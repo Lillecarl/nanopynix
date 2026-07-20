@@ -16,23 +16,19 @@ name: On commit
 jobs:
   docs-build:
     needs:
-    - test-git-multi-user
-    - test-git-single-user
-    - test-nix_2_31-multi-user
-    - test-nix_2_31-single-user
-    - test-nix_2_34-multi-user
-    - test-nix_2_34-single-user
-    - test-nix_2_35-multi-user
-    - test-nix_2_35-single-user
-    - test-tsan-git-multi-user
-    - test-tsan-git-single-user
-    - test-tsan-nix_2_34-multi-user
-    - test-tsan-nix_2_34-single-user
-    - test-tsan-nix_2_35-multi-user
-    - test-tsan-nix_2_35-single-user
+    - test-git
+    - test-nix_2_31
+    - test-nix_2_34
+    - test-nix_2_35
+    - test-tsan-git
+    - test-tsan-nix_2_34
+    - test-tsan-nix_2_35
     steps:
     - uses: actions/checkout@main
-    - uses: nixbuild/nix-quick-install-action@master
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
     - uses: cachix/cachix-action@master
       with:
         name: lillecarl
@@ -68,20 +64,19 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     if: github.ref == 'refs/heads/develop'
-  test-tsan-git-single-user:
+  test-tsan-git:
     steps:
     - uses: actions/checkout@main
-    - uses: nixbuild/nix-quick-install-action@master
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
     - uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
-    - name: Configure single-user Nix builds
-      run: |
-        sudo install -d -m 0755 /etc/nix
-        printf '%s\n' 'build-users-group =' 'require-drop-supplementary-groups = false' | sudo tee -a /etc/nix/nix.conf
-    - name: Build TSAN nanopynix test runner (git, single-user)
+    - name: Build TSAN nanopynix test runner (git)
       run: nix build ".#nanopynix-tests-git-tsan" --out-link result --print-build-logs
         --print-out-paths
     - name: Enable Nix sandbox namespaces
@@ -90,16 +85,16 @@ jobs:
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Run TSAN-instrumented stress tests (repeated)
+    - name: Run TSAN-instrumented stress tests (repeated, local+daemon backends)
       run: |
         set -o pipefail
-        LOGFILE="${{ github.workspace }}/tsan-output-git-single-user.log"
+        LOGFILE="${{ github.workspace }}/tsan-output-git.log"
         race_found=0
         for i in $(seq 1 5); do
           echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
           status=0
           unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-            ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
+            ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon \
             -m tsan_stress \
             2>&1 | tee -a "$LOGFILE" || status=$?
           echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
@@ -118,13 +113,13 @@ jobs:
           exit 1
         fi
         exit 0
-    - name: Run TSAN-instrumented concurrency tests (single pass)
+    - name: Run TSAN-instrumented concurrency tests (single pass, local+daemon backends)
       run: |
         set -o pipefail
-        LOGFILE="${{ github.workspace }}/tsan-output-broad-git-single-user.log"
+        LOGFILE="${{ github.workspace }}/tsan-output-broad-git.log"
         status=0
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon -m concurrency \
           2>&1 | tee -a "$LOGFILE" || status=$?
         echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
         if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
@@ -136,18 +131,18 @@ jobs:
           exit 1
         fi
         exit 0
-    - name: Upload TSAN output (git, single-user)
+    - name: Upload TSAN output (git)
       uses: actions/upload-artifact@main
       with:
-        name: tsan-race-report-git-single-user
+        name: tsan-race-report-git
         path: |
-          ${{ github.workspace }}/tsan-output-git-single-user.log
-          ${{ github.workspace }}/tsan-output-broad-git-single-user.log
+          ${{ github.workspace }}/tsan-output-git.log
+          ${{ github.workspace }}/tsan-output-broad-git.log
       if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-tsan-git-single-user,')
-  test-tsan-git-multi-user:
+      inputs.jobs), ',test-tsan-git,')
+  test-tsan-nix_2_34:
     steps:
     - uses: actions/checkout@main
     - uses: cachix/install-nix-action@master
@@ -159,86 +154,7 @@ jobs:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
-    - name: Build TSAN nanopynix test runner (git, multi-user)
-      run: nix build ".#nanopynix-tests-git-tsan" --out-link result --print-build-logs
-        --print-out-paths
-    - name: Enable Nix sandbox namespaces
-      run: |
-        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-        sudo sysctl -w kernel.unprivileged_userns_clone=1
-        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
-        unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Run TSAN-instrumented stress tests (repeated)
-      run: |
-        set -o pipefail
-        LOGFILE="${{ github.workspace }}/tsan-output-git-multi-user.log"
-        race_found=0
-        for i in $(seq 1 5); do
-          echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
-          status=0
-          unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-            ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
-            -m tsan_stress \
-            2>&1 | tee -a "$LOGFILE" || status=$?
-          echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
-          if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
-            echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
-            race_found=1
-            break
-          fi
-        done
-        if [ "$race_found" -eq 1 ]; then
-          echo "::error::genuine ThreadSanitizer data race detected -- see log above"
-          exit 1
-        fi
-        if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
-          echo "::error::pytest reported a real failure, or the process crashed -- see log above"
-          exit 1
-        fi
-        exit 0
-    - name: Run TSAN-instrumented concurrency tests (single pass)
-      run: |
-        set -o pipefail
-        LOGFILE="${{ github.workspace }}/tsan-output-broad-git-multi-user.log"
-        status=0
-        unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
-          2>&1 | tee -a "$LOGFILE" || status=$?
-        echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
-        if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
-          echo "::error::genuine ThreadSanitizer data race detected -- see log above"
-          exit 1
-        fi
-        if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
-          echo "::error::pytest reported a real failure, or the process crashed -- see log above"
-          exit 1
-        fi
-        exit 0
-    - name: Upload TSAN output (git, multi-user)
-      uses: actions/upload-artifact@main
-      with:
-        name: tsan-race-report-git-multi-user
-        path: |
-          ${{ github.workspace }}/tsan-output-git-multi-user.log
-          ${{ github.workspace }}/tsan-output-broad-git-multi-user.log
-      if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-tsan-git-multi-user,')
-  test-tsan-nix_2_34-single-user:
-    steps:
-    - uses: actions/checkout@main
-    - uses: nixbuild/nix-quick-install-action@master
-    - uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Configure single-user Nix builds
-      run: |
-        sudo install -d -m 0755 /etc/nix
-        printf '%s\n' 'build-users-group =' 'require-drop-supplementary-groups = false' | sudo tee -a /etc/nix/nix.conf
-    - name: Build TSAN nanopynix test runner (nix_2_34, single-user)
+    - name: Build TSAN nanopynix test runner (nix_2_34)
       run: nix build ".#nanopynix-tests-nix_2_34-tsan" --out-link result --print-build-logs
         --print-out-paths
     - name: Enable Nix sandbox namespaces
@@ -247,16 +163,16 @@ jobs:
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Run TSAN-instrumented stress tests (repeated)
+    - name: Run TSAN-instrumented stress tests (repeated, local+daemon backends)
       run: |
         set -o pipefail
-        LOGFILE="${{ github.workspace }}/tsan-output-nix_2_34-single-user.log"
+        LOGFILE="${{ github.workspace }}/tsan-output-nix_2_34.log"
         race_found=0
         for i in $(seq 1 5); do
           echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
           status=0
           unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-            ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
+            ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon \
             -m tsan_stress \
             2>&1 | tee -a "$LOGFILE" || status=$?
           echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
@@ -275,13 +191,13 @@ jobs:
           exit 1
         fi
         exit 0
-    - name: Run TSAN-instrumented concurrency tests (single pass)
+    - name: Run TSAN-instrumented concurrency tests (single pass, local+daemon backends)
       run: |
         set -o pipefail
-        LOGFILE="${{ github.workspace }}/tsan-output-broad-nix_2_34-single-user.log"
+        LOGFILE="${{ github.workspace }}/tsan-output-broad-nix_2_34.log"
         status=0
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon -m concurrency \
           2>&1 | tee -a "$LOGFILE" || status=$?
         echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
         if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
@@ -293,18 +209,18 @@ jobs:
           exit 1
         fi
         exit 0
-    - name: Upload TSAN output (nix_2_34, single-user)
+    - name: Upload TSAN output (nix_2_34)
       uses: actions/upload-artifact@main
       with:
-        name: tsan-race-report-nix_2_34-single-user
+        name: tsan-race-report-nix_2_34
         path: |
-          ${{ github.workspace }}/tsan-output-nix_2_34-single-user.log
-          ${{ github.workspace }}/tsan-output-broad-nix_2_34-single-user.log
+          ${{ github.workspace }}/tsan-output-nix_2_34.log
+          ${{ github.workspace }}/tsan-output-broad-nix_2_34.log
       if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-tsan-nix_2_34-single-user,')
-  test-tsan-nix_2_34-multi-user:
+      inputs.jobs), ',test-tsan-nix_2_34,')
+  test-tsan-nix_2_35:
     steps:
     - uses: actions/checkout@main
     - uses: cachix/install-nix-action@master
@@ -316,86 +232,7 @@ jobs:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
-    - name: Build TSAN nanopynix test runner (nix_2_34, multi-user)
-      run: nix build ".#nanopynix-tests-nix_2_34-tsan" --out-link result --print-build-logs
-        --print-out-paths
-    - name: Enable Nix sandbox namespaces
-      run: |
-        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-        sudo sysctl -w kernel.unprivileged_userns_clone=1
-        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
-        unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Run TSAN-instrumented stress tests (repeated)
-      run: |
-        set -o pipefail
-        LOGFILE="${{ github.workspace }}/tsan-output-nix_2_34-multi-user.log"
-        race_found=0
-        for i in $(seq 1 5); do
-          echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
-          status=0
-          unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-            ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
-            -m tsan_stress \
-            2>&1 | tee -a "$LOGFILE" || status=$?
-          echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
-          if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
-            echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
-            race_found=1
-            break
-          fi
-        done
-        if [ "$race_found" -eq 1 ]; then
-          echo "::error::genuine ThreadSanitizer data race detected -- see log above"
-          exit 1
-        fi
-        if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
-          echo "::error::pytest reported a real failure, or the process crashed -- see log above"
-          exit 1
-        fi
-        exit 0
-    - name: Run TSAN-instrumented concurrency tests (single pass)
-      run: |
-        set -o pipefail
-        LOGFILE="${{ github.workspace }}/tsan-output-broad-nix_2_34-multi-user.log"
-        status=0
-        unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
-          2>&1 | tee -a "$LOGFILE" || status=$?
-        echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
-        if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
-          echo "::error::genuine ThreadSanitizer data race detected -- see log above"
-          exit 1
-        fi
-        if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
-          echo "::error::pytest reported a real failure, or the process crashed -- see log above"
-          exit 1
-        fi
-        exit 0
-    - name: Upload TSAN output (nix_2_34, multi-user)
-      uses: actions/upload-artifact@main
-      with:
-        name: tsan-race-report-nix_2_34-multi-user
-        path: |
-          ${{ github.workspace }}/tsan-output-nix_2_34-multi-user.log
-          ${{ github.workspace }}/tsan-output-broad-nix_2_34-multi-user.log
-      if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-tsan-nix_2_34-multi-user,')
-  test-tsan-nix_2_35-single-user:
-    steps:
-    - uses: actions/checkout@main
-    - uses: nixbuild/nix-quick-install-action@master
-    - uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Configure single-user Nix builds
-      run: |
-        sudo install -d -m 0755 /etc/nix
-        printf '%s\n' 'build-users-group =' 'require-drop-supplementary-groups = false' | sudo tee -a /etc/nix/nix.conf
-    - name: Build TSAN nanopynix test runner (nix_2_35, single-user)
+    - name: Build TSAN nanopynix test runner (nix_2_35)
       run: nix build ".#nanopynix-tests-nix_2_35-tsan" --out-link result --print-build-logs
         --print-out-paths
     - name: Enable Nix sandbox namespaces
@@ -404,16 +241,16 @@ jobs:
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Run TSAN-instrumented stress tests (repeated)
+    - name: Run TSAN-instrumented stress tests (repeated, local+daemon backends)
       run: |
         set -o pipefail
-        LOGFILE="${{ github.workspace }}/tsan-output-nix_2_35-single-user.log"
+        LOGFILE="${{ github.workspace }}/tsan-output-nix_2_35.log"
         race_found=0
         for i in $(seq 1 5); do
           echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
           status=0
           unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-            ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
+            ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon \
             -m tsan_stress \
             2>&1 | tee -a "$LOGFILE" || status=$?
           echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
@@ -432,13 +269,13 @@ jobs:
           exit 1
         fi
         exit 0
-    - name: Run TSAN-instrumented concurrency tests (single pass)
+    - name: Run TSAN-instrumented concurrency tests (single pass, local+daemon backends)
       run: |
         set -o pipefail
-        LOGFILE="${{ github.workspace }}/tsan-output-broad-nix_2_35-single-user.log"
+        LOGFILE="${{ github.workspace }}/tsan-output-broad-nix_2_35.log"
         status=0
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon -m concurrency \
           2>&1 | tee -a "$LOGFILE" || status=$?
         echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
         if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
@@ -450,159 +287,18 @@ jobs:
           exit 1
         fi
         exit 0
-    - name: Upload TSAN output (nix_2_35, single-user)
+    - name: Upload TSAN output (nix_2_35)
       uses: actions/upload-artifact@main
       with:
-        name: tsan-race-report-nix_2_35-single-user
+        name: tsan-race-report-nix_2_35
         path: |
-          ${{ github.workspace }}/tsan-output-nix_2_35-single-user.log
-          ${{ github.workspace }}/tsan-output-broad-nix_2_35-single-user.log
+          ${{ github.workspace }}/tsan-output-nix_2_35.log
+          ${{ github.workspace }}/tsan-output-broad-nix_2_35.log
       if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-tsan-nix_2_35-single-user,')
-  test-tsan-nix_2_35-multi-user:
-    steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
-      with:
-        extra_nix_config: |
-          experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Build TSAN nanopynix test runner (nix_2_35, multi-user)
-      run: nix build ".#nanopynix-tests-nix_2_35-tsan" --out-link result --print-build-logs
-        --print-out-paths
-    - name: Enable Nix sandbox namespaces
-      run: |
-        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-        sudo sysctl -w kernel.unprivileged_userns_clone=1
-        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
-        unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Run TSAN-instrumented stress tests (repeated)
-      run: |
-        set -o pipefail
-        LOGFILE="${{ github.workspace }}/tsan-output-nix_2_35-multi-user.log"
-        race_found=0
-        for i in $(seq 1 5); do
-          echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
-          status=0
-          unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-            ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
-            -m tsan_stress \
-            2>&1 | tee -a "$LOGFILE" || status=$?
-          echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
-          if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
-            echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
-            race_found=1
-            break
-          fi
-        done
-        if [ "$race_found" -eq 1 ]; then
-          echo "::error::genuine ThreadSanitizer data race detected -- see log above"
-          exit 1
-        fi
-        if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
-          echo "::error::pytest reported a real failure, or the process crashed -- see log above"
-          exit 1
-        fi
-        exit 0
-    - name: Run TSAN-instrumented concurrency tests (single pass)
-      run: |
-        set -o pipefail
-        LOGFILE="${{ github.workspace }}/tsan-output-broad-nix_2_35-multi-user.log"
-        status=0
-        unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds -m concurrency \
-          2>&1 | tee -a "$LOGFILE" || status=$?
-        echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
-        if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
-          echo "::error::genuine ThreadSanitizer data race detected -- see log above"
-          exit 1
-        fi
-        if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
-          echo "::error::pytest reported a real failure, or the process crashed -- see log above"
-          exit 1
-        fi
-        exit 0
-    - name: Upload TSAN output (nix_2_35, multi-user)
-      uses: actions/upload-artifact@main
-      with:
-        name: tsan-race-report-nix_2_35-multi-user
-        path: |
-          ${{ github.workspace }}/tsan-output-nix_2_35-multi-user.log
-          ${{ github.workspace }}/tsan-output-broad-nix_2_35-multi-user.log
-      if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-tsan-nix_2_35-multi-user,')
-  test-git-single-user:
-    steps:
-    - uses: actions/checkout@main
-    - uses: nixbuild/nix-quick-install-action@master
-    - uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Configure single-user Nix builds
-      run: |
-        sudo install -d -m 0755 /etc/nix
-        printf '%s\n' 'build-users-group =' 'require-drop-supplementary-groups = false' | sudo tee -a /etc/nix/nix.conf
-    - name: Build nanopynix test runner for Nix git
-      run: nix build ".#nanopynix-tests-git" --out-link result --print-build-logs
-        --print-out-paths
-    - name: Verify test runner closure after build
-      run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    - name: Enable Nix sandbox namespaces
-      run: |
-        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-        sudo sysctl -w kernel.unprivileged_userns_clone=1
-        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
-        unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Test nanopynix against Nix git (full suite)
-      run: |
-        set -o pipefail
-        paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
-        rm -f "$paths_to_delete"
-        status=0
-        unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
-          2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
-        if [ -s "$paths_to_delete" ]; then
-          nix store delete --stdin < "$paths_to_delete" || true
-        fi
-        exit "$status"
-    - name: Upload test output
-      uses: actions/upload-artifact@main
-      with:
-        name: test-output-git-single-user
-        path: ${{ github.workspace }}/test-gdb-output.log
-      if: ${{ !cancelled() }}
-    - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@main
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ${{ github.workspace }}/coverage.xml
-        flags: git-single-user
-      if: ${{ !cancelled() }}
-    - name: Upload test results to Codecov
-      uses: codecov/codecov-action@main
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ${{ github.workspace }}/junit.xml
-        flags: git-single-user
-        report_type: test_results
-      if: ${{ !cancelled() }}
-    - name: Verify test runner closure after tests
-      run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-git-single-user,')
-  test-git-multi-user:
+      inputs.jobs), ',test-tsan-nix_2_35,')
+  test-git:
     steps:
     - uses: actions/checkout@main
     - uses: cachix/install-nix-action@master
@@ -625,14 +321,14 @@ jobs:
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Test nanopynix against Nix git (full suite)
+    - name: Test nanopynix against Nix git (full suite, daemon backend)
       run: |
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
         rm -f "$paths_to_delete"
         status=0
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends daemon \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
         if [ -s "$paths_to_delete" ]; then
           nix store delete --stdin < "$paths_to_delete" || true
@@ -641,7 +337,7 @@ jobs:
     - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: test-output-git-multi-user
+        name: test-output-git
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
@@ -649,85 +345,22 @@ jobs:
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/coverage.xml
-        flags: git-multi-user
+        flags: git
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/junit.xml
-        flags: git-multi-user
+        flags: git
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-git-multi-user,')
-  test-nix_2_31-single-user:
-    steps:
-    - uses: actions/checkout@main
-    - uses: nixbuild/nix-quick-install-action@master
-    - uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Configure single-user Nix builds
-      run: |
-        sudo install -d -m 0755 /etc/nix
-        printf '%s\n' 'build-users-group =' 'require-drop-supplementary-groups = false' | sudo tee -a /etc/nix/nix.conf
-    - name: Build nanopynix test runner for Nix nix_2_31
-      run: nix build ".#nanopynix-tests-nix_2_31" --out-link result --print-build-logs
-        --print-out-paths
-    - name: Verify test runner closure after build
-      run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    - name: Enable Nix sandbox namespaces
-      run: |
-        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-        sudo sysctl -w kernel.unprivileged_userns_clone=1
-        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
-        unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Test nanopynix against Nix nix_2_31 (full suite)
-      run: |
-        set -o pipefail
-        paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
-        rm -f "$paths_to_delete"
-        status=0
-        unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
-          2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
-        if [ -s "$paths_to_delete" ]; then
-          nix store delete --stdin < "$paths_to_delete" || true
-        fi
-        exit "$status"
-    - name: Upload test output
-      uses: actions/upload-artifact@main
-      with:
-        name: test-output-nix_2_31-single-user
-        path: ${{ github.workspace }}/test-gdb-output.log
-      if: ${{ !cancelled() }}
-    - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@main
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ${{ github.workspace }}/coverage.xml
-        flags: nix_2_31-single-user
-      if: ${{ !cancelled() }}
-    - name: Upload test results to Codecov
-      uses: codecov/codecov-action@main
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ${{ github.workspace }}/junit.xml
-        flags: nix_2_31-single-user
-        report_type: test_results
-      if: ${{ !cancelled() }}
-    - name: Verify test runner closure after tests
-      run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-nix_2_31-single-user,')
-  test-nix_2_31-multi-user:
+      inputs.jobs), ',test-git,')
+  test-nix_2_31:
     steps:
     - uses: actions/checkout@main
     - uses: cachix/install-nix-action@master
@@ -750,14 +383,14 @@ jobs:
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Test nanopynix against Nix nix_2_31 (full suite)
+    - name: Test nanopynix against Nix nix_2_31 (full suite, daemon backend)
       run: |
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
         rm -f "$paths_to_delete"
         status=0
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends daemon \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
         if [ -s "$paths_to_delete" ]; then
           nix store delete --stdin < "$paths_to_delete" || true
@@ -766,7 +399,7 @@ jobs:
     - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: test-output-nix_2_31-multi-user
+        name: test-output-nix_2_31
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
@@ -774,85 +407,22 @@ jobs:
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/coverage.xml
-        flags: nix_2_31-multi-user
+        flags: nix_2_31
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/junit.xml
-        flags: nix_2_31-multi-user
+        flags: nix_2_31
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-nix_2_31-multi-user,')
-  test-nix_2_34-single-user:
-    steps:
-    - uses: actions/checkout@main
-    - uses: nixbuild/nix-quick-install-action@master
-    - uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Configure single-user Nix builds
-      run: |
-        sudo install -d -m 0755 /etc/nix
-        printf '%s\n' 'build-users-group =' 'require-drop-supplementary-groups = false' | sudo tee -a /etc/nix/nix.conf
-    - name: Build nanopynix test runner for Nix nix_2_34
-      run: nix build ".#nanopynix-tests-nix_2_34" --out-link result --print-build-logs
-        --print-out-paths
-    - name: Verify test runner closure after build
-      run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    - name: Enable Nix sandbox namespaces
-      run: |
-        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-        sudo sysctl -w kernel.unprivileged_userns_clone=1
-        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
-        unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Test nanopynix against Nix nix_2_34 (full suite)
-      run: |
-        set -o pipefail
-        paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
-        rm -f "$paths_to_delete"
-        status=0
-        unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
-          2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
-        if [ -s "$paths_to_delete" ]; then
-          nix store delete --stdin < "$paths_to_delete" || true
-        fi
-        exit "$status"
-    - name: Upload test output
-      uses: actions/upload-artifact@main
-      with:
-        name: test-output-nix_2_34-single-user
-        path: ${{ github.workspace }}/test-gdb-output.log
-      if: ${{ !cancelled() }}
-    - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@main
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ${{ github.workspace }}/coverage.xml
-        flags: nix_2_34-single-user
-      if: ${{ !cancelled() }}
-    - name: Upload test results to Codecov
-      uses: codecov/codecov-action@main
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ${{ github.workspace }}/junit.xml
-        flags: nix_2_34-single-user
-        report_type: test_results
-      if: ${{ !cancelled() }}
-    - name: Verify test runner closure after tests
-      run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-nix_2_34-single-user,')
-  test-nix_2_34-multi-user:
+      inputs.jobs), ',test-nix_2_31,')
+  test-nix_2_34:
     steps:
     - uses: actions/checkout@main
     - uses: cachix/install-nix-action@master
@@ -875,14 +445,14 @@ jobs:
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Test nanopynix against Nix nix_2_34 (full suite)
+    - name: Test nanopynix against Nix nix_2_34 (full suite, daemon backend)
       run: |
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
         rm -f "$paths_to_delete"
         status=0
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends daemon \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
         if [ -s "$paths_to_delete" ]; then
           nix store delete --stdin < "$paths_to_delete" || true
@@ -891,7 +461,7 @@ jobs:
     - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: test-output-nix_2_34-multi-user
+        name: test-output-nix_2_34
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
@@ -899,85 +469,22 @@ jobs:
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/coverage.xml
-        flags: nix_2_34-multi-user
+        flags: nix_2_34
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/junit.xml
-        flags: nix_2_34-multi-user
+        flags: nix_2_34
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-nix_2_34-multi-user,')
-  test-nix_2_35-single-user:
-    steps:
-    - uses: actions/checkout@main
-    - uses: nixbuild/nix-quick-install-action@master
-    - uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Configure single-user Nix builds
-      run: |
-        sudo install -d -m 0755 /etc/nix
-        printf '%s\n' 'build-users-group =' 'require-drop-supplementary-groups = false' | sudo tee -a /etc/nix/nix.conf
-    - name: Build nanopynix test runner for Nix nix_2_35
-      run: nix build ".#nanopynix-tests-nix_2_35" --out-link result --print-build-logs
-        --print-out-paths
-    - name: Verify test runner closure after build
-      run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    - name: Enable Nix sandbox namespaces
-      run: |
-        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-        sudo sysctl -w kernel.unprivileged_userns_clone=1
-        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
-        unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Test nanopynix against Nix nix_2_35 (full suite)
-      run: |
-        set -o pipefail
-        paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
-        rm -f "$paths_to_delete"
-        status=0
-        unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
-          2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
-        if [ -s "$paths_to_delete" ]; then
-          nix store delete --stdin < "$paths_to_delete" || true
-        fi
-        exit "$status"
-    - name: Upload test output
-      uses: actions/upload-artifact@main
-      with:
-        name: test-output-nix_2_35-single-user
-        path: ${{ github.workspace }}/test-gdb-output.log
-      if: ${{ !cancelled() }}
-    - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@main
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ${{ github.workspace }}/coverage.xml
-        flags: nix_2_35-single-user
-      if: ${{ !cancelled() }}
-    - name: Upload test results to Codecov
-      uses: codecov/codecov-action@main
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ${{ github.workspace }}/junit.xml
-        flags: nix_2_35-single-user
-        report_type: test_results
-      if: ${{ !cancelled() }}
-    - name: Verify test runner closure after tests
-      run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-nix_2_35-single-user,')
-  test-nix_2_35-multi-user:
+      inputs.jobs), ',test-nix_2_34,')
+  test-nix_2_35:
     steps:
     - uses: actions/checkout@main
     - uses: cachix/install-nix-action@master
@@ -1000,14 +507,14 @@ jobs:
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Test nanopynix against Nix nix_2_35 (full suite)
+    - name: Test nanopynix against Nix nix_2_35 (full suite, daemon backend)
       run: |
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
         rm -f "$paths_to_delete"
         status=0
         unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends daemon \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
         if [ -s "$paths_to_delete" ]; then
           nix store delete --stdin < "$paths_to_delete" || true
@@ -1016,7 +523,7 @@ jobs:
     - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: test-output-nix_2_35-multi-user
+        name: test-output-nix_2_35
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
@@ -1024,18 +531,18 @@ jobs:
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/coverage.xml
-        flags: nix_2_35-multi-user
+        flags: nix_2_35
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/junit.xml
-        flags: nix_2_35-multi-user
+        flags: nix_2_35
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-nix_2_35-multi-user,')
+      inputs.jobs), ',test-nix_2_35,')
