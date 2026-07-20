@@ -96,3 +96,44 @@ async def test_manager_rpc_primop_lambda(shared_nix_environment: NixTestEnvironm
     ):
         result = await eval.string("builtins.managerTriple 7")
         assert await result.force() == 21
+
+
+def _rpc_reshape(request: dict[str, object]) -> dict[str, object]:
+    """Round-trips a nested attrset/list arg into a nested attrset/list
+    result, with no ``toJSON``/``fromJSON`` on either side of the RPC call --
+    exercises ``DeepValue`` carrying real structure over the wire instead of
+    the old JSON-string-scalar workaround."""
+    names = [str(item["name"]) for item in request["items"]]  # type: ignore[index] -- test-only, shape is known
+    return {
+        "count": len(names),
+        "names": names,
+        "nested": {"first": names[0], "tags": request["tags"]},
+    }
+
+
+async def test_manager_rpc_primop_deep_value(shared_nix_environment: NixTestEnvironment) -> None:
+    """A single arg carrying nested attrsets/lists, and a nested result, both
+    cross the RPC primop backchannel as real ``DeepValue`` structure."""
+    spec = PrimOpSpec(
+        name="managerReshape",
+        arity=1,
+        args=["request"],
+        doc="RPC primop: reshape a nested attrset/list argument",
+        rpc=True,
+    )
+    async with (
+        shared_nix_environment.rpc_session(primops=[spec], primop_callables={"managerReshape": _rpc_reshape}) as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        result = await eval.string("""
+            builtins.managerReshape {
+              items = [ { name = "a"; } { name = "b"; } ];
+              tags = [ "x" "y" ];
+            }
+        """)
+        assert await result.force_json() == {
+            "count": 2,
+            "names": ["a", "b"],
+            "nested": {"first": "a", "tags": ["x", "y"]},
+        }
