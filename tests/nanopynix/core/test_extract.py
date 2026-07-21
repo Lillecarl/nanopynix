@@ -13,6 +13,8 @@ from nanopynix_bindings import flake as nanopynix_flake  # L1 FlakeRef, LockedFl
 from nanopynix_bindings import store as nanopynix_store  # L1 StorePath, Store, PathInfo, BuildResult, MissingInfo
 
 from nanopynix._core._extract import (
+    _attrs_map,  # pyright: ignore[reportPrivateUsage]
+    _attrs_value,  # pyright: ignore[reportPrivateUsage]
     flake_ref_attrs,
     input_attrs,
     locked_flake,
@@ -156,6 +158,29 @@ def test_flake_ref_attrs_vs_input_attrs():
 
 
 # ════════════════════════════════════════════════════════════════════
+# _attrs_value / _attrs_map — private helpers with no other direct coverage
+# ════════════════════════════════════════════════════════════════════
+
+
+def test_attrs_value_bool_and_int_and_string_branches():
+    """input_attrs/flake_ref_attrs only ever exercise the string_value
+    fallback in practice; these dumb coverage tests pin the bool and int
+    branches of _attrs_value directly."""
+    assert _attrs_value(True).bool_value is True
+    assert _attrs_value(7).int_value == 7
+    assert _attrs_value("s").string_value == "s"
+
+
+def test_attrs_map_converts_a_plain_dict():
+    """_attrs_map has no current callers (kept as a util for future ones);
+    this dumb coverage test exercises it directly so it doesn't bit-rot."""
+    result = _attrs_map({"a": 1, "b": True, "c": "s"})
+    assert result.entries["a"].int_value == 1
+    assert result.entries["b"].bool_value is True
+    assert result.entries["c"].string_value == "s"
+
+
+# ════════════════════════════════════════════════════════════════════
 # locked_input — pure Python dict
 # ════════════════════════════════════════════════════════════════════
 
@@ -203,6 +228,16 @@ def test_locked_input_is_flake_false():
 def test_locked_input_follows_multiple():
     result = locked_input({"follows": ["a", "b", "c"]})
     assert result.follows == ["a", "b", "c"]
+
+
+def test_locked_input_falls_back_to_a_raw_string_ref_when_unparsable():
+    """A malformed ref must not raise out of locked_input; it degrades to a
+    single "ref" attrs entry with the raw string instead of a parsed FlakeRef."""
+    result = locked_input({"ref": "not a valid ref ??? %%% ###", "is_flake": True})
+
+    assert result.attrs is not None
+    assert result.attrs.entries.keys() == {"ref"}
+    assert result.attrs.entries["ref"].string_value == "not a valid ref ??? %%% ###"
 
 
 # ════════════════════════════════════════════════════════════════════

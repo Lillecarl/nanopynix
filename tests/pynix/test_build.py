@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from anyio import Path as AnyioPath
+from pynix.build import BuildTargetError, _build_target  # pyright: ignore[reportPrivateUsage]
+from pynix.fod import replace_fod_hash as _real_replace_fod_hash
+from pynix.target import EvaluationTarget
 from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 import nanopynix
+from nanopynix.exceptions import StoreError
 from pynix import Pynix
+from pynix import build as pynix_build
+from tests.support.git import init_flake_repo
 from tests.support.nix_environment import with_nixpkgs
 
 if TYPE_CHECKING:
@@ -234,6 +240,64 @@ async def test_build_missing_input_errors(capsys: pytest.CaptureFixture[str]) ->
     assert "either --file or --flake is required" in captured.err
 
 
+async def test_build_update_fod_without_file_errors(
+    shared_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
+) -> None:
+    cmd = Pynix.parse(
+        ["build", "--flake", f"{git_flake}#hello", "--update-fod", *shared_nix_environment.pynix_store_args()]
+    )
+
+    with pytest.raises(SystemExit):
+        await cmd.astart()
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--update-fod currently requires --file" in captured.err
+
+
+async def test_build_dry_run_without_update_fod_errors(
+    shared_nix_environment: NixTestEnvironment, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    nix_file = tmp_path / "build-test.nix"
+    nix_file.write_text("1\n")
+    cmd = Pynix.parse(["build", "--file", str(nix_file), "--dry-run", *shared_nix_environment.pynix_store_args()])
+
+    with pytest.raises(SystemExit):
+        await cmd.astart()
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--dry-run requires --update-fod" in captured.err
+
+
+async def test_build_propagates_a_non_fod_build_failure(
+    shared_nix_environment: NixTestEnvironment,
+    nixpkgs_path: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A build failure unrelated to a FOD hash mismatch must surface as the
+    original StoreError, not be swallowed or turned into a FOD update."""
+    nix_file = tmp_path / "build-test.nix"
+    nix_file.write_text(with_nixpkgs("""
+    let
+      pkgs = import <nixpkgs> {};
+    in
+      pkgs.stdenvNoCC.mkDerivation {
+        pname = "pynix-build-fails-test";
+        version = "1";
+        dontUnpack = true;
+        installPhase = "exit 1";
+      }
+    """, nixpkgs_path))
+    cmd = Pynix.parse(["build", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
+
+    with pytest.raises(StoreError):
+        await cmd.astart()
+
+    assert capsys.readouterr().out == ""
+
+
 async def test_build_with_separate_eval_store(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,
@@ -390,3 +454,117 @@ in runCommand "combined" {} "cat ${first} ${second} > $out"
 
     assert fixed_output_values == set()
     assert {"first.drv", "second.drv"} <= {path.rsplit("-", 1)[-1] for path in fixed_output_closure}
+
+
+async def test_build_update_fod_reports_an_ambiguous_hash_literal(
+    shared_nix_environment: NixTestEnvironment, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two identical empty hash literals with no derivation_name to
+    disambiguate them (a fetchurl mismatch carries no drv_path) must refuse
+    to guess, surfacing find_fod_hash_literal's ambiguity error."""
+    payload_a = tmp_path / "payload-a"
+    payload_a.write_text("payload a\n")
+    payload_b = tmp_path / "payload-b"
+    payload_b.write_text("payload b\n")
+    nix_file = tmp_path / "source.nix"
+    nix_file.write_text(
+        f'{{ a = builtins.fetchurl {{ url = "file://{payload_a}"; sha256 = ""; }};'
+        f' b = builtins.fetchurl {{ url = "file://{payload_b}"; sha256 = ""; }}; }}\n'
+    )
+    cmd = Pynix.parse(
+        ["build", "--file", str(nix_file), "--attr", "a", "--update-fod", *shared_nix_environment.pynix_store_args()]
+    )
+
+    with pytest.raises(SystemExit):
+        await cmd.astart()
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "cannot update fixed-output hash" in strip_ansi(captured.err)
+
+
+async def test_build_target_raises_when_mismatch_is_not_in_the_target_closure(
+    shared_nix_environment: NixTestEnvironment,
+    nixpkgs_path: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """mismatch_is_target_fod returning False must abort the update instead
+    of patching a hash literal for a derivation outside the evaluated
+    target's own closure."""
+    nix_file = tmp_path / "source.nix"
+    nix_file.write_text(
+        with_nixpkgs(
+            """with import <nixpkgs> {};
+runCommand "payload" {
+  outputHash = "";
+  outputHashAlgo = "sha256";
+  outputHashMode = "flat";
+} "printf '%s\\n' fixed-output-payload > $out"
+""",
+            nixpkgs_path,
+        )
+    )
+    target = EvaluationTarget(file=nix_file, attr=None, flake=None)
+
+    async def _always_false(*_args: object, **_kwargs: object) -> bool:
+        return False
+
+    monkeypatch.setattr(pynix_build, "mismatch_is_target_fod", _always_false)
+
+    async with shared_nix_environment.rpc_session() as nix, nix.store() as store, nix.eval(store) as session:
+        with pytest.raises(BuildTargetError, match="not found in the evaluated target derivation closure"):
+            await _build_target(target, session, nix=nix, evaluation_store=store, update_fod=True, dry_run=False)
+
+
+async def test_build_target_requires_a_file_target_to_update_a_fod(
+    shared_nix_environment: NixTestEnvironment, tmp_path: Path
+) -> None:
+    """The CLI already refuses --update-fod without --file before evaluation
+    (see test_build_update_fod_without_file_errors); this pins
+    _build_target's own defense-in-depth check by calling it directly with a
+    flake target, bypassing that earlier CLI guard."""
+    payload = tmp_path / "payload"
+    payload.write_text("fixed-output payload\n")
+    flake_dir = tmp_path / "flake"
+    flake_dir.mkdir()
+    init_flake_repo(flake_dir, f'default = builtins.fetchurl {{ url = "file://{payload}"; sha256 = ""; }};')
+    target = EvaluationTarget(file=None, attr=None, flake=f"{flake_dir}#default")
+
+    async with shared_nix_environment.rpc_session() as nix, nix.store() as store, nix.eval(store) as session:
+        with pytest.raises(BuildTargetError, match="--update-fod currently requires --file"):
+            await _build_target(target, session, nix=nix, evaluation_store=store, update_fod=True, dry_run=False)
+
+
+async def test_build_target_stops_after_ten_fixed_output_hash_updates(
+    shared_nix_environment: NixTestEnvironment,
+    nixpkgs_path: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A replace_fod_hash that always writes back the same wrong hash
+    simulates a FOD that never actually gets fixed, exercising the
+    update-count cap instead of looping forever."""
+    nix_file = tmp_path / "source.nix"
+    nix_file.write_text(
+        with_nixpkgs(
+            """with import <nixpkgs> {};
+runCommand "payload" {
+  outputHash = "";
+  outputHashAlgo = "sha256";
+  outputHashMode = "flat";
+} "printf '%s\\n' fixed-output-payload > $out"
+""",
+            nixpkgs_path,
+        )
+    )
+    target = EvaluationTarget(file=nix_file, attr=None, flake=None)
+
+    def _rewrite_with_still_wrong_hash(source: str, literal: Any, _got: str) -> str:
+        return _real_replace_fod_hash(source, literal, "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+
+    monkeypatch.setattr(pynix_build, "replace_fod_hash", _rewrite_with_still_wrong_hash)
+
+    async with shared_nix_environment.rpc_session() as nix, nix.store() as store, nix.eval(store) as session:
+        with pytest.raises(BuildTargetError, match="stopped after 10 fixed-output hash updates"):
+            await _build_target(target, session, nix=nix, evaluation_store=store, update_fod=True, dry_run=False)

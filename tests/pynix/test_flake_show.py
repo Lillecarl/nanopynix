@@ -33,6 +33,21 @@ async def test_flake_show_with_hash_attrpath(
     assert "greeting" not in captured.out
 
 
+async def test_flake_show_with_a_separate_attrpath_flag_navigates_further(
+    shared_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
+) -> None:
+    """--attrpath narrows further than the flake_ref's own '#' fragment,
+    a distinct code path from resolving the fragment alone (see the other
+    test above)."""
+    cmd = Pynix.parse(
+        ["flake", "show", f"{git_flake}#hello", "--attrpath", "pname", *shared_nix_environment.pynix_store_args()]
+    )
+    await cmd.astart()
+    captured = capsys.readouterr()
+    assert "greeting" not in captured.out
+    assert "drvPath" not in captured.out
+
+
 async def test_flake_metadata_json_does_not_write_lock_file(
     shared_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
 ) -> None:

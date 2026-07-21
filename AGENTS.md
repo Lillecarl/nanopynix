@@ -1,6 +1,6 @@
 # Useful commands
-- direnv exec . timeout 360 pytest tests
-- direnv exec . timeout 360 pytest tests --cov --cov-report=term-missing --cov-report= # coverage report, including the multiprocessing-forkserver Nix worker subprocess (see tests/conftest.py's _enable_subprocess_coverage and tests/_coverage_subprocess/sitecustomize.py)
+- direnv exec . timeout 500 pytest tests
+- direnv exec . timeout 500 pytest tests --cov --cov-report=term-missing --cov-report= # coverage report, including the multiprocessing-forkserver Nix worker subprocess (see tests/conftest.py's _enable_subprocess_coverage and tests/_coverage_subprocess/sitecustomize.py)
 - direnv exec . pyright
 - direnv exec . ruff check --fix
 - direnv exec . ruff check --config ruff-strict.toml --fix

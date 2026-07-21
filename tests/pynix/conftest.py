@@ -510,8 +510,8 @@ def _patched_environ(values: dict[str, str]) -> Generator[None]:
 def _pynix_configure_logging_noop() -> Generator[None]:
     old_configure_logging = pynix_util.configure_logging
     old_public_configure_logging = pynix.configure_logging
-    pynix_util.configure_logging = lambda: None
-    pynix.configure_logging = lambda: None
+    pynix_util.configure_logging = lambda *, file=None: None  # noqa: ARG005 -- matching configure_logging's real signature so callers like forward_nix_logs(log_file=...) don't break
+    pynix.configure_logging = lambda *, file=None: None  # noqa: ARG005 -- matching configure_logging's real signature so callers like forward_nix_logs(log_file=...) don't break
     try:
         yield
     finally:
