@@ -114,13 +114,21 @@ def pytest_configure(config: pytest.Config) -> None:
     if not root.is_absolute():
         root = config.rootpath / root
 
+    # _agent_default() (and its _autodetected_via side effect) runs
+    # unconditionally at parser-setup time to compute --agent's default, even
+    # when the user passes --agent explicitly on the command line. Only show
+    # the "auto-activated" banner when --agent's value actually came from
+    # that default, not from an explicit flag.
+    explicit_agent_flag = "--agent" in config.invocation_params.args
+    autodetected_via = None if explicit_agent_flag else _autodetected_via
+
     heartbeat_interval = cast("float", config.getoption("agent_heartbeat"))
     runtime = AgentRuntime(
         config,
         root=root,
         heartbeat_interval=heartbeat_interval,
         terminal=_REAL_TERMINAL,
-        autodetected_via=_autodetected_via,
+        autodetected_via=autodetected_via,
     )
     config.pluginmanager.register(runtime, _RUNTIME_PLUGIN_NAME)
 
