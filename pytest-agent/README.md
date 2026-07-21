@@ -13,12 +13,19 @@ may get extracted into its own repo later.
 pytest --agent
 ```
 
-The CLI prints a directory path at the start and end of the run and, while
-tests are running, either short progress heartbeats or a "may be stuck"
-notice if no test has finished in a while -- nothing else. Everything else
-(per-test stdout/stderr/log/tracebacks, an index, a run summary) is written
-under that directory (`.pytest-agent` by default) for you or an agent to read
-directly:
+The CLI prints a directory path at the start and end of the run and, every
+`--agent-heartbeat` seconds while tests are running, one line like:
+
+```
+[pytest-agent] 42s | 118 passed, 2 failed, 120/311 total | running: tests/test_foo.py::test_bar
+```
+
+That's it -- nothing else prints. Whether something is progressing or stuck
+is visible from that line alone: the counts and the running test change
+between prints if things are moving, and elapsed keeps climbing with nothing
+else changing if they aren't. Everything else (per-test stdout/stderr/log/
+tracebacks, an index, a run summary) is written under that directory
+(`.pytest-agent` by default) for you or an agent to read directly:
 
 ```
 .pytest-agent/
@@ -45,8 +52,7 @@ cat .pytest-agent/tests/tests/test_foo.py/test_bar.log
 | --- | --- | --- | --- |
 | `--agent` | `PYTEST_AGENT` | off | Turn on agent mode |
 | `--agent-dir` | `PYTEST_AGENT_DIR` | `.pytest-agent` | Where to write run detail (relative to rootdir) |
-| `--agent-stuck-after` | `PYTEST_AGENT_STUCK_AFTER` | `15` | Seconds with no completed test before printing a stuck notice |
-| `--agent-heartbeat` | `PYTEST_AGENT_HEARTBEAT` | `10` | Seconds between progress heartbeat lines |
+| `--agent-heartbeat` | `PYTEST_AGENT_HEARTBEAT` | `10` | Seconds between progress lines |
 | `--agent-allow-pipe` | `PYTEST_AGENT_ALLOW_PIPE` | off | Skip the piped-stdout guard below |
 
 ### The piped-stdout guard
