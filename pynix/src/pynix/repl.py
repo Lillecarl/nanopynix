@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import shlex
 import sys
@@ -27,8 +26,10 @@ from tree_sitter import Query, QueryCursor
 import nanopynix
 from nanopynix.exceptions import NixError
 from nanopynix.verbosity import normalize_log_level
+from pynix._completion import completion_prefix_at
 from pynix._nix_syntax import NIX_GRAMMAR_PATH, NIX_LANGUAGE, parse_nix
 from pynix._util import forward_nix_logs
+from pynix._value_render import format_json
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
@@ -169,65 +170,6 @@ def _nix_input(text: str) -> tuple[str, int] | None:
     return text, 0
 
 
-def _nodes(root: Any) -> list[Any]:
-    """Return all nodes below ``root`` in source order."""
-    nodes: list[Any] = [root]
-    result: list[Any] = []
-    while nodes:
-        node = nodes.pop()
-        result.append(node)
-        nodes.extend(reversed(node.children))
-    return result
-
-
-def _completion_target(source: str) -> tuple[str | None, str] | None:
-    """Return the semantic prefix and partial identifier at the cursor, if any."""
-    encoded = source.encode()
-    nodes = _nodes(parse_nix(source).root_node)
-    selections = [node for node in nodes if node.type == "select_expression" and node.end_byte == len(encoded)]
-    if selections:
-        target = selections[-1]
-        attrpath = target.child_by_field_name("attrpath")
-        if attrpath is None:
-            return None
-        attributes = [node for node in attrpath.named_children if node.type == "identifier"]
-        if not attributes:
-            return None
-        partial_node = attributes[-1]
-        prefix = encoded[target.start_byte : partial_node.start_byte].rstrip(b".").decode()
-        partial = encoded[partial_node.start_byte : partial_node.end_byte].decode()
-        return (prefix, partial) if prefix else None
-
-    if source.endswith("."):
-        before_dot = source.removesuffix(".")
-        encoded_before_dot = before_dot.encode()
-        expressions = [
-            node
-            for node in _nodes(parse_nix(before_dot).root_node)
-            if node.type in {"identifier", "select_expression", "variable_expression"}
-            and node.end_byte == len(encoded_before_dot)
-        ]
-        if expressions:
-            target = expressions[-1]
-            return encoded_before_dot[target.start_byte : target.end_byte].decode(), ""
-
-    variables = [node for node in nodes if node.type == "variable_expression" and node.end_byte == len(encoded)]
-    if variables:
-        target = variables[-1]
-        name = target.child_by_field_name("name")
-        if name is not None:
-            return None, encoded[name.start_byte : name.end_byte].decode()
-    identifiers = [node for node in nodes if node.type == "identifier" and node.end_byte == len(encoded)]
-    if identifiers:
-        target = identifiers[-1]
-        return None, encoded[target.start_byte : target.end_byte].decode()
-
-    interpolation_starts = [node for node in nodes if node.type == "${" and node.end_byte == len(encoded)]
-    if interpolation_starts:
-        return None, ""
-    return None
-
-
 class _NixLexer(Lexer):
     """Color Nix expressions with the tree-sitter-nix highlight query."""
 
@@ -286,7 +228,7 @@ class _ReplCompleter(Completer):
         source_and_offset = _nix_input(before_cursor)
         if source_and_offset is not None:
             source, _offset = source_and_offset
-            target = _completion_target(source)
+            target = completion_prefix_at(source, len(source.encode()))
             if target is not None:
                 prefix, partial = target
                 candidates = await self._repl.scope_names() if prefix is None else await self._attr_names(prefix)
@@ -326,7 +268,7 @@ async def _run_repl_loop(
 
     async def evaluate(expr: str) -> Any:
         value = await repl.string(expr)
-        print_formatted_text(json.dumps(await value.force_json(), indent=2, sort_keys=True))
+        print_formatted_text(format_json(await value.force_json()))
         return value
 
     async def reload_sources() -> None:
@@ -375,7 +317,7 @@ async def _run_repl_loop(
             if command in {":b", ":build"}:
                 value = await repl.string(argument)
                 outputs = await value.build()
-                print_formatted_text(json.dumps(outputs, indent=2, sort_keys=True))
+                print_formatted_text(format_json(outputs))
                 continue
             if command in {":e", ":edit"}:
                 await _edit(await repl.string(argument), line_editors)
@@ -412,7 +354,7 @@ async def _run_repl_loop(
                 continue
             value = await repl.line(line)
             if value is not None:
-                print_formatted_text(json.dumps(await value.force_json(), indent=2, sort_keys=True))
+                print_formatted_text(format_json(await value.force_json()))
         except (NixError, ReplRunError) as exc:
             _print_error(exc)
 

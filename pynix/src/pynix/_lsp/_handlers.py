@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import sys
 import threading
@@ -18,6 +17,7 @@ from nanopynix.exceptions import NixError
 from pynix._lsp._context import FileContext, parse_directives
 from pynix._lsp._module_system import OPTIONS_NAME, is_option_declaration, render_option_declaration, resolve_formal_arg
 from pynix._lsp._syntax import completion_target_at, identifier_path_at, parse_errors, top_level_symbols
+from pynix._value_render import format_json
 
 if TYPE_CHECKING:
     from pynix._lsp._syntax import ParseErrorRange
@@ -206,7 +206,7 @@ async def _render_value(value: nanopynix.ValueProxy) -> str:
         except NixError:
             pass
         else:
-            sections.append(f"```json\n{json.dumps(json_value, indent=2, sort_keys=True)}\n```")
+            sections.append(f"```json\n{format_json(json_value)}\n```")
     try:
         edit_path, edit_line = await value.edit_location()
     except NixError:

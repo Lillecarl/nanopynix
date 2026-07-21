@@ -22,11 +22,11 @@ this module derives from that one root:
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 from nanopynix.exceptions import NixError
 from pynix._lsp._syntax import top_level_lambda_formals
+from pynix._value_render import format_json
 
 if TYPE_CHECKING:
     import nanopynix
@@ -126,5 +126,5 @@ async def render_option_declaration(value: nanopynix.ValueProxy) -> list[str]:
     except NixError:
         pass
     else:
-        sections.append(f"default:\n```json\n{json.dumps(default, indent=2, sort_keys=True)}\n```")
+        sections.append(f"default:\n```json\n{format_json(default)}\n```")
     return sections

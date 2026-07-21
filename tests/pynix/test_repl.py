@@ -19,7 +19,6 @@ from pynix.repl import (  # type: ignore[reportPrivateUsage] -- tests intentiona
     _HELP,
     Repl,
     ReplRunError,
-    _completion_target,
     _derivation_name_part,
     _edit,
     _editor_argv,
@@ -488,21 +487,6 @@ def test_nix_input_returns_none_for_non_expression_command() -> None:
 
 def test_nix_input_returns_argument_and_offset_for_expression_command() -> None:
     assert _nix_input(":print 1 + 1") == ("1 + 1", len(":print "))
-
-
-# ── _completion_target: dumb coverage tests ─────────────────────────────
-# The existing completion test above only ever exercises inputs that
-# resolve to a real completion. These pin down the "no completion here"
-# branches: a dynamic/interpolated attrpath (no plain identifier to
-# complete) and inputs with no completable node at the cursor at all.
-
-
-def test_completion_target_returns_none_for_dynamic_attrpath() -> None:
-    assert _completion_target("pkgs.${x}") is None
-
-
-def test_completion_target_returns_none_when_nothing_matches() -> None:
-    assert _completion_target(".") is None
 
 
 # ── _run_repl_loop: prompt lifecycle and command dispatch ───────────────
