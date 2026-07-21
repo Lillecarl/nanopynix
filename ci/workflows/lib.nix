@@ -64,6 +64,8 @@ let
                 status=0
                 env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=''${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
                   ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends daemon \
+                  --cov --cov-report=term-missing --cov-report=xml:''${{ github.workspace }}/coverage.xml \
+                  --junitxml=''${{ github.workspace }}/junit.xml \
                   2>&1 | tee ''${{ github.workspace }}/test-gdb-output.log || status=$?
                 if [ -s "$paths_to_delete" ]; then
                   nix store delete --stdin < "$paths_to_delete" || true

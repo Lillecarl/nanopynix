@@ -1,4 +1,5 @@
 # Useful commands
+Note: Current full pytest invocations takes almost 600 seconds because it runs the test suite both in single-store and daemon backend mode serially
 - direnv exec . timeout 500 pytest tests
 - direnv exec . timeout 500 pytest tests --cov --cov-report=term-missing --cov-report= # coverage report, including the multiprocessing-forkserver Nix worker subprocess (see tests/conftest.py's _enable_subprocess_coverage and tests/_coverage_subprocess/sitecustomize.py)
 - direnv exec . pyright
