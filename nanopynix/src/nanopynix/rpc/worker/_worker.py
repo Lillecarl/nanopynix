@@ -32,6 +32,7 @@ import time
 import traceback
 from typing import TYPE_CHECKING, Any, cast
 
+import anyio
 from grpclib_transports.multiprocessing import serve_multiprocessing_endpoint
 from grpclib_transports.protocol import DEFAULT_TUNING
 from grpclib_transports.stdio import serve_stdio
@@ -335,7 +336,7 @@ class WorkerServiceHandler(WorkerServiceBase):
                     yield LogEvent(request_id=request_id, nix_log=NixLogEvent(action=action, args_json=json.dumps(args, default=str)))
                 elif kind == "finalized":
                     yield LogEvent(request_id=request_id, request_finalized=RequestFinalized())
-        except asyncio.CancelledError:
+        except anyio.get_cancelled_exc_class():
             pass
 
     async def shutdown(self, message: ShutdownRequest) -> ShutdownResponse:
@@ -441,7 +442,7 @@ async def run_worker(
     log_task = worker_state.log_task  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- cascade from WorkerState Any attributes
     if log_task is not None:
         log_task.cancel()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
-        with contextlib.suppress(asyncio.CancelledError):
+        with contextlib.suppress(anyio.get_cancelled_exc_class()):
             await log_task
     if worker_state.rpc_bridge is not None:  # type: ignore[reportUnknownVariableType] -- cascade from WorkerState Any attributes
         worker_state.rpc_bridge.stop()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
@@ -474,7 +475,7 @@ async def _stdio_main() -> None:
     log_task = worker_state.log_task  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- cascade from WorkerState Any attributes
     if log_task is not None:
         log_task.cancel()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
-        with contextlib.suppress(asyncio.CancelledError):
+        with contextlib.suppress(anyio.get_cancelled_exc_class()):
             await log_task
     if worker_state.rpc_bridge is not None:  # type: ignore[reportUnknownVariableType] -- cascade from WorkerState Any attributes
         worker_state.rpc_bridge.stop()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes

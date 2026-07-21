@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import anyio
 from grpclib_transports.multiprocessing import serve_multiprocessing_endpoint
 from grpclib_transports.protocol import DEFAULT_TUNING
 from nanopynix_proto.nix.common import LogEvent, NixLogEvent, RequestFinalized
@@ -135,5 +135,5 @@ async def run_daemon_worker(
             max_concurrency=max_concurrency,
         )
     finally:
-        with contextlib.suppress(asyncio.CancelledError):
+        with contextlib.suppress(anyio.get_cancelled_exc_class()):
             await state.close()

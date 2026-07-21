@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "pynix"
 version = "0.1.0"
 description = "End-to-end harness that consumes nanopynix as a library dependency"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = ["nanopynix", "clypi", "prompt-toolkit", "rich", "structlog", "tree-sitter", "tree-sitter-nix"]
 
 [project.scripts]

@@ -15,12 +15,12 @@ Usage::
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyio
 from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_proto.nix.common import LogEvent as LogEventProto
 from nanopynix_proto.nix.common import LogLevel
@@ -67,7 +67,7 @@ class LogCapture:
         self.events: list[LogEvent] = []
         self._request_ids: set[int] = set()
         self._finalized: set[int] = set()
-        self._waiters: dict[int, asyncio.Event] = {}
+        self._waiters: dict[int, anyio.Event] = {}
         self._active = False
         self._token: object | None = None
 
@@ -79,7 +79,7 @@ class LogCapture:
     def _register_request(self, request_id: int) -> None:
         if self._active:
             self._request_ids.add(request_id)
-            self._waiters.setdefault(request_id, asyncio.Event())
+            self._waiters.setdefault(request_id, anyio.Event())
 
     async def wait_for_request(self, request_id: int) -> None:
         if request_id not in self._request_ids:
@@ -90,7 +90,9 @@ class LogCapture:
 
     async def wait(self) -> None:
         request_ids = tuple(self._request_ids)
-        await asyncio.gather(*(self.wait_for_request(request_id) for request_id in request_ids))
+        async with anyio.create_task_group() as tg:
+            for request_id in request_ids:
+                tg.start_soon(self.wait_for_request, request_id)
 
     async def __aenter__(self) -> LogCapture:
         def _append(raw: object) -> None:
@@ -116,22 +118,13 @@ class LogCapture:
         if self._token is not None:
             _ACTIVE_LOG_CAPTURES.reset(self._token)  # type: ignore[arg-type] -- ContextVar token is opaque
             self._token = None
-        drain = asyncio.create_task(self.wait(), name="nanopynix-log-capture-drain")
-        cancelled = False
         try:
-            while not drain.done():
-                try:
-                    await asyncio.shield(drain)
-                except asyncio.CancelledError:
-                    cancelled = True
-                    continue
-            await drain
+            with anyio.CancelScope(shield=True):
+                await self.wait()
         finally:
             if self._sub is not None:
                 self._sub.unsubscribe()
                 self._sub = None
-        if cancelled:
-            raise asyncio.CancelledError
 
 
 def _to_primop_specs(specs: Sequence[PrimOpSpec | Mapping[str, Any]] | None) -> list[PrimOpSpec]:
@@ -245,7 +238,7 @@ class Session:
     async def close(self) -> None:
         """Shut down the worker."""
         try:
-            async with asyncio.timeout(60):
+            with anyio.fail_after(60):
                 for eval_session in tuple(self._evals):
                     await eval_session.close()
                 await self._manager.close()

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import shlex
@@ -11,6 +10,7 @@ from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, override
 
+import anyio
 import tree_sitter_nix  # type: ignore[reportMissingTypeStubs] -- tree-sitter-nix does not ship type stubs
 from clypi import Command, arg
 from prompt_toolkit import PromptSession
@@ -469,7 +469,7 @@ async def _run_derivation(value: Any) -> int:
     out_path = _primary_output(outputs)
     program = Path(out_path) / "bin" / main_program
     try:
-        process = await asyncio.create_subprocess_exec(str(program))
+        process = await anyio.open_process([str(program)], stdin=None, stdout=None, stderr=None)
     except OSError as exc:
         raise ReplRunError(f"cannot run {program}: {exc.strerror}") from exc
     return_code = await process.wait()
@@ -498,7 +498,7 @@ async def _edit(value: Any, line_editors: tuple[str, ...]) -> int:
     path, line = await value.edit_location()
     argv = _editor_argv(path, line, line_editors)
     try:
-        process = await asyncio.create_subprocess_exec(*argv)
+        process = await anyio.open_process(argv, stdin=None, stdout=None, stderr=None)
     except OSError as exc:
         raise ReplRunError(f"cannot start editor {argv[0]!r}: {exc.strerror}") from exc
     return_code = await process.wait()
@@ -512,7 +512,7 @@ async def _exec_argv(argv: list[str]) -> int:
     if not argv:
         raise ReplRunError(":exec command list is empty")
     try:
-        process = await asyncio.create_subprocess_exec(*argv)
+        process = await anyio.open_process(argv, stdin=None, stdout=None, stderr=None)
     except OSError as exc:
         raise ReplRunError(f"cannot run {argv[0]!r}: {exc.strerror}") from exc
     return_code = await process.wait()
@@ -533,7 +533,7 @@ async def _shell(command: str) -> int:
     if not command:
         raise ReplRunError(":shell command is empty")
     try:
-        process = await asyncio.create_subprocess_shell(command)
+        process = await anyio.open_process(command, stdin=None, stdout=None, stderr=None)
     except OSError as exc:
         raise ReplRunError(f"cannot start shell: {exc.strerror}") from exc
     return_code = await process.wait()

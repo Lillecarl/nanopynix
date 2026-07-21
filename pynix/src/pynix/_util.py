@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import asyncio
-import contextlib
+import functools
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO, cast
 
+import anyio
 import structlog
 
 if TYPE_CHECKING:
@@ -42,14 +42,27 @@ async def forward_nix_logs(
         configure_logging()
     else:
         configure_logging(file=log_file)
-    task = asyncio.create_task(_forward_nix_logs(session, print_build_logs=print_build_logs))
     try:
-        yield
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(functools.partial(_forward_nix_logs, session, print_build_logs=print_build_logs))
+            try:
+                yield
+            finally:
+                # Shielded: the drain must run to completion even if the
+                # caller's block was cancelled, matching the original
+                # asyncio (edge-cancellation) behavior of this cleanup.
+                with anyio.CancelScope(shield=True):
+                    await anyio.sleep(_LOG_DRAIN_SECONDS)
+                tg.cancel_scope.cancel()
+    except* BaseException as eg:
+        # anyio task groups always wrap exceptions in a group, even a lone
+        # one raised by the yielded body itself -- unwrap the common single
+        # exception case so callers keep seeing the original exception type
+        # (e.g. SystemExit) instead of a BaseExceptionGroup.
+        if len(eg.exceptions) == 1:
+            raise eg.exceptions[0] from None
+        raise
     finally:
-        await asyncio.sleep(_LOG_DRAIN_SECONDS)
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
         structlog.configure(**old_config)
 
 
