@@ -5,10 +5,10 @@ When a manager-side primop fires during Nix evaluation, the C++
 Nix thread.  That callback must make a gRPC backchannel call to the
 manager, but the backchannel lives on the event loop thread.
 
-This bridge uses ``call_soon_threadsafe`` to enqueue the request
-on the event loop, then blocks on a ``concurrent.futures.Future``
-whose ``result()`` releases the GIL — allowing the event loop to
-process the backchannel call and fulfil the future.
+This bridge uses an ``anyio.from_thread.BlockingPortal`` to run the
+backchannel call on the event loop and block the Nix thread until it
+completes — ``BlockingPortal`` is explicitly designed for arbitrary
+foreign threads, not just ones anyio itself spawned.
 
 No ``nest_asyncio`` needed.
 """
@@ -16,9 +16,10 @@ No ``nest_asyncio`` needed.
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 from typing import TYPE_CHECKING, Any
 
+import anyio
+import anyio.from_thread
 from betterproto2 import which_one_of
 from nanopynix_bindings import util as nanopynix_util
 from nanopynix_proto.nix.common import NullValue, ScalarValue
@@ -64,46 +65,73 @@ def _scalar_value_to_python(sv: ScalarValue | None) -> Any:
 
 class ThreadedRpcPrimopBridge:
     """Bridges synchronous primop calls on the Nix thread to async
-    backchannel RPCs on the event loop thread."""
+    backchannel RPCs on the event loop thread.
 
-    def __init__(self, backchannel: WorkerBackchannel, loop: asyncio.AbstractEventLoop) -> None:
+    ``start()``/``stop()`` are called from ``WorkerServiceHandler.init``/
+    ``shutdown``, which -- like separate gRPC calls generally -- may each run
+    as a different asyncio task. anyio's ``BlockingPortal`` owns a
+    ``CancelScope``/``TaskGroup`` internally, which must be entered and
+    exited by the same task, so its whole lifetime lives inside one
+    dedicated background task (``_run``); ``start()``/``stop()`` merely
+    signal that task via ``anyio.Event``, which -- unlike ``CancelScope``/
+    ``TaskGroup`` -- has no task affinity and is safe to set/wait from any
+    task. Same pattern as ``DaemonSupervisor`` in ``rpc/daemon/_supervisor.py``.
+    """
+
+    def __init__(self, backchannel: WorkerBackchannel) -> None:
         self._backchannel = backchannel
-        self._loop = loop
-        self._queue: asyncio.Queue[tuple[str, list[Any], concurrent.futures.Future[Any]]] = asyncio.Queue()
-        self._task: asyncio.Task[None] | None = None
+        self._portal: anyio.from_thread.BlockingPortal | None = None
+        self._run_task: asyncio.Task[None] | None = None
+        self._stop_event: anyio.Event | None = None
 
-    def start(self) -> None:
-        self._task = asyncio.create_task(self._dispatch_loop(), name="nix-primop-dispatcher")
+    async def start(self) -> None:
+        if self._run_task is not None:
+            raise RuntimeError("primop bridge is already running")
+        self._stop_event = anyio.Event()
+        ready = anyio.Event()
+        self._run_task = asyncio.create_task(self._run(ready), name="nix-primop-bridge")
+        await ready.wait()
 
-    def stop(self) -> None:
-        if self._task is not None:
-            self._task.cancel()
-            self._task = None
+    async def stop(self) -> None:
+        stop_event = self._stop_event
+        if stop_event is not None:
+            stop_event.set()
+        run_task = self._run_task
+        self._run_task = None
+        if run_task is not None:
+            await run_task
+        self._portal = None
 
-    async def _dispatch_loop(self) -> None:
-        while True:
-            name, args, future = await self._queue.get()
-            try:
-                request = CallPrimopRequest(
-                    name=name,
-                    args=[_python_to_scalar_value(a) for a in args],
-                    request_id=nanopynix_util.get_logger_request_id(),
-                )
-                response: CallPrimopResponse = await self._backchannel.call_unary(
-                    _CALL_ROUTE, request, CallPrimopResponse
-                )
-                future.set_result(_scalar_value_to_python(response.value))
-            except Exception as exc:
-                future.set_exception(exc)
+    async def _run(self, ready: anyio.Event) -> None:
+        stop_event = self._stop_event
+        if stop_event is None:
+            raise RuntimeError("primop bridge is not running")
+        async with anyio.from_thread.BlockingPortal() as portal:
+            self._portal = portal
+            ready.set()
+            await stop_event.wait()
+
+    async def _invoke_async(self, name: str, args: list[Any]) -> Any:
+        request = CallPrimopRequest(
+            name=name,
+            args=[_python_to_scalar_value(a) for a in args],
+            request_id=nanopynix_util.get_logger_request_id(),
+        )
+        with anyio.fail_after(_RPC_TIMEOUT):
+            response: CallPrimopResponse = await self._backchannel.call_unary(
+                _CALL_ROUTE, request, CallPrimopResponse
+            )
+        return _scalar_value_to_python(response.value)
 
     # ── called from the Nix thread ──────────────────────────────────
 
     def call(self, name: str, args: list[Any]) -> Any:
-        future: concurrent.futures.Future[Any] = concurrent.futures.Future()
-        self._loop.call_soon_threadsafe(self._queue.put_nowait, (name, args, future))
+        portal = self._portal
+        if portal is None:
+            raise RuntimeError("primop bridge is not running")
         try:
-            return future.result(timeout=_RPC_TIMEOUT)
-        except concurrent.futures.TimeoutError as exc:
+            return portal.call(self._invoke_async, name, args)
+        except TimeoutError as exc:
             raise TimeoutError(f"manager primop {name!r} timed out after {_RPC_TIMEOUT:.0f}s") from exc
 
 

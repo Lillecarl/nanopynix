@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast, get_type_hints
 
+import anyio
+
 if TYPE_CHECKING:
     from betterproto2 import Message
 
@@ -92,12 +94,25 @@ def _make_service_forwarder(
             executor: Any = _resolve_attr(self, nix_executor_attr)
             state = _resolve_attr(self, "_state")
             request = cast("Any", message)
-            raw = await state.run_request(
-                request_id=request.request_id,
-                executor=executor,
-                operation=self._nanobind_rpc_call,
-                args=(binding_method_name, message),
-            )
+            # NixThreadExecutor (dedicated-thread dispatch) and
+            # anyio.CapacityLimiter (bounded anyio.to_thread dispatch) are
+            # two distinct mechanisms, not variants of one shared interface
+            # -- run_request() takes them as separate keyword parameters, so
+            # this generic forwarder must route to the right one.
+            if isinstance(executor, anyio.CapacityLimiter):
+                raw = await state.run_request(
+                    request_id=request.request_id,
+                    limiter=executor,
+                    operation=self._nanobind_rpc_call,
+                    args=(binding_method_name, message),
+                )
+            else:
+                raw = await state.run_request(
+                    request_id=request.request_id,
+                    executor=executor,
+                    operation=self._nanobind_rpc_call,
+                    args=(binding_method_name, message),
+                )
             if isinstance(raw, response_type):
                 return raw
             if isinstance(raw, Mapping):

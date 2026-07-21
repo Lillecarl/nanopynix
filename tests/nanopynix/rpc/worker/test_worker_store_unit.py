@@ -6,10 +6,10 @@ import asyncio
 import threading
 from typing import Any, cast
 
+import anyio
 import pytest
 from nanopynix_proto.nix.store import GetUriRequest
 
-from nanopynix._core._nix_executor import NixThreadExecutor
 from nanopynix.rpc.worker._worker import WorkerState
 from nanopynix.rpc.worker._worker_store import StoreServiceHandler
 
@@ -38,19 +38,15 @@ async def test_store_handler_runs_independent_calls_on_multiple_store_threads() 
                     active -= 1
 
     handle = handles.allocate(SlowStore(), "store")
-    store_executor = NixThreadExecutor(max_workers=2, thread_name_prefix="test-store")
-    state.store_executor = store_executor
+    state.store_limiter = anyio.CapacityLimiter(2)
     handler = StoreServiceHandler(state)
-    try:
-        responses = cast(
-            "tuple[Any, Any]",
-            await asyncio.gather(
-                handler.get_uri(GetUriRequest(store_handle=handle, request_id=1)),
-                handler.get_uri(GetUriRequest(store_handle=handle, request_id=2)),
-            ),
-        )
-    finally:
-        store_executor.shutdown(wait=True)
+    responses = cast(
+        "tuple[Any, Any]",
+        await asyncio.gather(
+            handler.get_uri(GetUriRequest(store_handle=handle, request_id=1)),
+            handler.get_uri(GetUriRequest(store_handle=handle, request_id=2)),
+        ),
+    )
 
     first, second = responses
     assert first.uri == "fake://store"

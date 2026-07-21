@@ -63,12 +63,31 @@ what to inspect next, then query `/tmp/pytest.log` for the full failure context.
   an inline justification. Use the form
   `# type: ignore[rule-name] -- reason` or `# noqa: RULE -- reason`; do not
   use blanket or unexplained suppressions.
+- Prefer anyio primitives (`anyio.Lock`/`Event`, memory object streams,
+  `anyio.fail_after`/`move_on_after`, `anyio.create_task_group`,
+  `anyio.open_process`, `anyio.to_thread`/`from_thread.BlockingPortal`) over
+  raw `asyncio` equivalents in new code. Two documented, intentional
+  exceptions exist: `_core/_nix_executor.py`'s `asyncio.wrap_future` call
+  (interop with an already-running dedicated `concurrent.futures` thread —
+  routing it through `anyio.to_thread` would spend a slot in anyio's shared
+  capacity limiter for no benefit), and `asyncio.create_task()` used to host
+  a `CancelScope`/`TaskGroup` (a plain `anyio.create_task_group()` or
+  `anyio.from_thread.BlockingPortal`) whose `start()`/`close()` are invoked
+  from different tasks (e.g. separate gRPC handler calls) — see
+  `rpc/daemon/_supervisor.py` and `rpc/worker/_worker_primop.py`, since
+  anyio's `CancelScope`/`TaskGroup` must be entered and exited by the same
+  task.
 
 # Banned patterns
 
 - **Sync subprocess calls are forbidden.** Never use `subprocess.run`, `subprocess.call`,
   `subprocess.Popen` (without async wrappers), or `os.system`. Use
-  `asyncio.create_subprocess_exec` instead, even in test code.
+  `anyio.open_process`/`anyio.run_process` instead, even in test code. Unlike
+  `asyncio.create_subprocess_exec`, `anyio.open_process` defaults
+  `stdin`/`stdout`/`stderr` to `PIPE` rather than inheriting the parent's file
+  descriptors — pass `stdin=None, stdout=None, stderr=None` explicitly at any
+  call site that needs to inherit the terminal (interactive commands,
+  `$EDITOR`, etc.), or the child will silently hang or produce empty output.
 
 # Design notes
 

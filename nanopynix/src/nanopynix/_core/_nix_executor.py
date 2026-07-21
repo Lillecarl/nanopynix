@@ -7,6 +7,8 @@ import concurrent.futures
 import threading
 from typing import TYPE_CHECKING, Any, TypeVar
 
+import anyio
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -86,6 +88,17 @@ class NixThreadExecutor:
             self._futures.add(future)
         future.add_done_callback(self._discard_future)
         loop = asyncio.get_running_loop()
+        # Deliberately asyncio-native, not anyio.to_thread: this future is
+        # already running on a dedicated, independently managed thread (this
+        # executor's own pool), not one anyio would spawn. Routing the wait
+        # through anyio.to_thread.run_sync(future.result) would spend a slot
+        # in anyio's shared, process-wide to_thread capacity limiter just to
+        # block on a result that's already being computed elsewhere -- a
+        # thread blocking on a thread, contending for a resource for no
+        # benefit. asyncio.wrap_future costs nothing extra (an
+        # add_done_callback resolving a future on the running loop) and this
+        # project always runs anyio's asyncio backend, where asyncio-native
+        # interop is explicitly supported.
         return await asyncio.wrap_future(future, loop=loop)
 
     def _discard_future(self, future: concurrent.futures.Future[Any]) -> None:
@@ -111,15 +124,17 @@ class NixThreadExecutor:
         with self._lock:
             return any(not future.done() for future in self._futures)
 
-    async def drain(self, *, timeout: float | None = None) -> None:  # noqa: ASYNC109 -- timeout passed to asyncio.wait which accepts a timeout parameter
+    async def drain(self, *, timeout: float | None = None) -> None:  # noqa: ASYNC109 -- timeout passed to anyio.move_on_after which accepts a timeout parameter
         """Wait until all submitted work has finished without cancelling it."""
         with self._lock:
             futures = tuple(future for future in self._futures if not future.done())
         if not futures:
             return
-        wrapped = [asyncio.wrap_future(future) for future in futures]
-        _, pending = await asyncio.wait(wrapped, timeout=timeout)
-        if pending:
+        loop = asyncio.get_running_loop()
+        with anyio.move_on_after(timeout) as scope:
+            for future in futures:
+                await asyncio.wrap_future(future, loop=loop)
+        if scope.cancelled_caught:
             raise TimeoutError("timed out waiting for Nix executor work to finish")
 
     def shutdown(self, wait: bool = True) -> None:
