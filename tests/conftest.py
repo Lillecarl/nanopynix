@@ -18,6 +18,7 @@ from nanopynix_bindings import util as nanopynix_util
 import nanopynix
 
 pytest_plugins = (
+    "tests.support.lsp_environment",
     "tests.support.nix_environment",
     "tests.support.nix_runtime",
 )
