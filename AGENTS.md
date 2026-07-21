@@ -80,14 +80,14 @@ what to inspect next, then query `/tmp/pytest.log` for the full failure context.
 
 # Banned patterns
 
-- **Sync subprocess calls are forbidden.** Never use `subprocess.run`, `subprocess.call`,
-  `subprocess.Popen` (without async wrappers), or `os.system`. Use
-  `anyio.open_process`/`anyio.run_process` instead, even in test code. Unlike
-  `asyncio.create_subprocess_exec`, `anyio.open_process` defaults
-  `stdin`/`stdout`/`stderr` to `PIPE` rather than inheriting the parent's file
-  descriptors — pass `stdin=None, stdout=None, stderr=None` explicitly at any
-  call site that needs to inherit the terminal (interactive commands,
-  `$EDITOR`, etc.), or the child will silently hang or produce empty output.
+- **In an async function, always use the async alternative when one exists —
+  never a blocking sync call**, even in test code. `subprocess.run`/`Popen`/
+  `os.system` → `anyio.open_process` (defaults `stdin`/`stdout`/`stderr` to
+  `PIPE`, unlike asyncio — pass `None` explicitly to inherit the terminal).
+  Blocking `pathlib.Path` I/O (`.read_text()`, `.write_text()`, `.exists()`,
+  `.mkdir()`, etc.) → `anyio.Path`, same API, easy to miss since it doesn't
+  look like a blocking call. Pure path manipulation with no filesystem access
+  is still fine as plain `pathlib.Path`.
 
 # Design notes
 
