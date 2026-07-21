@@ -19,6 +19,16 @@ let
   regularVersionNames = builtins.filter (name: !lib.hasSuffix "-tsan" name) nanopynixVersionNames;
   tsanVersionNames = builtins.filter (lib.hasSuffix "-tsan") nanopynixVersionNames;
 
+  # Coverage-collecting backends run as separate matrix jobs (test-daemon-*,
+  # test-local-*) rather than serially inside one job, so covering both stays
+  # roughly free in wall-clock: they run in parallel. TSAN already exercises
+  # local+daemon together in its own repeated stress runs, but deliberately
+  # without coverage instrumentation (see mkTsanTestJob).
+  regularBackends = [
+    "daemon"
+    "local"
+  ];
+
   # A single cachix/install-nix-action (multi-user) install suffices for every
   # job now: the test suite owns its own daemon and local store paths
   # entirely (see tests/support/nix_environment.py), so the CI runner's own
@@ -40,6 +50,7 @@ let
   mkRegularTestJob =
     {
       version,
+      backend,
       ref ? null,
       lockArtifact ? null,
       needs ? [ ],
@@ -55,7 +66,7 @@ let
           (steps.verifyClosure { name = "Verify test runner closure after build"; })
           (steps.enableSandboxNamespaces { })
           {
-            name = "Test nanopynix against Nix ${version} (full suite, daemon backend)";
+            name = "Test nanopynix against Nix ${version} (full suite, ${backend} backend)";
             run = # bash
               ''
                 set -o pipefail
@@ -63,7 +74,7 @@ let
                 rm -f "$paths_to_delete"
                 status=0
                 env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=''${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
-                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends daemon \
+                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends ${backend} \
                   --cov --cov-report=term-missing --cov-report=xml:''${{ github.workspace }}/coverage.xml \
                   --junitxml=''${{ github.workspace }}/junit.xml \
                   2>&1 | tee ''${{ github.workspace }}/test-gdb-output.log || status=$?
@@ -75,7 +86,7 @@ let
           }
           (steps.uploadArtifact {
             name = "Upload test output";
-            artifactName = "test-output-${version}";
+            artifactName = "test-output-${backend}-${version}";
             path = "\${{ github.workspace }}/test-gdb-output.log";
           })
           (withCond "\${{ !cancelled() }}" {
@@ -84,7 +95,7 @@ let
             "with" = {
               token = "\${{ secrets.CODECOV_TOKEN }}";
               files = "\${{ github.workspace }}/coverage.xml";
-              flags = version;
+              flags = "${backend}-${version}";
             };
           })
           (withCond "\${{ !cancelled() }}" {
@@ -93,7 +104,7 @@ let
             "with" = {
               token = "\${{ secrets.CODECOV_TOKEN }}";
               files = "\${{ github.workspace }}/junit.xml";
-              flags = version;
+              flags = "${backend}-${version}";
               report_type = "test_results";
             };
           })
@@ -246,6 +257,7 @@ in
   inherit
     ciLib
     regularVersionNames
+    regularBackends
     tsanVersionNames
     mkRegularTestJob
     mkTsanTestJob
@@ -260,10 +272,13 @@ in
       needs ? [ ],
     }:
     builtins.listToAttrs (
-      map (version: {
-        name = "test-${version}";
-        value = mkRegularTestJob { inherit version ref lockArtifact needs; };
-      }) regularVersionNames
+      builtins.concatMap (
+        backend:
+        map (version: {
+          name = "test-${backend}-${version}";
+          value = mkRegularTestJob { inherit version backend ref lockArtifact needs; };
+        }) regularVersionNames
+      ) regularBackends
     );
 
   mkStaticTsanTestJobs =
