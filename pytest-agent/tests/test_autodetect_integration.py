@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import conftest
 import pytest
 from pytest_agent._harness_detect import HARNESS_ENV_VARS
 
@@ -36,7 +37,7 @@ def _agent_dir_was_written(pytester: pytest.Pytester) -> bool:
 
 def test_agent_mode_stays_off_with_no_harness_env_var_present(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
-    result = pytester.runpytest_subprocess("-p", "pytest_agent.plugin", "-q")
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "-q")
     assert result.ret == pytest.ExitCode.OK
     assert not _agent_dir_was_written(pytester)
 
@@ -46,7 +47,7 @@ def test_agent_mode_turns_on_by_itself_when_a_harness_env_var_is_set(
 ) -> None:
     monkeypatch.setenv("CLAUDECODE", "1")
     pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
-    result = pytester.runpytest_subprocess("-p", "pytest_agent.plugin", "-q")
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "-q")
     assert result.ret == pytest.ExitCode.OK
     assert _agent_dir_was_written(pytester)
 
@@ -57,7 +58,7 @@ def test_no_autodetect_env_var_disables_the_automatic_activation(
     monkeypatch.setenv("CLAUDECODE", "1")
     monkeypatch.setenv("PYTEST_AGENT_NO_AUTODETECT", "1")
     pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
-    result = pytester.runpytest_subprocess("-p", "pytest_agent.plugin", "-q")
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "-q")
     assert result.ret == pytest.ExitCode.OK
     assert not _agent_dir_was_written(pytester)
 
@@ -67,6 +68,6 @@ def test_explicit_agent_flag_still_works_alongside_no_autodetect(
 ) -> None:
     monkeypatch.setenv("PYTEST_AGENT_NO_AUTODETECT", "1")
     pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
-    result = pytester.runpytest_subprocess("-p", "pytest_agent.plugin", "--agent", "-q")
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent", "-q")
     assert result.ret == pytest.ExitCode.OK
     assert _agent_dir_was_written(pytester)
