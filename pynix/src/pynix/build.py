@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 import nanopynix
 from nanopynix.exceptions import StoreError
-from pynix._util import forward_nix_logs, prepare_sys_path
+from pynix._util import forward_nix_logs
 from pynix.fod import (
     FodSourceUpdateError,
     derivation_name_from_path,
@@ -63,8 +63,6 @@ class Build(Command):
 
     @override
     async def run(self) -> None:
-        prepare_sys_path()
-
         target = EvaluationTarget.from_command(self)
         try:
             target.validate(required=True)

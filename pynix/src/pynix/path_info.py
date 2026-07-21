@@ -10,7 +10,7 @@ from nanopynix_proto.nix.common import PathInfo as PathInfoProto  # noqa: TC002
 from rich.console import Console
 
 import nanopynix
-from pynix._util import forward_nix_logs, prepare_sys_path
+from pynix._util import forward_nix_logs
 
 logger = structlog.get_logger(__name__)
 console = Console()
@@ -26,8 +26,6 @@ class PathInfo(Command):
 
     @override
     async def run(self) -> None:
-        prepare_sys_path()
-
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             try:
                 info: PathInfoProto = await store.query_path_info(self.path)
