@@ -18,6 +18,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from pynix._completion import completion_prefix_at
 from pynix._nix_syntax import parse_nix
 
 
@@ -126,9 +127,7 @@ def identifier_path_at(source: str, byte_offset: int) -> list[str] | None:
     return None
 
 
-_ATTRPATH_TAIL_RE = re.compile(
-    r"(?:^|[^A-Za-z0-9_'.-])((?:[A-Za-z_][A-Za-z0-9_'-]*\.)*)([A-Za-z_][A-Za-z0-9_'-]*)?$"
-)
+_IDENTIFIER_CHAIN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-z0-9_'-]*)*")
 
 
 def completion_target_at(source: str, byte_offset: int) -> tuple[list[str], str] | None:
@@ -139,16 +138,27 @@ def completion_target_at(source: str, byte_offset: int) -> tuple[list[str], str]
     for ``cfg.serv`` with the cursor at the end, returns
     ``(["cfg"], "serv")``. Returns None if there's no identifier chain
     immediately before the cursor.
+
+    A thin adapter over ``completion_prefix_at`` (shared with the REPL,
+    which can also complete after arbitrary non-identifier expressions):
+    this server only ever resolves plain dotted-identifier chains against
+    its named roots, so a non-``None`` prefix that isn't shaped like one
+    (e.g. it came from completing after ``(import ./foo.nix).ba``) can't be
+    used here and yields None, same as it always could not.
     """
-    text_before = source.encode()[:byte_offset].decode()
-    match = _ATTRPATH_TAIL_RE.search(text_before)
-    if match is None:
+    result = completion_prefix_at(source, byte_offset)
+    if result is None:
         return None
-    prefix_dotted, partial = match.groups()
-    prefix = [segment for segment in (prefix_dotted or "").split(".") if segment]
+    prefix_text, partial = result
+    if prefix_text is None:
+        prefix: list[str] = []
+    elif _IDENTIFIER_CHAIN_RE.fullmatch(prefix_text):
+        prefix = prefix_text.split(".")
+    else:
+        return None
     if not prefix and not partial:
         return None
-    return prefix, partial or ""
+    return prefix, partial
 
 
 def top_level_lambda_formals(source: str) -> list[str] | None:
