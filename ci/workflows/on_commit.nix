@@ -1,6 +1,6 @@
 let
   workflow = import ./lib.nix { };
-  inherit (workflow.ciLib) mkWorkflow withCond;
+  inherit (workflow.ciLib) withCond;
 
   testJobs = workflow.mkStaticTestJobs { };
   tsanTestJobs = workflow.mkStaticTsanTestJobs { };
@@ -12,7 +12,7 @@ let
     ) job
   ) allTestJobs;
 in
-mkWorkflow {
+workflow.evalWorkflow {
   name = "On commit";
   on = {
     # Keep ci-develop available as a pushed ref for focused workflow_dispatch

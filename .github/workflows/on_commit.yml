@@ -49,8 +49,8 @@ jobs:
     - uses: actions/upload-pages-artifact@main
       with:
         path: public
-    runs-on: ubuntu-24.04
     if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-24.04
   docs-deploy:
     needs: docs-build
     steps:
@@ -66,8 +66,8 @@ jobs:
     concurrency:
       group: pages
       cancel-in-progress: false
-    runs-on: ubuntu-24.04
     if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-24.04
   test-tsan-git:
     steps:
     - uses: actions/checkout@main
@@ -143,9 +143,9 @@ jobs:
           ${{ github.workspace }}/tsan-output-git.log
           ${{ github.workspace }}/tsan-output-broad-git.log
       if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan-git,')
+    runs-on: ubuntu-24.04
   test-tsan-nix_2_34:
     steps:
     - uses: actions/checkout@main
@@ -221,9 +221,9 @@ jobs:
           ${{ github.workspace }}/tsan-output-nix_2_34.log
           ${{ github.workspace }}/tsan-output-broad-nix_2_34.log
       if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan-nix_2_34,')
+    runs-on: ubuntu-24.04
   test-tsan-nix_2_35:
     steps:
     - uses: actions/checkout@main
@@ -299,9 +299,9 @@ jobs:
           ${{ github.workspace }}/tsan-output-nix_2_35.log
           ${{ github.workspace }}/tsan-output-broad-nix_2_35.log
       if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan-nix_2_35,')
+    runs-on: ubuntu-24.04
   test-daemon-git:
     steps:
     - uses: actions/checkout@main
@@ -363,9 +363,9 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-git,')
+    runs-on: ubuntu-24.04
   test-daemon-nix_2_31:
     steps:
     - uses: actions/checkout@main
@@ -427,9 +427,9 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-nix_2_31,')
+    runs-on: ubuntu-24.04
   test-daemon-nix_2_34:
     steps:
     - uses: actions/checkout@main
@@ -491,9 +491,9 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-nix_2_34,')
+    runs-on: ubuntu-24.04
   test-daemon-nix_2_35:
     steps:
     - uses: actions/checkout@main
@@ -555,9 +555,9 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-nix_2_35,')
+    runs-on: ubuntu-24.04
   test-local-git:
     steps:
     - uses: actions/checkout@main
@@ -619,9 +619,9 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-git,')
+    runs-on: ubuntu-24.04
   test-local-nix_2_31:
     steps:
     - uses: actions/checkout@main
@@ -683,9 +683,9 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-nix_2_31,')
+    runs-on: ubuntu-24.04
   test-local-nix_2_34:
     steps:
     - uses: actions/checkout@main
@@ -747,9 +747,9 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-nix_2_34,')
+    runs-on: ubuntu-24.04
   test-local-nix_2_35:
     steps:
     - uses: actions/checkout@main
@@ -811,6 +811,6 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-nix_2_35,')
+    runs-on: ubuntu-24.04

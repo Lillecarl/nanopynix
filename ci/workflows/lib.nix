@@ -3,11 +3,13 @@
 { }:
 let
   ciLib = import ../lib.nix;
-  inherit (ciLib) steps mkJob withCond;
+  inherit (ciLib) steps withCond;
 
   getFlake = builtins.${"getFlake"};
   flake = getFlake (toString ../../.);
   inherit (flake) lib;
+
+  schema = import ./schema.nix { inherit lib; };
 
   flakeTestOutputs = lib.pipe flake.packages.${builtins.currentSystem} [
     (lib.filterAttrs (_n: v: v.passthru.addToMatrix or false))
@@ -55,7 +57,7 @@ let
       lockArtifact ? null,
       needs ? [ ],
     }:
-    mkJob (
+    (
       ciLib.optionalAttrs (needs != [ ]) { inherit needs; }
       // {
         steps = mkTestSetup { inherit ref lockArtifact; } ++ [
@@ -123,7 +125,7 @@ let
     let
       bareVersion = lib.removeSuffix "-tsan" version;
     in
-    mkJob (
+    (
       ciLib.optionalAttrs (needs != [ ]) { inherit needs; }
       // {
         steps = mkTestSetup { inherit ref lockArtifact; } ++ [
@@ -201,7 +203,7 @@ let
       ref ? null,
       lockArtifact ? null,
     }:
-    mkJob {
+    {
       inherit needs;
       steps =
         [ (steps.checkout { inherit ref; }) ]
@@ -230,7 +232,7 @@ let
 
   mkDocsDeployJob =
     { needs }:
-    mkJob {
+    {
       inherit needs;
       permissions = {
         pages = "write";
@@ -254,6 +256,7 @@ let
     };
 in
 {
+  inherit (schema) evalWorkflow;
   inherit
     ciLib
     regularVersionNames

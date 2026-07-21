@@ -1,34 +1,15 @@
-# Minimal function+attrset library for building GitHub Actions workflows as
-# plain Nix values, rendered to YAML via nanopynix's toYAML primop (see
-# ci/render.py). Deliberately not a NixOS-module-based system yet -- this is
-# the "get something working" first step; module-system ergonomics (option
-# declarations, merging, etc.) can replace these plain functions later
-# without changing the workflow definitions' shape much.
+# Minimal function+attrset library of GitHub Actions step constructors,
+# rendered to YAML via nanopynix's toYAML primop (see ci/render.py). Workflow-
+# and job-level shape (defaults, option types, merging) is handled by
+# ci/workflows/schema.nix's lib.evalModules-based schema; this file only
+# builds the plain step/list values that get fed into it.
 #
-# No nixpkgs `lib` dependency on purpose: workflow definitions should
+# No nixpkgs `lib` dependency on purpose: these step constructors should
 # evaluate hermetically from a plain `nix-instantiate --eval`/`eval_.file()`
 # call, without needing a working NIX_PATH.
 rec {
   optionalAttrs = cond: attrs: if cond then attrs else { };
   optional = cond: x: if cond then [ x ] else [ ];
-
-  mkWorkflow =
-    {
-      name,
-      on,
-      jobs,
-    }:
-    {
-      inherit name on jobs;
-    };
-
-  # Job attrs are passed through as-is other than defaulting runs-on --
-  # every job field GitHub Actions understands (if, needs, outputs,
-  # strategy, permissions, environment, concurrency, steps, ...) is just
-  # forwarded.
-  mkJob =
-    { runsOn ? "ubuntu-24.04", ... }@args:
-    (removeAttrs args [ "runsOn" ]) // { runs-on = runsOn; };
 
   # `if` is a Nix keyword, so it can't be a formal-argument name -- callers
   # pass the condition as `cond` and this helper renders it under the
