@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json as _json
 import queue
 import threading
@@ -12,6 +11,7 @@ from dataclasses import dataclass, field
 from math import isfinite
 from typing import TYPE_CHECKING, Any, Literal, Never, Protocol, overload
 
+import anyio
 from nanopynix_bindings.store import BuildMode
 from nanopynix_proto.nix.common import (
     CallArg,
@@ -288,7 +288,7 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
         self._rpc_timeout = rpc_timeout
         self._active = True
         self._draining_releases = False
-        self._operation_lock = asyncio.Lock()
+        self._operation_lock = anyio.Lock()
         self._eval_handle = 0
 
     def _check_active(self) -> None:

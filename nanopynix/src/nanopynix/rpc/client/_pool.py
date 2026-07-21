@@ -14,10 +14,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyio
 from grpclib.exceptions import GRPCError, StreamTerminatedError
 from grpclib_transports.multiprocessing import multiprocessing_worker_with_backchannel
 from nanopynix_proto.nix.common import PrimOpSpec as PrimOpSpecPB
@@ -256,12 +258,19 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
             if self._worker_service_stub is not None:
                 try:
                     await self.invoke(self._worker_stub.shutdown, ShutdownRequest(), timeout=self._shutdown_timeout)
-                except (TimeoutError, GRPCError, StreamTerminatedError, ConnectionError, WorkerDiedError, asyncio.CancelledError):
+                except (
+                    TimeoutError,
+                    GRPCError,
+                    StreamTerminatedError,
+                    ConnectionError,
+                    WorkerDiedError,
+                    anyio.get_cancelled_exc_class(),
+                ):
                     logger.debug("worker shutdown failed (expected during teardown)", exc_info=True)
         finally:
             if self._log_task is not None:
                 self._log_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
+                with contextlib.suppress(anyio.get_cancelled_exc_class()):
                     await self._log_task
                 self._log_task = None
             if self._stack is not None:
@@ -287,15 +296,14 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
 
     async def log_stream(self) -> AsyncIterator[object]:
         """Async iterator over log events."""
-        q: asyncio.Queue[object] = asyncio.Queue()
+        send_stream, receive_stream = anyio.create_memory_object_stream[object](max_buffer_size=math.inf)
 
         def _on_event(event: object) -> None:
-            q.put_nowait(event)
+            send_stream.send_nowait(event)
 
         sub = self._log_bus.subscribe(_on_event)
         try:
-            while True:
-                event = await q.get()
+            async for event in receive_stream:
                 if event is None:
                     break
                 yield event
@@ -314,7 +322,7 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
         try:
             async for event in self._worker_stub.subscribe_logs(SubscribeLogsRequest()):
                 self._log_bus.emit(event)
-        except asyncio.CancelledError:
+        except anyio.get_cancelled_exc_class():
             raise
         except (GRPCError, StreamTerminatedError, ConnectionError):
             logger.debug("worker log stream ended", exc_info=True)

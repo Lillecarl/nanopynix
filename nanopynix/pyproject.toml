@@ -7,11 +7,12 @@ name = "nanopynix"
 version = "0.1.0"
 description = "nanobind-based Python bindings for Nix"
 authors = [{ name = "nanopynix contributors" }]
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = [
   "nanopynix-bindings",
   "nanopynix-proto",
   "grpclib-transports",
+  "anyio>=4.14",
   "coolname",
   "janus",
   "jsonschema",
@@ -28,7 +29,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-dependency", "pytest-cov", "pytest-forked", "anyio", "pygit2"]
+test = ["pytest", "pytest-dependency", "pytest-cov", "pytest-forked", "pygit2"]
 
 [project.scripts]
 nanopynix-worker = "nanopynix.rpc.worker._worker:main"

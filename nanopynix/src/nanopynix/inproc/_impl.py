@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import math
 import os
 import threading
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyio
 from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import store as nanopynix_store
 from nanopynix_bindings import util as nanopynix_util
@@ -381,11 +383,11 @@ class Session:
 
     async def log_stream(self) -> AsyncIterator[LogEvent]:
         """Async iterator over log events from this process's Nix logger."""
-        queue: asyncio.Queue[LogEvent] = asyncio.Queue()
-        subscription = self.subscribe(queue.put_nowait)
+        send_stream, receive_stream = anyio.create_memory_object_stream[LogEvent](max_buffer_size=math.inf)
+        subscription = self.subscribe(send_stream.send_nowait)
         try:
-            while True:
-                yield await queue.get()
+            async for event in receive_stream:
+                yield event
         finally:
             subscription.unsubscribe()
 
