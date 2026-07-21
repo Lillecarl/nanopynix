@@ -9,7 +9,10 @@ let
   flake = getFlake (toString ../../.);
   inherit (flake) lib;
 
-  schema = import ./schema.nix { inherit lib; };
+  schema = import ./schema.nix {
+    inherit lib;
+    nixpkgsPath = flake.legacyPackages.${builtins.currentSystem}.path;
+  };
 
   flakeTestOutputs = lib.pipe flake.packages.${builtins.currentSystem} [
     (lib.filterAttrs (_n: v: v.passthru.addToMatrix or false))
@@ -57,63 +60,61 @@ let
       lockArtifact ? null,
       needs ? [ ],
     }:
-    (
-      ciLib.optionalAttrs (needs != [ ]) { inherit needs; }
-      // {
-        steps = mkTestSetup { inherit ref lockArtifact; } ++ [
-          {
-            name = "Build nanopynix test runner for Nix ${version}";
-            run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
-          }
-          (steps.verifyClosure { name = "Verify test runner closure after build"; })
-          (steps.enableSandboxNamespaces { })
-          {
-            name = "Test nanopynix against Nix ${version} (full suite, ${backend} backend)";
-            run = # bash
-              ''
-                set -o pipefail
-                paths_to_delete="''${{ github.workspace }}/nanopynix-test-store-paths.txt"
-                rm -f "$paths_to_delete"
-                status=0
-                env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=''${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
-                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends ${backend} \
-                  --cov --cov-report=term-missing --cov-report=xml:''${{ github.workspace }}/coverage.xml \
-                  --junitxml=''${{ github.workspace }}/junit.xml \
-                  2>&1 | tee ''${{ github.workspace }}/test-gdb-output.log || status=$?
-                if [ -s "$paths_to_delete" ]; then
-                  nix store delete --stdin < "$paths_to_delete" || true
-                fi
-                exit "$status"
-              '';
-          }
-          (steps.uploadArtifact {
-            name = "Upload test output";
-            artifactName = "test-output-${backend}-${version}";
-            path = "\${{ github.workspace }}/test-gdb-output.log";
-          })
-          (withCond "\${{ !cancelled() }}" {
-            name = "Upload coverage reports to Codecov";
-            uses = "codecov/codecov-action@main";
-            "with" = {
-              token = "\${{ secrets.CODECOV_TOKEN }}";
-              files = "\${{ github.workspace }}/coverage.xml";
-              flags = "${backend}-${version}";
-            };
-          })
-          (withCond "\${{ !cancelled() }}" {
-            name = "Upload test results to Codecov";
-            uses = "codecov/codecov-action@main";
-            "with" = {
-              token = "\${{ secrets.CODECOV_TOKEN }}";
-              files = "\${{ github.workspace }}/junit.xml";
-              flags = "${backend}-${version}";
-              report_type = "test_results";
-            };
-          })
-          (steps.verifyClosure { name = "Verify test runner closure after tests"; })
-        ];
-      }
-    );
+    ciLib.optionalAttrs (needs != [ ]) { inherit needs; }
+    // {
+      steps = mkTestSetup { inherit ref lockArtifact; } ++ [
+        {
+          name = "Build nanopynix test runner for Nix ${version}";
+          run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
+        }
+        (steps.verifyClosure { name = "Verify test runner closure after build"; })
+        (steps.enableSandboxNamespaces { })
+        {
+          name = "Test nanopynix against Nix ${version} (full suite, ${backend} backend)";
+          run = # bash
+            ''
+              set -o pipefail
+              paths_to_delete="''${{ github.workspace }}/nanopynix-test-store-paths.txt"
+              rm -f "$paths_to_delete"
+              status=0
+              env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=''${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+                ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends ${backend} \
+                --cov --cov-report=term-missing --cov-report=xml:''${{ github.workspace }}/coverage.xml \
+                --junitxml=''${{ github.workspace }}/junit.xml \
+                2>&1 | tee ''${{ github.workspace }}/test-gdb-output.log || status=$?
+              if [ -s "$paths_to_delete" ]; then
+                nix store delete --stdin < "$paths_to_delete" || true
+              fi
+              exit "$status"
+            '';
+        }
+        (steps.uploadArtifact {
+          name = "Upload test output";
+          artifactName = "test-output-${backend}-${version}";
+          path = "\${{ github.workspace }}/test-gdb-output.log";
+        })
+        (withCond "\${{ !cancelled() }}" {
+          name = "Upload coverage reports to Codecov";
+          uses = "codecov/codecov-action@main";
+          "with" = {
+            token = "\${{ secrets.CODECOV_TOKEN }}";
+            files = "\${{ github.workspace }}/coverage.xml";
+            flags = "${backend}-${version}";
+          };
+        })
+        (withCond "\${{ !cancelled() }}" {
+          name = "Upload test results to Codecov";
+          uses = "codecov/codecov-action@main";
+          "with" = {
+            token = "\${{ secrets.CODECOV_TOKEN }}";
+            files = "\${{ github.workspace }}/junit.xml";
+            flags = "${backend}-${version}";
+            report_type = "test_results";
+          };
+        })
+        (steps.verifyClosure { name = "Verify test runner closure after tests"; })
+      ];
+    };
 
   mkTsanTestJob =
     {
@@ -125,77 +126,75 @@ let
     let
       bareVersion = lib.removeSuffix "-tsan" version;
     in
-    (
-      ciLib.optionalAttrs (needs != [ ]) { inherit needs; }
-      // {
-        steps = mkTestSetup { inherit ref lockArtifact; } ++ [
-          {
-            name = "Build TSAN nanopynix test runner (${bareVersion})";
-            run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
-          }
-          (steps.enableSandboxNamespaces { })
-          {
-            name = "Run TSAN-instrumented stress tests (repeated, local+daemon backends)";
-            run = # bash
-              ''
-                set -o pipefail
-                LOGFILE="''${{ github.workspace }}/tsan-output-${bareVersion}.log"
-                race_found=0
-                for i in $(seq 1 5); do
-                  echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
-                  status=0
-                  unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-                    ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon \
-                    -m tsan_stress \
-                    2>&1 | tee -a "$LOGFILE" || status=$?
-                  echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
-                  if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
-                    echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
-                    race_found=1
-                    break
-                  fi
-                done
-                if [ "$race_found" -eq 1 ]; then
-                  echo "::error::genuine ThreadSanitizer data race detected -- see log above"
-                  exit 1
-                fi
-                if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
-                  echo "::error::pytest reported a real failure, or the process crashed -- see log above"
-                  exit 1
-                fi
-                exit 0
-              '';
-          }
-          {
-            name = "Run TSAN-instrumented concurrency tests (single pass, local+daemon backends)";
-            run = # bash
-              ''
-                set -o pipefail
-                LOGFILE="''${{ github.workspace }}/tsan-output-broad-${bareVersion}.log"
+    ciLib.optionalAttrs (needs != [ ]) { inherit needs; }
+    // {
+      steps = mkTestSetup { inherit ref lockArtifact; } ++ [
+        {
+          name = "Build TSAN nanopynix test runner (${bareVersion})";
+          run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
+        }
+        (steps.enableSandboxNamespaces { })
+        {
+          name = "Run TSAN-instrumented stress tests (repeated, local+daemon backends)";
+          run = # bash
+            ''
+              set -o pipefail
+              LOGFILE="''${{ github.workspace }}/tsan-output-${bareVersion}.log"
+              race_found=0
+              for i in $(seq 1 5); do
+                echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
                 status=0
                 unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon -m concurrency \
+                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon \
+                  -m tsan_stress \
                   2>&1 | tee -a "$LOGFILE" || status=$?
-                echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
+                echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
                 if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
-                  echo "::error::genuine ThreadSanitizer data race detected -- see log above"
-                  exit 1
+                  echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
+                  race_found=1
+                  break
                 fi
-                if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
-                  echo "::error::pytest reported a real failure, or the process crashed -- see log above"
-                  exit 1
-                fi
-                exit 0
-              '';
-          }
-          (steps.uploadArtifact {
-            name = "Upload TSAN output (${bareVersion})";
-            artifactName = "tsan-race-report-${bareVersion}";
-            path = "\${{ github.workspace }}/tsan-output-${bareVersion}.log\n\${{ github.workspace }}/tsan-output-broad-${bareVersion}.log\n";
-          })
-        ];
-      }
-    );
+              done
+              if [ "$race_found" -eq 1 ]; then
+                echo "::error::genuine ThreadSanitizer data race detected -- see log above"
+                exit 1
+              fi
+              if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
+                echo "::error::pytest reported a real failure, or the process crashed -- see log above"
+                exit 1
+              fi
+              exit 0
+            '';
+        }
+        {
+          name = "Run TSAN-instrumented concurrency tests (single pass, local+daemon backends)";
+          run = # bash
+            ''
+              set -o pipefail
+              LOGFILE="''${{ github.workspace }}/tsan-output-broad-${bareVersion}.log"
+              status=0
+              unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
+                ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon -m concurrency \
+                2>&1 | tee -a "$LOGFILE" || status=$?
+              echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
+              if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
+                echo "::error::genuine ThreadSanitizer data race detected -- see log above"
+                exit 1
+              fi
+              if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
+                echo "::error::pytest reported a real failure, or the process crashed -- see log above"
+                exit 1
+              fi
+              exit 0
+            '';
+        }
+        (steps.uploadArtifact {
+          name = "Upload TSAN output (${bareVersion})";
+          artifactName = "tsan-race-report-${bareVersion}";
+          path = "\${{ github.workspace }}/tsan-output-${bareVersion}.log\n\${{ github.workspace }}/tsan-output-broad-${bareVersion}.log\n";
+        })
+      ];
+    };
 
   mkDocsBuildJob =
     {
@@ -205,29 +204,32 @@ let
     }:
     {
       inherit needs;
-      steps =
-        [ (steps.checkout { inherit ref; }) ]
-        ++ ciLib.optional (lockArtifact != null) (steps.downloadArtifact { artifactName = lockArtifact; })
-        ++ [
-          (steps.installNix { })
-          (steps.cachix { })
-          {
-            name = "Build documentation";
-            run = "nix build .#nanopynix-docs --out-link result --print-build-logs --print-out-paths";
-          }
-          (steps.verifyClosure { name = "Verify docs closure"; })
-          {
-            name = "Prepare Pages artifact";
-            run = ''
-              mkdir -p public
-              cp -r --no-preserve=mode,ownership result/. public/
-            '';
-          }
-          {
-            uses = "actions/upload-pages-artifact@main";
-            "with" = { path = "public"; };
-          }
-        ];
+      steps = [
+        (steps.checkout { inherit ref; })
+      ]
+      ++ ciLib.optional (lockArtifact != null) (steps.downloadArtifact { artifactName = lockArtifact; })
+      ++ [
+        (steps.installNix { })
+        (steps.cachix { })
+        {
+          name = "Build documentation";
+          run = "nix build .#nanopynix-docs --out-link result --print-build-logs --print-out-paths";
+        }
+        (steps.verifyClosure { name = "Verify docs closure"; })
+        {
+          name = "Prepare Pages artifact";
+          run = ''
+            mkdir -p public
+            cp -r --no-preserve=mode,ownership result/. public/
+          '';
+        }
+        {
+          uses = "actions/upload-pages-artifact@main";
+          "with" = {
+            path = "public";
+          };
+        }
+      ];
     };
 
   mkDocsDeployJob =
@@ -279,7 +281,15 @@ in
         backend:
         map (version: {
           name = "test-${backend}-${version}";
-          value = mkRegularTestJob { inherit version backend ref lockArtifact needs; };
+          value = mkRegularTestJob {
+            inherit
+              version
+              backend
+              ref
+              lockArtifact
+              needs
+              ;
+          };
         }) regularVersionNames
       ) regularBackends
     );
@@ -293,7 +303,14 @@ in
     builtins.listToAttrs (
       map (version: {
         name = "test-tsan-${lib.removeSuffix "-tsan" version}";
-        value = mkTsanTestJob { inherit version ref lockArtifact needs; };
+        value = mkTsanTestJob {
+          inherit
+            version
+            ref
+            lockArtifact
+            needs
+            ;
+        };
       }) tsanVersionNames
     );
 }

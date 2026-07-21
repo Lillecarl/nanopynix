@@ -19,7 +19,9 @@ rec {
 
   steps = {
     checkout =
-      { ref ? null }:
+      {
+        ref ? null,
+      }:
       { uses = "actions/checkout@main"; } // optionalAttrs (ref != null) { "with" = { inherit ref; }; };
 
     installNix = { }: {
@@ -30,7 +32,9 @@ rec {
     };
 
     cachix =
-      { name ? "lillecarl" }:
+      {
+        name ? "lillecarl",
+      }:
       {
         uses = "cachix/cachix-action@master";
         "with" = {
@@ -41,7 +45,9 @@ rec {
       };
 
     enableSandboxNamespaces =
-      { corePattern ? true }:
+      {
+        corePattern ? true,
+      }:
       {
         name = "Enable Nix sandbox namespaces";
         run = builtins.concatStringsSep "\n" (
