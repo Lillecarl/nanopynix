@@ -1,0 +1,29 @@
+# Workspace-local Helix language-server config for testing `pynix lsp` as a
+# real editor language server. Helix picks the nearest ancestor of $PWD that
+# contains `.helix` or `.git` as its workspace root -- since this repo's own
+# `.git` is at the top level, launching `hx` from ~/Code/nanopynix would stop
+# there and never see this file. cd into *this* directory first:
+#
+#   cd ~/Code/nanopynix/tests/pynix/test_lsp/module_system   # direnv active, so `pynix` resolves on PATH
+#   hx config1.nix
+#
+# mod1.nix/mod3.nix declare options (enable/package/settings/port/
+# extraFlags types); mod2.nix reacts to one via a real mkDefault. config1.nix
+# and config2.nix are the two ways NixOS modules express config -- an
+# explicit `config = { ... };` wrapper, and the implicit/flat style with no
+# `config` key at all. Both support `config.foo.bar`-style completion AND
+# bare `services.foo` completion/hover (falls back to the declared options
+# tree), AND `pkgs.hel`-style real nixpkgs completion -- try typing inside
+# either file. `pynix lsp` only activates real eval-backed hover/completion
+# for files that start with a `# pynix-lsp: name = expr` header comment; a
+# NixOS module file should use the special `moduleEntry` name instead of
+# spelling out `config`/`options`/`pkgs` by hand -- see config1.nix's own
+# comment for what it does and why.
+
+[[language]]
+name = "nix"
+language-servers = ["pynix-lsp"]
+
+[language-server.pynix-lsp]
+command = "pynix"
+args = ["lsp"]

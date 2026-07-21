@@ -64,6 +64,14 @@ def identifier_path_at(source: str, byte_offset: int) -> list[str] | None:
     reference with no ``.``. Returns None if the cursor isn't positioned on
     a plain ``name.name.name``-shaped expression (e.g. it's on an operator,
     a string, or a more complex base expression).
+
+    Also handles a *binding*'s own attrpath (e.g. the ``services.foo`` in
+    ``services.foo = true;``) -- an attribute-definition key rather than a
+    reference, which has no base variable to anchor on, so the returned path
+    starts directly at that binding's own first segment. This only looks at
+    the enclosing binding's own attrpath; it does not walk up through
+    parent bindings for a nested-attrset-style definition like
+    ``services = { foo = true; };``.
     """
     tree = parse_nix(source)
     node = tree.root_node.descendant_for_byte_range(byte_offset, byte_offset)
@@ -92,16 +100,21 @@ def identifier_path_at(source: str, byte_offset: int) -> list[str] | None:
         return [text(identifier)]
 
     if parent.type == "attrpath":
-        select = parent.parent
-        if select is None or select.type != "select_expression":
+        select_or_binding = parent.parent
+        if select_or_binding is None:
             return None
-        base = select.child_by_field_name("expression")
-        if base is None or base.type != "variable_expression":
+        if select_or_binding.type == "select_expression":
+            base = select_or_binding.child_by_field_name("expression")
+            if base is None or base.type != "variable_expression":
+                return None
+            base_name_node = base.child_by_field_name("name")
+            if base_name_node is None:
+                return None
+            path = [text(base_name_node)]
+        elif select_or_binding.type == "binding":
+            path = []
+        else:
             return None
-        base_name_node = base.child_by_field_name("name")
-        if base_name_node is None:
-            return None
-        path = [text(base_name_node)]
         for attr in parent.named_children:
             if attr.type != "identifier":
                 continue
@@ -136,6 +149,37 @@ def completion_target_at(source: str, byte_offset: int) -> tuple[list[str], str]
     if not prefix and not partial:
         return None
     return prefix, partial or ""
+
+
+def top_level_lambda_formals(source: str) -> list[str] | None:
+    """Return the file's own outermost lambda's declared formal names.
+
+    NixOS modules are conventionally ``{ config, pkgs, lib, ... }: { ... }``.
+    This is used to decide which NixOS module-system arguments (see
+    ``_handlers.py``'s ``resolve_module_arg``) a file is even allowed to
+    reference -- offering ``pkgs.``-completion in a file whose own lambda
+    never took a ``pkgs`` argument would suggest a name that isn't actually
+    in scope. Only inspects the file's own top-level function, not any
+    nested one. Returns None if the top level isn't a ``{ ... }:``-shaped
+    function at all (e.g. a plain attrset, or a single-identifier lambda
+    like ``x: ...``, which NixOS modules don't use).
+    """
+    tree = parse_nix(source)
+    encoded = source.encode()
+    fn = next((child for child in tree.root_node.children if child.type == "function_expression"), None)
+    if fn is None:
+        return None
+    formals = fn.child_by_field_name("formals")
+    if formals is None:
+        return None
+    names: list[str] = []
+    for formal in formals.named_children:
+        if formal.type != "formal":
+            continue
+        name_node = formal.child_by_field_name("name")
+        if name_node is not None:
+            names.append(encoded[name_node.start_byte : name_node.end_byte].decode())
+    return names
 
 
 @dataclass(frozen=True)

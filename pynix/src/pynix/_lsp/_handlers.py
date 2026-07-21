@@ -15,7 +15,8 @@ from pygls.uris import to_fs_path
 
 import nanopynix
 from nanopynix.exceptions import NixError
-from pynix._lsp._context import FileContext, parse_directive
+from pynix._lsp._context import FileContext, parse_directives
+from pynix._lsp._module_system import OPTIONS_NAME, is_option_declaration, render_option_declaration, resolve_formal_arg
 from pynix._lsp._syntax import completion_target_at, identifier_path_at, parse_errors, top_level_symbols
 
 if TYPE_CHECKING:
@@ -113,10 +114,10 @@ def _parse_error_diagnostic(error: ParseErrorRange) -> types.Diagnostic:
     )
 
 
-def _context_error_diagnostic(error: NixError) -> types.Diagnostic:
-    zero = types.Position(0, 0)
+def _context_error_diagnostic(error: NixError, line: int) -> types.Diagnostic:
+    position = types.Position(line, 0)
     return types.Diagnostic(
-        range=types.Range(start=zero, end=zero),
+        range=types.Range(start=position, end=position),
         message=f"pynix-lsp context failed to evaluate: {error.msg_without_ansi}",
         severity=types.DiagnosticSeverity.Error,
         source=_SERVER_NAME,
@@ -124,51 +125,82 @@ def _context_error_diagnostic(error: NixError) -> types.Diagnostic:
 
 
 async def _sync_document(ls: PynixLanguageServer, uri: str) -> None:
-    """Reconcile one document's context against its current header directive.
+    """Reconcile one document's context against its current header directives.
 
-    Only (re)evaluates the context expression when the directive text itself
-    changed -- routine edits to the rest of the file just get fresh parse
-    diagnostics, matching nixd's own "assume an evaluated value doesn't
-    change until told otherwise" caching stance.
+    Only (re)evaluates the context expressions when the directive text
+    itself changed -- routine edits to the rest of the file just get fresh
+    parse diagnostics, matching nixd's own "assume an evaluated value
+    doesn't change until told otherwise" caching stance.
     """
     document = ls.workspace.get_text_document(uri)
     source = document.source
-    directive = parse_directive(source)
+    directives = parse_directives(source)
     context = ls.contexts.get(uri)
 
-    if directive is None:
+    if not directives:
         if context is not None:
             await context.close()
             del ls.contexts[uri]
         context = None
-    elif context is None or context.directive != directive:
+    elif context is None or context.directives != directives:
         file_path = to_fs_path(uri)
         file_dir = file_path.rsplit("/", 1)[0] if file_path and "/" in file_path else "."
         session, store = await ls.ensure_nix()
-        context = FileContext(session, store, directive, file_dir)
+        context = FileContext(session, store, directives, file_dir)
         await context.reload()
         ls.contexts[uri] = context
 
     diagnostics = [_parse_error_diagnostic(error) for error in parse_errors(source)]
-    if context is not None and context.error is not None:
-        diagnostics.append(_context_error_diagnostic(context.error))
+    if context is not None:
+        directives_by_name = {directive.name: directive for directive in context.directives}
+        diagnostics.extend(
+            _context_error_diagnostic(error, directives_by_name[name].line)
+            for name, error in context.errors.items()
+        )
     ls.text_document_publish_diagnostics(types.PublishDiagnosticsParams(uri=uri, diagnostics=diagnostics))
 
 
-async def _resolve_path(context: FileContext, path: list[str]) -> nanopynix.ValueProxy | None:
-    """Walk *path* through *context*'s root, or None if it isn't rooted there."""
-    if context.root is None or not path or path[0] != context.directive.name:
-        return None
-    value = context.root
-    for segment in path[1:]:
-        value = value.attr(segment)
-    return value
+async def _resolve_path(context: FileContext, source: str, path: list[str]) -> nanopynix.ValueProxy | None:
+    """Walk *path* through one of *context*'s bound roots.
+
+    If *path* starts with a bound name (e.g. ``cfg.enable``, or ``config``/
+    ``options`` derived from a ``moduleEntry`` directive), resolves relative
+    to that root. Otherwise, *path*'s first segment is tried as a NixOS
+    module-system argument (see ``_module_system.resolve_formal_arg`` --
+    gated on the file's own top-level lambda actually declaring it, e.g.
+    ``pkgs`` in ``{ config, pkgs, ... }:``). Otherwise, if the file also
+    bound a root named ``options``, the whole path (all of it, or none of it
+    for a bare top-level segment) is tried against it directly instead --
+    this is the shape a bare attribute-definition path takes (e.g. typing
+    ``services.foo`` inside a module's own ``config = { ... }`` block has no
+    ``cfg.``/``options.`` prefix at all to match against).
+    """
+    if path and path[0] in context.roots:
+        value = context.roots[path[0]]
+        for segment in path[1:]:
+            value = value.attr(segment)
+        return value
+    if path:
+        module_arg_root = await resolve_formal_arg(context, source, path[0])
+        if module_arg_root is not None:
+            value = module_arg_root
+            for segment in path[1:]:
+                value = value.attr(segment)
+            return value
+    if OPTIONS_NAME in context.roots:
+        value = context.roots[OPTIONS_NAME]
+        for segment in path:
+            value = value.attr(segment)
+        return value
+    return None
 
 
 async def _render_value(value: nanopynix.ValueProxy) -> str:
     nix_type = await value.get_type()
     sections = [f"```\n{nix_type.name.lower()}\n```"]
-    if nix_type != nanopynix.NixType.FUNCTION:
+    if nix_type == nanopynix.NixType.ATTRS and await is_option_declaration(value):
+        sections.extend(await render_option_declaration(value))
+    elif nix_type != nanopynix.NixType.FUNCTION:
         try:
             json_value = await value.force_json()
         except NixError:
@@ -196,7 +228,7 @@ async def _hover(ls: PynixLanguageServer, params: types.HoverParams) -> types.Ho
     path = identifier_path_at(source, byte_offset)
     if path is None:
         return None
-    value = await _resolve_path(context, path)
+    value = await _resolve_path(context, source, path)
     if value is None:
         return None
     try:
@@ -218,7 +250,7 @@ async def _completion(ls: PynixLanguageServer, params: types.CompletionParams) -
     if target is None:
         return None
     prefix, partial = target
-    value = await _resolve_path(context, prefix)
+    value = await _resolve_path(context, source, prefix)
     if value is None:
         return None
     try:
@@ -277,7 +309,7 @@ def create_server() -> PynixLanguageServer:
     server.feature(types.TEXT_DOCUMENT_DID_CHANGE)(_on_did_change)
     server.feature(types.TEXT_DOCUMENT_DID_CLOSE)(_on_did_close)
     server.feature(types.TEXT_DOCUMENT_HOVER)(_hover)
-    server.feature(types.TEXT_DOCUMENT_COMPLETION)(_completion)
+    server.feature(types.TEXT_DOCUMENT_COMPLETION, types.CompletionOptions(trigger_characters=["."]))(_completion)
     server.feature(types.TEXT_DOCUMENT_DOCUMENT_SYMBOL)(_on_document_symbol)
     server.feature(types.SHUTDOWN)(_on_shutdown)
     return server
