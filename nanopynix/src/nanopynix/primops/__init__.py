@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from nanopynix.primops.ipaddress_spec import ipaddress_primops as ipaddress_primops
+from nanopynix.primops.jsonschema_spec import jsonschema_primops as jsonschema_primops
 from nanopynix.primops.yaml import (
     from_yaml as from_yaml,
 )

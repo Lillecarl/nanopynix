@@ -929,6 +929,22 @@ static std::map<std::string, PyPrimOpCallback> &py_primop_registry() {
     return reg;
 }
 
+// Tag type backing the PrimopError Python exception class (see NB_MODULE
+// below) -- never actually thrown from C++, it only exists to give
+// nb::exception<T> something to register a (unused) translator for. The
+// Python class itself, not this tag, is what primops raise and what
+// py_primop_bridge below checks for by identity.
+struct PrimopErrorTag : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+// The registered PrimopError Python type object, set once in NB_MODULE and
+// read from py_primop_bridge to recognize it by identity.
+static nb::object &primop_error_type() {
+    static nb::object type;
+    return type;
+}
+
 // Set the content of a nix::Value from a Python object, recursively.
 static void python_to_value(
     nix::EvalState &state, nb::object obj, nix::Value &v,
@@ -1086,14 +1102,37 @@ static void py_primop_bridge(
     try {
         result = it->second.func(*py_args);
     } catch (nb::python_error &e) {
-        std::string detail = e.what();
-        auto newline = detail.rfind('\n');
-        if (newline != std::string::npos) {
-            detail = detail.substr(newline + 1);
+        // Read the exception's own message directly (str(exc_value)) rather
+        // than e.what()'s formatted traceback text -- e.what() renders a
+        // full "Traceback (most recent call last): ... \nExcType: message"
+        // dump, and the old approach of grabbing everything after the last
+        // '\n' assumed that message itself was single-line. A primop raising
+        // a genuinely multi-line ValueError (e.g. one violation per line)
+        // would have most of its message silently discarded, since the last
+        // '\n' then falls inside the message rather than at the
+        // traceback/message boundary.
+        std::string detail;
+        try {
+            detail = nb::cast<std::string>(nb::str(e.value()));
+        } catch (...) {
+            detail = e.what();
         }
-        auto value_error = std::string("ValueError: ");
-        if (detail.rfind(value_error, 0) == 0) {
-            detail = detail.substr(value_error.size());
+        // PrimopError is the dedicated type for a primop deliberately
+        // crafting a message for the Nix evaluator to see verbatim.
+        // ValueError is kept working the same way for backward
+        // compatibility / plain Python code that doesn't import it. Any
+        // other exception type is an unexpected internal failure, so keep
+        // its type name as a signal that this isn't a deliberate rejection.
+        const nb::object &primop_error = primop_error_type();
+        bool is_deliberate = e.matches(PyExc_ValueError)
+            || (primop_error.is_valid() && e.matches(primop_error));
+        if (!is_deliberate) {
+            std::string type_name = "Error";
+            try {
+                type_name = nb::cast<std::string>(nb::str(e.type().attr("__name__")));
+            } catch (...) {
+            }
+            detail = type_name + ": " + detail;
         }
         state.error<nix::EvalError>("%s", detail).debugThrow();
     }
@@ -1401,4 +1440,12 @@ NB_MODULE(expr, m) {
     (void) py_undef_err;
     (void) py_assert_err;
     (void) py_thrown_err;
+
+    // PrimopError: a plain Python exception (never thrown from C++ --
+    // PrimopErrorTag only exists to give nb::exception<T> a type to bind
+    // to) that a Python primop implementation raises to control exactly
+    // what message the Nix evaluator sees, with no type-name prefixing.
+    // py_primop_bridge recognizes it by identity via primop_error_type().
+    nb::exception<PrimopErrorTag> py_primop_error(m, "PrimopError", PyExc_Exception);
+    primop_error_type() = py_primop_error;
 }
