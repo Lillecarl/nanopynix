@@ -13,19 +13,25 @@ may get extracted into its own repo later.
 pytest --agent
 ```
 
+`--agent` also turns on by itself, with no flag needed, when a known AI
+coding-agent harness env var is present (`CLAUDECODE`, `CURSOR_AGENT`,
+`GEMINI_CLI`, `CODEX_SANDBOX`, `AI_AGENT`, and others -- see
+`_harness_detect.py` for the full list). Set `PYTEST_AGENT_NO_AUTODETECT=1`
+to turn that off and require an explicit `--agent`/`PYTEST_AGENT=1`.
+
 The CLI prints a directory path at the start and end of the run and, every
 `--agent-heartbeat` seconds while tests are running, one line like:
 
 ```
-[pytest-agent] 42s | 118 passed, 2 failed, 120/311 total | running: tests/test_foo.py::test_bar
+[pytest-agent] 42s pass=118 fail=2 done=120 tot=311 cur=tests/test_foo.py::test_bar
 ```
 
 That's it -- nothing else prints. Whether something is progressing or stuck
-is visible from that line alone: the counts and the running test change
-between prints if things are moving, and elapsed keeps climbing with nothing
-else changing if they aren't. Everything else (per-test stdout/stderr/log/
-tracebacks, an index, a run summary) is written under that directory
-(`.pytest-agent` by default) for you or an agent to read directly:
+is visible from that line alone: the counts and `cur` change between prints
+if things are moving, and elapsed keeps climbing with nothing else changing
+if they aren't. Everything else (per-test stdout/stderr/log/tracebacks, an
+index, a run summary) is written under that directory (`.pytest-agent` by
+default) for you or an agent to read directly:
 
 ```
 .pytest-agent/
@@ -50,10 +56,11 @@ cat .pytest-agent/tests/tests/test_foo.py/test_bar.log
 
 | Flag | Env var | Default | Meaning |
 | --- | --- | --- | --- |
-| `--agent` | `PYTEST_AGENT` | off | Turn on agent mode |
+| `--agent` | `PYTEST_AGENT` | auto-detected | Turn on agent mode |
 | `--agent-dir` | `PYTEST_AGENT_DIR` | `.pytest-agent` | Where to write run detail (relative to rootdir) |
 | `--agent-heartbeat` | `PYTEST_AGENT_HEARTBEAT` | `10` | Seconds between progress lines |
 | `--agent-allow-pipe` | `PYTEST_AGENT_ALLOW_PIPE` | off | Skip the piped-stdout guard below |
+| n/a | `PYTEST_AGENT_NO_AUTODETECT` | off | Disable the harness-env-var auto-activation |
 
 ### The piped-stdout guard
 

@@ -10,11 +10,17 @@ from _pytest.config import (
     create_terminal_writer,  # type: ignore[reportPrivateImportUsage] -- no public equivalent; see _silence_terminal_reporter
 )
 
+from pytest_agent._harness_detect import detect_agent_harness
 from pytest_agent._pipe_guard import find_banned_pipe_reader
 from pytest_agent._runtime import AgentRuntime
 from pytest_agent._terminal import RealTerminal
 
 _RUNTIME_PLUGIN_NAME = "pytest-agent-runtime"
+
+# Set by pytest_addoption, read by pytest_configure: which harness env var (if
+# any) caused --agent's default to turn on by itself, so the startup banner
+# can explain why agent mode is active when nobody passed --agent explicitly.
+_autodetected_via: str | None = None
 
 def _make_real_terminal() -> RealTerminal | None:
     try:
@@ -34,13 +40,30 @@ def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _agent_default() -> bool:
+    global _autodetected_via
+    if _env_flag("PYTEST_AGENT"):
+        return True
+    if _env_flag("PYTEST_AGENT_NO_AUTODETECT"):
+        return False
+    harness = detect_agent_harness()
+    if harness is None:
+        return False
+    _autodetected_via = harness
+    return True
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("agent", "pytest-agent: AI-agent-friendly test output")
     group.addoption(
         "--agent",
         action="store_true",
-        default=_env_flag("PYTEST_AGENT"),
-        help="Minimal CLI output (a periodic progress line only); full per-test detail written to --agent-dir.",
+        default=_agent_default(),
+        help=(
+            "Minimal CLI output (a periodic progress line only); full per-test detail "
+            "written to --agent-dir. Turns on by itself if a known AI coding-agent "
+            "harness env var is set (PYTEST_AGENT_NO_AUTODETECT=1 disables that)."
+        ),
     )
     group.addoption(
         "--agent-dir",
@@ -97,6 +120,7 @@ def pytest_configure(config: pytest.Config) -> None:
         root=root,
         heartbeat_interval=heartbeat_interval,
         terminal=_REAL_TERMINAL,
+        autodetected_via=_autodetected_via,
     )
     config.pluginmanager.register(runtime, _RUNTIME_PLUGIN_NAME)
 

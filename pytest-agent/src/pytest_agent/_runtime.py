@@ -34,11 +34,13 @@ class AgentRuntime:
         root: Path,
         heartbeat_interval: float,
         terminal: RealTerminal | None,
+        autodetected_via: str | None = None,
     ) -> None:
         self.config = config
         self.root = root
         self.heartbeat_interval = heartbeat_interval
         self.terminal = terminal
+        self.autodetected_via = autodetected_via
         self.recorder = TestRecorder(root)
 
         self.counts: dict[str, int] = dict.fromkeys(
@@ -59,6 +61,11 @@ class AgentRuntime:
     def pytest_sessionstart(self, session: pytest.Session) -> None:
         self.recorder.start()
         self.session_started_at = time.monotonic()
+        if self.autodetected_via is not None:
+            self._print(
+                f"auto-activated: found {self.autodetected_via} in the environment "
+                "(set PYTEST_AGENT_NO_AUTODETECT=1 to disable this)"
+            )
         self._print(f"writing full per-test detail to: {self.root.resolve()}")
         self._thread = threading.Thread(target=self._watch, name="pytest-agent-watcher", daemon=True)
         self._thread.start()
@@ -74,8 +81,8 @@ class AgentRuntime:
         elapsed = time.monotonic() - self.session_started_at
         finished = sum(self.counts.values())
         return (
-            f"{elapsed:.0f}s | {self.counts['passed']} passed, {self.counts['failed']} failed, "
-            f"{finished}/{self.total_collected or '?'} total | running: {self.current_nodeid or '?'}"
+            f"{elapsed:.0f}s pass={self.counts['passed']} fail={self.counts['failed']} "
+            f"done={finished} tot={self.total_collected or '?'} cur={self.current_nodeid or '?'}"
         )
 
     def pytest_runtest_logstart(self, nodeid: str, location: object) -> None:

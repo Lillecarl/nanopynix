@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from pytest_agent._harness_detect import HARNESS_ENV_VARS
 
 _SRC = Path(__file__).resolve().parents[1] / "src"
 
@@ -24,6 +25,11 @@ def _agent_on_pythonpath(monkeypatch: pytest.MonkeyPatch) -> None:  # type: igno
     existing = os.environ.get("PYTHONPATH", "")
     parts = [str(_SRC), *([existing] if existing else [])]
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join(parts))
+    # This repo's own dev environment is itself a Claude Code session, so
+    # cleared here to keep --agent's on/off state in these tests explicit
+    # rather than an accident of where they happen to run.
+    for name in HARNESS_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
 
 
 def test_agent_mode_writes_per_test_detail_and_exits_nonzero_on_failure(pytester: pytest.Pytester) -> None:
