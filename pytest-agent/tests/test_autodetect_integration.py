@@ -32,7 +32,7 @@ def _clean_agent_env(monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[r
 
 
 def _agent_dir_was_written(pytester: pytest.Pytester) -> bool:
-    return (pytester.path / ".pytest-agent" / "index.jsonl").exists()
+    return (pytester.path / ".pytest-agent" / "history.jsonl").exists()
 
 
 def test_agent_mode_stays_off_with_no_harness_env_var_present(pytester: pytest.Pytester) -> None:

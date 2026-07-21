@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import platform
 import threading
 import time
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from pytest_agent._capture import TestRecorder
+from pytest_agent._history import append_run_record, git_revision, prune_old_runs
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,16 +35,23 @@ class AgentRuntime:
         config: pytest.Config,
         *,
         root: Path,
+        top_root: Path,
+        run_number: int,
+        keep_runs: int,
         heartbeat_interval: float,
         terminal: RealTerminal | None,
         autodetected_via: str | None = None,
     ) -> None:
         self.config = config
         self.root = root
+        self.top_root = top_root
+        self.run_number = run_number
+        self.keep_runs = keep_runs
         self.heartbeat_interval = heartbeat_interval
         self.terminal = terminal
         self.autodetected_via = autodetected_via
         self.recorder = TestRecorder(root)
+        self.started_at_iso = ""
 
         self.counts: dict[str, int] = dict.fromkeys(
             ("passed", "failed", "error", "skipped", "xfailed", "xpassed", "collect_error"), 0
@@ -61,12 +71,13 @@ class AgentRuntime:
     def pytest_sessionstart(self, session: pytest.Session) -> None:
         self.recorder.start()
         self.session_started_at = time.monotonic()
+        self.started_at_iso = datetime.now(UTC).isoformat()
         if self.autodetected_via is not None:
             self._print(
                 f"auto-activated: found {self.autodetected_via} in the environment "
                 "(set PYTEST_AGENT_NO_AUTODETECT=1 to disable this)"
             )
-        self._print(f"writing full per-test detail to: {self.root.resolve()}")
+        self._print(f"run {self.run_number}: writing full per-test detail to: {self.root.resolve()}")
         self._thread = threading.Thread(target=self._watch, name="pytest-agent-watcher", daemon=True)
         self._thread.start()
 
@@ -109,12 +120,21 @@ class AgentRuntime:
             self._thread.join(timeout=5)
 
         duration = time.monotonic() - self.session_started_at
-        summary = {
-            "exit_status": int(exitstatus),
+        record = {
+            "run": self.run_number,
+            "run_dir": self.root.name,
+            "hostname": platform.node(),
+            "started_at": self.started_at_iso,
             "duration_s": round(duration, 3),
+            "exit_status": int(exitstatus),
             "counts": dict(self.counts),
+            "total_collected": self.total_collected,
+            "args": list(self.config.invocation_params.args),
+            "git_rev": git_revision(self.top_root),
         }
-        (self.root / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+        (self.root / "summary.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        append_run_record(self.top_root / "history.jsonl", record)
+        prune_old_runs(self.top_root, self.keep_runs, protect=self.root)
 
         self._print(f"done in {duration:.1f}s -- {self._final_counts_line()}")
         failed_nodeids = self.recorder.nodeids_with_outcome({"failed", "error", "collect_error"})
