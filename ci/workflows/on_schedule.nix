@@ -18,7 +18,7 @@ let
         version = "\${{ matrix.version }}";
         backend = "\${{ matrix.backend }}";
         ref = branch;
-        lockArtifact = lockArtifact;
+        inherit lockArtifact;
         needs = [ updateJob ];
       }
       // {
@@ -35,7 +35,7 @@ let
       workflow.mkTsanTestJob {
         version = "\${{ matrix.version }}";
         ref = branch;
-        lockArtifact = lockArtifact;
+        inherit lockArtifact;
         needs = [ updateJob ];
       }
       // {
@@ -90,7 +90,7 @@ workflow.evalWorkflow {
     docs-build = workflow.mkDocsBuildJob {
       needs = builtins.attrNames allTestJobs;
       ref = branch;
-      lockArtifact = lockArtifact;
+      inherit lockArtifact;
     };
     docs-deploy = workflow.mkDocsDeployJob { needs = "docs-build"; };
     update-lockfile-commit = {
