@@ -6,15 +6,6 @@ Note: Current full pytest invocations takes almost 600 seconds because it runs t
 - direnv exec . ruff check --fix
 - direnv exec . ruff check --config ruff-strict.toml --fix
 
-# Test process exclusivity
-
-**Never run more than one pytest process on this machine at a time.** This
-suite uses shared state and concurrent pytest instances invalidate its results.
-Before starting pytest, verify that no pytest process is already running; wait
-for the existing run to finish rather than starting another one. Do not launch
-background, overlapping, or retry pytest commands until the previous process
-has exited.
-
 # Version control
 
 This repository uses Jujutsu (`jj`) for version control. Prefer `jj` commands
@@ -89,18 +80,6 @@ Do NOT add a separate stderr pipe — it would be redundant and conflate Nix's
 logging abstraction with OS-level stderr.
 
 # Test Failure Discipline
-
-## Pytest exclusivity
-
-**Never run more than one pytest instance on this machine at a time.** The
-suite uses shared Nix-store/session resources and concurrent pytest invocations
-are invalid, even when they target different test files.
-
-Before starting pytest, check for every common pytest process form, including
-`pytest`, `py.test`, and `python -m pytest`. If any instance is live, do not
-start another one. Do not rely on a narrow process-name check alone. When the
-user has started or may be starting a test run, wait for their confirmation
-that it has finished before running pytest yourself.
 
 Do not assume failing tests are unrelated, flaky, or pre-existing.
 
