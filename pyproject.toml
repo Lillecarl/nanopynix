@@ -1,7 +1,7 @@
 [tool.pyright]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
-extraPaths = [".", "nanopynix/src", "pynix/src", "tests", "tests/pynix", "docs"]
+extraPaths = [".", "nanopynix/src", "pynix/src", "pytest-agent/src", "tests", "tests/pynix", "docs"]
 exclude = ["**/result*"]
 
 [[tool.pyright.executionEnvironments]]

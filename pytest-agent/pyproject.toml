@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pytest-agent"
+version = "0.1.0"
+description = "AI-agent-friendly pytest configuration: minimal terminal noise, full per-test detail on disk"
+requires-python = ">=3.10"
+dependencies = ["pytest>=8"]
+
+[project.entry-points.pytest11]
+agent = "pytest_agent.plugin"
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pytest_agent"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
