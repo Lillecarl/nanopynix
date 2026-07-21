@@ -8,10 +8,9 @@ import shlex
 import sys
 from io import StringIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast, override
+from typing import TYPE_CHECKING, Any, override
 
 import anyio
-import tree_sitter_nix  # type: ignore[reportMissingTypeStubs] -- tree-sitter-nix does not ship type stubs
 from clypi import Command, arg
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
@@ -23,11 +22,12 @@ from prompt_toolkit.shortcuts import print_formatted_text
 from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.table import Table
-from tree_sitter import Language, Parser, Query, QueryCursor
+from tree_sitter import Query, QueryCursor
 
 import nanopynix
 from nanopynix.exceptions import NixError
 from nanopynix.verbosity import normalize_log_level
+from pynix._nix_syntax import NIX_GRAMMAR_PATH, NIX_LANGUAGE, parse_nix
 from pynix._util import forward_nix_logs
 from pynix.target import (
     EvaluationTarget,
@@ -75,24 +75,9 @@ _COMMANDS = {
     ":?": "Show this help",
 }
 _NIX_EXPRESSION_COMMANDS = frozenset({":a", ":add", ":b", ":build", ":e", ":edit", ":exec", ":p", ":print", ":run", ":shell", ":t", ":type"})
-class _Grammar(Protocol):
-    path: str | None
-
-
-class _GrammarConfig(Protocol):
-    grammars: list[_Grammar]
-
-
-_NIX_LANGUAGE = Language(cast("int", tree_sitter_nix.language()))  # type: ignore[reportDeprecated, reportUnknownMemberType] -- tree-sitter-nix 0.3 exposes the legacy integer language pointer
-_NIX_GRAMMAR_CONFIG = cast("_GrammarConfig | None", tree_sitter_nix.config())  # type: ignore[reportUnknownMemberType] -- tree-sitter-nix has no type stubs
-if _NIX_GRAMMAR_CONFIG is None:
-    raise RuntimeError("tree-sitter-nix did not provide its grammar configuration")
-_NIX_GRAMMAR_PATH = _NIX_GRAMMAR_CONFIG.grammars[0].path
-if _NIX_GRAMMAR_PATH is None:
-    raise RuntimeError("tree-sitter-nix did not provide its grammar path")
 _NIX_HIGHLIGHTS = Query(
-    _NIX_LANGUAGE,
-    (Path(_NIX_GRAMMAR_PATH) / "queries" / "highlights.scm").read_text(),
+    NIX_LANGUAGE,
+    (Path(NIX_GRAMMAR_PATH) / "queries" / "highlights.scm").read_text(),
 )
 _NIX_HIGHLIGHT_STYLES = {
     "comment": "class:nix.comment",
@@ -184,11 +169,6 @@ def _nix_input(text: str) -> tuple[str, int] | None:
     return text, 0
 
 
-def _parse_nix(source: str):
-    """Parse one possibly incomplete Nix expression for prompt interaction."""
-    return Parser(_NIX_LANGUAGE).parse(source.encode())
-
-
 def _nodes(root: Any) -> list[Any]:
     """Return all nodes below ``root`` in source order."""
     nodes: list[Any] = [root]
@@ -203,7 +183,7 @@ def _nodes(root: Any) -> list[Any]:
 def _completion_target(source: str) -> tuple[str | None, str] | None:
     """Return the semantic prefix and partial identifier at the cursor, if any."""
     encoded = source.encode()
-    nodes = _nodes(_parse_nix(source).root_node)
+    nodes = _nodes(parse_nix(source).root_node)
     selections = [node for node in nodes if node.type == "select_expression" and node.end_byte == len(encoded)]
     if selections:
         target = selections[-1]
@@ -223,7 +203,7 @@ def _completion_target(source: str) -> tuple[str | None, str] | None:
         encoded_before_dot = before_dot.encode()
         expressions = [
             node
-            for node in _nodes(_parse_nix(before_dot).root_node)
+            for node in _nodes(parse_nix(before_dot).root_node)
             if node.type in {"identifier", "select_expression", "variable_expression"}
             and node.end_byte == len(encoded_before_dot)
         ]
@@ -258,7 +238,7 @@ class _NixLexer(Lexer):
         if source_and_offset is not None:
             source, offset = source_and_offset
             encoded = source.encode()
-            captures = QueryCursor(_NIX_HIGHLIGHTS).captures(_parse_nix(source).root_node)
+            captures = QueryCursor(_NIX_HIGHLIGHTS).captures(parse_nix(source).root_node)
             for capture, nodes in captures.items():
                 style = _NIX_HIGHLIGHT_STYLES.get(capture)
                 if style is None:
