@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import conftest
 import pytest
 from pytest_agent._harness_detect import HARNESS_ENV_VARS
 
@@ -48,7 +49,9 @@ def test_agent_mode_writes_per_test_detail_and_exits_nonzero_on_failure(pytester
         """
     )
 
-    result = pytester.runpytest_subprocess("-p", "pytest_agent.plugin", "--agent", "--agent-dir=.pytest-agent", "-q")
+    result = pytester.runpytest_subprocess(
+        *conftest.agent_plugin_cli_args(), "--agent", "--agent-dir=.pytest-agent", "-q"
+    )
     assert result.ret == pytest.ExitCode.TESTS_FAILED
 
     agent_dir = pytester.path / ".pytest-agent"
@@ -79,6 +82,20 @@ def test_agent_mode_writes_per_test_detail_and_exits_nonzero_on_failure(pytester
     assert "hello from ok" in ok_log.read_text(encoding="utf-8")
 
 
+def test_cli_wrapper_forces_agent_mode_on_with_no_flags(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import sys; sys.argv = ['pytest-agent']; from pytest_agent.cli import main; main()"],
+        cwd=pytester.path,
+        capture_output=True,
+        timeout=15,
+    )
+
+    assert result.returncode == 0
+    assert (pytester.path / ".pytest-agent" / "index.jsonl").exists()
+
+
 def test_pipe_guard_blocks_a_run_piped_into_grep(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
 
@@ -87,7 +104,7 @@ def test_pipe_guard_blocks_a_run_piped_into_grep(pytester: pytest.Pytester) -> N
         raise AssertionError("expected grep's stdin to be a pipe")
 
     pytest_proc = subprocess.Popen(
-        [sys.executable, "-m", "pytest", "-p", "pytest_agent.plugin"],
+        [sys.executable, "-m", "pytest", *conftest.agent_plugin_cli_args()],
         cwd=pytester.path,
         stdout=grep.stdin,
         stderr=subprocess.PIPE,
@@ -108,7 +125,7 @@ def test_agent_allow_pipe_bypasses_the_guard(pytester: pytest.Pytester) -> None:
         raise AssertionError("expected grep's stdin to be a pipe")
 
     pytest_proc = subprocess.Popen(
-        [sys.executable, "-m", "pytest", "-p", "pytest_agent.plugin", "--agent-allow-pipe", "-q"],
+        [sys.executable, "-m", "pytest", *conftest.agent_plugin_cli_args(), "--agent-allow-pipe", "-q"],
         cwd=pytester.path,
         stdout=grep.stdin,
         stderr=subprocess.PIPE,

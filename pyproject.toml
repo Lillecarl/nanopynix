@@ -8,6 +8,11 @@ exclude = ["**/result*"]
 root = "tests"
 reportPrivateUsage = "none"
 
+[[tool.pyright.executionEnvironments]]
+root = "pytest-agent/tests"
+extraPaths = ["pytest-agent/tests"]
+reportPrivateUsage = "none"
+
 [tool.coverage.run]
 source_pkgs = ["nanopynix", "pynix"]
 branch = true

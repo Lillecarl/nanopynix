@@ -45,13 +45,21 @@ let
     };
   });
 
+  pytest-agent = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
+    projectRoot = ../pytest-agent;
+    root = "$GIT_ROOT/pytest-agent/src";
+    inherit python;
+  });
+
   pythonEnv = python.withPackages (
     pp:
     nanopynix.dependencies
     ++ pynix.dependencies
+    ++ pytest-agent.dependencies
     ++ [
       nanopynix
       pynix
+      pytest-agent
       sphinx
       myst-parser
       furo
