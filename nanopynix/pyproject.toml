@@ -14,6 +14,7 @@ dependencies = [
   "grpclib-transports",
   "coolname",
   "janus",
+  "jsonschema",
   "pydantic",
   "pydantic-settings",
   "pyyaml",

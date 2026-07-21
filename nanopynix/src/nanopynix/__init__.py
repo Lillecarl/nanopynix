@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from nanopynix_bindings.expr import EvalState, Value, eval_file, init_libexpr, register_primop
+from nanopynix_bindings.expr import EvalState, PrimopError, Value, eval_file, init_libexpr, register_primop
 from nanopynix_bindings.fetchers import input_from_attrs, input_from_url
 from nanopynix_bindings.flake import get_flake, lock_flake, parse_flake_ref
 from nanopynix_bindings.main import init_nix, init_plugins
@@ -140,6 +140,7 @@ __all__ = [
     "ParseError",
     "PathInfo",
     "PrimOpSpec",
+    "PrimopError",
     "ReplSession",
     "RestrictedPathError",
     "ResultType",
