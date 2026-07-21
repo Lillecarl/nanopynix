@@ -55,19 +55,21 @@ def test_agent_mode_writes_per_test_detail_and_exits_nonzero_on_failure(pytester
     assert result.ret == pytest.ExitCode.TESTS_FAILED
 
     agent_dir = pytester.path / ".pytest-agent"
-    index_lines = (agent_dir / "index.jsonl").read_text(encoding="utf-8").splitlines()
+    # A fresh --agent-dir always starts numbering at 1.
+    run_dir = agent_dir / "runs-0001"
+    index_lines = (run_dir / "index.jsonl").read_text(encoding="utf-8").splitlines()
     records = [json.loads(line) for line in index_lines]
     outcomes = {record["nodeid"].split("::")[-1]: record["outcome"] for record in records}
     assert outcomes["test_ok"] == "passed"
     assert outcomes["test_fails"] == "failed"
     assert outcomes["test_skips"] == "skipped"
 
-    summary = json.loads((agent_dir / "summary.json").read_text(encoding="utf-8"))
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary["counts"]["passed"] == 1
     assert summary["counts"]["failed"] == 1
     assert summary["counts"]["skipped"] == 1
 
-    fail_log = next((agent_dir / "tests").rglob("test_fails.log"))
+    fail_log = next(run_dir.rglob("test_fails.log"))
     fail_text = fail_log.read_text(encoding="utf-8")
     # Regression guard: silencing the builtin terminal reporter must not break
     # pytest's own assertion-rewrite comparison output. An earlier
@@ -78,8 +80,34 @@ def test_agent_mode_writes_per_test_detail_and_exits_nonzero_on_failure(pytester
     assert "assert 1 == 2" in fail_text
     assert "get_terminal_writer" not in fail_text
 
-    ok_log = next((agent_dir / "tests").rglob("test_ok.log"))
+    ok_log = next(run_dir.rglob("test_ok.log"))
     assert "hello from ok" in ok_log.read_text(encoding="utf-8")
+
+
+def test_repeated_runs_accumulate_history_and_prune_old_run_dirs(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
+    agent_dir = pytester.path / ".pytest-agent"
+
+    for _ in range(3):
+        result = pytester.runpytest_subprocess(
+            *conftest.agent_plugin_cli_args(), "--agent", "--agent-keep-runs=2", "-q"
+        )
+        assert result.ret == pytest.ExitCode.OK
+
+    run_dirs = sorted(p.name for p in agent_dir.iterdir() if p.name.startswith("runs-"))
+    assert run_dirs == ["runs-0002", "runs-0003"]
+
+    history_lines = (agent_dir / "history.jsonl").read_text(encoding="utf-8").splitlines()
+    history_records = [json.loads(line) for line in history_lines]
+    assert [record["run"] for record in history_records] == [1, 2, 3]
+    for record in history_records:
+        assert record["hostname"]
+        assert record["started_at"]
+        assert record["counts"]["passed"] == 1
+
+    # history.jsonl's last line is how to find the most recent run without a
+    # "latest" symlink -- no separate mutable pointer to keep race-free.
+    assert history_records[-1]["run_dir"] == "runs-0003"
 
 
 def test_cli_wrapper_forces_agent_mode_on_with_no_flags(pytester: pytest.Pytester) -> None:
@@ -93,7 +121,7 @@ def test_cli_wrapper_forces_agent_mode_on_with_no_flags(pytester: pytest.Pyteste
     )
 
     assert result.returncode == 0
-    assert (pytester.path / ".pytest-agent" / "index.jsonl").exists()
+    assert (pytester.path / ".pytest-agent" / "runs-0001" / "index.jsonl").exists()
 
 
 def test_pipe_guard_blocks_a_run_piped_into_grep(pytester: pytest.Pytester) -> None:

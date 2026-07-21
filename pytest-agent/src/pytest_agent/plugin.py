@@ -11,6 +11,7 @@ from _pytest.config import (
 )
 
 from pytest_agent._harness_detect import detect_agent_harness
+from pytest_agent._history import next_run_dir
 from pytest_agent._pipe_guard import find_banned_pipe_reader
 from pytest_agent._runtime import AgentRuntime
 from pytest_agent._terminal import RealTerminal
@@ -77,6 +78,17 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Seconds between progress lines while tests run (default: %(default)s).",
     )
     group.addoption(
+        "--agent-keep-runs",
+        type=int,
+        default=int(os.environ.get("PYTEST_AGENT_KEEP_RUNS", "20")),
+        help=(
+            "Keep only the newest N runs-* directories under --agent-dir, deleting "
+            "older ones after each run (clamped to at least 1: the just-finished run "
+            "is never pruned). history.jsonl entries are kept forever regardless "
+            "(default: %(default)s)."
+        ),
+    )
+    group.addoption(
         "--agent-allow-pipe",
         action="store_true",
         default=_env_flag("PYTEST_AGENT_ALLOW_PIPE"),
@@ -110,9 +122,10 @@ def pytest_configure(config: pytest.Config) -> None:
     _silence_terminal_reporter(config)
 
     agent_dir = cast("str", config.getoption("agent_dir"))
-    root = Path(agent_dir)
-    if not root.is_absolute():
-        root = config.rootpath / root
+    top_root = Path(agent_dir)
+    if not top_root.is_absolute():
+        top_root = config.rootpath / top_root
+    run_number, root = next_run_dir(top_root)
 
     # _agent_default() (and its _autodetected_via side effect) runs
     # unconditionally at parser-setup time to compute --agent's default, even
@@ -123,9 +136,13 @@ def pytest_configure(config: pytest.Config) -> None:
     autodetected_via = None if explicit_agent_flag else _autodetected_via
 
     heartbeat_interval = cast("float", config.getoption("agent_heartbeat"))
+    keep_runs = cast("int", config.getoption("agent_keep_runs"))
     runtime = AgentRuntime(
         config,
         root=root,
+        top_root=top_root,
+        run_number=run_number,
+        keep_runs=keep_runs,
         heartbeat_interval=heartbeat_interval,
         terminal=_REAL_TERMINAL,
         autodetected_via=autodetected_via,

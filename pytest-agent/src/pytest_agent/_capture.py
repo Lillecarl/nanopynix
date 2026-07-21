@@ -40,7 +40,6 @@ class TestRecorder:
 
     def __init__(self, root: Path) -> None:
         self.root = root
-        self.tests_dir = root / "tests"
         self.collect_errors_dir = root / "collect_errors"
         self.index_path = root / "index.jsonl"
         self._pending: dict[str, list[tuple[pytest.TestReport, str]]] = {}
@@ -48,7 +47,6 @@ class TestRecorder:
 
     def start(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-        self.tests_dir.mkdir(parents=True, exist_ok=True)
         self.index_path.write_text("", encoding="utf-8")
 
     def add_report(self, report: pytest.TestReport, category: str) -> dict[str, Any] | None:
@@ -83,7 +81,7 @@ class TestRecorder:
                 sections.append(f"=== LOG ({report.when}) ===\n{caplog}")
 
         rel = nodeid_to_relpath(nodeid)
-        out_dir = self.tests_dir / rel.parent
+        out_dir = self.root / rel.parent
         out_dir.mkdir(parents=True, exist_ok=True)
         log_path = out_dir / f"{rel.name}.log"
         json_path = out_dir / f"{rel.name}.json"

@@ -30,26 +30,53 @@ That's it -- nothing else prints. Whether something is progressing or stuck
 is visible from that line alone: the counts and `cur` change between prints
 if things are moving, and elapsed keeps climbing with nothing else changing
 if they aren't. Everything else (per-test stdout/stderr/log/tracebacks, an
-index, a run summary) is written under that directory (`.pytest-agent` by
-default) for you or an agent to read directly:
+index, a run summary) is written to disk for you or an agent to read
+directly. Each invocation gets its own numbered run directory under
+`--agent-dir` (`.pytest-agent` by default), so nothing from a previous run is
+ever overwritten:
 
 ```
 .pytest-agent/
-  index.jsonl              # one JSON record per test, appended as it finishes
-  summary.json             # exit status, duration, counts, written at the end
-  collect_errors/          # one log per module that failed to import/collect
-  tests/
+  history.jsonl             # one line per run, appended when it finishes --
+                             # duration, counts, hostname, git rev, etc.
+  runs-0001/
+    index.jsonl              # one JSON record per test, appended as it finishes
+    summary.json              # the same fields as this run's history.jsonl line
+    collect_errors/          # one log per module that failed to import/collect
     tests/test_foo.py/
-      test_bar.log          # nodeid, outcome, duration, traceback, captured
-                             # stdout/stderr/log, one file per phase section
-      test_bar.json          # the same record that's in index.jsonl
+      test_bar.log            # nodeid, outcome, duration, traceback, captured
+                               # stdout/stderr/log, one file per phase section
+      test_bar.json            # the same record that's in index.jsonl
+  runs-0002/
+    ...
 ```
+
+pytest-agent always prints the exact run directory in its startup and final
+banner lines (`run 2: writing full per-test detail to: ...`) -- that's the
+normal way to find where to look. If you need to find the most recent run
+without having seen that banner, `history.jsonl`'s last line always names it:
+
+```sh
+tail -n1 .pytest-agent/history.jsonl | jq -r .run_dir
+```
+
+There's deliberately no mutable "latest" pointer (e.g. a symlink) kept in
+sync on every run -- under concurrent invocations against the same
+`--agent-dir`, anything that swaps the same path each time is a class of race
+worth avoiding for a "which was newest" convenience that `history.jsonl`
+already gives you for free.
 
 Find failures without piping anything:
 
 ```sh
-jq -c 'select(.outcome == "failed" or .outcome == "error")' .pytest-agent/index.jsonl
-cat .pytest-agent/tests/tests/test_foo.py/test_bar.log
+jq -c 'select(.outcome == "failed" or .outcome == "error")' .pytest-agent/runs-0002/index.jsonl
+cat .pytest-agent/runs-0002/tests/test_foo.py/test_bar.log
+```
+
+Track a test's duration across runs:
+
+```sh
+jq -c 'select(.nodeid == "tests/test_foo.py::test_bar") | .duration_s' .pytest-agent/runs-*/index.jsonl
 ```
 
 ### Options
@@ -59,6 +86,7 @@ cat .pytest-agent/tests/tests/test_foo.py/test_bar.log
 | `--agent` | `PYTEST_AGENT` | auto-detected | Turn on agent mode |
 | `--agent-dir` | `PYTEST_AGENT_DIR` | `.pytest-agent` | Where to write run detail (relative to rootdir) |
 | `--agent-heartbeat` | `PYTEST_AGENT_HEARTBEAT` | `10` | Seconds between progress lines |
+| `--agent-keep-runs` | `PYTEST_AGENT_KEEP_RUNS` | `20` | Keep only the newest N `runs-*` dirs (the just-finished run is never pruned); `history.jsonl` entries are kept forever regardless |
 | `--agent-allow-pipe` | `PYTEST_AGENT_ALLOW_PIPE` | off | Skip the piped-stdout guard below |
 | n/a | `PYTEST_AGENT_NO_AUTODETECT` | off | Disable the harness-env-var auto-activation |
 
