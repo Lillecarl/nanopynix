@@ -7,9 +7,7 @@ let
   allTestJobs = testJobs // tsanTestJobs;
   selectedTestJobs = builtins.mapAttrs (
     name: job:
-    withCond (
-      "github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',${name},')"
-    ) job
+    withCond ("github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',${name},')") job
   ) allTestJobs;
 in
 workflow.evalWorkflow {
@@ -17,7 +15,9 @@ workflow.evalWorkflow {
   on = {
     # Keep ci-develop available as a pushed ref for focused workflow_dispatch
     # runs without starting the full push matrix.
-    push = { branches-ignore = [ "ci-develop" ]; };
+    push = {
+      branches-ignore = [ "ci-develop" ];
+    };
     workflow_dispatch = {
       inputs = {
         jobs = {
@@ -30,11 +30,15 @@ workflow.evalWorkflow {
     };
   };
   jobs = selectedTestJobs // {
-    docs-build = withCond "github.ref == 'refs/heads/develop'" (workflow.mkDocsBuildJob {
-      needs = builtins.attrNames allTestJobs;
-    });
-    docs-deploy = withCond "github.ref == 'refs/heads/develop'" (workflow.mkDocsDeployJob {
-      needs = "docs-build";
-    });
+    docs-build = withCond "github.ref == 'refs/heads/develop'" (
+      workflow.mkDocsBuildJob {
+        needs = builtins.attrNames allTestJobs;
+      }
+    );
+    docs-deploy = withCond "github.ref == 'refs/heads/develop'" (
+      workflow.mkDocsDeployJob {
+        needs = "docs-build";
+      }
+    );
   };
 }

@@ -13,33 +13,39 @@ let
   # matrix -- there's no longer an install-mode axis to fan out over (see
   # ci/workflows/lib.nix), just the version.
   allTestJobs = {
-    test-regular = workflow.mkRegularTestJob {
-      version = "\${{ matrix.version }}";
-      backend = "\${{ matrix.backend }}";
-      ref = branch;
-      lockArtifact = lockArtifact;
-      needs = [ updateJob ];
-    } // {
-      strategy = {
-        fail-fast = false;
-        matrix = {
-          version = versionExpression "regular_versions";
-          backend = workflow.regularBackends;
+    test-regular =
+      workflow.mkRegularTestJob {
+        version = "\${{ matrix.version }}";
+        backend = "\${{ matrix.backend }}";
+        ref = branch;
+        lockArtifact = lockArtifact;
+        needs = [ updateJob ];
+      }
+      // {
+        strategy = {
+          fail-fast = false;
+          matrix = {
+            version = versionExpression "regular_versions";
+            backend = workflow.regularBackends;
+          };
         };
       };
-    };
 
-    test-tsan = workflow.mkTsanTestJob {
-      version = "\${{ matrix.version }}";
-      ref = branch;
-      lockArtifact = lockArtifact;
-      needs = [ updateJob ];
-    } // {
-      strategy = {
-        fail-fast = false;
-        matrix = { version = versionExpression "tsan_versions"; };
+    test-tsan =
+      workflow.mkTsanTestJob {
+        version = "\${{ matrix.version }}";
+        ref = branch;
+        lockArtifact = lockArtifact;
+        needs = [ updateJob ];
+      }
+      // {
+        strategy = {
+          fail-fast = false;
+          matrix = {
+            version = versionExpression "tsan_versions";
+          };
+        };
       };
-    };
   };
 in
 workflow.evalWorkflow {
@@ -89,13 +95,17 @@ workflow.evalWorkflow {
     docs-deploy = workflow.mkDocsDeployJob { needs = "docs-build"; };
     update-lockfile-commit = {
       needs = "docs-deploy";
-      permissions = { contents = "write"; };
+      permissions = {
+        contents = "write";
+      };
       steps = [
         (steps.checkout { ref = branch; })
         (steps.downloadArtifact { artifactName = lockArtifact; })
         {
           uses = "step-security/git-auto-commit-action@main";
-          "with" = { commit_message = "nix flake update"; };
+          "with" = {
+            commit_message = "nix flake update";
+          };
         }
       ];
     };
