@@ -40,7 +40,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--agent",
         action="store_true",
         default=_env_flag("PYTEST_AGENT"),
-        help="Minimal CLI output (progress/stuck only); full per-test detail written to --agent-dir.",
+        help="Minimal CLI output (a periodic progress line only); full per-test detail written to --agent-dir.",
     )
     group.addoption(
         "--agent-dir",
@@ -48,16 +48,10 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Directory for agent-mode run detail, relative to rootdir (default: %(default)s).",
     )
     group.addoption(
-        "--agent-stuck-after",
-        type=float,
-        default=float(os.environ.get("PYTEST_AGENT_STUCK_AFTER", "15")),
-        help="Seconds without a completed test before printing a stuck notice (default: %(default)s).",
-    )
-    group.addoption(
         "--agent-heartbeat",
         type=float,
         default=float(os.environ.get("PYTEST_AGENT_HEARTBEAT", "10")),
-        help="Seconds between progress heartbeat lines while tests run (default: %(default)s).",
+        help="Seconds between progress lines while tests run (default: %(default)s).",
     )
     group.addoption(
         "--agent-allow-pipe",
@@ -79,7 +73,7 @@ def pytest_cmdline_main(config: pytest.Config) -> int | None:
         "which truncates pytest's output and can hide the real failure.\n"
         "Run pytest without piping into head/tail/grep/sed/awk. Use --agent mode "
         "instead: it writes full per-test detail to disk and only prints a short "
-        "progress/stuck indicator, so there is nothing left that needs truncating.\n"
+        "periodic progress line, so there is nothing left that needs truncating.\n"
         "Pass --agent-allow-pipe (or set PYTEST_AGENT_ALLOW_PIPE=1) if this is intentional.\n"
     )
     return 2
@@ -97,12 +91,10 @@ def pytest_configure(config: pytest.Config) -> None:
     if not root.is_absolute():
         root = config.rootpath / root
 
-    stuck_after = cast("float", config.getoption("agent_stuck_after"))
     heartbeat_interval = cast("float", config.getoption("agent_heartbeat"))
     runtime = AgentRuntime(
         config,
         root=root,
-        stuck_after=stuck_after,
         heartbeat_interval=heartbeat_interval,
         terminal=_REAL_TERMINAL,
     )
