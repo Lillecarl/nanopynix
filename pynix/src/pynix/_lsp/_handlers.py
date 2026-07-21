@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
+import sys
+import threading
 from typing import TYPE_CHECKING
 
 from lsprotocol import types
+from pygls.io_ import StdinAsyncReader, StdoutWriter, run_async
 from pygls.lsp.server import LanguageServer
 from pygls.uris import to_fs_path
 
@@ -19,6 +23,7 @@ if TYPE_CHECKING:
 
 _SERVER_NAME = "pynix-lsp"
 _SERVER_VERSION = "0.1.0"
+_logger = logging.getLogger(__name__)
 
 
 class PynixLanguageServer(LanguageServer):
@@ -60,6 +65,34 @@ class PynixLanguageServer(LanguageServer):
         if self.nix_session is not None:
             await self.nix_session.close()
             self.nix_session = None
+
+    async def start_io_async(self) -> None:
+        """Run pygls' stdio message loop on the caller's own event loop.
+
+        pygls' own ``start_io()`` is synchronous and always wraps its message
+        loop in a fresh ``asyncio.run(...)``, which cannot nest inside the
+        loop clypi already runs this command under. The loop itself
+        (``pygls.io_.run_async``) is a plain coroutine with no such
+        requirement -- it dispatches its own blocking stdin reads via
+        ``loop.run_in_executor`` -- so driving it directly here avoids a
+        redundant second thread/event loop for the server's whole lifetime.
+        """
+        stop_event = threading.Event()
+        reader = StdinAsyncReader(sys.stdin.buffer, self.thread_pool)
+        writer = StdoutWriter(sys.stdout.buffer)
+        self.protocol.set_writer(writer)
+        try:
+            await run_async(
+                stop_event=stop_event,
+                reader=reader,
+                protocol=self.protocol,
+                logger=_logger,
+                error_handler=self.report_server_error,
+            )
+        except BrokenPipeError:
+            _logger.exception("connection to the client was lost")
+        finally:
+            self.shutdown()
 
 
 def _byte_offset(source: str, position: types.Position, ls: PynixLanguageServer, uri: str) -> int:
