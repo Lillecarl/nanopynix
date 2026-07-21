@@ -1,7 +1,7 @@
 let
   workflow = import ./lib.nix { };
   inherit (workflow) ciLib;
-  inherit (ciLib) mkJob mkWorkflow steps;
+  inherit (ciLib) steps;
 
   branch = "develop";
   lockArtifact = "flake-lock";
@@ -42,14 +42,14 @@ let
     };
   };
 in
-mkWorkflow {
+workflow.evalWorkflow {
   name = "On schedule";
   on = {
     schedule = [ { cron = "17 3 * * *"; } ];
     workflow_dispatch = null;
   };
   jobs = {
-    update-lockfile = mkJob {
+    update-lockfile = {
       outputs = {
         regular_versions = "\${{ steps.versions.outputs.regular_versions }}";
         tsan_versions = "\${{ steps.versions.outputs.tsan_versions }}";
@@ -87,7 +87,7 @@ mkWorkflow {
       lockArtifact = lockArtifact;
     };
     docs-deploy = workflow.mkDocsDeployJob { needs = "docs-build"; };
-    update-lockfile-commit = mkJob {
+    update-lockfile-commit = {
       needs = "docs-deploy";
       permissions = { contents = "write"; };
       steps = [
