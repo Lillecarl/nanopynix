@@ -1,6 +1,6 @@
 let
   workflow = import ./lib.nix { };
-  inherit (workflow.ciLib) withCond;
+  inherit (workflow) withCond;
 
   testJobs = workflow.mkStaticTestJobs { };
   tsanTestJobs = workflow.mkStaticTsanTestJobs { };

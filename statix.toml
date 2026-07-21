@@ -1,8 +1,8 @@
 # empty_pattern (W10) flags both `{ }:` and `{ ... }:` function heads,
 # suggesting `_:` instead. Both are used deliberately throughout this repo:
 # `{ }:` marks a function meant to be called as an attrset for future
-# extensibility (e.g. ci/lib.nix's `installNix`), and `{ ... }:` is the
-# standard NixOS module-function signature used by ci/workflows/schema.nix's
+# extensibility (e.g. ghanix/steps.nix's `installNix`), and `{ ... }:` is the
+# standard NixOS module-function signature used by ghanix/schema.nix's
 # submodules (statix's own `explain W10` example is, ironically, exactly
 # that NixOS-module shape). `_:` would work but reads as "argument ignored"
 # rather than "this is a configuration attrset", losing the convention.

@@ -2,17 +2,12 @@
 # workflow entrypoints; ci/render.py deliberately renders only on_*.nix.
 { }:
 let
-  ciLib = import ../lib.nix;
-  inherit (ciLib) steps withCond;
-
   getFlake = builtins.${"getFlake"};
   flake = getFlake (toString ../../.);
   inherit (flake) lib;
 
-  schema = import ./schema.nix {
-    inherit lib;
-    nixpkgsPath = flake.legacyPackages.${builtins.currentSystem}.path;
-  };
+  ghalib = import ../../ghanix { inherit lib; };
+  inherit (ghalib) steps withCond evalWorkflow;
 
   flakeTestOutputs = lib.pipe flake.packages.${builtins.currentSystem} [
     (lib.filterAttrs (_n: v: v.passthru.addToMatrix or false))
@@ -46,7 +41,7 @@ let
       lockArtifact ? null,
     }:
     [ (steps.checkout { inherit ref; }) ]
-    ++ ciLib.optional (lockArtifact != null) (steps.downloadArtifact { artifactName = lockArtifact; })
+    ++ lib.optional (lockArtifact != null) (steps.downloadArtifact { artifactName = lockArtifact; })
     ++ [
       (steps.installNix { })
       (steps.cachix { })
@@ -60,7 +55,7 @@ let
       lockArtifact ? null,
       needs ? [ ],
     }:
-    ciLib.optionalAttrs (needs != [ ]) { inherit needs; }
+    lib.optionalAttrs (needs != [ ]) { inherit needs; }
     // {
       steps = mkTestSetup { inherit ref lockArtifact; } ++ [
         {
@@ -126,7 +121,7 @@ let
     let
       bareVersion = lib.removeSuffix "-tsan" version;
     in
-    ciLib.optionalAttrs (needs != [ ]) { inherit needs; }
+    lib.optionalAttrs (needs != [ ]) { inherit needs; }
     // {
       steps = mkTestSetup { inherit ref lockArtifact; } ++ [
         {
@@ -207,7 +202,7 @@ let
       steps = [
         (steps.checkout { inherit ref; })
       ]
-      ++ ciLib.optional (lockArtifact != null) (steps.downloadArtifact { artifactName = lockArtifact; })
+      ++ lib.optional (lockArtifact != null) (steps.downloadArtifact { artifactName = lockArtifact; })
       ++ [
         (steps.installNix { })
         (steps.cachix { })
@@ -258,9 +253,10 @@ let
     };
 in
 {
-  inherit (schema) evalWorkflow;
   inherit
-    ciLib
+    evalWorkflow
+    steps
+    withCond
     regularVersionNames
     regularBackends
     tsanVersionNames
