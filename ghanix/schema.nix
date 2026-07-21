@@ -14,7 +14,7 @@
 # the option name: hyphenated and keyword-clashing attribute names both work
 # fine as Nix attribute names (quoted for keywords), so no separate
 # Nix-name/YAML-name translation layer is needed.
-{ lib, nixpkgsPath }:
+{ lib }:
 let
   inherit (lib) mkOption types;
 
@@ -165,16 +165,15 @@ let
   };
 
   # Recursively drops unset (null-default) option values so the rendered
-  # YAML only contains keys a job/step actually set, matching the old
-  # optionalAttrs-based output. The same trick nixpkgs' own systemd module
-  # uses to turn unit-file option sets into INI sections
-  # (`lib.filterAttrs (_: v: v != null)` in systemd/lib.nix's
+  # YAML only contains keys a job/step actually set. The same trick
+  # nixpkgs' own systemd module uses to turn unit-file option sets into INI
+  # sections (`lib.filterAttrs (_: v: v != null)` in systemd/lib.nix's
   # attrsToSection) -- just applied recursively, since steps nest a list of
   # attrsets rather than a single flat one.
   #
-  # Scoped to `jobs` only -- `on` is rendered verbatim, since e.g.
-  # on_schedule.nix's `workflow_dispatch = null;` is a deliberate GHA value
-  # (manual trigger, no inputs), not an unset option.
+  # Scoped to `jobs` only -- `on` is rendered verbatim, since a trigger
+  # block can contain a deliberate `null` (e.g. a bare `workflow_dispatch`
+  # with no inputs), which isn't an unset option.
   stripNulls =
     value:
     if builtins.isAttrs value then
@@ -184,12 +183,31 @@ let
     else
       value;
 
-  # NixOS's own assertions/warnings option pair (nixos/modules/misc/
-  # assertions.nix) -- reused as-is rather than hand-rolled, so `jobs`
-  # submodules could in principle grow their own `config.assertions`
-  # contributions later using the exact same convention every other NixOS
-  # module uses.
-  assertionsModule = import "${nixpkgsPath}/nixos/modules/misc/assertions.nix";
+  # NixOS's own assertions/warnings option shape (nixos/modules/misc/
+  # assertions.nix), vendored inline rather than imported from a nixpkgs
+  # checkout path -- ghanix only ever needs `lib`, not a nixpkgs source
+  # tree on disk. `lib.asserts.checkAssertWarn` below (used to check this
+  # pair) is real, un-vendored nixpkgs library code; only this small
+  # option-declaration pair is copied.
+  assertionsModule = {
+    options = {
+      assertions = mkOption {
+        type = types.listOf types.unspecified;
+        internal = true;
+        default = [ ];
+        description = ''
+          Conditions that must hold for workflow evaluation to succeed,
+          along with the error messages to show when they don't.
+        '';
+      };
+      warnings = mkOption {
+        type = types.listOf types.str;
+        internal = true;
+        default = [ ];
+        description = "Warnings to show during workflow evaluation.";
+      };
+    };
+  };
 
   # A job with no steps is always an authoring mistake (a builder forgot to
   # set `steps`, or a conditional list ended up empty) -- expressed as a

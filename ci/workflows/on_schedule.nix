@@ -1,7 +1,6 @@
 let
   workflow = import ./lib.nix { };
-  inherit (workflow) ciLib;
-  inherit (ciLib) steps;
+  inherit (workflow) steps;
 
   branch = "develop";
   lockArtifact = "flake-lock";
