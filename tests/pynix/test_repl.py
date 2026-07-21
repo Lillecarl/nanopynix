@@ -498,7 +498,7 @@ def test_nix_input_returns_argument_and_offset_for_expression_command() -> None:
 
 
 def test_completion_target_returns_none_for_dynamic_attrpath() -> None:
-    assert _completion_target('pkgs.${x}') is None
+    assert _completion_target("pkgs.${x}") is None
 
 
 def test_completion_target_returns_none_when_nothing_matches() -> None:
