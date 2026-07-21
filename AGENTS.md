@@ -20,14 +20,15 @@ from nanopynix rather than importing a private implementation module. A narrow
 private dependency is acceptable only when a redesign is not justified, and
 must be explicitly documented at the import site.
 
-Run pytest commands so the complete output is preserved. Do not pipe pytest
-directly into `tail`, `head`, `grep`, or similar filters. If you need a short
-live summary, use `tee` first, for example:
-
-- `direnv exec . timeout 60 pytest tests 2>&1 | tee /tmp/pytest.log | tail -n 80`
-
-The saved log is the source of truth. Use the short live summary only to decide
-what to inspect next, then query `/tmp/pytest.log` for the full failure context.
+pytest-agent auto-activates in this environment (it detects `CLAUDECODE` and
+similar agent-harness env vars), so plain `pytest ...` invocations already
+write full per-test detail — tracebacks, captured stdout/stderr/logs — to
+`.pytest-agent/runs-NNNN/` regardless of what the terminal shows. There is no
+need to pipe pytest through `tee`/`tail` to avoid losing output anymore; let
+pytest's output go to stdout unfiltered. If a test fails, read its detail file
+directly (path is printed in the run's "failed/errored" list, or found via
+`.pytest-agent/history.jsonl`'s last line) rather than relying on the
+terminal's minimal progress lines alone.
 
 # Python coding conventions
 
@@ -134,49 +135,20 @@ Instead say:
 
 ## Pytest output discipline
 
-Do not pipe pytest output directly through `head`, `tail`, `grep`, `sed`, `awk`,
-or similar filters. Pytest failure output is evidence. Truncating or filtering
-it often hides the traceback, captured logs, fixture setup errors, warnings,
-parametrization IDs, or the first failure that explains the rest.
+pytest-agent auto-activates in this environment and already enforces this:
+it refuses to run (exit code 2, before collecting anything) if it detects
+its own stdout piped directly into `head`/`tail`/`grep`/`sed`/`awk`/etc., and
+it always writes full per-test detail — tracebacks, captured stdout/stderr/
+logs — to `.pytest-agent/runs-NNNN/` regardless of what the terminal shows.
+So just let pytest's output go to the terminal unfiltered; there's no need to
+route it through `tee` to avoid losing evidence anymore.
 
-`tail` is especially risky. The last lines of pytest output are often only the
-short summary, not the failure cause. Do not use `tail` as the only record of a
-pytest run.
-
-Forbidden default patterns include:
-
-- `pytest ... | head`
-- `pytest ... | tail`
-- `pytest ... | grep ...`
-- `pytest ... 2>&1 | tail -n ...`
-
-Allowed pattern:
-
-- `pytest ... 2>&1 | tee /tmp/pytest.log | tail -n 80`
-
-This is allowed because `tee` preserves the complete output before `tail`
-shortens the live display. After this command, inspect `/tmp/pytest.log`; do not
-debug or report from the tailed output alone.
-
-Only filter pytest output after the complete output has already been preserved.
-You must state the specific reason before or alongside the command. Valid reasons
-include finding which test failed, searching a previously captured full log,
-extracting one known failure from a very large log after the full failure has
-already been inspected, or checking for one exact warning/error string after the
-underlying failure is understood.
-
-If pytest output is too large to read comfortably:
-
-- Prefer running the smallest relevant test directly with `pytest path::test`.
-- Prefer pytest's own controls such as `-x`, `--maxfail=1`, or increased
-  verbosity when they preserve the relevant failure context.
-- If you need post-processing, first preserve the complete output with `tee`,
-  then inspect or search the saved log.
-
-If you accidentally truncated or filtered a failing pytest run, especially with
-`tail`, and did not save the full output with `tee`, do not draw conclusions
-from that output. Re-run the failing command and preserve the full output before
-debugging or reporting the failure.
+If pytest's minimal terminal output isn't enough to understand a failure,
+read the detail file directly — its path is printed in the run's
+"failed/errored" list at the end, or the test's log lives at
+`.pytest-agent/runs-NNNN/<test file path>/<test name>.log` under the run
+named in `.pytest-agent/history.jsonl`'s last line — rather than re-running
+with ad hoc shell filtering.
 
 ## Never paper over failures
 
