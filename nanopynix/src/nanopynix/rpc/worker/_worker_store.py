@@ -23,7 +23,7 @@ class StoreServiceHandler(
     rpc_service_base=StoreServiceBase,
     binding_method_names=_store_binding_method_names(),
     method_prefix="store_",
-    nix_executor_attr="_state.store_executor",
+    nix_executor_attr="_state.store_limiter",
 ):
     """gRPC handler backed by proto-shaped nanobind store methods.
 

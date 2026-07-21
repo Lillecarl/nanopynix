@@ -38,6 +38,16 @@ from nanopynix.rpc.worker._worker_nix import (
 )
 
 
+class _FakeBridge:
+    """Only presence and start()/stop() matter to the initialization/shutdown path."""
+
+    async def start(self) -> None:
+        return None
+
+    async def stop(self) -> None:
+        return None
+
+
 def test_import_callable_rejects_a_path_without_a_colon() -> None:
     with pytest.raises(ValueError, match="invalid primop import path"):
         _import_callable("nanopynix.rpc.worker._worker")
@@ -123,7 +133,7 @@ async def test_init_writes_nix_conf_and_skips_empty_settings_render(monkeypatch:
 
     state = WorkerState()
     state.executor = NixThreadExecutor()
-    state.rpc_bridge = object()  # type: ignore[assignment] -- only presence matters to the initialization path
+    state.rpc_bridge = _FakeBridge()  # type: ignore[assignment] -- only presence and start()/stop() matter to the initialization path
     handler = WorkerServiceHandler(state)
     message = SimpleNamespace(
         settings={},
@@ -153,7 +163,7 @@ async def test_init_reports_and_reraises_initialization_failures(monkeypatch: py
 
     state = WorkerState()
     state.executor = NixThreadExecutor()
-    state.rpc_bridge = object()  # type: ignore[assignment] -- only presence matters to the initialization path
+    state.rpc_bridge = _FakeBridge()  # type: ignore[assignment] -- only presence and start()/stop() matter to the initialization path
     handler = WorkerServiceHandler(state)
     message = SimpleNamespace(
         settings={},
@@ -175,10 +185,10 @@ async def test_init_reports_and_reraises_initialization_failures(monkeypatch: py
     assert "nix init exploded" in capsys.readouterr().err
 
 
-async def test_open_store_requires_a_store_executor() -> None:
+async def test_open_store_requires_a_store_limiter() -> None:
     handler = WorkerServiceHandler(WorkerState())
 
-    with pytest.raises(GRPCError, match="worker store executor is unavailable"):
+    with pytest.raises(GRPCError, match="worker store limiter is unavailable"):
         await handler.open_store(SimpleNamespace(request_id=1, uri="auto"))  # type: ignore[arg-type] -- narrow message fake
 
 
@@ -276,11 +286,11 @@ async def test_shutdown_requires_an_executor() -> None:
         await handler.shutdown(ShutdownRequest(request_id=1))
 
 
-async def test_shutdown_tolerates_no_bridge_and_no_store_executor() -> None:
+async def test_shutdown_tolerates_no_bridge_and_no_store_limiter() -> None:
     state = WorkerState()
     state.executor = NixThreadExecutor()
     state.rpc_bridge = None
-    state.store_executor = None
+    state.store_limiter = None
     handler = WorkerServiceHandler(state)
 
     response = await handler.shutdown(ShutdownRequest(request_id=1))

@@ -30,6 +30,16 @@ from nanopynix.rpc.worker._worker_nix import (
 )
 
 
+class _FakeBridge:
+    """Only presence and start()/stop() matter to the initialization path."""
+
+    async def start(self) -> None:
+        return None
+
+    async def stop(self) -> None:
+        return None
+
+
 class _FakeEvalState:
     def __init__(
         self,
@@ -129,7 +139,7 @@ async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.Mo
 
     state = WorkerState()
     state.executor = NixThreadExecutor()
-    state.rpc_bridge = object()  # type: ignore[assignment] -- only presence matters to the initialization path
+    state.rpc_bridge = _FakeBridge()  # type: ignore[assignment] -- only presence and start()/stop() matter to the initialization path
     handler = WorkerServiceHandler(state)
     message = SimpleNamespace(
         settings={"sandbox": "false"},

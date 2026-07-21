@@ -33,6 +33,7 @@ import traceback
 from typing import TYPE_CHECKING, Any, cast
 
 import anyio
+import anyio.to_thread
 from grpclib_transports.multiprocessing import serve_multiprocessing_endpoint
 from grpclib_transports.protocol import DEFAULT_TUNING
 from grpclib_transports.stdio import serve_stdio
@@ -153,7 +154,10 @@ class WorkerState:
         (``Init``, ``GetVerbosity``/``SetVerbosity``, the store-close
         bookkeeping in ``_close_store``) — evaluator work runs on each
         evaluator's own executor instead.
-      * ``store_executor`` — event loop only (owns bounded Store threads)
+      * ``store_limiter`` — event loop only (bounds concurrent Store work
+        dispatched via ``anyio.to_thread.run_sync``; unlike ``executor``, a
+        ``CapacityLimiter`` has no thread-affinity requirement and no
+        shutdown lifecycle of its own to own/release)
       * ``rpc_bridge`` — Nix thread reads, event loop writes (internal locking)
     """
 
@@ -163,21 +167,37 @@ class WorkerState:
         self.handles: HandleRegistry = HandleRegistry()
         self.runtime = LocalRuntime()
         self.executor: NixThreadExecutor | None = None
-        self.store_executor: NixThreadExecutor | None = None
+        self.store_limiter: anyio.CapacityLimiter | None = None
         self.owns_executor = True
-        self.owns_store_executor = True
         self.rpc_bridge: ThreadedRpcPrimopBridge | None = None
         self.nix_path: list[str] = []
         self.worker_subname: str = "worker"
         self.named_store_uris: dict[int, str] = {}
 
-    async def run_request(self, *, request_id: int, executor: NixThreadExecutor, operation: Callable[..., Any], args: tuple[Any, ...] = ()) -> Any:
-        """Run a unary operation with its request-local logger context installed."""
+    async def run_request(
+        self,
+        *,
+        request_id: int,
+        operation: Callable[..., Any],
+        args: tuple[Any, ...] = (),
+        executor: NixThreadExecutor | None = None,
+        limiter: anyio.CapacityLimiter | None = None,
+    ) -> Any:
+        """Run a unary operation with its request-local logger context installed.
+
+        Exactly one of ``executor`` (a dedicated-thread ``NixThreadExecutor``,
+        for evaluator-affine work) or ``limiter`` (an
+        ``anyio.CapacityLimiter`` bounding ``anyio.to_thread.run_sync`` calls,
+        for Store work) must be given -- these are two distinct dispatch
+        mechanisms, not variants of one shared interface.
+        """
         collector = self.collector
         if request_id <= 0:
             if collector is not None:
                 collector.request_finalized(request_id)
             raise ValueError("request_id must be positive")
+        if (executor is None) == (limiter is None):
+            raise ValueError("run_request requires exactly one of executor or limiter")
 
         def _run() -> Any:
             previous = nanopynix_util.get_logger_request_id()
@@ -189,7 +209,9 @@ class WorkerState:
                     collector.request_finalized(request_id)
                 nanopynix_util.set_logger_request_id(previous)
 
-        return await executor.run(_run)
+        if executor is not None:
+            return await executor.run(_run)
+        return await anyio.to_thread.run_sync(_run, limiter=limiter)
 
     def log(self, action: str, *args: object) -> None:
         """Emit a diagnostic in the current executor thread's request context."""
@@ -224,6 +246,16 @@ class WorkerServiceHandler(WorkerServiceBase):
 
             if self._state.executor is None:
                 raise RuntimeError("worker executor is unavailable")  # noqa: TRY301 -- guard clause intentionally caught by except block which prints traceback and re-raises
+            if self._state.rpc_bridge is not None:
+                # worker_service_factory() must stay synchronous (it is
+                # handed to grpclib_transports as a BackchannelServiceFactory
+                # callback invoked without await), so the bridge's
+                # BlockingPortal -- whose __aenter__ needs a running event
+                # loop and an await -- starts here instead, on the first
+                # async operation the worker performs. Init always precedes
+                # OpenEval/primop registration, so this is ready before any
+                # primop could actually fire.
+                await self._state.rpc_bridge.start()
             await self._state.run_request(request_id=message.request_id, executor=self._state.executor, operation=self._init_nix, args=(message, settings))
 
             return InitResponse(status="ok")
@@ -259,9 +291,9 @@ class WorkerServiceHandler(WorkerServiceBase):
         _register_primops(primops_raw, rpc_bridge=self._state.rpc_bridge)
 
     async def open_store(self, message: OpenStoreRequest) -> OpenStoreResponse:
-        if self._state.store_executor is None:
-            raise RuntimeError("worker store executor is unavailable")
-        store_handle, uri, store_dir = await self._state.run_request(request_id=message.request_id, executor=self._state.store_executor, operation=self._open_store, args=(message.uri,))
+        if self._state.store_limiter is None:
+            raise RuntimeError("worker store limiter is unavailable")
+        store_handle, uri, store_dir = await self._state.run_request(request_id=message.request_id, limiter=self._state.store_limiter, operation=self._open_store, args=(message.uri,))
         return OpenStoreResponse(
             store_handle=store_handle,
             uri=uri,
@@ -348,11 +380,9 @@ class WorkerServiceHandler(WorkerServiceBase):
             raise RuntimeError("worker executor is unavailable")
         await self._state.run_request(request_id=message.request_id, executor=self._state.executor, operation=lambda: None)
         if self._state.rpc_bridge is not None:
-            self._state.rpc_bridge.stop()
+            await self._state.rpc_bridge.stop()
         if self._state.owns_executor:
             self._state.executor.shutdown(wait=False)
-        if self._state.store_executor is not None and self._state.owns_store_executor:
-            self._state.store_executor.shutdown(wait=False)
         return ShutdownResponse()
 
 
@@ -363,7 +393,7 @@ def worker_service_factory(
     backchannel: WorkerBackchannel | None = None,
     *,
     executor: NixThreadExecutor | None = None,
-    store_executor: NixThreadExecutor | None = None,
+    store_limiter: anyio.CapacityLimiter | None = None,
 ) -> list[IServable]:
     """Create service handlers with a shared WorkerState.
 
@@ -374,8 +404,12 @@ def worker_service_factory(
 
     * ``LogCollector`` + log-relay task (event loop thread)
     * evaluator ``NixThreadExecutor`` (dedicated single-worker thread)
-    * Store ``NixThreadExecutor`` (bounded, concurrent Store work)
-    * ``ThreadedRpcPrimopBridge`` (Nix→event-loop primop dispatch)
+    * Store ``anyio.CapacityLimiter`` (bounds concurrent Store work on
+      anyio's shared thread pool)
+    * ``ThreadedRpcPrimopBridge`` (Nix→event-loop primop dispatch; its
+      ``BlockingPortal`` is started later, from ``WorkerServiceHandler.init``
+      -- this factory must stay synchronous to satisfy grpclib_transports'
+      ``BackchannelServiceFactory`` contract)
     """
     collector = LogCollector()
     nanopynix_util.install_logger(collector.callback)
@@ -388,18 +422,10 @@ def worker_service_factory(
 
     state.executor = NixThreadExecutor() if executor is None else executor
     state.owns_executor = executor is None
-    state.store_executor = (
-        NixThreadExecutor(max_workers=_STORE_WORKERS, thread_name_prefix="nix-store")
-        if store_executor is None
-        else store_executor
-    )
-    state.owns_store_executor = store_executor is None
+    state.store_limiter = anyio.CapacityLimiter(_STORE_WORKERS) if store_limiter is None else store_limiter
 
     if backchannel is not None:
-        loop = asyncio.get_running_loop()
-        bridge = ThreadedRpcPrimopBridge(backchannel, loop)
-        bridge.start()
-        state.rpc_bridge = bridge
+        state.rpc_bridge = ThreadedRpcPrimopBridge(backchannel)
 
     return cast(
         "list[IServable]",
@@ -445,7 +471,7 @@ async def run_worker(
         with contextlib.suppress(anyio.get_cancelled_exc_class()):
             await log_task
     if worker_state.rpc_bridge is not None:  # type: ignore[reportUnknownVariableType] -- cascade from WorkerState Any attributes
-        worker_state.rpc_bridge.stop()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
+        await worker_state.rpc_bridge.stop()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
     if worker_state.executor is not None:  # type: ignore[reportUnknownVariableType] -- cascade from WorkerState Any attributes
         worker_state.executor.shutdown(wait=True)  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
 
@@ -478,7 +504,7 @@ async def _stdio_main() -> None:
         with contextlib.suppress(anyio.get_cancelled_exc_class()):
             await log_task
     if worker_state.rpc_bridge is not None:  # type: ignore[reportUnknownVariableType] -- cascade from WorkerState Any attributes
-        worker_state.rpc_bridge.stop()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
+        await worker_state.rpc_bridge.stop()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
     if worker_state.executor is not None:  # type: ignore[reportUnknownVariableType] -- cascade from WorkerState Any attributes
         worker_state.executor.shutdown(wait=True)  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
 
