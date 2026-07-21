@@ -10,7 +10,7 @@ from clypi import Command, arg
 from rich.console import Console
 
 import nanopynix
-from pynix._util import forward_nix_logs, prepare_sys_path
+from pynix._util import forward_nix_logs
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
@@ -37,8 +37,6 @@ class Eval(Command):
 
     @override
     async def run(self) -> None:
-        prepare_sys_path()
-
         target = EvaluationTarget.from_command(self)
         try:
             target.validate()

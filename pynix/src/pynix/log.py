@@ -6,7 +6,7 @@ from typing import override
 from clypi import Command, Positional, arg
 
 import nanopynix
-from pynix._util import forward_nix_logs, prepare_sys_path
+from pynix._util import forward_nix_logs
 
 _DEFAULT_STORE = "auto"
 
@@ -19,8 +19,6 @@ class Log(Command):
 
     @override
     async def run(self) -> None:
-        prepare_sys_path()
-
         async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             log = await store.get_build_log(self.path)
 

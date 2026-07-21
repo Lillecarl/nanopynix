@@ -15,7 +15,7 @@ from rich.console import Console
 from rich.tree import Tree
 
 import nanopynix
-from pynix._util import forward_nix_logs, prepare_sys_path
+from pynix._util import forward_nix_logs
 
 if TYPE_CHECKING:
 
@@ -46,8 +46,6 @@ class Show(Command):
 
     @override
     async def run(self) -> None:
-        prepare_sys_path()
-
         base_ref, _, flake_attr = self.flake_ref.partition("#")
         flake_attr = flake_attr or None
 
@@ -176,8 +174,6 @@ def _format_attr(name: str, nix_type: NixType, nix_type_enum: type[NixType]) -> 
 
 
 async def _print_flake_metadata(flake_ref: str, *, store_uri: str) -> None:
-    prepare_sys_path()
-
     async with (
         nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix,
         forward_nix_logs(nix),

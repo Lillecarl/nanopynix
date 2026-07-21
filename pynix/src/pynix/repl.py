@@ -28,7 +28,7 @@ from tree_sitter import Language, Parser, Query, QueryCursor
 import nanopynix
 from nanopynix.exceptions import NixError
 from nanopynix.verbosity import normalize_log_level
-from pynix._util import forward_nix_logs, prepare_sys_path
+from pynix._util import forward_nix_logs
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
@@ -585,8 +585,6 @@ class Repl(Command):
 
     @override
     async def run(self) -> None:
-        prepare_sys_path()
-
         target = EvaluationTarget.from_command(self)
         try:
             target.validate()

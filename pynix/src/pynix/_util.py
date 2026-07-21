@@ -3,7 +3,6 @@ from __future__ import annotations
 import functools
 import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO, cast
 
 import anyio
@@ -15,12 +14,6 @@ if TYPE_CHECKING:
 _RESULT_BUILD_LOG_LINE = 101
 _RESULT_POST_BUILD_LOG_LINE = 107
 _LOG_DRAIN_SECONDS = 0.5
-
-
-def prepare_sys_path() -> None:
-    cwd = str(Path.cwd())
-    sys.path[:] = [p for p in sys.path if p not in ("", ".", cwd)]
-    configure_logging()
 
 
 def configure_logging(*, file: TextIO | None = None) -> None:
