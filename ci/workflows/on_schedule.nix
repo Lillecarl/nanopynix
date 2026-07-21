@@ -15,13 +15,17 @@ let
   allTestJobs = {
     test-regular = workflow.mkRegularTestJob {
       version = "\${{ matrix.version }}";
+      backend = "\${{ matrix.backend }}";
       ref = branch;
       lockArtifact = lockArtifact;
       needs = [ updateJob ];
     } // {
       strategy = {
         fail-fast = false;
-        matrix = { version = versionExpression "regular_versions"; };
+        matrix = {
+          version = versionExpression "regular_versions";
+          backend = workflow.regularBackends;
+        };
       };
     };
 

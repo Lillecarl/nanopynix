@@ -85,14 +85,15 @@ jobs:
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Test nanopynix against Nix ${{ matrix.version }} (full suite, daemon backend)
+    - name: Test nanopynix against Nix ${{ matrix.version }} (full suite, ${{ matrix.backend
+        }} backend)
       run: |
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
         rm -f "$paths_to_delete"
         status=0
         env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends daemon \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends ${{ matrix.backend }} \
           --cov --cov-report=term-missing --cov-report=xml:${{ github.workspace }}/coverage.xml \
           --junitxml=${{ github.workspace }}/junit.xml \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
@@ -103,7 +104,7 @@ jobs:
     - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: test-output-${{ matrix.version }}
+        name: test-output-${{ matrix.backend }}-${{ matrix.version }}
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
@@ -111,14 +112,14 @@ jobs:
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/coverage.xml
-        flags: ${{ matrix.version }}
+        flags: ${{ matrix.backend }}-${{ matrix.version }}
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/junit.xml
-        flags: ${{ matrix.version }}
+        flags: ${{ matrix.backend }}-${{ matrix.version }}
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
@@ -128,6 +129,9 @@ jobs:
       fail-fast: false
       matrix:
         version: ${{ fromJson(needs.update-lockfile.outputs.regular_versions) }}
+        backend:
+        - daemon
+        - local
   test-tsan:
     needs:
     - update-lockfile

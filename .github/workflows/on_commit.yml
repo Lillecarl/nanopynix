@@ -16,10 +16,14 @@ name: On commit
 jobs:
   docs-build:
     needs:
-    - test-git
-    - test-nix_2_31
-    - test-nix_2_34
-    - test-nix_2_35
+    - test-daemon-git
+    - test-daemon-nix_2_31
+    - test-daemon-nix_2_34
+    - test-daemon-nix_2_35
+    - test-local-git
+    - test-local-nix_2_31
+    - test-local-nix_2_34
+    - test-local-nix_2_35
     - test-tsan-git
     - test-tsan-nix_2_34
     - test-tsan-nix_2_35
@@ -298,7 +302,7 @@ jobs:
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan-nix_2_35,')
-  test-git:
+  test-daemon-git:
     steps:
     - uses: actions/checkout@main
     - uses: cachix/install-nix-action@master
@@ -339,7 +343,7 @@ jobs:
     - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: test-output-git
+        name: test-output-daemon-git
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
@@ -347,22 +351,22 @@ jobs:
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/coverage.xml
-        flags: git
+        flags: daemon-git
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/junit.xml
-        flags: git
+        flags: daemon-git
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-git,')
-  test-nix_2_31:
+      inputs.jobs), ',test-daemon-git,')
+  test-daemon-nix_2_31:
     steps:
     - uses: actions/checkout@main
     - uses: cachix/install-nix-action@master
@@ -403,7 +407,7 @@ jobs:
     - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: test-output-nix_2_31
+        name: test-output-daemon-nix_2_31
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
@@ -411,22 +415,22 @@ jobs:
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/coverage.xml
-        flags: nix_2_31
+        flags: daemon-nix_2_31
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/junit.xml
-        flags: nix_2_31
+        flags: daemon-nix_2_31
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-nix_2_31,')
-  test-nix_2_34:
+      inputs.jobs), ',test-daemon-nix_2_31,')
+  test-daemon-nix_2_34:
     steps:
     - uses: actions/checkout@main
     - uses: cachix/install-nix-action@master
@@ -467,7 +471,7 @@ jobs:
     - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: test-output-nix_2_34
+        name: test-output-daemon-nix_2_34
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
@@ -475,22 +479,22 @@ jobs:
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/coverage.xml
-        flags: nix_2_34
+        flags: daemon-nix_2_34
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/junit.xml
-        flags: nix_2_34
+        flags: daemon-nix_2_34
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-nix_2_34,')
-  test-nix_2_35:
+      inputs.jobs), ',test-daemon-nix_2_34,')
+  test-daemon-nix_2_35:
     steps:
     - uses: actions/checkout@main
     - uses: cachix/install-nix-action@master
@@ -531,7 +535,7 @@ jobs:
     - name: Upload test output
       uses: actions/upload-artifact@main
       with:
-        name: test-output-nix_2_35
+        name: test-output-daemon-nix_2_35
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
@@ -539,18 +543,274 @@ jobs:
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/coverage.xml
-        flags: nix_2_35
+        flags: daemon-nix_2_35
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ${{ github.workspace }}/junit.xml
-        flags: nix_2_35
+        flags: daemon-nix_2_35
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-nix_2_35,')
+      inputs.jobs), ',test-daemon-nix_2_35,')
+  test-local-git:
+    steps:
+    - uses: actions/checkout@main
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Build nanopynix test runner for Nix git
+      run: nix build ".#nanopynix-tests-git" --out-link result --print-build-logs
+        --print-out-paths
+    - name: Verify test runner closure after build
+      run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    - name: Enable Nix sandbox namespaces
+      run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo sysctl -w kernel.unprivileged_userns_clone=1
+        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+    - name: Test nanopynix against Nix git (full suite, local backend)
+      run: |
+        set -o pipefail
+        paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
+        rm -f "$paths_to_delete"
+        status=0
+        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local \
+          --cov --cov-report=term-missing --cov-report=xml:${{ github.workspace }}/coverage.xml \
+          --junitxml=${{ github.workspace }}/junit.xml \
+          2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
+        if [ -s "$paths_to_delete" ]; then
+          nix store delete --stdin < "$paths_to_delete" || true
+        fi
+        exit "$status"
+    - name: Upload test output
+      uses: actions/upload-artifact@main
+      with:
+        name: test-output-local-git
+        path: ${{ github.workspace }}/test-gdb-output.log
+      if: ${{ !cancelled() }}
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@main
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ${{ github.workspace }}/coverage.xml
+        flags: local-git
+      if: ${{ !cancelled() }}
+    - name: Upload test results to Codecov
+      uses: codecov/codecov-action@main
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ${{ github.workspace }}/junit.xml
+        flags: local-git
+        report_type: test_results
+      if: ${{ !cancelled() }}
+    - name: Verify test runner closure after tests
+      run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-local-git,')
+  test-local-nix_2_31:
+    steps:
+    - uses: actions/checkout@main
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Build nanopynix test runner for Nix nix_2_31
+      run: nix build ".#nanopynix-tests-nix_2_31" --out-link result --print-build-logs
+        --print-out-paths
+    - name: Verify test runner closure after build
+      run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    - name: Enable Nix sandbox namespaces
+      run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo sysctl -w kernel.unprivileged_userns_clone=1
+        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+    - name: Test nanopynix against Nix nix_2_31 (full suite, local backend)
+      run: |
+        set -o pipefail
+        paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
+        rm -f "$paths_to_delete"
+        status=0
+        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local \
+          --cov --cov-report=term-missing --cov-report=xml:${{ github.workspace }}/coverage.xml \
+          --junitxml=${{ github.workspace }}/junit.xml \
+          2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
+        if [ -s "$paths_to_delete" ]; then
+          nix store delete --stdin < "$paths_to_delete" || true
+        fi
+        exit "$status"
+    - name: Upload test output
+      uses: actions/upload-artifact@main
+      with:
+        name: test-output-local-nix_2_31
+        path: ${{ github.workspace }}/test-gdb-output.log
+      if: ${{ !cancelled() }}
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@main
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ${{ github.workspace }}/coverage.xml
+        flags: local-nix_2_31
+      if: ${{ !cancelled() }}
+    - name: Upload test results to Codecov
+      uses: codecov/codecov-action@main
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ${{ github.workspace }}/junit.xml
+        flags: local-nix_2_31
+        report_type: test_results
+      if: ${{ !cancelled() }}
+    - name: Verify test runner closure after tests
+      run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-local-nix_2_31,')
+  test-local-nix_2_34:
+    steps:
+    - uses: actions/checkout@main
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Build nanopynix test runner for Nix nix_2_34
+      run: nix build ".#nanopynix-tests-nix_2_34" --out-link result --print-build-logs
+        --print-out-paths
+    - name: Verify test runner closure after build
+      run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    - name: Enable Nix sandbox namespaces
+      run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo sysctl -w kernel.unprivileged_userns_clone=1
+        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+    - name: Test nanopynix against Nix nix_2_34 (full suite, local backend)
+      run: |
+        set -o pipefail
+        paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
+        rm -f "$paths_to_delete"
+        status=0
+        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local \
+          --cov --cov-report=term-missing --cov-report=xml:${{ github.workspace }}/coverage.xml \
+          --junitxml=${{ github.workspace }}/junit.xml \
+          2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
+        if [ -s "$paths_to_delete" ]; then
+          nix store delete --stdin < "$paths_to_delete" || true
+        fi
+        exit "$status"
+    - name: Upload test output
+      uses: actions/upload-artifact@main
+      with:
+        name: test-output-local-nix_2_34
+        path: ${{ github.workspace }}/test-gdb-output.log
+      if: ${{ !cancelled() }}
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@main
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ${{ github.workspace }}/coverage.xml
+        flags: local-nix_2_34
+      if: ${{ !cancelled() }}
+    - name: Upload test results to Codecov
+      uses: codecov/codecov-action@main
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ${{ github.workspace }}/junit.xml
+        flags: local-nix_2_34
+        report_type: test_results
+      if: ${{ !cancelled() }}
+    - name: Verify test runner closure after tests
+      run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-local-nix_2_34,')
+  test-local-nix_2_35:
+    steps:
+    - uses: actions/checkout@main
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Build nanopynix test runner for Nix nix_2_35
+      run: nix build ".#nanopynix-tests-nix_2_35" --out-link result --print-build-logs
+        --print-out-paths
+    - name: Verify test runner closure after build
+      run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    - name: Enable Nix sandbox namespaces
+      run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo sysctl -w kernel.unprivileged_userns_clone=1
+        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+    - name: Test nanopynix against Nix nix_2_35 (full suite, local backend)
+      run: |
+        set -o pipefail
+        paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
+        rm -f "$paths_to_delete"
+        status=0
+        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local \
+          --cov --cov-report=term-missing --cov-report=xml:${{ github.workspace }}/coverage.xml \
+          --junitxml=${{ github.workspace }}/junit.xml \
+          2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
+        if [ -s "$paths_to_delete" ]; then
+          nix store delete --stdin < "$paths_to_delete" || true
+        fi
+        exit "$status"
+    - name: Upload test output
+      uses: actions/upload-artifact@main
+      with:
+        name: test-output-local-nix_2_35
+        path: ${{ github.workspace }}/test-gdb-output.log
+      if: ${{ !cancelled() }}
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@main
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ${{ github.workspace }}/coverage.xml
+        flags: local-nix_2_35
+      if: ${{ !cancelled() }}
+    - name: Upload test results to Codecov
+      uses: codecov/codecov-action@main
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ${{ github.workspace }}/junit.xml
+        flags: local-nix_2_35
+        report_type: test_results
+      if: ${{ !cancelled() }}
+    - name: Verify test runner closure after tests
+      run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-local-nix_2_35,')
