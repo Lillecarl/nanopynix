@@ -6,8 +6,12 @@ import asyncio
 import runpy
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
+from nanopynix_bindings.store import open_store
+
+import nanopynix
 
 _EXAMPLES = Path(__file__).resolve().parents[2] / "docs" / "examples"
 if not _EXAMPLES.is_dir():
@@ -24,9 +28,56 @@ _EXAMPLE_PARAMS = [
 ]
 
 
+def _seed_isolated_store(root: Path) -> str:
+    """Build a from-scratch, single-path, GC-rooted store under *root*.
+
+    ``store_example.py`` asserts on real store content (at least one valid
+    path, a nonempty ``collect_garbage(RETURN_LIVE)`` result), so an empty
+    isolated store won't do -- this gives it exactly one seeded, rooted path
+    to work with. Runs via the sync L1 binding directly in this (already
+    forked, see ``test_example_runs``) test process; the example itself
+    still talks to its own separate worker subprocess via the async
+    ``Session``/RPC API, so there is no shared libstore init state between
+    the two.
+    """
+    nanopynix.init_libstore()
+    store_uri = f"local://?root={root}"
+    store = open_store(store_uri)
+    try:
+        seed_file = root.parent / "example-seed.txt"
+        seed_file.write_text("nanopynix doc-example fixture\n", encoding="utf-8")
+        add_to_store = store.store_add_to_store  # type: ignore[reportUnknownMemberType] -- nanopynix_bindings' store.pyi declares this as bare `dict`, not dict[str, Any]
+        added = cast(
+            "dict[str, Any]",
+            add_to_store({"path": str(seed_file), "name": "example-seed", "method": "flat", "hash_algo": "sha256"}),
+        )
+        gc_root = root.parent / "example-gcroot"
+        add_perm_root = store.store_add_perm_root  # type: ignore[reportUnknownMemberType] -- same stub gap as above
+        add_perm_root({"store_path": added["path"], "gc_root": str(gc_root)})
+    finally:
+        store.close()
+    return store_uri
+
+
 @pytest.mark.forked
 @pytest.mark.parametrize("path", _EXAMPLE_PARAMS, ids=lambda p: p.name)
-def test_example_runs(path: Path) -> None:
+def test_example_runs(path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    if path.name == "store_example.py":
+        # Isolates this example from the real system store -- without this,
+        # Session()'s "auto" default hits the ambient host Nix daemon, and
+        # query_all_valid_paths()/collect_garbage(RETURN_LIVE) scale with
+        # *that* store's real size (tens of thousands of paths on a
+        # long-lived dev machine), not this test's needs.
+        store_uri = _seed_isolated_store(tmp_path / "store")
+        real_session_cls = nanopynix.Session
+
+        def _isolated_session(*args: Any, **kwargs: Any) -> nanopynix.Session:
+            kwargs.setdefault("store_uri", store_uri)
+            kwargs.setdefault("load_config", False)
+            return real_session_cls(*args, **kwargs)
+
+        monkeypatch.setattr(nanopynix, "Session", _isolated_session)
+
     loop = asyncio.new_event_loop()
     sys.path.insert(0, str(_EXAMPLES))
     try:
