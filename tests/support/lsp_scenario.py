@@ -97,7 +97,25 @@ class ExpectCompletion:
     exact: bool = False
 
 
-Action = GoTo | Select | Type | Delete | InsertAfterCursor | ExpectHover | ExpectCompletion
+@dataclass(frozen=True)
+class ExpectDiagnostics:
+    """Assert whether a diagnostic matching *code* (and *contains*, if given) is present.
+
+    *contains* narrows the match to a diagnostic whose message also contains
+    that substring -- needed since multiple diagnostics can share the same
+    *code* in one document (e.g. one suppressed attribute and one
+    unsuppressed one both reporting TF001), so "is TF001 present anywhere"
+    alone can't distinguish them. ``absent=True`` asserts the opposite --
+    no diagnostic matching both *code* and *contains* exists (e.g. after a
+    suppression comment).
+    """
+
+    code: str
+    contains: str | None = None
+    absent: bool = False
+
+
+Action = GoTo | Select | Type | Delete | InsertAfterCursor | ExpectHover | ExpectCompletion | ExpectDiagnostics
 
 
 class LspDriver(Protocol):
@@ -112,6 +130,8 @@ class LspDriver(Protocol):
     async def complete(
         self, uri: str, position: types.Position
     ) -> types.CompletionList | Sequence[types.CompletionItem] | None: ...
+
+    async def diagnostics(self, uri: str) -> Sequence[types.Diagnostic]: ...
 
 
 def _apply_text_edit(source: str, edit_range: types.Range, replacement: str) -> str:
@@ -239,6 +259,18 @@ class Scenario:
                         raise AssertionError(f"expected exactly {set(labels)}, got {actual}")
                 elif not set(labels) <= actual:
                     raise AssertionError(f"expected at least {set(labels)}, got {actual}")
+            case ExpectDiagnostics(code, contains, absent):
+                diagnostics = await driver.diagnostics(self.uri)
+                matches = [
+                    diagnostic
+                    for diagnostic in diagnostics
+                    if diagnostic.code == code and (contains is None or contains in diagnostic.message)
+                ]
+                summary = [(diagnostic.code, diagnostic.message) for diagnostic in diagnostics]
+                if absent and matches:
+                    raise AssertionError(f"expected no {code!r}/{contains!r} diagnostic, got {summary}")
+                if not absent and not matches:
+                    raise AssertionError(f"expected a {code!r}/{contains!r} diagnostic, got {summary}")
 
     async def _edit(self, driver: LspDriver, edit_range: types.Range, text: str) -> None:
         new_cursor = _end_position(edit_range.start, text)

@@ -27,6 +27,7 @@ from tests.support.lsp_environment import asset
 from tests.support.lsp_scenario import (
     Delete,
     ExpectCompletion,
+    ExpectDiagnostics,
     ExpectHover,
     GoTo,
     InsertAfterCursor,
@@ -211,6 +212,26 @@ async def test_completion_after_a_partial_core_meta_argument_name(
         [
             GoTo("5"),
             ExpectCompletion(labels=frozenset({"count"})),
+        ],
+    )
+    await scenario.run(terranix_driver)
+
+
+async def test_unknown_attribute_reports_tf001_unless_suppressed_on_its_own_line(terranix_driver: LspDriver) -> None:
+    """Neither `content2` nor `content5` (`local_file.greeting`) are real attributes.
+
+    `content5` has a trailing `# noqa: TF001 -- ...` comment and must NOT be
+    reported; `content2` has no such comment on its own line and must still
+    fire -- proving suppression is scoped to the specific line it's written
+    on, not "any noqa comment anywhere in the document silences every
+    diagnostic of that code."
+    """
+    scenario = Scenario(
+        _LOCAL_NIX.as_uri(),
+        _LOCAL_NIX.read_text(),
+        [
+            ExpectDiagnostics("TF001", contains="content2"),
+            ExpectDiagnostics("TF001", contains="content5", absent=True),
         ],
     )
     await scenario.run(terranix_driver)

@@ -54,6 +54,9 @@ class InProcessDriver:
     async def complete(self, uri: str, position: types.Position) -> types.CompletionList | None:
         return await _completion(self._server, types.CompletionParams(types.TextDocumentIdentifier(uri), position))
 
+    async def diagnostics(self, uri: str) -> Sequence[types.Diagnostic]:
+        return self._server.diagnostics.get(uri, [])
+
 
 class WireDriver:
     """Drives a real ``pytest_lsp.LanguageClient`` over genuine JSON-RPC.
@@ -97,3 +100,6 @@ class WireDriver:
         return await self._client.text_document_completion_async(
             params=types.CompletionParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
         )
+
+    async def diagnostics(self, uri: str) -> Sequence[types.Diagnostic]:
+        return self._client.diagnostics.get(uri, [])
