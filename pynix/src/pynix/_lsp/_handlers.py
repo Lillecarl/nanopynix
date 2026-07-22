@@ -14,10 +14,10 @@ from pygls.uris import to_fs_path
 
 import nanopynix
 from nanopynix.exceptions import NixError
-from pynix._lsp._context import FileContext, parse_directives
-from pynix._lsp._module_system import OPTIONS_NAME, is_option_declaration, render_option_declaration, resolve_formal_arg
+from pynix._lsp._context import FileContext, parse_directives, resolve_root_path
+from pynix._lsp._dialects import DIALECTS
+from pynix._lsp._render import render_value
 from pynix._lsp._syntax import completion_target_at, identifier_path_at, parse_errors, top_level_symbols
-from pynix._value_render import format_json
 
 if TYPE_CHECKING:
     from pynix._lsp._syntax import ParseErrorRange
@@ -148,6 +148,8 @@ async def _sync_document(ls: PynixLanguageServer, uri: str) -> None:
         session, store = await ls.ensure_nix()
         context = FileContext(session, store, directives, file_dir)
         await context.reload()
+        for dialect in DIALECTS:
+            await dialect.derive_roots(context)
         ls.contexts[uri] = context
 
     diagnostics = [_parse_error_diagnostic(error) for error in parse_errors(source)]
@@ -160,64 +162,14 @@ async def _sync_document(ls: PynixLanguageServer, uri: str) -> None:
     ls.text_document_publish_diagnostics(types.PublishDiagnosticsParams(uri=uri, diagnostics=diagnostics))
 
 
-async def _resolve_path(context: FileContext, source: str, path: list[str]) -> nanopynix.ValueProxy | None:
-    """Walk *path* through one of *context*'s bound roots.
-
-    If *path* starts with a bound name (e.g. ``cfg.enable``, or ``config``/
-    ``options`` derived from a ``moduleEntry`` directive), resolves relative
-    to that root. Otherwise, *path*'s first segment is tried as a NixOS
-    module-system argument (see ``_module_system.resolve_formal_arg`` --
-    gated on the file's own top-level lambda actually declaring it, e.g.
-    ``pkgs`` in ``{ config, pkgs, ... }:``). Otherwise, if the file also
-    bound a root named ``options``, the whole path (all of it, or none of it
-    for a bare top-level segment) is tried against it directly instead --
-    this is the shape a bare attribute-definition path takes (e.g. typing
-    ``services.foo`` inside a module's own ``config = { ... }`` block has no
-    ``cfg.``/``options.`` prefix at all to match against).
-    """
-    if path and path[0] in context.roots:
-        value = context.roots[path[0]]
-        for segment in path[1:]:
-            value = value.attr(segment)
-        return value
-    if path:
-        module_arg_root = await resolve_formal_arg(context, source, path[0])
-        if module_arg_root is not None:
-            value = module_arg_root
-            for segment in path[1:]:
-                value = value.attr(segment)
-            return value
-    if OPTIONS_NAME in context.roots:
-        value = context.roots[OPTIONS_NAME]
-        for segment in path:
-            value = value.attr(segment)
-        return value
-    return None
-
-
-async def _render_value(value: nanopynix.ValueProxy) -> str:
-    nix_type = await value.get_type()
-    sections = [f"```\n{nix_type.name.lower()}\n```"]
-    if nix_type == nanopynix.NixType.ATTRS and await is_option_declaration(value):
-        sections.extend(await render_option_declaration(value))
-    elif nix_type != nanopynix.NixType.FUNCTION:
-        try:
-            json_value = await value.force_json()
-        except NixError:
-            pass
-        else:
-            sections.append(f"```json\n{format_json(json_value)}\n```")
-    try:
-        edit_path, edit_line = await value.edit_location()
-    except NixError:
-        pass
-    else:
-        if edit_path:
-            sections.append(f"defined at `{edit_path}:{edit_line}`")
-    return "\n\n".join(sections)
-
-
 async def _hover(ls: PynixLanguageServer, params: types.HoverParams) -> types.Hover | None:
+    """Dialects get first refusal, since some (e.g. terranix's schema lookup) must override what a plain root walk would show.
+
+    A dialect returns non-None only for paths it specifically recognizes as
+    its own (see e.g. ``ModuleSystemDialect``'s "already a bound root, defer"
+    guard); the generic ``resolve_root_path`` walk is the fallback for
+    everything else.
+    """
     uri = params.text_document.uri
     context = ls.contexts.get(uri)
     if context is None:
@@ -225,20 +177,25 @@ async def _hover(ls: PynixLanguageServer, params: types.HoverParams) -> types.Ho
     document = ls.workspace.get_text_document(uri)
     source = document.source
     byte_offset = _byte_offset(source, params.position, ls, uri)
+    for dialect in DIALECTS:
+        rendered = await dialect.hover(context, source, byte_offset, DIALECTS)
+        if rendered is not None:
+            return types.Hover(contents=types.MarkupContent(kind=types.MarkupKind.Markdown, value=rendered))
     path = identifier_path_at(source, byte_offset)
     if path is None:
         return None
-    value = await _resolve_path(context, source, path)
+    value = await resolve_root_path(context, path)
     if value is None:
         return None
     try:
-        rendered = await _render_value(value)
+        rendered = await render_value(value, DIALECTS)
     except NixError:
         return None
     return types.Hover(contents=types.MarkupContent(kind=types.MarkupKind.Markdown, value=rendered))
 
 
 async def _completion(ls: PynixLanguageServer, params: types.CompletionParams) -> types.CompletionList | None:
+    """Dialects get first refusal; see ``_hover``'s docstring for why."""
     uri = params.text_document.uri
     context = ls.contexts.get(uri)
     if context is None:
@@ -246,11 +203,15 @@ async def _completion(ls: PynixLanguageServer, params: types.CompletionParams) -
     document = ls.workspace.get_text_document(uri)
     source = document.source
     byte_offset = _byte_offset(source, params.position, ls, uri)
+    for dialect in DIALECTS:
+        items = await dialect.complete(context, source, byte_offset, DIALECTS)
+        if items is not None:
+            return types.CompletionList(is_incomplete=False, items=items)
     target = completion_target_at(source, byte_offset)
     if target is None:
         return None
     prefix, partial = target
-    value = await _resolve_path(context, source, prefix)
+    value = await resolve_root_path(context, prefix)
     if value is None:
         return None
     try:

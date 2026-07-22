@@ -42,6 +42,37 @@ class _NoMatch:
 _NO_MATCH = _NoMatch()
 
 
+def _attrpath_binding_prefix_before_dot(
+    nodes: list[Any], byte_offset: int, encoded: bytes
+) -> tuple[str, str] | None:
+    """If a binding's own attrpath ends right before the dot at *byte_offset*, return its prefix.
+
+    E.g. for ``a.b.c.`` in ``a.b.c.d = 1;`` with the cursor right after that
+    dot, returns ``("a.b.c", "")``. None if no attrpath identifier ends
+    there, or its parent isn't a definition key (a ``select_expression``
+    reference instead, e.g. ``cfg.services.foo.``, is handled by the
+    generic nested-node search this is tried before).
+    """
+    for node in nodes:
+        if node.type != "identifier" or node.end_byte != byte_offset - 1:
+            continue
+        attrpath = node.parent
+        if attrpath is None or attrpath.type != "attrpath":
+            continue
+        binding = attrpath.parent
+        if binding is None or binding.type != "binding":
+            continue
+        segments: list[str] = []
+        for segment in attrpath.named_children:
+            if segment.type != "identifier":
+                continue
+            segments.append(encoded[segment.start_byte : segment.end_byte].decode())
+            if segment.end_byte == node.end_byte:
+                break
+        return ".".join(segments), ""
+    return None
+
+
 def _tree_prefix_at(source: str, byte_offset: int) -> tuple[str | None, str] | None | _NoMatch:
     """Tier 1: a tree-sitter structural match ending exactly at *byte_offset*.
 
@@ -92,6 +123,21 @@ def _tree_prefix_at(source: str, byte_offset: int) -> tuple[str | None, str] | N
         return None, ""
 
     if byte_offset > 0 and encoded[byte_offset - 1 : byte_offset] == b".":
+        # An attrpath *definition key* (e.g. `a.b.c.` in `a.b.c.d = 1;`) is
+        # checked first: unlike a reference chain (`a.b.c`, parsed as nested
+        # select_expressions, each wrapping a wider prefix -- see the
+        # "widest-spanning" comment below), a binding's own attrpath is a
+        # single flat node with each segment as a direct, unnested sibling
+        # identifier. So the generic widest-node search below would only
+        # ever find the one identifier ending exactly at the dot (e.g. just
+        # "c"), silently losing "a.b." -- this needs its own reconstruction,
+        # walking the attrpath's siblings up to that point, mirroring
+        # ``identifier_path_at``'s own binding-attrpath handling in
+        # ``pynix/_lsp/_syntax.py``.
+        attrpath_prefix = _attrpath_binding_prefix_before_dot(nodes, byte_offset, encoded)
+        if attrpath_prefix is not None:
+            return attrpath_prefix
+
         # Search the *original* source's own parse tree for a node ending
         # right before the dot -- NOT a separate re-parse of the text before
         # it in isolation. A real LSP document's "before the dot" text is an

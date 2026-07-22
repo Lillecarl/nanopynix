@@ -128,6 +128,41 @@ def identifier_path_at(source: str, byte_offset: int) -> list[str] | None:
 
 
 _IDENTIFIER_CHAIN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-z0-9_'-]*)*")
+_DOTTED_CHAIN_FULLMATCH_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
+
+
+def string_literal_path_at(source: str, byte_offset: int) -> list[str] | None:
+    """Return the dotted path inside a plain string literal containing *byte_offset*.
+
+    E.g. with the cursor anywhere in ``"random_id.suffix.hex"``, returns
+    ``["random_id", "suffix", "hex"]``. Dialect-agnostic: only recognizes the
+    shape (a single, non-interpolated string fragment whose whole content
+    looks like ``name.name.name``), with no knowledge of what any particular
+    dialect's convention (e.g. terranix's ``lib.tfRef "..."``) does with it.
+    Returns None if the cursor isn't inside such a string, or the fragment
+    has an interpolation (``string_expression`` would then have more than
+    one child between the quotes) or isn't dotted-identifier-shaped.
+    """
+    tree = parse_nix(source)
+    node = tree.root_node.descendant_for_byte_range(byte_offset, byte_offset)
+    if node is None:
+        return None
+    fragment = node if node.type == "string_fragment" else None
+    if fragment is None and node.parent is not None and node.parent.type == "string_fragment":
+        fragment = node.parent
+    if fragment is None:
+        return None
+    string_expression = fragment.parent
+    if string_expression is None or string_expression.type != "string_expression":
+        return None
+    fragments = [child for child in string_expression.children if child.type == "string_fragment"]
+    if len(fragments) != 1:
+        return None
+    encoded = source.encode()
+    text = encoded[fragment.start_byte : fragment.end_byte].decode()
+    if not _DOTTED_CHAIN_FULLMATCH_RE.fullmatch(text):
+        return None
+    return text.split(".")
 
 
 def completion_target_at(source: str, byte_offset: int) -> tuple[list[str], str] | None:

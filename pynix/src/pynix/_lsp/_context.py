@@ -19,7 +19,10 @@ would if written directly in the file.
 
 A NixOS module file is a special case worth its own directive,
 ``moduleEntry`` -- see ``_module_system.py``'s module docstring for what it
-does and why; this module only calls into it from ``reload()``.
+does and why. This module itself has no dialect-specific knowledge: after
+``reload()`` evaluates every directive's expression, ``_handlers.py`` gives
+each registered ``Dialect`` (see ``_dialect.py``) a chance to derive further
+roots (e.g. ``moduleEntry`` -> ``config``/``options``).
 """
 
 from __future__ import annotations
@@ -29,7 +32,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from nanopynix.exceptions import NixError
-from pynix._lsp._module_system import derive_module_roots
 
 if TYPE_CHECKING:
     import nanopynix
@@ -112,7 +114,6 @@ class FileContext:
                 self.roots[directive.name] = await eval_session.string(directive.expr, path=self._file_dir)
             except NixError as exc:
                 self.errors[directive.name] = exc
-        derive_module_roots(self)
 
     async def close(self) -> None:
         """Release every directive's evaluator. Idempotent."""
@@ -121,3 +122,20 @@ class FileContext:
         self._evals.clear()
         self.roots.clear()
         self.errors.clear()
+
+
+async def resolve_root_path(context: FileContext, path: list[str]) -> nanopynix.ValueProxy | None:
+    """Walk *path* through one of *context*'s bound roots by name (``path[0]``).
+
+    Works for any name a directive bound directly, or a ``Dialect.derive_roots``
+    hook added afterward (e.g. NixOS's derived ``config``/``options``, or
+    terranix's derived ``resource``/``output``/...). Anything else -- a path
+    whose first segment isn't a bound root at all -- is a dialect's own
+    concern (see ``_dialect.Dialect.hover``/``.complete``).
+    """
+    if not path or path[0] not in context.roots:
+        return None
+    value = context.roots[path[0]]
+    for segment in path[1:]:
+        value = value.attr(segment)
+    return value

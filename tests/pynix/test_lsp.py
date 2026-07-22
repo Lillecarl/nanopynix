@@ -431,3 +431,55 @@ async def test_document_symbol_lists_bindings_via_the_real_handler(lsp_server: P
     symbols = _document_symbols(lsp_server, uri)
     names = [symbol.name for symbol in symbols]
     assert names == ["options.services.foo.enable", "config", "systemd.services.foo"]
+
+
+# ── TerranixDialect (real tofu providers schema -json, via the fixture's own wrapper) ──
+
+
+async def test_hover_shows_provider_schema_description_for_a_resource_attribute(
+    lsp_server: PynixLanguageServer,
+) -> None:
+    """Hovering `byte_length` in `resource.random_id.suffix.byte_length = 4;` shows the real provider schema."""
+    uri = asset("terranix/modules/random.nix").as_uri()
+    await _sync_document(lsp_server, uri)
+
+    source = asset("terranix/modules/random.nix").read_text()
+    position = cursor_after(source, "byte_length", needle="random_id.suffix.byte_length")
+    hover = await _hover(lsp_server, types.HoverParams(types.TextDocumentIdentifier(uri), position))
+
+    assert hover is not None
+    assert isinstance(hover.contents, types.MarkupContent)
+    assert "number of random bytes to produce" in hover.contents.value
+    assert "4" in hover.contents.value
+
+
+async def test_completion_lists_real_schema_attribute_names_for_a_resource_type(
+    lsp_server: PynixLanguageServer,
+) -> None:
+    """Completing after `resource.random_id.suffix.` lists the real schema's attribute names."""
+    uri = asset("terranix/modules/random.nix").as_uri()
+    await _sync_document(lsp_server, uri)
+
+    source = asset("terranix/modules/random.nix").read_text()
+    position = cursor_after(source, "byte_length", needle="random_id.suffix.byte_length", offset=0)
+    completion = await _completion(lsp_server, types.CompletionParams(types.TextDocumentIdentifier(uri), position))
+
+    assert completion is not None
+    labels = {item.label for item in completion.items}
+    assert {"byte_length", "prefix", "keepers", "hex", "b64_url", "b64_std", "dec", "id"} <= labels
+
+
+async def test_hover_resolves_a_cross_resource_reference_inside_a_tfref_string(
+    lsp_server: PynixLanguageServer,
+) -> None:
+    """Hovering inside `lib.tfRef "random_id.suffix.hex"` resolves against `random_id`'s real schema."""
+    uri = asset("terranix/modules/null.nix").as_uri()
+    await _sync_document(lsp_server, uri)
+
+    source = asset("terranix/modules/null.nix").read_text()
+    position = cursor_after(source, "hex", needle="random_id.suffix.hex")
+    hover = await _hover(lsp_server, types.HoverParams(types.TextDocumentIdentifier(uri), position))
+
+    assert hover is not None
+    assert isinstance(hover.contents, types.MarkupContent)
+    assert "padded hexadecimal digits" in hover.contents.value
