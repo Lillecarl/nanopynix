@@ -332,3 +332,95 @@ def top_level_symbols(source: str) -> list[SymbolRange]:
         stack.extend(node.children)
     symbols.sort(key=lambda symbol: (symbol.start_row, symbol.start_column))
     return symbols
+
+
+def _direct_bindings(node: Any) -> list[Any]:
+    """Every ``binding`` node reachable from *node* without passing through another ``binding``.
+
+    Stopping the walk the moment a ``binding`` node is found (rather than
+    descending into its subtree) is what makes this "one level" rather than
+    "every binding anywhere below" -- intervening wrapper nodes (a
+    function's body, ``binding_set`` itself, parens) are transparently
+    walked through since none of them are themselves type ``"binding"``.
+    """
+    bindings: list[Any] = []
+    stack: list[Any] = list(node.children)
+    while stack:
+        candidate = stack.pop()
+        if candidate.type == "binding":
+            bindings.append(candidate)
+            continue
+        stack.extend(candidate.children)
+    return bindings
+
+
+def attrpath_range(source: str, path: tuple[str, ...]) -> tuple[int, int, int, int] | None:
+    """Return the ``(start_row, start_column, end_row, end_column)`` span of the binding at *path*.
+
+    Handles both a single flat dotted binding (``a.b.c = ...;``) and nested
+    attrset-valued bindings (``a.b = { c = ...; };``, the shape this
+    repository's own terranix fixtures actually use) uniformly: each
+    binding's own ``attrpath`` is matched segment-by-segment against a
+    prefix of *path*, recursing into an attrset-valued binding's own nested
+    bindings for the remainder. Returns None rather than raising when *path*
+    isn't reachable this way (e.g. built via a ``//`` merge, ``inherit``, or
+    a computed/non-identifier attrpath segment) -- callers fall back to a
+    whole-file position.
+    """
+    if not path:
+        return None
+    tree = parse_nix(source)
+    encoded = source.encode()
+
+    def segments_of(attrpath_node: Any) -> list[str] | None:
+        segments: list[str] = []
+        for child in attrpath_node.named_children:
+            if child.type != "identifier":
+                return None
+            segments.append(encoded[child.start_byte : child.end_byte].decode())
+        return segments
+
+    def search(node: Any, remaining: list[str]) -> Any | None:
+        for binding in _direct_bindings(node):
+            attrpath_node = binding.child_by_field_name("attrpath")
+            if attrpath_node is None:
+                continue
+            segments = segments_of(attrpath_node)
+            if segments is None:
+                continue
+            count = len(segments)
+            if segments != remaining[:count]:
+                continue
+            if count == len(remaining):
+                return binding
+            value = binding.child_by_field_name("expression")
+            if value is None:
+                continue
+            found = search(value, remaining[count:])
+            if found is not None:
+                return found
+        return None
+
+    found = search(tree.root_node, list(path))
+    if found is None:
+        return None
+    return (found.start_point[0], found.start_point[1], found.end_point[0], found.end_point[1])
+
+
+_NOQA_RE = re.compile(r"#\s*noqa:\s*(?P<code>[A-Z]+\d+)\s*--\s*(?P<reason>.+?)\s*$")
+
+
+def suppressed_codes_on_line(source: str, line: int) -> set[str]:
+    """Return every rule code suppressed by a ``# noqa: CODE -- reason`` comment on *line* (0-indexed).
+
+    A plain per-line regex scan, not a tree-sitter comment-node walk: Nix's
+    grammar attaches ``#``-comments as trivia to whatever token follows,
+    the same node-adjacency fragility this module's docstring already flags
+    for completion. Single code per comment in v1, matching this
+    repository's own ``# noqa: RULE -- reason`` Python convention.
+    """
+    lines = source.splitlines()
+    if not 0 <= line < len(lines):
+        return set()
+    match = _NOQA_RE.search(lines[line])
+    return {match.group("code")} if match else set()
