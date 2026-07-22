@@ -29,7 +29,11 @@ if TYPE_CHECKING:
 # ``_InprocProcessGuard`` in ``nanopynix.inproc``), and that fixture's
 # inproc_session is now the suite-wide default every other inproc test file
 # establishes first.
-_SUITE_SETTINGS = NixSettings(build_users_group="", require_drop_supplementary_groups=False)
+_SUITE_SETTINGS = NixSettings(
+    build_users_group="",
+    require_drop_supplementary_groups=False,
+    substituters=["daemon", "https://cache.nixos.org"],
+)
 
 
 def _raw_session(*, store_workers: int = 4) -> inproc.Session:
