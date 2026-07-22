@@ -11,6 +11,7 @@ from lsprotocol import types
 from pygls.io_ import StdinAsyncReader, StdoutWriter, run_async
 from pygls.lsp.server import LanguageServer
 from pygls.uris import to_fs_path
+from pygls.workspace import TextDocument
 
 import nanopynix
 from nanopynix.exceptions import NixError
@@ -43,6 +44,14 @@ class PynixLanguageServer(LanguageServer):
         self.store: nanopynix.Store | None = None
         self.contexts: dict[str, FileContext] = {}
         self.diagnostics: dict[str, list[types.Diagnostic]] = {}
+        # The most recent per-file source snapshot that parsed with zero
+        # ERROR/MISSING nodes, and whether the *live* snapshot currently has
+        # any -- see `_sync_document`'s docstring and `_document_symbols`/
+        # `_hover`'s use of these for why. Only ever read/written from
+        # `_sync_document`'s call site and the handlers that consult them;
+        # `_on_did_close` drops both so a closed file doesn't linger here.
+        self.last_good_source: dict[str, str] = {}
+        self.has_parse_errors: dict[str, bool] = {}
 
     async def ensure_nix(self) -> tuple[nanopynix.Session, nanopynix.Store]:
         """Open the shared Session/Store on first use."""
@@ -103,6 +112,22 @@ def _byte_offset(source: str, position: types.Position, ls: PynixLanguageServer,
     return len(source[:char_offset].encode("utf-8"))
 
 
+def _byte_offset_in(uri: str, source: str, position: types.Position) -> int:
+    """Like ``_byte_offset``, but against an arbitrary *source* rather than the live workspace document.
+
+    Used for the last-good-tree fallback: a cached snapshot's line/byte
+    layout generally differs from the live document's (the edit that broke
+    the live parse almost always changes some line's length), so reusing a
+    byte offset computed against the live document would land on the wrong
+    spot in the cached one. Building a standalone ``TextDocument`` lets the
+    same (line, character) position be re-resolved against the cached
+    text's own layout instead.
+    """
+    document = TextDocument(uri, source=source)
+    char_offset = document.offset_at_position(position)
+    return len(source[:char_offset].encode("utf-8"))
+
+
 def _parse_error_diagnostic(error: ParseErrorRange) -> types.Diagnostic:
     return types.Diagnostic(
         range=types.Range(
@@ -132,6 +157,18 @@ async def _sync_document(ls: PynixLanguageServer, uri: str) -> None:
     itself changed -- routine edits to the rest of the file just get fresh
     parse diagnostics, matching nixd's own "assume an evaluated value
     doesn't change until told otherwise" caching stance.
+
+    Also records whether *this* snapshot parsed error-free, and if so caches
+    it as ``ls.last_good_source[uri]`` -- tree-sitter-nix's error recovery
+    can have an unbounded blast radius (an incomplete ``formals`` list left
+    open mid-edit doesn't stay contained; it keeps trying to extend the
+    comma-separated formal list and can shred real, already-complete
+    bindings arbitrarily far downstream in the same file, not just the
+    token actually being typed). ``_document_symbols``/``_hover`` fall back
+    to this cached snapshot rather than showing corrupted or missing results
+    for code that hasn't actually changed, at the cost of showing slightly
+    stale (but structurally correct) data for the file until the in-progress
+    edit closes its brace again.
     """
     document = ls.workspace.get_text_document(uri)
     source = document.source
@@ -153,7 +190,12 @@ async def _sync_document(ls: PynixLanguageServer, uri: str) -> None:
             await dialect.derive_roots(context)
         ls.contexts[uri] = context
 
-    diagnostics = [_parse_error_diagnostic(error) for error in parse_errors(source)]
+    parse_error_ranges = parse_errors(source)
+    ls.has_parse_errors[uri] = bool(parse_error_ranges)
+    if not parse_error_ranges:
+        ls.last_good_source[uri] = source
+
+    diagnostics = [_parse_error_diagnostic(error) for error in parse_error_ranges]
     if context is not None:
         directives_by_name = {directive.name: directive for directive in context.directives}
         diagnostics.extend(
@@ -175,6 +217,20 @@ async def _hover(ls: PynixLanguageServer, params: types.HoverParams) -> types.Ho
     its own (see e.g. ``ModuleSystemDialect``'s "already a bound root, defer"
     guard); the generic ``resolve_root_path`` walk is the fallback for
     everything else.
+
+    When the live document currently has parse errors anywhere, hover -- for
+    both dialects and the generic walk below -- is computed against the last
+    snapshot that parsed clean instead of the live text (see
+    ``_sync_document``'s docstring for why: tree-sitter-nix's error recovery
+    can shred real, already-complete code arbitrarily far from wherever the
+    live syntax error actually is). The (line, character) position itself
+    still comes from the live request; only the *source text and byte
+    offset it's resolved against* switch to the cached snapshot, via
+    ``_byte_offset_in`` re-deriving the offset against that snapshot's own
+    layout rather than reusing the live one (which would drift whenever the
+    edit changed a preceding line's length -- almost always). This is
+    decided once, before dispatching to dialects, so every dialect benefits
+    uniformly without needing its own fallback logic.
     """
     uri = params.text_document.uri
     context = ls.contexts.get(uri)
@@ -183,6 +239,11 @@ async def _hover(ls: PynixLanguageServer, params: types.HoverParams) -> types.Ho
     document = ls.workspace.get_text_document(uri)
     source = document.source
     byte_offset = _byte_offset(source, params.position, ls, uri)
+    if ls.has_parse_errors.get(uri, False):
+        last_good = ls.last_good_source.get(uri)
+        if last_good is not None:
+            source = last_good
+            byte_offset = _byte_offset_in(uri, last_good, params.position)
     for dialect in DIALECTS:
         rendered = await dialect.hover(context, source, byte_offset, DIALECTS)
         if rendered is not None:
@@ -230,8 +291,14 @@ async def _completion(ls: PynixLanguageServer, params: types.CompletionParams) -
 
 def _document_symbols(ls: PynixLanguageServer, uri: str) -> list[types.DocumentSymbol]:
     document = ls.workspace.get_text_document(uri)
+    source = document.source
+    if ls.has_parse_errors.get(uri, False):
+        # Whole-file outline has no cursor position to translate, unlike
+        # `_hover` -- always safe to prefer the last clean snapshot outright
+        # rather than only on a live miss. See `_sync_document`'s docstring.
+        source = ls.last_good_source.get(uri, source)
     symbols: list[types.DocumentSymbol] = []
-    for symbol in top_level_symbols(document.source):
+    for symbol in top_level_symbols(source):
         symbol_range = types.Range(
             start=types.Position(symbol.start_row, symbol.start_column),
             end=types.Position(symbol.end_row, symbol.end_column),
@@ -256,9 +323,12 @@ async def _on_did_change(ls: PynixLanguageServer, params: types.DidChangeTextDoc
 
 
 async def _on_did_close(ls: PynixLanguageServer, params: types.DidCloseTextDocumentParams) -> None:
-    context = ls.contexts.pop(params.text_document.uri, None)
+    uri = params.text_document.uri
+    context = ls.contexts.pop(uri, None)
     if context is not None:
         await context.close()
+    ls.last_good_source.pop(uri, None)
+    ls.has_parse_errors.pop(uri, None)
 
 
 def _on_document_symbol(ls: PynixLanguageServer, params: types.DocumentSymbolParams) -> list[types.DocumentSymbol]:
