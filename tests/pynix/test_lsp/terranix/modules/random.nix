@@ -1,3 +1,4 @@
+# pynix-lsp: terranixEntry = import ../default.nix { }
 { lib, ... }:
 {
   resource.random_id.suffix.byte_length = 4;

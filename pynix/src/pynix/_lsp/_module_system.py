@@ -24,8 +24,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from lsprotocol import types
+
 from nanopynix.exceptions import NixError
-from pynix._lsp._syntax import top_level_lambda_formals
+from pynix._lsp._dialect import Dialect
+from pynix._lsp._render import render_value
+from pynix._lsp._syntax import completion_target_at, identifier_path_at, top_level_lambda_formals
 from pynix._value_render import format_json
 
 if TYPE_CHECKING:
@@ -128,3 +132,75 @@ async def render_option_declaration(value: nanopynix.ValueProxy) -> list[str]:
     else:
         sections.append(f"default:\n```json\n{format_json(default)}\n```")
     return sections
+
+
+class ModuleSystemDialect(Dialect):
+    """NixOS module-system support, as a peer ``Dialect`` (see ``_dialect.py``).
+
+    ``_handlers.py`` tries every dialect's ``hover``/``complete`` before
+    falling back to the generic ``resolve_root_path`` walk (some dialects,
+    e.g. terranix's schema lookup, must override what a plain root walk
+    would show). This dialect must therefore explicitly defer -- return None
+    -- whenever *path* already starts with a bound root name, so that
+    ``moduleEntry``-derived ``config``/``options`` paths (e.g. ``config.foo``)
+    still resolve via the generic walk exactly as before; it only ever
+    handles what that generic walk can't reach on its own: a module-argument
+    reference (e.g. ``pkgs.hello``) and the bare-attrpath-definition fallback
+    to ``options``.
+    """
+
+    async def derive_roots(self, context: FileContext) -> None:
+        derive_module_roots(context)
+
+    async def extra_hover_sections(self, value: nanopynix.ValueProxy) -> list[str] | None:
+        if await is_option_declaration(value):
+            return await render_option_declaration(value)
+        return None
+
+    async def _resolve(self, context: FileContext, source: str, path: list[str]) -> nanopynix.ValueProxy | None:
+        if path and path[0] in context.roots:
+            return None
+        if path:
+            module_arg_root = await resolve_formal_arg(context, source, path[0])
+            if module_arg_root is not None:
+                value = module_arg_root
+                for segment in path[1:]:
+                    value = value.attr(segment)
+                return value
+        if OPTIONS_NAME in context.roots:
+            value = context.roots[OPTIONS_NAME]
+            for segment in path:
+                value = value.attr(segment)
+            return value
+        return None
+
+    async def hover(
+        self, context: FileContext, source: str, byte_offset: int, dialects: list[Dialect]
+    ) -> str | None:
+        path = identifier_path_at(source, byte_offset)
+        if path is None:
+            return None
+        value = await self._resolve(context, source, path)
+        if value is None:
+            return None
+        try:
+            return await render_value(value, dialects)
+        except NixError:
+            return None
+
+    async def complete(
+        self, context: FileContext, source: str, byte_offset: int, dialects: list[Dialect]
+    ) -> list[types.CompletionItem] | None:
+        del dialects
+        target = completion_target_at(source, byte_offset)
+        if target is None:
+            return None
+        prefix, partial = target
+        value = await self._resolve(context, source, prefix)
+        if value is None:
+            return None
+        try:
+            names = await value.attr_names()
+        except NixError:
+            return None
+        return [types.CompletionItem(label=name) for name in names if name.startswith(partial)]
