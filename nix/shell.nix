@@ -19,6 +19,7 @@
   furo,
   cachix,
   statix,
+  tofuCoreSchemaTool,
 }:
 let
   nanopynix = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
@@ -83,5 +84,10 @@ mkShell {
     actionlint
     cachix
     statix
+    # pynix._lsp._tofu_core_schema invokes this at LSP-server runtime (see
+    # its module docstring) rather than baking a static snapshot -- on PATH
+    # here so the editable dev shell resolves it exactly like the real,
+    # non-editable build's makeWrapperArgs does (pynix/package.nix).
+    tofuCoreSchemaTool
   ];
 }

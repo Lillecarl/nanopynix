@@ -51,6 +51,15 @@ let
 
   clypi = python3Packages.callPackage ./nix/clypi.nix { };
 
+  # Exports OpenTofu's built-in ("core") HCL block schema
+  # (resource/data/count/for_each/lifecycle/...) as JSON for a given OpenTofu
+  # version, on demand -- see tools/tofu-core-schema/package.nix and
+  # pynix/src/pynix/_lsp/_tofu_core_schema.py, which invokes this at LSP-
+  # server runtime rather than baking a static snapshot. Independent of any
+  # nanopynix/Nix version, so it lives here rather than inside
+  # nanopynixForNixVersions.
+  tofuCoreSchemaTool = pkgs.callPackage ./tools/tofu-core-schema/package.nix { };
+
   tsan = pkgs.callPackage ./nix/tsan.nix { };
 
   # A confirmed data race in nix::Bindings::emptyBindings (a process-wide
@@ -134,6 +143,7 @@ let
                     nanopynix-proto
                     clypi
                     pyproject-nix
+                    tofuCoreSchemaTool
                     ;
                 }
                 // final
@@ -269,5 +279,6 @@ in
     grpclib-transports
     pyproject-nix
     tests
+    tofuCoreSchemaTool
     ;
 }

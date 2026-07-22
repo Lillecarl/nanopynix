@@ -183,6 +183,24 @@ def find_resource_block(schemas: ProviderSchemas, block_kind: str, resource_type
     return None
 
 
+def list_resource_type_names(schemas: ProviderSchemas, block_kind: str) -> list[str]:
+    """Every resource/data-source type name known across *every* provider in *schemas*.
+
+    Unlike ``find_resource_block`` (one specific type), this is for
+    completing the type name itself -- e.g. after typing ``resource.rand``,
+    listing every ``random_*`` type any locked provider declares, not just
+    ones already used somewhere in the file (that narrower "already
+    configured" set is what the generic root-value fallback in
+    ``_handlers.py`` already provides for free from a real Nix value; this is
+    a superset sourced from the schema instead).
+    """
+    names: list[str] = []
+    for provider_entry in schemas.provider_schemas.values():
+        table = provider_entry.resource_schemas if block_kind == "resource" else provider_entry.data_source_schemas
+        names.extend(table.keys())
+    return names
+
+
 def walk_schema_block(block: SchemaBlock, path: list[str]) -> SchemaAttribute | None:
     """Walk *path* (segments after ``resource.<type>.<name>``) through a schema block.
 

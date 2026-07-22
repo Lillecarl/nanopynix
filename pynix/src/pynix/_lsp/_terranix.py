@@ -48,24 +48,34 @@ from pynix._lsp._syntax import (
     string_literal_path_at,
 )
 from pynix._lsp._terranix_schema import (
+    SchemaBlock,
     find_resource_block,
     get_provider_schemas,
     list_block_attributes,
+    list_resource_type_names,
     render_schema_attribute,
     walk_schema_block,
 )
+from pynix._lsp._tofu_core_schema import detect_tofu_version, get_core_schema, merge_schema_blocks
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import nanopynix
     from pynix._lsp._context import FileContext
     from pynix._lsp._terranix_schema import ProviderSchemas
+    from pynix._lsp._tofu_core_schema import CoreBlockSchema
 
 TERRANIX_ENTRY_NAME = "terranixEntry"
 _BLOCK_KINDS = ("resource", "data")
+_DEFAULT_TOFU_VERSION = "1.12"
 
 
 class TerranixDialect(Dialect):
     """terranix support, as a peer ``Dialect`` (see ``_dialect.py``)."""
+
+    def __init__(self) -> None:
+        self._version_cache: dict[str, str] = {}
 
     async def derive_roots(self, context: FileContext) -> None:
         """Bind every top-level HCL block type (``resource``, ``output``, ...) as its own root.
@@ -96,7 +106,7 @@ class TerranixDialect(Dialect):
             return None
         return outputs.get("out")
 
-    async def _schema_for(self, context: FileContext) -> ProviderSchemas | None:
+    async def _outputs(self, context: FileContext) -> tuple[str, str] | None:
         entry = context.roots.get(TERRANIX_ENTRY_NAME)
         if entry is None:
             return None
@@ -104,7 +114,37 @@ class TerranixDialect(Dialect):
         module_out = await self._resource_output(entry, "module")
         if tofu_out is None or module_out is None:
             return None
+        return tofu_out, module_out
+
+    async def _schema_for(self, tofu_out: str, module_out: str) -> ProviderSchemas | None:
         return await get_provider_schemas(tofu_out, module_out)
+
+    async def _core_schema_for(self, tofu_out: str) -> Mapping[str, CoreBlockSchema] | None:
+        """Core (built-in) HCL block schema for whichever OpenTofu version *tofu_out* is.
+
+        Falls back to ``_DEFAULT_TOFU_VERSION`` if the real binary's version
+        can't be detected (e.g. an unusual wrapper) -- a slightly-off core
+        schema is still far more useful for meta-arguments like
+        ``count``/``for_each``/``lifecycle`` than none at all, and the core
+        schema barely changes between versions anyway.
+        """
+        version = await self._detect_tofu_version_cached(tofu_out)
+        return await get_core_schema(version)
+
+    async def _detect_tofu_version_cached(self, tofu_out: str) -> str:
+        """Memoized ``detect_tofu_version``, keyed by *tofu_out*'s (content-addressed) store path.
+
+        Without this, every hover/completion request re-spawns ``tofu
+        version -json`` -- a real subprocess, not free on every keystroke.
+        The store path never changes without a different derivation, so this
+        cache can never go stale.
+        """
+        cached = self._version_cache.get(tofu_out)
+        if cached is not None:
+            return cached
+        version = await detect_tofu_version(f"{tofu_out}/bin/tofu") or _DEFAULT_TOFU_VERSION
+        self._version_cache[tofu_out] = version
+        return version
 
     def _schema_path_at(self, source: str, byte_offset: int) -> list[str] | None:
         path = identifier_path_at(source, byte_offset)
@@ -117,16 +157,38 @@ class TerranixDialect(Dialect):
             return None
         return path
 
+    async def _block_for(self, context: FileContext, block_kind: str, resource_type: str) -> SchemaBlock | None:
+        """The merged provider+core schema block for ``<block_kind>.<resource_type>``.
+
+        Provider schema (``byte_length``, ...) and core schema
+        (``count``/``for_each``/``depends_on``/``lifecycle``, ...) are
+        genuinely complementary -- a provider never redeclares OpenTofu's own
+        meta-arguments, and core schema knows nothing about a specific
+        provider's attributes -- so either alone being unavailable (e.g. an
+        unrecognized resource type) shouldn't block hover/completion on what
+        the other one does know.
+        """
+        outputs = await self._outputs(context)
+        if outputs is None:
+            return None
+        tofu_out, module_out = outputs
+        schemas = await self._schema_for(tofu_out, module_out)
+        provider_block = find_resource_block(schemas, block_kind, resource_type) if schemas is not None else None
+        core_schema = await self._core_schema_for(tofu_out)
+        core_block = core_schema.get(block_kind) if core_schema is not None else None
+        if provider_block is None:
+            return core_block.block if core_block is not None else None
+        if core_block is None:
+            return provider_block
+        return merge_schema_blocks(provider_block, core_block.block)
+
     async def hover(
         self, context: FileContext, source: str, byte_offset: int, dialects: list[Dialect]
     ) -> str | None:
         path = self._schema_path_at(source, byte_offset)
         if path is None:
             return None
-        schemas = await self._schema_for(context)
-        if schemas is None:
-            return None
-        block = find_resource_block(schemas, path[0], path[1])
+        block = await self._block_for(context, path[0], path[1])
         if block is None:
             return None
         attribute = walk_schema_block(block, path[3:])
@@ -177,12 +239,37 @@ class TerranixDialect(Dialect):
             if target is None:
                 return None
             prefix, partial = target
+        if not prefix:
+            # Bare top-level keyword completion (e.g. typing "res" -> "resource")
+            # never needs a Nix build -- ``tools/tofu-core-schema`` is a plain
+            # subprocess call keyed only on a version string, so it stays
+            # fast even before the project's `tofu` output has ever been
+            # built.
+            core_schema = await get_core_schema(_DEFAULT_TOFU_VERSION)
+            if core_schema is None:
+                return None
+            return [types.CompletionItem(label=name) for name in core_schema if name.startswith(partial)]
+        if len(prefix) == 1 and prefix[0] in _BLOCK_KINDS:
+            # Resource/data *type* name completion (e.g. "resource.rand" ->
+            # "random_id", "random_password", ...), sourced from every locked
+            # provider's full schema -- a superset of whatever's already
+            # configured in the file. Returning None here (rather than an
+            # empty list) on any failure lets `_handlers.py`'s generic
+            # root-value fallback still offer the narrower "already
+            # configured types" list from a real Nix value, instead of
+            # silently offering nothing.
+            outputs = await self._outputs(context)
+            if outputs is None:
+                return None
+            tofu_out, module_out = outputs
+            schemas = await self._schema_for(tofu_out, module_out)
+            if schemas is None:
+                return None
+            names = list_resource_type_names(schemas, prefix[0])
+            return [types.CompletionItem(label=name) for name in names if name.startswith(partial)]
         if len(prefix) < 3 or prefix[0] not in _BLOCK_KINDS:
             return None
-        schemas = await self._schema_for(context)
-        if schemas is None:
-            return None
-        block = find_resource_block(schemas, prefix[0], prefix[1])
+        block = await self._block_for(context, prefix[0], prefix[1])
         if block is None:
             return None
         names = list_block_attributes(block, prefix[3:])
