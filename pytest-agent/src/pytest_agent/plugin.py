@@ -13,10 +13,9 @@ from _pytest.config import (
 from pytest_agent._harness_detect import detect_agent_harness
 from pytest_agent._history import next_run_dir
 from pytest_agent._pipe_guard import find_banned_pipe_reader
-from pytest_agent._runtime import AgentRuntime
+from pytest_agent._profile import profile as profile
+from pytest_agent._runtime import RUNTIME_PLUGIN_NAME, AgentRuntime
 from pytest_agent._terminal import RealTerminal
-
-_RUNTIME_PLUGIN_NAME = "pytest-agent-runtime"
 
 # Set by pytest_addoption, read by pytest_configure: which harness env var (if
 # any) caused --agent's default to turn on by itself, so the startup banner
@@ -147,7 +146,7 @@ def pytest_configure(config: pytest.Config) -> None:
         terminal=_REAL_TERMINAL,
         autodetected_via=autodetected_via,
     )
-    config.pluginmanager.register(runtime, _RUNTIME_PLUGIN_NAME)
+    config.pluginmanager.register(runtime, RUNTIME_PLUGIN_NAME)
 
 
 def _silence_terminal_reporter(config: pytest.Config) -> None:
@@ -171,6 +170,6 @@ def _silence_terminal_reporter(config: pytest.Config) -> None:
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
-    runtime = config.pluginmanager.get_plugin(_RUNTIME_PLUGIN_NAME)
+    runtime = config.pluginmanager.get_plugin(RUNTIME_PLUGIN_NAME)
     if runtime is not None:
         config.pluginmanager.unregister(runtime)

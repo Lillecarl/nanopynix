@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
     from pytest_agent._terminal import RealTerminal
 
+RUNTIME_PLUGIN_NAME = "pytest-agent-runtime"
+
 
 class AgentRuntime:
     """The registered plugin object for one agent-mode pytest session.
