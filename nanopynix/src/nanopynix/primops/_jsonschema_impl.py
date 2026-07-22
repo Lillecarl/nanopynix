@@ -19,10 +19,10 @@ import jsonschema.exceptions
 import jsonschema.validators
 from nanopynix_bindings.expr import PrimopError
 
-from nanopynix.models import JsonValue
-
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+    from nanopynix.models import JsonValue
 
 
 def _read_schema(schema_path: str) -> Any:
