@@ -40,6 +40,7 @@ class SchemaAttribute(BaseModel):
     required: bool = False
     optional: bool = False
     computed: bool = False
+    deprecated: bool = False
 
 
 class SchemaNestedBlock(BaseModel):
@@ -48,6 +49,8 @@ class SchemaNestedBlock(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     block: SchemaBlock = Field(default_factory=lambda: SchemaBlock())
+    nesting_mode: str | None = None
+    """``terraform-json``'s ``SchemaBlockType.NestingMode``: ``"single"``/``"list"``/``"set"``/``"map"``/``"group"``."""
 
 
 class SchemaBlock(BaseModel):
@@ -248,4 +251,6 @@ def render_schema_attribute(attribute: SchemaAttribute) -> str:
         sections.append("optional")
     if attribute.computed:
         sections.append("computed")
+    if attribute.deprecated:
+        sections.append("deprecated")
     return "\n\n".join(sections) if sections else "```\nno schema description available\n```"

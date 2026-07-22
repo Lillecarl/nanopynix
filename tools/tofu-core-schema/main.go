@@ -43,7 +43,29 @@ type exportedBlockBody struct {
 }
 
 type exportedNestedBlock struct {
-	Block exportedBlockBody `json:"block"`
+	Block       exportedBlockBody `json:"block"`
+	NestingMode string            `json:"nesting_mode,omitempty"`
+}
+
+// nestingModeString translates hcl-lang's BlockType into terraform-json's
+// SchemaNestingMode vocabulary ("single"/"list"/"set"/"map"), NOT a raw
+// String() cast: hcl-lang's BlockTypeObject.String() returns "object", but
+// terraform-json calls that same single-nested-block concept "single" --
+// confirmed by reading both packages' source, not assumed from the similar
+// naming.
+func nestingModeString(t hclschema.BlockType) string {
+	switch t {
+	case hclschema.BlockTypeObject:
+		return "single"
+	case hclschema.BlockTypeList:
+		return "list"
+	case hclschema.BlockTypeSet:
+		return "set"
+	case hclschema.BlockTypeMap:
+		return "map"
+	default: // BlockTypeNil
+		return ""
+	}
 }
 
 type exportedBlock struct {
@@ -131,7 +153,10 @@ func convertBody(bs *hclschema.BodySchema) exportedBlockBody {
 	if len(bs.Blocks) > 0 {
 		body.BlockTypes = make(map[string]exportedNestedBlock, len(bs.Blocks))
 		for name, block := range bs.Blocks {
-			body.BlockTypes[name] = exportedNestedBlock{Block: convertBody(block.Body)}
+			body.BlockTypes[name] = exportedNestedBlock{
+				Block:       convertBody(block.Body),
+				NestingMode: nestingModeString(block.Type),
+			}
 		}
 	}
 	return body
