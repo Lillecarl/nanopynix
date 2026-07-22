@@ -81,22 +81,40 @@ _NIX_HIGHLIGHTS = Query(
     (Path(NIX_GRAMMAR_PATH) / "queries" / "highlights.scm").read_text(),
 )
 _NIX_HIGHLIGHT_STYLES = {
+    # tree-sitter-nix 0.5.0 (numtide fork) renamed several capture groups to
+    # align with nvim-treesitter conventions -- see its docs/highlight-groups.md
+    # "Renames from v0.4.x and earlier" table. Both the surviving old names and
+    # their v0.5.0 replacements are mapped here so this doesn't silently regress
+    # on the next grammar bump either.
     "comment": "class:nix.comment",
-    "escape": "class:nix.escape",
+    "comment.documentation": "class:nix.comment",
     "function": "class:nix.function",
+    "function.call": "class:nix.function",
     "function.builtin": "class:nix.builtin",
     "keyword": "class:nix.keyword",
+    "keyword.conditional": "class:nix.keyword",
+    "keyword.operator": "class:nix.keyword",
+    "keyword.import": "class:nix.keyword",
+    "keyword.exception": "class:nix.keyword",
     "number": "class:nix.number",
+    "number.float": "class:nix.number",
+    "boolean": "class:nix.builtin",
+    "constant.builtin": "class:nix.builtin",
     "operator": "class:nix.operator",
-    "property": "class:nix.property",
+    # v0.5.0 dropped the old blanket "any identifier" fallback that used to
+    # ride along under @property -- @variable is now the only thing covering
+    # plain variable references, so it needs its own style to avoid going dark.
+    "variable": "class:nix.variable",
+    "variable.member": "class:nix.property",
     "punctuation.bracket": "class:nix.punctuation",
     "punctuation.delimiter": "class:nix.punctuation",
     "punctuation.special": "class:nix.punctuation",
     "string": "class:nix.string",
+    "string.escape": "class:nix.escape",
     "string.special.path": "class:nix.path",
-    "string.special.uri": "class:nix.path",
-    "variable.builtin": "class:nix.builtin",
+    "string.special.url": "class:nix.path",
     "variable.parameter": "class:nix.parameter",
+    "variable.parameter.builtin": "class:nix.parameter",
 }
 _REPL_STYLE = Style.from_dict(
     {
@@ -112,6 +130,7 @@ _REPL_STYLE = Style.from_dict(
         "nix.property": "ansiblue",
         "nix.punctuation": "ansibrightblack",
         "nix.string": "ansigreen",
+        "nix.variable": "ansiblue",
     }
 )
 _HELP_ROWS = (

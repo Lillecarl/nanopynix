@@ -445,6 +445,20 @@ def test_repl_tree_sitter_lexer_highlights_nix_expression() -> None:
     assert ("class:nix.string", '"') in fragments
 
 
+def test_repl_tree_sitter_lexer_highlights_plain_variable_references() -> None:
+    """Regression test: tree-sitter-nix 0.5.0 dropped the blanket @property
+    fallback that used to cover every identifier, so plain variable references
+    (as opposed to binding names or formals) need their own explicit capture
+    mapping or they silently stop being highlighted at all.
+    """
+    document = Document(':shell let x = 1; in x')
+
+    fragments = _NixLexer().lex_document(document)(0)
+
+    assert ("class:nix.property", "x") in fragments  # the `x = 1` binding name
+    assert ("class:nix.variable", "x") in fragments  # the `in x` reference
+
+
 def test_repl_tree_sitter_lexer_skips_highlighting_for_non_expression_input() -> None:
     """A bare, argument-less command (e.g. ":quit") has no Nix source to highlight."""
     document = Document(":quit")
