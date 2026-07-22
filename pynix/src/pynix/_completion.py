@@ -41,6 +41,24 @@ class _NoMatch:
 
 _NO_MATCH = _NoMatch()
 
+_COMMENT_NODE_TYPES = frozenset({"line_comment", "block_comment", "doc_comment"})
+
+
+def _inside_comment(nodes: list[Any], byte_offset: int) -> bool:
+    """True if *byte_offset* falls inside a ``#``/``/* */`` comment span.
+
+    Comments are tree-sitter ``extras`` -- real leaf nodes in the tree, just
+    not referenced by any grammar rule -- so they show up in a plain node
+    walk like anything else. Without this check, the lexical tier (which
+    only looks at raw text before the cursor with no structural awareness)
+    would happily match an identifier chain that only exists inside a
+    comment, e.g. ``# see pkgs.lib.<cursor>`` offering completions for
+    ``pkgs.lib`` as if it were real code.
+    """
+    return any(
+        node.type in _COMMENT_NODE_TYPES and node.start_byte <= byte_offset <= node.end_byte for node in nodes
+    )
+
 
 def _attrpath_binding_prefix_before_dot(
     nodes: list[Any], byte_offset: int, encoded: bytes
@@ -98,9 +116,15 @@ def _tree_prefix_at(source: str, byte_offset: int) -> tuple[str | None, str] | N
     than be reinterpreted as "try the lexical tier", since a raw-text regex
     scan has no idea the position is inside a dynamic key and would offer an
     unrelated, nonsensical completion instead of correctly offering none.
+
+    Also positively resolves (returns ``None``, not ``_NoMatch``) whenever
+    *byte_offset* sits inside a comment -- see ``_inside_comment``.
     """
     encoded = source.encode()
     nodes = _nodes(parse_nix(source).root_node)
+
+    if _inside_comment(nodes, byte_offset):
+        return None
 
     def text(node: Any) -> str:
         return encoded[node.start_byte : node.end_byte].decode()

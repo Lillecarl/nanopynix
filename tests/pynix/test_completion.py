@@ -70,6 +70,22 @@ def test_returns_none_after_trailing_whitespace_with_no_partial() -> None:
     assert completion_prefix_at(source, len(source)) is None
 
 
+def test_returns_none_for_a_dotted_chain_inside_a_line_comment() -> None:
+    """Regression test: comments are tree-sitter extras, invisible to the
+    lexical regex tier's raw-text scan -- without a structural check, typing
+    inside a comment like ``# see pkgs.lib.`` would offer completions for
+    ``pkgs.lib`` as if it were real, live code."""
+    source = "# see pkgs.lib.foo\nx = 1"
+    byte_offset = len("# see pkgs.lib.")
+    assert completion_prefix_at(source, byte_offset) is None
+
+
+def test_returns_none_for_a_dotted_chain_inside_a_block_comment() -> None:
+    source = "/* pkgs.lib. */"
+    byte_offset = len("/* pkgs.lib.")
+    assert completion_prefix_at(source, byte_offset) is None
+
+
 def test_falls_back_to_the_regex_tier_mid_token_inside_a_binding_attrpath() -> None:
     """A binding's own attrpath (a NixOS module's ``services.foo.enable =
     true;``) is not a select_expression at all, so the tree tier never
