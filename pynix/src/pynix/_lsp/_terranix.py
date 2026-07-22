@@ -5,15 +5,25 @@ Terraform/OpenTofu ``config.tf.json``. A file opts in with one directive:
 
     # pynix-lsp: terranixEntry = import ./default.nix { }
 
-Its expression must evaluate to an attrset shaped ``{ terranix, module, tofu
-}``:
+Its expression must evaluate to an attrset shaped ``{ terranix, module,
+moduleSystem, tofu }``:
 
-- ``terranix`` -- the *raw* ``${pkgs.terranix.src}/core`` result (an
-  ``lib.evalModules``-shaped attrset with a ``.config`` walkable exactly like
-  NixOS's ``moduleEntry.config``, see ``_module_system.py``).
+- ``terranix`` -- the *raw* ``${pkgs.terranix.src}/core`` result: an attrset
+  with only a ``.config`` (terranix's own wrapper strips ``_module``/``_ref``/
+  ``__functor`` and never returns ``.options`` at all -- see ``moduleSystem``
+  below for the fix).
 - ``module`` -- a derivation whose output directory contains
   ``config.tf.json`` and a real ``.terraform.lock.hcl``, produced by an
   offline ``tofu init``.
+- ``moduleSystem`` -- the *un*-sanitized ``lib.evalModules`` result for the
+  same module list ``terranix`` was built from (same modules, same
+  ``helpers.nix``-extended ``lib'`` terranix's own ``core/default.nix``
+  builds internally) -- ``.config``/``.options``/``._module`` all present,
+  exactly the shape ``_module_system.py`` expects from a NixOS
+  ``moduleEntry``. terranix's own public wrapper never exposes this (see
+  ``terranix`` above), so a directive has to build it by hand; see
+  ``tests/pynix/test_lsp/terranix/default.nix`` for the reference
+  construction.
 - ``tofu`` -- a derivation with a ``bin/tofu``-shaped executable already
   wired (via ``-chdir`` or equivalent) to operate on ``module``.
 
@@ -24,11 +34,15 @@ Unlike NixOS's options tree, Terraform provider resource/attribute schemas
 are not Nix values at all -- they only exist in ``tofu providers schema
 -json``'s external JSON output (see ``_terranix_schema.py``, which fetches
 and caches it, keyed by ``tofu``/``module``'s Nix store output paths). This
-module bridges the two: ``derive_roots`` binds terranix's own already-a-Nix-
-value config tree (for value-level hover/completion of already-typed
+module bridges three things: ``derive_roots`` binds terranix's own already-
+a-Nix-value config tree (for value-level hover/completion of already-typed
 attributes, reusing the generic root walk in ``_handlers.py``/``_context.py``
-for free), while ``hover``/``complete`` resolve schema-only knowledge (an
-attribute's description/type) that no Nix value carries.
+for free) *and* ``moduleSystem`` as a ``moduleEntry`` root (reusing
+``_module_system.derive_module_roots``/``ModuleSystemDialect`` as-is, so a
+terranix file's own top-level lambda formals -- e.g. ``pkgs`` via
+``_module.args`` -- resolve the same way a NixOS module's do), while
+``hover``/``complete`` here resolve schema-only knowledge (an attribute's
+description/type) that no Nix value carries.
 """
 
 from __future__ import annotations
@@ -41,6 +55,7 @@ from lsprotocol import types
 from nanopynix.exceptions import NixError
 from pynix._jsonschema import FindingKind, list_properties, render, validate
 from pynix._lsp._dialect import Dialect
+from pynix._lsp._module_system import MODULE_ENTRY_NAME, derive_module_roots
 from pynix._lsp._render import render_value
 from pynix._lsp._syntax import (
     attrpath_range,
@@ -161,10 +176,22 @@ class TerranixDialect(Dialect):
         4;``), so this one hook is enough for the generic root walk to
         handle already-typed attribute paths; no bare-path fallback (unlike
         ``OPTIONS_NAME``) is needed here.
+
+        Also binds ``moduleSystem`` as a ``moduleEntry`` root and delegates to
+        ``derive_module_roots`` (the exact function ``ModuleSystemDialect``
+        itself uses for real NixOS modules) -- since ``DIALECTS`` runs
+        ``ModuleSystemDialect`` *before* ``TerranixDialect`` (see
+        ``_dialects.py``), its own ``derive_roots`` would already have run
+        and found no ``moduleEntry`` bound yet by the time this method sets
+        one; calling ``derive_module_roots`` again here, now that it's bound,
+        is what actually gets ``config``/``options`` populated for a terranix
+        file, independent of dialect ordering.
         """
         entry = context.roots.get(TERRANIX_ENTRY_NAME)
         if entry is None:
             return
+        context.roots.setdefault(MODULE_ENTRY_NAME, entry.attr("moduleSystem"))
+        derive_module_roots(context)
         config_root = entry.attr("terranix").attr("config")
         try:
             names = await config_root.attr_names()
