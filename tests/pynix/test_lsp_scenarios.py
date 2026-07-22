@@ -29,6 +29,7 @@ from tests.support.lsp_scenario import (
     ExpectCompletion,
     ExpectDiagnostics,
     ExpectHover,
+    ExpectNoCompletion,
     GoTo,
     InsertAfterCursor,
     Scenario,
@@ -435,6 +436,165 @@ async def test_hover_on_a_module_arg_still_works_inside_an_explicit_config_wrapp
         [
             GoTo("1"),
             ExpectHover(contains="x86_64-linux"),
+        ],
+    )
+    await scenario.run(easykubenix_driver)
+
+
+async def test_completion_right_after_the_top_level_kubernetes_dot_lists_real_options(
+    easykubenix_driver: LspDriver,
+) -> None:
+    """Marker LSPOINTTOP sits right after `kubernetes.`, before `objects` -- an empty-partial trigger-on-dot position.
+
+    Not EasykubenixDialect's own doing (it defers for a 1-segment prefix) --
+    falls back to the generic options-tree completion ModuleSystemDialect
+    already provides. Included so every dot boundary along this path has an
+    explicit test, not just the ones the newer dialect handles.
+    """
+    scenario = Scenario(
+        _EASYKUBENIX_CONFIG_NIX.as_uri(),
+        _EASYKUBENIX_CONFIG_NIX.read_text(),
+        [
+            GoTo("TOP"),
+            ExpectCompletion(labels=frozenset({"objects", "resources", "apiMappings"})),
+        ],
+    )
+    await scenario.run(easykubenix_driver)
+
+
+async def test_completion_right_after_the_objects_dot_lists_declared_namespace_names(
+    easykubenix_driver: LspDriver,
+) -> None:
+    """Marker LSPOINTNS sits right after `kubernetes.objects.`, before `default` -- an empty-partial trigger-on-dot position.
+
+    ``EasykubenixDialect._namespace_names`` sources this from the real,
+    already-declared `Namespace` objects in the `none` bucket
+    (`kubernetes.objects.none.Namespace.default` is declared earlier in
+    this same file) rather than every namespace bucket key already used for
+    some other Kind.
+    """
+    scenario = Scenario(
+        _EASYKUBENIX_CONFIG_NIX.as_uri(),
+        _EASYKUBENIX_CONFIG_NIX.read_text(),
+        [
+            GoTo("NS"),
+            ExpectCompletion(labels=frozenset({"default"}), exact=True),
+        ],
+    )
+    await scenario.run(easykubenix_driver)
+
+
+async def test_completion_right_after_the_namespace_dot_lists_known_kind_names(
+    easykubenix_driver: LspDriver,
+) -> None:
+    """Marker LSPOINTKIND sits right after `kubernetes.objects.default.`, before `Deployment`.
+
+    ``EasykubenixDialect._kind_names`` sources this from
+    `config.kubernetes.apiMappings`'s own keys -- every Kind this project
+    knows an apiVersion for (bundled `apiResources/v1.33.json` plus any
+    project-declared extras), a strictly richer source than the OpenAPI
+    schema alone since a CRD Kind can appear here with no corresponding
+    upstream schema definition.
+    """
+    scenario = Scenario(
+        _EASYKUBENIX_CONFIG_NIX.as_uri(),
+        _EASYKUBENIX_CONFIG_NIX.read_text(),
+        [
+            GoTo("KIND"),
+            ExpectCompletion(labels=frozenset({"Deployment", "DaemonSet", "ConfigMap"})),
+        ],
+    )
+    await scenario.run(easykubenix_driver)
+
+
+async def test_completion_right_after_the_kind_dot_does_not_crash_with_no_name_source(
+    easykubenix_driver: LspDriver,
+) -> None:
+    """Marker LSPOINTNAME sits right after `kubernetes.objects.default.Deployment.`, before `p4`.
+
+    The object's own instance name is an arbitrary new name being chosen --
+    there's no sensible existing source to suggest from, so
+    ``EasykubenixDialect.complete`` deliberately returns None here (deferring
+    down the dialect chain), and every other dialect/fallback also has
+    nothing to offer at this position -- pinning that down explicitly
+    (rather than leaving it untested) confirms this doesn't crash or hang
+    now that four different dialects/fallbacks all get a chance at it.
+    """
+    scenario = Scenario(
+        _EASYKUBENIX_CONFIG_NIX.as_uri(),
+        _EASYKUBENIX_CONFIG_NIX.read_text(),
+        [
+            GoTo("NAME"),
+            ExpectNoCompletion(),
+        ],
+    )
+    await scenario.run(easykubenix_driver)
+
+
+async def test_completion_right_after_the_instance_name_dot_lists_top_level_object_fields(
+    easykubenix_driver: LspDriver,
+) -> None:
+    """Marker LSPOINTF1 sits right after `...Deployment.p5.`, before `spec`.
+
+    The shallowest schema-backed case: no `$ref` hop needed at all, just the
+    Deployment definition's own top-level `properties`.
+    """
+    scenario = Scenario(
+        _EASYKUBENIX_CONFIG_NIX.as_uri(),
+        _EASYKUBENIX_CONFIG_NIX.read_text(),
+        [
+            GoTo("F1"),
+            ExpectCompletion(labels=frozenset({"apiVersion", "kind", "metadata", "spec", "status"})),
+        ],
+    )
+    await scenario.run(easykubenix_driver)
+
+
+async def test_completion_right_after_the_spec_dot_lists_deployment_spec_fields(
+    easykubenix_driver: LspDriver,
+) -> None:
+    """Marker LSPOINTF2 sits right after `...p6.spec.`, before `template` -- one `$ref` hop (Deployment -> DeploymentSpec)."""
+    scenario = Scenario(
+        _EASYKUBENIX_CONFIG_NIX.as_uri(),
+        _EASYKUBENIX_CONFIG_NIX.read_text(),
+        [
+            GoTo("F2"),
+            ExpectCompletion(labels=frozenset({"replicas", "selector", "template", "strategy"})),
+        ],
+    )
+    await scenario.run(easykubenix_driver)
+
+
+async def test_completion_right_after_the_template_dot_lists_pod_template_spec_fields(
+    easykubenix_driver: LspDriver,
+) -> None:
+    """Marker LSPOINTF3 sits right after `...p7.spec.template.`, before `spec` -- two `$ref` hops deep (-> PodTemplateSpec)."""
+    scenario = Scenario(
+        _EASYKUBENIX_CONFIG_NIX.as_uri(),
+        _EASYKUBENIX_CONFIG_NIX.read_text(),
+        [
+            GoTo("F3"),
+            ExpectCompletion(labels=frozenset({"metadata", "spec"}), exact=True),
+        ],
+    )
+    await scenario.run(easykubenix_driver)
+
+
+async def test_completion_right_after_the_second_spec_dot_lists_pod_spec_fields(
+    easykubenix_driver: LspDriver,
+) -> None:
+    """Marker LSPOINTF4 sits right after `...p8.spec.template.spec.`, before `containers` -- three `$ref` hops deep (-> PodSpec).
+
+    Proves arbitrary-depth `$ref` resolution genuinely works end-to-end
+    through the real LSP handler, not just the standalone
+    ``pynix._jsonschema``/``_easykubenix_schema`` functions in isolation.
+    """
+    scenario = Scenario(
+        _EASYKUBENIX_CONFIG_NIX.as_uri(),
+        _EASYKUBENIX_CONFIG_NIX.read_text(),
+        [
+            GoTo("F4"),
+            ExpectCompletion(labels=frozenset({"containers", "volumes", "restartPolicy"})),
         ],
     )
     await scenario.run(easykubenix_driver)

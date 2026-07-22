@@ -199,6 +199,22 @@ class ModuleSystemDialect(Dialect):
         value = await self._resolve(context, source, prefix)
         if value is None:
             return None
+        if await is_option_declaration(value):
+            # `prefix` landed exactly ON a leaf mkOption declaration (e.g.
+            # `options.kubernetes.objects`, whose *value* type happens to be
+            # `attrsOf (submodule ...)` but whose own options-tree node is
+            # still just one option, not a namespace of further named
+            # sub-options -- see the module docstring's note on
+            # `attrsOf`-typed options not exposing per-instance `options.
+            # <path>` recursion at all). Completing "further" here via plain
+            # `attr_names()` would surface the option declaration's own
+            # internal mkOption fields (`description`/`type`/`default`/...),
+            # never a real completion candidate -- so this defers instead of
+            # returning that noise, most importantly letting a later,
+            # dialect-specific completion (e.g. EasykubenixDialect's
+            # namespace/Kind-name completion) win instead of being shadowed
+            # by this generic fallback "succeeding" with the wrong thing.
+            return None
         try:
             names = await value.attr_names()
         except NixError:
