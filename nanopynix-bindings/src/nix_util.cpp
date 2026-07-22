@@ -125,6 +125,16 @@ public:
 
     void result(nix::ActivityId id, nix::ResultType type,
                 const nix::Logger::Fields & fields) override {
+        // resProgress/resSetExpected are pure numeric-only progress-bar
+        // ticks (bytes done/expected/running/failed), fired many times per
+        // second per active download/copy with no string payload -- every
+        // consumer of this callback (see pynix/_util.py's _forward_nix_logs)
+        // already discards them downstream. Dropping them here, before the
+        // GIL-acquiring Python callback and the RPC/protobuf/pydantic round
+        // trip they'd otherwise pay for, avoids forwarding a firehose of
+        // noise (six-figure event counts observed for a single provider
+        // fetch) that nothing ever reads.
+        if (type == nix::resProgress || type == nix::resSetExpected) return;
         nb::gil_scoped_acquire gil;
         nb::list fl;
         for (auto & f : fields) {
