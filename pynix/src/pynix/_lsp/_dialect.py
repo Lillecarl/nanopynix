@@ -66,3 +66,13 @@ class Dialect:
     ) -> list[types.CompletionItem] | None:
         """Resolve completion for a path the generic ``resolve_root_path`` walk can't reach."""
         return None
+
+    async def diagnostics(self, context: FileContext, source: str) -> list[types.Diagnostic] | None:
+        """Report schema-validation diagnostics (unknown attributes, etc.) for this dialect's own roots.
+
+        Unlike ``hover``/``complete`` (first-non-None dialect wins),
+        diagnostics from every dialect are unconditionally concatenated by
+        the caller -- each dialect only ever reports on constructs it owns,
+        so there's no ambiguity to resolve between dialects.
+        """
+        return None

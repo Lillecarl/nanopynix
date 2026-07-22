@@ -42,6 +42,7 @@ class PynixLanguageServer(LanguageServer):
         self.nix_session: nanopynix.Session | None = None
         self.store: nanopynix.Store | None = None
         self.contexts: dict[str, FileContext] = {}
+        self.diagnostics: dict[str, list[types.Diagnostic]] = {}
 
     async def ensure_nix(self) -> tuple[nanopynix.Session, nanopynix.Store]:
         """Open the shared Session/Store on first use."""
@@ -159,6 +160,11 @@ async def _sync_document(ls: PynixLanguageServer, uri: str) -> None:
             _context_error_diagnostic(error, directives_by_name[name].line)
             for name, error in context.errors.items()
         )
+        for dialect in DIALECTS:
+            dialect_diagnostics = await dialect.diagnostics(context, source)
+            if dialect_diagnostics is not None:
+                diagnostics.extend(dialect_diagnostics)
+    ls.diagnostics[uri] = diagnostics
     ls.text_document_publish_diagnostics(types.PublishDiagnosticsParams(uri=uri, diagnostics=diagnostics))
 
 
