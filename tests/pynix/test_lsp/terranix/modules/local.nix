@@ -22,6 +22,7 @@
     content3 = lib.tfRef "local_file.greeting.count";
 #                                              vLSPOINT5
     content4 = lib.tfRef "local_file.greeting.c";
+    content5 = "static"; # noqa: TF001 -- dynamically supplied elsewhere
   };
 
   # LSLINE3
