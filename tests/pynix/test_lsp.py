@@ -433,6 +433,90 @@ async def test_document_symbol_lists_bindings_via_the_real_handler(lsp_server: P
     assert names == ["options.services.foo.enable", "config", "systemd.services.foo"]
 
 
+# ── last-good-tree fallback (tree-sitter-nix's unbounded error recovery) ──
+
+
+async def test_document_symbols_fall_back_to_the_last_error_free_parse(lsp_server: PynixLanguageServer) -> None:
+    """Regression test: an incomplete ``formals`` list doesn't stay contained.
+
+    tree-sitter-nix's error recovery keeps trying to extend the
+    comma-separated formal list across everything that follows, shredding a
+    real, already-complete binding arbitrarily far downstream in the same
+    file into unrecognizable fragments -- not just the token actually being
+    typed. Falling back to the last snapshot that parsed with zero
+    ERROR/MISSING nodes means an in-progress edit near the top of a file
+    doesn't blank out the outline for unrelated, already-complete bindings
+    further down.
+    """
+    uri = "file:///last-good-tree-outline-test.nix"
+    good_source = (
+        "{\n"
+        "  resource.local_file.greeting = {\n"
+        '    content = "hello";\n'
+        "  };\n"
+        "  resource.local_file.third = {\n"
+        '    content = "world";\n'
+        "  };\n"
+        "}\n"
+    )
+    lsp_server.workspace.put_text_document(
+        types.TextDocumentItem(uri=uri, language_id="nix", version=1, text=good_source)
+    )
+    await _sync_document(lsp_server, uri)
+    good_names = {symbol.name for symbol in _document_symbols(lsp_server, uri)}
+    assert "resource.local_file.third" in good_names
+
+    broken_source = (
+        "{\n"
+        "  f = { a, b\n"
+        "  resource.local_file.third = {\n"
+        '    content = "world";\n'
+        "  };\n"
+        "}\n"
+    )
+    lsp_server.workspace.update_text_document(
+        types.VersionedTextDocumentIdentifier(uri=uri, version=2),
+        types.TextDocumentContentChangeWholeDocument(text=broken_source),
+    )
+    await _sync_document(lsp_server, uri)
+    assert lsp_server.has_parse_errors[uri]
+
+    names_while_broken = {symbol.name for symbol in _document_symbols(lsp_server, uri)}
+    assert "resource.local_file.third" in names_while_broken
+
+
+async def test_hover_falls_back_to_the_last_error_free_parse(lsp_server: PynixLanguageServer) -> None:
+    """Same corruption as above, but for hover -- and on a byte-identical
+    cursor position, since the corrupting edit replaces one line in place
+    rather than inserting new lines, so the target line's position is the
+    same in both the good and broken snapshots."""
+    uri = asset("module_system/last_good_tree.nix").as_uri()
+    good_source = asset("module_system/last_good_tree.nix").read_text()
+    lsp_server.workspace.put_text_document(
+        types.TextDocumentItem(uri=uri, language_id="nix", version=1, text=good_source)
+    )
+    await _sync_document(lsp_server, uri)
+    assert not lsp_server.has_parse_errors[uri]
+
+    broken_source = good_source.replace(
+        "services.example-daemon.enable = true;", "broken = { a, b"
+    )
+    assert broken_source != good_source
+    lsp_server.workspace.update_text_document(
+        types.VersionedTextDocumentIdentifier(uri=uri, version=2),
+        types.TextDocumentContentChangeWholeDocument(text=broken_source),
+    )
+    await _sync_document(lsp_server, uri)
+    assert lsp_server.has_parse_errors[uri]
+
+    position = cursor_after(broken_source, "port", needle="services.example-daemon.port")
+    hover = await _hover(lsp_server, types.HoverParams(types.TextDocumentIdentifier(uri), position))
+
+    assert hover is not None
+    assert isinstance(hover.contents, types.MarkupContent)
+    assert "Port the example daemon listens on." in hover.contents.value
+
+
 # ── TerranixDialect (real tofu providers schema -json, via the fixture's own wrapper) ──
 
 
