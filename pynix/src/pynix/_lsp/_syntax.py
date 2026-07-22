@@ -165,6 +165,46 @@ def string_literal_path_at(source: str, byte_offset: int) -> list[str] | None:
     return text.split(".")
 
 
+def string_literal_completion_target_at(source: str, byte_offset: int) -> tuple[list[str], str] | None:
+    """Return ``(prefix_path, partial)`` for completion inside a plain string literal.
+
+    Mirrors ``completion_target_at``, but for the text between quotes rather
+    than a bare identifier chain -- e.g. with the cursor right after
+    ``"random_id.suf`` inside ``lib.tfRef "random_id.suf..."``, returns
+    ``(["random_id"], "suf")``. Same shape restriction as
+    ``string_literal_path_at`` (a single, non-interpolated string fragment),
+    but unlike that function, only looks at the text *before* the cursor --
+    completion is inherently about an in-progress, not-yet-finished token, so
+    text after the cursor (e.g. the rest of an already-typed attribute name)
+    is irrelevant here. Dialect-agnostic, same as ``string_literal_path_at``.
+    """
+    tree = parse_nix(source)
+    node = tree.root_node.descendant_for_byte_range(byte_offset, byte_offset)
+    if node is None:
+        return None
+    fragment = node if node.type == "string_fragment" else None
+    if fragment is None and node.parent is not None and node.parent.type == "string_fragment":
+        fragment = node.parent
+    if fragment is None:
+        return None
+    string_expression = fragment.parent
+    if string_expression is None or string_expression.type != "string_expression":
+        return None
+    fragments = [child for child in string_expression.children if child.type == "string_fragment"]
+    if len(fragments) != 1:
+        return None
+    encoded = source.encode()
+    text_before_cursor = encoded[fragment.start_byte : byte_offset].decode()
+    if text_before_cursor and not _DOTTED_CHAIN_FULLMATCH_RE.fullmatch(text_before_cursor):
+        return None
+    segments = text_before_cursor.split(".")
+    partial = segments[-1]
+    prefix = segments[:-1]
+    if not prefix and not partial:
+        return None
+    return prefix, partial
+
+
 def completion_target_at(source: str, byte_offset: int) -> tuple[list[str], str] | None:
     """Return ``(prefix_path, partial)`` for attribute completion at *byte_offset*.
 

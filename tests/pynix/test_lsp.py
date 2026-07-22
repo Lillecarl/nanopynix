@@ -483,3 +483,19 @@ async def test_hover_resolves_a_cross_resource_reference_inside_a_tfref_string(
     assert hover is not None
     assert isinstance(hover.contents, types.MarkupContent)
     assert "padded hexadecimal digits" in hover.contents.value
+
+
+async def test_completion_inside_a_tfref_string_lists_matching_schema_attribute_names(
+    lsp_server: PynixLanguageServer,
+) -> None:
+    """Completing mid-token inside `lib.tfRef "random_id.suffix.he"` lists matching schema attribute names."""
+    uri = asset("terranix/modules/null.nix").as_uri()
+    await _sync_document(lsp_server, uri)
+
+    source = asset("terranix/modules/null.nix").read_text()
+    position = cursor_after(source, "hex", needle="random_id.suffix.hex", offset=2)
+    completion = await _completion(lsp_server, types.CompletionParams(types.TextDocumentIdentifier(uri), position))
+
+    assert completion is not None
+    labels = {item.label for item in completion.items}
+    assert labels == {"hex"}

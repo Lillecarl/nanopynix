@@ -41,7 +41,12 @@ from lsprotocol import types
 from nanopynix.exceptions import NixError
 from pynix._lsp._dialect import Dialect
 from pynix._lsp._render import render_value
-from pynix._lsp._syntax import completion_target_at, identifier_path_at, string_literal_path_at
+from pynix._lsp._syntax import (
+    completion_target_at,
+    identifier_path_at,
+    string_literal_completion_target_at,
+    string_literal_path_at,
+)
 from pynix._lsp._terranix_schema import (
     find_resource_block,
     get_provider_schemas,
@@ -154,10 +159,24 @@ class TerranixDialect(Dialect):
         self, context: FileContext, source: str, byte_offset: int, dialects: list[Dialect]
     ) -> list[types.CompletionItem] | None:
         del dialects
-        target = completion_target_at(source, byte_offset)
-        if target is None:
-            return None
-        prefix, partial = target
+        # The string-literal check is tried first: it's strictly AST-gated
+        # (only matches inside a real, non-interpolated string_fragment), so
+        # it can't misfire outside a string. completion_target_at can't be
+        # trusted to signal "not in a string" via returning None -- its
+        # lexical fallback tier is text-only and doesn't know about quotes,
+        # so it happily (and wrongly) treats the opening `"` as a word
+        # boundary and returns a same-shaped-but-wrong (too-short, missing
+        # the implicit "resource" prefix) result for text inside a string
+        # too.
+        string_target = string_literal_completion_target_at(source, byte_offset)
+        if string_target is not None:
+            string_prefix, partial = string_target
+            prefix = ["resource", *string_prefix]
+        else:
+            target = completion_target_at(source, byte_offset)
+            if target is None:
+                return None
+            prefix, partial = target
         if len(prefix) < 3 or prefix[0] not in _BLOCK_KINDS:
             return None
         schemas = await self._schema_for(context)
