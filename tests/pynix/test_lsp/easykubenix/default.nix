@@ -7,10 +7,19 @@
 # `passthru.eval`: real `config`/`options`/`_module`, no un-hiding
 # workaround needed (see `../terranix/default.nix`'s `moduleSystem` comment
 # for what terranix has to work around instead). That makes `moduleSystem`
-# below directly usable as a `# pynix-lsp: moduleEntry = ...` target, the
-# same plain `ModuleSystemDialect` contract any NixOS module fixture uses.
-# No easykubenix-specific Python dialect code exists yet (see the project
-# memory / plan for the deferred OpenAPI-schema-backed follow-up).
+# below directly usable as the `# pynix-lsp: easykubenixEntry = ...` target's
+# `moduleSystem` field.
+#
+# `openApiSchemaPath` is a pinned upstream v1.33 Kubernetes OpenAPI v2
+# (`swagger.json`-shaped) document -- same major.minor as
+# `easykubenix/apiResources/v1.33.json`, the Kind->apiVersion mapping file
+# `kubernetes.nix` already defaults to, so a Kind resolved via
+# `config.kubernetes.apiMappings` is guaranteed to also exist in this
+# schema's `definitions`. Real easykubenix projects have other options here
+# (a live-cluster `kubectl get --raw /openapi/v2` dump cached to disk, which
+# also picks up installed CRDs a static release schema can never see) --
+# `EasykubenixDialect` (see `pynix/src/pynix/_lsp/_easykubenix.py`) only
+# ever consumes the resulting path, indifferent to how it was produced.
 { }:
 let
   default = import ../../../../. { };
@@ -28,8 +37,14 @@ let
     inherit pkgs;
     modules = testModules;
   };
+
+  k8sOpenApiSchema = pkgs.fetchurl {
+    url = "https://raw.githubusercontent.com/kubernetes/kubernetes/release-1.33/api/openapi-spec/swagger.json";
+    sha256 = "1xkykxxhk72n3x01df0jm9pmw24q2rzizwqnwncibbslhpwspx9a";
+  };
 in
 {
   inherit pkgs;
   moduleSystem = eku.passthru.eval;
+  openApiSchemaPath = "${k8sOpenApiSchema}";
 }

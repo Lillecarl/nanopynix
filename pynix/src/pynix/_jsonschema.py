@@ -165,25 +165,54 @@ def validate(schema: dict[str, Any], value: object) -> list[Finding]:
     return findings
 
 
-def walk(schema: dict[str, Any], path: tuple[str, ...]) -> dict[str, Any] | None:
-    """Return the schema fragment at *path*, descending one ``properties``/``additionalProperties`` hop per segment."""
-    current = schema
+def _deref(schema: dict[str, Any], root: dict[str, Any]) -> dict[str, Any]:
+    """Resolve a Kubernetes-shaped ``{"$ref": "#/definitions/<key>"}`` fragment against *root*, one hop.
+
+    Kubernetes' own OpenAPI schema refs are always exactly this shape (a
+    flat key directly under ``#/definitions/``) -- this is not a general
+    RFC 6901 JSON Pointer resolver. terranix's adapter always fully inlines
+    its converted schemas (no ``$ref`` ever appears), so this is a no-op for
+    every existing caller that never passes a ``$ref``-bearing fragment.
+    """
+    ref = schema.get("$ref")
+    if not isinstance(ref, str) or not ref.startswith("#/definitions/"):
+        return schema
+    definitions = _as_str_keyed_dict(root.get("definitions"))
+    target = definitions.get(ref.removeprefix("#/definitions/"))
+    return _as_str_keyed_dict(target) if isinstance(target, dict) else schema
+
+
+def walk(
+    schema: dict[str, Any], path: tuple[str, ...], *, root: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
+    """Return the schema fragment at *path*, descending one ``properties``/``additionalProperties`` hop per segment.
+
+    *root* is the document ``$ref``s resolve against, defaulting to *schema*
+    itself. Pass the full OpenAPI document (with its own ``definitions``)
+    for a ``$ref``-heavy schema; irrelevant, and safely omittable, for an
+    already-fully-inlined one like terranix's.
+    """
+    root = schema if root is None else root
+    current = _deref(schema, root)
     for segment in path:
         properties = _as_str_keyed_dict(current.get("properties"))
         if segment in properties:
-            current = _as_str_keyed_dict(properties[segment])
+            current = _deref(_as_str_keyed_dict(properties[segment]), root)
             continue
         additional = current.get("additionalProperties")
         if isinstance(additional, dict):
-            current = _as_str_keyed_dict(additional)
+            current = _deref(_as_str_keyed_dict(additional), root)
             continue
         return None
     return current
 
 
-def list_properties(schema: dict[str, Any], path: tuple[str, ...]) -> list[str] | None:
+def list_properties(
+    schema: dict[str, Any], path: tuple[str, ...], *, root: dict[str, Any] | None = None
+) -> list[str] | None:
     """List declared property names at *path* within *schema* (for completion)."""
-    fragment = walk(schema, path) if path else schema
+    root = schema if root is None else root
+    fragment = walk(schema, path, root=root) if path else _deref(schema, root)
     if fragment is None:
         return None
     properties = fragment.get("properties")
@@ -192,24 +221,26 @@ def list_properties(schema: dict[str, Any], path: tuple[str, ...]) -> list[str] 
     return list(_as_str_keyed_dict(properties))
 
 
-def _describe_type(schema: dict[str, Any]) -> str | None:
+def _describe_type(schema: dict[str, Any], root: dict[str, Any]) -> str | None:
     schema_type = schema.get("type")
     if schema_type == "array":
         items = schema.get("items")
-        item_type = _describe_type(_as_str_keyed_dict(items)) if isinstance(items, dict) else None
+        item_type = _describe_type(_deref(_as_str_keyed_dict(items), root), root) if isinstance(items, dict) else None
         return f"array of {item_type}" if item_type else "array"
     if isinstance(schema_type, str):
         return schema_type
     return None
 
 
-def render(schema: dict[str, Any]) -> str:
+def render(schema: dict[str, Any], *, root: dict[str, Any] | None = None) -> str:
     """Render one schema fragment's description/type/deprecated/computed annotations as hover Markdown."""
+    root = schema if root is None else root
+    schema = _deref(schema, root)
     sections: list[str] = []
     description = schema.get("description")
     if description:
         sections.append(str(description))
-    schema_type = _describe_type(schema)
+    schema_type = _describe_type(schema, root)
     if schema_type is not None:
         sections.append(f"type: `{schema_type}`")
     if schema.get("readOnly"):

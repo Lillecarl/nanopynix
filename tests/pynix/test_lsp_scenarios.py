@@ -438,3 +438,123 @@ async def test_hover_on_a_module_arg_still_works_inside_an_explicit_config_wrapp
         ],
     )
     await scenario.run(easykubenix_driver)
+
+
+async def test_hover_on_a_kind_name_summarizes_it_via_the_openapi_schema(easykubenix_driver: LspDriver) -> None:
+    """Marker LSPOINT3 sits on `Deployment` in `kubernetes.objects.default.Deployment.demo.spec.replicas`.
+
+    Unlike LSPOINT2's shallow ``options.kubernetes.objects`` case (a fixed,
+    schema-independent mkOption description shared by every Kind),
+    ``EasykubenixDialect`` resolves the *specific* Kind's own OpenAPI
+    definition -- via ``config.kubernetes.apiMappings.Deployment`` (="apps/v1")
+    and the pinned schema at ``../default.nix``'s ``openApiSchemaPath`` -- and
+    renders that definition's top-level description.
+    """
+    scenario = Scenario(
+        _EASYKUBENIX_DEMO_NIX.as_uri(),
+        _EASYKUBENIX_DEMO_NIX.read_text(),
+        [
+            GoTo("3"),
+            ExpectHover(contains="declarative updates"),
+        ],
+    )
+    await scenario.run(easykubenix_driver)
+
+
+async def test_hover_on_a_field_inside_a_kubernetes_object_body_resolves_via_the_openapi_schema(
+    easykubenix_driver: LspDriver,
+) -> None:
+    """Marker LSPOINT4 sits on `replicas` in `...Deployment.demo.spec.replicas = 1;`.
+
+    The real per-field case this dialect exists for: `kubernetes.nix`'s
+    object bodies are `freeformType = ekn.lib.kubeValueType` (a generic
+    recursive JSON-ish type), so Nix itself has zero structural knowledge of
+    what `spec.replicas` means -- that only exists in the Kubernetes OpenAPI
+    schema, resolved here by walking `spec` (a `$ref` to `DeploymentSpec`)
+    then `replicas` through `pynix._jsonschema.walk`.
+    """
+    scenario = Scenario(
+        _EASYKUBENIX_DEMO_NIX.as_uri(),
+        _EASYKUBENIX_DEMO_NIX.read_text(),
+        [
+            GoTo("4"),
+            ExpectHover(contains="Number of desired pods"),
+        ],
+    )
+    await scenario.run(easykubenix_driver)
+
+
+async def test_completion_inside_a_kubernetes_object_body_lists_openapi_schema_fields(
+    easykubenix_driver: LspDriver,
+) -> None:
+    """Marker range LSSTART5/LSEND5 spans `replicas` on a second Deployment, retyped as `rep`.
+
+    Proves ``EasykubenixDialect.complete`` (not just ``hover``) walks the
+    OpenAPI schema -- ``list_properties`` at ``("spec",)`` for `Deployment`
+    must include `replicas` (and its DeploymentSpec siblings) as real,
+    schema-sourced completion items.
+    """
+    scenario = Scenario(
+        _EASYKUBENIX_DEMO_NIX.as_uri(),
+        _EASYKUBENIX_DEMO_NIX.read_text(),
+        [
+            Select("5"),
+            Delete(),
+            Type("rep"),
+            ExpectCompletion(labels=frozenset({"replicas"})),
+        ],
+    )
+    await scenario.run(easykubenix_driver)
+
+
+async def test_hover_on_a_field_written_in_nested_attrset_style_still_resolves_via_the_openapi_schema(
+    easykubenix_driver: LspDriver,
+) -> None:
+    """Marker LSPOINT6 sits on `replicas` inside `Deployment.demoNested = { spec = { replicas = 2; }; };`.
+
+    Regression coverage for a real gap found via manual testing:
+    `identifier_path_at` alone only ever resolves the *innermost* binding's
+    own flat attrpath (`["replicas"]` here), losing the outer
+    `kubernetes.objects.default.Deployment.demoNested.spec` prefix entirely
+    since it never walks up through the wrapping `spec = { ... };`/`Deployment.
+    demoNested = { ... };` bindings. `EasykubenixDialect` recovers this via
+    `enclosing_binding_path_at` (see pynix/src/pynix/_lsp/_syntax.py).
+    """
+    scenario = Scenario(
+        _EASYKUBENIX_DEMO_NIX.as_uri(),
+        _EASYKUBENIX_DEMO_NIX.read_text(),
+        [
+            GoTo("6"),
+            ExpectHover(contains="Number of desired pods"),
+        ],
+    )
+    await scenario.run(easykubenix_driver)
+
+
+async def test_completion_on_a_bare_key_in_nested_attrset_style_recovers_the_kind_context(
+    easykubenix_driver: LspDriver,
+) -> None:
+    """Marker range LSSTART7/LSEND7 spans `metadata` on a bare key inside `Deployment.demoNested2 = { ... };`.
+
+    The exact bug reported via manual testing: completing a bare (dot-less)
+    key typed directly inside a Kubernetes object's nested-style body (e.g.
+    retyping `metadata` from scratch as `me`) returned nothing at all --
+    `completion_target_at`'s own lexical scan sees only the empty local
+    prefix `[]` for a bare identifier, with zero awareness of the enclosing
+    `kubernetes.objects.default.Deployment.demoNested2` context.
+    `EasykubenixDialect.complete` now prepends `enclosing_binding_path_at`'s
+    result before checking the Kind-anchored shape.
+    """
+    scenario = Scenario(
+        _EASYKUBENIX_DEMO_NIX.as_uri(),
+        _EASYKUBENIX_DEMO_NIX.read_text(),
+        [
+            Select("7"),
+            Delete(),
+            Type("me"),
+            ExpectCompletion(labels=frozenset({"metadata"})),
+        ],
+    )
+    await scenario.run(easykubenix_driver)
+
+

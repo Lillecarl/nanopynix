@@ -451,7 +451,7 @@ def test_repl_tree_sitter_lexer_highlights_plain_variable_references() -> None:
     (as opposed to binding names or formals) need their own explicit capture
     mapping or they silently stop being highlighted at all.
     """
-    document = Document(':shell let x = 1; in x')
+    document = Document(":shell let x = 1; in x")
 
     fragments = _NixLexer().lex_document(document)(0)
 

@@ -64,7 +64,15 @@ class Dialect:
         byte_offset: int,
         dialects: list[Dialect],
     ) -> list[types.CompletionItem] | None:
-        """Resolve completion for a path the generic ``resolve_root_path`` walk can't reach."""
+        """Resolve completion for a path the generic ``resolve_root_path`` walk can't reach.
+
+        Unlike ``hover`` (any non-None result wins), the caller only treats a
+        *non-empty* list as final -- an empty list falls through to the next
+        dialect exactly as if this one had returned None. Returning `[]`
+        rather than `None` is still meaningful (it says "I recognize this
+        position, there's just nothing to suggest here"), but must not be
+        used to deliberately suppress a later, more specific dialect.
+        """
         return None
 
     async def diagnostics(self, context: FileContext, source: str) -> list[types.Diagnostic] | None:
