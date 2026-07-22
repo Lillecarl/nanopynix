@@ -112,6 +112,21 @@ def test_block_converts_nested_list_block_as_array_of_object() -> None:
     assert schema["properties"]["ingress"]["items"]["required"] == ["port"]
 
 
+def test_block_carries_its_own_description_and_deprecated() -> None:
+    """Block-level ``description``/``deprecated`` (rare in practice -- see _terranix_schema.py's SchemaBlock) survive the conversion."""
+    block = SchemaBlock(description="A local file resource.", deprecated=True)
+    schema = block_to_json_schema(block)
+    assert schema["description"] == "A local file resource."
+    assert schema["deprecated"] is True
+
+
+def test_block_without_a_description_omits_the_key() -> None:
+    block = SchemaBlock(attributes={"filename": SchemaAttribute(type="string")})
+    schema = block_to_json_schema(block)
+    assert "description" not in schema
+    assert "deprecated" not in schema
+
+
 def test_converted_block_validates_via_the_generic_engine() -> None:
     block = SchemaBlock(
         attributes={

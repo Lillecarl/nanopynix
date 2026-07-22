@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING, cast
 from lsprotocol import types
 
 from nanopynix.exceptions import NixError
-from pynix._jsonschema import FindingKind, validate
+from pynix._jsonschema import FindingKind, list_properties, render, validate
 from pynix._lsp._dialect import Dialect
 from pynix._lsp._render import render_value
 from pynix._lsp._syntax import (
@@ -126,6 +126,25 @@ def _build_diagnostic(source: str, path: tuple[str, ...], code: str, message: st
     )
 
 
+def _render_resource_type(block: SchemaBlock) -> str:
+    """Render a resource/data-source *type*'s own hover, from its JSON Schema conversion.
+
+    Reuses ``block_to_json_schema`` (already the diagnostics path's schema
+    source) rather than a bespoke renderer: whatever block-level
+    ``description``/``deprecated`` the provider actually set (few do -- see
+    ``_terranix_schema.py``'s ``SchemaBlock``) surfaces here for free via the
+    generic ``pynix._jsonschema.render``, with the declared attribute names
+    listed alongside so hovering the type name is still useful even when the
+    provider left no block-level prose.
+    """
+    schema = block_to_json_schema(block)
+    sections = [render(schema)]
+    names = list_properties(schema, ())
+    if names:
+        sections.append("attributes: " + ", ".join(f"`{name}`" for name in sorted(names)))
+    return "\n\n".join(sections)
+
+
 class TerranixDialect(Dialect):
     """terranix support, as a peer ``Dialect`` (see ``_dialect.py``)."""
 
@@ -208,7 +227,7 @@ class TerranixDialect(Dialect):
             if string_path is None:
                 return None
             path = ["resource", *string_path]
-        if len(path) < 4 or path[0] not in _BLOCK_KINDS:
+        if len(path) < 2 or path[0] not in _BLOCK_KINDS:
             return None
         return path
 
@@ -246,6 +265,14 @@ class TerranixDialect(Dialect):
         block = await self._block_for(context, path[0], path[1])
         if block is None:
             return None
+        if len(path) < 4:
+            # Cursor is on the resource/data *type* name itself (``path`` has
+            # only ``[kind, type]`` or ``[kind, type, instance]`` segments) --
+            # there's no specific attribute to describe, so this renders the
+            # block as a whole via the same JSON Schema conversion the
+            # diagnostics path already uses, rather than a separate bespoke
+            # renderer.
+            return _render_resource_type(block)
         attribute = walk_schema_block(block, path[3:])
         if attribute is None:
             return None
