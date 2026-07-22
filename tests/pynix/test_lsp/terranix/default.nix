@@ -56,6 +56,7 @@ let
     ./modules/random.nix
     ./modules/local.nix
     ./modules/null.nix
+    ./modules/config.nix
     requiredProvidersModule
     backendModule
   ];

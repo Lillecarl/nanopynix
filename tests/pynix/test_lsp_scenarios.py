@@ -46,6 +46,9 @@ if TYPE_CHECKING:
 
 _LOCAL_NIX = asset("terranix/modules/local.nix")
 _NULL_NIX = asset("terranix/modules/null.nix")
+_CONFIG_NIX = asset("terranix/modules/config.nix")
+_EASYKUBENIX_DEMO_NIX = asset("easykubenix/modules/demo.nix")
+_EASYKUBENIX_CONFIG_NIX = asset("easykubenix/modules/config.nix")
 
 
 @pytest.fixture(params=["in_process", "wire"])
@@ -55,6 +58,20 @@ async def terranix_driver(
     lsp_wire: tuple[PynixLanguageServer, pytest_lsp.LanguageClient],
 ) -> AsyncIterator[LspDriver]:
     """Both backends for the terranix scenarios below, parametrized so each scenario runs against each."""
+    if request.param == "in_process":
+        yield InProcessDriver(lsp_server)
+        return
+    _wire_server, wire_client = lsp_wire
+    yield WireDriver(wire_client)
+
+
+@pytest.fixture(params=["in_process", "wire"])
+async def easykubenix_driver(
+    request: pytest.FixtureRequest,
+    lsp_server: PynixLanguageServer,
+    lsp_wire: tuple[PynixLanguageServer, pytest_lsp.LanguageClient],
+) -> AsyncIterator[LspDriver]:
+    """Both backends for the easykubenix scenarios below, parametrized so each scenario runs against each."""
     if request.param == "in_process":
         yield InProcessDriver(lsp_server)
         return
@@ -325,3 +342,99 @@ async def test_unknown_attribute_reports_tf001_unless_suppressed_on_its_own_line
         ],
     )
     await scenario.run(terranix_driver)
+
+
+async def test_resource_type_completion_still_works_inside_an_explicit_config_wrapper(
+    terranix_driver: LspDriver,
+) -> None:
+    """config.nix wraps its definitions in `config = { ... };` -- the NixOS-module convention, see config.nix's own comment.
+
+    Regression coverage for exactly the manual check that motivated this
+    fixture: resource *type* completion (mirroring
+    ``test_resource_type_completion_lists_the_full_provider_catalog``) must
+    resolve identically whether or not the module wraps its definitions in
+    `config`, since `TerranixDialect`'s roots come from the already-merged
+    `.config` and `completion_target_at` only ever looks at the innermost
+    enclosing binding's own attrpath, never an outer `config` key.
+    """
+    scenario = Scenario(
+        _CONFIG_NIX.as_uri(),
+        _CONFIG_NIX.read_text(),
+        [
+            Select("1"),
+            Delete(),
+            Type("resource.rand"),
+            ExpectCompletion(labels=frozenset({"random_id", "random_password", "random_string"})),
+        ],
+    )
+    await scenario.run(terranix_driver)
+
+
+async def test_hover_on_a_module_arg_resolves_for_easykubenix_files(easykubenix_driver: LspDriver) -> None:
+    """Marker LSPOINT1 sits on `system` in `pkgs.stdenv.hostPlatform.system`.
+
+    Unlike terranix, easykubenix needs no un-hiding workaround at all --
+    ``../easykubenix/default.nix`` goes through easykubenix's own real entry
+    point, whose ``passthru.eval`` already exposes the raw ``lib.evalModules``
+    result. This proves the plain ``ModuleSystemDialect`` (no new
+    easykubenix-specific Python code) resolves `_module.args` for an
+    easykubenix file's own top-level lambda formals exactly like it already
+    does for terranix's `null.nix` and any ordinary NixOS module.
+    """
+    scenario = Scenario(
+        _EASYKUBENIX_DEMO_NIX.as_uri(),
+        _EASYKUBENIX_DEMO_NIX.read_text(),
+        [
+            GoTo("1"),
+            ExpectHover(contains="x86_64-linux"),
+        ],
+    )
+    await scenario.run(easykubenix_driver)
+
+
+async def test_hover_on_a_real_easykubenix_option_description(easykubenix_driver: LspDriver) -> None:
+    """Marker LSPOINT2 sits on `objects`, the second segment of a flat top-level binding.
+
+    Deliberately shallow: nixpkgs' module system does not expose per-instance
+    `options.<path>` recursion for `attrsOf submodule`-typed options via
+    plain attribute access at all (confirmed with an isolated `evalModules`
+    repro, independent of easykubenix's own design -- the real mechanism is
+    `type.getSubOptions`, used internally by documentation tooling, not a
+    live per-instance tree). `options.kubernetes.objects` itself is the
+    deepest path this mechanism can resolve, and it carries a real,
+    substantial `mkOption` description -- proving options-tree hover works
+    for an easykubenix module with zero new Python code.
+    """
+    scenario = Scenario(
+        _EASYKUBENIX_DEMO_NIX.as_uri(),
+        _EASYKUBENIX_DEMO_NIX.read_text(),
+        [
+            GoTo("2"),
+            ExpectHover(contains="grouped by namespace"),
+        ],
+    )
+    await scenario.run(easykubenix_driver)
+
+
+async def test_hover_on_a_module_arg_still_works_inside_an_explicit_config_wrapper(
+    easykubenix_driver: LspDriver,
+) -> None:
+    """config.nix wraps its definitions in `config = { ... };` -- see config.nix's own comment.
+
+    Regression coverage mirroring
+    ``test_resource_type_completion_still_works_inside_an_explicit_config_wrapper``
+    for terranix: `_module.args` resolution (marker LSPOINT1, same
+    `pkgs.stdenv.hostPlatform.system` proof as demo.nix's LSPOINT1) must
+    resolve identically whether or not the module wraps its definitions in
+    `config`, since `identifier_path_at` only ever looks at the innermost
+    enclosing binding's own attrpath, never an outer `config` key.
+    """
+    scenario = Scenario(
+        _EASYKUBENIX_CONFIG_NIX.as_uri(),
+        _EASYKUBENIX_CONFIG_NIX.read_text(),
+        [
+            GoTo("1"),
+            ExpectHover(contains="x86_64-linux"),
+        ],
+    )
+    await scenario.run(easykubenix_driver)
