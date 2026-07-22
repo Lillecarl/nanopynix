@@ -73,9 +73,27 @@ def identifier_path_at(source: str, byte_offset: int) -> list[str] | None:
     the enclosing binding's own attrpath; it does not walk up through
     parent bindings for a nested-attrset-style definition like
     ``services = { foo = true; };``.
+
+    Tries *byte_offset* first, then falls back to *byte_offset - 1*: the same
+    token-boundary quirk fixed in ``_string_fragment_at`` applies here too --
+    a cursor right after an identifier the user just finished typing (e.g.
+    right after ``count`` in ``count = 1;``, before the following space)
+    resolves to the enclosing ``binding`` node, not the ``identifier``, since
+    ``descendant_for_byte_range`` favors the token *following* a boundary
+    point. The fallback only fires when the primary lookup finds nothing, so
+    it can't misfire for the (much more common) cursor-inside-a-token case,
+    which already succeeds on the first try.
     """
     tree = parse_nix(source)
-    node = tree.root_node.descendant_for_byte_range(byte_offset, byte_offset)
+    result = _identifier_path_at_node(source, tree.root_node.descendant_for_byte_range(byte_offset, byte_offset))
+    if result is not None or byte_offset == 0:
+        return result
+    return _identifier_path_at_node(
+        source, tree.root_node.descendant_for_byte_range(byte_offset - 1, byte_offset - 1)
+    )
+
+
+def _identifier_path_at_node(source: str, node: Any | None) -> list[str] | None:
     if node is None:
         return None
 
@@ -131,6 +149,35 @@ _IDENTIFIER_CHAIN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-
 _DOTTED_CHAIN_FULLMATCH_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
 
 
+def _string_fragment_at(source: str, byte_offset: int) -> Any | None:
+    """Return the sole ``string_fragment`` node containing *byte_offset*, if any.
+
+    ``descendant_for_byte_range`` resolves a zero-width point sitting exactly
+    on a token boundary to whichever token follows it -- so a cursor right
+    after the last character the user just typed (immediately before the
+    closing ``"``) resolves to the closing-quote token, not the
+    ``string_fragment`` a moment ago. That's the single most common
+    completion position there is (type some characters, cursor sits right
+    after them), so this climbs from whatever node the point query returns up
+    to its enclosing ``string_expression`` and then locates the fragment by
+    byte range instead of trusting the point query's own node choice.
+    """
+    tree = parse_nix(source)
+    node = tree.root_node.descendant_for_byte_range(byte_offset, byte_offset)
+    string_expression = node
+    while string_expression is not None and string_expression.type != "string_expression":
+        string_expression = string_expression.parent
+    if string_expression is None:
+        return None
+    fragments = [child for child in string_expression.children if child.type == "string_fragment"]
+    if len(fragments) != 1:
+        return None
+    fragment = fragments[0]
+    if not (fragment.start_byte <= byte_offset <= fragment.end_byte):
+        return None
+    return fragment
+
+
 def string_literal_path_at(source: str, byte_offset: int) -> list[str] | None:
     """Return the dotted path inside a plain string literal containing *byte_offset*.
 
@@ -143,20 +190,8 @@ def string_literal_path_at(source: str, byte_offset: int) -> list[str] | None:
     has an interpolation (``string_expression`` would then have more than
     one child between the quotes) or isn't dotted-identifier-shaped.
     """
-    tree = parse_nix(source)
-    node = tree.root_node.descendant_for_byte_range(byte_offset, byte_offset)
-    if node is None:
-        return None
-    fragment = node if node.type == "string_fragment" else None
-    if fragment is None and node.parent is not None and node.parent.type == "string_fragment":
-        fragment = node.parent
+    fragment = _string_fragment_at(source, byte_offset)
     if fragment is None:
-        return None
-    string_expression = fragment.parent
-    if string_expression is None or string_expression.type != "string_expression":
-        return None
-    fragments = [child for child in string_expression.children if child.type == "string_fragment"]
-    if len(fragments) != 1:
         return None
     encoded = source.encode()
     text = encoded[fragment.start_byte : fragment.end_byte].decode()
@@ -178,20 +213,8 @@ def string_literal_completion_target_at(source: str, byte_offset: int) -> tuple[
     text after the cursor (e.g. the rest of an already-typed attribute name)
     is irrelevant here. Dialect-agnostic, same as ``string_literal_path_at``.
     """
-    tree = parse_nix(source)
-    node = tree.root_node.descendant_for_byte_range(byte_offset, byte_offset)
-    if node is None:
-        return None
-    fragment = node if node.type == "string_fragment" else None
-    if fragment is None and node.parent is not None and node.parent.type == "string_fragment":
-        fragment = node.parent
+    fragment = _string_fragment_at(source, byte_offset)
     if fragment is None:
-        return None
-    string_expression = fragment.parent
-    if string_expression is None or string_expression.type != "string_expression":
-        return None
-    fragments = [child for child in string_expression.children if child.type == "string_fragment"]
-    if len(fragments) != 1:
         return None
     encoded = source.encode()
     text_before_cursor = encoded[fragment.start_byte : byte_offset].decode()
