@@ -34,19 +34,23 @@ attribute's description/type) that no Nix value carries.
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from lsprotocol import types
 
 from nanopynix.exceptions import NixError
+from pynix._jsonschema import FindingKind, validate
 from pynix._lsp._dialect import Dialect
 from pynix._lsp._render import render_value
 from pynix._lsp._syntax import (
+    attrpath_range,
     completion_target_at,
     identifier_path_at,
     string_literal_completion_target_at,
     string_literal_path_at,
+    suppressed_codes_on_line,
 )
+from pynix._lsp._terranix_jsonschema import block_to_json_schema
 from pynix._lsp._terranix_schema import (
     SchemaBlock,
     find_resource_block,
@@ -69,6 +73,57 @@ if TYPE_CHECKING:
 TERRANIX_ENTRY_NAME = "terranixEntry"
 _BLOCK_KINDS = ("resource", "data")
 _DEFAULT_TOFU_VERSION = "1.12"
+_DIAGNOSTIC_SOURCE = "pynix-lsp"
+
+
+def _rule_code_for(block: SchemaBlock, path: tuple[str | int, ...]) -> str | None:
+    """Disambiguate a generic ``UNKNOWN_PROPERTY`` finding into TF001 (attribute) vs TF002 (nested block type).
+
+    ``block_to_json_schema`` folds both ``attributes`` and ``block_types``
+    into the same JSON Schema ``properties`` dict, so the generic engine
+    can't tell them apart -- this walks the *original* ``SchemaBlock`` (not
+    the converted JSON Schema) to check which one the offending key actually
+    was. Returns None (no diagnostic) if *path* doesn't resolve to a plain
+    string-keyed location within *block*.
+    """
+    current = block
+    for segment in path[:-1]:
+        if not isinstance(segment, str):
+            return None
+        nested = current.block_types.get(segment)
+        if nested is None:
+            return None
+        current = nested.block
+    final = path[-1]
+    if not isinstance(final, str):
+        return None
+    return "TF002" if final in current.block_types else "TF001"
+
+
+def _build_diagnostic(source: str, path: tuple[str, ...], code: str, message: str) -> types.Diagnostic | None:
+    """Build one diagnostic at *path*'s resolved source range, or drop it if suppressed on that line.
+
+    Falls back to ``Position(0, 0)`` (mirrors ``_context_error_diagnostic``'s
+    existing whole-directive fallback shape in ``_handlers.py``) when
+    ``attrpath_range`` can't resolve *path* -- a finding that can't be
+    precisely anchored is still reported, just without a precise range.
+    """
+    span = attrpath_range(source, path)
+    line = span[0] if span is not None else 0
+    if code in suppressed_codes_on_line(source, line):
+        return None
+    if span is not None:
+        start = types.Position(span[0], span[1])
+        end = types.Position(span[2], span[3])
+    else:
+        start = end = types.Position(0, 0)
+    return types.Diagnostic(
+        range=types.Range(start=start, end=end),
+        message=message,
+        severity=types.DiagnosticSeverity.Warning,
+        code=code,
+        source=_DIAGNOSTIC_SOURCE,
+    )
 
 
 class TerranixDialect(Dialect):
@@ -276,3 +331,64 @@ class TerranixDialect(Dialect):
         if names is None:
             return None
         return [types.CompletionItem(label=name) for name in names if name.startswith(partial)]
+
+    async def diagnostics(self, context: FileContext, source: str) -> list[types.Diagnostic] | None:
+        """Flag unknown attributes/nested-block types on every resource/data instance declared in *source*.
+
+        ``context.roots`` reflects the *whole* terranix project (every
+        module the directive's own ``import ../default.nix { }``-style
+        expression pulls in), not just the currently open document -- a
+        cross-resource reference in this repo's own fixtures resolves to a
+        different file entirely. Diagnostics must NOT be reported against
+        instances declared in some *other* file though (their positions
+        would resolve against the wrong document's text) -- the
+        ``attrpath_range(source, ...)`` existence check below filters the
+        merged-project instance list down to just the ones actually written
+        in *this* document.
+
+        v1 only emits TF001 (unknown attribute) and TF002 (unknown nested
+        block type) -- TF003 (missing required)/TF004 (type mismatch) are
+        real findings ``pynix._jsonschema.validate`` already produces, but
+        are deliberately filtered out here since they have no assigned,
+        suppressible rule code yet.
+        """
+        found: list[types.Diagnostic] = []
+        for block_kind in _BLOCK_KINDS:
+            root = context.roots.get(block_kind)
+            if root is None:
+                continue
+            try:
+                resource_types = await root.attr_names()
+            except NixError:
+                continue
+            for resource_type in resource_types:
+                block = await self._block_for(context, block_kind, resource_type)
+                if block is None:
+                    continue
+                schema = block_to_json_schema(block)
+                type_root = root.attr(resource_type)
+                try:
+                    instance_names = await type_root.attr_names()
+                except NixError:
+                    continue
+                for instance_name in instance_names:
+                    if attrpath_range(source, (block_kind, resource_type, instance_name)) is None:
+                        continue
+                    try:
+                        value = await type_root.attr(instance_name).force_json()
+                    except NixError:
+                        continue
+                    for finding in validate(schema, value):
+                        if finding.kind is not FindingKind.UNKNOWN_PROPERTY:
+                            continue
+                        code = _rule_code_for(block, finding.path)
+                        if code is None:
+                            continue
+                        full_path_raw = (block_kind, resource_type, instance_name, *finding.path)
+                        if not all(isinstance(segment, str) for segment in full_path_raw):
+                            continue
+                        full_path = cast("tuple[str, ...]", full_path_raw)
+                        diagnostic = _build_diagnostic(source, full_path, code, finding.message)
+                        if diagnostic is not None:
+                            found.append(diagnostic)
+        return found
