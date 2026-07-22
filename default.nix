@@ -145,6 +145,17 @@ let
                     pyproject-nix
                     tofuCoreSchemaTool
                     ;
+                  # `pkgs.path` (the nixpkgs source tree) would otherwise be
+                  # shadowed by python3Packages' own PyPI package literally
+                  # named "path" -- `pkgs // python3Packages` above resolves
+                  # to the latter. Named distinctly so any consumer wanting
+                  # the real nixpkgs source path doesn't silently get the
+                  # wrong thing.
+                  nixpkgsPath = pkgs.path;
+                  # Same shadowing problem: python3Packages.tree-sitter is the
+                  # PyPI `tree-sitter` bindings package, not pkgs.tree-sitter
+                  # (the CLI derivation, whose passthru has `buildGrammar`).
+                  treeSitterCli = pkgs.tree-sitter;
                 }
                 // final
               );
