@@ -801,7 +801,7 @@ async def test_main_program_falls_back_to_pname_when_meta_lacks_main_program() -
 async def test_main_program_rejects_non_string_meta_main_program() -> None:
     value = _RunValue({"meta": _RunValue({"mainProgram": 123}, {})}, {})
 
-    with pytest.raises(ReplRunError, match="meta.mainProgram is not a string"):
+    with pytest.raises(ReplRunError, match=r"meta\.mainProgram is not a string"):
         await _main_program(value)
 
 
@@ -815,7 +815,7 @@ async def test_main_program_rejects_non_string_pname() -> None:
 async def test_main_program_rejects_derivation_with_no_identifying_attrs() -> None:
     value = _RunValue({}, {})
 
-    with pytest.raises(ReplRunError, match="has neither meta.mainProgram, pname, nor name"):
+    with pytest.raises(ReplRunError, match=r"has neither meta\.mainProgram, pname, nor name"):
         await _main_program(value)
 
 

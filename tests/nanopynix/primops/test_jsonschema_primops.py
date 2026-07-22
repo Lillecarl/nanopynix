@@ -40,8 +40,7 @@ async def test_invalid_value_raises_with_violation_details():
         session.eval(store) as eval,
     ):
         with pytest.raises(Exception) as exc_info:  # noqa: PT011
-            v = await eval.string(f"builtins.validateJSONSchema {{ count = -1; }} {_WIDGET_SCHEMA}")
-            await v.force_deep()
+            await (await eval.string(f"builtins.validateJSONSchema {{ count = -1; }} {_WIDGET_SCHEMA}")).force_deep()
         message = str(exc_info.value)
         assert "validateJSONSchema: value does not match schema" in message
         assert "'name' is a required property" in message
@@ -56,8 +55,7 @@ async def test_malformed_schema_raises_descriptive_error():
         session.eval(store) as eval,
     ):
         with pytest.raises(Exception) as exc_info:  # noqa: PT011
-            v = await eval.string(f"builtins.validateJSONSchema {{ }} {_MALFORMED_SCHEMA}")
-            await v.force_deep()
+            await (await eval.string(f"builtins.validateJSONSchema {{ }} {_MALFORMED_SCHEMA}")).force_deep()
         message = str(exc_info.value)
         assert "validateJSONSchema: schema file" in message
         assert "is invalid" in message
