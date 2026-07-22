@@ -90,6 +90,28 @@ jq -c 'select(.nodeid == "tests/test_foo.py::test_bar") | .duration_s' .pytest-a
 | `--agent-allow-pipe` | `PYTEST_AGENT_ALLOW_PIPE` | off | Skip the piped-stdout guard below |
 | n/a | `PYTEST_AGENT_NO_AUTODETECT` | off | Disable the harness-env-var auto-activation |
 
+### Profiling a slow test
+
+Add `profile` as a test parameter to profile it with
+[pyinstrument](https://github.com/joerick/pyinstrument) and get a text report
+written to disk automatically -- no other change to the test body:
+
+```python
+def test_something_slow(profile):
+    do_the_slow_thing()
+```
+
+The report lands next to that test's other output -- `test_bar.profile.txt`
+alongside `test_bar.log`/`test_bar.json` under the current run directory when
+`--agent` is active, or under a fixed `<agent-dir>/profiles/...` (overwritten
+each run) otherwise.
+
+`pyinstrument` is a hard dependency of pytest-agent itself, not an optional
+extra -- pytest-agent is the thing that's optional (only pulled into a
+project's environment, here via `nix/shell.nix`, when its detail-on-disk
+philosophy is wanted at all), so there's no lighter-weight "pytest-agent
+without a profiler" install worth supporting.
+
 ### The piped-stdout guard
 
 Independently of `--agent`, this plugin refuses to run at all (exit code 2,

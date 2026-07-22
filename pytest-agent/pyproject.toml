@@ -7,7 +7,7 @@ name = "pytest-agent"
 version = "0.1.0"
 description = "AI-agent-friendly pytest configuration: minimal terminal noise, full per-test detail on disk"
 requires-python = ">=3.10"
-dependencies = ["pytest>=8"]
+dependencies = ["pytest>=8", "pyinstrument"]
 
 [project.entry-points.pytest11]
 agent = "pytest_agent.plugin"
