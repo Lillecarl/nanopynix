@@ -68,8 +68,9 @@ def linked_nix_runtime() -> NixRuntime:
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--nix-test-backends",
-        default="local,daemon",
-        help="comma-separated hermetic Nix backends: local,daemon",
+        default="local",
+        help="comma-separated hermetic Nix backends: local,daemon (CI and the TSan workflows always pass this "
+        "explicitly, so this default only governs plain local `pytest` invocations)",
     )
     parser.addoption(
         "--nix-sanitizer",
