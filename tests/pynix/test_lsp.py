@@ -10,6 +10,7 @@ from pynix._lsp._syntax import (
     completion_target_at,
     identifier_path_at,
     parse_errors,
+    string_literal_path_at,
     top_level_lambda_formals,
     top_level_symbols,
 )
@@ -94,6 +95,25 @@ def test_identifier_path_at_resolves_a_binding_attrpath_key() -> None:
     source = "{ services.foo = true; }"
     offset = source.index("foo")
     assert identifier_path_at(source, offset) == ["services", "foo"]
+
+
+def test_string_literal_path_at_truncates_to_the_segment_under_the_cursor() -> None:
+    """Cursor on the first segment returns just that segment, not the whole dotted chain."""
+    source = '"random_id.suffix.hex"'
+    offset = source.index("random_id")
+    assert string_literal_path_at(source, offset) == ["random_id"]
+
+
+def test_string_literal_path_at_truncates_through_a_middle_segment() -> None:
+    source = '"random_id.suffix.hex"'
+    offset = source.index("suffix")
+    assert string_literal_path_at(source, offset) == ["random_id", "suffix"]
+
+
+def test_string_literal_path_at_on_the_final_segment_returns_the_whole_chain() -> None:
+    source = '"random_id.suffix.hex"'
+    offset = source.index("hex")
+    assert string_literal_path_at(source, offset) == ["random_id", "suffix", "hex"]
 
 
 def test_completion_target_at_splits_prefix_and_partial() -> None:

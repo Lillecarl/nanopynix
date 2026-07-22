@@ -41,6 +41,8 @@ class SchemaAttribute(BaseModel):
     optional: bool = False
     computed: bool = False
     deprecated: bool = False
+    sensitive: bool = False
+    write_only: bool = False
 
 
 class SchemaNestedBlock(BaseModel):
@@ -60,6 +62,8 @@ class SchemaBlock(BaseModel):
 
     attributes: dict[str, SchemaAttribute] = Field(default_factory=dict)
     block_types: dict[str, SchemaNestedBlock] = Field(default_factory=dict)
+    description: str | None = None
+    deprecated: bool = False
 
 
 SchemaBlock.model_rebuild()
@@ -251,6 +255,10 @@ def render_schema_attribute(attribute: SchemaAttribute) -> str:
         sections.append("optional")
     if attribute.computed:
         sections.append("computed")
+    if attribute.sensitive:
+        sections.append("sensitive")
+    if attribute.write_only:
+        sections.append("write-only")
     if attribute.deprecated:
         sections.append("deprecated")
     return "\n\n".join(sections) if sections else "```\nno schema description available\n```"

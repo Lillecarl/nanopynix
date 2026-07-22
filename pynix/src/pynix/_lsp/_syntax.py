@@ -179,16 +179,19 @@ def _string_fragment_at(source: str, byte_offset: int) -> Any | None:
 
 
 def string_literal_path_at(source: str, byte_offset: int) -> list[str] | None:
-    """Return the dotted path inside a plain string literal containing *byte_offset*.
+    """Return the dotted path inside a plain string literal, truncated at *byte_offset*.
 
-    E.g. with the cursor anywhere in ``"random_id.suffix.hex"``, returns
-    ``["random_id", "suffix", "hex"]``. Dialect-agnostic: only recognizes the
-    shape (a single, non-interpolated string fragment whose whole content
-    looks like ``name.name.name``), with no knowledge of what any particular
-    dialect's convention (e.g. terranix's ``lib.tfRef "..."``) does with it.
-    Returns None if the cursor isn't inside such a string, or the fragment
-    has an interpolation (``string_expression`` would then have more than
-    one child between the quotes) or isn't dotted-identifier-shaped.
+    E.g. with the cursor on ``random_id`` in ``"random_id.suffix.hex"``,
+    returns ``["random_id"]``; on ``suffix``, ``["random_id", "suffix"]`` --
+    mirrors ``identifier_path_at``'s own truncate-at-cursor behavior for a
+    plain (non-string) attribute path, so a caller can't tell the two apart
+    by shape. Dialect-agnostic: only recognizes the shape (a single,
+    non-interpolated string fragment whose whole content looks like
+    ``name.name.name``), with no knowledge of what any particular dialect's
+    convention (e.g. terranix's ``lib.tfRef "..."``) does with it. Returns
+    None if the cursor isn't inside such a string, or the fragment has an
+    interpolation (``string_expression`` would then have more than one child
+    between the quotes) or isn't dotted-identifier-shaped.
     """
     fragment = _string_fragment_at(source, byte_offset)
     if fragment is None:
@@ -197,7 +200,15 @@ def string_literal_path_at(source: str, byte_offset: int) -> list[str] | None:
     text = encoded[fragment.start_byte : fragment.end_byte].decode()
     if not _DOTTED_CHAIN_FULLMATCH_RE.fullmatch(text):
         return None
-    return text.split(".")
+    segments = text.split(".")
+    local_offset = byte_offset - fragment.start_byte
+    cursor = 0
+    for index, segment in enumerate(segments):
+        cursor += len(segment.encode())
+        if local_offset <= cursor:
+            return segments[: index + 1]
+        cursor += 1  # the "." separator
+    return segments
 
 
 def string_literal_completion_target_at(source: str, byte_offset: int) -> tuple[list[str], str] | None:

@@ -11,9 +11,10 @@
 # not part of the terranix config itself.
 { lib, ... }:
 {
+#                     vLSPOINT8"g"
   resource.local_file.greeting = {
     filename = "\${path.cwd}/terranix-demo-output/greeting-\${random_id.suffix.hex}.txt";
-#                LSPOINT1v"r"
+#                LSPOINT7v"r"                    vLSPOINT1"r"
     content = lib.tfRef "random_password.example.result";
 #                                         LSSTART2v"r"  vLSEND2
     content2 = lib.tfRef "random_password.example.result";
@@ -23,6 +24,8 @@
 #                                              vLSPOINT5
     content4 = lib.tfRef "local_file.greeting.c";
     content5 = "static"; # noqa: TF001 -- dynamically supplied elsewhere
+#                         vLSPOINT6"l"
+    content6 = lib.tfRef "local_file.greeting.count";
   };
 
   # LSLINE3

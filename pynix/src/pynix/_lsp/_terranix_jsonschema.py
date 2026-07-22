@@ -90,4 +90,8 @@ def block_to_json_schema(block: SchemaBlock) -> dict[str, Any]:
     schema: dict[str, Any] = {"type": "object", "properties": properties, "additionalProperties": False}
     if required:
         schema["required"] = required
+    if block.description:
+        schema["description"] = block.description
+    if block.deprecated:
+        schema["deprecated"] = True
     return schema

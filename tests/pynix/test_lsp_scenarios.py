@@ -64,13 +64,56 @@ async def terranix_driver(
 async def test_hover_inside_a_tfref_string_resolves_the_cross_resource_reference(
     terranix_driver: LspDriver,
 ) -> None:
-    """Marker LSPOINT1 sits on the 'r' of `random_password.example.result` inside `content`'s tfRef string."""
+    """Marker LSPOINT1 sits on `result`, the last segment of `random_password.example.result`."""
     scenario = Scenario(
         _LOCAL_NIX.as_uri(),
         _LOCAL_NIX.read_text(),
         [
             GoTo("1"),
             ExpectHover(contains="generated random string"),
+        ],
+    )
+    await scenario.run(terranix_driver)
+
+
+async def test_hover_on_the_resource_type_segment_of_a_tfref_string_summarizes_the_type(
+    terranix_driver: LspDriver,
+) -> None:
+    """Marker LSPOINT7 sits on `random_password`, the *type* segment, in the same string as LSPOINT1.
+
+    Same string, different cursor column, different hover -- proving
+    `string_literal_path_at` is now position-sensitive rather than always
+    resolving to the string's final segment regardless of where the cursor
+    actually sits.
+    """
+    scenario = Scenario(
+        _LOCAL_NIX.as_uri(),
+        _LOCAL_NIX.read_text(),
+        [
+            GoTo("7"),
+            ExpectHover(contains="`result`"),
+        ],
+    )
+    await scenario.run(terranix_driver)
+
+
+async def test_hover_on_a_resource_type_name_summarizes_its_attributes(
+    terranix_driver: LspDriver,
+) -> None:
+    """Marker LSPOINT6 sits on `local_file`, the type segment, in `content6`'s tfRef string.
+
+    Regression coverage for the original gap: hovering the resource type
+    name itself (not a specific attribute) previously returned None outright
+    (`_schema_path_at` rejected anything shorter than 4 segments) -- this now
+    renders the block's own JSON Schema conversion, listing its declared
+    attributes.
+    """
+    scenario = Scenario(
+        _LOCAL_NIX.as_uri(),
+        _LOCAL_NIX.read_text(),
+        [
+            GoTo("6"),
+            ExpectHover(contains="`filename`"),
         ],
     )
     await scenario.run(terranix_driver)
@@ -212,6 +255,27 @@ async def test_completion_after_a_partial_core_meta_argument_name(
         [
             GoTo("5"),
             ExpectCompletion(labels=frozenset({"count"})),
+        ],
+    )
+    await scenario.run(terranix_driver)
+
+
+async def test_hover_on_a_resource_instance_name_also_summarizes_its_type(
+    terranix_driver: LspDriver,
+) -> None:
+    """Marker LSPOINT8 sits on `greeting`, the *instance* name (not a tfRef string, a real binding key).
+
+    A 3-segment path (`resource.local_file.greeting`) hits the same
+    resource-type-summary branch as the 2-segment type-name case above --
+    there's only one schema block per *type*, not per instance, so this is
+    intentionally the same rendering, not a separate instance-specific one.
+    """
+    scenario = Scenario(
+        _LOCAL_NIX.as_uri(),
+        _LOCAL_NIX.read_text(),
+        [
+            GoTo("8"),
+            ExpectHover(contains="`filename`"),
         ],
     )
     await scenario.run(terranix_driver)
