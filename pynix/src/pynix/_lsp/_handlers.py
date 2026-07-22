@@ -262,7 +262,18 @@ async def _hover(ls: PynixLanguageServer, params: types.HoverParams) -> types.Ho
 
 
 async def _completion(ls: PynixLanguageServer, params: types.CompletionParams) -> types.CompletionList | None:
-    """Dialects get first refusal; see ``_hover``'s docstring for why."""
+    """Dialects get first refusal; see ``_hover``'s docstring for why.
+
+    Unlike hover, a dialect's *empty* completion list does not win here --
+    only a genuinely non-empty one does, falling through to the next
+    dialect (then the generic walk) otherwise. ``ModuleSystemDialect``'s own
+    ``complete`` always resolves a bare/dot-less prefix against the whole
+    ``options`` root regardless of what other dialect-specific context the
+    cursor is actually in (e.g. inside a Kubernetes object body), and an
+    empty-but-non-None result from that generic resolution must not block a
+    later, more specific dialect (e.g. ``EasykubenixDialect``) from offering
+    real completions for the exact same position.
+    """
     uri = params.text_document.uri
     context = ls.contexts.get(uri)
     if context is None:
@@ -272,7 +283,7 @@ async def _completion(ls: PynixLanguageServer, params: types.CompletionParams) -
     byte_offset = _byte_offset(source, params.position, ls, uri)
     for dialect in DIALECTS:
         items = await dialect.complete(context, source, byte_offset, DIALECTS)
-        if items is not None:
+        if items:
             return types.CompletionList(is_incomplete=False, items=items)
     target = completion_target_at(source, byte_offset)
     if target is None:

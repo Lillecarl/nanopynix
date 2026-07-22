@@ -1,4 +1,4 @@
-# pynix-lsp: moduleEntry = (import ../default.nix { }).moduleSystem
+# pynix-lsp: easykubenixEntry = import ../default.nix { }
 #
 # A real easykubenix author might wrap a module's definitions in an
 # explicit `config = { ... };` (the NixOS-module convention -- see

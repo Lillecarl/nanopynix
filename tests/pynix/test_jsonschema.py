@@ -100,3 +100,49 @@ def test_render_includes_x_computed_annotation() -> None:
 
 def test_render_falls_back_when_nothing_to_say() -> None:
     assert "no schema description available" in render({})
+
+
+_REF_DOCUMENT: dict[str, Any] = {
+    "$ref": "#/definitions/Pod",
+    "definitions": {
+        "Pod": {
+            "type": "object",
+            "description": "A pod.",
+            "properties": {"spec": {"$ref": "#/definitions/PodSpec"}},
+        },
+        "PodSpec": {
+            "type": "object",
+            "description": "A pod's spec.",
+            "properties": {"replicas": {"type": "integer", "description": "Desired replica count."}},
+        },
+    },
+}
+
+
+def test_walk_resolves_a_top_level_ref() -> None:
+    assert walk(_REF_DOCUMENT, (), root=_REF_DOCUMENT) == {
+        "type": "object",
+        "description": "A pod.",
+        "properties": {"spec": {"$ref": "#/definitions/PodSpec"}},
+    }
+
+
+def test_walk_follows_a_ref_through_a_nested_property() -> None:
+    fragment = walk(_REF_DOCUMENT, ("spec", "replicas"), root=_REF_DOCUMENT)
+    assert fragment == {"type": "integer", "description": "Desired replica count."}
+
+
+def test_list_properties_follows_a_ref() -> None:
+    assert list_properties(_REF_DOCUMENT, ("spec",), root=_REF_DOCUMENT) == ["replicas"]
+
+
+def test_render_follows_a_ref() -> None:
+    rendered = render(_REF_DOCUMENT, root=_REF_DOCUMENT)
+    assert "A pod." in rendered
+
+
+def test_ref_resolution_is_a_no_op_for_a_schema_with_no_ref() -> None:
+    """Confirms terranix's already-fully-inlined schemas are entirely unaffected by the new ``root`` parameter."""
+    assert walk(_RESOURCE_SCHEMA, ("content",)) == {"type": "string", "description": "Content to store."}
+    assert list_properties(_RESOURCE_SCHEMA, ()) is not None
+    assert "Content to store." in render({"type": "string", "description": "Content to store."})

@@ -93,6 +93,80 @@ def identifier_path_at(source: str, byte_offset: int) -> list[str] | None:
     )
 
 
+def enclosing_binding_path_at(source: str, byte_offset: int) -> list[str]:
+    """Return the dotted path of every attrset-valued binding enclosing *byte_offset*, outermost first.
+
+    Unlike ``identifier_path_at`` (which only ever resolves the *innermost*
+    binding's own flat attrpath, by design -- see its own docstring),
+    climbing here means a bare or partially-typed key nested several
+    ``binding -> attrset_expression -> binding_set`` layers deep still
+    resolves against the full path leading to it. E.g. for the cursor on a
+    not-yet-typed key inside::
+
+        kubernetes.objects.default.Deployment.demo = {
+          spec = {
+            <cursor>
+          };
+        };
+
+    returns ``["kubernetes", "objects", "default", "Deployment", "demo",
+    "spec"]`` -- combine with ``identifier_path_at``/``completion_target_at``'s
+    own (local-only) result for the full path, since neither of those two
+    know about this outer nesting on their own.
+
+    A bare, single-segment ``config = { ... };`` wrapping the file's own
+    top-level attrset is transparently skipped -- NixOS's module convention
+    treats that wrapper as equivalent to not wrapping at all (see
+    ``_terranix.py``'s own ``config``-wrapper regression test), so climbing
+    through it must not surface a spurious leading ``"config"`` segment.
+    Only the true top-level wrapper is special-cased this way: a *nested*
+    attribute that happens to be named ``config`` several layers deep (e.g.
+    a Kubernetes ConfigMap's own ``data.config`` field, written in nested
+    style) is a perfectly ordinary segment and is never skipped, since its
+    own enclosing chain has further bindings above it.
+
+    Returns ``[]`` when *byte_offset* isn't inside any attrset that is
+    itself the value of a binding (e.g. a fully flat top-level binding like
+    ``a.b.c = 1;``, or the file's own top-level attrset) -- callers can
+    always unconditionally prepend this result with no special-casing for
+    "no enclosing binding" vs "some enclosing binding".
+    """
+    tree = parse_nix(source)
+    encoded = source.encode()
+
+    def text(n: Any) -> str:
+        return encoded[n.start_byte : n.end_byte].decode()
+
+    node = tree.root_node.descendant_for_byte_range(byte_offset, byte_offset)
+    segments: list[list[str]] = []
+    current = node
+    while current is not None:
+        if current.type == "attrset_expression":
+            parent = current.parent
+            if parent is not None and parent.type == "binding":
+                attrpath_node = parent.child_by_field_name("attrpath")
+                segment = (
+                    [text(child) for child in attrpath_node.named_children if child.type == "identifier"]
+                    if attrpath_node is not None
+                    else []
+                )
+                binding_set = parent.parent
+                enclosing_attrset = binding_set.parent if binding_set is not None else None
+                is_top_level_config_wrapper = (
+                    segment == ["config"]
+                    and enclosing_attrset is not None
+                    and enclosing_attrset.type == "attrset_expression"
+                    and (enclosing_attrset.parent is None or enclosing_attrset.parent.type != "binding")
+                )
+                if not is_top_level_config_wrapper:
+                    segments.append(segment)
+                current = parent
+                continue
+        current = current.parent
+    segments.reverse()
+    return [segment for group in segments for segment in group]
+
+
 def _identifier_path_at_node(source: str, node: Any | None) -> list[str] | None:
     if node is None:
         return None
