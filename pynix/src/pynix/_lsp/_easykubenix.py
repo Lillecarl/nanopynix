@@ -55,6 +55,7 @@ from pynix._lsp._module_system import CONFIG_NAME, MODULE_ENTRY_NAME, derive_mod
 from pynix._lsp._syntax import completion_target_at, enclosing_binding_path_at, identifier_path_at
 
 if TYPE_CHECKING:
+    import nanopynix
     from pynix._lsp._context import FileContext
 
 EASYKUBENIX_ENTRY_NAME = "easykubenixEntry"
@@ -99,6 +100,45 @@ class EasykubenixDialect(Dialect):
             return
         context.roots.setdefault(MODULE_ENTRY_NAME, entry.attr("moduleSystem"))
         derive_module_roots(context)
+
+    async def _attr_names(self, value: nanopynix.ValueProxy | None) -> list[str] | None:
+        if value is None:
+            return None
+        try:
+            return await value.attr_names()
+        except NixError:
+            return None
+
+    async def _kind_names(self, context: FileContext) -> list[str] | None:
+        """Every known Kind name, from ``config.kubernetes.apiMappings``'s own keys.
+
+        Already a real, merged Nix value (bundled ``apiMappingFile`` plus any
+        project-declared extras) -- a strictly richer source than the
+        OpenAPI schema alone, since a CRD Kind can have an ``apiMappings``
+        entry with no corresponding upstream schema definition at all.
+        """
+        config_root = context.roots.get(CONFIG_NAME)
+        if config_root is None:
+            return None
+        return await self._attr_names(config_root.attr("kubernetes").attr("apiMappings"))
+
+    async def _namespace_names(self, context: FileContext) -> list[str] | None:
+        """Every declared namespace name, from existing ``Namespace`` objects in the ``none`` bucket.
+
+        ``kubernetes.nix``'s own convention: a cluster-scoped ``Namespace``
+        object itself lives under the fixed ``none`` bucket (``namespace !=
+        "none"`` is what triggers auto-injecting ``metadata.namespace``), so
+        ``kubernetes.objects.none.Namespace``'s own keys are exactly the set
+        of namespace names this project has actually declared and is
+        therefore useful to suggest -- as opposed to guessing at arbitrary
+        strings, or listing every namespace bucket key already used
+        elsewhere (which would suggest typos as confidently as real ones).
+        """
+        config_root = context.roots.get(CONFIG_NAME)
+        if config_root is None:
+            return None
+        namespace_kind = config_root.attr("kubernetes").attr("objects").attr("none").attr("Namespace")
+        return await self._attr_names(namespace_kind)
 
     async def _definition_for(self, context: FileContext, kind: str) -> tuple[dict[str, Any], str] | None:
         """Resolve *kind*'s ``(group, version, kind)`` schema definition, via ``config.kubernetes.apiMappings``."""
@@ -156,7 +196,30 @@ class EasykubenixDialect(Dialect):
         # binding, losing the outer `kubernetes.objects.<ns>.<kind>.<name>`
         # prefix for a field completed inside a nested-style object body.
         prefix = enclosing_binding_path_at(source, byte_offset) + local_prefix
-        if len(prefix) < 5 or prefix[0] != "kubernetes" or prefix[1] not in _OBJECT_ROOT_NAMES:
+        if len(prefix) < 2 or prefix[0] != "kubernetes" or prefix[1] not in _OBJECT_ROOT_NAMES:
+            return None
+        if len(prefix) == 2:
+            # Completing the namespace segment itself (e.g.
+            # `kubernetes.objects.def<cursor>`) -- suggest names already
+            # declared as real `Namespace` objects, not the (much larger,
+            # much less relevant) set of every namespace bucket key already
+            # used for some other Kind.
+            names = await self._namespace_names(context)
+            if names is None:
+                return None
+            return [types.CompletionItem(label=name) for name in names if name.startswith(partial)]
+        if len(prefix) == 3:
+            # Completing the Kind segment (e.g.
+            # `kubernetes.objects.default.Depl<cursor>`) -- every Kind name
+            # this project knows an apiVersion for, real or CRD.
+            names = await self._kind_names(context)
+            if names is None:
+                return None
+            return [types.CompletionItem(label=name) for name in names if name.startswith(partial)]
+        if len(prefix) < 5:
+            # The object's own instance name (e.g. `...Deployment.dem<cursor>`)
+            # -- an arbitrary new name being chosen, no sensible source to
+            # suggest from.
             return None
         definition = await self._definition_for(context, prefix[3])
         if definition is None:

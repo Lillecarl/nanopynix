@@ -98,6 +98,18 @@ class ExpectCompletion:
 
 
 @dataclass(frozen=True)
+class ExpectNoCompletion:
+    """Complete at the cursor and assert the result is None -- no dialect or fallback has anything to offer here.
+
+    Distinct from ``ExpectCompletion(labels=frozenset())``, which would
+    accept *any* result including a real (if empty) ``CompletionList`` --
+    this asserts the request resolves all the way down to nothing at all,
+    a legitimate and worth-pinning-down outcome (e.g. an arbitrary new name
+    being typed, with no sensible source to suggest from).
+    """
+
+
+@dataclass(frozen=True)
 class ExpectDiagnostics:
     """Assert whether a diagnostic matching *code* (and *contains*, if given) is present.
 
@@ -115,7 +127,17 @@ class ExpectDiagnostics:
     absent: bool = False
 
 
-Action = GoTo | Select | Type | Delete | InsertAfterCursor | ExpectHover | ExpectCompletion | ExpectDiagnostics
+Action = (
+    GoTo
+    | Select
+    | Type
+    | Delete
+    | InsertAfterCursor
+    | ExpectHover
+    | ExpectCompletion
+    | ExpectNoCompletion
+    | ExpectDiagnostics
+)
 
 
 class LspDriver(Protocol):
@@ -259,6 +281,11 @@ class Scenario:
                         raise AssertionError(f"expected exactly {set(labels)}, got {actual}")
                 elif not set(labels) <= actual:
                     raise AssertionError(f"expected at least {set(labels)}, got {actual}")
+            case ExpectNoCompletion():
+                completion = await driver.complete(self.uri, self._cursor)
+                if completion is not None:
+                    items = completion.items if isinstance(completion, types.CompletionList) else completion
+                    raise AssertionError(f"expected no completion result, got {[item.label for item in items]}")
             case ExpectDiagnostics(code, contains, absent):
                 diagnostics = await driver.diagnostics(self.uri)
                 matches = [
