@@ -17,7 +17,7 @@ from typing import Any
 import grpclib
 import pytest
 from grpclib.const import Status
-from nanopynix_proto.nix.common import LogEvent, NullValue, ScalarValue
+from nanopynix_proto.nix.common import DeepValue, LogEvent, NullValue, ScalarValue
 from nanopynix_proto.nix.manager import CallPrimopRequest
 
 from nanopynix.rpc.client._manager import (
@@ -74,7 +74,7 @@ def test_python_to_scalar_value_covers_every_type(value: Any, field: str, expect
 
 
 def test_python_to_scalar_value_rejects_unsupported_type() -> None:
-    with pytest.raises(TypeError, match="unsupported RPC primop return type"):
+    with pytest.raises(TypeError, match="unsupported RPC primop value type"):
         _python_to_scalar_value(object())
 
 
@@ -169,8 +169,12 @@ async def test_manager_primop_service_handler_register_all_and_awaits_coroutine(
     handler.register_all({"add": _async_add})
 
     response = await handler.call(
-        CallPrimopRequest(name="add", args=[ScalarValue(int_value=2), ScalarValue(int_value=3)])
+        CallPrimopRequest(
+            name="add",
+            args=[DeepValue(scalar=ScalarValue(int_value=2)), DeepValue(scalar=ScalarValue(int_value=3))],
+        )
     )
 
     assert response.value is not None
-    assert response.value.int_value == 5
+    assert response.value.scalar is not None
+    assert response.value.scalar.int_value == 5

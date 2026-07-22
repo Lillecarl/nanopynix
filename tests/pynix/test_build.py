@@ -5,15 +5,15 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from anyio import Path as AnyioPath
+from nanopynix_helpers import build as nanopynix_helpers_build
+from nanopynix_helpers.fod import replace_fod_hash as _real_replace_fod_hash
 from pynix.build import BuildTargetError, _build_target  # pyright: ignore[reportPrivateUsage]
-from pynix.fod import replace_fod_hash as _real_replace_fod_hash
 from pynix.target import EvaluationTarget
 from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 import nanopynix
 from nanopynix.exceptions import StoreError
 from pynix import Pynix
-from pynix import build as pynix_build
 from tests.support.git import init_flake_repo
 from tests.support.nix_environment import with_nixpkgs
 
@@ -510,7 +510,7 @@ runCommand "payload" {
     async def _always_false(*_args: object, **_kwargs: object) -> bool:
         return False
 
-    monkeypatch.setattr(pynix_build, "mismatch_is_target_fod", _always_false)
+    monkeypatch.setattr(nanopynix_helpers_build, "mismatch_is_target_fod", _always_false)
 
     async with shared_nix_environment.rpc_session() as nix, nix.store() as store, nix.eval(store) as session:
         with pytest.raises(BuildTargetError, match="not found in the evaluated target derivation closure"):
@@ -563,7 +563,7 @@ runCommand "payload" {
     def _rewrite_with_still_wrong_hash(source: str, literal: Any, _got: str) -> str:
         return _real_replace_fod_hash(source, literal, "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 
-    monkeypatch.setattr(pynix_build, "replace_fod_hash", _rewrite_with_still_wrong_hash)
+    monkeypatch.setattr(nanopynix_helpers_build, "replace_fod_hash", _rewrite_with_still_wrong_hash)
 
     async with shared_nix_environment.rpc_session() as nix, nix.store() as store, nix.eval(store) as session:
         with pytest.raises(BuildTargetError, match="stopped after 10 fixed-output hash updates"):

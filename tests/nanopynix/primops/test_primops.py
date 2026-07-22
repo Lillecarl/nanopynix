@@ -5,14 +5,15 @@ Primops are registered in conftest.py before the session EvalState is created.
 
 from __future__ import annotations
 
-import os
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from nanopynix_bindings import store as nanopynix_store
 
 if TYPE_CHECKING:
     import nanopynix
+    from tests.support.nix_environment import NixTestEnvironment
 
 pytestmark = pytest.mark.nix_version(minimum="2.32")
 
@@ -91,7 +92,9 @@ class TestRegisterPrimop:
         v = eval_state.eval_string("test_add4 10 10 10 12")
         assert v.as_int() == 42
 
-    def test_string_arg_with_context_is_realised(self, eval_state: nanopynix.EvalState):
+    def test_string_arg_with_context_is_realised(
+        self, eval_state: nanopynix.EvalState, l1_nix_environment: NixTestEnvironment
+    ):
         """A string carrying string context (e.g. "${someDerivation}") must be
         built and substituted for the primop, not rejected -- primops run at
         eval time, not inside a derivation build, so callers would otherwise
@@ -108,7 +111,7 @@ class TestRegisterPrimop:
         """)
         result = v.as_string()
         assert result.endswith("primop-string-context-test")
-        assert Path(result).exists()
+        assert l1_nix_environment.physical_path(result).exists()
 
     def test_string_return_value_carries_context_from_arg(
         self, eval_state: nanopynix.EvalState, store: Any
