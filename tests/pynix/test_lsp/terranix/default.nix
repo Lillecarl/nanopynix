@@ -52,15 +52,39 @@ let
     config.terraform.backend.local = { };
   };
 
+  terranixModules = [
+    ./modules/random.nix
+    ./modules/local.nix
+    ./modules/null.nix
+    requiredProvidersModule
+    backendModule
+  ];
+
   terranix = import "${pkgs.terranix.src}/core" {
     inherit pkgs;
+    modules = terranixModules;
+  };
+
+  # terranix's own `core/default.nix` only ever returns a sanitized
+  # `{ config = ...; }` -- its `sanitize` helper explicitly strips
+  # `_module`/`_ref`/`__functor` out of `evalModules`' result, and
+  # `evaluated.options` is never referenced by the wrapper at all (not
+  # stripped -- simply never returned). For LSP purposes (options-tree
+  # hover/completion, `_module.args` resolution for a file's own top-level
+  # lambda formals -- the same machinery `_module_system.py` already
+  # provides for real NixOS modules) that's not enough: this replicates
+  # `core/default.nix`'s own `evaluateConfiguration` by hand, using the same
+  # module list and the same `helpers.nix`-extended `lib'` (where
+  # `lib.tfRef`/`lib.tf.*`, already used throughout ./modules, come from),
+  # but keeps the *raw* `evalModules` result instead of routing it through
+  # `sanitize`.
+  lib' = pkgs.lib.extend (import "${pkgs.terranix.src}/core/helpers.nix" pkgs);
+
+  moduleSystem = lib'.evalModules {
     modules = [
-      ./modules/random.nix
-      ./modules/local.nix
-      ./modules/null.nix
-      requiredProvidersModule
-      backendModule
-    ];
+      { imports = [ "${pkgs.terranix.src}/core/terraform-options.nix" "${pkgs.terranix.src}/modules" ]; }
+      { _module.args = { inherit pkgs; }; }
+    ] ++ terranixModules;
   };
 
   configJSON = pkgs.writeText "config.tf.json" (builtins.toJSON terranix.config);
@@ -127,6 +151,7 @@ in
   inherit
     pkgs
     module
+    moduleSystem
     terranix
     tofu
     ;

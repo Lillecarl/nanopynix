@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from tests.support.lsp_scenario import LspDriver
 
 _LOCAL_NIX = asset("terranix/modules/local.nix")
+_NULL_NIX = asset("terranix/modules/null.nix")
 
 
 @pytest.fixture(params=["in_process", "wire"])
@@ -276,6 +277,31 @@ async def test_hover_on_a_resource_instance_name_also_summarizes_its_type(
         [
             GoTo("8"),
             ExpectHover(contains="`filename`"),
+        ],
+    )
+    await scenario.run(terranix_driver)
+
+
+async def test_hover_on_a_module_arg_resolves_via_terranixs_own_module_system(
+    terranix_driver: LspDriver,
+) -> None:
+    """Marker LSPOINT9 (in null.nix, not local.nix) sits on `system` in `pkgs.stdenv.hostPlatform.system`.
+
+    `null.nix` declares `{ lib, pkgs, ... }:` -- `pkgs` isn't a terranix
+    concept at all, it only resolves because `../default.nix`'s
+    `moduleSystem` (a real, un-sanitized `lib.evalModules` result, unlike
+    terranix's own `core/default.nix` wrapper which discards `_module`
+    entirely) sets `_module.args.pkgs`, and `TerranixDialect.derive_roots`
+    binds it as a `moduleEntry` root so `ModuleSystemDialect`'s existing
+    `_module.args` resolution (the same mechanism real NixOS modules use for
+    `pkgs`) picks it up for free.
+    """
+    scenario = Scenario(
+        _NULL_NIX.as_uri(),
+        _NULL_NIX.read_text(),
+        [
+            GoTo("9"),
+            ExpectHover(contains="x86_64-linux"),
         ],
     )
     await scenario.run(terranix_driver)
