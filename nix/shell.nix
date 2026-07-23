@@ -1,5 +1,4 @@
 {
-  lib,
   mkShell,
   python,
   pyright,
@@ -62,7 +61,6 @@ let
 in
 mkShell {
   shellHook = ''
-    export NANOPYNIX_GIT_ROOT=${lib.escapeShellArg (toString ../.)}
     unset PYTHONPATH
   '';
 

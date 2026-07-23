@@ -36,6 +36,7 @@ from ekn.eval import (
     evaluate_with_fod_update,
     push_closure_to_store,
     realise_attr,
+    timed_stage,
     verbose_session,
 )
 from ekn.git import commit_manifests, diff_manifests, flatten_manifests, try_jj_status
@@ -656,9 +657,12 @@ class Deploy(Commit):
     async def run(self) -> None:
         with verbose_session(self.verbosity, print_build_logs=self.print_build_logs):
             if not self.no_verify:
-                await Validate.run(cast("Validate", self))
-            await _push_ekn_cache(self.file, self.flake, self.attr, allow_failure=self.cache_allow_failure)
-            await super().run()
+                with timed_stage("deploy: validate (total)"):
+                    await Validate.run(cast("Validate", self))
+            with timed_stage("deploy: cache-push (total, incl. network copy)"):
+                await _push_ekn_cache(self.file, self.flake, self.attr, allow_failure=self.cache_allow_failure)
+            with timed_stage("deploy: commit (total, incl. git push)"):
+                await super().run()
 
 
 class KubeApply(Command):
