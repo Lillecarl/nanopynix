@@ -13,6 +13,7 @@
   nanopynix-proto,
   grpclib-transports,
   clypi,
+  kr8s,
   renderEditablePyproject,
   sphinx,
   myst-parser,
@@ -23,51 +24,36 @@
   tree-sitter-nix,
 }:
 let
-  nanopynix = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
-    projectRoot = ../nanopynix;
-    root = "$GIT_ROOT/nanopynix/src";
-    inherit python;
-    pythonPackages = python.pkgs // {
-      inherit nanopynix-bindings nanopynix-proto grpclib-transports;
-    };
-  });
-
-  nanopynix-helpers = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
-    projectRoot = ../nanopynix-helpers;
-    root = "$GIT_ROOT/nanopynix-helpers/src";
-    inherit python;
-    pythonPackages = python.pkgs // {
-      inherit nanopynix tree-sitter-nix;
-    };
-  });
-
-  pynix = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
-    projectRoot = ../pynix;
-    root = "$GIT_ROOT/pynix/src";
-    inherit python;
-    extras = [ "test" ];
-    pythonPackages = python.pkgs // {
-      inherit nanopynix nanopynix-helpers clypi tree-sitter-nix;
-    };
-  });
-
-  pytest-agent = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
-    projectRoot = ../pytest-agent;
-    root = "$GIT_ROOT/pytest-agent/src";
-    inherit python;
-  });
+  # Reuses the same editable package definitions dev-env.nix exports (rather
+  # than its combined `pythonEnv`) so this shell's own extra docs deps
+  # (sphinx/myst-parser/furo) land in the *same* python.withPackages env --
+  # two separate envs on PATH would collide on bin/python3 et al.
+  devEnv = import ./dev-env.nix {
+    inherit
+      python
+      nanopynix-bindings
+      nanopynix-proto
+      grpclib-transports
+      clypi
+      kr8s
+      tree-sitter-nix
+      renderEditablePyproject
+      ;
+  };
 
   pythonEnv = python.withPackages (
     pp:
-    nanopynix.dependencies
-    ++ nanopynix-helpers.dependencies
-    ++ pynix.dependencies
-    ++ pytest-agent.dependencies
+    devEnv.nanopynix.dependencies
+    ++ devEnv.nanopynix-helpers.dependencies
+    ++ devEnv.pynix.dependencies
+    ++ devEnv.ekn.dependencies
+    ++ devEnv.pytest-agent.dependencies
     ++ [
-      nanopynix
-      nanopynix-helpers
-      pynix
-      pytest-agent
+      devEnv.nanopynix
+      devEnv.nanopynix-helpers
+      devEnv.pynix
+      devEnv.ekn
+      devEnv.pytest-agent
       sphinx
       myst-parser
       furo
@@ -76,7 +62,7 @@ let
 in
 mkShell {
   shellHook = ''
-    export GIT_ROOT=${lib.escapeShellArg (toString ../.)}
+    export NANOPYNIX_GIT_ROOT=${lib.escapeShellArg (toString ../.)}
     unset PYTHONPATH
   '';
 

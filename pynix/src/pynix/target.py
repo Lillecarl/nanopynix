@@ -6,15 +6,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from clypi import arg
+from nanopynix_helpers import EvaluationTargetError as EvaluationTargetError
+from nanopynix_helpers import select_attr as select_attr
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from nanopynix.rpc.client import EvalSession, ReplSession, ValueProxy
-
-
-class EvaluationTargetError(RuntimeError):
-    """An evaluation target or attribute selection is invalid."""
 
 
 def file_option() -> Path | None:
@@ -89,17 +87,3 @@ async def load_repl_target(target: EvaluationTarget, repl: ReplSession) -> Value
             value = await select_attr(value, target.attr)
         return value
     return await evaluate_target(target, repl)
-
-
-async def select_attr(value: ValueProxy, attrpath: str) -> ValueProxy:
-    """Select a dot-separated attribute path with useful missing-attribute errors."""
-    for part in attrpath.split("."):
-        if not part:
-            raise EvaluationTargetError("attribute path contains an empty component")
-        if not await value.has_attr(part):
-            names = await value.attr_names()
-            available = ", ".join(names[:10])
-            suffix = "" if len(names) <= 10 else f", ... ({len(names)} total)"
-            raise EvaluationTargetError(f"attribute {part!r} not found; available attributes: {available}{suffix}")
-        value = value.attr(part)
-    return value

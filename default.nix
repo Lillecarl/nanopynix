@@ -51,6 +51,28 @@ let
 
   clypi = python3Packages.callPackage ./nix/clypi.nix { };
 
+  # Neither depends on any Nix-version-specific code (no nix-store/nix-expr/
+  # nanopynix/nanopynix-bindings), so -- like clypi above -- these live here
+  # rather than inside nanopynixForNixVersions/extendNixScope, built once
+  # instead of once per Nix version. Only merged into callNixPythonPackage's
+  # environment below (see `inherit kr8s tree-sitter-nix` in the merge) so
+  # in-scope package.nix files (ekn, pynix, nanopynix-helpers) can still
+  # resolve them by name.
+  kr8s = python3Packages.callPackage ./nix/kr8s.nix { };
+
+  tree-sitter-nix = python3Packages.callPackage ./nix/tree-sitter-nix.nix {
+    # `pkgs.path` (the nixpkgs source tree) would otherwise be shadowed by
+    # python3Packages' own PyPI package literally named "path" if resolved
+    # through python3Packages -- calling this directly with `pkgs.path`
+    # sidesteps that entirely.
+    nixpkgsPath = pkgs.path;
+    # Same shadowing problem: python3Packages.tree-sitter is the PyPI
+    # `tree-sitter` bindings package, not pkgs.tree-sitter (the CLI
+    # derivation, whose passthru has `buildGrammar`).
+    treeSitterCli = pkgs.tree-sitter;
+    treeSitterNixSrc = inputs.tree-sitter-nix-numtide;
+  };
+
   # Exports OpenTofu's built-in ("core") HCL block schema
   # (resource/data/count/for_each/lifecycle/...) as JSON for a given OpenTofu
   # version, on demand -- see tools/tofu-core-schema/package.nix and
@@ -142,21 +164,11 @@ let
                     betterproto2-compiler
                     nanopynix-proto
                     clypi
+                    kr8s
+                    tree-sitter-nix
                     pyproject-nix
                     tofuCoreSchemaTool
                     ;
-                  # `pkgs.path` (the nixpkgs source tree) would otherwise be
-                  # shadowed by python3Packages' own PyPI package literally
-                  # named "path" -- `pkgs // python3Packages` above resolves
-                  # to the latter. Named distinctly so any consumer wanting
-                  # the real nixpkgs source path doesn't silently get the
-                  # wrong thing.
-                  nixpkgsPath = pkgs.path;
-                  # Same shadowing problem: python3Packages.tree-sitter is the
-                  # PyPI `tree-sitter` bindings package, not pkgs.tree-sitter
-                  # (the CLI derivation, whose passthru has `buildGrammar`).
-                  treeSitterCli = pkgs.tree-sitter;
-                  treeSitterNixSrc = inputs.tree-sitter-nix-numtide;
                 }
                 // final
               );
@@ -176,10 +188,26 @@ let
                     inherit tsanRuntime;
                   };
                 };
-              tree-sitter-nix = callNixPythonPackage ./nix/tree-sitter-nix.nix { };
               nanopynix-helpers = callNixPythonPackage ./nanopynix-helpers/package.nix { };
-              pynix = callNixPythonPackage ./pynix/package.nix { };
+              # ekn's own Python source now lives here (migrated from
+              # easykubenix/ekn -- see ekn/package.nix), so it's built
+              # against exactly the nanopynix/nanopynix-bindings wheels
+              # built in this same scope, with no cross-repo source
+              # reference. easykubenix consumes this build's output
+              # (`nanopynix.ekn`) for its own parseYamlStream.nix IFD
+              # fallback rather than building its own copy.
+              ekn = callNixPythonPackage ./ekn/package.nix { };
+              pynix = callNixPythonPackage ./pynix/package.nix {
+                inherit (final) ekn;
+              };
               shell = callNixPythonPackage ./nix/shell.nix { };
+              # A live, editable-install `pynix`/`ekn` env (no devtools --
+              # see nix/shell.nix for the full interactive nanopynix shell),
+              # exported so other repos can drop a hot-reloading `pynix`
+              # into their own devShell/direnv without rebuilding on every
+              # edit here. See nix/dev-env.nix's own docstring for the
+              # NANOPYNIX_GIT_ROOT env var consumers must export.
+              pynixDevEnv = (callNixPythonPackage ./nix/dev-env.nix { }).pythonEnv;
               nanopynix-docs = callNixPythonPackage ./nix/docs.nix { };
             }
           ) scope.packages
@@ -280,7 +308,9 @@ in
     nanopynix
     nanopynix-bindings
     nanopynix-helpers
+    ekn
     pynix
+    pynixDevEnv
     shell
     nanopynix-docs
     ;

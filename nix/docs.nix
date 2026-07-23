@@ -21,7 +21,7 @@ stdenvNoCC.mkDerivation {
   pname = "nanopynix-docs";
   version = "0";
 
-  src = lib.cleanSource ../.;
+  src = ../.;
 
   nativeBuildInputs = [ pythonEnv ];
 

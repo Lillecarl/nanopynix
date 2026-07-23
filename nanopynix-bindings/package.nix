@@ -32,7 +32,7 @@ let
 in
 let
   attrs = renderPyproject {
-    projectRoot = ./.;
+    projectRoot = toString ./.;
     inherit python;
   };
 in
@@ -41,7 +41,7 @@ buildPythonPackage (
   // {
     version = "${attrs.version}-${version}";
     
-    src = lib.cleanSource ./.;
+    src = ./.;
 
     build-system = attrs.build-system ++ [
       cmake

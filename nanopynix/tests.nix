@@ -27,7 +27,7 @@ in
     gdb
   ];
   text = ''
-    cd ${lib.cleanSource ../.}
+    cd ${../.}
     export PYTHONNOUSERSITE=1
     export NIX_PATH=nixpkgs=${nixpkgs}
   ''

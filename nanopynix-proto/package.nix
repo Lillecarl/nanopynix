@@ -11,7 +11,7 @@
 }:
 let
   attrs = renderPyproject {
-    projectRoot = ./.;
+    projectRoot = toString ./.;
     inherit python;
     pythonPackages = python.pkgs // {
       inherit betterproto2;
@@ -22,7 +22,7 @@ buildPythonPackage (
   attrs
   // {
 
-    src = lib.cleanSource ./.;
+    src = ./.;
 
     nativeBuildInputs = [
       protobuf

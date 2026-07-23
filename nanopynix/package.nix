@@ -14,7 +14,7 @@
 }:
 let
   attrs = renderPyproject {
-    projectRoot = lib.cleanSource ./.;
+    projectRoot = toString ./.;
     inherit python;
     pythonPackages = python.pkgs // {
       "nanopynix-bindings" = nanopynix-bindings;
@@ -27,6 +27,8 @@ buildPythonPackage (
   attrs
   // {
     version = "${attrs.version}-${version}";
+
+    src = ./.;
 
     # pythonImportsCheck dlopen()s nanopynix-bindings transitively into a
     # fresh python process; when bindings were built with TSAN, its runtime
