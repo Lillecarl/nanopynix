@@ -257,6 +257,22 @@ def _log_timing(label: str, elapsed: float) -> None:
         print(f"[EKN_TIMING] {label}: {elapsed:.3f}s", file=sys.stderr)
 
 
+@contextmanager
+def timed_stage(label: str) -> Iterator[None]:
+    """Print `[EKN_TIMING] label: N.NNNs` to stderr on exit, when EKN_TIMING is
+    set -- same env var/format `_log_timing` uses, as a context manager for
+    call sites (cli.py's Deploy chain, `_validation_config`'s per-attr builds)
+    that wrap a whole block rather than one already-measured span."""
+    if not _timing_enabled():
+        yield
+        return
+    start = time.monotonic()
+    try:
+        yield
+    finally:
+        _log_timing(label, time.monotonic() - start)
+
+
 async def evaluate_generated_manifests(
     file: str | PathLike[str] | None,
     flake_uri: str | None,
@@ -346,7 +362,8 @@ async def evaluate_gitops_manifests(
         if await proxy.has_attr("config"):
             proxy = proxy.attr("config")
 
-        gitops_targets = await proxy.attr("kubernetes").attr("gitopsTargets").force_json()
+        with timed_stage("gitops: force_json(kubernetes.gitopsTargets)"):
+            gitops_targets = await proxy.attr("kubernetes").attr("gitopsTargets").force_json()
         return {
             "config": {
                 "kubernetes": {
@@ -472,7 +489,8 @@ async def evaluate_cache_config(
         if cache_to is None:
             return {"cache_to": None, "cache_package_out": None}
 
-        cache_package_out = (await proxy.attr("ekn").attr("cachePackage").build()).get("out")
+        with timed_stage("cache-push: build ekn.cachePackage"):
+            cache_package_out = (await proxy.attr("ekn").attr("cachePackage").build()).get("out")
         return {"cache_to": cache_to, "cache_package_out": cache_package_out}
 
 
@@ -547,28 +565,33 @@ async def _validation_config(proxy: Any) -> dict:
     # this function returns beyond what's assembled below -- forcing them
     # here would just be wasted eval work.
     v = proxy.attr("validation")
-    kubeadm_config = await v.attr("kubeadmConfig").force_json()
-    pod_subnet = await v.attr("podSubnet").force_json()
-    service_subnet = await v.attr("serviceSubnet").force_json()
-    debug = await v.attr("debug").force_json()
-    k8s_version = await proxy.attr("kubernetes").attr("package").attr("version").force_json()
+    with timed_stage("validate: force_json cheap validation/kluctl fields"):
+        kubeadm_config = await v.attr("kubeadmConfig").force_json()
+        pod_subnet = await v.attr("podSubnet").force_json()
+        service_subnet = await v.attr("serviceSubnet").force_json()
+        debug = await v.attr("debug").force_json()
+        k8s_version = await proxy.attr("kubernetes").attr("package").attr("version").force_json()
 
-    # kluctl.resourcePriority/discriminator are plain data (no build), used
-    # by Validate.run()'s kr8s-based apply_and_prune instead of shelling out
-    # to `kluctl deploy` -- see apply.py.
-    resource_priority = await proxy.attr("kluctl").attr("resourcePriority").force_json()
-    discriminator = await proxy.attr("kluctl").attr("discriminator").force_json()
+        # kluctl.resourcePriority/discriminator are plain data (no build), used
+        # by Validate.run()'s kr8s-based apply_and_prune instead of shelling out
+        # to `kluctl deploy` -- see apply.py.
+        resource_priority = await proxy.attr("kluctl").attr("resourcePriority").force_json()
+        discriminator = await proxy.attr("kluctl").attr("discriminator").force_json()
 
-    # Cheap -- just {kind, namespace, name} triples, not full objects (see
-    # kubernetes.nix's novalidateKeys) -- lets Validate.run() skip applying
-    # objects that can never be meaningfully verified in this ephemeral
-    # harness without re-forcing the entire generated set a second time.
-    novalidate_keys = await proxy.attr("kubernetes").attr("novalidateKeys").force_json()
+        # Cheap -- just {kind, namespace, name} triples, not full objects (see
+        # kubernetes.nix's novalidateKeys) -- lets Validate.run() skip applying
+        # objects that can never be meaningfully verified in this ephemeral
+        # harness without re-forcing the entire generated set a second time.
+        novalidate_keys = await proxy.attr("kubernetes").attr("novalidateKeys").force_json()
 
-    etcd_out = (await v.attr("etcdPackage").build()).get("out")
-    kubeconform_out = (await v.attr("kubeconformPackage").build()).get("out")
-    k8s_out = (await proxy.attr("kubernetes").attr("package").build()).get("out")
-    manifest_out = (await proxy.attr("internal").attr("manifestJSONFile").build()).get("out")
+    with timed_stage("validate: build etcdPackage"):
+        etcd_out = (await v.attr("etcdPackage").build()).get("out")
+    with timed_stage("validate: build kubeconformPackage"):
+        kubeconform_out = (await v.attr("kubeconformPackage").build()).get("out")
+    with timed_stage("validate: build kubernetes.package"):
+        k8s_out = (await proxy.attr("kubernetes").attr("package").build()).get("out")
+    with timed_stage("validate: build internal.manifestJSONFile (forces kubernetes.generated)"):
+        manifest_out = (await proxy.attr("internal").attr("manifestJSONFile").build()).get("out")
 
     return {
         "config": {
@@ -631,4 +654,5 @@ __all__ = [
     "evaluate_validation_config",
     "evaluate_validation_file",
     "evaluate_with_fod_update",
+    "timed_stage",
 ]

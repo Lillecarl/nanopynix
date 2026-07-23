@@ -98,6 +98,10 @@ public:
     }
 
     void warn(const std::string & msg) override {
+        // Matches nix::Logger::warn's own default impl (log(lvlWarn, ...)),
+        // which we fully override rather than delegate to -- so we must
+        // apply the same verbosity gate ourselves.
+        if (nix::lvlWarn > nix::verbosity) return;
         nb::gil_scoped_acquire gil;
         _cb(nb::int_(logger_request_id), "warn", msg);
     }
@@ -106,7 +110,14 @@ public:
                        nix::ActivityType type, const std::string & s,
                        const nix::Logger::Fields & fields,
                        nix::ActivityId parent) override {
-        if (lvl > nix::verbosity) return;
+        // Matches nix's own default logger (SimpleLogger::startActivity:
+        // `if (lvl <= verbosity && !s.empty()) log(...)`) -- most Activities
+        // in a big build/copy closure are structural bookkeeping nodes
+        // (actRealise/actBuilds/actCopyPaths container activities) with an
+        // empty message and no fields, one per derivation/path processed.
+        // Even Nix's own CLI renders nothing for these; there is nothing
+        // here for any consumer of this callback to use either.
+        if (lvl > nix::verbosity || s.empty()) return;
         nb::gil_scoped_acquire gil;
         nb::list fl;
         for (auto & f : fields) {
@@ -119,22 +130,29 @@ public:
     }
 
     void stopActivity(nix::ActivityId id) override {
-        nb::gil_scoped_acquire gil;
-        _cb(nb::int_(logger_request_id), "stop", id);
+        // Nix constructs one Activity per derivation/store-path/
+        // substitution it processes -- hundreds of thousands for a single
+        // big deploy's closure, each with a stopActivity call on top of its
+        // startActivity. Every consumer of this callback in this
+        // repo (pynix/_util.py's _forward_nix_logs, ekn/eval.py's
+        // _print_log_event) explicitly discards "stop" events -- nothing
+        // downstream ever reads them, at any verbosity. Drop before the
+        // GIL-acquiring Python callback and the RPC/protobuf/pydantic round
+        // trip they'd otherwise pay for.
+        (void) id;
     }
 
     void result(nix::ActivityId id, nix::ResultType type,
                 const nix::Logger::Fields & fields) override {
-        // resProgress/resSetExpected are pure numeric-only progress-bar
-        // ticks (bytes done/expected/running/failed), fired many times per
-        // second per active download/copy with no string payload -- every
-        // consumer of this callback (see pynix/_util.py's _forward_nix_logs)
-        // already discards them downstream. Dropping them here, before the
-        // GIL-acquiring Python callback and the RPC/protobuf/pydantic round
-        // trip they'd otherwise pay for, avoids forwarding a firehose of
-        // noise (six-figure event counts observed for a single provider
-        // fetch) that nothing ever reads.
-        if (type == nix::resProgress || type == nix::resSetExpected) return;
+        // Of all ResultTypes, only resBuildLogLine/resPostBuildLogLine are
+        // ever read by a consumer in this repo (both check for exactly
+        // those two before doing anything) -- the rest (resProgress/
+        // resSetExpected progress-bar ticks foremost among them, firing
+        // many times per second per active download/copy) are pure noise
+        // here. Drop everything else before the GIL-acquiring Python
+        // callback and the RPC/protobuf/pydantic round trip they'd
+        // otherwise pay for.
+        if (type != nix::resBuildLogLine && type != nix::resPostBuildLogLine) return;
         nb::gil_scoped_acquire gil;
         nb::list fl;
         for (auto & f : fields) {

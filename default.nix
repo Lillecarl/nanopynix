@@ -205,8 +205,8 @@ let
               # see nix/shell.nix for the full interactive nanopynix shell),
               # exported so other repos can drop a hot-reloading `pynix`
               # into their own devShell/direnv without rebuilding on every
-              # edit here. See nix/dev-env.nix's own docstring for the
-              # NANOPYNIX_GIT_ROOT env var consumers must export.
+              # edit here. See nix/dev-env.nix's own docstring for why no
+              # env var is needed.
               pynixDevEnv = (callNixPythonPackage ./nix/dev-env.nix { }).pythonEnv;
               nanopynix-docs = callNixPythonPackage ./nix/docs.nix { };
             }

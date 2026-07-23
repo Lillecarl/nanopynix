@@ -11,7 +11,7 @@
 let
   nanopynix = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
     projectRoot = ../nanopynix;
-    root = "$NANOPYNIX_GIT_ROOT/nanopynix/src";
+    root = toString (../nanopynix + "/src");
     inherit python;
     pythonPackages = python.pkgs // {
       inherit nanopynix-bindings nanopynix-proto grpclib-transports;
@@ -20,7 +20,7 @@ let
 
   nanopynix-helpers = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
     projectRoot = ../nanopynix-helpers;
-    root = "$NANOPYNIX_GIT_ROOT/nanopynix-helpers/src";
+    root = toString (../nanopynix-helpers + "/src");
     inherit python;
     pythonPackages = python.pkgs // {
       inherit nanopynix tree-sitter-nix;
@@ -29,7 +29,7 @@ let
 
   pynix = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
     projectRoot = ../pynix;
-    root = "$NANOPYNIX_GIT_ROOT/pynix/src";
+    root = toString (../pynix + "/src");
     inherit python;
     # `extras` only controls which extras are *installed*; mkPythonEditablePackage
     # still eagerly resolves every declared [project.optional-dependencies]
@@ -55,7 +55,7 @@ let
   # arg, which bundles the *built* ekn instead).
   ekn = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
     projectRoot = ../ekn;
-    root = "$NANOPYNIX_GIT_ROOT/ekn/src";
+    root = toString (../ekn + "/src");
     inherit python;
     pythonPackages = python.pkgs // {
       inherit nanopynix nanopynix-helpers clypi kr8s;
@@ -64,7 +64,7 @@ let
 
   pytest-agent = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
     projectRoot = ../pytest-agent;
-    root = "$NANOPYNIX_GIT_ROOT/pytest-agent/src";
+    root = toString (../pytest-agent + "/src");
     inherit python;
   });
 in
@@ -78,15 +78,15 @@ in
     ;
 
   # A `pynix`/`ekn` (plus the plain `python3` interpreter) backed entirely
-  # by editable installs -- consumers must `export NANOPYNIX_GIT_ROOT=<path
-  # to a nanopynix checkout>` before running anything from this env's `bin/`
-  # (mkPythonEditablePackage's generated loader calls
-  # `os.path.expandvars("$NANOPYNIX_GIT_ROOT/.../src")` at *import* time, not
-  # build time -- see pyproject-nix's editable_hook). Exported so other
-  # repos (e.g. hetzkube) can drop a live, hot-reloading `pynix ekn` into
-  # their own devShell/direnv setup without rebuilding on every edit. Does
-  # not include nanopynix's own devtools (pyright/ruff/...) -- see
-  # nix/shell.nix for the full interactive nanopynix dev shell.
+  # by editable installs -- each package's `root` above is this checkout's
+  # own `toString`'d absolute path (no store copy, since this whole tree is
+  # consumed via a local path override rather than flake eval), so the
+  # generated loaders resolve straight back here at import time with
+  # nothing for a consumer to export. Exported so other repos (e.g.
+  # hetzkube) can drop a live, hot-reloading `pynix ekn` into their own
+  # devShell/direnv setup without rebuilding on every edit. Does not include
+  # nanopynix's own devtools (pyright/ruff/...) -- see nix/shell.nix for the
+  # full interactive nanopynix dev shell.
   pythonEnv = python.withPackages (
     pp:
     nanopynix.dependencies
