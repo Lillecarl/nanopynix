@@ -22,9 +22,10 @@ this module derives from that one root:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from lsprotocol import types
+from pygls.uris import from_fs_path
 
 from nanopynix.exceptions import NixError
 from pynix._lsp._dialect import Dialect
@@ -134,6 +135,47 @@ async def render_option_declaration(value: nanopynix.ValueProxy) -> list[str]:
     return sections
 
 
+def _position_from_json(entry: object) -> types.Location | None:
+    """Build a ``Location`` from a nixpkgs-shaped ``{file, line, column}`` dict (1-based line/column)."""
+    if not isinstance(entry, dict):
+        return None
+    # isinstance narrows to the bare, generic-less `dict[Unknown, Unknown]`
+    # (isinstance can't check generic parameters at runtime) -- re-asserting
+    # the type here is what stops that Unknown from propagating into the
+    # .get() calls below (same idiom as _easykubenix_schema.py's _gvk_index).
+    entry = cast("dict[str, Any]", entry)
+    file = entry.get("file")
+    line = entry.get("line")
+    column = entry.get("column")
+    if not isinstance(file, str) or not isinstance(line, int) or not isinstance(column, int):
+        return None
+    uri = from_fs_path(file)
+    if uri is None:
+        return None
+    position = types.Position(max(line - 1, 0), max(column - 1, 0))
+    return types.Location(uri=uri, range=types.Range(position, position))
+
+
+async def _option_declaration_locations(value: nanopynix.ValueProxy) -> list[types.Location] | None:
+    """Every declaration site of an ``mkOption``-produced *value*, from its own ``declarationPositions``.
+
+    nixpkgs' ``lib/options.nix`` already tracks this explicitly (an option
+    can be declared, in the plain ``mkOption`` sense, in only one place, but
+    the field is still a list for symmetry with ``definitionsWithLocations``)
+    -- more reliable than calling ``builtins.unsafeGetAttrPos`` ourselves,
+    which returns null for most values that pass through the module
+    system's fixed-point merging (see this feature's design notes).
+    """
+    try:
+        positions = await value.attr("declarationPositions").force_json()
+    except NixError:
+        return None
+    if not isinstance(positions, list):
+        return None
+    locations = [location for entry in positions if (location := _position_from_json(entry)) is not None]
+    return locations or None
+
+
 class ModuleSystemDialect(Dialect):
     """NixOS module-system support, as a peer ``Dialect`` (see ``_dialect.py``).
 
@@ -187,6 +229,51 @@ class ModuleSystemDialect(Dialect):
             return await render_value(value, dialects)
         except NixError:
             return None
+
+    async def _best_effort_location(
+        self, context: FileContext, source: str, path: list[str]
+    ) -> types.Location | None:
+        """Best-effort ``builtins.unsafeGetAttrPos`` lookup for a non-option *path* (e.g. a module arg like ``pkgs.hello``).
+
+        Only attempted when *path* has a parent to look the last segment up
+        in, and only when this context has a ``moduleEntry``-backed eval
+        session to run it in (a ``ValueProxy`` and the function it's passed
+        to must share the same ``EvalSession`` -- see
+        ``FileContext.eval_session``'s docstring). Returns None on any
+        failure, including nixpkgs' own composed package sets (built via
+        ``makeScope``/overlays) not preserving plain-attrset position
+        tracking -- a graceful "no definition available" is the correct
+        outcome, not a bug, for most of nixpkgs' own attributes.
+        """
+        if len(path) < 2:
+            return None
+        eval_session = context.eval_session(MODULE_ENTRY_NAME)
+        if eval_session is None:
+            return None
+        parent_value = await self._resolve(context, source, path[:-1])
+        if parent_value is None:
+            return None
+        try:
+            unsafe_get_attr_pos = await eval_session.string("builtins.unsafeGetAttrPos")
+            position_value = await unsafe_get_attr_pos.call(path[-1], parent_value)
+            position = await position_value.force_json()
+        except NixError:
+            return None
+        return _position_from_json(position)
+
+    async def definition(
+        self, context: FileContext, source: str, byte_offset: int, dialects: list[Dialect]
+    ) -> types.Location | list[types.Location] | None:
+        del dialects
+        path = identifier_path_at(source, byte_offset)
+        if path is None:
+            return None
+        value = await self._resolve(context, source, path)
+        if value is None:
+            return None
+        if await is_option_declaration(value):
+            return await _option_declaration_locations(value)
+        return await self._best_effort_location(context, source, path)
 
     async def complete(
         self, context: FileContext, source: str, byte_offset: int, dialects: list[Dialect]

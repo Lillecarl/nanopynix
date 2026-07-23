@@ -115,6 +115,19 @@ class FileContext:
             except NixError as exc:
                 self.errors[directive.name] = exc
 
+    def eval_session(self, root_name: str) -> nanopynix.EvalSession | None:
+        """The ``EvalSession`` that produced ``roots[root_name]``, if any.
+
+        For auxiliary lookups against a value already known to live in that
+        root's own evaluation graph (e.g. calling ``builtins.
+        unsafeGetAttrPos`` with an existing ``ValueProxy`` as an argument) --
+        a ``ValueProxy`` and the function it's passed to must come from the
+        *same* ``EvalSession`` (each has its own independent ``EvalState``
+        in the underlying worker, so value handles aren't interchangeable
+        across sessions even within the same ``FileContext``).
+        """
+        return self._evals.get(root_name)
+
     async def close(self) -> None:
         """Release every directive's evaluator. Idempotent."""
         for eval_session in self._evals.values():

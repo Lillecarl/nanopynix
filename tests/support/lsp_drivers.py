@@ -17,7 +17,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from lsprotocol import types
-from pynix._lsp._handlers import _completion, _hover, _sync_document
+from pynix._lsp._handlers import (
+    _completion,
+    _definition,
+    _document_highlight,
+    _hover,
+    _prepare_rename,
+    _references,
+    _rename,
+    _sync_document,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -53,6 +62,41 @@ class InProcessDriver:
 
     async def complete(self, uri: str, position: types.Position) -> types.CompletionList | None:
         return await _completion(self._server, types.CompletionParams(types.TextDocumentIdentifier(uri), position))
+
+    async def definition(self, uri: str, position: types.Position) -> types.Location | list[types.Location] | None:
+        return await _definition(
+            self._server, types.DefinitionParams(text_document=types.TextDocumentIdentifier(uri), position=position)
+        )
+
+    async def prepare_rename(self, uri: str, position: types.Position) -> types.PrepareRenameResult | None:
+        return await _prepare_rename(
+            self._server,
+            types.PrepareRenameParams(text_document=types.TextDocumentIdentifier(uri), position=position),
+        )
+
+    async def rename(self, uri: str, position: types.Position, new_name: str) -> types.WorkspaceEdit | None:
+        return await _rename(
+            self._server,
+            types.RenameParams(text_document=types.TextDocumentIdentifier(uri), position=position, new_name=new_name),
+        )
+
+    async def document_highlight(self, uri: str, position: types.Position) -> list[types.DocumentHighlight] | None:
+        return await _document_highlight(
+            self._server,
+            types.DocumentHighlightParams(text_document=types.TextDocumentIdentifier(uri), position=position),
+        )
+
+    async def references(
+        self, uri: str, position: types.Position, *, include_declaration: bool
+    ) -> list[types.Location] | None:
+        return await _references(
+            self._server,
+            types.ReferenceParams(
+                text_document=types.TextDocumentIdentifier(uri),
+                position=position,
+                context=types.ReferenceContext(include_declaration),
+            ),
+        )
 
     async def diagnostics(self, uri: str) -> Sequence[types.Diagnostic]:
         return self._server.diagnostics.get(uri, [])
@@ -99,6 +143,45 @@ class WireDriver:
     ) -> types.CompletionList | Sequence[types.CompletionItem] | None:
         return await self._client.text_document_completion_async(
             params=types.CompletionParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
+        )
+
+    async def definition(
+        self, uri: str, position: types.Position
+    ) -> types.Location | Sequence[types.Location] | Sequence[types.LocationLink] | None:
+        return await self._client.text_document_definition_async(
+            params=types.DefinitionParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
+        )
+
+    async def prepare_rename(
+        self, uri: str, position: types.Position
+    ) -> types.Range | types.PrepareRenamePlaceholder | types.PrepareRenameDefaultBehavior | None:
+        return await self._client.text_document_prepare_rename_async(
+            params=types.PrepareRenameParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
+        )
+
+    async def rename(self, uri: str, position: types.Position, new_name: str) -> types.WorkspaceEdit | None:
+        return await self._client.text_document_rename_async(
+            params=types.RenameParams(
+                text_document=types.TextDocumentIdentifier(uri=uri), position=position, new_name=new_name
+            )
+        )
+
+    async def document_highlight(
+        self, uri: str, position: types.Position
+    ) -> Sequence[types.DocumentHighlight] | None:
+        return await self._client.text_document_document_highlight_async(
+            params=types.DocumentHighlightParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
+        )
+
+    async def references(
+        self, uri: str, position: types.Position, *, include_declaration: bool
+    ) -> Sequence[types.Location] | None:
+        return await self._client.text_document_references_async(
+            params=types.ReferenceParams(
+                text_document=types.TextDocumentIdentifier(uri=uri),
+                position=position,
+                context=types.ReferenceContext(include_declaration),
+            )
         )
 
     async def diagnostics(self, uri: str) -> Sequence[types.Diagnostic]:

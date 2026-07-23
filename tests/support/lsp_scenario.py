@@ -127,6 +127,73 @@ class ExpectDiagnostics:
     absent: bool = False
 
 
+@dataclass(frozen=True)
+class ExpectDefinition:
+    """Go to definition at the cursor and assert one result lands at (*line*, *character*).
+
+    *file_suffix*, if given, narrows the match to a location whose URI ends
+    with that suffix (e.g. ``"mod3.nix"``, for a NixOS option's
+    ``declarationPositions`` landing in a different fixture file) --
+    otherwise any matching location counts, which is the common case for
+    local let/formal definitions and same-file path-literal jumps.
+    """
+
+    line: int
+    character: int
+    file_suffix: str | None = None
+
+
+@dataclass(frozen=True)
+class ExpectNoDefinition:
+    """Go to definition at the cursor and assert no result at all -- a legitimate, tested outcome."""
+
+
+@dataclass(frozen=True)
+class Rename:
+    """Rename the binding at the cursor to *new_name*.
+
+    Requires ``prepareRename`` to succeed first (raises ``AssertionError``
+    otherwise, mirroring a real client's own preflight check before it would
+    even offer the rename UI), then applies the resulting ``WorkspaceEdit``
+    to the document as real ``textDocument/didChange`` edits -- same as a
+    real editor would after the user accepts a rename -- so a following
+    ``ExpectText``/``GoTo``/etc. sees the renamed document.
+    """
+
+    new_name: str
+
+
+@dataclass(frozen=True)
+class ExpectNoRename:
+    """Assert prepareRename refuses (returns None) at the cursor -- no Rename() attempted."""
+
+
+@dataclass(frozen=True)
+class ExpectText:
+    """Assert *contains* appears verbatim in the scenario's current tracked document text."""
+
+    contains: str
+
+
+@dataclass(frozen=True)
+class ExpectDocumentHighlightCount:
+    """Document-highlight at the cursor and assert exactly *count* highlights come back."""
+
+    count: int
+
+
+@dataclass(frozen=True)
+class ExpectReferencesCount:
+    """Find-references at the cursor and assert exactly *count* locations come back.
+
+    ``include_declaration`` mirrors the LSP request's own toggle for whether
+    the binding's own definition span counts as one of the results.
+    """
+
+    count: int
+    include_declaration: bool = True
+
+
 Action = (
     GoTo
     | Select
@@ -137,6 +204,13 @@ Action = (
     | ExpectCompletion
     | ExpectNoCompletion
     | ExpectDiagnostics
+    | ExpectDefinition
+    | ExpectNoDefinition
+    | Rename
+    | ExpectNoRename
+    | ExpectText
+    | ExpectDocumentHighlightCount
+    | ExpectReferencesCount
 )
 
 
@@ -152,6 +226,24 @@ class LspDriver(Protocol):
     async def complete(
         self, uri: str, position: types.Position
     ) -> types.CompletionList | Sequence[types.CompletionItem] | None: ...
+
+    async def definition(
+        self, uri: str, position: types.Position
+    ) -> types.Location | Sequence[types.Location] | Sequence[types.LocationLink] | None: ...
+
+    async def prepare_rename(
+        self, uri: str, position: types.Position
+    ) -> types.Range | types.PrepareRenamePlaceholder | types.PrepareRenameDefaultBehavior | None: ...
+
+    async def rename(self, uri: str, position: types.Position, new_name: str) -> types.WorkspaceEdit | None: ...
+
+    async def document_highlight(
+        self, uri: str, position: types.Position
+    ) -> Sequence[types.DocumentHighlight] | None: ...
+
+    async def references(
+        self, uri: str, position: types.Position, *, include_declaration: bool
+    ) -> Sequence[types.Location] | None: ...
 
     async def diagnostics(self, uri: str) -> Sequence[types.Diagnostic]: ...
 
@@ -227,6 +319,22 @@ def _shift_range(range_: types.Range, edit_range: types.Range, replacement: str)
     )
 
 
+def _definition_locations(
+    result: types.Location | Sequence[types.Location] | Sequence[types.LocationLink] | None,
+) -> list[tuple[str, types.Position]]:
+    """Normalize any of ``textDocument/definition``'s result shapes to ``(uri, start position)`` pairs."""
+    if result is None:
+        return []
+    items: Sequence[types.Location | types.LocationLink] = [result] if isinstance(result, types.Location) else result
+    locations: list[tuple[str, types.Position]] = []
+    for item in items:
+        if isinstance(item, types.LocationLink):
+            locations.append((item.target_uri, item.target_selection_range.start))
+        else:
+            locations.append((item.uri, item.range.start))
+    return locations
+
+
 class Scenario:
     """A fixture's source plus a sequence of ``Action``s to play back against an ``LspDriver``."""
 
@@ -298,6 +406,51 @@ class Scenario:
                     raise AssertionError(f"expected no {code!r}/{contains!r} diagnostic, got {summary}")
                 if not absent and not matches:
                     raise AssertionError(f"expected a {code!r}/{contains!r} diagnostic, got {summary}")
+            case ExpectDefinition(line, character, file_suffix):
+                locations = _definition_locations(await driver.definition(self.uri, self._cursor))
+                if not locations:
+                    raise AssertionError("expected a definition result, got none")
+                matched = any(
+                    (file_suffix is None or uri.endswith(file_suffix))
+                    and position.line == line
+                    and position.character == character
+                    for uri, position in locations
+                )
+                if not matched:
+                    raise AssertionError(f"expected a definition at ({file_suffix!r}, {line}, {character}), got {locations}")
+            case ExpectNoDefinition():
+                locations = _definition_locations(await driver.definition(self.uri, self._cursor))
+                if locations:
+                    raise AssertionError(f"expected no definition result, got {locations}")
+            case Rename(new_name):
+                prepared = await driver.prepare_rename(self.uri, self._cursor)
+                if prepared is None:
+                    raise AssertionError("prepareRename refused at cursor")
+                edit = await driver.rename(self.uri, self._cursor, new_name)
+                if edit is None:
+                    raise AssertionError("rename returned no WorkspaceEdit")
+                text_edits = (edit.changes or {}).get(self.uri, [])
+                for text_edit in sorted(
+                    text_edits, key=lambda e: (e.range.start.line, e.range.start.character), reverse=True
+                ):
+                    await self._edit(driver, text_edit.range, text_edit.new_text)
+            case ExpectNoRename():
+                prepared = await driver.prepare_rename(self.uri, self._cursor)
+                if prepared is not None:
+                    raise AssertionError(f"expected prepareRename to refuse, got {prepared!r}")
+            case ExpectText(contains):
+                if contains not in self._text:
+                    raise AssertionError(f"{contains!r} not in document text: {self._text!r}")
+            case ExpectDocumentHighlightCount(count):
+                highlights = await driver.document_highlight(self.uri, self._cursor)
+                actual = len(highlights) if highlights is not None else 0
+                if actual != count:
+                    raise AssertionError(f"expected {count} document highlights, got {actual}")
+            case ExpectReferencesCount(count, include_declaration):
+                references = await driver.references(self.uri, self._cursor, include_declaration=include_declaration)
+                actual = len(references) if references is not None else 0
+                if actual != count:
+                    raise AssertionError(f"expected {count} references, got {actual}")
 
     async def _edit(self, driver: LspDriver, edit_range: types.Range, text: str) -> None:
         new_cursor = _end_position(edit_range.start, text)

@@ -509,3 +509,261 @@ def suppressed_codes_on_line(source: str, line: int) -> set[str]:
         return set()
     match = _NOQA_RE.search(lines[line])
     return {match.group("code")} if match else set()
+
+
+def path_literal_at(source: str, byte_offset: int) -> str | None:
+    """Return the literal source text of a ``path_expression``/``hpath_expression`` node containing *byte_offset*.
+
+    E.g. for ``./foo.nix`` (in ``import ./foo.nix``), returns ``"./foo.nix"``
+    verbatim -- callers resolve it against the file's own directory, the
+    same base-path convention ``_context.py``'s own directives use. Returns
+    None when the path contains string interpolation (``./foo-${x}.nix``,
+    not resolvable without evaluation) or the cursor isn't inside a path
+    literal at all. A ``spath_expression`` (``<nixpkgs>``-style, resolved
+    via ``NIX_PATH`` search semantics rather than a plain filesystem join)
+    is deliberately not handled here.
+    """
+    tree = parse_nix(source)
+    encoded = source.encode()
+    node = tree.root_node.descendant_for_byte_range(byte_offset, byte_offset)
+    current = node
+    while current is not None:
+        if current.type in ("path_expression", "hpath_expression"):
+            if any(child.type == "interpolation" for child in current.children):
+                return None
+            return encoded[current.start_byte : current.end_byte].decode()
+        current = current.parent
+    return None
+
+
+@dataclass(frozen=True)
+class LocalScope:
+    """One local lexical binding's own name span, plus every other reference to it within its shadowing scope.
+
+    ``definition`` and each entry in ``references`` are ``(start_row,
+    start_column, end_row, end_column)`` spans, matching ``attrpath_range``'s
+    own convention.
+    """
+
+    definition: tuple[int, int, int, int]
+    references: list[tuple[int, int, int, int]]
+
+
+def _node_text(encoded: bytes, node: Any) -> str:
+    return encoded[node.start_byte : node.end_byte].decode()
+
+
+def _node_range(node: Any) -> tuple[int, int, int, int]:
+    return (node.start_point[0], node.start_point[1], node.end_point[0], node.end_point[1])
+
+
+def _same_node(a: Any | None, b: Any) -> bool:
+    """True if *a* and *b* denote the same tree position.
+
+    tree-sitter's Python bindings hand back a fresh wrapper object on every
+    node access (``node.parent.children[0] is not node`` even when they're
+    the same underlying tree node), so identity comparison silently always
+    fails -- byte-range equality is the correct way to ask "is this the
+    same node" here.
+    """
+    return a is not None and a.start_byte == b.start_byte and a.end_byte == b.end_byte
+
+
+def _child_of_type(node: Any, type_name: str) -> Any | None:
+    for child in node.children:
+        if child.type == type_name:
+            return child
+    return None
+
+
+def _function_declared_names(function_expression: Any, encoded: bytes) -> set[str]:
+    """Every name a ``function_expression`` binds directly: its ``universal``/``formals`` names."""
+    names: set[str] = set()
+    universal = function_expression.child_by_field_name("universal")
+    if universal is not None:
+        names.add(_node_text(encoded, universal))
+    formals = function_expression.child_by_field_name("formals")
+    if formals is not None:
+        for formal in formals.named_children:
+            if formal.type != "formal":
+                continue
+            name = formal.child_by_field_name("name")
+            if name is not None:
+                names.add(_node_text(encoded, name))
+    return names
+
+
+def _let_declared_names(let_expression: Any, encoded: bytes) -> set[str]:
+    """Every name a ``let_expression``'s own ``binding_set`` binds directly (single-segment bindings and inherits).
+
+    Nix ``let`` is already mutually recursive (no separate ``rec`` keyword),
+    so this is the full set of names visible to every sibling binding and
+    the ``in`` body alike.
+    """
+    binding_set = _child_of_type(let_expression, "binding_set")
+    if binding_set is None:
+        return set()
+    names: set[str] = set()
+    for binding in binding_set.named_children:
+        if binding.type == "binding":
+            attrpath = binding.child_by_field_name("attrpath")
+            if attrpath is not None and len(attrpath.named_children) == 1:
+                attr = attrpath.named_children[0]
+                if attr.type == "identifier":
+                    names.add(_node_text(encoded, attr))
+        elif binding.type in ("inherit", "inherit_from"):
+            attrs = binding.child_by_field_name("attrs")
+            if attrs is not None:
+                for attr in attrs.named_children:
+                    if attr.type == "identifier":
+                        names.add(_node_text(encoded, attr))
+    return names
+
+
+def _binding_site_at(node: Any, encoded: bytes) -> tuple[str, Any, Any] | None:
+    """If *node* is itself a v1-renameable binding's own name, return ``(name, scope_root, definition_node)``.
+
+    Renameable kinds: a ``formal``'s ``name``, a ``function_expression``'s
+    ``universal`` identifier, and a ``let_expression`` binding whose
+    ``attrpath`` is exactly one identifier segment. ``inherit``-bound names
+    and multi-segment attrpath bindings are not v1-renameable definition
+    sites (see ``_syntax.py``'s module-level design notes in the LSP plan);
+    None is returned for those, same as for anything else.
+    """
+    if node.type != "identifier":
+        return None
+    parent = node.parent
+    if parent is None:
+        return None
+    name = _node_text(encoded, node)
+
+    if parent.type == "formal" and _same_node(parent.child_by_field_name("name"), node):
+        formals = parent.parent
+        function_expression = formals.parent if formals is not None else None
+        if function_expression is not None and function_expression.type == "function_expression":
+            # Scope is the *whole* function_expression, not just its body: a
+            # sibling formal's own default expression can reference this one
+            # (``{ a, b ? a + 1 }: ...`` -- formals aren't order-dependent,
+            # it's a simultaneous lazy attrset pattern, not a `let`), so
+            # ``b ? a + 1``'s own ``a`` must be found too, not just the body's.
+            return name, function_expression, node
+        return None
+
+    if parent.type == "function_expression" and _same_node(parent.child_by_field_name("universal"), node):
+        return name, parent, node
+
+    if parent.type == "attrpath" and len(parent.named_children) == 1 and _same_node(parent.named_children[0], node):
+        binding = parent.parent
+        if binding is not None and binding.type == "binding":
+            binding_set = binding.parent
+            let_expression = binding_set.parent if binding_set is not None else None
+            if let_expression is not None and let_expression.type == "let_expression":
+                return name, let_expression, node
+
+    return None
+
+
+def _resolve_declaration(node: Any, name: str, encoded: bytes) -> tuple[Any, Any] | None:
+    """Climb ancestors of a reference *node* for the nearest enclosing declaration of *name*.
+
+    Returns ``(definition_node, scope_root)``, or None if the nearest
+    enclosing declaration is an ``inherit`` (not v1-renameable -- shadowing
+    still stops the search here, same as Nix's own lexical scoping, but no
+    result is returned for it) or there is no local declaration at all
+    (e.g. *name* is a builtin or an ambient global).
+    """
+    current = node.parent
+    while current is not None:
+        if current.type == "function_expression":
+            universal = current.child_by_field_name("universal")
+            if universal is not None and _node_text(encoded, universal) == name:
+                return universal, current
+            formals = current.child_by_field_name("formals")
+            if formals is not None:
+                for formal in formals.named_children:
+                    if formal.type != "formal":
+                        continue
+                    formal_name = formal.child_by_field_name("name")
+                    if formal_name is not None and _node_text(encoded, formal_name) == name:
+                        return formal_name, current
+        elif current.type == "let_expression":
+            binding_set = _child_of_type(current, "binding_set")
+            if binding_set is not None:
+                for binding in binding_set.named_children:
+                    if binding.type == "binding":
+                        attrpath = binding.child_by_field_name("attrpath")
+                        if attrpath is not None and len(attrpath.named_children) == 1:
+                            attr = attrpath.named_children[0]
+                            if attr.type == "identifier" and _node_text(encoded, attr) == name:
+                                return attr, current
+                    elif binding.type in ("inherit", "inherit_from"):
+                        attrs = binding.child_by_field_name("attrs")
+                        if attrs is not None:
+                            for attr in attrs.named_children:
+                                if attr.type == "identifier" and _node_text(encoded, attr) == name:
+                                    return None
+        current = current.parent
+    return None
+
+
+def _collect_references(scope_root: Any, name: str, encoded: bytes) -> list[Any]:
+    """Every ``variable_expression`` referencing *name* within *scope_root*, not descending into a shadowing subtree."""
+    results: list[Any] = []
+
+    def walk(node: Any, *, top: bool) -> None:
+        if not top:
+            if node.type == "function_expression" and name in _function_declared_names(node, encoded):
+                return
+            if node.type == "let_expression" and name in _let_declared_names(node, encoded):
+                return
+        if node.type == "variable_expression":
+            identifier = node.child_by_field_name("name")
+            if identifier is not None and _node_text(encoded, identifier) == name:
+                results.append(identifier)
+            return
+        for child in node.children:
+            walk(child, top=False)
+
+    walk(scope_root, top=True)
+    return results
+
+
+def local_scope_at(source: str, byte_offset: int) -> LocalScope | None:
+    """Resolve the local lexical binding at *byte_offset*, whether the cursor is on its definition or a reference.
+
+    Covers exactly the v1-renameable binding kinds (see
+    ``_binding_site_at``'s docstring): a function's ``formal``/``universal``
+    name, or a single-segment ``let`` binding, from either the definition
+    site itself or any ``variable_expression`` reference to it. Returns
+    None for anything else -- module-system option paths, attrset literal
+    keys, builtins/globals, ``inherit``-bound names, and dynamic attrpaths
+    are all out of scope for v1 rename/highlight/references.
+
+    Tries *byte_offset* first, then *byte_offset - 1* -- the same
+    token-boundary quirk documented on ``identifier_path_at``: a cursor
+    right after an identifier favors the following token over the
+    identifier itself.
+    """
+    tree = parse_nix(source)
+    encoded = source.encode()
+    candidates = [tree.root_node.descendant_for_byte_range(byte_offset, byte_offset)]
+    if byte_offset > 0:
+        candidates.append(tree.root_node.descendant_for_byte_range(byte_offset - 1, byte_offset - 1))
+
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        site = _binding_site_at(candidate, encoded)
+        if site is not None:
+            name, scope_root, definition_node = site
+            references = _collect_references(scope_root, name, encoded)
+            return LocalScope(_node_range(definition_node), [_node_range(r) for r in references])
+        if candidate.type == "identifier" and candidate.parent is not None and candidate.parent.type == "variable_expression":
+            name = _node_text(encoded, candidate)
+            resolved = _resolve_declaration(candidate, name, encoded)
+            if resolved is not None:
+                definition_node, scope_root = resolved
+                references = _collect_references(scope_root, name, encoded)
+                return LocalScope(_node_range(definition_node), [_node_range(r) for r in references])
+
+    return None

@@ -42,3 +42,12 @@ async def hover_at(client: LanguageClient, uri: str, position: types.Position) -
     return await client.text_document_hover_async(
         params=types.HoverParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
     )
+
+
+async def definition_at(
+    client: LanguageClient, uri: str, position: types.Position
+) -> types.Location | Sequence[types.Location] | Sequence[types.LocationLink] | None:
+    """Send a real ``textDocument/definition`` request."""
+    return await client.text_document_definition_async(
+        params=types.DefinitionParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
+    )

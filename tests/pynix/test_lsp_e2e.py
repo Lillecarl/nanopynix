@@ -24,7 +24,7 @@ import pytest_lsp
 from lsprotocol import types
 from pytest_lsp import ClientServerConfig, LanguageClient, client_capabilities
 
-from tests.support.lsp_client import complete_at, hover_at, open_document
+from tests.support.lsp_client import complete_at, definition_at, hover_at, open_document
 from tests.support.lsp_cursor import cursor_after
 
 _MODULE_SYSTEM = (Path(__file__).parent / "test_lsp" / "module_system").resolve()
@@ -58,6 +58,18 @@ async def test_completion_advertises_dot_as_a_trigger_character(client: Language
     trigger_characters: list[str] | None = provider.trigger_characters  # type: ignore[reportUnknownMemberType] -- see above
     assert trigger_characters is not None
     assert "." in trigger_characters
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_server_advertises_definition_rename_highlight_and_references_capabilities(
+    client: LanguageClient,
+) -> None:
+    """Without these, a real client has no reason to ever send the corresponding requests at all."""
+    capabilities: types.ServerCapabilities = client.server_capabilities  # type: ignore[attr-defined] -- see `client` fixture
+    assert capabilities.definition_provider  # type: ignore[reportUnknownMemberType] -- lsprotocol's generated *Options union types aren't fully resolvable by pyright
+    assert capabilities.rename_provider  # type: ignore[reportUnknownMemberType] -- see above
+    assert capabilities.document_highlight_provider  # type: ignore[reportUnknownMemberType] -- see above
+    assert capabilities.references_provider  # type: ignore[reportUnknownMemberType] -- see above
 
 
 @pytest.mark.asyncio(loop_scope="module")
@@ -115,3 +127,55 @@ async def test_e2e_hover_shows_the_declared_option(client: LanguageClient) -> No
     assert hover is not None
     assert isinstance(hover.contents, types.MarkupContent)
     assert "Port the example daemon listens on." in hover.contents.value
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_e2e_go_to_definition_on_a_nixos_option_reference_lands_on_its_declaration(
+    client: LanguageClient,
+) -> None:
+    """`services.example-daemon.enable` (config1.nix) resolves, over real stdio, to its `declarationPositions` in mod3.nix."""
+    path = _MODULE_SYSTEM / "config1.nix"
+    source = path.read_text()
+    uri = path.as_uri()
+    open_document(client, uri, source)
+    await client.wait_for_notification(types.TEXT_DOCUMENT_PUBLISH_DIAGNOSTICS)
+
+    position = cursor_after(source, "enable", needle="services.example-daemon.enable")
+    result = await definition_at(client, uri, position)
+
+    assert result is not None
+    locations = [result] if isinstance(result, types.Location) else list(result)
+    assert any(
+        isinstance(location, types.Location)
+        and location.uri.endswith("mod3.nix")
+        and location.range.start == types.Position(3, 4)
+        for location in locations
+    )
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_e2e_renaming_a_let_binding_updates_every_reference_over_real_stdio(client: LanguageClient) -> None:
+    """Round-trips a real `prepareRename` + `rename` request against `definition_scope.nix`'s outer `greeting`."""
+    path = _MODULE_SYSTEM / "definition_scope.nix"
+    source = path.read_text()
+    uri = path.as_uri()
+    open_document(client, uri, source)
+    await client.wait_for_notification(types.TEXT_DOCUMENT_PUBLISH_DIAGNOSTICS)
+
+    position = cursor_after(source, "greeting", needle='greeting = "hello"')
+
+    prepared = await client.text_document_prepare_rename_async(
+        params=types.PrepareRenameParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
+    )
+    assert prepared is not None
+
+    edit = await client.text_document_rename_async(
+        params=types.RenameParams(
+            text_document=types.TextDocumentIdentifier(uri=uri), position=position, new_name="salutation"
+        )
+    )
+    assert edit is not None
+    assert edit.changes is not None
+    text_edits = edit.changes[uri]
+    assert len(text_edits) == 4
+    assert {text_edit.new_text for text_edit in text_edits} == {"salutation"}

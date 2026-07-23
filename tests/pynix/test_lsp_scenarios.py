@@ -27,11 +27,18 @@ from tests.support.lsp_environment import asset
 from tests.support.lsp_scenario import (
     Delete,
     ExpectCompletion,
+    ExpectDefinition,
     ExpectDiagnostics,
+    ExpectDocumentHighlightCount,
     ExpectHover,
     ExpectNoCompletion,
+    ExpectNoDefinition,
+    ExpectNoRename,
+    ExpectReferencesCount,
+    ExpectText,
     GoTo,
     InsertAfterCursor,
+    Rename,
     Scenario,
     Select,
     Type,
@@ -50,6 +57,9 @@ _NULL_NIX = asset("terranix/modules/null.nix")
 _CONFIG_NIX = asset("terranix/modules/config.nix")
 _EASYKUBENIX_DEMO_NIX = asset("easykubenix/modules/demo.nix")
 _EASYKUBENIX_CONFIG_NIX = asset("easykubenix/modules/config.nix")
+_MODULE_SYSTEM_CONFIG1_NIX = asset("module_system/config1.nix")
+_DEFINITION_SCOPE_NIX = asset("module_system/definition_scope.nix")
+_DEFINITION_IMPORT_NIX = asset("module_system/definition_import.nix")
 
 
 @pytest.fixture(params=["in_process", "wire"])
@@ -59,6 +69,20 @@ async def terranix_driver(
     lsp_wire: tuple[PynixLanguageServer, pytest_lsp.LanguageClient],
 ) -> AsyncIterator[LspDriver]:
     """Both backends for the terranix scenarios below, parametrized so each scenario runs against each."""
+    if request.param == "in_process":
+        yield InProcessDriver(lsp_server)
+        return
+    _wire_server, wire_client = lsp_wire
+    yield WireDriver(wire_client)
+
+
+@pytest.fixture(params=["in_process", "wire"])
+async def module_system_driver(
+    request: pytest.FixtureRequest,
+    lsp_server: PynixLanguageServer,
+    lsp_wire: tuple[PynixLanguageServer, pytest_lsp.LanguageClient],
+) -> AsyncIterator[LspDriver]:
+    """Both backends for the module-system definition/rename/highlight/references scenarios below."""
     if request.param == "in_process":
         yield InProcessDriver(lsp_server)
         return
@@ -716,5 +740,154 @@ async def test_completion_on_a_bare_key_in_nested_attrset_style_recovers_the_kin
         ],
     )
     await scenario.run(easykubenix_driver)
+
+
+async def test_renaming_a_let_binding_updates_every_reference_but_not_a_shadowed_inner_one(
+    module_system_driver: LspDriver,
+) -> None:
+    """Marker GDEF sits on the outer `greeting`'s own name; GREF sits on one of its references.
+
+    `definition_scope.nix` also declares an inner, shadowing `let greeting =
+    "shadowed"; in greeting` -- renaming the outer binding must leave that
+    inner one completely untouched, proving the shadowing-aware scope walk
+    in `local_scope_at` (not just a naive whole-file text replace).
+    """
+    scenario = Scenario(
+        _DEFINITION_SCOPE_NIX.as_uri(),
+        _DEFINITION_SCOPE_NIX.read_text(),
+        [
+            GoTo("GDEF"),
+            Rename("salutation"),
+            ExpectText(contains='salutation = "hello"'),
+            ExpectText(contains="first = salutation +"),
+            ExpectText(contains="second = salutation +"),
+            ExpectText(contains="outer = salutation;"),
+            ExpectText(contains='greeting = "shadowed"'),
+            ExpectText(contains="in\n    greeting;"),
+        ],
+    )
+    await scenario.run(module_system_driver)
+
+
+async def test_renaming_a_formal_updates_a_sibling_defaults_reference_too(
+    module_system_driver: LspDriver,
+) -> None:
+    """Marker ADEF sits on formal `a` in `{ a, b ? a + 1 }:` -- its scope is the whole function, not just the body.
+
+    Regression coverage for the exact scoping bug found and fixed while
+    building this feature: `b`'s default expression (`a + 1`) is a sibling
+    formal's default, not part of the function body, but is still in `a`'s
+    scope per Nix's own formals semantics -- see `_binding_site_at` in
+    `_syntax.py`.
+    """
+    scenario = Scenario(
+        _DEFINITION_SCOPE_NIX.as_uri(),
+        _DEFINITION_SCOPE_NIX.read_text(),
+        [
+            GoTo("ADEF"),
+            Rename("x"),
+            ExpectText(contains="{ x, b ? x + 1 }:"),
+            ExpectText(contains="x + b;"),
+        ],
+    )
+    await scenario.run(module_system_driver)
+
+
+async def test_document_highlight_and_references_count_every_span_in_the_shadowing_aware_scope(
+    module_system_driver: LspDriver,
+) -> None:
+    """Marker GREF sits on a reference (not the definition) -- highlight/references must still find the whole scope.
+
+    The outer `greeting` has 1 definition + 3 references (`first`, `second`,
+    `outer`) -- 4 spans for document highlight (always includes the
+    definition), 4 for references with `include_declaration`, 3 without.
+    """
+    scenario = Scenario(
+        _DEFINITION_SCOPE_NIX.as_uri(),
+        _DEFINITION_SCOPE_NIX.read_text(),
+        [
+            GoTo("GREF"),
+            ExpectDocumentHighlightCount(4),
+            ExpectReferencesCount(4, include_declaration=True),
+            ExpectReferencesCount(3, include_declaration=False),
+        ],
+    )
+    await scenario.run(module_system_driver)
+
+
+async def test_prepare_rename_refuses_on_a_nixos_option_reference(module_system_driver: LspDriver) -> None:
+    """Marker ENABLE (in config1.nix) sits on `enable` in a bare option-definition attrpath, not a local binding.
+
+    v1 rename is deliberately local-lexical-scope only -- a NixOS option
+    reference resolves through real Nix evaluation, not syntax, so it must
+    not be offered for rename at all.
+    """
+    scenario = Scenario(
+        _MODULE_SYSTEM_CONFIG1_NIX.as_uri(),
+        _MODULE_SYSTEM_CONFIG1_NIX.read_text(),
+        [
+            GoTo("ENABLE"),
+            ExpectNoRename(),
+        ],
+    )
+    await scenario.run(module_system_driver)
+
+
+async def test_go_to_definition_on_an_import_path_literal_jumps_to_the_imported_file(
+    module_system_driver: LspDriver,
+) -> None:
+    """Marker IMPORT (in definition_import.nix) sits inside the `./mod2.nix` path literal of an `imports = [ ... ];` entry."""
+    scenario = Scenario(
+        _DEFINITION_IMPORT_NIX.as_uri(),
+        _DEFINITION_IMPORT_NIX.read_text(),
+        [
+            GoTo("IMPORT"),
+            ExpectDefinition(line=0, character=0, file_suffix="mod2.nix"),
+        ],
+    )
+    await scenario.run(module_system_driver)
+
+
+async def test_go_to_definition_on_a_nixos_option_reference_lands_on_its_declaration(
+    module_system_driver: LspDriver,
+) -> None:
+    """Marker ENABLE (in config1.nix) sits on `enable`, a bare option-definition attrpath resolving through `options`.
+
+    `mod3.nix` declares `services.example-daemon.enable = lib.mkEnableOption
+    ...;` on its own line 4 (1-based), column 5 -- nixpkgs' `lib/options.nix`
+    `declarationPositions` bookkeeping, read via `_option_declaration_locations`
+    -- so this only passes if the whole real-evaluation path (not just the
+    syntax-only local-scope engine) is actually being consulted for
+    `textDocument/definition`.
+    """
+    scenario = Scenario(
+        _MODULE_SYSTEM_CONFIG1_NIX.as_uri(),
+        _MODULE_SYSTEM_CONFIG1_NIX.read_text(),
+        [
+            GoTo("ENABLE"),
+            ExpectDefinition(line=3, character=4, file_suffix="mod3.nix"),
+        ],
+    )
+    await scenario.run(module_system_driver)
+
+
+async def test_go_to_definition_on_a_composed_package_attribute_gracefully_finds_nothing(
+    module_system_driver: LspDriver,
+) -> None:
+    """Marker PKGSHELLO (in config1.nix) sits on `hello` in `pkgs.hello`.
+
+    `builtins.unsafeGetAttrPos` returns null for nixpkgs packages composed
+    via `makeScope`/overlays (confirmed during this feature's design pass) --
+    a graceful `None` is the correct, tested outcome here, not a bug.
+    """
+    scenario = Scenario(
+        _MODULE_SYSTEM_CONFIG1_NIX.as_uri(),
+        _MODULE_SYSTEM_CONFIG1_NIX.read_text(),
+        [
+            GoTo("PKGSHELLO"),
+            ExpectNoDefinition(),
+        ],
+    )
+    await scenario.run(module_system_driver)
 
 

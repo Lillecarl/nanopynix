@@ -7,10 +7,11 @@ import sys
 import threading
 from typing import TYPE_CHECKING
 
+import anyio
 from lsprotocol import types
 from pygls.io_ import StdinAsyncReader, StdoutWriter, run_async
 from pygls.lsp.server import LanguageServer
-from pygls.uris import to_fs_path
+from pygls.uris import from_fs_path, to_fs_path
 from pygls.workspace import TextDocument
 
 import nanopynix
@@ -18,7 +19,14 @@ from nanopynix.exceptions import NixError
 from pynix._lsp._context import FileContext, parse_directives, resolve_root_path
 from pynix._lsp._dialects import DIALECTS
 from pynix._lsp._render import render_value
-from pynix._lsp._syntax import completion_target_at, identifier_path_at, parse_errors, top_level_symbols
+from pynix._lsp._syntax import (
+    completion_target_at,
+    identifier_path_at,
+    local_scope_at,
+    parse_errors,
+    path_literal_at,
+    top_level_symbols,
+)
 
 if TYPE_CHECKING:
     from pynix._lsp._syntax import ParseErrorRange
@@ -128,6 +136,42 @@ def _byte_offset_in(uri: str, source: str, position: types.Position) -> int:
     return len(source[:char_offset].encode("utf-8"))
 
 
+def _file_dir(uri: str) -> str:
+    """The filesystem directory containing *uri*, or ``"."`` if it can't be resolved to a real path."""
+    file_path = to_fs_path(uri)
+    return file_path.rsplit("/", 1)[0] if file_path and "/" in file_path else "."
+
+
+def _resolve_source(ls: PynixLanguageServer, uri: str, position: types.Position) -> tuple[str, int]:
+    """Return the ``(source, byte_offset)`` pair every syntax-derived handler below should resolve *position* against.
+
+    Prefers the live document, falling back to the last snapshot that
+    parsed clean if the live document currently has parse errors anywhere
+    -- see ``_sync_document``'s docstring for why (tree-sitter-nix's error
+    recovery can shred real, already-complete code arbitrarily far from
+    wherever the live syntax error actually is). *position* itself always
+    comes from the live request; only the source text/byte offset it's
+    resolved against may switch to the cached snapshot, via
+    ``_byte_offset_in`` re-deriving the offset against that snapshot's own
+    layout (reusing the live offset would drift whenever the edit changed a
+    preceding line's length -- almost always).
+    """
+    document = ls.workspace.get_text_document(uri)
+    source = document.source
+    byte_offset = _byte_offset(source, position, ls, uri)
+    if ls.has_parse_errors.get(uri, False):
+        last_good = ls.last_good_source.get(uri)
+        if last_good is not None:
+            source = last_good
+            byte_offset = _byte_offset_in(uri, last_good, position)
+    return source, byte_offset
+
+
+def _lsp_range(span: tuple[int, int, int, int]) -> types.Range:
+    start_row, start_column, end_row, end_column = span
+    return types.Range(types.Position(start_row, start_column), types.Position(end_row, end_column))
+
+
 def _parse_error_diagnostic(error: ParseErrorRange) -> types.Diagnostic:
     return types.Diagnostic(
         range=types.Range(
@@ -181,10 +225,8 @@ async def _sync_document(ls: PynixLanguageServer, uri: str) -> None:
             del ls.contexts[uri]
         context = None
     elif context is None or context.directives != directives:
-        file_path = to_fs_path(uri)
-        file_dir = file_path.rsplit("/", 1)[0] if file_path and "/" in file_path else "."
         session, store = await ls.ensure_nix()
-        context = FileContext(session, store, directives, file_dir)
+        context = FileContext(session, store, directives, _file_dir(uri))
         await context.reload()
         for dialect in DIALECTS:
             await dialect.derive_roots(context)
@@ -236,14 +278,7 @@ async def _hover(ls: PynixLanguageServer, params: types.HoverParams) -> types.Ho
     context = ls.contexts.get(uri)
     if context is None:
         return None
-    document = ls.workspace.get_text_document(uri)
-    source = document.source
-    byte_offset = _byte_offset(source, params.position, ls, uri)
-    if ls.has_parse_errors.get(uri, False):
-        last_good = ls.last_good_source.get(uri)
-        if last_good is not None:
-            source = last_good
-            byte_offset = _byte_offset_in(uri, last_good, params.position)
+    source, byte_offset = _resolve_source(ls, uri, params.position)
     for dialect in DIALECTS:
         rendered = await dialect.hover(context, source, byte_offset, DIALECTS)
         if rendered is not None:
@@ -298,6 +333,119 @@ async def _completion(ls: PynixLanguageServer, params: types.CompletionParams) -
         return None
     items = [types.CompletionItem(label=name) for name in names if name.startswith(partial)]
     return types.CompletionList(is_incomplete=False, items=items)
+
+
+async def _path_literal_location(uri: str, path_literal: str) -> types.Location | None:
+    """Resolve a static path literal (``./foo.nix``) to a real file's ``Location``, or None if it doesn't exist.
+
+    A directory target (``imports = [ ./mymodule ];``, the common NixOS
+    convention) resolves to its own ``default.nix`` when present, matching
+    what ``import`` itself would actually load.
+    """
+    target = anyio.Path(_file_dir(uri)) / path_literal
+    if await target.is_dir():
+        default_nix = target / "default.nix"
+        if await default_nix.exists():
+            target = default_nix
+    if not await target.exists():
+        return None
+    resolved_uri = from_fs_path(str(target))
+    if resolved_uri is None:
+        return None
+    origin = types.Position(0, 0)
+    return types.Location(uri=resolved_uri, range=types.Range(origin, origin))
+
+
+async def _definition(
+    ls: PynixLanguageServer, params: types.DefinitionParams
+) -> types.Location | list[types.Location] | None:
+    """Structural lookups (path literal, local scope) first, then dialects -- mirrors ``_hover``'s dispatch order.
+
+    Path-literal and local-scope resolution work even with no directive
+    bound at all (pure syntax, same "always available" tier diagnostics
+    already get); dialects only run when this file has an evaluation
+    context.
+    """
+    uri = params.text_document.uri
+    source, byte_offset = _resolve_source(ls, uri, params.position)
+
+    path_literal = path_literal_at(source, byte_offset)
+    if path_literal is not None:
+        location = await _path_literal_location(uri, path_literal)
+        if location is not None:
+            return location
+
+    local = local_scope_at(source, byte_offset)
+    if local is not None:
+        return types.Location(uri=uri, range=_lsp_range(local.definition))
+
+    context = ls.contexts.get(uri)
+    if context is None:
+        return None
+    for dialect in DIALECTS:
+        location = await dialect.definition(context, source, byte_offset, DIALECTS)
+        if location is not None:
+            return location
+    return None
+
+
+async def _prepare_rename(
+    ls: PynixLanguageServer, params: types.PrepareRenameParams
+) -> types.PrepareRenameResult | None:
+    """Refuse (return None) unless the cursor is on a v1-renameable local binding -- see ``local_scope_at``'s docstring."""
+    uri = params.text_document.uri
+    source, byte_offset = _resolve_source(ls, uri, params.position)
+    local = local_scope_at(source, byte_offset)
+    if local is None:
+        return None
+    return _lsp_range(local.definition)
+
+
+async def _rename(ls: PynixLanguageServer, params: types.RenameParams) -> types.WorkspaceEdit | None:
+    """Rename a local lexical binding and every reference to it, all within this one document.
+
+    Local-lexical-scope only (``let`` bindings, function formals) -- see
+    ``local_scope_at``'s docstring for exactly which binding kinds qualify.
+    Cross-file/semantic rename (e.g. a NixOS option and every module that
+    sets it) is out of scope: unsafe without a real project graph, and this
+    server's LSP surface only ever reasons about one open document.
+    """
+    uri = params.text_document.uri
+    source, byte_offset = _resolve_source(ls, uri, params.position)
+    local = local_scope_at(source, byte_offset)
+    if local is None:
+        return None
+    spans = [local.definition, *local.references]
+    edits = [types.TextEdit(range=_lsp_range(span), new_text=params.new_name) for span in spans]
+    return types.WorkspaceEdit(changes={uri: edits})
+
+
+async def _document_highlight(
+    ls: PynixLanguageServer, params: types.DocumentHighlightParams
+) -> list[types.DocumentHighlight] | None:
+    uri = params.text_document.uri
+    source, byte_offset = _resolve_source(ls, uri, params.position)
+    local = local_scope_at(source, byte_offset)
+    if local is None:
+        return None
+    highlights = [types.DocumentHighlight(range=_lsp_range(local.definition), kind=types.DocumentHighlightKind.Write)]
+    highlights.extend(
+        types.DocumentHighlight(range=_lsp_range(span), kind=types.DocumentHighlightKind.Read)
+        for span in local.references
+    )
+    return highlights
+
+
+async def _references(ls: PynixLanguageServer, params: types.ReferenceParams) -> list[types.Location] | None:
+    uri = params.text_document.uri
+    source, byte_offset = _resolve_source(ls, uri, params.position)
+    local = local_scope_at(source, byte_offset)
+    if local is None:
+        return None
+    spans = list(local.references)
+    if params.context.include_declaration:
+        spans.append(local.definition)
+    return [types.Location(uri=uri, range=_lsp_range(span)) for span in spans]
 
 
 def _document_symbols(ls: PynixLanguageServer, uri: str) -> list[types.DocumentSymbol]:
@@ -358,6 +506,11 @@ def create_server() -> PynixLanguageServer:
     server.feature(types.TEXT_DOCUMENT_DID_CLOSE)(_on_did_close)
     server.feature(types.TEXT_DOCUMENT_HOVER)(_hover)
     server.feature(types.TEXT_DOCUMENT_COMPLETION, types.CompletionOptions(trigger_characters=["."]))(_completion)
+    server.feature(types.TEXT_DOCUMENT_DEFINITION)(_definition)
+    server.feature(types.TEXT_DOCUMENT_PREPARE_RENAME)(_prepare_rename)
+    server.feature(types.TEXT_DOCUMENT_RENAME)(_rename)
+    server.feature(types.TEXT_DOCUMENT_DOCUMENT_HIGHLIGHT)(_document_highlight)
+    server.feature(types.TEXT_DOCUMENT_REFERENCES)(_references)
     server.feature(types.TEXT_DOCUMENT_DOCUMENT_SYMBOL)(_on_document_symbol)
     server.feature(types.SHUTDOWN)(_on_shutdown)
     return server

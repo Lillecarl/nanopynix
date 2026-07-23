@@ -75,6 +75,21 @@ class Dialect:
         """
         return None
 
+    async def definition(
+        self,
+        context: FileContext,
+        source: str,
+        byte_offset: int,
+        dialects: list[Dialect],
+    ) -> types.Location | list[types.Location] | None:
+        """Resolve go-to-definition for a path the generic structural/local-scope lookups can't reach.
+
+        Same "first non-None wins" dispatch as ``hover`` -- there's no
+        empty-list concern here since a ``Location``/``Location`` list is
+        either found or it isn't.
+        """
+        return None
+
     async def diagnostics(self, context: FileContext, source: str) -> list[types.Diagnostic] | None:
         """Report schema-validation diagnostics (unknown attributes, etc.) for this dialect's own roots.
 
