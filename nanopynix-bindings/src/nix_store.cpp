@@ -647,6 +647,21 @@ static void build_paths(
     s.buildPaths(dps, buildMode, evalStore);
 }
 
+static void copy_closure(
+        nix::Store &s,
+        const std::vector<nix::StorePath> &paths,
+        std::shared_ptr<nix::Store> destStore,
+        bool repair = false,
+        bool checkSigs = true,
+        bool substitute = false) {
+    nix::StorePathSet pathSet(paths.begin(), paths.end());
+    nb::gil_scoped_release release;
+    nix::copyClosure(s, *destStore, pathSet,
+        repair ? nix::Repair : nix::NoRepair,
+        checkSigs ? nix::CheckSigs : nix::NoCheckSigs,
+        substitute ? nix::Substitute : nix::NoSubstitute);
+}
+
 static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
     nix::Derivation drv;
     {
@@ -978,6 +993,23 @@ static nb::dict store_ensure_path(nix::Store &s, const nb::dict &request) {
     return nb::dict();
 }
 
+static nb::dict store_copy_closure(
+        nix::Store &s,
+        const nb::dict &request,
+        std::shared_ptr<nix::Store> destStore = nullptr) {
+    if (!destStore) {
+        throw nix::Error("dest_store_handle is required for copy_closure");
+    }
+    copy_closure(
+        s,
+        request_store_paths(s, request, "paths"),
+        destStore,
+        request_bool(request, "repair"),
+        request_bool(request, "check_sigs"),
+        request_bool(request, "substitute"));
+    return nb::dict();
+}
+
 static nb::dict store_optimise_store(nix::Store &s, const nb::dict &) {
     {
         nb::gil_scoped_release release;
@@ -1092,6 +1124,8 @@ static void bind_store(nb::module_ &m) {
         // Closures
         .def("compute_fs_closure", &compute_fs_closure,
              "path"_a, "flip_direction"_a = false, "include_outputs"_a = false, "include_derivers"_a = false)
+        .def("copy_closure", &copy_closure,
+             "paths"_a, "dest_store"_a, "repair"_a = false, "check_sigs"_a = true, "substitute"_a = false)
         .def("query_missing", &query_missing_store_paths, "paths"_a)
         // Derivations
         .def("query_derivation_outputs", &query_derivation_outputs, "path"_a)
@@ -1172,6 +1206,11 @@ static void bind_store(nb::module_ &m) {
         .def("store_add_perm_root", &store_add_perm_root, "request"_a)
         .def("store_add_indirect_root", &store_add_indirect_root, "request"_a)
         .def("store_ensure_path", &store_ensure_path, "request"_a)
+        .def(
+            "store_copy_closure",
+            &store_copy_closure,
+            "request"_a,
+            "dest_store"_a = nullptr)
         .def("store_optimise_store", &store_optimise_store, "request"_a)
         .def("store_verify_store", &store_verify_store, "request"_a)
         .def("store_get_build_log", &store_get_build_log, "request"_a)

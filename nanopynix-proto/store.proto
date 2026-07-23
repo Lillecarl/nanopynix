@@ -30,6 +30,7 @@ service StoreService {
   rpc AddPermRoot(AddPermRootRequest) returns (AddPermRootResponse);
   rpc AddIndirectRoot(AddIndirectRootRequest) returns (AddIndirectRootResponse);
   rpc EnsurePath(EnsurePathRequest) returns (EnsurePathResponse);
+  rpc CopyClosure(CopyClosureRequest) returns (CopyClosureResponse);
   rpc OptimiseStore(OptimiseStoreRequest) returns (OptimiseStoreResponse);
   rpc VerifyStore(VerifyStoreRequest) returns (VerifyStoreResponse);
   rpc GetBuildLog(GetBuildLogRequest) returns (GetBuildLogResponse);
@@ -245,6 +246,21 @@ message EnsurePathRequest {
   int64 store_handle = 100;
 }
 message EnsurePathResponse {}
+
+message CopyClosureRequest {
+  int64 request_id = 1000;
+  repeated string paths = 1;
+  // Required -- a handle to an already-open destination Store (see
+  // BuildPathsWithResultsRequest.eval_store_handle for the precedent of
+  // threading a second store handle through this RPC boundary). 0/unset is
+  // a hard error: a copy with no destination is meaningless.
+  int64 dest_store_handle = 2;
+  bool repair = 3;
+  bool check_sigs = 4;
+  bool substitute = 5;
+  int64 store_handle = 100;
+}
+message CopyClosureResponse {}
 
 message OptimiseStoreRequest {
   int64 request_id = 1000;

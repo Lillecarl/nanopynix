@@ -148,6 +148,15 @@ class TestStore:
     def test_ensure_path(self, store: Any, store_seeded_path: Any):
         store.ensure_path(store_seeded_path)
 
+    def test_copy_closure(self, store: Any, store_seeded_path: Any, tmp_path: Path):
+        dest = nanopynix_store.open_store(f"local?root={tmp_path / 'dest'}")
+        try:
+            assert not dest.is_valid_path(store_seeded_path)
+            store.copy_closure([store_seeded_path], dest)
+            assert dest.is_valid_path(store_seeded_path)
+        finally:
+            dest.close()
+
     def test_optimise_store_empty_local_store(self, tmp_path: Path):
         store = nanopynix_store.open_store(f"local?root={tmp_path}")
         store.optimise_store()

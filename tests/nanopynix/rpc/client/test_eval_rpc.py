@@ -564,6 +564,22 @@ async def test_evaluated_derivation_can_build_with_explicit_build_store(
         assert await AnyioPath(shared_nix_environment.physical_path(outputs["out"])).read_text() == "explicit\n"
 
 
+async def test_copy_closure_between_stores(rpc_session: RpcSessionFactory, tmp_path: Path):
+    """Store.copy_closure copies a path from one open store to another."""
+    async with (
+        rpc_session() as session,
+        session.store() as source,
+        session.store(uri=f"local?root={tmp_path / 'dest'}") as dest,
+    ):
+        source_file = tmp_path / "copy-closure-fixture.txt"
+        source_file.write_text("nanopynix copy_closure fixture\n", encoding="utf-8")
+        path = await source.add_to_store(str(source_file), name="nanopynix-copy-closure-fixture")
+
+        assert not await dest.is_valid_path(path)
+        await source.copy_closure([path], dest)
+        assert await dest.is_valid_path(path)
+
+
 @requires_dynamic_primops
 async def test_worker_yaml_primops(rpc_session: RpcSessionFactory):
     """Importable worker primops parse and render YAML during eval."""
