@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json as _json
 import queue
 import threading
 import weakref
@@ -12,6 +11,7 @@ from math import isfinite
 from typing import TYPE_CHECKING, Any, Literal, Never, Protocol, overload
 
 import anyio
+import pydantic_core
 from nanopynix_bindings.store import BuildMode
 from nanopynix_proto.nix.common import (
     CallArg,
@@ -679,7 +679,8 @@ class ValueProxy:
         resp = await self._ctx.proxy.force_json(
             ForceJsonRequest(handle=self.handle, copy_to_store=copy_to_store),
         )
-        return _json.loads(resp.json)
+        # pydantic_core's Rust JSON decoder instead of stdlib json.loads.
+        return pydantic_core.from_json(resp.json)
 
     async def realise_string(self, *, timeout: float | None = None) -> str:
         """Coerce this value to a string and realise its Nix string context."""

@@ -10,13 +10,13 @@ keeping evaluation pure.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import jsonschema
 import jsonschema.exceptions
 import jsonschema.validators
+import pydantic_core
 from nanopynix_bindings.expr import PrimopError
 
 if TYPE_CHECKING:
@@ -31,8 +31,8 @@ def _read_schema(schema_path: str) -> Any:
     except OSError as exc:
         raise PrimopError(f"validateJSONSchema: failed to read schema file '{schema_path}': {exc}") from exc
     try:
-        return json.loads(text)
-    except json.JSONDecodeError as exc:
+        return pydantic_core.from_json(text)
+    except ValueError as exc:
         raise PrimopError(f"validateJSONSchema: schema file '{schema_path}' is not valid JSON: {exc}") from exc
 
 

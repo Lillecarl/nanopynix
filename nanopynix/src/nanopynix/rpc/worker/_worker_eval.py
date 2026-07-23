@@ -10,9 +10,10 @@ never blocks on Nix.
 
 from __future__ import annotations
 
-import json as _json
 from dataclasses import dataclass
 from typing import Any
+
+import pydantic_core
 
 from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import flake as nanopynix_flake
@@ -385,7 +386,12 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _do_force_json(self, message: ForceJsonRequest) -> ForceJsonResponse:
         value = self._resolve(message.handle)
-        return ForceJsonResponse(json=_json.dumps(value.to_json(copy_to_store=message.copy_to_store)))
+        # pydantic_core's Rust JSON encoder instead of stdlib json.dumps --
+        # the tree is already known-valid JSON-compatible data straight out
+        # of Nix's own to_json C++ binding, so this skips straight to
+        # serialization rather than going through TypeAdapter validation.
+        json_bytes = pydantic_core.to_json(value.to_json(copy_to_store=message.copy_to_store))
+        return ForceJsonResponse(json=json_bytes.decode("utf-8"))
 
     async def realise_string(self, message: RealiseStringRequest) -> RealiseStringResponse:
         return await self._run(message, self._do_realise_string)
