@@ -48,6 +48,30 @@ def test_handles_a_dangling_dot_after_an_arbitrary_expression() -> None:
     assert completion_prefix_at(source, len(source)) == ("(import ./foo.nix)", "")
 
 
+def test_handles_a_dangling_dot_on_a_not_yet_assigned_definition_key() -> None:
+    """Regression test: a definition-key attrpath with no `=` yet (the exact
+    moment a user finishes typing a brand new binding's dotted path and
+    hasn't typed anything else) loses everything but the trailing segment.
+
+    With no `=`, tree-sitter-nix never forms an `attrpath`/`binding` node at
+    all here -- the whole chain collapses into one flat `ERROR` node's own
+    direct `identifier`/`.` children, unlike an already-complete binding
+    (`a.b.c = 1;`, where a clean `attrpath` node exists) or a reference
+    chain (`cfg.services.foo.` as a value, where the dangling dot lands in
+    its own isolated single-child ERROR node and the chain itself still
+    parses as a clean `select_expression`). The old "widest clean node
+    ending right before the dot" search only ever found the lone trailing
+    identifier in this shape, since the multi-segment grouping only exists
+    as the (necessarily erroring) ERROR node itself -- silently truncating
+    completion to just the last-typed segment the instant `.` is typed,
+    until a further character is typed and the lexical regex tier (which
+    doesn't care about tree structure at all) takes back over.
+    """
+    source = "{ x = 1; a.b.c. }"
+    idx = source.index("c.") + len("c.")
+    assert completion_prefix_at(source, idx) == ("a.b.c", "")
+
+
 def test_completes_from_a_string_interpolation_open() -> None:
     source = '"${'
     assert completion_prefix_at(source, len(source)) == (None, "")

@@ -91,6 +91,52 @@ def _attrpath_binding_prefix_before_dot(
     return None
 
 
+def _flat_identifier_chain_before_dot(nodes: list[Any], byte_offset: int, encoded: bytes) -> str | None:
+    """Reconstruct a dotted identifier chain ending right before the dot at *byte_offset* by walking siblings.
+
+    Covers the shape ``_attrpath_binding_prefix_before_dot`` can't: a
+    *not-yet-assigned* definition-key attrpath (no ``=`` typed yet, e.g. the
+    very moment a user finishes typing ``kubernetes.objects.default.
+    Deployment.demo.`` and nothing follows). With no ``=``, tree-sitter-nix
+    never forms an ``attrpath``/``binding`` node at all -- the whole chain
+    (``identifier``, ``.``, ``identifier``, ``.``, ...) collapses into a
+    single flat ``ERROR`` node's own direct children instead, which is why
+    the "widest clean expression" search below only ever finds the lone
+    trailing identifier (the only individually error-free leaf in that
+    shape): it has no multi-segment node to find, since the multi-segment
+    grouping only exists as the ERROR node itself.
+
+    Since both shapes -- a clean ``attrpath``'s children and an ERROR node's
+    flattened children -- are simple ``identifier``/``.`` siblings either
+    way, one backward sibling-walk from the dot handles both (this doesn't
+    replace ``_attrpath_binding_prefix_before_dot``, which is tried first and
+    already correct there, but is a safe, strictly additive fallback).
+
+    Correctly does *not* fire for a dangling dot after a reference chain
+    (e.g. ``cfg.services.foo.`` used as a value): there, the chain itself
+    (``cfg.services.foo``) parses clean as its own ``select_expression``,
+    and the dangling ``.`` lands in its *own* isolated single-child ERROR
+    node with no identifier sibling at all -- so the walk immediately finds
+    nothing and returns None, leaving that case to the existing widest-node
+    search below.
+    """
+    dot = next((node for node in nodes if node.type == "." and node.end_byte == byte_offset), None)
+    if dot is None:
+        return None
+    segments: list[str] = []
+    node = dot.prev_sibling
+    while node is not None and node.type == "identifier":
+        segments.append(encoded[node.start_byte : node.end_byte].decode())
+        dot_node = node.prev_sibling
+        if dot_node is None or dot_node.type != ".":
+            break
+        node = dot_node.prev_sibling
+    if not segments:
+        return None
+    segments.reverse()
+    return ".".join(segments)
+
+
 def _tree_prefix_at(source: str, byte_offset: int) -> tuple[str | None, str] | None | _NoMatch:
     """Tier 1: a tree-sitter structural match ending exactly at *byte_offset*.
 
@@ -161,6 +207,10 @@ def _tree_prefix_at(source: str, byte_offset: int) -> tuple[str | None, str] | N
         attrpath_prefix = _attrpath_binding_prefix_before_dot(nodes, byte_offset, encoded)
         if attrpath_prefix is not None:
             return attrpath_prefix
+
+        chain = _flat_identifier_chain_before_dot(nodes, byte_offset, encoded)
+        if chain is not None:
+            return chain, ""
 
         # Search the *original* source's own parse tree for a node ending
         # right before the dot -- NOT a separate re-parse of the text before
