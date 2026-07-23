@@ -8,7 +8,7 @@
 }:
 let
   attrs = renderPyproject {
-    projectRoot = lib.cleanSource ./.;
+    projectRoot = toString ./.;
     inherit python;
     pythonPackages = python.pkgs // {
       inherit nanopynix tree-sitter-nix;
@@ -18,6 +18,8 @@ in
 buildPythonPackage (
   attrs
   // {
+    src = ./.;
+
     pythonImportsCheck = [
       "nanopynix_helpers"
     ];

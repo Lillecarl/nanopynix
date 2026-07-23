@@ -10,6 +10,12 @@ from nanopynix_helpers.build import (
 from nanopynix_helpers.build import (
     build_with_fod_update as build_with_fod_update,
 )
+from nanopynix_helpers.eval_target import (
+    EvaluationTargetError as EvaluationTargetError,
+)
+from nanopynix_helpers.eval_target import (
+    select_attr as select_attr,
+)
 from nanopynix_helpers.fod import (
     FodHashLiteral as FodHashLiteral,
 )
