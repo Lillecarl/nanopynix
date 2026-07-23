@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 import threading
@@ -16,8 +17,9 @@ from pygls.workspace import TextDocument
 
 import nanopynix
 from nanopynix.exceptions import NixError
-from pynix._lsp._context import FileContext, parse_directives, resolve_root_path
+from pynix._lsp._context import FileContext, SharedEvalCache, parse_directives, resolve_root_path
 from pynix._lsp._dialects import DIALECTS
+from pynix._lsp._module_system import resolve_module_arg
 from pynix._lsp._render import render_value
 from pynix._lsp._syntax import (
     completion_target_at,
@@ -25,6 +27,7 @@ from pynix._lsp._syntax import (
     local_scope_at,
     parse_errors,
     path_literal_at,
+    top_level_lambda_formals,
     top_level_symbols,
 )
 
@@ -40,16 +43,21 @@ class PynixLanguageServer(LanguageServer):
     """Owns the one shared Nix evaluator worker for the whole server session.
 
     Each open file with a ``# pynix-lsp:`` directive gets its own
-    ``FileContext`` (and so its own ``EvalSession``) within this one shared
-    ``Session``/``Store`` -- opening a new ``EvalSession`` is cheap (a
-    dedicated thread in the existing worker), unlike spawning a whole new
-    worker subprocess per file.
+    ``FileContext`` within this one shared ``Session``/``Store`` --
+    opening a new ``EvalSession`` is cheap (a dedicated thread in the
+    existing worker), unlike spawning a whole new worker subprocess per
+    file. ``FileContext`` itself resolves each directive's ``EvalSession``
+    via ``shared_evals`` (a ``SharedEvalCache``), so two files declaring the
+    byte-identical directive expression share one already-evaluated
+    ``EvalSession`` rather than each paying its evaluation cost separately
+    -- see ``SharedEvalCache``'s own docstring.
     """
 
     def __init__(self) -> None:
         super().__init__(_SERVER_NAME, _SERVER_VERSION)  # type: ignore[reportUnknownMemberType] -- pygls' LanguageServer.__init__ forwards *args/**kwargs, so pyright can't fully resolve its composed signature
         self.nix_session: nanopynix.Session | None = None
         self.store: nanopynix.Store | None = None
+        self.shared_evals: SharedEvalCache | None = None
         self.contexts: dict[str, FileContext] = {}
         self.diagnostics: dict[str, list[types.Diagnostic]] = {}
         # The most recent per-file source snapshot that parsed with zero
@@ -60,24 +68,40 @@ class PynixLanguageServer(LanguageServer):
         # `_on_did_close` drops both so a closed file doesn't linger here.
         self.last_good_source: dict[str, str] = {}
         self.has_parse_errors: dict[str, bool] = {}
+        # Strong references to fire-and-forget module-arg warm-up tasks (see
+        # `_warm_module_args`) -- otherwise nothing keeps them alive and
+        # asyncio is free to garbage-collect a still-running task.
+        self.warm_tasks: set[asyncio.Task[None]] = set()
 
-    async def ensure_nix(self) -> tuple[nanopynix.Session, nanopynix.Store]:
-        """Open the shared Session/Store on first use."""
-        if self.nix_session is not None and self.store is not None:
-            return self.nix_session, self.store
-        session = nanopynix.Session(experimental_features=["flakes", "nix-command"])
-        await session.open()
-        store = session.store()
-        await store.open()
-        self.nix_session = session
-        self.store = store
-        return session, store
+    async def ensure_nix(self) -> tuple[nanopynix.Session, nanopynix.Store, SharedEvalCache]:
+        """Open the shared Session/Store/SharedEvalCache on first use.
+
+        ``nix_session``/``store`` may already be set without going through
+        this method at all (the test suite's ``lsp_server`` fixture seeds
+        them directly from a shared, test-session-lifetime worker rather
+        than spawning a fresh one per test) -- only missing pieces are
+        created, so this must never unconditionally build a brand new
+        ``nanopynix.Session`` when one is already sitting there.
+        """
+        if self.nix_session is None or self.store is None:
+            session = nanopynix.Session(experimental_features=["flakes", "nix-command"])
+            await session.open()
+            store = session.store()
+            await store.open()
+            self.nix_session = session
+            self.store = store
+        if self.shared_evals is None:
+            self.shared_evals = SharedEvalCache(self.nix_session, self.store)
+        return self.nix_session, self.store, self.shared_evals
 
     async def aclose(self) -> None:
-        """Close every open file context and the shared Session/Store."""
+        """Close every open file context, the shared eval cache, and the shared Session/Store."""
         for context in self.contexts.values():
             await context.close()
         self.contexts.clear()
+        if self.shared_evals is not None:
+            await self.shared_evals.close_all()
+            self.shared_evals = None
         if self.store is not None:
             await self.store.close()
             self.store = None
@@ -194,6 +218,33 @@ def _context_error_diagnostic(error: NixError, line: int) -> types.Diagnostic:
     )
 
 
+async def _warm_module_args(context: FileContext, source: str) -> None:
+    """Best-effort background warm-up: force every module-arg this file's own top-level lambda declares.
+
+    Resolving a module arg (e.g. ``pkgs``) means forcing ``_module.args``/
+    ``_module.specialArgs`` through the module system for the first time in
+    this ``EvalSession`` -- confirmed to cost several real seconds the first
+    time (a complex module composition like easykubenix's can take ~8s),
+    dropping to well under a second on every subsequent force once the
+    underlying ``EvalState`` has cached it. Running this the moment a file's
+    context is created, rather than waiting for the user's first completion
+    request to pay that cost synchronously, is what actually fixes the
+    "completion just doesn't seem to fire" symptom -- a real editor's
+    completion popup has nowhere near an 8s patience budget.
+
+    Can race a fast did_open -> did_close (this file's `EvalSession` may
+    already be released -- and, if this was the last file sharing it,
+    closed -- by the time this finishes); caught broadly and logged at
+    debug level rather than left to bubble up as an unhandled task
+    exception, since there's no request left waiting on this result by then.
+    """
+    for name in top_level_lambda_formals(source) or []:
+        try:
+            await resolve_module_arg(context, name)
+        except Exception:
+            _logger.debug("module-arg warm-up for %r failed (file likely closed mid-warm)", name, exc_info=True)
+
+
 async def _sync_document(ls: PynixLanguageServer, uri: str) -> None:
     """Reconcile one document's context against its current header directives.
 
@@ -225,12 +276,15 @@ async def _sync_document(ls: PynixLanguageServer, uri: str) -> None:
             del ls.contexts[uri]
         context = None
     elif context is None or context.directives != directives:
-        session, store = await ls.ensure_nix()
-        context = FileContext(session, store, directives, _file_dir(uri))
+        _session, _store, shared_evals = await ls.ensure_nix()
+        context = FileContext(shared_evals, directives, _file_dir(uri))
         await context.reload()
         for dialect in DIALECTS:
             await dialect.derive_roots(context)
         ls.contexts[uri] = context
+        warm_task = asyncio.create_task(_warm_module_args(context, source))
+        ls.warm_tasks.add(warm_task)
+        warm_task.add_done_callback(ls.warm_tasks.discard)
 
     parse_error_ranges = parse_errors(source)
     ls.has_parse_errors[uri] = bool(parse_error_ranges)
