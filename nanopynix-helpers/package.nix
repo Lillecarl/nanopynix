@@ -2,6 +2,7 @@
   lib,
   buildPythonPackage,
   nanopynix,
+  tree-sitter-nix,
   python,
   renderPyproject,
 }:
@@ -10,10 +11,7 @@ let
     projectRoot = lib.cleanSource ./.;
     inherit python;
     pythonPackages = python.pkgs // {
-      inherit nanopynix;
-      "tree-sitter-nix" = python.pkgs.tree-sitter-grammars.tree-sitter-nix.overridePythonAttrs (_: {
-        pname = "tree-sitter-nix";
-      });
+      inherit nanopynix tree-sitter-nix;
     };
   };
 in

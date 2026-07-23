@@ -4,19 +4,17 @@
   nanopynix,
   nanopynix-helpers,
   clypi,
+  tree-sitter-nix,
   python,
   renderPyproject,
   tofuCoreSchemaTool,
-  treeSitterCli,
-  nixpkgsPath,
 }:
 let
   attrs = renderPyproject {
     projectRoot = ./.;
     inherit python;
     pythonPackages = python.pkgs // {
-      inherit nanopynix nanopynix-helpers clypi;
-      "tree-sitter-nix" = import ../nix/tree-sitter-nix.nix { inherit python treeSitterCli nixpkgsPath; };
+      inherit nanopynix nanopynix-helpers clypi tree-sitter-nix;
     };
   };
 in

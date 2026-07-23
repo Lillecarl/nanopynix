@@ -2,11 +2,12 @@
   python,
   treeSitterCli,
   nixpkgsPath,
+  treeSitterNixSrc,
 }:
 let
-  # Local-dev override: build tree-sitter-nix's Python bindings straight from
-  # a working checkout instead of nixpkgs' pinned fetch, so grammar.js edits
-  # there are picked up on the next rebuild without a round-trip through
+  # Builds tree-sitter-nix's Python bindings from the tree-sitter-nix-numtide
+  # flake input instead of nixpkgs' pinned fetch, so bumping the flake input
+  # is all it takes to pick up grammar.js changes -- no round-trip through
   # nixpkgs (bump grammar-sources.nix rev/hash, wait for cache, etc).
   #
   # Points at numtide/tree-sitter-nix, not nix-community/tree-sitter-nix:
@@ -16,7 +17,7 @@ let
   grammarDrv = treeSitterCli.buildGrammar {
     language = "nix";
     version = "0.0.0-local";
-    src = /home/lillecarl/Code/tree-sitter-nix-numtide;
+    src = treeSitterNixSrc;
     generate = true;
     # numtide's tree-sitter.json advertises an "ocaml" bindings entry that
     # postdates the tree-sitter-config schema nixpkgs' pinned CLI generates
