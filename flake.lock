@@ -246,7 +246,24 @@
         "flake-compatish": "flake-compatish_4",
         "grpclib-transports": "grpclib-transports_2",
         "nixpkgs": "nixpkgs",
-        "pyproject-nix": "pyproject-nix_2"
+        "pyproject-nix": "pyproject-nix_2",
+        "tree-sitter-nix-numtide": "tree-sitter-nix-numtide"
+      }
+    },
+    "tree-sitter-nix-numtide": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1779268707,
+        "narHash": "sha256-n3sQz0LhDCdoza4bmXHGvZWROyUpYO7u+00/w7bsO/I=",
+        "owner": "numtide",
+        "repo": "tree-sitter-nix",
+        "rev": "70f34e95e30b7ebcc40815d4385d68576c4a15cd",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "tree-sitter-nix",
+        "type": "github"
       }
     }
   },

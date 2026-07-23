@@ -20,8 +20,7 @@
   cachix,
   statix,
   tofuCoreSchemaTool,
-  treeSitterCli,
-  nixpkgsPath,
+  tree-sitter-nix,
 }:
 let
   nanopynix = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
@@ -29,21 +28,16 @@ let
     root = "$GIT_ROOT/nanopynix/src";
     inherit python;
     pythonPackages = python.pkgs // {
-      "nanopynix-bindings" = nanopynix-bindings;
-      "nanopynix-proto" = nanopynix-proto;
-      "grpclib-transports" = grpclib-transports;
+      inherit nanopynix-bindings nanopynix-proto grpclib-transports;
     };
   });
-
-  treeSitterNix = import ./tree-sitter-nix.nix { inherit python treeSitterCli nixpkgsPath; };
 
   nanopynix-helpers = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
     projectRoot = ../nanopynix-helpers;
     root = "$GIT_ROOT/nanopynix-helpers/src";
     inherit python;
     pythonPackages = python.pkgs // {
-      inherit nanopynix;
-      "tree-sitter-nix" = treeSitterNix;
+      inherit nanopynix tree-sitter-nix;
     };
   });
 
@@ -53,8 +47,7 @@ let
     inherit python;
     extras = [ "test" ];
     pythonPackages = python.pkgs // {
-      inherit nanopynix nanopynix-helpers clypi;
-      "tree-sitter-nix" = treeSitterNix;
+      inherit nanopynix nanopynix-helpers clypi tree-sitter-nix;
     };
   });
 

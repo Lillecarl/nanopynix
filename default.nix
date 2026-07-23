@@ -156,6 +156,7 @@ let
                   # PyPI `tree-sitter` bindings package, not pkgs.tree-sitter
                   # (the CLI derivation, whose passthru has `buildGrammar`).
                   treeSitterCli = pkgs.tree-sitter;
+                  treeSitterNixSrc = inputs.tree-sitter-nix-numtide;
                 }
                 // final
               );
@@ -175,6 +176,7 @@ let
                     inherit tsanRuntime;
                   };
                 };
+              tree-sitter-nix = callNixPythonPackage ./nix/tree-sitter-nix.nix { };
               nanopynix-helpers = callNixPythonPackage ./nanopynix-helpers/package.nix { };
               pynix = callNixPythonPackage ./pynix/package.nix { };
               shell = callNixPythonPackage ./nix/shell.nix { };

@@ -14,6 +14,15 @@
       url = "github:Lillecarl/easykubenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # numtide's fork, not nix-community/tree-sitter-nix: numtide's README
+    # states it's "kept moving while upstream is stalled" and "new bug
+    # reports and PRs should be filed here" -- nixpkgs itself still pins the
+    # stalled nix-community rev. Not a flake (grammar source only), built via
+    # nix/tree-sitter-nix.nix.
+    tree-sitter-nix-numtide = {
+      url = "github:numtide/tree-sitter-nix";
+      flake = false;
+    };
   };
   outputs =
     inputs:
