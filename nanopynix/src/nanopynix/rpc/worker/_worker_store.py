@@ -47,6 +47,12 @@ class StoreServiceHandler(
         raise RuntimeError(f"missing checked nanobind store method: {binding_method_name}")
 
     def _extra_binding_args(self, binding_method_name: str, request: dict[str, Any]) -> tuple[Any, ...]:
+        if binding_method_name == "store_copy_closure":
+            dest_store_handle = request.pop("dest_store_handle", 0)
+            dest_store = self._get_store(dest_store_handle) if dest_store_handle else None
+            if dest_store is None:
+                raise RuntimeError("dest_store_handle is required for copy_closure")
+            return (dest_store.require_raw(),)
         if binding_method_name not in {"store_build_paths_with_results", "store_build_for_humans"}:
             return ()
         eval_store_handle = request.pop("eval_store_handle", 0)

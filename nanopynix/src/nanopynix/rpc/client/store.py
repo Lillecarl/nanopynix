@@ -13,6 +13,7 @@ from nanopynix_proto.nix.store import (
     CollectGarbageRequest,
     ComputeFsClosureRequest,
     ComputeStorePathRequest,
+    CopyClosureRequest,
     EnsurePathRequest,
     FindRootsRequest,
     FollowLinksToStorePathRequest,
@@ -363,6 +364,29 @@ class Store:
     async def ensure_path(self, path: str | StorePath, /) -> None:
         """Ensure a store path is valid, substituting it if available."""
         await self.rpc.ensure_path(EnsurePathRequest(path=str(path)))
+
+    async def copy_closure(
+        self,
+        paths: list[str | StorePath],
+        /,
+        dest_store: Store,
+        *,
+        repair: bool = False,
+        check_sigs: bool = True,
+        substitute: bool = False,
+    ) -> None:
+        """Copy the closure of ``paths`` from this store to ``dest_store``."""
+        if dest_store._session_id != self._session_id:
+            raise ValueError("dest_store belongs to a different Session")
+        await self.rpc.copy_closure(
+            CopyClosureRequest(
+                paths=[str(path) for path in paths],
+                dest_store_handle=dest_store.store_handle,
+                repair=repair,
+                check_sigs=check_sigs,
+                substitute=substitute,
+            )
+        )
 
     async def optimise_store(self) -> None:
         """Optimise store disk usage by hard-linking duplicate files."""
