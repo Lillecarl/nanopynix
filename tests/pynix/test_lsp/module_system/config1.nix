@@ -19,9 +19,11 @@
 {
   config = {
     programs.example.enable = true;
+#                                   vLSPOINTPKGSHELLO"h"
     programs.example.package = pkgs.hello;
     programs.example.settings.greeting = "hello from config1.nix";
 
+#                           vLSPOINTENABLE"e"
     services.example-daemon.enable = true;
     services.example-daemon.port = 9090;
     services.example-daemon.extraFlags = [ "--verbose" ];
