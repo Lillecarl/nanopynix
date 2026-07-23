@@ -23,7 +23,13 @@ _JsonValue: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
 def _yaml12_loader() -> type[Any]:
-    class Loader(yaml.SafeLoader):  # type: ignore[reportUnknownBaseType] -- PyYAML stubs may be incomplete
+    # CSafeLoader (libyaml-backed) instead of the pure-Python SafeLoader: the
+    # C scanner/parser/composer still calls back into the same Python-level
+    # Resolver/SafeConstructor machinery add_implicit_resolver/add_constructor
+    # mutate, so this custom-tag setup carries over unchanged -- just faster
+    # (see ekn/git.py's flatten_manifests for the same swap on the dump side,
+    # benchmarked ~7.5x).
+    class Loader(yaml.CSafeLoader):  # type: ignore[reportUnknownBaseType] -- PyYAML stubs may be incomplete
         pass
 
     legacy_tags = {
@@ -33,7 +39,7 @@ def _yaml12_loader() -> type[Any]:
     }
     Loader.yaml_implicit_resolvers = {  # type: ignore[reportUnknownMemberType] -- yaml_implicit_resolvers class attribute not in stubs
         ch: [(tag, regexp) for tag, regexp in resolvers if tag not in legacy_tags]
-        for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()  # type: ignore[reportUnknownMemberType] -- yaml_implicit_resolvers not in stubs
+        for ch, resolvers in yaml.CSafeLoader.yaml_implicit_resolvers.items()  # type: ignore[reportUnknownMemberType] -- yaml_implicit_resolvers not in stubs
     }
 
     Loader.add_implicit_resolver(  # type: ignore[reportUnknownMemberType] -- yaml.Loader methods may not have complete stubs
@@ -62,7 +68,7 @@ def _yaml12_loader() -> type[Any]:
 
 
 def _yaml11_loader() -> type[Any]:
-    class Loader(yaml.SafeLoader):  # type: ignore[reportUnknownBaseType] -- PyYAML stubs may be incomplete
+    class Loader(yaml.CSafeLoader):  # type: ignore[reportUnknownBaseType] -- PyYAML stubs may be incomplete
         pass
 
     # YAML 1.1's core schema resolves a bare, unquoted `=` scalar to the
@@ -75,7 +81,7 @@ def _yaml11_loader() -> type[Any]:
     # same way `construct_yaml_str` does instead of raising.
     Loader.add_constructor(
         "tag:yaml.org,2002:value",
-        yaml.SafeLoader.construct_yaml_str,  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType] -- yaml.Loader methods may not have complete stubs
+        yaml.CSafeLoader.construct_yaml_str,  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType] -- yaml.Loader methods may not have complete stubs
     )
     return Loader
 
@@ -163,15 +169,18 @@ def from_yaml11_stream(source: str) -> list[JsonValue]:
         raise ValueError(f"fromYAML11Stream: failed to parse YAML 1.1 stream: {_parse_error_message(exc)}") from exc
 
 
-class _BlockStyleDumper(yaml.SafeDumper):
-    """SafeDumper that renders multi-line strings as literal blocks (``|``).
+class _BlockStyleDumper(yaml.CSafeDumper):
+    """CSafeDumper that renders multi-line strings as literal blocks (``|``).
 
     A plain SafeDumper falls back to an escaped double-quoted scalar for any
     string PyYAML doesn't consider "simple" (e.g. containing '${{ ... }}'
     literals), which is valid YAML but unreadable for multi-line shell
     scripts. Scoped to a Dumper subclass rather than mutating
     yaml.SafeDumper globally, since other code in this process may still
-    want PyYAML's default string style.
+    want PyYAML's default string style. CSafeDumper (libyaml-backed) instead
+    of the pure-Python SafeDumper for the same reason as `_yaml12_loader`/
+    `_yaml11_loader` above -- add_representer still mutates the shared
+    Python-level Representer machinery the C emitter calls back into.
     """
 
 
