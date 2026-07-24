@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import kr8s
 import structlog
@@ -48,7 +48,9 @@ async def _build_object(spec: dict[str, Any], api: Api) -> APIObject:
     except KeyError:
         group = api_version.split("/", 1)[0] if "/" in api_version else None
         lookup = f"{kind}.{group}" if group else kind
-        _, plural, namespaced = await api.async_lookup_kind(lookup)
+        # kr8s.Api.async_lookup_kind's `kind` parameter has no upstream type
+        # annotation, so pyright can't resolve the member's own type fully.
+        _, plural, namespaced = await api.async_lookup_kind(lookup)  # pyright: ignore[reportUnknownMemberType]
         cls = new_class(kind, api_version, namespaced=namespaced, plural=plural)
     return cls(spec, api=api)
 
@@ -68,12 +70,16 @@ async def ssa_apply(
     anything -- `obj.raw` is left untouched in that case, since it isn't a
     real apply.
     """
-    api = obj.api
+    # kr8s.APIObject.api's property getter has no upstream return annotation
+    # (kr8s/_objects.py), so pyright can only infer a partially-Unknown union
+    # for it -- cast to the precise type its docstring/behavior guarantees.
+    api = cast("Api | None", obj.api)  # pyright: ignore[reportUnknownMemberType]
     assert api is not None
     params = {"fieldManager": field_manager, "force": "true" if force else "false"}
     if dry_run:
         params["dryRun"] = "All"
-    async with api.call_api(
+    # kr8s.Api.call_api's **kwargs has no upstream type annotation.
+    async with api.call_api(  # pyright: ignore[reportUnknownMemberType]
         "PATCH",
         version=obj.version,
         url=f"{obj.endpoint}/{obj.name}",
@@ -155,7 +161,10 @@ async def apply_and_prune(
         return
 
     for kind in kinds:
-        async for obj in api.async_get(
+        # kr8s.Api.async_get's `label_selector`/`field_selector` params and its
+        # `APIObject | dict` yield type are both bare-`dict`/unannotated
+        # upstream, so pyright can't resolve the member or the loop variable.
+        async for obj in api.async_get(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
             kind,
             namespace=kr8s.ALL,
             label_selector={discriminator_label: discriminator},
