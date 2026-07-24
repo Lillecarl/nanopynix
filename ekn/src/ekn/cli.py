@@ -16,9 +16,6 @@ import rich.traceback
 import structlog
 from anyio import Path
 from clypi import Command, Positional, arg
-from nanopynix import NixError
-from nanopynix.models import JsonValue
-from nanopynix.primops import from_yaml11_stream, from_yaml_stream, to_yaml
 from pydantic import TypeAdapter, ValidationError
 
 from ekn.apply import apply_and_prune
@@ -39,9 +36,22 @@ from ekn.eval import (
     timed_stage,
     verbose_session,
 )
-from ekn.git import commit_manifests, diff_manifests, flatten_manifests, try_jj_status
+from ekn.git import (
+    ConcurrentDeployError,
+    PreparedCommits,
+    commit_manifests,
+    diff_manifests,
+    finalize_branches,
+    flatten_manifests,
+    prepare_deploy_and_source_commits,
+    rollback_branches,
+    try_jj_status,
+)
 from ekn.gitops import GitOpsTargetError, resolved_targets
 from ekn.sops import ensure_age_identities, maybe_decrypt
+from nanopynix import NixError
+from nanopynix.models import JsonValue
+from nanopynix.primops import from_yaml11_stream, from_yaml_stream, to_yaml
 
 _log = structlog.get_logger()
 
@@ -99,7 +109,7 @@ async def _evaluate_gitops(
     flake: str | None,
     attr: str | None,
 ) -> dict:
-    """Like `_evaluate`, but only forces kubernetes.gitopsTargets -- the
+    """Like `_evaluate`, but only forces kubernetes.gitOpsTargets -- the
     only field Diff/Commit/Deploy read via `_gitops_file_groups`."""
     try:
         uri, customer = _parse_flake(flake) if flake is not None else (None, None)
@@ -117,46 +127,46 @@ def _dig(data: object, *keys: str) -> Any:
     return data
 
 
-def _check_gitops(result: dict[str, Any]) -> str:
-    enabled = _dig(result, "config", "gitops", "enable")
-    if enabled is not True:
-        _log.error("gitops is not enabled for this config (config.gitops.enable != true)")
+def _gitops_branches(result: dict[str, Any]) -> tuple[str, str | None]:
+    """Read the instance-wide `(deployBranch, sourceBranch)` pair.
+
+    One pair per easykubenix instance -- an "environment" is just whichever
+    `--file`/`--flake`+`--attr` entrypoint you evaluate, so there is no
+    separate environment concept here. `sourceBranch` is `None` when the
+    dual-commit source-snapshot feature is disabled for this instance.
+    """
+    deploy_branch = _dig(result, "config", "gitOps", "deployBranch")
+    if not isinstance(deploy_branch, str) or not deploy_branch:
+        _log.error("config.gitOps.deployBranch is not set in the evaluated config")
         raise SystemExit(1)
-    branch = _dig(result, "config", "gitops", "branch")
-    if not isinstance(branch, str) or not branch:
-        _log.error("config.gitops.branch is not set in the evaluated config")
+    source_branch = _dig(result, "config", "gitOps", "sourceBranch")
+    if source_branch is not None and (not isinstance(source_branch, str) or not source_branch):
+        _log.error("config.gitOps.sourceBranch must be a non-empty string or null")
         raise SystemExit(1)
-    return branch
+    return deploy_branch, source_branch
 
 
-def _gitops_path(result: dict[str, Any]) -> str:
-    path = _dig(result, "config", "gitops", "path")
-    if path is None:
-        return "./"
-    if not isinstance(path, str) or not path:
-        _log.error("config.gitops.path must be a non-empty string")
-        raise SystemExit(1)
-    return path
+def _gitops_file_groups(result: dict[str, Any]) -> list[tuple[str, str]]:
+    """Merge every GitOps target's rendered objects into one file list.
 
-
-def _gitops_file_groups(result: dict[str, Any]) -> dict[str, list[tuple[str, str]]]:
-    gitops_targets = _dig(result, "config", "kubernetes", "gitopsTargets")
+    Targets are pure path-routing (`gitOps.targets.<name>.path`) -- there is
+    only one `(deployBranch, sourceBranch)` pair per instance (see
+    `_gitops_branches`), so there is nothing left to group by branch here.
+    """
+    gitops_targets = _dig(result, "config", "kubernetes", "gitOpsTargets")
     if not isinstance(gitops_targets, dict) or not gitops_targets:
         raise GitOpsTargetError("no GitOps-routed Kubernetes objects found")
 
     routed = resolved_targets(gitops_targets)
 
-    groups: dict[str, dict[str, str]] = {}
+    files: dict[str, str] = {}
     for target, target_manifests in routed.items():
-        branch_files = groups.setdefault(target.branch, {})
         for path, content in flatten_manifests(target_manifests, target.path, kustomize=True):
-            existing = branch_files.get(path)
+            existing = files.get(path)
             if existing is not None and existing != content:
-                raise GitOpsTargetError(
-                    f"conflicting generated content for {target.branch}:{path}"
-                )
-            branch_files[path] = content
-    return {branch: list(files.items()) for branch, files in groups.items()}
+                raise GitOpsTargetError(f"conflicting generated content for {path}")
+            files[path] = content
+    return list(files.items())
 
 
 class Eval(Command):
@@ -214,79 +224,132 @@ class Render(Command):
 
 
 class Diff(Command):
-    """Diff GitOps-routed manifests against their target branches."""
+    """Diff GitOps-routed manifests against the deploy branch."""
     file: _Path | None = arg(None, short="f", inherited=True)
     flake: str | None = arg(None, inherited=True)
     attr: str | None = arg(None, short="A", help="Dot-separated attribute path within the evaluation result.")
 
     async def run(self) -> None:
-        result = await _evaluate_gitops(self.file, self.flake, self.attr)
+        deploy_branch, _source_branch, files = await _resolve_gitops(self.file, self.flake, self.attr)
         try:
-            groups = _gitops_file_groups(result)
-        except (GitOpsTargetError, TypeError) as exc:
-            _log.error("GitOps routing failed: %s", exc)
+            diff_output = diff_manifests(".", deploy_branch, files)
+        except Exception as exc:
+            _log.error("diff failed: %s", exc)
             raise SystemExit(1) from exc
-        has_differences = False
-        for branch, files in groups.items():
-            try:
-                diff_output = diff_manifests(".", branch, files)
-            except Exception as exc:
-                _log.error("diff failed: %s", exc)
-                raise SystemExit(1) from exc
-            if diff_output is not None:
-                has_differences = True
-                sys.stdout.write(diff_output)
-        if not has_differences:
+        if diff_output is not None:
+            sys.stdout.write(diff_output)
+        else:
             _log.info("no differences")
         await try_jj_status(".")
 
 
+async def _resolve_gitops(
+    file: _Path | None, flake: str | None, attr: str | None
+) -> tuple[str, str | None, list[tuple[str, str]]]:
+    """Evaluate GitOps manifests and return `(deploy_branch, source_branch,
+    files)` -- one branch pair per easykubenix instance, see
+    `_gitops_branches`."""
+    result = await _evaluate_gitops(file, flake, attr)
+    try:
+        files = _gitops_file_groups(result)
+    except (GitOpsTargetError, TypeError) as exc:
+        _log.error("GitOps routing failed: %s", exc)
+        raise SystemExit(1) from exc
+    deploy_branch, source_branch = _gitops_branches(result)
+    return deploy_branch, source_branch, files
+
+
+def _default_commit_message(attr: str | None) -> str:
+    import pygit2
+    try:
+        repo = pygit2.Repository(".")
+        head_sha = str(repo.head.target)[:7]
+    except Exception:
+        head_sha = "unknown"
+    return f"ekn: render manifests from {attr or 'root'} @ {head_sha}"
+
+
+async def _finalize_commit(
+    deploy_branch: str,
+    source_branch: str | None,
+    files: list[tuple[str, str]],
+    message: str,
+    prepared: PreparedCommits | None,
+    *,
+    push: bool,
+    remote: str,
+) -> None:
+    """Write the rendered manifests to `deploy_branch` (and, if
+    `source_branch` is set, the paired source snapshot too), then push if
+    requested.
+
+    If `prepared` is given (built earlier via
+    `prepare_deploy_and_source_commits`, e.g. before `Deploy` runs Validate),
+    only the finalize (ref-move) step happens here. Otherwise prepare and
+    finalize happen back-to-back -- `Commit` invoked directly has no
+    intervening verification step to prepare ahead of.
+    """
+    if source_branch is None:
+        try:
+            commit_id = commit_manifests(".", deploy_branch, files, message)
+        except Exception as exc:
+            _log.error("commit failed: %s", exc)
+            raise SystemExit(1) from exc
+        _log.info("committed to %s @ %s", deploy_branch, commit_id)
+    else:
+        try:
+            if prepared is None:
+                prepared = prepare_deploy_and_source_commits(
+                    ".", deploy_branch, source_branch, files, message
+                )
+            finalize_branches(".", deploy_branch, source_branch, prepared)
+        except ConcurrentDeployError as exc:
+            _log.error(str(exc))
+            raise SystemExit(1) from exc
+        except Exception as exc:
+            _log.error("commit failed: %s", exc)
+            raise SystemExit(1) from exc
+        _log.info(
+            "committed to %s @ %s (source %s @ %s)",
+            deploy_branch, prepared.deploy_oid, source_branch, prepared.source_oid,
+        )
+    if push:
+        await _git_push(remote, deploy_branch, source_branch)
+
+
 class Commit(Command):
-    """Render manifests and write them to their GitOps target branches."""
+    """Render manifests and write them to the GitOps deploy (and paired
+    source) branch."""
     file: _Path | None = arg(None, short="f", inherited=True)
     flake: str | None = arg(None, inherited=True)
     attr: str | None = arg(None, short="A", help="Dot-separated attribute path within the evaluation result.")
     message: str | None = arg(None, short="m", help="Commit message.")
     push: bool = arg(
         False,
-        help="git push each committed GitOps branch to its remote afterwards -- "
-        "commit_manifests only ever commits locally, and ArgoCD/Flux read from the remote.",
+        help="git push the committed GitOps branch(es) to their remote afterwards -- "
+        "commits are only ever made locally, and ArgoCD/Flux read from the remote.",
     )
-    remote: str = arg("origin", help="Remote to push GitOps branches to (with --push).")
+    remote: str = arg("origin", help="Remote to push GitOps branch(es) to (with --push).")
 
     async def run(self) -> None:
-        result = await _evaluate_gitops(self.file, self.flake, self.attr)
-        try:
-            groups = _gitops_file_groups(result)
-        except (GitOpsTargetError, TypeError) as exc:
-            _log.error("GitOps routing failed: %s", exc)
-            raise SystemExit(1) from exc
-        if not self.message:
-            import pygit2
-            try:
-                repo = pygit2.Repository(".")
-                head_sha = str(repo.head.target)[:7]
-            except Exception:
-                head_sha = "unknown"
-            self.message = f"ekn: render manifests from {self.attr or 'root'} @ {head_sha}"
-        for branch, files in groups.items():
-            try:
-                commit_id = commit_manifests(".", branch, files, self.message)
-            except Exception as exc:
-                _log.error("commit failed: %s", exc)
-                raise SystemExit(1) from exc
-            _log.info("committed to %s @ %s", branch, commit_id)
-            if self.push:
-                await _git_push(self.remote, branch)
+        deploy_branch, source_branch, files = await _resolve_gitops(self.file, self.flake, self.attr)
+        message = self.message or _default_commit_message(self.attr)
+        await _finalize_commit(
+            deploy_branch, source_branch, files, message, None,
+            push=self.push, remote=self.remote,
+        )
         await try_jj_status(".")
 
 
-async def _git_push(remote: str, branch: str) -> None:
-    _log.info(f"pushing {branch} to {remote}")
-    proc = await asyncio.create_subprocess_exec("git", "push", remote, branch)
+async def _git_push(remote: str, deploy_branch: str, source_branch: str | None) -> None:
+    branches = [deploy_branch] if source_branch is None else [deploy_branch, source_branch]
+    _log.info(f"pushing {', '.join(branches)} to {remote}")
+    # --atomic (a no-op with a single ref) keeps deploy_branch/source_branch
+    # from ever updating independently on the remote when both are pushed.
+    proc = await asyncio.create_subprocess_exec("git", "push", "--atomic", remote, *branches)
     rc = await proc.wait()
     if rc != 0:
-        _log.error(f"git push {remote} {branch} failed (rc={rc})")
+        _log.error(f"git push --atomic {remote} {' '.join(branches)} failed (rc={rc})")
         raise SystemExit(1)
 
 
@@ -656,13 +719,105 @@ class Deploy(Commit):
 
     async def run(self) -> None:
         with verbose_session(self.verbosity, print_build_logs=self.print_build_logs):
+            deploy_branch, source_branch, files = await _resolve_gitops(self.file, self.flake, self.attr)
+            message = self.message or _default_commit_message(self.attr)
+
+            # Prepared *before* Validate/cache-push run (not just before the
+            # git push) -- pygit2 only ever builds loose objects here, no
+            # ref is moved until `_finalize_commit`'s `finalize_branches`
+            # call below, so a failed Validate/cache-push leaves no trace.
+            prepared: PreparedCommits | None = None
+            if source_branch is not None:
+                with timed_stage("deploy: prepare commits"):
+                    prepared = prepare_deploy_and_source_commits(
+                        ".", deploy_branch, source_branch, files, message
+                    )
+
             if not self.no_verify:
                 with timed_stage("deploy: validate (total)"):
                     await Validate.run(cast("Validate", self))
             with timed_stage("deploy: cache-push (total, incl. network copy)"):
                 await _push_ekn_cache(self.file, self.flake, self.attr, allow_failure=self.cache_allow_failure)
             with timed_stage("deploy: commit (total, incl. git push)"):
-                await super().run()
+                await _finalize_commit(
+                    deploy_branch, source_branch, files, message, prepared,
+                    push=self.push, remote=self.remote,
+                )
+        await try_jj_status(".")
+
+
+class Rollback(Command):
+    """Roll back the GitOps deploy (and paired source) branch to an older
+    commit -- forward-only, replays the old tree as a *new* commit, never
+    resets or force-pushes anything.
+
+    Deliberately supports skipping Nix evaluation entirely via
+    `--deploy-branch`/`--source-branch`: an incident is often *why* Nix
+    eval is currently broken, so rollback can't depend on it working.
+    `--file`/`--flake` is the routine convenience for a one-step-back
+    during normal testing, when Nix eval is healthy.
+    """
+    deploy_branch: str | None = arg(
+        None, help="Deploy branch to roll back, bypassing Nix evaluation entirely. "
+        "Mutually exclusive with --file/--flake.",
+    )
+    source_branch: str | None = arg(
+        None, help="Paired source branch to roll back alongside --deploy-branch (optional).",
+    )
+    file: _Path | None = arg(None, short="f", inherited=True)
+    flake: str | None = arg(None, inherited=True)
+    attr: str | None = arg(None, short="A", help="Dot-separated attribute path within the evaluation result.")
+    to: str | None = arg(None, help="Roll back to this specific commit-ish instead of walking --steps-back.")
+    steps_back: int = arg(1, help="Number of deploy-branch first-parent steps to roll back, when --to is not given.")
+    push: bool = arg(False, help="git push the rolled-back branch(es) to their remote afterwards.")
+    remote: str = arg("origin", help="Remote to push to (with --push).")
+    verify: bool = arg(
+        False,
+        help="Run Validate against the restored tree before finalizing -- requires --file/--flake. "
+        "Off by default: an incident rollback should be fast, and the restored tree was already "
+        "validated when it was first deployed.",
+    )
+    _free_port = staticmethod(Validate._free_port)
+
+    async def run(self) -> None:
+        has_nix_entrypoint = self.file is not None or self.flake is not None
+        if self.deploy_branch is not None:
+            if has_nix_entrypoint:
+                _log.error("--deploy-branch is mutually exclusive with --file/--flake")
+                raise SystemExit(1)
+            deploy_branch, source_branch = self.deploy_branch, self.source_branch
+        elif has_nix_entrypoint:
+            result = await _evaluate_gitops(self.file, self.flake, self.attr)
+            deploy_branch, source_branch = _gitops_branches(result)
+        else:
+            _log.error("specify --deploy-branch, or --file/--flake to read branches from Nix")
+            raise SystemExit(1)
+
+        if self.verify and not has_nix_entrypoint:
+            _log.error("--verify requires --file/--flake")
+            raise SystemExit(1)
+
+        try:
+            prepared = rollback_branches(
+                ".", deploy_branch, source_branch, steps_back=self.steps_back, to=self.to
+            )
+        except (ValueError, TypeError) as exc:
+            _log.error("rollback failed: %s", exc)
+            raise SystemExit(1) from exc
+
+        if self.verify:
+            await Validate.run(cast("Validate", self))
+
+        try:
+            finalize_branches(".", deploy_branch, source_branch, prepared)
+        except ConcurrentDeployError as exc:
+            _log.error(str(exc))
+            raise SystemExit(1) from exc
+        _log.info("rolled back %s @ %s", deploy_branch, prepared.deploy_oid)
+
+        if self.push:
+            await _git_push(self.remote, deploy_branch, source_branch)
+        await try_jj_status(".")
 
 
 class KubeApply(Command):
@@ -691,7 +846,7 @@ class KubeApply(Command):
     attr: str | None = arg(None, short="A", help="Dot-separated attribute path within the evaluation result.")
     target: str | None = arg(
         None,
-        help="Apply only this GitOps target's objects (kubernetes.gitopsTargets). Omit for the full kubernetes.generated set.",
+        help="Apply only this GitOps target's objects (kubernetes.gitOpsTargets). Omit for the full kubernetes.generated set.",
     )
     prune: bool = arg(
         False,
@@ -755,7 +910,7 @@ class ClusterDiff(Command):
     attr: str | None = arg(None, short="A", help="Dot-separated attribute path within the evaluation result.")
     target: str | None = arg(
         None,
-        help="Diff only this GitOps target's objects (kubernetes.gitopsTargets). Omit for the full kubernetes.generated set.",
+        help="Diff only this GitOps target's objects (kubernetes.gitOpsTargets). Omit for the full kubernetes.generated set.",
     )
 
     async def run(self) -> None:
@@ -904,6 +1059,7 @@ class Ekn(Command):
         | Render
         | Diff
         | Commit
+        | Rollback
         | Validate
         | KubeApply
         | ClusterDiff
@@ -932,8 +1088,9 @@ class Ekn(Command):
             print("  deploy        Verify, then render and write routed GitOps manifests.")
             print("  eval          Evaluate Nix and dump JSON.")
             print("  render        Render Kubernetes manifests as YAML on stdout.")
-            print("  diff          Diff rendered manifests against the GitOps branch.")
-            print("  commit        Render manifests and write them to the GitOps branch.")
+            print("  diff          Diff rendered manifests against the GitOps deploy branch.")
+            print("  commit        Render manifests and write them to the GitOps deploy (and source) branch.")
+            print("  rollback      Roll back the GitOps deploy (and source) branch to an older commit.")
             print("  validate      Boot real etcd+kube-apiserver, apply manifests, run kubeconform.")
             print("  kubeapply     Apply Kubernetes objects directly against the current kubeconfig context.")
             print("  clusterdiff   Diff Kubernetes objects against the live cluster's actual current state.")

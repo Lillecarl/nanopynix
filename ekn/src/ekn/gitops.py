@@ -11,7 +11,6 @@ class GitOpsTargetError(ValueError):
 
 @dataclass(frozen=True)
 class GitOpsTarget:
-    branch: str
     path: str
 
 
@@ -25,14 +24,16 @@ def _required_string(route: object, field: str) -> str:
 
 
 def resolved_targets(gitops_targets: dict[str, Any]) -> dict[GitOpsTarget, list[dict[str, Any]]]:
-    """Turn `kubernetes.gitopsTargets` (already joined by the Nix module) into
+    """Turn `kubernetes.gitOpsTargets` (already joined by the Nix module) into
     `{GitOpsTarget: [manifest, ...]}`.
 
-    The Nix side (`kubernetes.gitopsTargets`) has already resolved each
-    object's `ekn.gitOpsTarget` name against `gitops.targets` and grouped
+    The Nix side (`kubernetes.gitOpsTargets`) has already resolved each
+    object's `ekn.gitOpsTarget` name against `gitOps.targets` and grouped
     objects by target name -- there is no index/lookup left to build here,
     just validation and a merge for the (unusual but valid) case of two
-    named targets sharing the same branch+path.
+    named targets sharing the same path. The branch these all land on is
+    instance-wide (`gitOps.deployBranch`/`gitOps.sourceBranch`), not part of
+    a target -- targets are pure path-routing.
     """
     result: defaultdict[GitOpsTarget, list[dict[str, Any]]] = defaultdict(list)
     for name, entry in gitops_targets.items():
@@ -41,10 +42,7 @@ def resolved_targets(gitops_targets: dict[str, Any]) -> dict[GitOpsTarget, list[
         objects = entry.get("objects")
         if not isinstance(objects, list):
             raise GitOpsTargetError(f"GitOps target {name!r} objects must be a list")
-        target = GitOpsTarget(
-            branch=_required_string(entry.get("target"), "branch"),
-            path=_required_string(entry.get("target"), "path"),
-        )
+        target = GitOpsTarget(path=_required_string(entry.get("target"), "path"))
         result[target].extend(objects)
     return dict(result)
 

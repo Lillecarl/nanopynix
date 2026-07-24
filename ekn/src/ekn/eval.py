@@ -10,11 +10,6 @@ from os import PathLike
 from typing import Any
 
 from anyio import Path
-from nanopynix import NixError, NixEvalSettings, NixSettings, Session
-from nanopynix.models import LogEvent
-from nanopynix.primops import yaml_primops
-from nanopynix.verbosity import LogLevelInput
-from nanopynix_proto.nix.common import LogEvent as LogEventProto
 from nanopynix_helpers.eval_target import select_attr
 from nanopynix_helpers.fod import (
     derivation_name_from_path,
@@ -23,6 +18,12 @@ from nanopynix_helpers.fod import (
     find_fod_hash_literal,
     replace_fod_hash,
 )
+from nanopynix_proto.nix.common import LogEvent as LogEventProto
+
+from nanopynix import NixError, NixEvalSettings, NixSettings, Session
+from nanopynix.models import LogEvent
+from nanopynix.primops import yaml_primops
+from nanopynix.verbosity import LogLevelInput
 
 _SESSION_SETTINGS = NixSettings()
 
@@ -330,13 +331,14 @@ async def evaluate_gitops_manifests(
     customer: str | None,
     attr_path: str | None,
 ) -> dict:
-    """Resolve to `{"config": {"kubernetes": {"gitopsTargets": ...}}}`.
+    """Resolve to `{"config": {"kubernetes": {"gitOpsTargets": ...},
+    "gitOps": {"deployBranch": ..., "sourceBranch": ...}}}`.
 
-    Used by Diff/Commit/Deploy, which only ever read this field via
-    `_gitops_file_groups`. Diff/Commit previously went through the generic
-    `_evaluate` -> `evaluate_file`/`evaluate_flake`, which force_json's the
-    *entire* narrowed `config` (every option in every module, not just
-    kubernetes.gitopsTargets) before `_dig()`-ing this field out --
+    Used by Diff/Commit/Deploy, which only ever read these fields via
+    `_gitops_file_groups`/`_gitops_branches`. Diff/Commit previously went
+    through the generic `_evaluate` -> `evaluate_file`/`evaluate_flake`,
+    which force_json's the *entire* narrowed `config` (every option in
+    every module, not just these fields) before `_dig()`-ing them out --
     forcing everything else was pure waste.
     """
     async with (
@@ -362,12 +364,19 @@ async def evaluate_gitops_manifests(
         if await proxy.has_attr("config"):
             proxy = proxy.attr("config")
 
-        with timed_stage("gitops: force_json(kubernetes.gitopsTargets)"):
-            gitops_targets = await proxy.attr("kubernetes").attr("gitopsTargets").force_json()
+        gitops_proxy = proxy.attr("gitOps")
+        with timed_stage("gitops: force_json(kubernetes.gitOpsTargets, gitOps.deployBranch/sourceBranch)"):
+            gitops_targets = await proxy.attr("kubernetes").attr("gitOpsTargets").force_json()
+            deploy_branch = await gitops_proxy.attr("deployBranch").force_json()
+            source_branch = await gitops_proxy.attr("sourceBranch").force_json()
         return {
             "config": {
                 "kubernetes": {
-                    "gitopsTargets": gitops_targets,
+                    "gitOpsTargets": gitops_targets,
+                },
+                "gitOps": {
+                    "deployBranch": deploy_branch,
+                    "sourceBranch": source_branch,
                 },
             }
         }
@@ -385,7 +394,7 @@ async def evaluate_kubeapply_config(
     and `kubernetes.sopsAgeIdentities` (SOPS age decrypt identities some
     consumer needs bootstrapped as a Secret -- see `ekn.sops.ensure_age_identities`).
 
-    `target` narrows to one `kubernetes.gitopsTargets` entry's objects,
+    `target` narrows to one `kubernetes.gitOpsTargets` entry's objects,
     `.ekn` routing metadata stripped; omitted, force_json's the full
     `kubernetes.generated` instead -- never both, so this only ever forces
     the one field it actually needs.
@@ -414,9 +423,9 @@ async def evaluate_kubeapply_config(
             proxy = proxy.attr("config")
 
         if target:
-            gitops_targets = await proxy.attr("kubernetes").attr("gitopsTargets").force_json()
+            gitops_targets = await proxy.attr("kubernetes").attr("gitOpsTargets").force_json()
             if not isinstance(gitops_targets, dict):
-                raise ValueError("kubernetes.gitopsTargets did not evaluate to an object")
+                raise ValueError("kubernetes.gitOpsTargets did not evaluate to an object")
             resolved = gitops_targets.get(target)
             if not isinstance(resolved, dict):
                 raise ValueError(f"unknown gitops target {target!r}")
@@ -559,7 +568,7 @@ async def _validation_config(proxy: Any) -> dict:
         proxy = proxy.attr("config")
 
     # Deliberately does not force kubernetes.generated/generatedByPath/
-    # gitopsTargets: Validate.run() applies manifests via
+    # gitOpsTargets: Validate.run() applies manifests via
     # internal.manifestJSONFile (a derivation built straight from
     # kubernetes.generated, see internal.nix) and never reads the fields
     # this function returns beyond what's assembled below -- forcing them
