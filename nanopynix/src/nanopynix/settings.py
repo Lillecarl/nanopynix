@@ -112,6 +112,10 @@ class _NixConfigModel(BaseModel):
         return dict(self._iter_set())
 
 
+_NIX_2_35 = "2.35"
+_NIX_2_24 = "2.24"
+
+
 class NixSettings(_NixConfigModel):
     """Nix settings rendered as nix.conf-compatible key/value pairs."""
 
@@ -138,20 +142,20 @@ class NixSettings(_NixConfigModel):
     external_builders: list[str] | None = None
     extra_platforms: list[str] | None = None
     fallback: bool | None = None
-    filetransfer_retry_attempts: int | None = Field(default=None, json_schema_extra={"nix_version_min": "2.35"})
-    filetransfer_retry_delay: int | None = Field(default=None, json_schema_extra={"nix_version_min": "2.35"})
+    filetransfer_retry_attempts: int | None = Field(default=None, json_schema_extra={"nix_version_min": _NIX_2_35})
+    filetransfer_retry_delay: int | None = Field(default=None, json_schema_extra={"nix_version_min": _NIX_2_35})
     filetransfer_retry_delay_rate_limited: int | None = Field(
-        default=None, json_schema_extra={"nix_version_min": "2.35"}
+        default=None, json_schema_extra={"nix_version_min": _NIX_2_35}
     )
-    filetransfer_retry_jitter: bool | None = Field(default=None, json_schema_extra={"nix_version_min": "2.35"})
-    filetransfer_retry_max_delay: int | None = Field(default=None, json_schema_extra={"nix_version_min": "2.35"})
+    filetransfer_retry_jitter: bool | None = Field(default=None, json_schema_extra={"nix_version_min": _NIX_2_35})
+    filetransfer_retry_max_delay: int | None = Field(default=None, json_schema_extra={"nix_version_min": _NIX_2_35})
     filter_syscalls: bool | None = None
     fsync_metadata: bool | None = None
     fsync_store_paths: bool | None = None
     gc_reserved_space: int | None = None
     hashed_mirrors: list[str] | None = None
     http2: bool | None = None
-    http3: bool | None = Field(default=None, json_schema_extra={"nix_version_min": "2.35"})
+    http3: bool | None = Field(default=None, json_schema_extra={"nix_version_min": _NIX_2_35})
     http_connections: int | None = None
     id_count: int | None = None
     ignored_acls: list[str] | None = None
@@ -177,10 +181,10 @@ class NixSettings(_NixConfigModel):
     narinfo_cache_positive_ttl: int | None = None
     netrc_file: str | None = None
     nix_shell_always_looks_for_shell_nix: bool | None = Field(
-        default=None, json_schema_extra={"nix_version_min": "2.24"}
+        default=None, json_schema_extra={"nix_version_min": _NIX_2_24}
     )
     nix_shell_shebang_arguments_relative_to_script: bool | None = Field(
-        default=None, json_schema_extra={"nix_version_min": "2.24"}
+        default=None, json_schema_extra={"nix_version_min": _NIX_2_24}
     )
     plugin_files: list[str] | None = None
     post_build_hook: str | None = None
@@ -278,6 +282,11 @@ class NixEvalSettings(_NixConfigModel):
     warn_short_path_literals: bool | None = None
 
 
+NIX_PATH_SETTING_KEY = _alias("nix_path")
+"""The rendered nix.conf key for NixEvalSettings.nix_path -- derived from the
+same alias_generator that renders it, rather than restated as a literal."""
+
+
 class NixFetchSettings(_NixConfigModel):
     """Fetcher-specific Nix settings."""
 
@@ -310,13 +319,17 @@ class NixSettingsEnv(NixSettings, BaseSettings):
     )
 
 
+DEFAULT_RPC_TIMEOUT_SECONDS = 300.0
+DEFAULT_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+
+
 class NanopynixSettings(BaseSettings):
     """Runtime settings for nanopynix itself, never forwarded to Nix."""
 
     model_config = SettingsConfigDict(env_prefix="NANOPYNIX_", extra="forbid")
 
-    rpc_timeout: float = Field(default=300.0, gt=0)
-    shutdown_timeout: float = Field(default=5.0, gt=0)
+    rpc_timeout: float = Field(default=DEFAULT_RPC_TIMEOUT_SECONDS, gt=0)
+    shutdown_timeout: float = Field(default=DEFAULT_SHUTDOWN_TIMEOUT_SECONDS, gt=0)
     line_editors: list[str] = Field(default_factory=lambda: list(DEFAULT_LINE_EDITORS))
 
 

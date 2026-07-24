@@ -71,10 +71,16 @@ from nanopynix.exceptions import (
     ValueReleasedError,
     WrongNixTypeError,
 )
-from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedInput, NixType
+from nanopynix.models import FlakeRef, HandleKind, JsonScalar, JsonValue, LockedInput, NixType
 from nanopynix.rpc.client._pool import _RPC_TIMEOUT  # type: ignore[reportPrivateUsage] -- cross-class access
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
-from nanopynix.settings import DEFAULT_LINE_EDITORS, NixEvalSettings, NixFetchSettings, NixFlakeSettings
+from nanopynix.settings import (
+    DEFAULT_LINE_EDITORS,
+    NIX_PATH_SETTING_KEY,
+    NixEvalSettings,
+    NixFetchSettings,
+    NixFlakeSettings,
+)
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
 if TYPE_CHECKING:
@@ -175,7 +181,7 @@ class _EvalOwner:
 class _LeaseRef:
     """Opaque identity of one worker-side resource allocation."""
 
-    kind: str
+    kind: HandleKind
     handle: int
     generation: object
 
@@ -224,7 +230,7 @@ class _DeferredReleases:
     def generation(self) -> object:
         return self._generation
 
-    def new_lease(self, kind: str, handle: int) -> _Lease:
+    def new_lease(self, kind: HandleKind, handle: int) -> _Lease:
         return _Lease(_LeaseRef(kind, handle, self._generation))
 
     def defer(self, ref: _LeaseRef) -> None:
@@ -320,14 +326,14 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
         self._draining_releases = True
         try:
             for ref in self._releases.drain():
-                if ref.kind == "value":
+                if ref.kind == HandleKind.VALUE:
                     method = self._worker._eval_stub.release  # type: ignore[reportPrivateUsage] -- EvalProxy owns the worker RPC boundary
                     await self._worker.invoke(
                         method,
                         ReleaseRequest(handle=ref.handle, eval_handle=self._eval_handle),
                         timeout=self._rpc_timeout,
                     )
-                elif ref.kind == "locked_flake":
+                elif ref.kind == HandleKind.LOCKED_FLAKE:
                     method = self._worker._eval_stub.release_locked_flake  # type: ignore[reportPrivateUsage] -- EvalProxy owns the worker RPC boundary
                     await self._worker.invoke(
                         method,
@@ -371,7 +377,7 @@ class _EvalProxyContext:
             _ResolvedValue(
                 handle=handle,
                 nix_type=_parse_nix_type(typ),
-                lease=self.releases.new_lease("value", handle),
+                lease=self.releases.new_lease(HandleKind.VALUE, handle),
             ),
         )
 
@@ -419,7 +425,7 @@ class ValueProxy:
     def __init__(self, ctx: _EvalProxyContext, state: _ValueState) -> None:
         self._ctx = ctx
         if isinstance(state, _ResolvedValue) and state.lease is None:
-            state = _ResolvedValue(state.handle, state.nix_type, ctx.releases.new_lease("value", state.handle))
+            state = _ResolvedValue(state.handle, state.nix_type, ctx.releases.new_lease(HandleKind.VALUE, state.handle))
         self._state = state
         self._released = False
         self._finalizer: Any = None
@@ -483,7 +489,7 @@ class ValueProxy:
         self._state = _ResolvedValue(
             handle=handle.handle,
             nix_type=_parse_nix_type(handle.type),
-            lease=self._ctx.releases.new_lease("value", handle.handle),
+            lease=self._ctx.releases.new_lease(HandleKind.VALUE, handle.handle),
         )
         self._finalizer = weakref.finalize(self, _finalize_lease, self._lease, self._ctx.releases)
 
@@ -956,7 +962,7 @@ class LockedFlakeHandle:
 
     def __post_init__(self) -> None:
         releases = self._session._deferred_releases()  # type: ignore[reportPrivateUsage] -- session owns resource cleanup generation
-        self._lease = releases.new_lease("locked_flake", self.handle)
+        self._lease = releases.new_lease(HandleKind.LOCKED_FLAKE, self.handle)
         self._finalizer = weakref.finalize(self, _finalize_lease, self._lease, releases)
 
     def __copy__(self) -> Never:
@@ -1066,7 +1072,7 @@ class EvalSession:
         releases = _DeferredReleases()
         proxy = EvalProxy(self._worker, releases, self._rpc_timeout)
         rendered_eval = self._eval_settings.to_worker_settings() if self._eval_settings is not None else {}
-        rendered_eval.pop("nix-path", None)  # this worker applies nix_path session-wide, not per-eval
+        rendered_eval.pop(NIX_PATH_SETTING_KEY, None)  # this worker applies nix_path session-wide, not per-eval
         rendered_fetch = self._fetch_settings.to_worker_settings() if self._fetch_settings is not None else {}
         try:
             response = await proxy.open_eval(
@@ -1114,7 +1120,7 @@ class EvalSession:
         ``restrict_eval``) require a new :class:`EvalSession`.
         """
         rendered_eval = eval_settings.to_worker_settings() if eval_settings is not None else {}
-        rendered_eval.pop("nix-path", None)
+        rendered_eval.pop(NIX_PATH_SETTING_KEY, None)
         rendered_fetch = fetch_settings.to_worker_settings() if fetch_settings is not None else {}
         await self._ensure_proxy().configure_eval(
             ConfigureEvalRequest(eval_settings=rendered_eval, fetch_settings=rendered_fetch)

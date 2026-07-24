@@ -59,8 +59,14 @@ from nanopynix_proto.nix.worker import (
 
 from nanopynix._core._local import LocalRuntime
 from nanopynix._process_title import set_process_title, set_worker_title
-from nanopynix.logging import LogCollector
-from nanopynix.models import PrimOpSpec
+from nanopynix.logging import LogCollector, LogStreamEventKind
+from nanopynix.models import (
+    NIX_CONFIG_ENV,
+    NIX_USER_CONF_FILES_ENV,
+    WORKER_INIT_STATUS_OK,
+    HandleKind,
+    PrimOpSpec,
+)
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
 from nanopynix.rpc.worker._handle_registry import HandleRegistry
 from nanopynix.rpc.worker._worker_eval import EvalServiceHandler, close_eval_state, find_evals_by_store
@@ -236,11 +242,11 @@ class WorkerServiceHandler(WorkerServiceBase):
             # These environment variables must be in place before libstore
             # reads configuration. They are process state, not Nix state.
             if message.nix_conf is not None:
-                os.environ["NIX_USER_CONF_FILES"] = message.nix_conf
+                os.environ[NIX_USER_CONF_FILES_ENV] = message.nix_conf
             if settings:
                 rendered_settings = "\n".join(f"{key} = {value}" for key, value in settings.items())
-                inherited_settings = os.environ.get("NIX_CONFIG")
-                os.environ["NIX_CONFIG"] = (
+                inherited_settings = os.environ.get(NIX_CONFIG_ENV)
+                os.environ[NIX_CONFIG_ENV] = (
                     f"{inherited_settings}\n{rendered_settings}" if inherited_settings else rendered_settings
                 )
 
@@ -258,7 +264,7 @@ class WorkerServiceHandler(WorkerServiceBase):
                 await self._state.rpc_bridge.start()
             await self._state.run_request(request_id=message.request_id, executor=self._state.executor, operation=self._init_nix, args=(message, settings))
 
-            return InitResponse(status="ok")
+            return InitResponse(status=WORKER_INIT_STATUS_OK)
 
         except Exception:
             traceback.print_exc(file=sys.stderr)
@@ -302,7 +308,7 @@ class WorkerServiceHandler(WorkerServiceBase):
 
     def _open_store(self, uri: str) -> tuple[int, str, str]:
         store = self._state.runtime.open_store(uri)
-        handle = self._state.handles.allocate(store, "store")
+        handle = self._state.handles.allocate(store, HandleKind.STORE)
         store_uri = store.get_uri()
         self._state.named_store_uris[handle] = store_uri
         self._update_store_title()
@@ -318,7 +324,7 @@ class WorkerServiceHandler(WorkerServiceBase):
 
     def _close_store(self, store_handle: int, force: bool = False) -> None:
         try:
-            store = self._state.handles.get_typed(store_handle, "store")
+            store = self._state.handles.get_typed(store_handle, HandleKind.STORE)
         except KeyError:
             # Store close is idempotent: a client or session teardown may
             # repeat a successful forced close.
@@ -363,10 +369,10 @@ class WorkerServiceHandler(WorkerServiceBase):
                 if event is None:
                     break
                 kind, request_id, *payload = event
-                if kind == "nix":
+                if kind == LogStreamEventKind.NIX:
                     action, *args = payload
                     yield LogEvent(request_id=request_id, nix_log=NixLogEvent(action=action, args_json=json.dumps(args, default=str)))
-                elif kind == "finalized":
+                elif kind == LogStreamEventKind.FINALIZED:
                     yield LogEvent(request_id=request_id, request_finalized=RequestFinalized())
         except anyio.get_cancelled_exc_class():
             pass

@@ -12,13 +12,14 @@ from grpclib.const import Cardinality, Handler, Status
 from nanopynix_proto.nix.common import DeepAttrs, DeepList, DeepValue, LogEvent, NullValue, ScalarValue
 from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
 
+from nanopynix.models import CALL_ROUTE
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from grpclib.server import Stream
 
 _LOG_ROUTE = "/nix.manager.ManagerService/Log"
-_CALL_ROUTE = "/nix.manager.ManagerPrimopService/Call"
 
 
 @dataclass(eq=False, repr=False)
@@ -73,7 +74,7 @@ class ManagerPrimopServiceBase(betterproto2_grpclib.ServiceBase):
 
     def __mapping__(self) -> dict[str, Handler]:
         return {
-            _CALL_ROUTE: Handler(
+            CALL_ROUTE: Handler(
                 self.__rpc_call,
                 Cardinality.UNARY_UNARY,
                 CallPrimopRequest,

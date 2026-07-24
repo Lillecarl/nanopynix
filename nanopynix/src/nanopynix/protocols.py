@@ -12,7 +12,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar
 
+from nanopynix_bindings.store import BuildMode
 from nanopynix_proto.nix.store import GcAction
+
+from nanopynix.models import NO_GC_LIMIT
 
 if TYPE_CHECKING:
     from nanopynix.models import BuildResult, Derivation, GcResult, MissingInfo, PathInfo, StorePath
@@ -150,7 +153,7 @@ class AsyncStore(Protocol):
         derived_paths: list[str | StorePath],
         /,
         *,
-        build_mode: int = 0,
+        build_mode: int = BuildMode.Normal.value,
         eval_store: AsyncStore | None = None,
     ) -> list[BuildResult]:
         """Build derived paths, treating a plain derivation path as all outputs."""
@@ -167,7 +170,7 @@ class AsyncStore(Protocol):
         *,
         ignore_liveness: bool = False,
         paths_to_delete: list[str | StorePath] | tuple[()] = (),
-        max_freed: int = 2**64 - 1,
+        max_freed: int = NO_GC_LIMIT,
     ) -> GcResult:
         """Run a garbage-collection pass; see :meth:`nanopynix.store.Store.collect_garbage`."""
         ...

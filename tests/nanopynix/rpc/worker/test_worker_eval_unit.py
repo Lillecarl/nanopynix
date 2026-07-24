@@ -14,6 +14,7 @@ from nanopynix._core._local import (  # type: ignore[reportPrivateUsage] -- test
     LocalEvalState,
     LocalStore,
 )
+from nanopynix.models import HandleKind
 from nanopynix.rpc.worker._handle_registry import (
     HandleRegistry,  # type: ignore[reportPrivateUsage] -- test imports private module
 )
@@ -174,8 +175,8 @@ async def test_open_eval_allows_concurrent_eval_states(monkeypatch: pytest.Monke
     monkeypatch.setattr(nix_core.nanopynix_expr, "EvalState", _FakeEvalState)
 
     state = WorkerState()
-    second_handle = state.handles.allocate(LocalStore("second-store"), "store")
-    first_handle = state.handles.allocate(LocalStore("first-store"), "store")
+    second_handle = state.handles.allocate(LocalStore("second-store"), HandleKind.STORE)
+    first_handle = state.handles.allocate(LocalStore("first-store"), HandleKind.STORE)
     state.nix_path = ["nixpkgs=/tmp/nixpkgs"]
     handler = EvalServiceHandler(state)
 
@@ -210,14 +211,14 @@ def test_releasing_remote_value_closes_local_value() -> None:
 
     handles = HandleRegistry()
     value = Value()
-    handle = handles.allocate(value, "value")
+    handle = handles.allocate(value, HandleKind.VALUE)
     handler = EvalServiceHandler(SimpleNamespace(handles=handles))
 
     handler._do_release(SimpleNamespace(handle=handle))  # type: ignore[reportPrivateUsage] -- test verifies worker release ownership
 
     assert value.closed
     with pytest.raises(KeyError):
-        handles.get_typed(handle, "value")
+        handles.get_typed(handle, HandleKind.VALUE)
 
 
 def test_releasing_locked_flake_closes_local_resource() -> None:
@@ -230,11 +231,11 @@ def test_releasing_locked_flake_closes_local_resource() -> None:
 
     handles = HandleRegistry()
     locked_flake = LockedFlake()
-    handle = handles.allocate(locked_flake, "locked_flake")
+    handle = handles.allocate(locked_flake, HandleKind.LOCKED_FLAKE)
     handler = EvalServiceHandler(SimpleNamespace(handles=handles))
 
     handler._do_release_locked_flake(SimpleNamespace(handle=handle))  # type: ignore[reportPrivateUsage] -- test verifies worker release ownership
 
     assert locked_flake.closed
     with pytest.raises(KeyError):
-        handles.get_typed(handle, "locked_flake")
+        handles.get_typed(handle, HandleKind.LOCKED_FLAKE)

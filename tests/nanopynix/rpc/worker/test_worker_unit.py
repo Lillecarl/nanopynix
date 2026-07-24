@@ -26,6 +26,7 @@ from nanopynix_proto.nix.worker import (
 
 import nanopynix.rpc.worker._worker as worker  # type: ignore[reportPrivateUsage] -- test imports private module
 from nanopynix.logging import LogCollector
+from nanopynix.models import HandleKind
 from nanopynix.rpc.worker._worker import (  # type: ignore[reportPrivateUsage] -- test imports private module
     WorkerServiceHandler,
     WorkerState,
@@ -212,7 +213,7 @@ def test_close_store_skips_title_update_for_a_handle_never_opened_via_open_store
         titles.append("called")
 
     state = WorkerState()
-    handle = state.handles.allocate(_FakeStore(), "store")
+    handle = state.handles.allocate(_FakeStore(), HandleKind.STORE)
     handler = WorkerServiceHandler(state)
     handler._update_store_title = _record_title_update  # type: ignore[method-assign, reportPrivateUsage] -- test verifies it is NOT called
 

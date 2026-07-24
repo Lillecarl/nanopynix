@@ -13,23 +13,25 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
+from nanopynix.models import HandleKind
+
 
 @dataclass
 class HandleRegistry:
-    _resources: dict[int, tuple[str, Any, int | None]] = field(
-        default_factory=dict[int, tuple[str, Any, "int | None"]]
+    _resources: dict[int, tuple[HandleKind, Any, int | None]] = field(
+        default_factory=dict[int, tuple[HandleKind, Any, "int | None"]]
     )
     _next: int = 1
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
-    def allocate(self, resource: Any, kind: str, owner: int | None = None) -> int:
+    def allocate(self, resource: Any, kind: HandleKind, owner: int | None = None) -> int:
         with self._lock:
             handle = self._next
             self._next += 1
             self._resources[handle] = (kind, resource, owner)
             return handle
 
-    def get(self, handle: int) -> tuple[str, Any]:
+    def get(self, handle: int) -> tuple[HandleKind, Any]:
         with self._lock:
             entry = self._resources.get(handle)
             if entry is None:
@@ -37,17 +39,17 @@ class HandleRegistry:
             kind, resource, _owner = entry
             return kind, resource
 
-    def get_typed(self, handle: int, expected_kind: str) -> Any:
+    def get_typed(self, handle: int, expected_kind: HandleKind) -> Any:
         kind, resource = self.get(handle)
         if kind != expected_kind:
             raise TypeError(f"handle {handle} is a {kind}, not a {expected_kind}")
         return resource
 
-    def iter_kind(self, kind: str) -> list[tuple[int, Any]]:
+    def iter_kind(self, kind: HandleKind) -> list[tuple[int, Any]]:
         with self._lock:
             return [(handle, resource) for handle, (k, resource, _owner) in self._resources.items() if k == kind]
 
-    def iter_owned(self, owner: int, kind: str | None = None) -> list[tuple[int, Any]]:
+    def iter_owned(self, owner: int, kind: HandleKind | None = None) -> list[tuple[int, Any]]:
         """Return ``(handle, resource)`` pairs allocated with ``owner``, optionally filtered by ``kind``."""
         with self._lock:
             return [
