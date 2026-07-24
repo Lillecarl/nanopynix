@@ -151,7 +151,7 @@ class CallbackBus:
     """Dispatch events synchronously to a list of subscribed callbacks.
 
     Shared by :class:`nanopynix.inproc.Session` (dispatching already-decoded
-    log events directly, no wire hop) and the RPC client's ``_WorkerClient``
+    log events directly, no wire hop) and the RPC client's ``WorkerClient``
     (dispatching events received over gRPC from the worker's own
     ``LogCollector``). The worker side (``rpc.worker._worker.subscribe_logs``)
     is deliberately not built on this class: it runs *inside* the worker

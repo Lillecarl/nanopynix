@@ -33,8 +33,7 @@ from nanopynix import (
     WrongNixTypeError,
 )
 from nanopynix.models import LogEvent
-from nanopynix.rpc.client._pool import _RPC_TIMEOUT as _RPC_TIMEOUT
-from nanopynix.rpc.client._pool import _WorkerClient as _WorkerClient
+from nanopynix.rpc.client._pool import WorkerClient
 from nanopynix.rpc.client._session import (
     EvalProxy,
     EvalSession,
@@ -57,6 +56,7 @@ from nanopynix.rpc.client._session import (
 )
 from nanopynix.rpc.client.session import Session
 from nanopynix.rpc.client.store import Store, StoreHandle
+from nanopynix.settings import DEFAULT_RPC_TIMEOUT_SECONDS
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -170,8 +170,8 @@ def _mock_has_attr_response(has: bool = True) -> MagicMock:
 def _mock_pool() -> MagicMock:
     """Return a mock worker client that serializes individual RPCs."""
     pool = MagicMock()
-    pool._eval_stub = _make_eval_stub()
-    pool._store_stub = MagicMock()
+    pool.eval_stub = _make_eval_stub()
+    pool.store_stub = MagicMock()
 
     async def _invoke(method: Any, request: Any, *, timeout: float) -> Any:  # noqa: ASYNC109 -- mock implementing WorkerClient.invoke; timeout passed to grpclib stub
         return await method(request, timeout=timeout)
@@ -183,12 +183,12 @@ def _mock_pool() -> MagicMock:
 def _mock_worker_client() -> MagicMock:
     """Return a mock worker client with eval and Store RPC stubs."""
     rw = MagicMock()
-    rw._eval_stub = _make_eval_stub()
-    rw._store_stub = MagicMock()
-    rw._store_stub.build_paths_with_results = AsyncMock()
-    rw._store_stub.build_for_humans = AsyncMock()
-    rw._store_stub.build_derivation = AsyncMock()
-    rw._store_stub.read_derivation = AsyncMock()
+    rw.eval_stub = _make_eval_stub()
+    rw.store_stub = MagicMock()
+    rw.store_stub.build_paths_with_results = AsyncMock()
+    rw.store_stub.build_for_humans = AsyncMock()
+    rw.store_stub.build_derivation = AsyncMock()
+    rw.store_stub.read_derivation = AsyncMock()
     rw.release = AsyncMock()
 
     async def _invoke(method: Any, request: Any, *, timeout: float) -> Any:  # noqa: ASYNC109 -- mock implementing WorkerClient.invoke; timeout passed to grpclib stub
@@ -210,7 +210,7 @@ class TestEvalSessionLifecycle:
         session = EvalSession(pool)
         result = await session.__aenter__()
         assert result is session
-        pool._eval_stub.open_eval.assert_awaited_once()
+        pool.eval_stub.open_eval.assert_awaited_once()
 
     async def test_open_close_manual_lifecycle(self):
         pool = _mock_pool()
@@ -218,7 +218,7 @@ class TestEvalSessionLifecycle:
         await session.open()
         await session.close()
 
-        pool._eval_stub.close_eval.assert_awaited_once()
+        pool.eval_stub.close_eval.assert_awaited_once()
 
     async def test_exit_closes_eval_state(self):
         pool = _mock_pool()
@@ -227,12 +227,12 @@ class TestEvalSessionLifecycle:
         await session.__aenter__()
         await session.__aexit__(None, None, None)
 
-        pool._eval_stub.close_eval.assert_awaited_once()
+        pool.eval_stub.close_eval.assert_awaited_once()
 
     async def test_exit_deactivates_after_close_eval_error(self):
         """A failed CloseEval still invalidates the client-side session."""
         pool = _mock_pool()
-        pool._eval_stub.close_eval.side_effect = TimeoutError("close_eval timed out")
+        pool.eval_stub.close_eval.side_effect = TimeoutError("close_eval timed out")
 
         session = EvalSession(pool)
         await session.__aenter__()
@@ -256,7 +256,7 @@ class TestEvalSessionLifecycle:
 
     async def test_file_after_enter(self):
         pool = _mock_pool()
-        pool._eval_stub.eval_file.return_value = _mock_value_handle(1, "attrs")
+        pool.eval_stub.eval_file.return_value = _mock_value_handle(1, "attrs")
 
         session = EvalSession(pool)
         await session.__aenter__()
@@ -264,18 +264,18 @@ class TestEvalSessionLifecycle:
         assert isinstance(root, ValueProxy)
         assert root.handle == 1
         assert root.nix_type == NixType.ATTRS
-        request = pool._eval_stub.open_eval.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
+        request = pool.eval_stub.open_eval.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert request.store_handle == 1
 
     async def test_string_after_enter(self):
         pool = _mock_pool()
-        pool._eval_stub.eval_string.return_value = _mock_value_handle(2, "int")
+        pool.eval_stub.eval_string.return_value = _mock_value_handle(2, "int")
 
         session = EvalSession(pool, store_handle=99)
         await session.__aenter__()
         root = await session.string("42 + 1")
         assert root.nix_type == NixType.INT
-        request = pool._eval_stub.open_eval.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
+        request = pool.eval_stub.open_eval.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert request.store_handle == 99
 
     @pytest.mark.concurrency
@@ -296,7 +296,7 @@ class TestEvalSessionLifecycle:
             active -= 1
             return _mock_value_handle(active + 1, "int")
 
-        pool._eval_stub.eval_string.side_effect = eval_string
+        pool.eval_stub.eval_string.side_effect = eval_string
         session = EvalSession(pool)
         await session.open()
         try:
@@ -313,29 +313,29 @@ class TestEvalSessionLifecycle:
 
     async def test_timeout_override(self):
         pool = _mock_pool()
-        pool._eval_stub.eval_string.return_value = _mock_value_handle(1, "int")
+        pool.eval_stub.eval_string.return_value = _mock_value_handle(1, "int")
 
         session = EvalSession(pool, timeout=10.0)
         await session.__aenter__()
         await session.string("42", timeout=5.0)
-        call_kwargs = pool._eval_stub.eval_string.call_args[1]  # type: ignore[reportUnknownMemberType, reportOptionalSubscript] -- mock call_args absence in stubs
-        assert call_kwargs["timeout"] == _RPC_TIMEOUT
+        call_kwargs = pool.eval_stub.eval_string.call_args[1]  # type: ignore[reportUnknownMemberType, reportOptionalSubscript] -- mock call_args absence in stubs
+        assert call_kwargs["timeout"] == DEFAULT_RPC_TIMEOUT_SECONDS
 
     async def test_timeout_falls_back_to_session_default(self):
         pool = _mock_pool()
-        pool._eval_stub.eval_string.return_value = _mock_value_handle(1, "int")
+        pool.eval_stub.eval_string.return_value = _mock_value_handle(1, "int")
 
         session = EvalSession(pool, timeout=10.0)
         await session.__aenter__()
         await session.string("42")  # no override
-        call_kwargs = pool._eval_stub.eval_string.call_args[1]  # type: ignore[reportUnknownMemberType, reportOptionalSubscript] -- mock call_args absence in stubs
-        assert call_kwargs["timeout"] == _RPC_TIMEOUT
+        call_kwargs = pool.eval_stub.eval_string.call_args[1]  # type: ignore[reportUnknownMemberType, reportOptionalSubscript] -- mock call_args absence in stubs
+        assert call_kwargs["timeout"] == DEFAULT_RPC_TIMEOUT_SECONDS
 
 
 class TestReplSession:
     async def test_open_starts_repl_scope_and_line_returns_expression_value(self):
         pool = _mock_pool()
-        pool._eval_stub.repl_process_line.return_value = SimpleNamespace(
+        pool.eval_stub.repl_process_line.return_value = SimpleNamespace(
             is_binding=False,
             value=_mock_value_handle(7, "int"),
         )
@@ -344,15 +344,15 @@ class TestReplSession:
         await session.open()
         result = await session.line("x + 1")
 
-        pool._eval_stub.begin_repl.assert_awaited_once()
-        open_request = pool._eval_stub.open_eval.call_args.args[0]
+        pool.eval_stub.begin_repl.assert_awaited_once()
+        open_request = pool.eval_stub.open_eval.call_args.args[0]
         assert open_request.store_handle == 99
         assert isinstance(result, ValueProxy)
         assert result.handle == 7
 
     async def test_line_returns_none_for_binding(self):
         pool = _mock_pool()
-        pool._eval_stub.repl_process_line.return_value = SimpleNamespace(is_binding=True)
+        pool.eval_stub.repl_process_line.return_value = SimpleNamespace(is_binding=True)
 
         session = ReplSession(pool)
         await session.open()
@@ -427,20 +427,20 @@ class TestValueProxyLifecycle:
 
     async def test_force_delegates_to_worker(self):
         w = self._worker()
-        w._eval_stub.force.return_value = _mock_force_value_scalar(99)
+        w.eval_stub.force.return_value = _mock_force_value_scalar(99)
         vp = self._proxy(w, 1, "int")
         result = await vp.force()
         assert result == 99
 
     async def test_force_as_uses_cached_type(self):
         w = self._worker()
-        w._eval_stub.force.return_value = _mock_force_value_scalar(99)
+        w.eval_stub.force.return_value = _mock_force_value_scalar(99)
         vp = self._proxy(w, 1, "int")
 
         result = await vp.force_as(NixType.INT)
 
         assert result == 99
-        w._eval_stub.force.assert_awaited_once()
+        w.eval_stub.force.assert_awaited_once()
 
     async def test_force_as_wrong_type_raises_typed_error(self):
         w = self._worker()
@@ -451,7 +451,7 @@ class TestValueProxyLifecycle:
 
         assert exc.value.expected == "int"
         assert exc.value.actual == "string"
-        w._eval_stub.force.assert_not_awaited()
+        w.eval_stub.force.assert_not_awaited()
 
     async def test_coerce_str_accepts_scalars(self):
         cases: list[tuple[NixType | str, object, str]] = [
@@ -465,7 +465,7 @@ class TestValueProxyLifecycle:
         ]
         for typ, raw, expected in cases:
             w = self._worker()
-            w._eval_stub.force.return_value = _mock_force_value_scalar(raw)
+            w.eval_stub.force.return_value = _mock_force_value_scalar(raw)
             vp = self._proxy(w, 1, typ)
             assert await vp.coerce_str() == expected
 
@@ -478,7 +478,7 @@ class TestValueProxyLifecycle:
         ]
         for typ, raw, expected in cases:
             w = self._worker()
-            w._eval_stub.force.return_value = _mock_force_value_scalar(raw)
+            w.eval_stub.force.return_value = _mock_force_value_scalar(raw)
             vp = self._proxy(w, 1, typ)
             assert await vp.coerce_int() == expected
 
@@ -491,7 +491,7 @@ class TestValueProxyLifecycle:
         ]
         for typ, raw in cases:
             w = self._worker()
-            w._eval_stub.force.return_value = _mock_force_value_scalar(raw)
+            w.eval_stub.force.return_value = _mock_force_value_scalar(raw)
             vp = self._proxy(w, 1, typ)
             with pytest.raises(NixCoercionError):
                 await vp.coerce_int()
@@ -504,7 +504,7 @@ class TestValueProxyLifecycle:
         ]
         for typ, raw, expected in cases:
             w = self._worker()
-            w._eval_stub.force.return_value = _mock_force_value_scalar(raw)
+            w.eval_stub.force.return_value = _mock_force_value_scalar(raw)
             vp = self._proxy(w, 1, typ)
             assert await vp.coerce_float() == expected
 
@@ -516,32 +516,32 @@ class TestValueProxyLifecycle:
         ]
         for typ, raw in cases:
             w = self._worker()
-            w._eval_stub.force.return_value = _mock_force_value_scalar(raw)
+            w.eval_stub.force.return_value = _mock_force_value_scalar(raw)
             vp = self._proxy(w, 1, typ)
             with pytest.raises(NixCoercionError):
                 await vp.coerce_float()
 
     async def test_coerce_bool_is_conservative(self):
         true_worker = self._worker()
-        true_worker._eval_stub.force.return_value = _mock_force_value_scalar("true")
+        true_worker.eval_stub.force.return_value = _mock_force_value_scalar("true")
         false_worker = self._worker()
-        false_worker._eval_stub.force.return_value = _mock_force_value_scalar(" false ")
+        false_worker.eval_stub.force.return_value = _mock_force_value_scalar(" false ")
         bool_worker = self._worker()
-        bool_worker._eval_stub.force.return_value = _mock_force_value_scalar(True)
+        bool_worker.eval_stub.force.return_value = _mock_force_value_scalar(True)
 
         assert await self._proxy(true_worker, 1, "string").coerce_bool() is True
         assert await self._proxy(false_worker, 1, "string").coerce_bool() is False
         assert await self._proxy(bool_worker, 1, "bool").coerce_bool() is True
 
         int_worker = self._worker()
-        int_worker._eval_stub.force.return_value = _mock_force_value_scalar(1)
+        int_worker.eval_stub.force.return_value = _mock_force_value_scalar(1)
         with pytest.raises(NixCoercionError):
             await self._proxy(int_worker, 1, "int").coerce_bool()
 
     async def test_coercions_reject_structural_values(self):
         w = self._worker()
         # force() on attrs returns ValueAttrs, not a scalar
-        w._eval_stub.force.return_value = _mock_force_value_scalar(["x"])
+        w.eval_stub.force.return_value = _mock_force_value_scalar(["x"])
         vp = self._proxy(w, 1, "attrs")
 
         for coercion in (vp.coerce_str, vp.coerce_int, vp.coerce_float, vp.coerce_bool):
@@ -550,7 +550,7 @@ class TestValueProxyLifecycle:
 
     async def test_call_json_arg_uses_explicit_wire_arg(self):
         w = self._worker()
-        w._eval_stub.call.return_value = _mock_value_handle(3, "int")
+        w.eval_stub.call.return_value = _mock_value_handle(3, "int")
         vp = self._proxy(w, 1, "function")
 
         result = await vp({"name": "demo"})
@@ -559,14 +559,14 @@ class TestValueProxyLifecycle:
 
     async def test_call_unknown_type_resolves_type_before_call(self):
         w = self._worker()
-        w._eval_stub.type_name.return_value = _mock_type_name_response("function")
-        w._eval_stub.call.return_value = _mock_value_handle(3, "int")
+        w.eval_stub.type_name.return_value = _mock_type_name_response("function")
+        w.eval_stub.call.return_value = _mock_value_handle(3, "int")
         vp = self._proxy(w, 1, "unknown")
 
         result = await vp({"name": "demo"})
 
         assert result.handle == 3
-        w._eval_stub.type_name.assert_awaited_once()
+        w.eval_stub.type_name.assert_awaited_once()
 
     async def test_call_non_function_raises_typed_error(self):
         w = self._worker()
@@ -577,11 +577,11 @@ class TestValueProxyLifecycle:
 
         assert exc.value.expected == "function"
         assert exc.value.actual == "int"
-        w._eval_stub.call.assert_not_awaited()
+        w.eval_stub.call.assert_not_awaited()
 
     async def test_call_value_proxy_arg_uses_remote_handle(self):
         w = self._worker()
-        w._eval_stub.call.return_value = _mock_value_handle(3, "int")
+        w.eval_stub.call.return_value = _mock_value_handle(3, "int")
         owner = self._owner()
         fn = self._proxy(w, 1, "function", owner=owner)
         arg = self._proxy(w, 2, "attrs", owner=owner)
@@ -589,11 +589,11 @@ class TestValueProxyLifecycle:
         result = await fn(arg)
 
         assert result.handle == 3
-        w._eval_stub.call.assert_awaited_once()
+        w.eval_stub.call.assert_awaited_once()
 
     async def test_call_nested_value_proxy_arg_uses_remote_handle(self):
         w = self._worker()
-        w._eval_stub.call.return_value = _mock_value_handle(3, "int")
+        w.eval_stub.call.return_value = _mock_value_handle(3, "int")
         owner = self._owner()
         fn = self._proxy(w, 1, "function", owner=owner)
         arg = self._proxy(w, 2, "attrs", owner=owner)
@@ -601,7 +601,7 @@ class TestValueProxyLifecycle:
         result = await fn({"items": [arg, 1]})
 
         assert result.handle == 3
-        w._eval_stub.call.assert_awaited_once()
+        w.eval_stub.call.assert_awaited_once()
 
     async def test_call_foreign_value_proxy_raises_typed_error(self):
         w = self._worker()
@@ -611,7 +611,7 @@ class TestValueProxyLifecycle:
         with pytest.raises(ForeignValueError, match="another EvalSession"):
             await fn(arg)
 
-        w._eval_stub.call.assert_not_awaited()
+        w.eval_stub.call.assert_not_awaited()
 
     async def test_call_nested_foreign_value_proxy_raises_typed_error(self):
         w = self._worker()
@@ -621,7 +621,7 @@ class TestValueProxyLifecycle:
         with pytest.raises(ForeignValueError, match="another EvalSession"):
             await fn({"arg": [arg]})
 
-        w._eval_stub.call.assert_not_awaited()
+        w.eval_stub.call.assert_not_awaited()
 
     async def test_attr_returns_new_proxy(self):
         w = self._worker()
@@ -629,10 +629,10 @@ class TestValueProxyLifecycle:
         child = vp.attr("name")
         assert isinstance(child, ValueProxy)
         assert child.nix_type == NixType.UNSPECIFIED
-        w._eval_stub.attr.assert_not_awaited()
+        w.eval_stub.attr.assert_not_awaited()
 
-        w._eval_stub.attr.return_value = _mock_value_handle(5, "string")
-        w._eval_stub.force.return_value = _mock_force_value_scalar("hello")
+        w.eval_stub.attr.return_value = _mock_value_handle(5, "string")
+        w.eval_stub.force.return_value = _mock_force_value_scalar("hello")
         assert await child.force() == "hello"
         assert child.handle == 5
         assert child.nix_type == NixType.STRING
@@ -641,10 +641,10 @@ class TestValueProxyLifecycle:
         w = self._worker()
         vp = self._proxy(w, 1, "list")
         child = vp.list_get(0)
-        w._eval_stub.list_get.assert_not_awaited()
+        w.eval_stub.list_get.assert_not_awaited()
 
-        w._eval_stub.list_get.return_value = _mock_value_handle(3, "int")
-        w._eval_stub.type_name.return_value = _mock_type_name_response("int")
+        w.eval_stub.list_get.return_value = _mock_value_handle(3, "int")
+        w.eval_stub.type_name.return_value = _mock_type_name_response("int")
         assert await child.get_type() == NixType.INT
         assert child.handle == 3
 
@@ -656,66 +656,66 @@ class TestValueProxyLifecycle:
         child = vp.list_get(-1)
         assert child is not None
         # The stub should not be called yet — list_get is lazy.
-        w._eval_stub.list_get.assert_not_awaited()
+        w.eval_stub.list_get.assert_not_awaited()
 
     async def test_list_length(self):
         w = self._worker()
-        w._eval_stub.list_length.return_value = _mock_list_length_response(3)
+        w.eval_stub.list_length.return_value = _mock_list_length_response(3)
         vp = self._proxy(w, 1, "list")
         assert await vp.list_length() == 3
 
     async def test_attr_names(self):
         w = self._worker()
-        w._eval_stub.attr_names.return_value = _mock_attr_names_response(["a", "b", "c"])
+        w.eval_stub.attr_names.return_value = _mock_attr_names_response(["a", "b", "c"])
         vp = self._proxy(w, 1, "attrs")
         assert await vp.attr_names() == ["a", "b", "c"]
 
     async def test_has_attr(self):
         w = self._worker()
-        w._eval_stub.has_attr.return_value = _mock_has_attr_response(True)
+        w.eval_stub.has_attr.return_value = _mock_has_attr_response(True)
         vp = self._proxy(w, 1, "attrs")
         assert await vp.has_attr("foo") is True
 
     async def test_build_uses_cascading_build_by_default(self):
         w = self._worker()
-        w._eval_stub.build.return_value = _mock_build_response()
+        w.eval_stub.build.return_value = _mock_build_response()
         vp = _EvalProxyContext(EvalProxy(w), self._owner(), store_handle=123).value(1, "attrs")
 
         result = await vp.build()
 
         assert result == {"out": "/nix/store/aaa-demo"}
-        w._eval_stub.build.assert_awaited_once()
-        build_request = w._eval_stub.build.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
+        w.eval_stub.build.assert_awaited_once()
+        build_request = w.eval_stub.build.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert build_request.handle == 1
         assert build_request.build_mode == BuildMode.Normal.value
         assert build_request.build_store_handle == 0
-        w._eval_stub.attr.assert_not_awaited()
-        w._eval_stub.force_json.assert_not_awaited()
-        w._store_stub.build_for_humans.assert_not_awaited()
-        w._store_stub.build_paths_with_results.assert_not_awaited()
-        w._store_stub.build_derivation.assert_not_awaited()
-        w._store_stub.read_derivation.assert_not_awaited()
+        w.eval_stub.attr.assert_not_awaited()
+        w.eval_stub.force_json.assert_not_awaited()
+        w.store_stub.build_for_humans.assert_not_awaited()
+        w.store_stub.build_paths_with_results.assert_not_awaited()
+        w.store_stub.build_derivation.assert_not_awaited()
+        w.store_stub.read_derivation.assert_not_awaited()
 
     async def test_build_mode_uses_cascading_build(self):
         w = self._worker()
-        w._eval_stub.build.return_value = _mock_build_response()
+        w.eval_stub.build.return_value = _mock_build_response()
         vp = _EvalProxyContext(EvalProxy(w), self._owner(), store_handle=123).value(1, "attrs")
 
         result = await vp.build(build_mode=BuildMode.Check)
 
         assert result == {"out": "/nix/store/aaa-demo"}
-        w._eval_stub.build.assert_awaited_once()
-        build_request = w._eval_stub.build.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
+        w.eval_stub.build.assert_awaited_once()
+        build_request = w.eval_stub.build.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert build_request.handle == 1
         assert build_request.build_mode == BuildMode.Check.value
         assert build_request.build_store_handle == 0
-        w._store_stub.build_for_humans.assert_not_awaited()
-        w._store_stub.build_paths_with_results.assert_not_awaited()
-        w._store_stub.build_derivation.assert_not_awaited()
+        w.store_stub.build_for_humans.assert_not_awaited()
+        w.store_stub.build_paths_with_results.assert_not_awaited()
+        w.store_stub.build_derivation.assert_not_awaited()
 
     async def test_build_store_overrides_build_store_not_eval_store(self):
         w = self._worker()
-        w._eval_stub.build.return_value = _mock_build_response()
+        w.eval_stub.build.return_value = _mock_build_response()
         rpc = StoreHandle(_mock_pool(), "mock", "session-id")
         rpc._active = True  # type: ignore[reportPrivateUsage] -- test injects internal store state
         rpc._store_handle = 456  # type: ignore[reportPrivateUsage] -- test injects store handle directly for mock setup
@@ -726,10 +726,10 @@ class TestValueProxyLifecycle:
         result = await vp.build(store=build_store)
 
         assert result == {"out": "/nix/store/aaa-demo"}
-        build_request = w._eval_stub.build.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
+        build_request = w.eval_stub.build.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert build_request.handle == 1
         assert build_request.build_store_handle == 456
-        w._store_stub.build_for_humans.assert_not_awaited()
+        w.store_stub.build_for_humans.assert_not_awaited()
 
     async def test_build_rejects_foreign_build_store(self):
         w = self._worker()
@@ -745,25 +745,25 @@ class TestValueProxyLifecycle:
 
     async def test_get_type_delegates_to_worker_for_thunk(self):
         w = self._worker()
-        w._eval_stub.type_name.return_value = _mock_type_name_response("attrs")
+        w.eval_stub.type_name.return_value = _mock_type_name_response("attrs")
         vp = self._proxy(w, 1, "thunk")
         assert await vp.get_type() == NixType.ATTRS
         assert vp.nix_type == NixType.ATTRS
-        w._eval_stub.type_name.assert_awaited_once()
+        w.eval_stub.type_name.assert_awaited_once()
 
     async def test_get_type_uses_cached_concrete_type(self):
         w = self._worker()
         vp = self._proxy(w, 1, "attrs")
 
         assert await vp.get_type() == NixType.ATTRS
-        w._eval_stub.type_name.assert_not_awaited()
+        w.eval_stub.type_name.assert_not_awaited()
 
     async def test_release(self):
         w = self._worker()
-        w._eval_stub.release.return_value = MagicMock()
+        w.eval_stub.release.return_value = MagicMock()
         vp = self._proxy(w, 1, "int")
         await vp.release()
-        w._eval_stub.release.assert_awaited_once()
+        w.eval_stub.release.assert_awaited_once()
 
     async def test_raises_after_session_close(self):
         w = self._worker()
@@ -771,7 +771,7 @@ class TestValueProxyLifecycle:
         vp = self._proxy(w, 1, "int", owner=self._owner(active))
 
         # Active — works
-        w._eval_stub.force.return_value = _mock_force_value_scalar(42)
+        w.eval_stub.force.return_value = _mock_force_value_scalar(42)
         assert await vp.force() == 42
 
         # Session closed
@@ -781,7 +781,7 @@ class TestValueProxyLifecycle:
 
     async def test_release_then_force_raises_typed_error(self):
         w = self._worker()
-        w._eval_stub.release.return_value = MagicMock()
+        w.eval_stub.release.return_value = MagicMock()
         vp = self._proxy(w, 1, "int")
         await vp.release()
 
@@ -791,8 +791,8 @@ class TestValueProxyLifecycle:
     async def test_attrs_borrow_parent_handle(self):
         """An attrs view cannot independently release its parent's handle."""
         w = self._worker()
-        w._eval_stub.attr_names.return_value = MagicMock(names=["x"])
-        w._eval_stub.release.return_value = MagicMock()
+        w.eval_stub.attr_names.return_value = MagicMock(names=["x"])
+        w.eval_stub.release.return_value = MagicMock()
         parent = self._proxy(w, 1, "attrs")
 
         attrs = await parent.force()
@@ -802,7 +802,7 @@ class TestValueProxyLifecycle:
         await parent.release()
         with pytest.raises(ValueReleasedError, match="ValueProxy has been released"):
             _ = attrs["x"]
-        w._eval_stub.release.assert_awaited_once()
+        w.eval_stub.release.assert_awaited_once()
 
     async def test_finalizer_defers_release_until_a_safe_rpc_boundary(self):
         w = self._worker()
@@ -813,9 +813,9 @@ class TestValueProxyLifecycle:
         del value
         gc.collect()
 
-        w._eval_stub.release.assert_not_awaited()
+        w.eval_stub.release.assert_not_awaited()
         await proxy.drain_deferred_releases()
-        w._eval_stub.release.assert_awaited_once()
+        w.eval_stub.release.assert_awaited_once()
 
     async def test_value_proxy_rejects_copying(self):
         value = self._proxy(self._worker(), 7, "int")
@@ -828,7 +828,7 @@ class TestValueProxyLifecycle:
     async def test_check_active_only_when_owner_has_flag(self):
         """An owner without an active flag never expires."""
         w = self._worker()
-        w._eval_stub.force.return_value = _mock_force_value_scalar(42)
+        w.eval_stub.force.return_value = _mock_force_value_scalar(42)
         vp = self._proxy(w, 1, "int")
         assert await vp.force() == 42  # should not raise
 
@@ -864,7 +864,7 @@ class TestValueListBounds:
         with pytest.raises(IndexError, match="out of range"):
             _ = value[-3]
 
-        w._eval_stub.list_get.assert_not_awaited()
+        w.eval_stub.list_get.assert_not_awaited()
 
     async def test_force_rejects_out_of_range_indexes(self):
         w = self._worker()
@@ -873,7 +873,7 @@ class TestValueListBounds:
         with pytest.raises(IndexError, match="out of range"):
             await value.force(2)
 
-        w._eval_stub.list_get.assert_not_awaited()
+        w.eval_stub.list_get.assert_not_awaited()
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -906,43 +906,43 @@ class TestLazyChildProxy:
     async def test_attrs_getitem_force_calls_attr(self):
         """attrs["x"].force() calls eval.attr with parent handle and name."""
         w = self._worker()
-        w._eval_stub.attr.return_value = _mock_value_handle(5, "int")
-        w._eval_stub.force.return_value = _mock_force_value_scalar(99)
+        w.eval_stub.attr.return_value = _mock_value_handle(5, "int")
+        w.eval_stub.force.return_value = _mock_force_value_scalar(99)
         cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), "name")
 
         result = await cp.force()
 
-        assert w._eval_stub.attr.await_count == 1
-        assert w._eval_stub.force.await_count == 1
+        assert w.eval_stub.attr.await_count == 1
+        assert w.eval_stub.force.await_count == 1
         assert result == 99
 
     async def test_list_getitem_force_calls_list_get(self):
         """lst[0].force() calls eval.list_get with parent handle and index."""
         w = self._worker()
-        w._eval_stub.list_get.return_value = _mock_value_handle(3, "int")
-        w._eval_stub.force.return_value = _mock_force_value_scalar(42)
+        w.eval_stub.list_get.return_value = _mock_value_handle(3, "int")
+        w.eval_stub.force.return_value = _mock_force_value_scalar(42)
         cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), 0)
 
         result = await cp.force()
 
-        assert w._eval_stub.list_get.await_count == 1
-        assert w._eval_stub.force.await_count == 1
+        assert w.eval_stub.list_get.await_count == 1
+        assert w.eval_stub.force.await_count == 1
         assert result == 42
 
     async def test_no_rpc_until_force(self):
         """No RPC is made until .force() is called on the child proxy."""
         w = self._worker()
         cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), "name")
-        w._eval_stub.attr.assert_not_called()
+        w.eval_stub.attr.assert_not_called()
         # accessing a property doesn't trigger RPC either
         with pytest.raises(UnresolvedValueError, match="not been resolved"):
             _ = cp.handle
-        w._eval_stub.attr.assert_not_called()
+        w.eval_stub.attr.assert_not_called()
 
     async def test_child_proxy_force_deep(self):
         """force_deep resolves child then deep-forces it."""
         w = self._worker()
-        w._eval_stub.attr.return_value = _mock_value_handle(5, "attrs")
+        w.eval_stub.attr.return_value = _mock_value_handle(5, "attrs")
         deep_val = DeepValue(
             attrs=DeepAttrs(
                 entries={
@@ -951,13 +951,13 @@ class TestLazyChildProxy:
                 },
             ),
         )
-        w._eval_stub.force_deep.return_value = deep_val
+        w.eval_stub.force_deep.return_value = deep_val
         cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), "name")
 
         result = await cp.force_deep()
 
-        assert w._eval_stub.attr.await_count == 1
-        assert w._eval_stub.force_deep.await_count == 1
+        assert w.eval_stub.attr.await_count == 1
+        assert w.eval_stub.force_deep.await_count == 1
         assert result == {"a": 1, "b": 2}
 
     async def test_child_proxy_inactive_raises(self):
@@ -972,13 +972,13 @@ class TestLazyChildProxy:
     async def test_child_proxy_timeout_override(self):
         """Timeout override is passed through to resolve and force."""
         w = self._worker()
-        w._eval_stub.attr.return_value = _mock_value_handle(5, "int")
-        w._eval_stub.force.return_value = _mock_force_value_scalar(42)
+        w.eval_stub.attr.return_value = _mock_value_handle(5, "int")
+        w.eval_stub.force.return_value = _mock_force_value_scalar(42)
         cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), "name", timeout=30.0)
 
         await cp.force(timeout=10.0)
 
-        assert w._eval_stub.attr.call_args[1]["timeout"] == _RPC_TIMEOUT  # type: ignore[reportUnknownMemberType, reportOptionalSubscript] -- mock call_args absence in stubs
+        assert w.eval_stub.attr.call_args[1]["timeout"] == DEFAULT_RPC_TIMEOUT_SECONDS  # type: ignore[reportUnknownMemberType, reportOptionalSubscript] -- mock call_args absence in stubs
 
 
 class TestWorkerOomScore:
@@ -997,7 +997,7 @@ class TestWorkerOomScore:
             "_write_oom_score_adj",
             lambda pid, value: calls.append((pid, value)),
         )
-        manager = _WorkerClient(worker_oom_score_adj=500)  # type: ignore[reportPrivateUsage] -- test accesses pool internals
+        manager = WorkerClient(worker_oom_score_adj=500)
 
         manager._on_worker_process_start(MagicMock(pid=1234))  # type: ignore[reportPrivateUsage] -- test accesses pool internals
 
@@ -1091,7 +1091,7 @@ class TestLogStreamRequestId:
 class TestLogCapture:
     async def test_capture_records_typed_events(self):
         session = object.__new__(Session)
-        manager = _WorkerClient()
+        manager = WorkerClient()
         session._manager = manager  # type: ignore[reportPrivateUsage] -- test injects mock manager
 
         async with session.capture_logs() as logs:
@@ -1105,7 +1105,7 @@ class TestLogCapture:
 
     async def test_capture_unsubscribes_on_exit(self):
         session = object.__new__(Session)
-        manager = _WorkerClient()
+        manager = WorkerClient()
         session._manager = manager  # type: ignore[reportPrivateUsage] -- test injects mock manager
 
         async with session.capture_logs() as logs:

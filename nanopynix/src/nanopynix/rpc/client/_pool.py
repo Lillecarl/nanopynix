@@ -38,11 +38,12 @@ from nanopynix.exceptions import from_response
 from nanopynix.logging import BusSubscription, CallbackBus
 from nanopynix.models import DEFAULT_STORE_URI, WORKER_INIT_STATUS_OK
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
-from nanopynix.rpc.worker._worker import (
-    _WORKER_MAX_CONCURRENCY,  # type: ignore[reportPrivateUsage] -- cross-class access
-    worker_service_factory,
+from nanopynix.rpc.worker._worker import worker_service_factory
+from nanopynix.settings import (
+    DEFAULT_RPC_TIMEOUT_SECONDS,
+    DEFAULT_SHUTDOWN_TIMEOUT_SECONDS,
+    DEFAULT_WORKER_MAX_CONCURRENCY,
 )
-from nanopynix.settings import DEFAULT_RPC_TIMEOUT_SECONDS, DEFAULT_SHUTDOWN_TIMEOUT_SECONDS
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Sequence
@@ -54,11 +55,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ────────────────────────────────────────────────────────────────────
-_RPC_TIMEOUT = DEFAULT_RPC_TIMEOUT_SECONDS
 _OOM_SCORE_ADJ_MIN = -1000
 _OOM_SCORE_ADJ_MAX = 1000
 
-_ACTIVE_LOG_CAPTURES: ContextVar[tuple[Any, ...]] = ContextVar("nanopynix_active_log_captures", default=())
+ACTIVE_LOG_CAPTURES: ContextVar[tuple[Any, ...]] = ContextVar("nanopynix_active_log_captures", default=())
+"""Task-local stack of active LogCapture instances (nanopynix.rpc.client.session).
+
+Shared, cross-module dispatch contract: WorkerClient.invoke() tags each
+request into every capture active in the calling task; kept unprefixed
+(package-internal, not module-private) rather than paying a
+reportPrivateUsage suppression tax at the one import site that needs it."""
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -100,20 +106,20 @@ def _write_oom_score_adj(pid: int, value: int, *, proc_root: Path = Path("/proc"
 
 
 # ════════════════════════════════════════════════════════════════════
-# Log dispatch — see nanopynix.logging.CallbackBus for why this is shared
-# with inproc.Session and not with the worker's own subscribe_logs.
-# ════════════════════════════════════════════════════════════════════
-# _WorkerClient — single-worker lifecycle and operation dispatch
+# WorkerClient — single-worker lifecycle and operation dispatch. Log
+# dispatch itself lives in nanopynix.logging.CallbackBus, shared with
+# inproc.Session -- see that class's docstring for why the worker's own
+# subscribe_logs is not built on it.
 # ════════════════════════════════════════════════════════════════════
 
 
-class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the public Session façade
+class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the public Session façade
     """Own one multiprocessing worker and dispatch its RPC operations.
 
     Provides:
     - ``call()`` — worker RPC dispatch without cross-service serialization.
     - ``subscribe()`` / ``log_stream()`` — log event access.
-    - Direct access to ``_store_stub`` and ``_eval_stub`` for gRPC calls.
+    - Direct access to ``store_stub`` and ``eval_stub`` for gRPC calls.
     """
 
     def __init__(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
@@ -129,7 +135,7 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
         primops: list[PrimOpSpec] | None = None,
         primop_callables: dict[str, Callable[..., Any]] | None = None,
         worker_oom_score_adj: int | None = None,
-        rpc_timeout: float = _RPC_TIMEOUT,
+        rpc_timeout: float = DEFAULT_RPC_TIMEOUT_SECONDS,
         shutdown_timeout: float = DEFAULT_SHUTDOWN_TIMEOUT_SECONDS,
     ) -> None:
         self._store_uri = store_uri
@@ -172,7 +178,7 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
                 ],
                 on_process_start=self._on_worker_process_start,
                 preload=["nanopynix.rpc.worker._worker"],
-                max_concurrency=_WORKER_MAX_CONCURRENCY,
+                max_concurrency=DEFAULT_WORKER_MAX_CONCURRENCY,
             ),
         )
         self._worker_service_stub = WorkerServiceStub(self._channel)
@@ -194,7 +200,7 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
 
         # Initialize Nix in the worker
         init_response = await self.invoke(
-            self._worker_stub.init,
+            self.worker_stub.init,
             InitRequest(
                 store_uri=self._store_uri,
                 nix_conf=str(self._nix_conf) if self._nix_conf is not None else None,
@@ -215,7 +221,7 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
         try:
             if self._worker_service_stub is not None:
                 try:
-                    await self.invoke(self._worker_stub.shutdown, ShutdownRequest(), timeout=self._shutdown_timeout)
+                    await self.invoke(self.worker_stub.shutdown, ShutdownRequest(), timeout=self._shutdown_timeout)
                 except (
                     TimeoutError,
                     GRPCError,
@@ -246,8 +252,8 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
         request_id = self._next_request_id
         self._next_request_id += 1
         request.request_id = request_id
-        for capture in _ACTIVE_LOG_CAPTURES.get():
-            capture._register_request(request_id)  # type: ignore[reportPrivateUsage] -- capture registration is the dispatch contract  # noqa: SLF001
+        for capture in ACTIVE_LOG_CAPTURES.get():
+            capture._register_request(request_id)  # type: ignore[reportPrivateUsage] -- WorkerClient.invoke() drives LogCapture's request-tagging  # noqa: SLF001
         return await _grpc_call(method(request, timeout=timeout))
 
     # ── log access ─────────────────────────────────────────────────
@@ -278,7 +284,7 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
 
     async def _forward_worker_logs(self) -> None:
         try:
-            async for event in self._worker_stub.subscribe_logs(SubscribeLogsRequest()):
+            async for event in self.worker_stub.subscribe_logs(SubscribeLogsRequest()):
                 self._log_bus.emit(event)
         except anyio.get_cancelled_exc_class():
             raise
@@ -302,34 +308,34 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
 
     async def get_verbosity(self) -> LogLevel:
         """Return the current worker-side Nix log verbosity."""
-        response = await self.invoke(self._worker_stub.get_verbosity, GetVerbosityRequest(), timeout=self.rpc_timeout)
+        response = await self.invoke(self.worker_stub.get_verbosity, GetVerbosityRequest(), timeout=self.rpc_timeout)
         self._verbosity = response.verbosity
         return response.verbosity
 
     async def set_verbosity(self, verbosity: LogLevel) -> LogLevel:
         """Set the worker-side Nix log verbosity."""
         response = await self.invoke(
-            self._worker_stub.set_verbosity, SetVerbosityRequest(verbosity=verbosity), timeout=self.rpc_timeout
+            self.worker_stub.set_verbosity, SetVerbosityRequest(verbosity=verbosity), timeout=self.rpc_timeout
         )
         self._verbosity = response.verbosity
         return response.verbosity
 
     @property
-    def _worker_stub(self) -> WorkerServiceStub:
+    def worker_stub(self) -> WorkerServiceStub:
         stub = self._worker_service_stub
         if stub is None:
             raise WorkerDiedError("Worker not started")
         return stub
 
     @property
-    def _store_stub(self) -> StoreServiceStub:
+    def store_stub(self) -> StoreServiceStub:
         stub = self._store_service_stub
         if stub is None:
             raise WorkerDiedError("Worker not started")
         return stub
 
     @property
-    def _eval_stub(self) -> EvalServiceStub:
+    def eval_stub(self) -> EvalServiceStub:
         stub = self._eval_service_stub
         if stub is None:
             raise WorkerDiedError("Worker not started")

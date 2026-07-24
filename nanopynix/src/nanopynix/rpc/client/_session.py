@@ -71,10 +71,10 @@ from nanopynix.exceptions import (
     WrongNixTypeError,
 )
 from nanopynix.models import FlakeRef, HandleKind, JsonScalar, JsonValue, LockedInput, NixType
-from nanopynix.rpc.client._pool import _RPC_TIMEOUT  # type: ignore[reportPrivateUsage] -- cross-class access
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
 from nanopynix.settings import (
     DEFAULT_LINE_EDITORS,
+    DEFAULT_RPC_TIMEOUT_SECONDS,
     NIX_PATH_SETTING_KEY,
     NixEvalSettings,
     NixFetchSettings,
@@ -89,7 +89,7 @@ if TYPE_CHECKING:
     from nanopynix_bindings.store import BuildMode as BuildModeType
     from nanopynix_proto.nix.common import LockedFlake as LockedFlakeProto
 
-    from nanopynix.rpc.client._pool import _WorkerClient  # type: ignore[reportPrivateUsage] -- cross-class access
+    from nanopynix.rpc.client._pool import WorkerClient
     from nanopynix.rpc.client.store import Store
 
 
@@ -256,9 +256,9 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
 
     def __init__(
         self,
-        worker: _WorkerClient,
+        worker: WorkerClient,
         releases: _DeferredReleases | None = None,
-        rpc_timeout: float = _RPC_TIMEOUT,
+        rpc_timeout: float = DEFAULT_RPC_TIMEOUT_SECONDS,
     ) -> None:
         self._worker = worker
         self._releases = releases or _DeferredReleases()
@@ -282,7 +282,7 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
                 await self._drain_deferred_releases_locked()
             if method_name != "open_eval":
                 message.eval_handle = self._eval_handle  # type: ignore[attr-defined] -- every non-OpenEval EvalService request carries eval_handle=100
-            method = getattr(self._worker._eval_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access  # noqa: SLF001
+            method = getattr(self._worker.eval_stub, method_name)
             return await self._worker.invoke(method, message, timeout=self._rpc_timeout)
 
     async def drain_deferred_releases(self) -> None:
@@ -298,14 +298,14 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
         try:
             for ref in self._releases.drain():
                 if ref.kind == HandleKind.VALUE:
-                    method = self._worker._eval_stub.release  # type: ignore[reportPrivateUsage] -- EvalProxy owns the worker RPC boundary  # noqa: SLF001
+                    method = self._worker.eval_stub.release
                     await self._worker.invoke(
                         method,
                         ReleaseRequest(handle=ref.handle, eval_handle=self._eval_handle),
                         timeout=self._rpc_timeout,
                     )
                 elif ref.kind == HandleKind.LOCKED_FLAKE:
-                    method = self._worker._eval_stub.release_locked_flake  # type: ignore[reportPrivateUsage] -- EvalProxy owns the worker RPC boundary  # noqa: SLF001
+                    method = self._worker.eval_stub.release_locked_flake
                     await self._worker.invoke(
                         method,
                         ReleaseLockedFlakeRequest(handle=ref.handle, eval_handle=self._eval_handle),
@@ -318,7 +318,7 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
 
     async def _store_proxy_call(self, method_name: str, message: Message) -> Any:
         self._check_active()
-        method = getattr(self._worker._store_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access  # noqa: SLF001
+        method = getattr(self._worker.store_stub, method_name)
         return await self._worker.invoke(method, message, timeout=self._rpc_timeout)
 
 
@@ -1005,12 +1005,12 @@ class EvalSession:
 
     def __init__(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
         self,
-        worker: _WorkerClient,
+        worker: WorkerClient,
         owner_session: _EvalSessionOwner | None = None,
         store_handle: int = 1,
         timeout: float | None = None,
         session_id: str = "",
-        rpc_timeout: float = _RPC_TIMEOUT,
+        rpc_timeout: float = DEFAULT_RPC_TIMEOUT_SECONDS,
         line_editors: Sequence[str] = DEFAULT_LINE_EDITORS,
         store: Store | None = None,
         eval_settings: NixEvalSettings | None = None,

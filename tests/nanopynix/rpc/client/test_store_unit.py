@@ -96,7 +96,7 @@ def _make_stub_mock() -> MagicMock:
 @pytest.fixture
 def pool() -> MagicMock:
     p: MagicMock = MagicMock()
-    p._store_stub = _make_stub_mock()  # type: ignore[reportPrivateUsage] -- test fixture sets private stub
+    p.store_stub = _make_stub_mock()
 
     async def _passthrough(method: Any, request: Any, *, timeout: float) -> Any:  # noqa: ASYNC109 -- mock implementing WorkerClient.invoke interface
         del timeout
@@ -109,7 +109,7 @@ def pool() -> MagicMock:
 @pytest.fixture
 def store(pool: MagicMock) -> Store:
     s = Store(pool, "mock", "mock-session-id")
-    s._active = True  # type: ignore[reportPrivateUsage] -- bypass async open() for mock tests
+    s._active = True
     return s
 
 
@@ -200,52 +200,52 @@ def _mock_collect_garbage_response(**overrides: Any) -> MagicMock:
 
 class TestIdentity:
     async def test_get_uri(self, store: Store, pool: MagicMock):
-        pool._store_stub.get_uri.return_value = MagicMock(uri="daemon")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.get_uri.return_value = MagicMock(uri="daemon")
         result = await store.get_uri(GetUriRequest())
         assert result.uri == "daemon"
-        pool._store_stub.get_uri.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.get_uri.assert_awaited_once()
 
     async def test_get_uri_with_params(self, store: Store, pool: MagicMock):
-        pool._store_stub.get_uri.return_value = MagicMock(uri="unix:///private/socket?root=/private/root")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.get_uri.return_value = MagicMock(uri="unix:///private/socket?root=/private/root")
         result = await store.get_uri(GetUriRequest(with_params=True))
         assert result.uri == "unix:///private/socket?root=/private/root"
-        request = pool._store_stub.get_uri.await_args.args[0]  # type: ignore[reportPrivateUsage, reportUnknownVariableType] -- test inspects generated request
+        request = pool.store_stub.get_uri.await_args.args[0]  # type: ignore[reportUnknownVariableType] -- test inspects generated request
         assert request.with_params is True
 
     async def test_get_store_dir(self, store: Store, pool: MagicMock):
-        pool._store_stub.get_store_dir.return_value = MagicMock(dir="/nix/store")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.get_store_dir.return_value = MagicMock(dir="/nix/store")
         result = await store.get_store_dir(GetStoreDirRequest())
         assert result.dir == "/nix/store"
-        pool._store_stub.get_store_dir.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.get_store_dir.assert_awaited_once()
 
     async def test_get_build_log(self, store: Store, pool: MagicMock):
-        pool._store_stub.get_build_log.return_value = MagicMock(log="hello log\n")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.get_build_log.return_value = MagicMock(log="hello log\n")
         result = await store.get_build_log(GetBuildLogRequest(path="/nix/store/aaa-bbb"))
         assert result.log == "hello log\n"
-        pool._store_stub.get_build_log.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.get_build_log.assert_awaited_once()
 
     async def test_add_to_store_injects_store_handle(self, store: Store, pool: MagicMock):
-        pool._store_stub.add_to_store.return_value = AddToStoreResponse(path="/nix/store/aaa-added")  # type: ignore[reportPrivateUsage] -- test accesses private stub
-        store._store_handle = 123  # type: ignore[reportPrivateUsage] -- test injects store handle directly
+        pool.store_stub.add_to_store.return_value = AddToStoreResponse(path="/nix/store/aaa-added")
+        store._store_handle = 123
         request = AddToStoreRequest(path="/tmp/source", name="source", method="nar", hash_algo="sha256")
 
         result = await store.add_to_store(request)
 
         assert result.path == "/nix/store/aaa-added"
-        pool._store_stub.add_to_store.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
-        sent = pool._store_stub.add_to_store.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args; await_args may be None
+        pool.store_stub.add_to_store.assert_awaited_once()
+        sent = pool.store_stub.add_to_store.await_args.args[0]  # type: ignore[reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args; await_args may be None
         assert sent.store_handle == 123
 
     async def test_compute_store_path_injects_store_handle(self, store: Store, pool: MagicMock):
-        pool._store_stub.compute_store_path.return_value = ComputeStorePathResponse(path="/nix/store/bbb-added")  # type: ignore[reportPrivateUsage] -- test accesses private stub
-        store._store_handle = 456  # type: ignore[reportPrivateUsage] -- test injects store handle directly
+        pool.store_stub.compute_store_path.return_value = ComputeStorePathResponse(path="/nix/store/bbb-added")
+        store._store_handle = 456
         request = ComputeStorePathRequest(path="/tmp/source", method="flat", hash_algo="sha256")
 
         result = await store.compute_store_path(request)
 
         assert result.path == "/nix/store/bbb-added"
-        pool._store_stub.compute_store_path.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
-        sent = pool._store_stub.compute_store_path.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args; await_args may be None
+        pool.store_stub.compute_store_path.assert_awaited_once()
+        sent = pool.store_stub.compute_store_path.await_args.args[0]  # type: ignore[reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args; await_args may be None
         assert sent.store_handle == 456
 
 
@@ -255,45 +255,45 @@ class TestPublicStore:
         return PublicStore(store)
 
     async def test_uri_unwraps_response(self, public_store: PublicStore, pool: MagicMock):
-        pool._store_stub.get_uri.return_value = MagicMock(uri="daemon")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.get_uri.return_value = MagicMock(uri="daemon")
 
         assert await public_store.uri() == "daemon"
-        pool._store_stub.get_uri.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.get_uri.assert_awaited_once()
 
     async def test_uri_with_params_unwraps_response(self, public_store: PublicStore, pool: MagicMock):
-        pool._store_stub.get_uri.return_value = MagicMock(uri="unix:///private/socket?root=/private/root")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.get_uri.return_value = MagicMock(uri="unix:///private/socket?root=/private/root")
 
         assert await public_store.uri(with_params=True) == "unix:///private/socket?root=/private/root"
-        request = pool._store_stub.get_uri.await_args.args[0]  # type: ignore[reportPrivateUsage, reportUnknownVariableType] -- test inspects generated request
+        request = pool.store_stub.get_uri.await_args.args[0]  # type: ignore[reportUnknownVariableType] -- test inspects generated request
         assert request.with_params is True
 
     async def test_store_dir_unwraps_response(self, public_store: PublicStore, pool: MagicMock):
-        pool._store_stub.get_store_dir.return_value = MagicMock(dir="/nix/store")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.get_store_dir.return_value = MagicMock(dir="/nix/store")
 
         assert await public_store.store_dir() == "/nix/store"
-        pool._store_stub.get_store_dir.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.get_store_dir.assert_awaited_once()
 
     async def test_parse_store_path_returns_model(self, public_store: PublicStore, pool: MagicMock):
-        pool._store_stub.parse_store_path.return_value = ParseStorePathResponse(path="/nix/store/aaa-bbb")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.parse_store_path.return_value = ParseStorePathResponse(path="/nix/store/aaa-bbb")
 
         path = await public_store.parse_store_path("/nix/store/aaa-bbb")
 
         assert path == "/nix/store/aaa-bbb"
 
     async def test_is_valid_path_unwraps_response(self, public_store: PublicStore, pool: MagicMock):
-        pool._store_stub.is_valid_path.return_value = MagicMock(valid=True)  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.is_valid_path.return_value = MagicMock(valid=True)
 
         assert await public_store.is_valid_path("/nix/store/aaa-bbb")
 
     async def test_rpc_exposes_generated_surface(self, public_store: PublicStore, pool: MagicMock):
-        pool._store_stub.get_build_log.return_value = MagicMock(log="hello log\n")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.get_build_log.return_value = MagicMock(log="hello log\n")
 
         response = await public_store.rpc.get_build_log(GetBuildLogRequest(path="/nix/store/aaa-bbb"))
 
         assert response.log == "hello log\n"
 
     async def test_query_missing_sends_request(self, public_store: PublicStore, pool: MagicMock):
-        pool._store_stub.query_missing.return_value = _mock_missing_info(  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.query_missing.return_value = _mock_missing_info(
             will_build=["/nix/store/aaa-foo.drv"],
             will_substitute=["/nix/store/bbb-bar"],
             unknown=[],
@@ -303,24 +303,24 @@ class TestPublicStore:
         result = await public_store.query_missing(["/nix/store/aaa-foo.drv", "/nix/store/bbb-bar"])
         assert result.will_build == ["/nix/store/aaa-foo.drv"]
         assert result.download_size == 12345
-        pool._store_stub.query_missing.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
-        sent = pool._store_stub.query_missing.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
+        pool.store_stub.query_missing.assert_awaited_once()
+        sent = pool.store_stub.query_missing.await_args.args[0]  # type: ignore[reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
         assert sent.derived_paths == ["/nix/store/aaa-foo.drv", "/nix/store/bbb-bar"]
 
     async def test_build_paths_with_results_sends_derived_paths(self, public_store: PublicStore, pool: MagicMock):
-        pool._store_stub.build_paths_with_results.return_value = _mock_build_result_list(  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.build_paths_with_results.return_value = _mock_build_result_list(
             [_mock_build_result(drv_path="/nix/store/aaa-foo.drv", success=True)],
         )
 
         results = await public_store.build_paths_with_results(["/nix/store/aaa-foo.drv"])
 
         assert results[0].success
-        sent = pool._store_stub.build_paths_with_results.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
+        sent = pool.store_stub.build_paths_with_results.await_args.args[0]  # type: ignore[reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
         assert sent.derived_paths == ["/nix/store/aaa-foo.drv"]
         assert sent.build_mode == 0
 
     async def test_read_derivation_sends_request(self, public_store: PublicStore, pool: MagicMock):
-        pool._store_stub.read_derivation.return_value = _mock_derivation(  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.read_derivation.return_value = _mock_derivation(
             name="foo",
             system="x86_64-linux",
             builder="/bin/sh",
@@ -328,24 +328,24 @@ class TestPublicStore:
         result = await public_store.read_derivation("/nix/store/aaa-foo.drv")
         assert result.name == "foo"
         assert result.system == "x86_64-linux"
-        pool._store_stub.read_derivation.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
-        sent = pool._store_stub.read_derivation.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
+        pool.store_stub.read_derivation.assert_awaited_once()
+        sent = pool.store_stub.read_derivation.await_args.args[0]  # type: ignore[reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
         assert sent.path == "/nix/store/aaa-foo.drv"
 
     async def test_collect_garbage_sends_request(self, public_store: PublicStore, pool: MagicMock):
-        pool._store_stub.collect_garbage.return_value = _mock_collect_garbage_response(  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.collect_garbage.return_value = _mock_collect_garbage_response(
             paths=["/nix/store/aaa-foo", "/nix/store/bbb-bar"],
             bytes_freed=4096,
         )
         result = await public_store.collect_garbage(GcAction.RETURN_DEAD)
         assert result.paths == ["/nix/store/aaa-foo", "/nix/store/bbb-bar"]
         assert result.bytes_freed == 4096
-        pool._store_stub.collect_garbage.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
-        sent = pool._store_stub.collect_garbage.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
+        pool.store_stub.collect_garbage.assert_awaited_once()
+        sent = pool.store_stub.collect_garbage.await_args.args[0]  # type: ignore[reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
         assert sent.action == GcAction.RETURN_DEAD
 
     async def test_collect_garbage_with_options(self, public_store: PublicStore, pool: MagicMock):
-        pool._store_stub.collect_garbage.return_value = _mock_collect_garbage_response(  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.collect_garbage.return_value = _mock_collect_garbage_response(
             paths=[],
             bytes_freed=0,
         )
@@ -356,8 +356,8 @@ class TestPublicStore:
             max_freed=1000,
         )
         assert result.paths == []
-        pool._store_stub.collect_garbage.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
-        sent = pool._store_stub.collect_garbage.await_args.args[0]  # type: ignore[reportPrivateUsage, reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
+        pool.store_stub.collect_garbage.assert_awaited_once()
+        sent = pool.store_stub.collect_garbage.await_args.args[0]  # type: ignore[reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
         assert sent.action == GcAction.DELETE_SPECIFIC
         assert sent.ignore_liveness is True
         assert sent.paths_to_delete == ["/nix/store/aaa-foo"]
@@ -371,25 +371,25 @@ class TestPublicStore:
 
 class TestStorePathCoercion:
     async def test_parse_store_path_returns_proto(self, store: Store, pool: MagicMock):
-        pool._store_stub.parse_store_path.return_value = ParseStorePathResponse(path="/nix/store/aaa-bbb")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.parse_store_path.return_value = ParseStorePathResponse(path="/nix/store/aaa-bbb")
         result = await store.parse_store_path(ParseStorePathRequest(path="/nix/store/aaa-bbb"))
         assert result.path == "/nix/store/aaa-bbb"
 
     async def test_is_valid_path_accepts_str(self, store: Store, pool: MagicMock):
-        pool._store_stub.is_valid_path.return_value = MagicMock(valid=True)  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.is_valid_path.return_value = MagicMock(valid=True)
         result = await store.is_valid_path(IsValidPathRequest(path="/nix/store/aaa-bbb"))
         assert result.valid is True
 
     async def test_is_valid_path_accepts_storepath(self, store: Store, pool: MagicMock):
-        pool._store_stub.is_valid_path.return_value = MagicMock(valid=True)  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.is_valid_path.return_value = MagicMock(valid=True)
         sp = _mock_store_path("a" * 32 + "-foo", "a" * 32, "foo")
         result = await store.is_valid_path(IsValidPathRequest(path=sp.to_string))
         assert result.valid is True
 
     async def test_follow_links_returns_storepath(self, store: Store, pool: MagicMock):
-        pool._store_stub.follow_links_to_store_path.return_value = FollowLinksToStorePathResponse(
+        pool.store_stub.follow_links_to_store_path.return_value = FollowLinksToStorePathResponse(
             path="/nix/store/aaa-bbb"
-        )  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        )
         result = await store.follow_links_to_store_path(FollowLinksToStorePathRequest(path="/some/link"))
         assert result.path == "/nix/store/aaa-bbb"
 
@@ -401,17 +401,17 @@ class TestStorePathCoercion:
 
 class TestPathInfo:
     async def test_query_path_info_str(self, store: Store, pool: MagicMock):
-        pool._store_stub.query_path_info.return_value = _mock_path_info(nar_size=1234)  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.query_path_info.return_value = _mock_path_info(nar_size=1234)
         result = await store.query_path_info(QueryPathInfoRequest(path="/nix/store/aaa-foo"))
         assert result.nar_size == 1234
 
     async def test_query_path_info_storepath(self, store: Store, pool: MagicMock):
-        pool._store_stub.query_path_info.return_value = _mock_path_info()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.query_path_info.return_value = _mock_path_info()
         sp = _mock_store_path("a" * 32 + "-foo", "a" * 32, "foo")
         await store.query_path_info(QueryPathInfoRequest(path=sp.to_string))
 
     async def test_query_path_from_hash_part_found(self, store: Store, pool: MagicMock):
-        pool._store_stub.query_path_from_hash_part.return_value = MagicMock(  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.query_path_from_hash_part.return_value = MagicMock(
             path="/nix/store/aaa-foo",
         )
         result = await store.query_path_from_hash_part(QueryPathFromHashPartRequest(hash_part="aaa"))
@@ -419,7 +419,7 @@ class TestPathInfo:
         assert result.path == "/nix/store/aaa-foo"
 
     async def test_query_path_from_hash_part_not_found(self, store: Store, pool: MagicMock):
-        pool._store_stub.query_path_from_hash_part.return_value = MagicMock(path=None)  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.query_path_from_hash_part.return_value = MagicMock(path=None)
         result = await store.query_path_from_hash_part(QueryPathFromHashPartRequest(hash_part="nonexistent"))
         assert result.path is None
 
@@ -431,14 +431,14 @@ class TestPathInfo:
 
 class TestClosures:
     async def test_compute_fs_closure(self, store: Store, pool: MagicMock):
-        pool._store_stub.compute_fs_closure.return_value = _mock_store_path_list(  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.compute_fs_closure.return_value = _mock_store_path_list(
             [_mock_store_path("aaa-foo", "aaa", "foo"), _mock_store_path("bbb-bar", "bbb", "bar")],
         )
         result = await store.compute_fs_closure(ComputeFsClosureRequest(path="/nix/store/aaa-foo", flip_direction=True))
         assert len(result.paths) == 2
 
     async def test_query_missing_coerces_list(self, store: Store, pool: MagicMock):
-        pool._store_stub.query_missing.return_value = _mock_missing_info()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.query_missing.return_value = _mock_missing_info()
         sp = _mock_store_path("a" * 32 + "-foo", "a" * 32, "foo")
         result = await store.query_missing(QueryMissingRequest(derived_paths=[sp.to_string, "/nix/store/bbb-bar"]))
         assert isinstance(result, MagicMock)
@@ -451,14 +451,14 @@ class TestClosures:
 
 class TestDerivations:
     async def test_query_derivation_outputs_str(self, store: Store, pool: MagicMock):
-        pool._store_stub.query_derivation_outputs.return_value = _mock_store_path_list(  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.query_derivation_outputs.return_value = _mock_store_path_list(
             [_mock_store_path("aaa-out", "aaa", "out")],
         )
         result = await store.query_derivation_outputs(QueryDerivationOutputsRequest(path="/nix/store/aaa-foo.drv"))
         assert len(result.paths) == 1
 
     async def test_query_valid_derivers_storepath(self, store: Store, pool: MagicMock):
-        pool._store_stub.query_valid_derivers.return_value = _mock_store_path_list()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.query_valid_derivers.return_value = _mock_store_path_list()
         sp = _mock_store_path("a" * 32 + "-foo", "a" * 32, "foo")
         result = await store.query_valid_derivers(QueryValidDeriversRequest(path=sp.to_string))
         assert result.paths == []
@@ -471,17 +471,17 @@ class TestDerivations:
 
 class TestBulk:
     async def test_query_all_valid_paths(self, store: Store, pool: MagicMock):
-        pool._store_stub.query_all_valid_paths.return_value = _mock_store_path_list()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.query_all_valid_paths.return_value = _mock_store_path_list()
         result = await store.query_all_valid_paths(QueryAllValidPathsRequest())
         assert result.paths == []
 
     async def test_query_referrers(self, store: Store, pool: MagicMock):
-        pool._store_stub.query_referrers.return_value = _mock_store_path_list()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.query_referrers.return_value = _mock_store_path_list()
         result = await store.query_referrers(QueryReferrersRequest(path="/nix/store/aaa-foo"))
         assert result.paths == []
 
     async def test_query_substitutable_paths_coerces_list(self, store: Store, pool: MagicMock):
-        pool._store_stub.query_substitutable_paths.return_value = _mock_store_path_list()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.query_substitutable_paths.return_value = _mock_store_path_list()
         sp = _mock_store_path("a" * 32 + "-foo", "a" * 32, "foo")
         result = await store.query_substitutable_paths(
             QuerySubstitutablePathsRequest(paths=[sp.to_string, "/nix/store/bbb-bar"]),
@@ -496,7 +496,7 @@ class TestBulk:
 
 class TestBuild:
     async def test_build_paths_with_results(self, store: Store, pool: MagicMock):
-        pool._store_stub.build_paths_with_results.return_value = _mock_build_result_list(  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.build_paths_with_results.return_value = _mock_build_result_list(
             [_mock_build_result(drv_path="/nix/store/aaa.drv", success=True, status="built")],
         )
         result = await store.build_paths_with_results(
@@ -506,7 +506,7 @@ class TestBuild:
         assert result.results[0].success is True
 
     async def test_build_for_humans(self, store: Store, pool: MagicMock):
-        pool._store_stub.build_for_humans.return_value = _mock_build_result_list(  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.build_for_humans.return_value = _mock_build_result_list(
             [_mock_build_result(drv_path="/nix/store/aaa.drv", success=True, status="substituted")],
         )
         result = await store.build_for_humans(BuildPathsWithResultsRequest(derived_paths=["/nix/store/aaa.drv"]))
@@ -514,7 +514,7 @@ class TestBuild:
         assert result.results[0].status == "substituted"
 
     async def test_read_derivation(self, store: Store, pool: MagicMock):
-        pool._store_stub.read_derivation.return_value = _mock_derivation(name="foo", system="x86_64-linux")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.read_derivation.return_value = _mock_derivation(name="foo", system="x86_64-linux")
         result = await store.read_derivation(ReadDerivationRequest(path="/nix/store/aaa-foo.drv"))
         assert result.name == "foo"
         assert result.system == "x86_64-linux"
@@ -527,52 +527,52 @@ class TestBuild:
 
 class TestGC:
     async def test_add_temp_root(self, store: Store, pool: MagicMock):
-        pool._store_stub.add_temp_root.return_value = MagicMock()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.add_temp_root.return_value = MagicMock()
         await store.add_temp_root(AddTempRootRequest(path="/nix/store/aaa-foo"))
-        pool._store_stub.add_temp_root.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.add_temp_root.assert_awaited_once()
 
     async def test_find_roots(self, store: Store, pool: MagicMock):
-        pool._store_stub.find_roots.return_value = _mock_find_roots_response()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.find_roots.return_value = _mock_find_roots_response()
         result = await store.find_roots(FindRootsRequest(censor=True))
         assert result.roots == []
-        pool._store_stub.find_roots.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.find_roots.assert_awaited_once()
 
     async def test_collect_garbage_dry_run(self, store: Store, pool: MagicMock):
-        pool._store_stub.collect_garbage.return_value = _mock_collect_garbage_response(  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.collect_garbage.return_value = _mock_collect_garbage_response(
             paths=["/nix/store/aaa-foo"],
             bytes_freed=0,
         )
         result = await store.collect_garbage(CollectGarbageRequest(action=GcAction.RETURN_DEAD))
         assert result.paths == ["/nix/store/aaa-foo"]
         assert result.bytes_freed == 0
-        pool._store_stub.collect_garbage.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.collect_garbage.assert_awaited_once()
 
     async def test_add_perm_root(self, store: Store, pool: MagicMock):
-        pool._store_stub.add_perm_root.return_value = MagicMock(path="/tmp/root")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.add_perm_root.return_value = MagicMock(path="/tmp/root")
         result = await store.add_perm_root(AddPermRootRequest(store_path="/nix/store/aaa-foo", gc_root="/tmp/root"))
         assert result.path == "/tmp/root"
-        pool._store_stub.add_perm_root.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.add_perm_root.assert_awaited_once()
 
     async def test_add_indirect_root(self, store: Store, pool: MagicMock):
-        pool._store_stub.add_indirect_root.return_value = MagicMock()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.add_indirect_root.return_value = MagicMock()
         await store.add_indirect_root(AddIndirectRootRequest(path="/tmp/root"))
-        pool._store_stub.add_indirect_root.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.add_indirect_root.assert_awaited_once()
 
     async def test_ensure_path(self, store: Store, pool: MagicMock):
-        pool._store_stub.ensure_path.return_value = MagicMock()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.ensure_path.return_value = MagicMock()
         await store.ensure_path(EnsurePathRequest(path="/nix/store/aaa-foo"))
-        pool._store_stub.ensure_path.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.ensure_path.assert_awaited_once()
 
     async def test_optimise_store(self, store: Store, pool: MagicMock):
-        pool._store_stub.optimise_store.return_value = MagicMock()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.optimise_store.return_value = MagicMock()
         await store.optimise_store(OptimiseStoreRequest())
-        pool._store_stub.optimise_store.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.optimise_store.assert_awaited_once()
 
     async def test_verify_store(self, store: Store, pool: MagicMock):
-        pool._store_stub.verify_store.return_value = MagicMock(errors=False)  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.verify_store.return_value = MagicMock(errors=False)
         result = await store.verify_store(VerifyStoreRequest(check_contents=False, repair=False))
         assert result.errors is False
-        pool._store_stub.verify_store.assert_awaited_once()  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool.store_stub.verify_store.assert_awaited_once()
 
 
 # ════════════════════════════════════════════════════════════════════

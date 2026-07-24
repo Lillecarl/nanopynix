@@ -115,7 +115,7 @@ async def test_worker_death_detection():
     this `async with` block), which anyio's shared loop exception handler
     picks up and re-raises here. Since nanopynix's own worker-close path
     already treats StreamTerminatedError as an expected teardown outcome (see
-    _WorkerClient.close), a temporary loop exception handler ignoring it for
+    WorkerClient.close), a temporary loop exception handler ignoring it for
     the lifetime of this session is a faithful, local match for that same
     tolerance -- not a weakening of the assertion below, which still requires
     a real WorkerDiedError/ConnectionError/OSError on the next call.

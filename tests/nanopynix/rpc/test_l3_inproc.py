@@ -46,8 +46,8 @@ pytestmark = pytest.mark.l3_inproc
 class _InprocWorkerClient:
     """Minimal worker-client shape used by the public L3 EvalSession."""
 
-    _eval_stub: Any
-    _store_stub: Any
+    eval_stub: Any
+    worker_stub: Any
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _next_request_id: int = 3
 
@@ -62,7 +62,7 @@ class _InprocWorkerClient:
 class _InprocManager:
     def __init__(self, worker: _InprocWorkerClient) -> None:
         self._worker = worker
-        self._worker_stub = worker._store_stub
+        self.worker_stub = worker.worker_stub
         self.reserve_count = 0
 
     async def reserve(self, *, timeout: float | None = None) -> _InprocWorkerClient:  # noqa: ASYNC109 -- threading timeout through to grpclib, not asyncio.timeout
@@ -269,7 +269,7 @@ async def test_failed_value_release_retries_at_the_next_rpc_boundary(l3_inproc: 
     async with l3_inproc.eval as eval:
         value = await eval.string("1")
         handle = value.handle
-        l3_inproc.worker._eval_stub = _FailFirstRpc(l3_inproc.worker._eval_stub, "release")
+        l3_inproc.worker.eval_stub = _FailFirstRpc(l3_inproc.worker.eval_stub, "release")
 
         with pytest.raises(OSError, match="injected release"):
             await value.release()
@@ -296,7 +296,7 @@ async def test_session_close_closes_eval_state_and_clears_worker_values(l3_inpro
 
 async def test_eval_rpc_requires_open_eval(l3_inproc: _L3Inproc) -> None:
     with pytest.raises(GRPCError, match="call OpenEval before evaluating"):
-        await l3_inproc.worker._eval_stub.eval_string(EvalStringRequest(expr="1", source_name="<test>"))
+        await l3_inproc.worker.eval_stub.eval_string(EvalStringRequest(expr="1", source_name="<test>"))
 
     assert l3_inproc.state.handles.iter_kind(HandleKind.EVAL) == []
 
@@ -347,7 +347,7 @@ async def test_failed_locked_flake_release_retries_at_the_next_rpc_boundary(
     async with l3_inproc.eval as eval:
         locked = await eval.lock_flake(str(tmp_path), write_lock_file=False)
         handle = locked.handle
-        l3_inproc.worker._eval_stub = _FailFirstRpc(l3_inproc.worker._eval_stub, "release_locked_flake")
+        l3_inproc.worker.eval_stub = _FailFirstRpc(l3_inproc.worker.eval_stub, "release_locked_flake")
 
         with pytest.raises(OSError, match="injected release_locked_flake"):
             await locked.release()

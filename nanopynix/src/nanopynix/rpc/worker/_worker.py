@@ -15,7 +15,7 @@ Threading model
   cross-thread access.  ``LogCollector`` is inherently thread-safe
   (``janus.Queue``).
 
-Spawned by ``Session._WorkerClient``.
+Spawned by ``Session``'s ``rpc.client._pool.WorkerClient``.
 """
 
 from __future__ import annotations
@@ -76,6 +76,7 @@ from nanopynix.rpc.worker._worker_primop import (
     rpc_primop_callback_factory as rpc_primop_callback_factory,  # type: ignore[reportPrivateUsage] -- internal module, required for primop callback factory
 )
 from nanopynix.rpc.worker._worker_store import StoreServiceHandler
+from nanopynix.settings import DEFAULT_WORKER_MAX_CONCURRENCY
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -88,8 +89,6 @@ if TYPE_CHECKING:
 # Re-export for the multiprocessing runner in _pool.py
 __all__ = ["main", "run_worker", "worker_service_factory"]
 
-# Keep handler slots for long-lived streams plus bounded concurrent Store RPCs.
-_WORKER_MAX_CONCURRENCY = 32
 _STORE_WORKERS = 4
 
 # ── Primop registration ──────────────────────────────────────────────
@@ -387,7 +386,7 @@ class WorkerServiceHandler(WorkerServiceBase):
         This is the wire-encoding hop from ``LogCollector`` to protobuf, so it
         is deliberately not built on :class:`nanopynix.logging.CallbackBus`
         (the in-process pub-sub shared by ``inproc.Session`` and the client's
-        ``_WorkerClient``) — there is nothing to subscribe/unsubscribe here,
+        ``WorkerClient``) — there is nothing to subscribe/unsubscribe here,
         only a single collector stream serialized onto a gRPC channel.
         """
         collector = self._state.collector
@@ -484,7 +483,7 @@ def worker_service_factory(
 async def run_worker(
     endpoint: Any,
     tuning: Any = None,
-    max_concurrency: int | None = _WORKER_MAX_CONCURRENCY,
+    max_concurrency: int | None = DEFAULT_WORKER_MAX_CONCURRENCY,
 ) -> None:
     """Serve gRPC over a multiprocessing pipe endpoint.
 
@@ -532,7 +531,7 @@ def main() -> None:
 
 async def _stdio_main() -> None:
     handlers = worker_service_factory()
-    await serve_stdio(handlers, max_concurrency=_WORKER_MAX_CONCURRENCY)
+    await serve_stdio(handlers, max_concurrency=DEFAULT_WORKER_MAX_CONCURRENCY)
 
     # Cleanup after transport closes
     worker_state: WorkerState = cast("WorkerServiceHandler", handlers[0])._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType, reportUnknownMemberType] -- private attr access, cascade from Any  # noqa: SLF001

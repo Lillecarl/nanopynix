@@ -43,19 +43,15 @@ from nanopynix_proto.nix.store import (
 from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
 from nanopynix.models import NO_GC_LIMIT, BuildResult, Derivation, GcResult, MissingInfo, StorePath
-from nanopynix.rpc.client._pool import (
-    _RPC_TIMEOUT as _RPC_TIMEOUT,  # type: ignore[reportPrivateUsage] -- cross-class access
-)
 from nanopynix.rpc.client._pool import WorkerDiedError
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
+from nanopynix.settings import DEFAULT_RPC_TIMEOUT_SECONDS
 
 if TYPE_CHECKING:
     from betterproto2 import Message
     from nanopynix_proto.nix.common import PathInfo
 
-    from nanopynix.rpc.client._pool import (
-        _WorkerClient,  # type: ignore[reportPrivateUsage] -- TYPE_CHECKING import of lifecycle type
-    )
+    from nanopynix.rpc.client._pool import WorkerClient
 
 _DEFAULT_CA_METHOD = "nar"
 _DEFAULT_HASH_ALGO = "sha256"
@@ -72,10 +68,10 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
 
     def __init__(
         self,
-        pool: _WorkerClient,
+        pool: WorkerClient,
         uri: str,
         session_id: str,
-        rpc_timeout: float = _RPC_TIMEOUT,
+        rpc_timeout: float = DEFAULT_RPC_TIMEOUT_SECONDS,
     ) -> None:
         self._pool = pool
         self._rpc_timeout = rpc_timeout
@@ -88,7 +84,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
     async def open(self) -> None:
         """Open a store on the worker and activate the handle."""
         resp = await self._pool.invoke(
-            self._pool._worker_stub.open_store,  # type: ignore[reportPrivateUsage] -- cross-class access  # noqa: SLF001
+            self._pool.worker_stub.open_store,
             OpenStoreRequest(uri=self._uri),
             timeout=self._rpc_timeout,
         )
@@ -104,7 +100,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
                 await dependent_eval.close()
         try:
             await self._pool.invoke(
-                self._pool._worker_stub.close_store,  # type: ignore[reportPrivateUsage] -- cross-class access  # noqa: SLF001
+                self._pool.worker_stub.close_store,
                 CloseStoreRequest(store_handle=self._store_handle, force=force),
                 timeout=self._rpc_timeout,
             )
@@ -144,7 +140,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         if self._store_handle:
             message_any = cast("Any", message)
             message_any.store_handle = self._store_handle
-        method = getattr(self._pool._store_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access  # noqa: SLF001
+        method = getattr(self._pool.store_stub, method_name)
         return await self._pool.invoke(method, message, timeout=self._rpc_timeout)
 
 
