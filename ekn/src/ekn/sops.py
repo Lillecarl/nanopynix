@@ -12,7 +12,7 @@ import kr8s
 import structlog
 import yaml
 
-from ekn.apply import build_object, ssa_apply
+from ekn.apply import apply_one, build_object
 
 if TYPE_CHECKING:
     from kr8s._api import Api  # kr8s.asyncio.api() returns this, not kr8s.Api
@@ -225,15 +225,15 @@ async def ensure_age_identities(
             # fresh bootstrap target whose Namespace object hasn't been
             # applied in this same `ekn kubeapply` run) -- ensure it
             # directly rather than depending on apply ordering.
-            namespace_obj = await build_object(
+            await apply_one(
                 {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}},
                 api,
+                field_manager=field_manager,
             )
-            await ssa_apply(namespace_obj, field_manager=field_manager)
 
             key_text = await _generate_age_identity()
 
-            secret_obj = await build_object(
+            await apply_one(
                 {
                     "apiVersion": "v1",
                     "kind": "Secret",
@@ -241,8 +241,8 @@ async def ensure_age_identities(
                     "stringData": {key: key_text},
                 },
                 api,
+                field_manager=field_manager,
             )
-            await ssa_apply(secret_obj, field_manager=field_manager)
             _log.info("created SOPS age identity", namespace=namespace, secret=secret_name)
 
         public_key = _public_key_from_identity_text(key_text)
