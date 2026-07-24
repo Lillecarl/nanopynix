@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import anyio
-from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_proto.nix.common import LogEvent as LogEventProto
 from nanopynix_proto.nix.common import LogLevel
 
@@ -38,6 +37,7 @@ from nanopynix.settings import (
     NixEvalSettings,
     NixFetchSettings,
     NixSettings,
+    normalize_nix_path,
     normalize_nix_settings,
 )
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
@@ -46,9 +46,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping, Sequence
     from os import PathLike
 
-    from nanopynix.rpc.client._pool import (
-        _Subscription,  # type: ignore[reportPrivateUsage] -- type of _WorkerClient.subscribe result
-    )
+    from nanopynix.logging import BusSubscription
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +61,7 @@ class LogCapture:
 
     def __init__(self, manager: _WorkerClient) -> None:
         self._manager = manager
-        self._sub: _Subscription | None = None
+        self._sub: BusSubscription | None = None
         self.events: list[LogEvent] = []
         self._request_ids: set[int] = set()
         self._finalized: set[int] = set()
@@ -138,14 +136,6 @@ def _to_primop_specs(specs: Sequence[PrimOpSpec | Mapping[str, Any]] | None) -> 
     return result
 
 
-def _normalize_nix_path(nix_path: str | Sequence[str] | None) -> list[str]:
-    if nix_path is None:
-        return list(nanopynix_expr.parse_nix_path())
-    if isinstance(nix_path, str):
-        return list(nanopynix_expr.parse_nix_path(nix_path))
-    return list(nix_path)
-
-
 class Session:
     """Session runtime — manages a single subprocess worker.
 
@@ -196,7 +186,7 @@ class Session:
             settings=worker_settings,
             experimental_features=list(nix_settings.experimental_features or []),
             verbosity=normalize_log_level(verbosity) if verbosity is not None else None,
-            nix_path=_normalize_nix_path(nix_path),
+            nix_path=normalize_nix_path(nix_path),
             primops=_to_primop_specs(primops),
             primop_callables=dict(primop_callables) if primop_callables is not None else None,
             worker_oom_score_adj=worker_oom_score_adj,

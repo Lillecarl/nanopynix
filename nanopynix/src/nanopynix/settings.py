@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Iterator, Mapping, Sequence
 
 
 DEFAULT_EXPERIMENTAL_FEATURES = ("flakes", "nix-command")
@@ -349,6 +349,19 @@ def normalize_nix_settings(settings: NixSettings | os.PathLike[str] | str | None
     if isinstance(settings, str | os.PathLike):  # type: ignore[reportUnnecessaryIsInstance] -- runtime guard for untyped callers
         return NixSettings.from_file(settings)
     raise TypeError("settings must be a NixSettings instance, an anyio.Path/path-like config file, or None")
+
+
+def normalize_nix_path(nix_path: str | Sequence[str] | None) -> list[str]:
+    """Coerce ``nix_path`` to a resolved list of ``NIX_PATH`` entries.
+
+    ``None`` falls back to parsing the process environment's ``NIX_PATH``; a
+    colon-separated string is parsed the same way Nix itself would.
+    """
+    if nix_path is None:
+        return list(nanopynix_expr.parse_nix_path())
+    if isinstance(nix_path, str):
+        return list(nanopynix_expr.parse_nix_path(nix_path))
+    return list(nix_path)
 
 
 def list_settings_metadata() -> dict[str, NixSettingMetadata]:

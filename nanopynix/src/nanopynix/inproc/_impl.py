@@ -27,7 +27,7 @@ from nanopynix_proto.nix.store import GcAction as PublicGcAction
 from nanopynix._core._extract import locked_flake as _locked_flake_proto
 from nanopynix._core._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
 from nanopynix._core._nix_executor import NixThreadExecutor
-from nanopynix.logging import LogCollector, LogStreamEventKind
+from nanopynix.logging import BusSubscription, CallbackBus, LogCollector, LogStreamEventKind
 from nanopynix.models import (
     DEFAULT_STORE_URI,
     NIX_USER_CONF_FILES_ENV,
@@ -47,6 +47,7 @@ from nanopynix.settings import (
     NixFetchSettings,
     NixFlakeSettings,
     NixSettings,
+    normalize_nix_path,
     normalize_nix_settings,
 )
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
@@ -155,15 +156,6 @@ class InprocLockedFlakeReleasedError(RuntimeError):
     """Raised when an in-process locked flake is used after release."""
 
 
-class _LogSubscription:
-    def __init__(self, session: Session, callback: Any) -> None:
-        self._session = session
-        self._callback = callback
-
-    def unsubscribe(self) -> None:
-        self._session.unsubscribe(self._callback)
-
-
 class Session:
     """Own one asynchronous, pointer-backed in-process Nix runtime.
 
@@ -194,7 +186,7 @@ class Session:
         self._load_config = load_config
         self._settings = normalize_nix_settings(settings).with_experimental_features(list(experimental_features or []))
         self._verbosity = normalize_log_level(verbosity) if verbosity is not None else None
-        self._nix_path = self._normalize_nix_path(nix_path)
+        self._nix_path = normalize_nix_path(nix_path)
         self._store_uri = store_uri
         if store_workers < 1:
             raise ValueError("store_workers must be at least 1")
@@ -204,20 +196,12 @@ class Session:
         # Creation is deliberately lazy: merely importing nanopynix.inproc
         # must not start a Nix thread in an L3 manager process.
         self._executor: NixThreadExecutor | None = None
-        self._log_callbacks: set[Any] = set()
+        self._log_bus = CallbackBus()
         self._log_task: asyncio.Task[None] | None = None
         self._opened = False
         self._operation_ids = itertools.count(1)
         self._evals: set[EvalSession] = set()
         self._stores: set[Store] = set()
-
-    @staticmethod
-    def _normalize_nix_path(nix_path: str | Sequence[str] | None) -> list[str]:
-        if nix_path is None:
-            return list(nanopynix_expr.parse_nix_path())
-        if isinstance(nix_path, str):
-            return list(nanopynix_expr.parse_nix_path(nix_path))
-        return list(nix_path)
 
     async def __aenter__(self) -> Session:
         await self.open()
@@ -341,8 +325,7 @@ class Session:
                 event = LogEvent(request_id=request_id, request_finalized=RequestFinalized())
             else:
                 continue
-            for callback in tuple(self._log_callbacks):
-                callback(event)
+            self._log_bus.emit(event)
 
     def _check_open(self) -> None:
         if not self._opened:
@@ -372,10 +355,6 @@ class Session:
 
     def _next_operation_id(self) -> int:
         return next(self._operation_ids)
-
-    def unsubscribe(self, callback: Any) -> None:
-        """Remove one callback previously registered with :meth:`subscribe`."""
-        self._log_callbacks.discard(callback)
 
     def store(self, uri: str | None = None) -> Store:
         """Return a direct-pointer store context manager."""
@@ -422,10 +401,9 @@ class Session:
         finally:
             subscription.unsubscribe()
 
-    def subscribe(self, callback: Any) -> _LogSubscription:
+    def subscribe(self, callback: Any) -> BusSubscription:
         """Subscribe a callback to live log events. Call ``.unsubscribe()`` to stop."""
-        self._log_callbacks.add(callback)
-        return _LogSubscription(self, callback)
+        return self._log_bus.subscribe(callback)
 
 
 class Store:

@@ -35,6 +35,7 @@ from nanopynix_proto.nix.worker import (
 )
 
 from nanopynix.exceptions import from_response
+from nanopynix.logging import BusSubscription, CallbackBus
 from nanopynix.models import DEFAULT_STORE_URI, WORKER_INIT_STATUS_OK
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
 from nanopynix.rpc.worker._worker import (
@@ -99,51 +100,8 @@ def _write_oom_score_adj(pid: int, value: int, *, proc_root: Path = Path("/proc"
 
 
 # ════════════════════════════════════════════════════════════════════
-# _LogBus + _Subscription
-# ════════════════════════════════════════════════════════════════════
-
-
-class _LogBus:
-    """Subscriber list for worker log events.
-
-    Zero subscribers → events are discarded (no buffering, no overhead).
-    Callbacks are called synchronously from the read loop — keep them fast.
-    """
-
-    def __init__(self) -> None:
-        self._subscribers: list[Callable[[object], None]] = []
-
-    def subscribe(self, callback: Callable[..., None]) -> _Subscription:
-        self._subscribers.append(callback)
-        return _Subscription(self, callback)
-
-    def _unsubscribe(self, sub: _Subscription) -> None:
-        with contextlib.suppress(ValueError):
-            self._subscribers.remove(sub._callback)  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks  # noqa: SLF001
-
-    def emit(self, event: object) -> None:
-        if not self._subscribers:
-            return
-        for cb in self._subscribers:
-            try:
-                cb(event)
-            except Exception:
-                logger.exception("worker log subscriber failed")
-
-
-class _Subscription:
-    """Handle returned by ``_LogBus.subscribe()``."""
-
-    __slots__ = ("_bus", "_callback")
-
-    def __init__(self, bus: _LogBus, callback: Callable[..., None]) -> None:
-        self._bus = bus
-        self._callback = callback
-
-    def unsubscribe(self) -> None:
-        self._bus._unsubscribe(self)  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks  # noqa: SLF001
-
-
+# Log dispatch — see nanopynix.logging.CallbackBus for why this is shared
+# with inproc.Session and not with the worker's own subscribe_logs.
 # ════════════════════════════════════════════════════════════════════
 # _WorkerClient — single-worker lifecycle and operation dispatch
 # ════════════════════════════════════════════════════════════════════
@@ -192,7 +150,7 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
         self._store_service_stub: StoreServiceStub | None = None
         self._eval_service_stub: EvalServiceStub | None = None
         self._primop_handler: Any = None
-        self._log_bus: _LogBus = _LogBus()
+        self._log_bus: CallbackBus = CallbackBus()
         self._log_task: asyncio.Task[None] | None = None
         self._stack: contextlib.AsyncExitStack | None = None
         self._next_request_id = 1
@@ -310,11 +268,11 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
         finally:
             sub.unsubscribe()
 
-    def subscribe(self, callback: Callable[..., None]) -> _Subscription:
+    def subscribe(self, callback: Callable[..., None]) -> BusSubscription:
         """Subscribe a callback to all log events.
 
         Callback receives ``LogEvent`` proto messages from the worker.
-        Returns a ``_Subscription`` — call ``.unsubscribe()`` to stop.
+        Returns a ``BusSubscription`` — call ``.unsubscribe()`` to stop.
         """
         return self._log_bus.subscribe(callback)
 
