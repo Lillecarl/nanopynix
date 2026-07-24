@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import os
+import re
 import shutil
 import sys
 from dataclasses import dataclass
@@ -12,9 +13,28 @@ from typing import Any
 import pygit2
 from anyio import Path as AsyncPath
 
+_SOURCE_TRAILER_KEY = "ekn-source"
+_SOURCE_TRAILER_RE = re.compile(rf"^{re.escape(_SOURCE_TRAILER_KEY)}: (?P<oid>[0-9a-f]{{4,40}})$", re.MULTILINE)
+
 
 def _repo_path(path: str | None = None) -> str:
     return os.environ.get("EKN_REPO") or path or "."
+
+
+def _with_source_trailer(message: str, source_oid: pygit2.Oid) -> str:
+    """Append an `ekn-source: <oid>` trailer to a deploy commit's message,
+    recording its paired source commit explicitly rather than leaving
+    `rollback_branches` to reverse-engineer it from parent order (a
+    contract that was previously enforced only by a comment on
+    `prepare_deploy_and_source_commits`)."""
+    return f"{message.rstrip()}\n\n{_SOURCE_TRAILER_KEY}: {source_oid}\n"
+
+
+def _read_source_trailer(commit: pygit2.Commit) -> pygit2.Oid | None:
+    match = _SOURCE_TRAILER_RE.search(commit.message)
+    if match is None:
+        return None
+    return pygit2.Oid(hex=match.group("oid"))
 
 
 def _build_tree(repo: Any, files: list[tuple[str, str]]) -> Any:
@@ -174,6 +194,11 @@ def prepare_deploy_and_source_commits(
     branch). The deploy commit's parents are the previous commit on
     `deploy_branch` (if any) followed by the just-built source commit --
     every deploy commit points at the exact source state that produced it.
+
+    The deploy commit's message also carries an explicit `ekn-source: <oid>`
+    trailer (see `_with_source_trailer`) recording the same link --
+    `rollback_branches` reads this trailer rather than assuming the source
+    commit is always the deploy commit's *last* parent.
     """
     repo = pygit2.Repository(_repo_path(repo_path))
     author = repo.default_signature
@@ -198,7 +223,7 @@ def prepare_deploy_and_source_commits(
         None,
         author,
         committer,
-        message,
+        _with_source_trailer(message, source_oid),
         deploy_tree_id,
         deploy_parents,
     )
@@ -294,18 +319,29 @@ def rollback_branches(
 
     source_oid: pygit2.Oid | None = None
     expected_source_parent: pygit2.Oid | None = None
+    deploy_message = message
     if source_branch is not None:
         expected_source_parent = _branch_tip(repo, source_branch)
         source_parents = [expected_source_parent] if expected_source_parent is not None else []
-        # target_commit's *last* parent is the source commit it was
-        # originally paired with (prepare_deploy_and_source_commits always
-        # appends it last, whether or not there was also a previous-deploy
-        # parent) -- reuse its tree. Falls back to the deploy commit's own
-        # tree only if target_commit has no parents at all, which a
-        # dual-commit deploy never produces (its source parent is always
-        # present) -- this fallback is purely defensive, e.g. `--to` pointed
-        # at a commit made entirely outside this tooling.
-        source_tree_id = target_commit.parents[-1].tree_id if target_commit.parents else target_commit.tree_id
+
+        # Prefer target_commit's explicit ekn-source trailer over its
+        # parent order -- see _with_source_trailer/prepare_deploy_and_source_
+        # commits. Falls back to the old *last*-parent convention for deploy
+        # commits made before this trailer existed, and finally to the
+        # deploy commit's own tree only if it has no parents at all (e.g.
+        # `--to` pointed at a commit made entirely outside this tooling).
+        target_source_oid = _read_source_trailer(target_commit)
+        if target_source_oid is not None:
+            target_source_commit = repo[target_source_oid]
+            if not isinstance(target_source_commit, pygit2.Commit):  # pyright: ignore[reportUnnecessaryIsInstance] -- pygit2-stubs models Object/Commit as unrelated siblings of an invariant generic _ObjectBase[T] (different type args), so pyright thinks this can never match, even though pygit2.Commit.__mro__ shows Commit genuinely subclasses Object at runtime
+                msg = f"expected Commit, got {type(target_source_commit).__name__}"
+                raise TypeError(msg)
+            source_tree_id = target_source_commit.tree_id
+        elif target_commit.parents:
+            source_tree_id = target_commit.parents[-1].tree_id
+        else:
+            source_tree_id = target_commit.tree_id
+
         source_oid = repo.create_commit(
             None,
             author,
@@ -315,12 +351,13 @@ def rollback_branches(
             source_parents,
         )
         deploy_parents.append(source_oid)
+        deploy_message = _with_source_trailer(message, source_oid)
 
     deploy_oid = repo.create_commit(
         None,
         author,
         committer,
-        message,
+        deploy_message,
         target_commit.tree_id,
         deploy_parents,
     )
