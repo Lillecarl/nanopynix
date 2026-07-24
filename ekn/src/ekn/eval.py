@@ -57,8 +57,27 @@ class GitOpsBranches(BaseModel):
     source_branch: _NonEmptyStr | None = Field(default=None, alias="sourceBranch")
 
 
+class _GitOpsTargetRef(BaseModel):
+    """`gitOps.targets.<name>` itself -- see easykubenix's gitops.nix. Just a
+    `{path}` today, but modeled as its own submodule (not flattened to a bare
+    string) since that's the real Nix shape and easykubenix may grow more
+    fields on it later."""
+
+    path: _NonEmptyStr
+
+
+class GitOpsTargetEntry(BaseModel):
+    """Validated `kubernetes.gitOpsTargets` entry -- one named GitOps target's
+    routed objects/raw files plus its resolved `gitOps.targets.<name>` entry,
+    see `ekn.gitops.resolved_targets`."""
+
+    target: _GitOpsTargetRef
+    objects: list[dict[str, Any]]
+    raw_files: list[_NonEmptyStr] = Field(default_factory=list, alias="rawFiles")
+
+
 class _GitOpsKubernetesConfig(BaseModel):
-    gitops_targets: dict[str, JsonValue] = Field(alias="gitOpsTargets")
+    gitops_targets: dict[str, GitOpsTargetEntry] = Field(alias="gitOpsTargets")
 
 
 class _GitOpsManifestsConfig(BaseModel):
@@ -81,11 +100,22 @@ class CacheConfigResult(BaseModel):
     cache_package_out: str | None
 
 
+class SopsAgeIdentity(BaseModel):
+    """Validated `kubernetes.sopsAgeIdentities` entry -- see
+    `ekn.sops.ensure_age_identities`."""
+
+    namespace: _NonEmptyStr
+    secret_name: _NonEmptyStr = Field(alias="secretName")
+    key: _NonEmptyStr = "key.txt"
+    sops_config_file: _NonEmptyStr | None = Field(default=None, alias="sopsConfigFile")
+    sops_files: list[_NonEmptyStr] = Field(default_factory=list, alias="sopsFiles")
+
+
 class KubeApplyConfigResult(BaseModel):
     objects: list[dict[str, Any]]
     discriminator: str
     resource_priority: dict[str, int]
-    sops_age_identities: list[dict[str, Any]]
+    sops_age_identities: list[SopsAgeIdentity]
 
 
 class _ValidationPackageInfo(BaseModel):
@@ -782,7 +812,9 @@ async def evaluate_validation_config(flake_uri: str, customer: str) -> Validatio
 
 __all__ = [
     "GitOpsManifestsResult",
+    "GitOpsTargetEntry",
     "NixError",
+    "SopsAgeIdentity",
     "evaluate_file",
     "evaluate_file_multi",
     "evaluate_flake",

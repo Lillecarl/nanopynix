@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from ekn.apply import Manifest
-    from ekn.eval import GitOpsManifestsResult
+    from ekn.eval import GitOpsManifestsResult, GitOpsTargetEntry
     from nanopynix.models import JsonValue
 
 
@@ -22,39 +22,6 @@ class GitOpsTargetError(ValueError):
 @dataclass(frozen=True)
 class GitOpsTarget:
     path: str
-
-
-def _required_string(route: JsonValue, field: str) -> str:
-    if not isinstance(route, dict):
-        raise GitOpsTargetError("GitOps target must be an attribute set")
-    value = route.get(field)
-    if not isinstance(value, str) or not value:
-        raise GitOpsTargetError(f"GitOps target {field} must be a non-empty string")
-    return value
-
-
-def _as_manifest_list(objects: JsonValue, name: str) -> list[Manifest]:
-    if not isinstance(objects, list):
-        raise GitOpsTargetError(f"GitOps target {name!r} objects must be a list")
-    manifests: list[Manifest] = []
-    for obj in objects:
-        if not isinstance(obj, dict):
-            raise GitOpsTargetError(f"GitOps target {name!r} object must be an attribute set")
-        manifests.append(obj)
-    return manifests
-
-
-def _as_path_list(paths: JsonValue, name: str) -> list[str]:
-    if paths is None:
-        return []
-    if not isinstance(paths, list):
-        raise GitOpsTargetError(f"GitOps target {name!r} rawFiles must be a list")
-    result: list[str] = []
-    for path in paths:
-        if not isinstance(path, str):
-            raise GitOpsTargetError(f"GitOps target {name!r} rawFiles entries must be strings")
-        result.append(path)
-    return result
 
 
 def load_raw_manifest(path: str) -> Manifest:
@@ -71,17 +38,19 @@ def load_raw_manifest(path: str) -> Manifest:
     return data
 
 
-def resolved_targets(gitops_targets: dict[str, JsonValue]) -> dict[GitOpsTarget, list[Manifest]]:
+def resolved_targets(gitops_targets: dict[str, GitOpsTargetEntry]) -> dict[GitOpsTarget, list[Manifest]]:
     """Turn `kubernetes.gitOpsTargets` (already joined by the Nix module) into
     `{GitOpsTarget: [manifest, ...]}`.
 
     The Nix side (`kubernetes.gitOpsTargets`) has already resolved each
     object's `ekn.gitOpsTarget` name against `gitOps.targets` and grouped
     objects by target name -- there is no index/lookup left to build here,
-    just validation and a merge for the (unusual but valid) case of two
-    named targets sharing the same path. The branch these all land on is
-    instance-wide (`gitOps.deployBranch`/`gitOps.sourceBranch`), not part of
-    a target -- targets are pure path-routing.
+    just a merge for the (unusual but valid) case of two named targets
+    sharing the same path. Each entry is already validated (see
+    `ekn.eval.GitOpsTargetEntry`) by the time it reaches here. The branch
+    these all land on is instance-wide
+    (`gitOps.deployBranch`/`gitOps.sourceBranch`), not part of a target --
+    targets are pure path-routing.
 
     Each target's `rawFiles` (paths only, per easykubenix) are read and
     parsed here and appended to the same manifest list `objects` populates
@@ -92,14 +61,10 @@ def resolved_targets(gitops_targets: dict[str, JsonValue]) -> dict[GitOpsTarget,
     Nix-evaluated ones don't, but weren't order-sensitive to begin with).
     """
     result: defaultdict[GitOpsTarget, list[Manifest]] = defaultdict(list)
-    for name, entry in gitops_targets.items():
-        if not isinstance(entry, dict):
-            raise GitOpsTargetError(f"GitOps target {name!r} entry must be an attribute set")
-        objects = _as_manifest_list(entry.get("objects"), name)
-        raw_paths = _as_path_list(entry.get("rawFiles"), name)
-        target = GitOpsTarget(path=_required_string(entry.get("target"), "path"))
-        result[target].extend(objects)
-        result[target].extend(load_raw_manifest(p) for p in raw_paths)
+    for entry in gitops_targets.values():
+        target = GitOpsTarget(path=entry.target.path)
+        result[target].extend(entry.objects)
+        result[target].extend(load_raw_manifest(p) for p in entry.raw_files)
     return dict(result)
 
 

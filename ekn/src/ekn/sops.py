@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from kr8s._api import Api  # kr8s.asyncio.api() returns this, not kr8s.Api
 
     from ekn.apply import Manifest
+    from ekn.eval import SopsAgeIdentity
     from nanopynix.models import JsonValue
 
 _log = structlog.get_logger()
@@ -152,17 +153,6 @@ def _add_recipient_to_sops_config(
     return changed
 
 
-def _as_str_list(value: JsonValue, field: str) -> list[str]:
-    if not isinstance(value, list):
-        raise SopsUpdateKeysError(f"{field} must be a list of strings")
-    strings: list[str] = []
-    for item in value:
-        if not isinstance(item, str):
-            raise SopsUpdateKeysError(f"{field} must be a list of strings")
-        strings.append(item)
-    return strings
-
-
 async def _run_sops_updatekeys(config_file: str, sops_files: list[str]) -> None:
     for sops_file in sops_files:
         proc = await asyncio.create_subprocess_exec(
@@ -183,7 +173,7 @@ async def _run_sops_updatekeys(config_file: str, sops_files: list[str]) -> None:
 
 
 async def ensure_age_identities(
-    identities: list[Manifest],
+    identities: list[SopsAgeIdentity],
     *,
     api: Api,
     field_manager: str = "ekn",
@@ -211,11 +201,9 @@ async def ensure_age_identities(
     is retried since it only checks -- never assumes -- that it already ran.
     """
     for identity in identities:
-        namespace = identity["namespace"]
-        secret_name = identity["secretName"]
-        key = identity.get("key", "key.txt")
-        if not isinstance(namespace, str) or not isinstance(secret_name, str) or not isinstance(key, str):
-            raise TypeError("sopsAgeIdentities entry's namespace/secretName/key must be strings")
+        namespace = identity.namespace
+        secret_name = identity.secret_name
+        key = identity.key
 
         secret = await build_object(
             {
@@ -259,12 +247,10 @@ async def ensure_age_identities(
 
         public_key = _public_key_from_identity_text(key_text)
 
-        sops_config_file = identity.get("sopsConfigFile")
+        sops_config_file = identity.sops_config_file
         if not sops_config_file:
             continue
-        if not isinstance(sops_config_file, str):
-            raise TypeError("sopsAgeIdentities entry's sopsConfigFile must be a string")
-        sops_files = _as_str_list(identity.get("sopsFiles") or [], "sopsAgeIdentities entry's sopsFiles")
+        sops_files = identity.sops_files
         if _add_recipient_to_sops_config(sops_config_file, sops_files, public_key):
             await _run_sops_updatekeys(sops_config_file, sops_files)
             _log.info(
