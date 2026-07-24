@@ -59,7 +59,7 @@ def test_import_callable_rejects_a_path_without_a_colon() -> None:
 
 def test_import_callable_rejects_a_non_callable_target() -> None:
     with pytest.raises(TypeError, match="primop import path is not callable"):
-        _import_callable("nanopynix.rpc.worker._worker:_WORKER_MAX_CONCURRENCY")
+        _import_callable("nanopynix.rpc.worker._worker:DEFAULT_WORKER_MAX_CONCURRENCY")
 
 
 def test_import_callable_resolves_a_dotted_attribute_path() -> None:

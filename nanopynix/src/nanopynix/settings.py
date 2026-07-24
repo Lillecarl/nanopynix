@@ -324,6 +324,10 @@ class NixSettingsEnv(NixSettings, BaseSettings):
 
 DEFAULT_RPC_TIMEOUT_SECONDS = 300.0
 DEFAULT_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+DEFAULT_WORKER_MAX_CONCURRENCY = 32
+"""Shared between the worker's own gRPC server (rpc.worker._worker) and the
+client's dispatch limiter (rpc.client._pool) -- the client must not exceed
+what the worker's transport is configured to serve concurrently."""
 
 
 class NanopynixSettings(BaseSettings):

@@ -192,7 +192,7 @@ async def test_drain_empty():
 
 
 # ── CallbackBus — shared pub-sub used by inproc.Session and the RPC
-# client's _WorkerClient (see nanopynix.logging.CallbackBus's docstring for
+# client's WorkerClient (see nanopynix.logging.CallbackBus's docstring for
 # why the worker's own subscribe_logs is not built on this). ──────────────
 
 

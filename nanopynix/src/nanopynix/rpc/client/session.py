@@ -1,6 +1,6 @@
 """Session manager — lifecycle, configuration, and entry point for all facades.
 
-Manages a single subprocess worker via ``_WorkerClient``.  The worker is an
+Manages a single subprocess worker via ``WorkerClient``.  The worker is an
 independent Nix process (forkserver-based gRPC) with its own Store connection,
 logger, and configuration.
 
@@ -26,10 +26,7 @@ from nanopynix_proto.nix.common import LogLevel
 
 from nanopynix._process_title import set_manager_title
 from nanopynix.models import DEFAULT_STORE_URI, LogEvent, PrimOpSpec
-from nanopynix.rpc.client._pool import (
-    _ACTIVE_LOG_CAPTURES,  # type: ignore[reportPrivateUsage] -- dispatch-owned task-local capture stack
-    _WorkerClient,  # type: ignore[reportPrivateUsage] -- internal lifecycle integration
-)
+from nanopynix.rpc.client._pool import ACTIVE_LOG_CAPTURES, WorkerClient
 from nanopynix.rpc.client._session import EvalSession, ReplSession
 from nanopynix.rpc.client.store import Store, StoreHandle
 from nanopynix.settings import (
@@ -59,7 +56,7 @@ def _raw_log_event(raw: LogEventProto) -> LogEvent:
 class LogCapture:
     """Async context manager that records log events while active."""
 
-    def __init__(self, manager: _WorkerClient) -> None:
+    def __init__(self, manager: WorkerClient) -> None:
         self._manager = manager
         self._sub: BusSubscription | None = None
         self.events: list[LogEvent] = []
@@ -75,6 +72,14 @@ class LogCapture:
         return frozenset(self._request_ids)
 
     def _register_request(self, request_id: int) -> None:
+        """Tag `request_id` as started inside this capture's scope.
+
+        Called only by ``rpc.client._pool.WorkerClient.invoke()`` via
+        ``ACTIVE_LOG_CAPTURES`` -- an internal dispatch hook, not part of
+        ``LogCapture``'s public API (unlike ``events``/``request_ids``/
+        ``wait``/``wait_for_request``, which callers use directly), even
+        though ``LogCapture`` itself is re-exported from ``nanopynix.rpc``.
+        """
         if self._active:
             self._request_ids.add(request_id)
             self._waiters.setdefault(request_id, anyio.Event())
@@ -108,13 +113,13 @@ class LogCapture:
 
         self._sub = self._manager.subscribe(_append)
         self._active = True
-        self._token = _ACTIVE_LOG_CAPTURES.set((*_ACTIVE_LOG_CAPTURES.get(), self))
+        self._token = ACTIVE_LOG_CAPTURES.set((*ACTIVE_LOG_CAPTURES.get(), self))
         return self
 
     async def __aexit__(self, *args: object) -> None:
         self._active = False
         if self._token is not None:
-            _ACTIVE_LOG_CAPTURES.reset(self._token)  # type: ignore[arg-type] -- ContextVar token is opaque
+            ACTIVE_LOG_CAPTURES.reset(self._token)  # type: ignore[arg-type] -- ContextVar token is opaque
             self._token = None
         try:
             with anyio.CancelScope(shield=True):
@@ -179,7 +184,7 @@ class Session:
         self.runtime_settings = nanopynix_settings
         self._store_uri = store_uri
         worker_settings = nix_settings.to_worker_settings()
-        self._manager = _WorkerClient(
+        self._manager = WorkerClient(
             store_uri=store_uri,
             nix_conf=nix_conf,
             load_config=load_config,

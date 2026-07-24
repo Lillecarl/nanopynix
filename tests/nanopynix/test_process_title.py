@@ -62,7 +62,7 @@ def test_session_sets_manager_title(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.anyio
 async def test_store_session_opens_store_with_its_uri() -> None:
     pool = MagicMock()
-    pool._worker_stub.open_store = AsyncMock(return_value=SimpleNamespace(store_handle=42))
+    pool.worker_stub.open_store = AsyncMock(return_value=SimpleNamespace(store_handle=42))
 
     async def invoke(method: object, request: object, *, timeout: float) -> object:  # noqa: ASYNC109 -- mock implementing WorkerClient.invoke interface
         del timeout
@@ -73,5 +73,5 @@ async def test_store_session_opens_store_with_its_uri() -> None:
 
     await store.open()
 
-    request = pool._worker_stub.open_store.call_args.args[0]
+    request = pool.worker_stub.open_store.call_args.args[0]
     assert request.uri == "local?root=/tmp/test-store"
