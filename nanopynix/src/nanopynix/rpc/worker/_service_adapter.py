@@ -14,10 +14,10 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast, get_type_hints
 
 import anyio
 
-from nanopynix.models import HandleKind
-
 if TYPE_CHECKING:
     from betterproto2 import Message
+
+    from nanopynix.models import HandleKind
 
 
 @dataclass(frozen=True)

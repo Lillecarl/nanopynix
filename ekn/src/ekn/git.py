@@ -4,14 +4,17 @@ import asyncio
 import io
 import os
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+import pygit2
+import yaml
+from anyio import Path as AsyncPath
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-    import pygit2
 
     from nanopynix.models import JsonValue
 
@@ -23,8 +26,6 @@ def _repo_path(path: str | None = None) -> str:
 def flatten_manifests(
     data: Sequence[JsonValue], subdir: str = "./", kustomize: bool = False
 ) -> list[tuple[str, str]]:
-    import yaml
-
     if not isinstance(data, list):
         raise TypeError(f"expected list, got {type(data).__name__}")
 
@@ -105,8 +106,6 @@ def flatten_manifests(
 
 
 def _build_tree(repo: Any, files: list[tuple[str, str]]) -> Any:
-    import pygit2
-
     index = pygit2.Index()
     for rel_path, content in files:
         blob_id = repo.create_blob(content.encode("utf-8"))
@@ -130,8 +129,6 @@ def snapshot_source_tree(repo_path: str) -> pygit2.Oid:
     natural place to reject a snapshot outright before any git object is
     created from it.
     """
-    import pygit2
-
     repo = pygit2.Repository(_repo_path(repo_path))
     workdir = repo.workdir
     if workdir is None:  # pyright: ignore[reportUnnecessaryComparison] -- pygit2's stub types workdir as always str, but a bare repo returns None at runtime
@@ -177,8 +174,6 @@ def commit_manifests(
     files: list[tuple[str, str]],
     message: str,
 ) -> str:
-    import pygit2
-
     repo = pygit2.Repository(_repo_path(repo_path))
     tree_id = _build_tree(repo, files)
 
@@ -212,8 +207,6 @@ def diff_manifests(
     branch_name: str,
     new_files: list[tuple[str, str]],
 ) -> str | None:
-    import pygit2
-
     repo = pygit2.Repository(_repo_path(repo_path))
     new_tree_id = _build_tree(repo, new_files)
 
@@ -274,8 +267,6 @@ def prepare_deploy_and_source_commits(
     `deploy_branch` (if any) followed by the just-built source commit --
     every deploy commit points at the exact source state that produced it.
     """
-    import pygit2
-
     repo = pygit2.Repository(_repo_path(repo_path))
     author = repo.default_signature
     committer = repo.default_signature
@@ -320,8 +311,6 @@ def finalize_branches(
     from a branch ref (and thus eligible to be pushed) -- a future secrets
     scanner could run here as a final check.
     """
-    import pygit2
-
     repo = pygit2.Repository(_repo_path(repo_path))
 
     if source_branch is not None and _branch_tip(repo, source_branch) != prepared.expected_source_parent:
@@ -362,8 +351,6 @@ def rollback_branches(
     force-pushes anything. Without `to`, walks `deploy_branch`'s
     first-parent history back `steps_back` commits from its current tip.
     """
-    import pygit2
-
     repo = pygit2.Repository(_repo_path(repo_path))
     author = repo.default_signature
     committer = repo.default_signature
@@ -424,7 +411,7 @@ def rollback_branches(
 
 async def try_jj_status(repo_path: str | None = None) -> None:
     root = _repo_path(repo_path)
-    if not Path(root, ".jj").is_dir():
+    if not await AsyncPath(root, ".jj").is_dir():
         return
     if shutil.which("jj") is None:
         return
@@ -436,4 +423,4 @@ async def try_jj_status(repo_path: str | None = None) -> None:
     )
     stdout, _ = await proc.communicate()
     if proc.returncode == 0 and stdout:
-        print(stdout.decode(), end="")
+        sys.stdout.write(stdout.decode())

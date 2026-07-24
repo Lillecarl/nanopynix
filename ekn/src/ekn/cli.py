@@ -8,11 +8,11 @@ import shutil
 import socket
 import sys
 import tempfile
-from collections.abc import Callable
 from pathlib import Path as _Path
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import kr8s.asyncio
+import pygit2
 import rich.traceback
 import structlog
 from anyio import Path
@@ -54,6 +54,9 @@ from ekn.sops import ensure_age_identities, maybe_decrypt
 from nanopynix import NixError
 from nanopynix.models import JsonValue
 from nanopynix.primops import from_yaml11_stream, from_yaml_stream, to_yaml
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _log = structlog.get_logger()
 
@@ -252,7 +255,6 @@ async def _resolve_gitops(
 
 
 def _default_commit_message(attr: str | None) -> str:
-    import pygit2
     try:
         repo = pygit2.Repository(".")
         head_sha = str(repo.head.target)[:7]
@@ -1081,27 +1083,7 @@ class Ekn(Command):
 
     async def run(self) -> None:
         if self.file is None and self.flake is None:
-            print("Usage: ekn [OPTIONS] COMMAND [ARGS]...")
-            print()
-            print("  easykubenix CLI — evaluate Nix and manage GitOps release branches.")
-            print()
-            print("Options:")
-            print("  --file, -f       Nix file to evaluate.")
-            print("  --flake          Flake reference (e.g. '.#myconfig').")
-            print("  --attr, -A       Dot-separated attribute path within the evaluation result.")
-            print()
-            print("Commands:")
-            print("  deploy        Verify, then render and write routed GitOps manifests.")
-            print("  eval          Evaluate Nix and dump JSON.")
-            print("  render        Render Kubernetes manifests as YAML on stdout.")
-            print("  diff          Diff rendered manifests against the GitOps deploy branch.")
-            print("  commit        Render manifests and write them to the GitOps deploy (and source) branch.")
-            print("  rollback      Roll back the GitOps deploy (and source) branch to an older commit.")
-            print("  validate      Boot real etcd+kube-apiserver, apply manifests, run kubeconform.")
-            print("  kubeapply     Apply Kubernetes objects directly against the current kubeconfig context.")
-            print("  clusterdiff   Diff Kubernetes objects against the live cluster's actual current state.")
-            print("  pushcache     Build a Nix attribute and copy its realised closure to a remote store.")
-            raise SystemExit(0)
+            self.print_help()
         result = await _evaluate(self.file, self.flake, self.attr)
         json.dump(result, sys.stdout, indent=2, default=str)
         sys.stdout.write("\n")
