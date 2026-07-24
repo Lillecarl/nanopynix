@@ -112,6 +112,23 @@ async def ssa_apply(
     return result
 
 
+async def apply_one(spec: Manifest, api: Api, *, field_manager: str) -> APIObject:
+    """Build and server-side-apply a single manifest, returning the resulting
+    APIObject.
+
+    The shared "put this object on the cluster" primitive: `apply_and_prune`'s
+    tier loop calls this per discriminator-labeled object it tracks for
+    pruning, and `ekn.sops.ensure_age_identities`' cluster-bootstrap step
+    calls it directly for its Namespace/Secret objects -- which deliberately
+    skip discriminator labeling (they aren't part of any `apply_and_prune`
+    generation and must never be pruned), so that decision stays with each
+    caller rather than being baked in here.
+    """
+    obj = await build_object(spec, api)
+    await ssa_apply(obj, field_manager=field_manager)
+    return obj
+
+
 def _object_key(obj: APIObject) -> tuple[str, str, str]:
     return (obj.namespace or "none", obj.kind, obj.name)
 
@@ -164,8 +181,7 @@ async def apply_and_prune(  # noqa: PLR0913 tracked complexity/arg-count debt, s
         applied: list[APIObject] = []
         for spec in tier:
             labeled = _with_discriminator_label(spec, discriminator_label, discriminator)
-            obj = await build_object(labeled, api)
-            await ssa_apply(obj, field_manager=field_manager)
+            obj = await apply_one(labeled, api, field_manager=field_manager)
             applied.append(obj)
             desired_keys.add(_object_key(obj))
             kinds.add(obj.kind)
@@ -210,6 +226,7 @@ __all__ = [
     "DEFAULT_DISCRIMINATOR_LABEL",
     "Manifest",
     "apply_and_prune",
+    "apply_one",
     "barriers",
     "build_object",
     "ssa_apply",
