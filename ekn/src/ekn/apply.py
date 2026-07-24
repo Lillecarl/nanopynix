@@ -155,6 +155,7 @@ async def apply_and_prune(  # noqa: PLR0913 tracked complexity/arg-count debt, s
     field_manager: str = "ekn",
     crd_establish_timeout: int = 60,
     prune: bool = True,
+    prune_kinds: set[str] | None = None,
 ) -> None:
     """Apply `objects` in barrier order, then (if `prune`) prune anything
     previously applied under the same discriminator that this run no longer
@@ -167,6 +168,13 @@ async def apply_and_prune(  # noqa: PLR0913 tracked complexity/arg-count debt, s
     against; needs a kind list independent of the current apply set (e.g.
     from `kubernetes.apiMappings`) before this drives a real, persistent
     cluster.
+
+    `prune_kinds`, when given, is unioned into the kinds scanned for pruning
+    alongside whatever kinds this apply itself touched -- an additive seam
+    for the eventual fix above (an `apiMappings`-sourced kind list), added
+    now so that fix won't be a breaking signature change later. No caller
+    passes it yet; `None` (the default) preserves today's current-apply-only
+    scanning exactly.
 
     `prune=False` (the default for `ekn kubeapply` against a real cluster,
     e.g. a narrow `--target` slice) avoids pruning objects that are simply
@@ -194,7 +202,7 @@ async def apply_and_prune(  # noqa: PLR0913 tracked complexity/arg-count debt, s
     if not prune:
         return
 
-    for kind in kinds:
+    for kind in kinds | (prune_kinds or set()):
         # kr8s.Api.async_get's `label_selector`/`field_selector` params and its
         # `APIObject | dict` yield type are both bare-`dict`/unannotated
         # upstream, so pyright can't resolve the member or the loop variable.
