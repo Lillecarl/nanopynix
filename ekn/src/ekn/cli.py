@@ -600,7 +600,10 @@ class Rollback(Command):
                 steps_back=self.steps_back,
                 to=self.to,
             )
-        except (ValueError, TypeError) as exc:
+        except (ValueError, TypeError, KeyError) as exc:
+            # pygit2.Repository.revparse_single (called by rollback_branches
+            # for --to) raises KeyError, not ValueError/TypeError, for a
+            # revision spec it can't resolve.
             _log.error("rollback failed: %s", exc)
             raise SystemExit(1) from exc
 
