@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from pathlib import Path
-from typing import TYPE_CHECKING
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ekn.apply import Manifest
+    from ekn.eval import GitOpsManifestsResult
     from nanopynix.models import JsonValue
 
 
@@ -100,4 +103,143 @@ def resolved_targets(gitops_targets: dict[str, JsonValue]) -> dict[GitOpsTarget,
     return dict(result)
 
 
-__all__ = ["GitOpsTarget", "GitOpsTargetError", "load_raw_manifest", "resolved_targets"]
+def flatten_manifests(  # noqa: C901 tracked complexity/arg-count debt, see TODO.md
+    data: Sequence[JsonValue],
+    subdir: str = "./",
+    kustomize: bool = False,
+) -> list[tuple[str, str]]:
+    """Render a list of manifests to `(path, yaml_content)` pairs, optionally
+    alongside a kustomize `kustomization.yaml` (plus a ksops generator for any
+    manifest carrying a `sops` key). Pure YAML/kustomize rendering -- no git
+    involvement, which is why this lives here rather than in git.py."""
+    if not isinstance(data, list):
+        raise TypeError(f"expected list, got {type(data).__name__}")
+
+    base = PurePosixPath(subdir)
+    files: list[tuple[str, str]] = []
+    resources: list[str] = []
+    generators: list[str] = []
+
+    for manifest in data:
+        if not isinstance(manifest, dict):
+            continue
+        metadata = manifest.get("metadata")
+        kind = manifest.get("kind")
+        if not isinstance(metadata, dict) or not isinstance(kind, str):
+            continue
+        namespace = metadata.get("namespace", "none")
+        name = metadata.get("name")
+        if not isinstance(namespace, str) or not isinstance(name, str):
+            continue
+        path = base / namespace / kind / f"{name}.yaml"
+        # CSafeDumper (libyaml-backed) instead of the pure-Python Dumper:
+        # benchmarked ~7.5x faster (5.0s -> 0.67s for a 371-object render,
+        # dominated by CRDs' multi-hundred-KB bodies) with identical output
+        # for plain JSON-like data.
+        yaml_content = yaml.dump(
+            manifest,
+            default_flow_style=False,
+            sort_keys=False,
+            Dumper=yaml.CSafeDumper,
+        )
+        files.append((str(path), yaml_content))
+
+        if not kustomize:
+            continue
+        rel_path = str(path.relative_to(base))
+        if isinstance(manifest.get("sops"), dict):
+            generator_path = base / namespace / kind / f"{name}.ksops-generator.yaml"
+            generator_name = f"{namespace}-{kind.lower()}-{name}-ksops"
+            generator_content = yaml.dump(
+                {
+                    "apiVersion": "viaduct.ai/v1",
+                    "kind": "ksops",
+                    "metadata": {
+                        "name": generator_name,
+                        "annotations": {
+                            "config.kubernetes.io/function": "exec:\n  path: ksops\n",
+                        },
+                    },
+                    # Relative to the kustomization root (where kustomize
+                    # invokes the ksops KRM function from), not to the
+                    # generator file's own directory -- a bare "{name}.yaml"
+                    # here fails at kustomize-build time with "no such file
+                    # or directory" once the generator and plain file live
+                    # in a subdirectory (namespace/kind/), which is always.
+                    "files": [rel_path],
+                },
+                default_flow_style=False,
+                sort_keys=False,
+                Dumper=yaml.CSafeDumper,
+            )
+            files.append((str(generator_path), generator_content))
+            generators.append(str(generator_path.relative_to(base)))
+        else:
+            resources.append(rel_path)
+
+    if kustomize:
+        kustomization: dict[str, Any] = {
+            "apiVersion": "kustomize.config.k8s.io/v1beta1",
+            "kind": "Kustomization",
+        }
+        if resources:
+            kustomization["resources"] = resources
+        if generators:
+            kustomization["generators"] = generators
+        kustomization_content = yaml.dump(
+            kustomization,
+            default_flow_style=False,
+            sort_keys=False,
+            Dumper=yaml.CSafeDumper,
+        )
+        files.append((str(base / "kustomization.yaml"), kustomization_content))
+
+    return files
+
+
+def branches(result: GitOpsManifestsResult) -> tuple[str, str | None]:
+    """Read the instance-wide `(deployBranch, sourceBranch)` pair.
+
+    One pair per easykubenix instance -- an "environment" is just whichever
+    `--file`/`--flake`+`--attr` entrypoint you evaluate, so there is no
+    separate environment concept here. `sourceBranch` is `None` when the
+    dual-commit source-snapshot feature is disabled for this instance.
+    Validated by `GitOpsBranches` (see eval.py) at evaluation time, so
+    there's nothing left to check here.
+    """
+    branch_config = result.config.git_ops
+    return branch_config.deploy_branch, branch_config.source_branch
+
+
+def file_groups(result: GitOpsManifestsResult) -> list[tuple[str, str]]:
+    """Merge every GitOps target's rendered objects into one file list.
+
+    Targets are pure path-routing (`gitOps.targets.<name>.path`) -- there is
+    only one `(deployBranch, sourceBranch)` pair per instance (see
+    `branches`), so there is nothing left to group by branch here.
+    """
+    gitops_targets = result.config.kubernetes.gitops_targets
+    if not gitops_targets:
+        raise GitOpsTargetError("no GitOps-routed Kubernetes objects found")
+
+    routed = resolved_targets(gitops_targets)
+
+    files: dict[str, str] = {}
+    for target, target_manifests in routed.items():
+        for path, content in flatten_manifests(target_manifests, target.path, kustomize=True):
+            existing = files.get(path)
+            if existing is not None and existing != content:
+                raise GitOpsTargetError(f"conflicting generated content for {path}")
+            files[path] = content
+    return list(files.items())
+
+
+__all__ = [
+    "GitOpsTarget",
+    "GitOpsTargetError",
+    "branches",
+    "file_groups",
+    "flatten_manifests",
+    "load_raw_manifest",
+    "resolved_targets",
+]

@@ -44,12 +44,13 @@ from ekn.git import (
     commit_manifests,
     diff_manifests,
     finalize_branches,
-    flatten_manifests,
     prepare_deploy_and_source_commits,
     rollback_branches,
     try_jj_status,
 )
-from ekn.gitops import GitOpsTargetError, resolved_targets
+from ekn.gitops import GitOpsTargetError, flatten_manifests
+from ekn.gitops import branches as gitops_branches
+from ekn.gitops import file_groups as gitops_file_groups
 from ekn.sops import ensure_age_identities, maybe_decrypt
 from nanopynix import NixError
 from nanopynix.models import JsonValue
@@ -116,7 +117,7 @@ async def _evaluate_gitops(
     attr: str | None,
 ) -> GitOpsManifestsResult:
     """Like `_evaluate`, but only forces kubernetes.gitOpsTargets -- the
-    only field Diff/Commit/Deploy read via `_gitops_file_groups`."""
+    only field Diff/Commit/Deploy read via `gitops.file_groups`."""
     try:
         uri, customer = _parse_flake(flake) if flake is not None else (None, None)
         return await evaluate_gitops_manifests(file, uri, customer, attr)
@@ -126,43 +127,6 @@ async def _evaluate_gitops(
     except ValidationError as exc:
         _log.error(f"invalid GitOps config: {exc}")
         raise SystemExit(1) from exc
-
-
-def _gitops_branches(result: GitOpsManifestsResult) -> tuple[str, str | None]:
-    """Read the instance-wide `(deployBranch, sourceBranch)` pair.
-
-    One pair per easykubenix instance -- an "environment" is just whichever
-    `--file`/`--flake`+`--attr` entrypoint you evaluate, so there is no
-    separate environment concept here. `sourceBranch` is `None` when the
-    dual-commit source-snapshot feature is disabled for this instance.
-    Validated by `GitOpsBranches` (see eval.py) at evaluation time, so
-    there's nothing left to check here.
-    """
-    branches = result.config.git_ops
-    return branches.deploy_branch, branches.source_branch
-
-
-def _gitops_file_groups(result: GitOpsManifestsResult) -> list[tuple[str, str]]:
-    """Merge every GitOps target's rendered objects into one file list.
-
-    Targets are pure path-routing (`gitOps.targets.<name>.path`) -- there is
-    only one `(deployBranch, sourceBranch)` pair per instance (see
-    `_gitops_branches`), so there is nothing left to group by branch here.
-    """
-    gitops_targets = result.config.kubernetes.gitops_targets
-    if not gitops_targets:
-        raise GitOpsTargetError("no GitOps-routed Kubernetes objects found")
-
-    routed = resolved_targets(gitops_targets)
-
-    files: dict[str, str] = {}
-    for target, target_manifests in routed.items():
-        for path, content in flatten_manifests(target_manifests, target.path, kustomize=True):
-            existing = files.get(path)
-            if existing is not None and existing != content:
-                raise GitOpsTargetError(f"conflicting generated content for {path}")
-            files[path] = content
-    return list(files.items())
 
 
 class Eval(Command):
@@ -253,14 +217,14 @@ async def _resolve_gitops(
 ) -> tuple[str, str | None, list[tuple[str, str]]]:
     """Evaluate GitOps manifests and return `(deploy_branch, source_branch,
     files)` -- one branch pair per easykubenix instance, see
-    `_gitops_branches`."""
+    `gitops.branches`."""
     result = await _evaluate_gitops(file, flake, attr)
     try:
-        files = _gitops_file_groups(result)
+        files = gitops_file_groups(result)
     except (GitOpsTargetError, TypeError) as exc:
         _log.error("GitOps routing failed: %s", exc)
         raise SystemExit(1) from exc
-    deploy_branch, source_branch = _gitops_branches(result)
+    deploy_branch, source_branch = gitops_branches(result)
     return deploy_branch, source_branch, files
 
 
@@ -866,7 +830,7 @@ class Rollback(Command):
             deploy_branch, source_branch = self.deploy_branch, self.source_branch
         elif has_nix_entrypoint:
             result = await _evaluate_gitops(self.file, self.flake, self.attr)
-            deploy_branch, source_branch = _gitops_branches(result)
+            deploy_branch, source_branch = gitops_branches(result)
         else:
             _log.error("specify --deploy-branch, or --file/--flake to read branches from Nix")
             raise SystemExit(1)
