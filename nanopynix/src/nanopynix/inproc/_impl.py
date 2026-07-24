@@ -56,18 +56,18 @@ if TYPE_CHECKING:
 
 
 BuildMode = nanopynix_store.BuildMode
-GCAction = nanopynix_store.GCAction
 RawEvalState = nanopynix_expr.EvalState
+RawGCAction = nanopynix_store.GCAction
 RawStore = nanopynix_store.Store
 RawValue = nanopynix_expr.Value
 StorePath = nanopynix_store.StorePath
 
 
 _RAW_GC_ACTIONS = {
-    PublicGcAction.RETURN_LIVE: GCAction.ReturnLive,
-    PublicGcAction.RETURN_DEAD: GCAction.ReturnDead,
-    PublicGcAction.DELETE_DEAD: GCAction.DeleteDead,
-    PublicGcAction.DELETE_SPECIFIC: GCAction.DeleteSpecific,
+    PublicGcAction.RETURN_LIVE: RawGCAction.ReturnLive,
+    PublicGcAction.RETURN_DEAD: RawGCAction.ReturnDead,
+    PublicGcAction.DELETE_DEAD: RawGCAction.DeleteDead,
+    PublicGcAction.DELETE_SPECIFIC: RawGCAction.DeleteSpecific,
 }
 
 
@@ -1110,12 +1110,12 @@ def _force_deep_to_python(value: Any) -> Any:
 __all__ = [
     "BuildMode",
     "EvalSession",
-    "GCAction",
     "InprocLockedFlakeReleasedError",
     "InprocSessionClosedError",
     "InprocValueReleasedError",
     "LockedFlake",
     "RawEvalState",
+    "RawGCAction",
     "RawStore",
     "RawValue",
     "ReplSession",

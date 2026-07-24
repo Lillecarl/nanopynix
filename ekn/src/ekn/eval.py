@@ -29,6 +29,7 @@ from nanopynix.rpc import Session
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Generator
 
+    from nanopynix.rpc import EvalSession, ValueProxy
     from nanopynix.verbosity import LogLevelInput
 
 _SESSION_SETTINGS = NixSettings()
@@ -235,6 +236,41 @@ async def _session() -> AsyncGenerator[Session]:
                 sub.unsubscribe()
 
 
+async def _resolve_proxy(
+    eval_: EvalSession,
+    file: str | PathLike[str] | None,
+    flake_uri: str | None,
+    customer: str | None,
+    attr_path: str | None,
+) -> ValueProxy:
+    """Resolve --file/--flake[+--customer] into a proxy, then narrow by
+    attr_path if given -- the branching prelude duplicated verbatim across
+    evaluate_with_fod_update/evaluate_flake_ekn/evaluate_generated_manifests/
+    evaluate_gitops_manifests/evaluate_kubeapply_config/evaluate_cache_config/
+    evaluate_validation_config. Deliberately does not descend into `.config`
+    -- callers that need that (all but evaluate_with_fod_update) do it
+    themselves right after, since evaluate_with_fod_update's retry loop
+    force_json's whatever attr_path picks directly and never descended into
+    `.config`.
+    """
+    if flake_uri is not None:
+        outputs = await eval_.eval_flake(flake_uri)
+        if customer:
+            system = await (await eval_.string("builtins.currentSystem")).force_json()
+            proxy = outputs.attr("eknConfig").attr(str(system)).attr(customer)
+        else:
+            proxy = outputs
+    elif file is not None:
+        proxy = await (await eval_.file(str(file))).auto_call()
+    else:
+        raise ValueError("specify --file or --flake")
+
+    if attr_path:
+        proxy = await select_attr(proxy, attr_path)
+
+    return proxy
+
+
 async def evaluate_file(file: str | PathLike[str], attr_path: str | None) -> object:
     async with (
         _session() as session,
@@ -304,19 +340,7 @@ async def evaluate_with_fod_update(  # noqa: PLR0913 tracked complexity/arg-coun
         while True:
             async with session.capture_logs() as logs:
                 try:
-                    if flake_uri is not None:
-                        outputs = await eval_.eval_flake(flake_uri)
-                        if customer:
-                            system = await (await eval_.string("builtins.currentSystem")).force_json()
-                            proxy = outputs.attr("eknConfig").attr(str(system)).attr(customer)
-                        else:
-                            proxy = outputs
-                    elif file is not None:
-                        proxy = await (await eval_.file(str(file))).auto_call()
-                    else:
-                        raise ValueError("specify --file or --flake")
-                    if attr_path:
-                        proxy = await select_attr(proxy, attr_path)
+                    proxy = await _resolve_proxy(eval_, file, flake_uri, customer, attr_path)
                     return await proxy.force_json()
                 except NixError as exc:
                     error = exc
@@ -367,9 +391,7 @@ async def evaluate_flake_ekn(flake_uri: str, customer: str) -> FlakeEknResult:
         session.store() as store,
         session.eval(store, eval_settings=_profiler_eval_settings()) as eval_,
     ):
-        outputs = await eval_.eval_flake(flake_uri)
-        system = await (await eval_.string("builtins.currentSystem")).force_json()
-        proxy = outputs.attr("eknConfig").attr(str(system)).attr(customer)
+        proxy = await _resolve_proxy(eval_, None, flake_uri, customer, None)
         if await proxy.has_attr("config"):
             proxy = proxy.attr("config")
 
@@ -435,21 +457,7 @@ async def evaluate_generated_manifests(
         t_session_ready = time.monotonic()
         _log_timing("session/store/eval-session setup", t_session_ready - t_start)
 
-        if flake_uri is not None:
-            outputs = await eval_.eval_flake(flake_uri)
-            if customer:
-                system = await (await eval_.string("builtins.currentSystem")).force_json()
-                proxy = outputs.attr("eknConfig").attr(str(system)).attr(customer)
-            else:
-                proxy = outputs
-        elif file is not None:
-            proxy = await (await eval_.file(str(file))).auto_call()
-        else:
-            raise ValueError("specify --file or --flake")
-
-        if attr_path:
-            proxy = await select_attr(proxy, attr_path)
-
+        proxy = await _resolve_proxy(eval_, file, flake_uri, customer, attr_path)
         if await proxy.has_attr("config"):
             proxy = proxy.attr("config")
 
@@ -482,21 +490,7 @@ async def evaluate_gitops_manifests(
         session.store() as store,
         session.eval(store, eval_settings=_profiler_eval_settings()) as eval_,
     ):
-        if flake_uri is not None:
-            outputs = await eval_.eval_flake(flake_uri)
-            if customer:
-                system = await (await eval_.string("builtins.currentSystem")).force_json()
-                proxy = outputs.attr("eknConfig").attr(str(system)).attr(customer)
-            else:
-                proxy = outputs
-        elif file is not None:
-            proxy = await (await eval_.file(str(file))).auto_call()
-        else:
-            raise ValueError("specify --file or --flake")
-
-        if attr_path:
-            proxy = await select_attr(proxy, attr_path)
-
+        proxy = await _resolve_proxy(eval_, file, flake_uri, customer, attr_path)
         if await proxy.has_attr("config"):
             proxy = proxy.attr("config")
 
@@ -520,7 +514,7 @@ async def evaluate_gitops_manifests(
         )
 
 
-async def evaluate_kubeapply_config(  # noqa: C901, PLR0912 tracked complexity/arg-count debt, see TODO.md
+async def evaluate_kubeapply_config(
     file: str | PathLike[str] | None,
     flake_uri: str | None,
     customer: str | None,
@@ -542,21 +536,7 @@ async def evaluate_kubeapply_config(  # noqa: C901, PLR0912 tracked complexity/a
         session.store() as store,
         session.eval(store, eval_settings=_profiler_eval_settings()) as eval_,
     ):
-        if flake_uri is not None:
-            outputs = await eval_.eval_flake(flake_uri)
-            if customer:
-                system = await (await eval_.string("builtins.currentSystem")).force_json()
-                proxy = outputs.attr("eknConfig").attr(str(system)).attr(customer)
-            else:
-                proxy = outputs
-        elif file is not None:
-            proxy = await (await eval_.file(str(file))).auto_call()
-        else:
-            raise ValueError("specify --file or --flake")
-
-        if attr_path:
-            proxy = await select_attr(proxy, attr_path)
-
+        proxy = await _resolve_proxy(eval_, file, flake_uri, customer, attr_path)
         if await proxy.has_attr("config"):
             proxy = proxy.attr("config")
 
@@ -631,21 +611,7 @@ async def evaluate_cache_config(
         session.store() as store,
         session.eval(store, eval_settings=_profiler_eval_settings()) as eval_,
     ):
-        if flake_uri is not None:
-            outputs = await eval_.eval_flake(flake_uri)
-            if customer:
-                system = await (await eval_.string("builtins.currentSystem")).force_json()
-                proxy = outputs.attr("eknConfig").attr(str(system)).attr(customer)
-            else:
-                proxy = outputs
-        elif file is not None:
-            proxy = await (await eval_.file(str(file))).auto_call()
-        else:
-            raise ValueError("specify --file or --flake")
-
-        if attr_path:
-            proxy = await select_attr(proxy, attr_path)
-
+        proxy = await _resolve_proxy(eval_, file, flake_uri, customer, attr_path)
         if await proxy.has_attr("config"):
             proxy = proxy.attr("config")
 
@@ -804,9 +770,7 @@ async def evaluate_validation_config(flake_uri: str, customer: str) -> Validatio
         session.store() as store,
         session.eval(store, eval_settings=_profiler_eval_settings()) as eval_,
     ):
-        outputs = await eval_.eval_flake(flake_uri)
-        system = await (await eval_.string("builtins.currentSystem")).force_json()
-        proxy = outputs.attr("eknConfig").attr(str(system)).attr(customer)
+        proxy = await _resolve_proxy(eval_, None, flake_uri, customer, None)
         return await _validation_config(proxy)
 
 

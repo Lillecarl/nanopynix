@@ -7,9 +7,6 @@ from nanopynix.inproc._impl import (
     EvalSession as EvalSession,
 )
 from nanopynix.inproc._impl import (
-    GCAction as GCAction,
-)
-from nanopynix.inproc._impl import (
     InprocLockedFlakeReleasedError as InprocLockedFlakeReleasedError,
 )
 from nanopynix.inproc._impl import (
@@ -23,6 +20,9 @@ from nanopynix.inproc._impl import (
 )
 from nanopynix.inproc._impl import (
     RawEvalState as RawEvalState,
+)
+from nanopynix.inproc._impl import (
+    RawGCAction as RawGCAction,
 )
 from nanopynix.inproc._impl import (
     RawStore as RawStore,

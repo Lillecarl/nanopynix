@@ -47,7 +47,7 @@ class Show(Command):
         base_ref, _, flake_attr = self.flake_ref.partition("#")
         flake_attr = flake_attr or None
 
-        async with eval_session(self.store, experimental_features=["flakes", "nix-command"]) as (_nix, _store, session):
+        async with eval_session(self.store) as (_nix, _store, session):
             outputs = await session.eval_flake(base_ref)
             if flake_attr:
                 outputs = _navigate(outputs, flake_attr)
@@ -167,7 +167,7 @@ def _format_attr(name: str, nix_type: nanopynix.NixType, nix_type_enum: type[nan
 
 
 async def _print_flake_metadata(flake_ref: str, *, store_uri: str) -> None:
-    async with eval_session(store_uri, experimental_features=["flakes", "nix-command"]) as (_nix, _store, session):
+    async with eval_session(store_uri) as (_nix, _store, session):
         locked = await session.lock_flake(flake_ref, write_lock_file=False)
         try:
             print_json(_locked_flake_to_json(flake_ref, locked))

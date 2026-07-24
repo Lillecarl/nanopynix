@@ -24,6 +24,20 @@ if TYPE_CHECKING:
 _log = structlog.get_logger()
 
 
+def _secret_manifest(name: str, namespace: str, *, string_data: dict[str, JsonValue] | None = None) -> Manifest:
+    """Build a Secret manifest shape -- shared by `ensure_age_identities`'
+    existence check (no `stringData`) and its actual apply (`stringData`
+    set), so the two can't silently drift apart."""
+    manifest: Manifest = {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {"name": name, "namespace": namespace},
+    }
+    if string_data is not None:
+        manifest["stringData"] = string_data
+    return manifest
+
+
 class SopsDecryptError(RuntimeError):
     pass
 
@@ -205,14 +219,7 @@ async def ensure_age_identities(
         secret_name = identity.secret_name
         key = identity.key
 
-        secret = await build_object(
-            {
-                "apiVersion": "v1",
-                "kind": "Secret",
-                "metadata": {"name": secret_name, "namespace": namespace},
-            },
-            api,
-        )
+        secret = await build_object(_secret_manifest(secret_name, namespace), api)
         try:
             await secret.async_refresh()
             # kr8s.APIObject.raw returns a python-box `Box`, whose
@@ -234,12 +241,7 @@ async def ensure_age_identities(
             key_text = await _generate_age_identity()
 
             await apply_one(
-                {
-                    "apiVersion": "v1",
-                    "kind": "Secret",
-                    "metadata": {"name": secret_name, "namespace": namespace},
-                    "stringData": {key: key_text},
-                },
+                _secret_manifest(secret_name, namespace, string_data={key: key_text}),
                 api,
                 field_manager=field_manager,
             )

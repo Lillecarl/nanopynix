@@ -217,20 +217,6 @@ class EphemeralControlPlane:
             _log.error("kubeadm kubeconfig phase failed\n%s", err)
             raise SystemExit(1)
 
-        rc, _, err = await exec_capture(
-            "kubeadm",
-            "init",
-            "phase",
-            "kubeconfig",
-            "admin",
-            f"--config={kubeadm_cfg}",
-            f"--kubeconfig-dir={tmp}",
-            env=self.env,
-        )
-        if rc != 0:
-            _log.error("kubeadm kubeconfig phase failed\n%s", err)
-            raise SystemExit(1)
-
     async def _start_etcd(self, tmp: Path) -> None:
         _log.info("starting etcd")
         self._etcd_proc = await asyncio.create_subprocess_exec(

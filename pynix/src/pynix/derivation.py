@@ -48,7 +48,7 @@ class Show(Command):
             console.print(f"[red]Error:[/red] {exc}")
             raise SystemExit(1) from exc
 
-        async with store_session(self.store, experimental_features=["flakes", "nix-command"]) as (nix, store):
+        async with store_session(self.store) as (nix, store):
             async with nix.eval(store) as session:
                 try:
                     root = await evaluate_target(target, session, auto_call_file=True)

@@ -99,7 +99,7 @@ class Osearch(Command):
             self._search(records, self.query)
 
     async def _build_index(self, target: EvaluationTarget, cache_path: Path) -> list[OptionRecord]:
-        async with eval_session(self.store, experimental_features=["flakes", "nix-command"]) as (_nix, _store, session):
+        async with eval_session(self.store) as (_nix, _store, session):
             try:
                 target_value = await evaluate_target(target, session, auto_call_file=True)
                 options_value = await select_attr(target_value, self.options_attr)
