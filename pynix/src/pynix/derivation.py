@@ -5,12 +5,11 @@ from typing import TYPE_CHECKING, Any, override
 
 import structlog
 from clypi import Command, arg
-from rich.console import Console
 
 if TYPE_CHECKING:
     from nanopynix.rpc import ValueProxy
 
-from pynix._util import print_json, store_session
+from pynix._util import error_exit, print_json, report_and_exit, store_session
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
@@ -21,7 +20,6 @@ from pynix.target import (
 )
 
 logger = structlog.get_logger(__name__)
-console = Console()
 
 _DEFAULT_STORE = "auto"
 
@@ -45,16 +43,14 @@ class Show(Command):
         try:
             target.validate(required=True)
         except EvaluationTargetError as exc:
-            console.print(f"[red]Error:[/red] {exc}")
-            raise SystemExit(1) from exc
+            report_and_exit(exc)
 
         async with store_session(self.store) as (nix, store):
             async with nix.eval(store) as session:
                 try:
                     root = await evaluate_target(target, session, auto_call_file=True)
                 except EvaluationTargetError as exc:
-                    console.print(f"[red]Error:[/red] {exc}")
-                    raise SystemExit(1) from exc
+                    report_and_exit(exc)
 
                 drv_path = await self._get_drv_path(root)
 
@@ -65,16 +61,13 @@ class Show(Command):
     @staticmethod
     async def _get_drv_path(value: ValueProxy) -> str:
         if not await value.has_attr("type"):
-            console.print("[red]Error:[/red] value is not a derivation")
-            raise SystemExit(1)
+            error_exit("value is not a derivation")
         value_type = await value.attr("type").force_json()
         if value_type != "derivation":
-            console.print(f"[red]Error:[/red] value at attribute path is not a derivation (got {value_type!r})")
-            raise SystemExit(1)
+            error_exit(f"value at attribute path is not a derivation (got {value_type!r})")
         drv_path = await value.attr("drvPath").force_json()
         if not isinstance(drv_path, str):
-            console.print("[red]Error:[/red] failed to get derivation path")
-            raise SystemExit(1)
+            error_exit("failed to get derivation path")
         return drv_path
 
     @staticmethod

@@ -15,7 +15,7 @@ from rapidfuzz import fuzz, process
 from rich.console import Console
 
 from pynix._options import OptionRecord, fetch_option_doc_list
-from pynix._util import eval_session, print_json
+from pynix._util import error_console, eval_session, print_json, report_and_exit
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
@@ -28,10 +28,6 @@ from pynix.target import (
 
 logger = structlog.get_logger(__name__)
 console = Console()
-# Build-progress messages (e.g. "indexed N options") go to stderr, not
-# stdout, so `--json-output`'s stdout stays clean, parseable JSON even when
-# the cache also had to be (re)built as part of the same invocation.
-console_err = Console(stderr=True)
 
 _DEFAULT_STORE = "auto"
 
@@ -85,8 +81,7 @@ class Osearch(Command):
         try:
             target.validate(required=True)
         except EvaluationTargetError as exc:
-            console.print(f"[red]Error:[/red] {exc}")
-            raise SystemExit(1) from exc
+            report_and_exit(exc)
 
         cache_path = _cache_path(target, self.options_attr, self.lib_attr)
         records = (
@@ -105,11 +100,10 @@ class Osearch(Command):
                 options_value = await select_attr(target_value, self.options_attr)
                 lib_value = await select_attr(target_value, self.lib_attr)
             except EvaluationTargetError as exc:
-                console.print(f"[red]Error:[/red] {exc}")
-                raise SystemExit(1) from exc
+                report_and_exit(exc)
             records = await fetch_option_doc_list(session, options_value, lib_value)
         _save_cache(cache_path, target, records)
-        console_err.print(f"indexed {len(records)} options from {_target_description(target)}")
+        error_console.print(f"indexed {len(records)} options from {_target_description(target)}")
         return records
 
     def _search(self, records: list[OptionRecord], query: str) -> None:

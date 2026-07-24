@@ -119,7 +119,7 @@ async def test_show_flake_greeting_is_not_derivation(
     with pytest.raises(SystemExit):
         await cmd.astart()
     captured = capsys.readouterr()
-    assert "value is not a derivation" in captured.out
+    assert "value is not a derivation" in captured.err
 
 
 async def test_show_missing_both_errors(capsys: pytest.CaptureFixture[str]) -> None:
@@ -127,7 +127,7 @@ async def test_show_missing_both_errors(capsys: pytest.CaptureFixture[str]) -> N
     with pytest.raises(SystemExit):
         await cmd.astart()
     captured = capsys.readouterr()
-    assert "either --file or --flake is required" in captured.out
+    assert "either --file or --flake is required" in captured.err
 
 
 async def test_show_both_file_and_flake_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -137,7 +137,7 @@ async def test_show_both_file_and_flake_errors(tmp_path: Path, capsys: pytest.Ca
     with pytest.raises(SystemExit):
         await cmd.astart()
     captured = capsys.readouterr()
-    assert "--file and --flake are mutually exclusive" in captured.out
+    assert "--file and --flake are mutually exclusive" in captured.err
 
 
 async def test_show_file_missing_attr_errors(
@@ -161,7 +161,7 @@ async def test_show_file_missing_attr_errors(
     with pytest.raises(SystemExit):
         await cmd.astart()
     captured = capsys.readouterr()
-    assert "attribute 'missing' not found" in strip_ansi(captured.out)
+    assert "attribute 'missing' not found" in strip_ansi(captured.err)
 
 
 async def test_show_file_wrong_type_attr_errors(
@@ -175,7 +175,7 @@ async def test_show_file_wrong_type_attr_errors(
     with pytest.raises(SystemExit):
         await cmd.astart()
     captured = capsys.readouterr()
-    assert "value at attribute path is not a derivation" in captured.out
+    assert "value at attribute path is not a derivation" in captured.err
 
 
 async def test_show_file_non_string_drv_path_errors(
@@ -189,4 +189,4 @@ async def test_show_file_non_string_drv_path_errors(
     with pytest.raises(SystemExit):
         await cmd.astart()
     captured = capsys.readouterr()
-    assert "failed to get derivation path" in captured.out
+    assert "failed to get derivation path" in captured.err

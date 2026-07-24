@@ -6,9 +6,8 @@ from typing import override
 
 import structlog
 from clypi import Command, arg
-from rich.console import Console
 
-from pynix._util import eval_session, print_json
+from pynix._util import error_exit, eval_session, print_json, report_and_exit
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
@@ -19,7 +18,6 @@ from pynix.target import (
 )
 
 logger = structlog.get_logger(__name__)
-console = Console()
 
 _DEFAULT_STORE = "auto"
 
@@ -39,12 +37,10 @@ class Eval(Command):
         try:
             target.validate()
         except EvaluationTargetError as exc:
-            console.print(f"[red]Error:[/red] {exc}")
-            raise SystemExit(1) from exc
+            report_and_exit(exc)
         if target.file is not None or target.flake is not None:
             if self.expr is not None:
-                console.print("[red]Error:[/red] expression argument cannot be combined with --file or --flake")
-                raise SystemExit(1)
+                error_exit("expression argument cannot be combined with --file or --flake")
             expr = None
         elif self.expr is not None:
             expr = self.expr
@@ -61,7 +57,6 @@ class Eval(Command):
                     else await session.string(expr)
                 )
             except EvaluationTargetError as exc:
-                console.print(f"[red]Error:[/red] {exc}")
-                raise SystemExit(1) from exc
+                report_and_exit(exc)
             value = await root.force_json()
             print_json(value)
