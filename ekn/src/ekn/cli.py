@@ -3,13 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
-import shutil
-import socket
 import sys
-import tempfile
 from pathlib import Path as _Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import kr8s.asyncio
 import pygit2
@@ -52,6 +48,7 @@ from ekn.gitops import GitOpsTargetError, flatten_manifests
 from ekn.gitops import branches as gitops_branches
 from ekn.gitops import file_groups as gitops_file_groups
 from ekn.sops import ensure_age_identities, maybe_decrypt
+from ekn.validation import EphemeralControlPlane, exec_capture, prepare_validation_objects
 from nanopynix import NixError
 from nanopynix.models import JsonValue
 from nanopynix.primops import from_yaml11_stream, from_yaml_stream, to_yaml
@@ -60,26 +57,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 _log = structlog.get_logger()
-
-
-async def _exec(
-    *args: str,
-    env: dict[str, str] | None = None,
-    stdin: str | None = None,
-) -> tuple[int, str, str]:
-    proc = await asyncio.create_subprocess_exec(
-        *args,
-        stdin=asyncio.subprocess.PIPE if stdin is not None else None,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-    )
-    stdout, stderr = await proc.communicate(
-        input=stdin.encode() if stdin is not None else None,
-    )
-    if proc.returncode is None:
-        raise RuntimeError("subprocess returncode is unset after communicate() completed")
-    return proc.returncode, stdout.decode(), stderr.decode()
 
 
 def _parse_flake(flake_ref: str) -> tuple[str, str | None]:
@@ -392,12 +369,6 @@ async def _push_ekn_cache(file: _Path | None, flake: str | None, attr: str | Non
     _log.info(f"pushed {cache_package_out} to {cache_to}")
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("", 0))
-        return s.getsockname()[1]
-
-
 class Validate(Command):
     """Boot real etcd+kube-apiserver, apply manifests, and run kubeconform."""
 
@@ -405,7 +376,7 @@ class Validate(Command):
     flake: str | None = arg(None, inherited=True)
     attr: str | None = arg(None, short="A", help="Dot-separated attribute path within the evaluation result.")
 
-    async def run(self) -> None:  # noqa: C901, PLR0912, PLR0915 tracked complexity/arg-count debt, see TODO.md
+    async def run(self) -> None:
         if self.file is not None:
             cfg = await evaluate_validation_file(self.file, self.attr)
         else:
@@ -416,221 +387,19 @@ class Validate(Command):
             cfg = await evaluate_validation_config(uri, customer)
         c = cfg.config
 
-        tmp = Path(tempfile.mkdtemp(suffix="eknvalidation"))
-        cert_dir = str(tmp / "pki")
-        kubeconfig = str(tmp / "admin.conf")
-        kubeadm_cfg = str(tmp / "kubeadm-config.json")
-        schema_file = str(tmp / "k8s-schema.json")
-
-        k8s_bin = c.kubernetes.package.out_path + "/bin"
-        etcd_bin = c.validation.etcd_package.out_path + "/bin"
-        kubeconform_bin = c.validation.kubeconform_package.out_path + "/bin"
         manifest_path = c.internal.manifest_json_file.out_path
+        novalidate_keys = {(k["kind"], k["namespace"], k["name"]) for k in c.novalidate_keys}
 
-        subnet = c.validation.service_subnet
-        bind = "127.0.0.1"
-        k8s_port = _free_port()
-        etcd_client_port = _free_port()
-        etcd_peer_port = _free_port()
-
-        os.environ["CERT_DIR"] = cert_dir
-        os.environ["KUBECONFIG"] = kubeconfig
-        os.environ["BIND_ADDRESS"] = bind
-        os.environ["KUBERNETES_PORT"] = str(k8s_port)
-
-        etcd_proc: asyncio.subprocess.Process | None = None
-        apiserver_proc: asyncio.subprocess.Process | None = None
-
-        try:
-            await Path(cert_dir).mkdir(parents=True)
-            # kubeadmConfig carries literal $BIND_ADDRESS/$KUBERNETES_PORT
-            # placeholders (see easykubenix/validation.nix's
-            # controlPlaneEndpoint) -- the older fish-script validationScript
-            # substituted these via the shell before handing the config to
-            # kubeadm; kubeadm itself does no env-var expansion on its config
-            # files, so do the same substitution here.
-            kubeadm_config_text = (
-                json.dumps(c.validation.kubeadm_config)
-                .replace("$BIND_ADDRESS", bind)
-                .replace("$KUBERNETES_PORT", str(k8s_port))
-                .replace("$CERT_DIR", cert_dir)
-            )
-            await Path(kubeadm_cfg).write_text(kubeadm_config_text)
-
-            env = os.environ | {
-                "PATH": f"{k8s_bin}:{etcd_bin}:{kubeconform_bin}:" + os.environ.get("PATH", ""),
-            }
-
-            rc, _, err = await _exec(
-                "kubeadm",
-                "init",
-                "phase",
-                "certs",
-                "all",
-                f"--config={kubeadm_cfg}",
-                env=env,
-            )
-            if rc != 0:
-                _log.error("kubeadm certs phase failed\n%s", err)
-                raise SystemExit(1)
-
-            rc, _, err = await _exec(
-                "kubeadm",
-                "init",
-                "phase",
-                "kubeconfig",
-                "admin",
-                f"--config={kubeadm_cfg}",
-                f"--kubeconfig-dir={tmp}",
-                env=env,
-            )
-            if rc != 0:
-                _log.error("kubeadm kubeconfig phase failed\n%s", err)
-                raise SystemExit(1)
-
-            rc, _, err = await _exec(
-                "kubeadm",
-                "init",
-                "phase",
-                "kubeconfig",
-                "admin",
-                f"--config={kubeadm_cfg}",
-                f"--kubeconfig-dir={tmp}",
-                env=env,
-            )
-            if rc != 0:
-                _log.error("kubeadm kubeconfig phase failed\n%s", err)
-                raise SystemExit(1)
-
-            _log.info("starting etcd")
-            etcd_proc = await asyncio.create_subprocess_exec(
-                *[
-                    "etcd",
-                    f"--data-dir={tmp}/etcd-data",
-                    "--name=default",
-                    f"--listen-client-urls=https://{bind}:{etcd_client_port}",
-                    f"--advertise-client-urls=https://{bind}:{etcd_client_port}",
-                    f"--listen-peer-urls=https://{bind}:{etcd_peer_port}",
-                    f"--initial-advertise-peer-urls=https://{bind}:{etcd_peer_port}",
-                    f"--initial-cluster=default=https://{bind}:{etcd_peer_port}",
-                    "--client-cert-auth=true",
-                    f"--trusted-ca-file={cert_dir}/etcd/ca.crt",
-                    f"--cert-file={cert_dir}/etcd/server.crt",
-                    f"--key-file={cert_dir}/etcd/server.key",
-                    "--peer-client-cert-auth=true",
-                    f"--peer-trusted-ca-file={cert_dir}/etcd/ca.crt",
-                    f"--peer-cert-file={cert_dir}/etcd/peer.crt",
-                    f"--peer-key-file={cert_dir}/etcd/peer.key",
-                    "--log-level=error",
-                ],
-                env=env,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
-            for attempt in range(10):
-                rc, _, err = await _exec(
-                    "etcdctl",
-                    f"--endpoints=https://{bind}:{etcd_client_port}",
-                    f"--cacert={cert_dir}/etcd/ca.crt",
-                    f"--cert={cert_dir}/etcd/healthcheck-client.crt",
-                    f"--key={cert_dir}/etcd/healthcheck-client.key",
-                    "endpoint",
-                    "health",
-                    env=env,
-                )
-                if rc == 0:
-                    break
-                await asyncio.sleep(attempt * 0.5)
-            else:
-                _log.error("etcd failed to start\n%s", err)
-                if etcd_proc.returncode is not None and etcd_proc.stderr is not None:
-                    etcd_err = await etcd_proc.stderr.read()
-                    _log.error(etcd_err.decode())
-                raise SystemExit(1)
-
-            _log.info("starting kube-apiserver")
-            apiserver_proc = await asyncio.create_subprocess_exec(
-                *[
-                    "kube-apiserver",
-                    "--watch-cache=false",
-                    "--anonymous-auth=false",
-                    f"--etcd-cafile={cert_dir}/etcd/ca.crt",
-                    f"--etcd-certfile={cert_dir}/apiserver-etcd-client.crt",
-                    f"--etcd-keyfile={cert_dir}/apiserver-etcd-client.key",
-                    f"--etcd-servers=https://{bind}:{etcd_client_port}",
-                    f"--service-cluster-ip-range={subnet}",
-                    f"--bind-address={bind}",
-                    f"--secure-port={k8s_port}",
-                    "--allow-privileged=true",
-                    f"--client-ca-file={cert_dir}/ca.crt",
-                    f"--kubelet-client-certificate={cert_dir}/apiserver-kubelet-client.crt",
-                    f"--kubelet-client-key={cert_dir}/apiserver-kubelet-client.key",
-                    "--service-account-issuer=https://kubernetes.default.svc.cluster.local",
-                    f"--service-account-key-file={cert_dir}/sa.pub",
-                    f"--service-account-signing-key-file={cert_dir}/sa.key",
-                    f"--tls-cert-file={cert_dir}/apiserver.crt",
-                    f"--tls-private-key-file={cert_dir}/apiserver.key",
-                ],
-                env=env,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
-            for attempt in range(10):
-                rc, _, err = await _exec(
-                    "kubectl",
-                    "get",
-                    "--raw",
-                    "/healthz",
-                    env=env,
-                )
-                if rc == 0:
-                    break
-                await asyncio.sleep(attempt * 0.5)
-            else:
-                _log.error("kube-apiserver failed to start\n%s", err)
-                if apiserver_proc.returncode is not None and apiserver_proc.stderr is not None:
-                    apiserver_err = await apiserver_proc.stderr.read()
-                    _log.error(apiserver_err.decode())
-                raise SystemExit(1)
-
+        async with EphemeralControlPlane(
+            k8s_bin=c.kubernetes.package.out_path + "/bin",
+            etcd_bin=c.validation.etcd_package.out_path + "/bin",
+            kubeconform_bin=c.validation.kubeconform_package.out_path + "/bin",
+            service_subnet=c.validation.service_subnet,
+            kubeadm_config=c.validation.kubeadm_config,
+        ) as plane:
             _log.info("applying manifests")
-            manifest_list: JsonValue = json.loads(await Path(manifest_path).read_text())
-            unwrapped = manifest_list["items"] if isinstance(manifest_list, dict) else manifest_list
-            if not isinstance(unwrapped, list):
-                _log.error("internal.manifestJSONFile did not produce a list of objects")
-                raise SystemExit(1)
-            # internal.manifestJSONFile always contains one k8s object dict
-            # per list entry -- see kubernetes.nix's `internal.nix`.
-            objects = cast("list[dict[str, Any]]", unwrapped)
-            # Skip objects that can never be meaningfully verified in this
-            # throwaway, controller-less apiserver (e.g. an aggregated
-            # APIService whose backing Service/Pod never actually runs
-            # here) -- see kubernetes.nix's `ekn.novalidate`/`novalidateKeys`.
-            novalidate_keys = {(k["kind"], k["namespace"], k["name"]) for k in c.novalidate_keys}
-            if novalidate_keys:
-                skipped = [
-                    obj
-                    for obj in objects
-                    if (obj["kind"], obj.get("metadata", {}).get("namespace", "none"), obj["metadata"]["name"])
-                    in novalidate_keys
-                ]
-                for obj in skipped:
-                    _log.debug(
-                        "skipping (novalidate)",
-                        kind=obj["kind"],
-                        namespace=obj.get("metadata", {}).get("namespace"),
-                        name=obj["metadata"]["name"],
-                    )
-                objects = [
-                    obj
-                    for obj in objects
-                    if (obj["kind"], obj.get("metadata", {}).get("namespace", "none"), obj["metadata"]["name"])
-                    not in novalidate_keys
-                ]
-            objects = [await maybe_decrypt(obj) for obj in objects]
-            kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig)
+            objects = await prepare_validation_objects(manifest_path, novalidate_keys)
+            kr8s_api = await kr8s.asyncio.api(kubeconfig=plane.kubeconfig)
             try:
                 await apply_and_prune(
                     objects,
@@ -652,26 +421,20 @@ class Validate(Command):
                 raise SystemExit(1) from exc
 
             _log.info("dumping OpenAPI schema")
-            rc, out, err = await _exec(
-                "kubectl",
-                "get",
-                "--raw",
-                "/openapi/v2",
-                env=env,
-            )
+            rc, out, err = await exec_capture("kubectl", "get", "--raw", "/openapi/v2", env=plane.env)
             if rc != 0:
                 _log.error("OpenAPI schema dump failed\n%s", err)
                 raise SystemExit(1)
-            await Path(schema_file).write_text(out)
+            await Path(plane.schema_file).write_text(out)
 
             _log.info("running kubeconform")
             manifest_data = await Path(manifest_path).read_text()
-            rc, out, err = await _exec(
+            rc, out, err = await exec_capture(
                 "kubeconform",
-                f"-schema-location={schema_file}",
+                f"-schema-location={plane.schema_file}",
                 "-summary",
                 stdin=manifest_data,
-                env=env,
+                env=plane.env,
             )
             sys.stdout.write(out)
             if rc != 0:
@@ -679,16 +442,6 @@ class Validate(Command):
                 raise SystemExit(1)
 
             _log.info("Your manifests are as valid as they can be against Kubernetes %s", c.kubernetes.package.version)
-
-        finally:
-            for proc in (etcd_proc, apiserver_proc):
-                if proc and proc.returncode is None:
-                    proc.terminate()
-                    try:
-                        await asyncio.wait_for(proc.wait(), timeout=5)
-                    except TimeoutError:
-                        proc.kill()
-            shutil.rmtree(tmp, ignore_errors=True)
 
 
 class Deploy(Commit):
@@ -906,7 +659,7 @@ class KubeApply(Command):
 
     async def run(self) -> None:
         if self.confirm_context is not None:
-            rc, out, _ = await _exec("kubectl", "config", "current-context")
+            rc, out, _ = await exec_capture("kubectl", "config", "current-context")
             current = out.strip()
             if rc != 0 or not current.endswith(self.confirm_context):
                 _log.warning(f"current kubectl context is {current!r}, not *{self.confirm_context}")
