@@ -26,7 +26,8 @@ from nanopynix_proto.nix.worker import (
 )
 
 from nanopynix._core._nix_executor import NixThreadExecutor
-from nanopynix.models import HandleKind, NixType
+from nanopynix._wire import HandleKind
+from nanopynix.models import NixType
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
 from nanopynix.rpc.client._session import EvalSession, ValueReleasedError
 from nanopynix.rpc.client.store import StoreHandle

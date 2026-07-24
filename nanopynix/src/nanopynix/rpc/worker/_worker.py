@@ -59,14 +59,14 @@ from nanopynix_proto.nix.worker import (
 
 from nanopynix._core._local import LocalRuntime
 from nanopynix._process_title import set_process_title, set_worker_title
-from nanopynix.logging import LogCollector, LogStreamEventKind
-from nanopynix.models import (
+from nanopynix._wire import (
     NIX_CONFIG_ENV,
     NIX_USER_CONF_FILES_ENV,
     WORKER_INIT_STATUS_OK,
     HandleKind,
-    PrimOpSpec,
 )
+from nanopynix.logging import LogCollector, LogStreamEventKind
+from nanopynix.models import PrimOpSpec
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
 from nanopynix.rpc.worker._handle_registry import HandleRegistry
 from nanopynix.rpc.worker._worker_eval import EvalServiceHandler, close_eval_state, find_evals_by_store

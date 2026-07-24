@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar
 from nanopynix_bindings.store import BuildMode
 from nanopynix_proto.nix.store import GcAction
 
-from nanopynix.models import NO_GC_LIMIT
+from nanopynix._wire import NO_GC_LIMIT
 
 if TYPE_CHECKING:
     from nanopynix.models import BuildResult, Derivation, GcResult, MissingInfo, PathInfo, StorePath

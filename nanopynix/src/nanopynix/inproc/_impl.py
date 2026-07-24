@@ -27,11 +27,9 @@ from nanopynix_proto.nix.store import GcAction as PublicGcAction
 from nanopynix._core._extract import locked_flake as _locked_flake_proto
 from nanopynix._core._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
 from nanopynix._core._nix_executor import NixThreadExecutor
+from nanopynix._wire import DEFAULT_STORE_URI, NIX_USER_CONF_FILES_ENV, NO_GC_LIMIT
 from nanopynix.logging import BusSubscription, CallbackBus, LogCollector, LogStreamEventKind
 from nanopynix.models import (
-    DEFAULT_STORE_URI,
-    NIX_USER_CONF_FILES_ENV,
-    NO_GC_LIMIT,
     BuildResult,
     Derivation,
     GcResult,

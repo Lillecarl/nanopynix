@@ -25,8 +25,8 @@ from nanopynix_proto.nix.worker import (
 )
 
 import nanopynix.rpc.worker._worker as worker  # type: ignore[reportPrivateUsage] -- test imports private module
+from nanopynix._wire import HandleKind
 from nanopynix.logging import LogCollector
-from nanopynix.models import HandleKind
 from nanopynix.rpc.worker._worker import (  # type: ignore[reportPrivateUsage] -- test imports private module
     WorkerServiceHandler,
     WorkerState,

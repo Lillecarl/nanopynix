@@ -8,7 +8,7 @@ from betterproto2 import Casing, OutputFormat
 from nanopynix_bindings import store as nanopynix_store
 from nanopynix_proto.nix.store import StoreServiceBase
 
-from nanopynix.models import HandleKind
+from nanopynix._wire import HandleKind
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
 from nanopynix.rpc.worker._service_adapter import GeneratedServiceAdapterMixin, HandleArgSpec
 

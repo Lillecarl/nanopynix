@@ -25,7 +25,8 @@ from nanopynix_proto.nix.common import LogEvent as LogEventProto
 from nanopynix_proto.nix.common import LogLevel
 
 from nanopynix._process_title import set_manager_title
-from nanopynix.models import DEFAULT_STORE_URI, LogEvent, PrimOpSpec
+from nanopynix._wire import DEFAULT_STORE_URI
+from nanopynix.models import LogEvent, PrimOpSpec
 from nanopynix.rpc.client._pool import ACTIVE_LOG_CAPTURES, WorkerClient
 from nanopynix.rpc.client._session import EvalSession, ReplSession
 from nanopynix.rpc.client.store import Store, StoreHandle

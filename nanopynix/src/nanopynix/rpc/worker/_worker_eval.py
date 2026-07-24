@@ -80,7 +80,7 @@ from nanopynix._core._codec import python_to_scalar
 from nanopynix._core._extract import flake_ref_attrs as _flake_ref_attrs
 from nanopynix._core._extract import locked_flake as _locked_flake
 from nanopynix._core._local import LocalLockedFlake, LocalValue
-from nanopynix.models import HandleKind
+from nanopynix._wire import HandleKind
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
 from nanopynix.rpc.worker._service_adapter import (
     _proto_shape,  # type: ignore[reportPrivateUsage] -- internal module registry pattern

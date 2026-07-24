@@ -13,7 +13,7 @@ from nanopynix_proto.nix.common import LogEvent
 from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
 
 from nanopynix._core._codec import deep_value_to_python, python_to_deep_value
-from nanopynix.models import CALL_ROUTE
+from nanopynix._wire import CALL_ROUTE
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping

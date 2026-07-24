@@ -14,7 +14,7 @@ from nanopynix._core._local import (  # type: ignore[reportPrivateUsage] -- test
     LocalEvalState,
     LocalStore,
 )
-from nanopynix.models import HandleKind
+from nanopynix._wire import HandleKind
 from nanopynix.rpc.worker._handle_registry import (
     HandleRegistry,  # type: ignore[reportPrivateUsage] -- test imports private module
 )
