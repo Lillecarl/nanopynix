@@ -1,4 +1,3 @@
-# ruff: noqa: F401
 # pyright: reportUnusedImport=false
 """Reusable building blocks layered on nanopynix, kept out of its core to avoid pulling in dependencies (e.g. tree-sitter) that most nanopynix consumers don't need."""
 

@@ -9,7 +9,11 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     import pygit2
+
+    from nanopynix.models import JsonValue
 
 
 def _repo_path(path: str | None = None) -> str:
@@ -17,7 +21,7 @@ def _repo_path(path: str | None = None) -> str:
 
 
 def flatten_manifests(
-    data: object, subdir: str = "./", kustomize: bool = False
+    data: Sequence[JsonValue], subdir: str = "./", kustomize: bool = False
 ) -> list[tuple[str, str]]:
     import yaml
 
@@ -137,7 +141,7 @@ def snapshot_source_tree(repo_path: str) -> pygit2.Oid:
     index = pygit2.Index()
     for root, dirnames, filenames in os.walk(workdir):
         root_path = Path(root)
-        kept_dirnames = []
+        kept_dirnames: list[str] = []
         for dirname in dirnames:
             if dirname in (".git", ".jj"):
                 continue
@@ -196,7 +200,7 @@ def commit_manifests(
     )
 
     commit = repo[commit_id]
-    if not isinstance(commit, pygit2.Commit):
+    if not isinstance(commit, pygit2.Commit):  # pyright: ignore[reportUnnecessaryIsInstance] -- pygit2-stubs models Object/Commit as unrelated siblings of an invariant generic _ObjectBase[T] (different type args), so pyright thinks this can never match, even though pygit2.Commit.__mro__ shows Commit genuinely subclasses Object at runtime
         msg = f"expected Commit, got {type(commit).__name__}"
         raise TypeError(msg)
     repo.create_branch(branch_name, commit, True)
@@ -336,7 +340,7 @@ def finalize_branches(
 
     for branch_name, oid in pairs:
         commit = repo[oid]
-        if not isinstance(commit, pygit2.Commit):  # pyright: ignore[reportUnnecessaryIsInstance] -- defensive: repo[oid] is typed Object-derived at runtime even though the stub narrows Oid lookups to Commit
+        if not isinstance(commit, pygit2.Commit):  # pyright: ignore[reportUnnecessaryIsInstance] -- pygit2-stubs models Object/Commit as unrelated siblings of an invariant generic _ObjectBase[T] (different type args), so pyright thinks this can never match, even though pygit2.Commit.__mro__ shows Commit genuinely subclasses Object at runtime
             msg = f"expected Commit, got {type(commit).__name__}"
             raise TypeError(msg)
         if branch_name in repo.branches.local:
@@ -372,7 +376,7 @@ def rollback_branches(
         target_commit = repo.revparse_single(to).peel(pygit2.Commit)
     else:
         target_commit = repo[deploy_tip]
-        if not isinstance(target_commit, pygit2.Commit):  # pyright: ignore[reportUnnecessaryIsInstance] -- defensive: repo[oid] is typed Object-derived at runtime even though the stub narrows Oid lookups to Commit
+        if not isinstance(target_commit, pygit2.Commit):  # pyright: ignore[reportUnnecessaryIsInstance] -- pygit2-stubs models Object/Commit as unrelated siblings of an invariant generic _ObjectBase[T] (different type args), so pyright thinks this can never match, even though pygit2.Commit.__mro__ shows Commit genuinely subclasses Object at runtime
             msg = f"expected Commit, got {type(target_commit).__name__}"
             raise TypeError(msg)
         for _ in range(steps_back):

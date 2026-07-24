@@ -6,16 +6,19 @@ import json
 import re
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import kr8s
 import structlog
 import yaml
 
-from ekn.apply import _build_object, ssa_apply
+from ekn.apply import build_object, ssa_apply
 
 if TYPE_CHECKING:
     from kr8s._api import Api  # kr8s.asyncio.api() returns this, not kr8s.Api
+
+    from ekn.apply import Manifest
+    from nanopynix.models import JsonValue
 
 _log = structlog.get_logger()
 
@@ -32,7 +35,7 @@ class SopsUpdateKeysError(RuntimeError):
     pass
 
 
-async def maybe_decrypt(obj: dict[str, Any]) -> dict[str, Any]:
+async def maybe_decrypt(obj: Manifest) -> Manifest:
     """Decrypt `obj` via the real `sops` CLI if it carries a `sops:`
     metadata block (the standard marker SOPS itself writes) -- otherwise
     return it unchanged.
@@ -43,6 +46,16 @@ async def maybe_decrypt(obj: dict[str, Any]) -> dict[str, Any]:
     git tree) untouched. This is the one place a direct apply (`ekn
     kubeapply`/`ekn validate` -- both bypass ArgoCD+kustomize+ksops
     entirely) needs to actually decrypt before the apiserver can use it.
+
+    `--ignore-mac`: `obj` reached us via a Nix eval (`kubernetes.generated`
+    -> JSON), and `builtins.toJSON` always alphabetizes attrset keys --
+    every object here has a different key order than the on-disk file SOPS
+    computed its whole-document MAC against, so that MAC would fail on
+    every single object, not just tampered ones. Each field is still
+    independently authenticated (its own AES-GCM tag from the `ENC[...]`
+    value), so this only drops the additional whole-document consistency
+    check that Nix's reordering makes unusable here -- it does not disable
+    per-field decryption authentication.
     """
     if not isinstance(obj.get("sops"), dict):
         return obj
@@ -50,6 +63,7 @@ async def maybe_decrypt(obj: dict[str, Any]) -> dict[str, Any]:
     proc = await asyncio.create_subprocess_exec(
         "sops",
         "--decrypt",
+        "--ignore-mac",
         "--input-type",
         "json",
         "--output-type",
@@ -62,11 +76,13 @@ async def maybe_decrypt(obj: dict[str, Any]) -> dict[str, Any]:
     stdout, stderr = await proc.communicate(json.dumps(obj).encode())
     if proc.returncode != 0:
         kind = obj.get("kind", "?")
-        name = obj.get("metadata", {}).get("name", "?")
+        metadata_value = obj.get("metadata") or {}
+        metadata: Manifest = metadata_value if isinstance(metadata_value, dict) else {}
+        name = metadata.get("name", "?")
         raise SopsDecryptError(
             f"sops --decrypt failed for {kind}/{name}: {stderr.decode()}"
         )
-    decrypted = json.loads(stdout)
+    decrypted: JsonValue = json.loads(stdout)
     if not isinstance(decrypted, dict):
         raise SopsDecryptError(f"sops --decrypt returned non-object JSON: {stdout!r}")
     return decrypted
@@ -107,20 +123,27 @@ def _add_recipient_to_sops_config(
     knows whether `sops updatekeys` needs to run at all.
     """
     path = Path(config_file)
-    config = yaml.safe_load(path.read_text()) or {}
-    rules = config.get("creation_rules") or []
-    if not isinstance(rules, list):
+    loaded: JsonValue = yaml.safe_load(path.read_text())
+    config: Manifest = loaded if isinstance(loaded, dict) else {}
+    rules_value: JsonValue = config.get("creation_rules") or []
+    if not isinstance(rules_value, list):
         raise SopsUpdateKeysError(f"{config_file}: creation_rules is not a list")
 
     base_dir = path.parent
     relative_files = [str(Path(f).resolve().relative_to(base_dir.resolve())) for f in sops_files]
 
     changed = False
-    for rule in rules:
+    for rule in rules_value:
+        if not isinstance(rule, dict):
+            raise SopsUpdateKeysError(f"{config_file}: creation_rules entry must be an attribute set")
         pattern = rule.get("path_regex")
-        if not pattern or not any(re.search(pattern, f) for f in relative_files):
+        if not isinstance(pattern, str) or not pattern:
             continue
-        existing = [k.strip() for k in (rule.get("age") or "").split(",") if k.strip()]
+        if not any(re.search(pattern, f) for f in relative_files):
+            continue
+        age_value = rule.get("age")
+        age_str = age_value if isinstance(age_value, str) else ""
+        existing = [k.strip() for k in age_str.split(",") if k.strip()]
         if public_key in existing:
             continue
         rule["age"] = ",".join([*existing, public_key])
@@ -129,6 +152,17 @@ def _add_recipient_to_sops_config(
     if changed:
         path.write_text(yaml.safe_dump(config, sort_keys=False))
     return changed
+
+
+def _as_str_list(value: JsonValue, field: str) -> list[str]:
+    if not isinstance(value, list):
+        raise SopsUpdateKeysError(f"{field} must be a list of strings")
+    strings: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise SopsUpdateKeysError(f"{field} must be a list of strings")
+        strings.append(item)
+    return strings
 
 
 async def _run_sops_updatekeys(config_file: str, sops_files: list[str]) -> None:
@@ -151,7 +185,7 @@ async def _run_sops_updatekeys(config_file: str, sops_files: list[str]) -> None:
 
 
 async def ensure_age_identities(
-    identities: list[dict[str, Any]],
+    identities: list[Manifest],
     *,
     api: Api,
     field_manager: str = "ekn",
@@ -182,8 +216,10 @@ async def ensure_age_identities(
         namespace = identity["namespace"]
         secret_name = identity["secretName"]
         key = identity.get("key", "key.txt")
+        if not isinstance(namespace, str) or not isinstance(secret_name, str) or not isinstance(key, str):
+            raise TypeError("sopsAgeIdentities entry's namespace/secretName/key must be strings")
 
-        secret = await _build_object(
+        secret = await build_object(
             {
                 "apiVersion": "v1",
                 "kind": "Secret",
@@ -193,20 +229,24 @@ async def ensure_age_identities(
         )
         try:
             await secret.async_refresh()
-            key_text = base64.b64decode(secret.raw["data"][key]).decode()
+            # kr8s.APIObject.raw returns a python-box `Box`, whose
+            # __getitem__/get etc. ship with zero type annotations upstream
+            # (box/box.py) -- pyright can't resolve indexing through it at
+            # all, with or without an intervening annotated variable.
+            key_text = base64.b64decode(secret.raw["data"][key]).decode()  # pyright: ignore[reportUnknownArgumentType]
         except kr8s.NotFoundError:
             # The Secret's own namespace may not exist yet either (e.g. a
             # fresh bootstrap target whose Namespace object hasn't been
             # applied in this same `ekn kubeapply` run) -- ensure it
             # directly rather than depending on apply ordering.
-            namespace_obj = await _build_object(
+            namespace_obj = await build_object(
                 {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}}, api
             )
             await ssa_apply(namespace_obj, field_manager=field_manager)
 
             key_text = await _generate_age_identity()
 
-            secret_obj = await _build_object(
+            secret_obj = await build_object(
                 {
                     "apiVersion": "v1",
                     "kind": "Secret",
@@ -223,7 +263,9 @@ async def ensure_age_identities(
         sops_config_file = identity.get("sopsConfigFile")
         if not sops_config_file:
             continue
-        sops_files = identity.get("sopsFiles") or []
+        if not isinstance(sops_config_file, str):
+            raise TypeError("sopsAgeIdentities entry's sopsConfigFile must be a string")
+        sops_files = _as_str_list(identity.get("sopsFiles") or [], "sopsAgeIdentities entry's sopsFiles")
         if _add_recipient_to_sops_config(sops_config_file, sops_files, public_key):
             await _run_sops_updatekeys(sops_config_file, sops_files)
             _log.info(

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import kr8s
 import structlog
 from kr8s.asyncio.objects import APIObject, get_class, new_class
+
+from nanopynix.models import JsonValue
 
 if TYPE_CHECKING:
     from kr8s._api import Api  # kr8s.asyncio.api() returns this, not kr8s.Api
@@ -15,10 +17,12 @@ _log = structlog.get_logger()
 DEFAULT_DISCRIMINATOR_LABEL = "ekn.dev/discriminator"
 _DEFAULT_BARRIER_PRIORITY = 100
 
+type Manifest = dict[str, JsonValue]
+
 
 def barriers(
-    objects: list[dict[str, Any]], resource_priority: dict[str, int]
-) -> list[list[dict[str, Any]]]:
+    objects: list[Manifest], resource_priority: dict[str, int]
+) -> list[list[Manifest]]:
     """Group objects into ordered apply barriers by kind priority.
 
     Mirrors kluctl's resourcePriority: objects whose kind has a lower
@@ -27,14 +31,16 @@ def barriers(
     become Established) before the next barrier starts. Kinds with no
     configured priority all land together in one final barrier.
     """
-    grouped: dict[int, list[dict[str, Any]]] = {}
+    grouped: dict[int, list[Manifest]] = {}
     for obj in objects:
-        priority = resource_priority.get(obj.get("kind", ""), _DEFAULT_BARRIER_PRIORITY)
+        kind = obj.get("kind", "")
+        kind_str = kind if isinstance(kind, str) else ""
+        priority = resource_priority.get(kind_str, _DEFAULT_BARRIER_PRIORITY)
         grouped.setdefault(priority, []).append(obj)
     return [grouped[priority] for priority in sorted(grouped)]
 
 
-async def _build_object(spec: dict[str, Any], api: Api) -> APIObject:
+async def build_object(spec: Manifest, api: Api) -> APIObject:
     """Turn a raw manifest dict into a kr8s APIObject, resolving plural/
     namespaced-ness for kinds kr8s doesn't have a builtin class for (i.e.
     almost every CRD) against the live API server's own discovery info --
@@ -42,7 +48,11 @@ async def _build_object(spec: dict[str, Any], api: Api) -> APIObject:
     guessing a plural by string mangling.
     """
     kind = spec["kind"]
+    if not isinstance(kind, str):
+        raise TypeError(f"manifest 'kind' must be a string, got {type(kind).__name__}")
     api_version = spec.get("apiVersion", "v1")
+    if not isinstance(api_version, str):
+        raise TypeError(f"manifest 'apiVersion' must be a string, got {type(api_version).__name__}")
     try:
         cls = get_class(kind, api_version)
     except KeyError:
@@ -57,7 +67,7 @@ async def _build_object(spec: dict[str, Any], api: Api) -> APIObject:
 
 async def ssa_apply(
     obj: APIObject, *, field_manager: str, force: bool = True, dry_run: bool = False
-) -> dict[str, Any]:
+) -> Manifest:
     """Server-side apply.
 
     kr8s's `.patch()` only supports merge-patch/json-patch content types --
@@ -88,7 +98,9 @@ async def ssa_apply(
         headers={"Content-Type": "application/apply-patch+yaml"},
         params=params,
     ) as resp:
-        result = resp.json()
+        result: JsonValue = resp.json()
+    if not isinstance(result, dict):
+        raise TypeError(f"server-side apply response must be an object, got {type(result).__name__}")
     if not dry_run:
         obj.raw = result
     return result
@@ -98,12 +110,12 @@ def _object_key(obj: APIObject) -> tuple[str, str, str]:
     return (obj.namespace or "none", obj.kind, obj.name)
 
 
-def _with_discriminator_label(
-    spec: dict[str, Any], label: str, value: str
-) -> dict[str, Any]:
+def _with_discriminator_label(spec: Manifest, label: str, value: str) -> Manifest:
     labeled = dict(spec)
-    metadata = dict(labeled.get("metadata") or {})
-    labels = dict(metadata.get("labels") or {})
+    metadata_value = labeled.get("metadata") or {}
+    metadata: Manifest = dict(metadata_value) if isinstance(metadata_value, dict) else {}
+    labels_value = metadata.get("labels") or {}
+    labels: dict[str, JsonValue] = dict(labels_value) if isinstance(labels_value, dict) else {}
     labels[label] = value
     metadata["labels"] = labels
     labeled["metadata"] = metadata
@@ -111,7 +123,7 @@ def _with_discriminator_label(
 
 
 async def apply_and_prune(
-    objects: list[dict[str, Any]],
+    objects: list[Manifest],
     *,
     api: Api,
     discriminator: str,
@@ -146,7 +158,7 @@ async def apply_and_prune(
         applied: list[APIObject] = []
         for spec in tier:
             labeled = _with_discriminator_label(spec, discriminator_label, discriminator)
-            obj = await _build_object(labeled, api)
+            obj = await build_object(labeled, api)
             await ssa_apply(obj, field_manager=field_manager)
             applied.append(obj)
             desired_keys.add(_object_key(obj))
@@ -188,4 +200,11 @@ async def apply_and_prune(
                 await obj.delete()
 
 
-__all__ = ["DEFAULT_DISCRIMINATOR_LABEL", "apply_and_prune", "barriers", "ssa_apply"]
+__all__ = [
+    "DEFAULT_DISCRIMINATOR_LABEL",
+    "Manifest",
+    "apply_and_prune",
+    "barriers",
+    "build_object",
+    "ssa_apply",
+]

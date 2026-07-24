@@ -3,11 +3,10 @@ from __future__ import annotations
 import os
 import sys
 import time
-from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from os import PathLike
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from anyio import Path
 from nanopynix_helpers.eval_target import select_attr
@@ -24,7 +23,11 @@ from pydantic import BaseModel, Field, StringConstraints
 from nanopynix import NixError, NixEvalSettings, NixSettings, Session
 from nanopynix.models import JsonValue, LogEvent
 from nanopynix.primops import yaml_primops
-from nanopynix.verbosity import LogLevelInput
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator, Generator
+
+    from nanopynix.verbosity import LogLevelInput
 
 _SESSION_SETTINGS = NixSettings()
 
@@ -53,7 +56,7 @@ class GitOpsBranches(BaseModel):
 
 
 class _GitOpsKubernetesConfig(BaseModel):
-    gitops_targets: dict[str, Any] = Field(alias="gitOpsTargets")
+    gitops_targets: dict[str, JsonValue] = Field(alias="gitOpsTargets")
 
 
 class _GitOpsManifestsConfig(BaseModel):
@@ -149,7 +152,7 @@ def _print_log_event(raw: object) -> None:
 
 
 @contextmanager
-def verbose_session(verbosity: LogLevelInput, *, print_build_logs: bool) -> Iterator[None]:
+def verbose_session(verbosity: LogLevelInput, *, print_build_logs: bool) -> Generator[None]:
     """Turn up nanopynix's own logging for every `_session()` opened inside
     this block -- real Nix build/eval progress that `nix run
     --print-build-logs` can't see (that flag only covers building the `ekn`
@@ -182,7 +185,7 @@ def _profiler_eval_settings() -> NixEvalSettings | None:
 
 
 @asynccontextmanager
-async def _session() -> AsyncIterator[Session]:
+async def _session() -> AsyncGenerator[Session]:
     async with Session(
         settings=_SESSION_SETTINGS,
         verbosity=_VERBOSITY.get(),
@@ -358,7 +361,7 @@ def _log_timing(label: str, elapsed: float) -> None:
 
 
 @contextmanager
-def timed_stage(label: str) -> Iterator[None]:
+def timed_stage(label: str) -> Generator[None]:
     """Print `[EKN_TIMING] label: N.NNNs` to stderr on exit, when EKN_TIMING is
     set -- same env var/format `_log_timing` uses, as a context manager for
     call sites (cli.py's Deploy chain, `_validation_config`'s per-attr builds)
