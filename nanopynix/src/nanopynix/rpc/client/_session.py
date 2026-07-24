@@ -20,9 +20,7 @@ from nanopynix_proto.nix.common import (
     DeepValue,
     ForceValue,
     LogLevel,
-    NullValue,
     RemoteCallArg,
-    ScalarValue,
 )
 from nanopynix_proto.nix.eval import (
     AttrNamesRequest,
@@ -62,6 +60,7 @@ from nanopynix_proto.nix.eval import (
     WriteLockFileRequest,
 )
 
+from nanopynix._core._codec import python_to_scalar, scalar_to_python
 from nanopynix.exceptions import (
     EvalSessionClosedError,
     ForeignValueError,
@@ -98,34 +97,6 @@ class _EvalSessionOwner(Protocol):
     def claim_eval(self, eval_session: EvalSession) -> None: ...
 
     def release_eval(self, eval_session: EvalSession) -> None: ...
-
-
-def _scalar_to_pyval(scalar: ScalarValue | None) -> JsonScalar:
-    """Convert a proto ScalarValue to a Python JSON-scalar."""
-    if scalar is None:
-        return None
-    if scalar.string_value is not None:
-        return scalar.string_value
-    if scalar.int_value is not None:
-        return scalar.int_value
-    if scalar.float_value is not None:
-        return scalar.float_value
-    if scalar.bool_value is not None:
-        return scalar.bool_value
-    return None  # null_value
-
-
-def _pyval_to_scalar(v: JsonScalar) -> ScalarValue:
-    """Convert a Python JSON-scalar value to a proto ScalarValue."""
-    if v is None:
-        return ScalarValue(null_value=NullValue())
-    if isinstance(v, bool):
-        return ScalarValue(bool_value=v)
-    if isinstance(v, int):
-        return ScalarValue(int_value=v)
-    if isinstance(v, float):
-        return ScalarValue(float_value=v)
-    return ScalarValue(string_value=str(v))
 
 
 def _parse_nix_type(value: Any) -> NixType | None:
@@ -506,13 +477,13 @@ class ValueProxy:
     def _decode_force_value(self, value: ForceValue) -> JsonValue | ValueProxy:
         if value.remote_value is not None:
             return self._ctx.value(value.remote_value.handle, value.remote_value.type)
-        return _scalar_to_pyval(value.scalar)
+        return scalar_to_python(value.scalar)
 
     def _decode_deep_value(self, value: DeepValue) -> NixDeepValue:
         if value.remote_value is not None:
             return self._ctx.value(value.remote_value.handle, value.remote_value.type)
         if value.scalar is not None:
-            return _scalar_to_pyval(value.scalar)
+            return scalar_to_python(value.scalar)
         if value.list is not None:
             return [self._decode_deep_value(item) for item in value.list.items]
         if value.attrs is not None:
@@ -535,7 +506,7 @@ class ValueProxy:
                     entries={key: await self._encode_call_arg(item, timeout=timeout) for key, item in value.items()},
                 ),
             )
-        return CallArg(scalar=_pyval_to_scalar(value))
+        return CallArg(scalar=python_to_scalar(value, on_unsupported="stringify"))
 
     # ── force ──────────────────────────────────────────────────────
 
