@@ -1,6 +1,6 @@
 """Asynchronous in-process Nix API backed by direct L1 object pointers.
 
-Unlike :class:`nanopynix.Session`, this module does not start a worker
+Unlike :class:`nanopynix.rpc.Session`, this module does not start a worker
 process. Store work uses a bounded thread pool, while each evaluator owns a
 dedicated thread so callers retain an asynchronous API without exposing Nix's
 evaluator thread-affinity requirements.
@@ -986,7 +986,7 @@ class Value:
     async def force(self) -> Any:
         """Evaluate to WHNF and convert to a plain Python value.
 
-        Unlike :meth:`nanopynix.ValueProxy.force`, compound types (attrsets,
+        Unlike :meth:`nanopynix.rpc.ValueProxy.force`, compound types (attrsets,
         lists) are also converted directly rather than returned as lazy
         wrapper views — there is no ``ValueAttrs``/``ValueList`` equivalent
         in the in-process API.

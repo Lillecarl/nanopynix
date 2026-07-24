@@ -18,7 +18,7 @@ import asyncio
 import nanopynix
 
 async def main():
-    async with nanopynix.Session() as session, session.store() as store, session.eval(store) as eval:
+    async with nanopynix.rpc.Session() as session, session.store() as store, session.eval(store) as eval:
         hello = await eval.string('"hello, world"')
         print(await hello.force_json())
 

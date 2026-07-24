@@ -102,7 +102,7 @@ class Osearch(Command):
 
     async def _build_index(self, target: EvaluationTarget, cache_path: Path) -> list[OptionRecord]:
         async with (
-            nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix,
+            nanopynix.rpc.Session(experimental_features=["flakes", "nix-command"]) as nix,
             forward_nix_logs(nix),
             nix.store(self.store) as store,
             nix.eval(store) as session,

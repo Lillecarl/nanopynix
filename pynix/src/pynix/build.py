@@ -11,7 +11,7 @@ from clypi import Command, arg
 from rich.console import Console
 
 if TYPE_CHECKING:
-    from nanopynix.rpc.client import ValueProxy
+    from nanopynix.rpc import ValueProxy
 
 from nanopynix_helpers.build import FodBuildError, build_with_fod_update
 
@@ -73,7 +73,7 @@ class Build(Command):
             trusted_public_keys=self.trusted_public_keys.split(),
         )
         async with (
-            nanopynix.Session(settings=settings, verbosity=nanopynix.normalize_log_level(self.verbosity)) as nix,
+            nanopynix.rpc.Session(settings=settings, verbosity=nanopynix.normalize_log_level(self.verbosity)) as nix,
             forward_nix_logs(nix, print_build_logs=self.print_build_logs),
         ):
             try:

@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 
     from prompt_toolkit.document import Document
 
-    from nanopynix import ReplSession
+    from nanopynix.rpc import ReplSession
 
 _DEFAULT_STORE = "auto"
 _PROMPT = "pynix> "
@@ -541,7 +541,7 @@ class Repl(Command):
             print_formatted_text(f"error: {exc}")
             raise SystemExit(1) from exc
 
-        async with nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix:
+        async with nanopynix.rpc.Session(experimental_features=["flakes", "nix-command"]) as nix:
             with patch_stdout():
                 async with (
                     forward_nix_logs(nix, log_file=sys.stdout),

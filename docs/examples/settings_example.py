@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import asyncio
 
-from nanopynix import NixSettings, Session, list_settings_metadata
+from nanopynix import NixSettings, list_settings_metadata
+from nanopynix.rpc import Session
 
 
 async def main() -> None:

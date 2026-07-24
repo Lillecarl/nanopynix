@@ -56,7 +56,7 @@ class Eval(Command):
             logger.info("reading expression from stdin")
 
         async with (
-            nanopynix.Session() as nix,
+            nanopynix.rpc.Session() as nix,
             forward_nix_logs(nix),
             nix.store(self.store) as store,
             nix.eval(store) as session,

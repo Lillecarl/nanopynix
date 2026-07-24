@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
     from nanopynix.models import StorePath
 
-    RpcSessionFactory = Callable[..., nanopynix.Session]
+    RpcSessionFactory = Callable[..., nanopynix.rpc.Session]
     InprocSessionFactory = Callable[..., nanopynix.inproc.Session]
 
 
@@ -74,8 +74,8 @@ class NixTestEnvironment:
             substituters=["daemon", "https://cache.nixos.org"],
         )
 
-    def rpc_session(self, **kwargs: Any) -> nanopynix.Session:
-        return nanopynix.Session(
+    def rpc_session(self, **kwargs: Any) -> nanopynix.rpc.Session:
+        return nanopynix.rpc.Session(
             store_uri=self.store_uri,
             load_config=False,
             settings=self.settings,

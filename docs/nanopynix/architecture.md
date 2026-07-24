@@ -3,7 +3,7 @@
 nanopynix has two async APIs for running Nix, and they present nearly the
 same shape:
 
-- `nanopynix.Session` — runs Nix in an isolated worker **subprocess** and
+- `nanopynix.rpc.Session` — runs Nix in an isolated worker **subprocess** and
   talks to it over gRPC. See {doc}`api/session`, {doc}`api/store`,
   {doc}`api/eval`.
 - `nanopynix.inproc.Session` — runs Nix directly on one dedicated thread in

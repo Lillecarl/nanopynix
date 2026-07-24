@@ -6,25 +6,25 @@ exclusively for its duration. Every `ValueProxy` (and the `ValueAttrs`/
 open.
 
 ```{eval-rst}
-.. autoclass:: nanopynix.EvalSession
+.. autoclass:: nanopynix.rpc.EvalSession
    :members:
    :undoc-members:
 
-.. autoclass:: nanopynix.ReplSession
+.. autoclass:: nanopynix.rpc.ReplSession
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. autoclass:: nanopynix.ValueProxy
+.. autoclass:: nanopynix.rpc.ValueProxy
    :members:
    :undoc-members:
 
-.. autoclass:: nanopynix.ValueAttrs
+.. autoclass:: nanopynix.rpc.ValueAttrs
    :members:
 
-.. autoclass:: nanopynix.ValueList
+.. autoclass:: nanopynix.rpc.ValueList
    :members:
 
-.. autoclass:: nanopynix.LockedFlakeHandle
+.. autoclass:: nanopynix.rpc.LockedFlakeHandle
    :members:
 ```

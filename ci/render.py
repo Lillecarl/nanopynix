@@ -15,7 +15,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from nanopynix import EvalSession, NixType, Session, yaml_primops
+from nanopynix import NixType, yaml_primops
+from nanopynix.rpc import EvalSession, Session
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS_DIR = REPO_ROOT / "ci" / "workflows"

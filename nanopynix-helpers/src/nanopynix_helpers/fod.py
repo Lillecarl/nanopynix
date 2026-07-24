@@ -12,8 +12,7 @@ from tree_sitter import Language, Parser
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from nanopynix import Store
-    from nanopynix.rpc.client import ValueProxy
+    from nanopynix.rpc import Store, ValueProxy
 
 _HASH_ATTRIBUTES = frozenset({"hash", "sha256", "outputHash"})
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")

@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import pytest
 
-from nanopynix import PrimopError, Session
+from nanopynix import PrimopError
 from nanopynix.models import PrimOpSpec
+from nanopynix.rpc import Session
 
 pytestmark = pytest.mark.nix_version(minimum="2.32")
 

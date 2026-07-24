@@ -16,7 +16,8 @@ from pathlib import Path
 
 import pygit2
 
-from nanopynix import NixType, Session
+from nanopynix import NixType
+from nanopynix.rpc import Session
 
 # A fixed signature keeps this example hermetic: a machine without a global
 # git user.name/user.email configured (e.g. a fresh CI runner) would otherwise

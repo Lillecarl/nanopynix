@@ -27,6 +27,7 @@ from nanopynix_proto.nix.store import GcAction as GcAction
 from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 from nanopynix import inproc as inproc
+from nanopynix import rpc as rpc
 from nanopynix._process_title import set_manager_title as set_manager_title
 from nanopynix.exceptions import (
     EvalError,
@@ -77,21 +78,6 @@ from nanopynix.protocols import (
     AsyncValue,
     AsyncVerbosityController,
 )
-from nanopynix.rpc.client import (
-    EvalSession,
-    LockedFlakeHandle,
-    LogCapture,
-    Nix,
-    ReplSession,
-    Session,
-    Store,
-    StoreHandle,
-    ValueAttrs,
-    ValueList,
-    ValueProxy,
-    WorkerDiedError,
-)
-from nanopynix.rpc.client.types import NixArg, NixDeepValue, NixValue
 from nanopynix.settings import (
     NanopynixSettings,
     NixEvalSettings,
@@ -118,10 +104,8 @@ __all__ = [
     "AsyncValue",
     "AsyncVerbosityController",
     "BuildMode",
-    "EvalSession",
     "GcAction",
     "GcResult",
-    "LockedFlakeHandle",
     "LogLevel",
     "LogLevelInput",
     "NanopynixSettings",
@@ -136,31 +120,22 @@ __all__ = [
     "NixSettingsEnv",
     "NixType",
     "NixTypeError",
-    "NixValue",
     "ParseError",
     "PathInfo",
     "PrimOpSpec",
     "PrimopError",
-    "ReplSession",
     "RestrictedPathError",
     "ResultType",
-    "Session",
     "SettingsDrift",
-    "Store",
     "StoreError",
-    "StoreHandle",
     "StorePath",
     "ThrownError",
     "UndefinedVarError",
     "UnresolvedValueError",
     "UsageError",
     "Value",
-    "ValueAttrs",
     "ValueHandle",
-    "ValueList",
-    "ValueProxy",
     "ValueReleasedError",
-    "WorkerDiedError",
     "WrongNixTypeError",
     "build_info",
     "check_all_settings_model_drift",
@@ -195,6 +170,7 @@ __all__ = [
     "process_connection",
     "register_primop",
     "remove_logger",
+    "rpc",
     "set_manager_title",
     "set_setting",
     "set_verbosity",

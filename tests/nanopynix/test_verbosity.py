@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from nanopynix import LogLevel, Session, normalize_log_level
+from nanopynix import LogLevel, normalize_log_level
+from nanopynix.rpc import Session
 
 
 @pytest.mark.parametrize(

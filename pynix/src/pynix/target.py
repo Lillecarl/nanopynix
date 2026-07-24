@@ -12,7 +12,7 @@ from nanopynix_helpers import select_attr as select_attr
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from nanopynix.rpc.client import EvalSession, ReplSession, ValueProxy
+    from nanopynix.rpc import EvalSession, ReplSession, ValueProxy
 
 
 def file_option() -> Path | None:
