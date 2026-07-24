@@ -1,14 +1,5 @@
 # TODO
 
-# inproc drops FINALIZED log events
-`inproc/_impl.py`'s `_forward_logs` only handles `LogStreamEventKind.NIX`
-events (`if kind != LogStreamEventKind.NIX: continue`), silently dropping
-`LogStreamEventKind.FINALIZED` events -- whereas the RPC-based worker
-(`rpc/worker/_worker.py`) and daemon (`rpc/daemon/_worker.py`) log-forwarding
-paths both explicitly handle `FINALIZED` too. Investigate whether this is
-intentional (inproc callers may have no use for the finalized-boundary
-signal) or a real gap.
-
 # Deferred: debatable-tier "magic value" findings
 The magic-values audit also turned up ~15 lower-confidence findings that
 were deliberately left alone in this pass (not clear violations, more a

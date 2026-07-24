@@ -548,6 +548,24 @@ async def test_inproc_session_log_stream_yields_events(inproc_session: InprocSes
 
 
 @pytest.mark.anyio
+async def test_inproc_session_subscribe_receives_a_request_finalized_event(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    async with inproc_session() as nix:
+        events: list[Any] = []
+        subscription = nix.subscribe(events.append)
+        try:
+            await nix.get_verbosity()
+            for _ in range(50):
+                if any(event.is_request_finalized for event in events):
+                    break
+                await asyncio.sleep(0.05)
+            assert any(event.is_request_finalized for event in events)
+        finally:
+            subscription.unsubscribe()
+
+
+@pytest.mark.anyio
 async def test_inproc_store_not_open_raises(inproc_session: InprocSessionFactory) -> None:
     async with inproc_session() as nix:
         store = nix.store()
