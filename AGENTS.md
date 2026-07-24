@@ -75,9 +75,8 @@ terminal's minimal progress lines alone.
   a `CancelScope`/`TaskGroup` (a plain `anyio.create_task_group()` or
   `anyio.from_thread.BlockingPortal`) whose `start()`/`close()` are invoked
   from different tasks (e.g. separate gRPC handler calls) — see
-  `rpc/daemon/_supervisor.py` and `rpc/worker/_worker_primop.py`, since
-  anyio's `CancelScope`/`TaskGroup` must be entered and exited by the same
-  task.
+  `rpc/worker/_worker_primop.py`, since anyio's `CancelScope`/`TaskGroup`
+  must be entered and exited by the same task.
 
 # Banned patterns
 

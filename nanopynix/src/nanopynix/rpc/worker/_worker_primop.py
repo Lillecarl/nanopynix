@@ -104,7 +104,8 @@ class ThreadedRpcPrimopBridge:
     dedicated background task (``_run``); ``start()``/``stop()`` merely
     signal that task via ``anyio.Event``, which -- unlike ``CancelScope``/
     ``TaskGroup`` -- has no task affinity and is safe to set/wait from any
-    task. Same pattern as ``DaemonSupervisor`` in ``rpc/daemon/_supervisor.py``.
+    task -- see AGENTS.md's documented exception to the anyio-primitives
+    convention for the same reasoning.
     """
 
     def __init__(self, backchannel: WorkerBackchannel) -> None:

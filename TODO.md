@@ -3,8 +3,7 @@
 # Deferred: debatable-tier "magic value" findings
 The magic-values audit also turned up ~15 lower-confidence findings that
 were deliberately left alone in this pass (not clear violations, more a
-matter of taste/context): the 64 KiB read-buffer size in
-`rpc/daemon/_connection.py`, `LogCollector`'s `maxsize=10_000`, cosmetic
+matter of taste/context): `LogCollector`'s `maxsize=10_000`, cosmetic
 thread-name-prefix literals, `generate_slug(2)`, the `store_workers: int = 4`
 default, `rpc/client/_session.py`'s hardcoded store-handle-`1` default
 (implicitly tied to `HandleRegistry._next`'s start value), and
