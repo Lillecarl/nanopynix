@@ -592,7 +592,7 @@ class Validate(Command):
                     in novalidate_keys
                 ]
                 for obj in skipped:
-                    _log.info(
+                    _log.debug(
                         "skipping (novalidate)", kind=obj["kind"],
                         namespace=obj.get("metadata", {}).get("namespace"),
                         name=obj["metadata"]["name"],

@@ -145,7 +145,7 @@ async def apply_and_prune(
             applied.append(obj)
             desired_keys.add(_object_key(obj))
             kinds.add(obj.kind)
-            _log.info("applied", kind=obj.kind, namespace=obj.namespace, name=obj.name)
+            _log.debug("applied", kind=obj.kind, namespace=obj.namespace, name=obj.name)
 
         crds = [obj for obj in applied if obj.kind == "CustomResourceDefinition"]
         for crd in crds:
