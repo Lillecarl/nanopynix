@@ -10,7 +10,7 @@ from clypi import Command, arg
 from rich.console import Console
 
 if TYPE_CHECKING:
-    from nanopynix.rpc.client import ValueProxy
+    from nanopynix.rpc import ValueProxy
 
 import nanopynix
 from pynix._util import forward_nix_logs
@@ -52,7 +52,7 @@ class Show(Command):
             raise SystemExit(1) from exc
 
         async with (
-            nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix,
+            nanopynix.rpc.Session(experimental_features=["flakes", "nix-command"]) as nix,
             forward_nix_logs(nix),
             nix.store(self.store) as store,
         ):

@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, cast
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from nanopynix.rpc.client import EvalSession, ValueProxy
+    from nanopynix.rpc import EvalSession, ValueProxy
 
 _COLLECT_OPTION_METADATA = """
 lib: options:

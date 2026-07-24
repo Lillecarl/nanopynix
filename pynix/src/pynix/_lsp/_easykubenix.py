@@ -108,7 +108,7 @@ class EasykubenixDialect(Dialect):
         context.roots.setdefault(MODULE_ENTRY_NAME, entry.attr("moduleSystem"))
         derive_module_roots(context)
 
-    async def _attr_names(self, value: nanopynix.ValueProxy | None) -> list[str] | None:
+    async def _attr_names(self, value: nanopynix.rpc.ValueProxy | None) -> list[str] | None:
         if value is None:
             return None
         try:

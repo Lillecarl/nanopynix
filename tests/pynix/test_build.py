@@ -20,7 +20,7 @@ from tests.support.nix_environment import with_nixpkgs
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from nanopynix import Store, ValueProxy
+    from nanopynix.rpc import Store, ValueProxy
     from tests.support.nix_environment import NixTestEnvironment
 
 

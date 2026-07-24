@@ -69,14 +69,14 @@ def test_example_runs(path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         # *that* store's real size (tens of thousands of paths on a
         # long-lived dev machine), not this test's needs.
         store_uri = _seed_isolated_store(tmp_path / "store")
-        real_session_cls = nanopynix.Session
+        real_session_cls = nanopynix.rpc.Session
 
-        def _isolated_session(*args: Any, **kwargs: Any) -> nanopynix.Session:
+        def _isolated_session(*args: Any, **kwargs: Any) -> nanopynix.rpc.Session:
             kwargs.setdefault("store_uri", store_uri)
             kwargs.setdefault("load_config", False)
             return real_session_cls(*args, **kwargs)
 
-        monkeypatch.setattr(nanopynix, "Session", _isolated_session)
+        monkeypatch.setattr(nanopynix.rpc, "Session", _isolated_session)
 
     loop = asyncio.new_event_loop()
     sys.path.insert(0, str(_EXAMPLES))

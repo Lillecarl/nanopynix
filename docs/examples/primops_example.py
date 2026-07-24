@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import asyncio
 
-from nanopynix import NixType, PrimOpSpec, Session, yaml_primops
+from nanopynix import NixType, PrimOpSpec, yaml_primops
+from nanopynix.rpc import Session
 
 
 async def main() -> None:

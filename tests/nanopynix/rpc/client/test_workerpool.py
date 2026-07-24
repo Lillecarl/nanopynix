@@ -9,7 +9,8 @@ from typing import Any
 import pytest
 from grpclib.exceptions import StreamTerminatedError
 
-from nanopynix import LogEvent, Nix, NixType, StoreError, WorkerDiedError
+from nanopynix import LogEvent, NixType, StoreError
+from nanopynix.rpc import Nix, WorkerDiedError
 
 
 async def test_single_worker_basics():

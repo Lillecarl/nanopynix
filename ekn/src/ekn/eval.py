@@ -21,9 +21,10 @@ from nanopynix_proto.nix.common import LogEvent as LogEventProto
 from pydantic import BaseModel, Field, StringConstraints
 
 from ekn.gitops import load_raw_manifest
-from nanopynix import NixError, NixEvalSettings, NixSettings, Session
+from nanopynix import NixError, NixEvalSettings, NixSettings
 from nanopynix.models import JsonValue, LogEvent
 from nanopynix.primops import yaml_primops
+from nanopynix.rpc import Session
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Generator

@@ -18,7 +18,7 @@ import nanopynix
 from pynix._util import forward_nix_logs
 
 if TYPE_CHECKING:
-    from nanopynix.rpc.client import ValueProxy
+    from nanopynix.rpc import ValueProxy
 
 logger = structlog.get_logger(__name__)
 console = Console()
@@ -51,7 +51,7 @@ class Show(Command):
         flake_attr = flake_attr or None
 
         async with (
-            nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix,
+            nanopynix.rpc.Session(experimental_features=["flakes", "nix-command"]) as nix,
             forward_nix_logs(nix),
             nix.store(self.store) as store,
             nix.eval(store) as session,
@@ -176,7 +176,7 @@ def _format_attr(name: str, nix_type: NixType, nix_type_enum: type[NixType]) -> 
 
 async def _print_flake_metadata(flake_ref: str, *, store_uri: str) -> None:
     async with (
-        nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix,
+        nanopynix.rpc.Session(experimental_features=["flakes", "nix-command"]) as nix,
         forward_nix_logs(nix),
         nix.store(store_uri) as store,
         nix.eval(store) as session,

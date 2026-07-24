@@ -223,7 +223,7 @@ class AsyncEvalSession(Protocol):
         update_inputs: bool | list[str] = False,
         write_lock_file: bool = True,
     ) -> AsyncLockedFlake:
-        """Lock a flake, optionally updating inputs; see :meth:`nanopynix.EvalSession.lock_flake`."""
+        """Lock a flake, optionally updating inputs; see :meth:`nanopynix.rpc.EvalSession.lock_flake`."""
         ...
 
     async def eval_flake(self, ref: str, /, *, write_lock_file: bool = True) -> AsyncValue:

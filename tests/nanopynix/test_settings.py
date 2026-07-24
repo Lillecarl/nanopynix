@@ -6,7 +6,7 @@ import anyio
 import pytest
 from pydantic import ValidationError
 
-from nanopynix import Session
+from nanopynix.rpc import Session
 from nanopynix.settings import (
     DEFAULT_LINE_EDITORS,
     NanopynixSettings,

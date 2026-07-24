@@ -17,12 +17,12 @@ from nanopynix import (
     EvalSessionClosedError,
     NixCoercionError,
     NixType,
-    ValueProxy,
     ValueReleasedError,
     WrongNixTypeError,
     strip_ansi,
     yaml_primops,
 )
+from nanopynix.rpc import ValueProxy
 from tests.support.git import init_flake_repo
 
 if TYPE_CHECKING:

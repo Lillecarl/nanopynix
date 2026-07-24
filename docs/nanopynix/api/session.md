@@ -5,11 +5,11 @@ hands out {doc}`Store <store>` and {doc}`EvalSession <eval>` facades that
 share it. `Nix` is a backward-compatible alias for `Session`.
 
 ```{eval-rst}
-.. autoclass:: nanopynix.Session
+.. autoclass:: nanopynix.rpc.Session
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. autoclass:: nanopynix.LogCapture
+.. autoclass:: nanopynix.rpc.LogCapture
    :members:
 ```

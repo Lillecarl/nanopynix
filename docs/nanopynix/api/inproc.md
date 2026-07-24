@@ -4,7 +4,7 @@
 API, but runs Nix directly on a dedicated thread in the current process —
 no subprocess, no gRPC. See
 {doc}`Workers vs in-process <../architecture>` for what that trades off and
-when to reach for this module instead of `nanopynix.Session`.
+when to reach for this module instead of `nanopynix.rpc.Session`.
 
 ```{eval-rst}
 .. automodule:: nanopynix.inproc

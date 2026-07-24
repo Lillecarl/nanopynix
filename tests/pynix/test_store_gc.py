@@ -399,10 +399,12 @@ def _install_fake_nanopynix(
         store_module,
         "nanopynix",
         SimpleNamespace(
-            Session=lambda: _FakeSession(
-                store_root,
-                closures=closures or {},
-                nar_sizes=nar_sizes or {},
+            rpc=SimpleNamespace(
+                Session=lambda: _FakeSession(
+                    store_root,
+                    closures=closures or {},
+                    nar_sizes=nar_sizes or {},
+                ),
             ),
         ),
     )

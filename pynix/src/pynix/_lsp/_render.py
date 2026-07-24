@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from pynix._lsp._dialect import Dialect
 
 
-async def render_value(value: nanopynix.ValueProxy, dialects: list[Dialect]) -> str:  # noqa: C901 tracked complexity/arg-count debt, see TODO.md
+async def render_value(value: nanopynix.rpc.ValueProxy, dialects: list[Dialect]) -> str:  # noqa: C901 tracked complexity/arg-count debt, see TODO.md
     """Render *value* as hover Markdown, letting *dialects* supply extra sections.
 
     The first dialect whose ``extra_hover_sections`` returns non-None wins,

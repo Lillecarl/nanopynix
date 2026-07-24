@@ -582,5 +582,5 @@ class TestGC:
 
 async def test_public_store_is_distinct_from_rpc_transport():
     """The public facade intentionally separates ergonomic and generated APIs."""
-    assert nanopynix.Store is PublicStore
-    assert nanopynix.Store is not nanopynix.StoreHandle
+    assert nanopynix.rpc.Store is PublicStore
+    assert nanopynix.rpc.Store is not nanopynix.rpc.StoreHandle

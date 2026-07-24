@@ -26,7 +26,7 @@ class PathInfo(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
             try:
                 info: PathInfoProto = await store.query_path_info(self.path)
             except Exception as exc:

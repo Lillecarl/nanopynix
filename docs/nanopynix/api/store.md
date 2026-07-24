@@ -5,10 +5,10 @@
 available through `store.rpc` for operations without a dedicated method yet.
 
 ```{eval-rst}
-.. autoclass:: nanopynix.Store
+.. autoclass:: nanopynix.rpc.Store
    :members:
    :undoc-members:
 
-.. autoclass:: nanopynix.StoreHandle
+.. autoclass:: nanopynix.rpc.StoreHandle
    :members:
 ```

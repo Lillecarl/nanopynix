@@ -21,8 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from pathlib import Path
 
-    from nanopynix import Session, Store
-    from nanopynix.rpc.client import EvalSession, ValueProxy
+    from nanopynix.rpc import EvalSession, Session, Store, ValueProxy
 
 
 class FodBuildError(RuntimeError):

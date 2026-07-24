@@ -6,11 +6,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from nanopynix import NixType, Session
+from nanopynix import NixType
 from nanopynix.primops import ipaddress_primops
+from nanopynix.rpc import Session
 
 if TYPE_CHECKING:
-    from nanopynix.rpc.client._session import NixDeepValue
+    from nanopynix.rpc import NixDeepValue
 
 
 pytestmark = pytest.mark.nix_version(minimum="2.32")

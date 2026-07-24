@@ -12,7 +12,7 @@ over gRPC:
 import nanopynix
 from nanopynix_proto.nix.store import GetStoreDirRequest
 
-async with nanopynix.Session(config={"max-jobs": "4"}) as session:
+async with nanopynix.rpc.Session(config={"max-jobs": "4"}) as session:
     async with session.store() as store:
         store_dir = (await store.get_store_dir(GetStoreDirRequest())).dir
 

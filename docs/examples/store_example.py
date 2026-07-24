@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import asyncio
 
-from nanopynix import GcAction, Session
+from nanopynix import GcAction
+from nanopynix.rpc import Session
 
 
 async def main() -> None:

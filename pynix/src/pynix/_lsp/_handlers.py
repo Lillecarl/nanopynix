@@ -55,8 +55,8 @@ class PynixLanguageServer(LanguageServer):
 
     def __init__(self) -> None:
         super().__init__(_SERVER_NAME, _SERVER_VERSION)  # type: ignore[reportUnknownMemberType] -- pygls' LanguageServer.__init__ forwards *args/**kwargs, so pyright can't fully resolve its composed signature
-        self.nix_session: nanopynix.Session | None = None
-        self.store: nanopynix.Store | None = None
+        self.nix_session: nanopynix.rpc.Session | None = None
+        self.store: nanopynix.rpc.Store | None = None
         self.shared_evals: SharedEvalCache | None = None
         self.contexts: dict[str, FileContext] = {}
         self.diagnostics: dict[str, list[types.Diagnostic]] = {}
@@ -73,7 +73,7 @@ class PynixLanguageServer(LanguageServer):
         # asyncio is free to garbage-collect a still-running task.
         self.warm_tasks: set[asyncio.Task[None]] = set()
 
-    async def ensure_nix(self) -> tuple[nanopynix.Session, nanopynix.Store, SharedEvalCache]:
+    async def ensure_nix(self) -> tuple[nanopynix.rpc.Session, nanopynix.rpc.Store, SharedEvalCache]:
         """Open the shared Session/Store/SharedEvalCache on first use.
 
         ``nix_session``/``store`` may already be set without going through
@@ -81,10 +81,10 @@ class PynixLanguageServer(LanguageServer):
         them directly from a shared, test-session-lifetime worker rather
         than spawning a fresh one per test) -- only missing pieces are
         created, so this must never unconditionally build a brand new
-        ``nanopynix.Session`` when one is already sitting there.
+        ``nanopynix.rpc.Session`` when one is already sitting there.
         """
         if self.nix_session is None or self.store is None:
-            session = nanopynix.Session(experimental_features=["flakes", "nix-command"])
+            session = nanopynix.rpc.Session(experimental_features=["flakes", "nix-command"])
             await session.open()
             store = session.store()
             await store.open()

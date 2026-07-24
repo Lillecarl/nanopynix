@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from nanopynix import Session
 from nanopynix.primops import jsonschema_primops
+from nanopynix.rpc import Session
 
 pytestmark = pytest.mark.nix_version(minimum="2.32")
 
