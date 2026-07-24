@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import json
 import sys
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, TextIO, cast
@@ -8,8 +9,13 @@ from typing import TYPE_CHECKING, Any, TextIO, cast
 import anyio
 import structlog
 
+import nanopynix
+
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    import os
+    from collections.abc import AsyncGenerator, Sequence
+
+    from nanopynix.rpc import EvalSession, Session, Store
 
 _RESULT_BUILD_LOG_LINE = 101
 _RESULT_POST_BUILD_LOG_LINE = 107
@@ -17,6 +23,11 @@ _LOG_DRAIN_SECONDS = 0.5
 # A Nix "result" action's args are at least [_, result_type], with an
 # optional trailing fields list.
 _MIN_RESULT_EVENT_ARGS = 2
+
+
+def print_json(obj: object) -> None:
+    sys.stdout.write(json.dumps(obj, sort_keys=True, indent=2, ensure_ascii=False))
+    sys.stdout.write("\n")
 
 
 def configure_logging(*, file: TextIO | None = None) -> None:
@@ -63,6 +74,81 @@ async def forward_nix_logs(
         raise
     finally:
         structlog.configure(**old_config)
+
+
+@asynccontextmanager
+async def nix_session(
+    *,
+    settings: nanopynix.NixSettings | os.PathLike[str] | str | None = None,
+    experimental_features: Sequence[str] | None = None,
+    verbosity: nanopynix.LogLevelInput | None = None,
+    print_build_logs: bool = False,
+) -> AsyncGenerator[Session]:
+    """Open an RPC session and forward its Nix logs for the duration of the block.
+
+    Only forwards settings/experimental_features/verbosity to ``Session`` when
+    the caller actually overrides them, so this degrades to the plain
+    ``Session()`` call most command modules use (also keeps this a
+    faithful drop-in for tests that stub ``nanopynix.rpc.Session`` with a
+    zero-argument fake).
+    """
+    kwargs: dict[str, Any] = {}
+    if settings is not None:
+        kwargs["settings"] = settings
+    if experimental_features is not None:
+        kwargs["experimental_features"] = list(experimental_features)
+    if verbosity is not None:
+        kwargs["verbosity"] = verbosity
+    async with (
+        nanopynix.rpc.Session(**kwargs) as nix,
+        forward_nix_logs(nix, print_build_logs=print_build_logs),
+    ):
+        yield nix
+
+
+@asynccontextmanager
+async def store_session(
+    store_uri: str,
+    *,
+    settings: nanopynix.NixSettings | os.PathLike[str] | str | None = None,
+    experimental_features: Sequence[str] | None = None,
+    verbosity: nanopynix.LogLevelInput | None = None,
+    print_build_logs: bool = False,
+) -> AsyncGenerator[tuple[Session, Store]]:
+    """Open a session and store, forwarding logs for the duration of the block."""
+    async with (
+        nix_session(
+            settings=settings,
+            experimental_features=experimental_features,
+            verbosity=verbosity,
+            print_build_logs=print_build_logs,
+        ) as nix,
+        nix.store(store_uri) as store,
+    ):
+        yield nix, store
+
+
+@asynccontextmanager
+async def eval_session(
+    store_uri: str,
+    *,
+    settings: nanopynix.NixSettings | os.PathLike[str] | str | None = None,
+    experimental_features: Sequence[str] | None = None,
+    verbosity: nanopynix.LogLevelInput | None = None,
+    print_build_logs: bool = False,
+) -> AsyncGenerator[tuple[Session, Store, EvalSession]]:
+    """Open a session, store, and eval session, forwarding logs for the duration of the block."""
+    async with (
+        store_session(
+            store_uri,
+            settings=settings,
+            experimental_features=experimental_features,
+            verbosity=verbosity,
+            print_build_logs=print_build_logs,
+        ) as (nix, store),
+        nix.eval(store) as session,
+    ):
+        yield nix, store, session
 
 
 async def _forward_nix_logs(session: Any, *, print_build_logs: bool) -> None:

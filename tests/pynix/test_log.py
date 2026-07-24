@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
-import pynix.log as log_module
+import pynix._util as util_module
 import pytest
 from nanopynix_proto.nix.store import GetBuildLogRequest
 
@@ -45,8 +45,8 @@ async def test_pynix_log_errors_when_build_log_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     path = "/nix/store/00000000000000000000000000000000-no-log"
-    monkeypatch.setattr(log_module, "forward_nix_logs", _noop_forward_nix_logs)
-    monkeypatch.setattr(log_module, "nanopynix", SimpleNamespace(rpc=SimpleNamespace(Session=_FakeSession)))
+    monkeypatch.setattr(util_module, "forward_nix_logs", _noop_forward_nix_logs)
+    monkeypatch.setattr(util_module, "nanopynix", SimpleNamespace(rpc=SimpleNamespace(Session=_FakeSession)))
 
     cmd = Pynix.parse(["log", path, *shared_nix_environment.pynix_store_args()])
     with pytest.raises(SystemExit, match=r"build log of .* is not available"):

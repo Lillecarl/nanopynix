@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import override
@@ -15,9 +14,8 @@ from clypi import Command, Positional, arg
 from rapidfuzz import fuzz, process
 from rich.console import Console
 
-import nanopynix
 from pynix._options import OptionRecord, fetch_option_doc_list
-from pynix._util import forward_nix_logs
+from pynix._util import eval_session, print_json
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
@@ -101,12 +99,7 @@ class Osearch(Command):
             self._search(records, self.query)
 
     async def _build_index(self, target: EvaluationTarget, cache_path: Path) -> list[OptionRecord]:
-        async with (
-            nanopynix.rpc.Session(experimental_features=["flakes", "nix-command"]) as nix,
-            forward_nix_logs(nix),
-            nix.store(self.store) as store,
-            nix.eval(store) as session,
-        ):
+        async with eval_session(self.store, experimental_features=["flakes", "nix-command"]) as (_nix, _store, session):
             try:
                 target_value = await evaluate_target(target, session, auto_call_file=True)
                 options_value = await select_attr(target_value, self.options_attr)
@@ -124,8 +117,7 @@ class Osearch(Command):
         matches = process.extract(query, list(by_name), scorer=fuzz.WRatio, limit=self.limit)
         results = [by_name[name] for name, _score, _index in matches]
         if self.json_output:
-            sys.stdout.write(json.dumps([asdict(record) for record in results], sort_keys=True, indent=2))
-            sys.stdout.write("\n")
+            print_json([asdict(record) for record in results])
             return
         for record in results:
             console.print(f"[bold]{record.name}[/bold] :: {record.type}")

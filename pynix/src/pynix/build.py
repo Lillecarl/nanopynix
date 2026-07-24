@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import difflib
-import json
-import sys
 from pathlib import Path  # noqa: TC003 -- clypi evaluates annotations at runtime, Path must be importable
 from typing import TYPE_CHECKING, Any, override
 
@@ -16,7 +14,7 @@ if TYPE_CHECKING:
 from nanopynix_helpers.build import FodBuildError, build_with_fod_update
 
 import nanopynix
-from pynix._util import forward_nix_logs
+from pynix._util import nix_session, print_json
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
@@ -72,10 +70,11 @@ class Build(Command):
             substituters=self.substituters.split(),
             trusted_public_keys=self.trusted_public_keys.split(),
         )
-        async with (
-            nanopynix.rpc.Session(settings=settings, verbosity=nanopynix.normalize_log_level(self.verbosity)) as nix,
-            forward_nix_logs(nix, print_build_logs=self.print_build_logs),
-        ):
+        async with nix_session(
+            settings=settings,
+            verbosity=self.verbosity,
+            print_build_logs=self.print_build_logs,
+        ) as nix:
             try:
                 if self.eval_store is None:
                     async with nix.store(self.store) as store:
@@ -111,7 +110,7 @@ class Build(Command):
                 error_console.print(f"[red]Error:[/red] {exc}")
                 raise SystemExit(1) from exc
 
-        _print_json({"outputs": outputs, "updatedFods": updates, "dryRun": self.dry_run})
+        print_json({"outputs": outputs, "updatedFods": updates, "dryRun": self.dry_run})
 
 
 async def _evaluate_build_target(target: EvaluationTarget, session: Any) -> ValueProxy:
@@ -172,8 +171,3 @@ def _print_diff(path: Path, before: str, after: str) -> None:
         highlight=False,
         end="",
     )
-
-
-def _print_json(obj: object) -> None:
-    sys.stdout.write(json.dumps(obj, sort_keys=True, indent=2, ensure_ascii=False))
-    sys.stdout.write("\n")

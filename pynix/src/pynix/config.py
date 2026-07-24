@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
-import sys
 from typing import override
 
 from clypi import Command, arg
 
 import nanopynix
+from pynix._util import print_json
 
 
 class Show(Command):
@@ -18,9 +17,9 @@ class Show(Command):
     async def run(self) -> None:
         nanopynix.init_libstore(load_config=True)
         if self.setting is not None:
-            _print_json({self.setting: nanopynix.get_setting(self.setting)})
+            print_json({self.setting: nanopynix.get_setting(self.setting)})
             return
-        _print_json(nanopynix.list_settings())
+        print_json(nanopynix.list_settings())
 
 
 class Check(Command):
@@ -29,7 +28,7 @@ class Check(Command):
     @override
     async def run(self) -> None:
         nanopynix.init_libstore(load_config=True)
-        _print_json({"ok": True})
+        print_json({"ok": True})
 
 
 class CurrentSystem(Command):
@@ -38,15 +37,10 @@ class CurrentSystem(Command):
     @override
     async def run(self) -> None:
         nanopynix.init_libstore(load_config=True)
-        _print_json({"currentSystem": nanopynix.current_system()})
+        print_json({"currentSystem": nanopynix.current_system()})
 
 
 class Config(Command):
     """Inspect Nix configuration"""
 
     subcommand: Show | Check | CurrentSystem
-
-
-def _print_json(obj: object) -> None:
-    sys.stdout.write(json.dumps(obj, sort_keys=True, indent=2, ensure_ascii=False))
-    sys.stdout.write("\n")

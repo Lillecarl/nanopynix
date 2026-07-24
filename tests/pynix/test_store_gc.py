@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
     from tests.support.nix_environment import NixTestEnvironment
 
-import pynix.store as store_module
+import pynix._util as util_module
 import pytest
 
 from pynix import Pynix
@@ -394,9 +394,9 @@ def _install_fake_nanopynix(
     closures: dict[str, list[str]] | None = None,
     nar_sizes: dict[str, int] | None = None,
 ) -> None:
-    monkeypatch.setattr(store_module, "forward_nix_logs", _noop_forward_nix_logs)
+    monkeypatch.setattr(util_module, "forward_nix_logs", _noop_forward_nix_logs)
     monkeypatch.setattr(
-        store_module,
+        util_module,
         "nanopynix",
         SimpleNamespace(
             rpc=SimpleNamespace(

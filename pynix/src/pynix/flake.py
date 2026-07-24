@@ -3,19 +3,16 @@ from __future__ import annotations
 # pyright: reportUnknownMemberType=false
 # nanopynix / nanopynix_proto are C++ nanobind extensions without type stubs.
 import contextlib
-import json
-import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, override
 
 import structlog
 from clypi import Command, Positional, arg
-from nanopynix_proto.nix.common import NixType
 from rich.console import Console
 from rich.tree import Tree
 
 import nanopynix
-from pynix._util import forward_nix_logs
+from pynix._util import eval_session, print_json
 
 if TYPE_CHECKING:
     from nanopynix.rpc import ValueProxy
@@ -50,12 +47,7 @@ class Show(Command):
         base_ref, _, flake_attr = self.flake_ref.partition("#")
         flake_attr = flake_attr or None
 
-        async with (
-            nanopynix.rpc.Session(experimental_features=["flakes", "nix-command"]) as nix,
-            forward_nix_logs(nix),
-            nix.store(self.store) as store,
-            nix.eval(store) as session,
-        ):
+        async with eval_session(self.store, experimental_features=["flakes", "nix-command"]) as (_nix, _store, session):
             outputs = await session.eval_flake(base_ref)
             if flake_attr:
                 outputs = _navigate(outputs, flake_attr)
@@ -63,7 +55,7 @@ class Show(Command):
                 outputs = _navigate(outputs, self.attrpath)
 
             tree = Tree(f"[bold]{self.flake_ref}[/bold]")
-            await _build_tree(tree, outputs, NixType, budget=_TreeBudget())
+            await _build_tree(tree, outputs, nanopynix.NixType, budget=_TreeBudget())
             console.print(tree)
 
 
@@ -98,7 +90,7 @@ def _navigate(root: ValueProxy, attrpath: str) -> ValueProxy:
 async def _build_tree(  # noqa: C901 tracked complexity/arg-count debt, see TODO.md
     tree: Tree,
     value: ValueProxy,
-    nix_type_enum: type[NixType],
+    nix_type_enum: type[nanopynix.NixType],
     *,
     depth: int = 0,
     budget: _TreeBudget,
@@ -152,7 +144,7 @@ async def _build_tree(  # noqa: C901 tracked complexity/arg-count debt, see TODO
         tree.add(f"[dim]{nix_type.name.lower()}[/dim]")
 
 
-def _format_attr(name: str, nix_type: NixType, nix_type_enum: type[NixType]) -> str:  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
+def _format_attr(name: str, nix_type: nanopynix.NixType, nix_type_enum: type[nanopynix.NixType]) -> str:  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
     if nix_type == nix_type_enum.ATTRS:
         return f"[cyan]{name}[/cyan]"
     if nix_type == nix_type_enum.LIST:
@@ -175,15 +167,10 @@ def _format_attr(name: str, nix_type: NixType, nix_type_enum: type[NixType]) -> 
 
 
 async def _print_flake_metadata(flake_ref: str, *, store_uri: str) -> None:
-    async with (
-        nanopynix.rpc.Session(experimental_features=["flakes", "nix-command"]) as nix,
-        forward_nix_logs(nix),
-        nix.store(store_uri) as store,
-        nix.eval(store) as session,
-    ):
+    async with eval_session(store_uri, experimental_features=["flakes", "nix-command"]) as (_nix, _store, session):
         locked = await session.lock_flake(flake_ref, write_lock_file=False)
         try:
-            _print_json(_locked_flake_to_json(flake_ref, locked))
+            print_json(_locked_flake_to_json(flake_ref, locked))
         finally:
             await locked.release()
 
@@ -220,11 +207,6 @@ def _attrs_value_to_json(value: Any) -> str | int | bool | None:
     if value.string_value is not None:
         return value.string_value
     return None
-
-
-def _print_json(obj: object) -> None:
-    sys.stdout.write(json.dumps(obj, sort_keys=True, indent=2, ensure_ascii=False))
-    sys.stdout.write("\n")
 
 
 class Flake(Command):
