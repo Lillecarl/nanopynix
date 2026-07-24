@@ -21,6 +21,7 @@ import anyio
 from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import store as nanopynix_store
 from nanopynix_bindings import util as nanopynix_util
+from nanopynix_proto.nix.common import RequestFinalized
 from nanopynix_proto.nix.store import GcAction as PublicGcAction
 
 from nanopynix._core._extract import locked_flake as _locked_flake_proto
@@ -330,10 +331,13 @@ class Session:
     async def _forward_logs(self) -> None:
         async for raw in self._collector.stream():
             kind, request_id, *payload = raw
-            if kind != LogStreamEventKind.NIX:
+            if kind == LogStreamEventKind.NIX:
+                action, *args = payload
+                event = LogEvent(request_id=request_id, action=action, args=args)
+            elif kind == LogStreamEventKind.FINALIZED:
+                event = LogEvent(request_id=request_id, request_finalized=RequestFinalized())
+            else:
                 continue
-            action, *args = payload
-            event = LogEvent(request_id=request_id, action=action, args=args)
             for callback in tuple(self._log_callbacks):
                 callback(event)
 
@@ -348,14 +352,20 @@ class Session:
         if executor is None:
             raise RuntimeError("open inproc Session has no Nix executor")
         operation_id = self._next_operation_id()
-        return await executor.run(_run_with_log_context, operation_id, func, args)
+        try:
+            return await executor.run(_run_with_log_context, operation_id, func, args)
+        finally:
+            self._collector.request_finalized(operation_id)
 
     async def _run_closing(self, func: Any, *args: Any) -> Any:
         executor = self._executor
         if executor is None:
             raise RuntimeError("open inproc Session has no Nix executor")
         operation_id = self._next_operation_id()
-        return await executor.run_closing(_run_with_log_context, operation_id, func, args)
+        try:
+            return await executor.run_closing(_run_with_log_context, operation_id, func, args)
+        finally:
+            self._collector.request_finalized(operation_id)
 
     def _next_operation_id(self) -> int:
         return next(self._operation_ids)
@@ -763,20 +773,18 @@ class EvalSession:
 
     async def run(self, func: Any, *args: Any) -> Any:
         """Run evaluator and Value work on this evaluator's dedicated thread."""
-        return await self._executor.run(
-            _run_with_log_context,
-            self._session._next_operation_id(),  # type: ignore[reportPrivateUsage] -- Session owns operation correlation
-            func,
-            args,
-        )
+        operation_id = self._session._next_operation_id()  # type: ignore[reportPrivateUsage] -- Session owns operation correlation
+        try:
+            return await self._executor.run(_run_with_log_context, operation_id, func, args)
+        finally:
+            self._session._collector.request_finalized(operation_id)  # type: ignore[reportPrivateUsage] -- Session owns the log collector
 
     async def _run_closing(self, func: Any, *args: Any) -> Any:
-        return await self._executor.run_closing(
-            _run_with_log_context,
-            self._session._next_operation_id(),  # type: ignore[reportPrivateUsage] -- Session owns operation correlation
-            func,
-            args,
-        )
+        operation_id = self._session._next_operation_id()  # type: ignore[reportPrivateUsage] -- Session owns operation correlation
+        try:
+            return await self._executor.run_closing(_run_with_log_context, operation_id, func, args)
+        finally:
+            self._session._collector.request_finalized(operation_id)  # type: ignore[reportPrivateUsage] -- Session owns the log collector
 
     def _require_raw(self) -> Any:
         if not self._active or self._local is None:
