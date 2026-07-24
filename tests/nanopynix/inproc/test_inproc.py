@@ -18,7 +18,7 @@ from nanopynix_proto.nix.store import GcAction
 
 from nanopynix import Derivation, GcResult, MissingInfo, StorePath, inproc
 from nanopynix.inproc import _impl as inproc_impl
-from nanopynix.settings import NixEvalSettings
+from nanopynix.settings import NixEvalSettings, normalize_nix_path
 from tests.support.git import init_flake_repo
 
 if TYPE_CHECKING:
@@ -608,11 +608,10 @@ def test_inproc_session_nix_conf_accepts_existing_path(tmp_path: Path) -> None:
     assert session is not None
 
 
-def test_inproc_normalize_nix_path_str_and_list_variants() -> None:
-    assert inproc.Session._normalize_nix_path("foo=/bar") == list(  # type: ignore[reportPrivateUsage] -- exercising the str branch directly
-        nanopynix_expr.parse_nix_path("foo=/bar"),
-    )
-    assert inproc.Session._normalize_nix_path(["a", "b"]) == ["a", "b"]  # type: ignore[reportPrivateUsage] -- exercising the sequence branch directly
+def test_normalize_nix_path_str_and_list_variants() -> None:
+    """``normalize_nix_path`` (nanopynix.settings) is shared by inproc.Session and rpc.Session."""
+    assert normalize_nix_path("foo=/bar") == list(nanopynix_expr.parse_nix_path("foo=/bar"))
+    assert normalize_nix_path(["a", "b"]) == ["a", "b"]
 
 
 # ── Additional Store/EvalSession/Value/LockedFlake coverage ──────────────

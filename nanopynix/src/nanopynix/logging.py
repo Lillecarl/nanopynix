@@ -9,7 +9,9 @@ for the worker subprocess and an async interface for the Nix manager client.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import enum
+import logging
 import threading
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +21,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
     type LogCallback = Callable[..., None]
+
+_logger = logging.getLogger(__name__)
 
 
 class LogStreamEventKind(enum.StrEnum):
@@ -128,3 +132,53 @@ class LogCollector:
     def send_sentinel(self) -> None:
         """Push a ``None`` sentinel to unblock ``stream()`` without closing."""
         self._queue.sync_q.put(None)
+
+
+class BusSubscription:
+    """Handle returned by :meth:`CallbackBus.subscribe` — call ``.unsubscribe()`` to stop."""
+
+    __slots__ = ("_bus", "_callback")
+
+    def __init__(self, bus: CallbackBus, callback: LogCallback) -> None:
+        self._bus = bus
+        self._callback = callback
+
+    def unsubscribe(self) -> None:
+        self._bus._unsubscribe(self)  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks  # noqa: SLF001
+
+
+class CallbackBus:
+    """Dispatch events synchronously to a list of subscribed callbacks.
+
+    Shared by :class:`nanopynix.inproc.Session` (dispatching already-decoded
+    log events directly, no wire hop) and the RPC client's ``_WorkerClient``
+    (dispatching events received over gRPC from the worker's own
+    ``LogCollector``). The worker side (``rpc.worker._worker.subscribe_logs``)
+    is deliberately not built on this class: it runs *inside* the worker
+    process and must serialize events to protobuf over a streaming RPC, which
+    is a wire-encoding step this in-process callback dispatch has no part of.
+
+    Zero subscribers -> events are discarded (no buffering, no overhead). A
+    subscriber that raises is logged and does not stop dispatch to the
+    remaining subscribers.
+    """
+
+    def __init__(self) -> None:
+        self._subscribers: list[LogCallback] = []
+
+    def subscribe(self, callback: LogCallback) -> BusSubscription:
+        self._subscribers.append(callback)
+        return BusSubscription(self, callback)
+
+    def _unsubscribe(self, sub: BusSubscription) -> None:
+        with contextlib.suppress(ValueError):
+            self._subscribers.remove(sub._callback)  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks  # noqa: SLF001
+
+    def emit(self, event: object) -> None:
+        if not self._subscribers:
+            return
+        for callback in tuple(self._subscribers):
+            try:
+                callback(event)
+            except Exception:
+                _logger.exception("log bus subscriber failed")

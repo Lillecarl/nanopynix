@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 from nanopynix_bindings import util as nanopynix_util
 
 from nanopynix import LogCollector
+from nanopynix.logging import CallbackBus
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -188,3 +189,75 @@ async def test_drain_empty():
     c = LogCollector()
     assert c.drain() == []
     c.close()
+
+
+# ── CallbackBus — shared pub-sub used by inproc.Session and the RPC
+# client's _WorkerClient (see nanopynix.logging.CallbackBus's docstring for
+# why the worker's own subscribe_logs is not built on this). ──────────────
+
+
+def test_callback_bus_dispatches_to_all_subscribers():
+    bus = CallbackBus()
+    seen_a: list[object] = []
+    seen_b: list[object] = []
+    bus.subscribe(seen_a.append)
+    bus.subscribe(seen_b.append)
+
+    bus.emit("event")
+
+    assert seen_a == ["event"]
+    assert seen_b == ["event"]
+
+
+def test_callback_bus_unsubscribe_stops_dispatch():
+    bus = CallbackBus()
+    seen: list[object] = []
+    sub = bus.subscribe(seen.append)
+
+    bus.emit("first")
+    sub.unsubscribe()
+    bus.emit("second")
+
+    assert seen == ["first"]
+
+
+def test_callback_bus_raising_subscriber_does_not_block_others():
+    """A subscriber that raises is logged, not fatal to the remaining subscribers.
+
+    This is a deliberate behavior change from the old inproc-private
+    dispatch loop it replaced (which let a raising callback propagate and
+    kill the session's log-forwarding task) -- unified onto the RPC
+    client's more robust swallow-and-log semantics.
+    """
+    bus = CallbackBus()
+    seen: list[object] = []
+
+    def _raises(_event: object) -> None:
+        raise RuntimeError("boom")
+
+    bus.subscribe(_raises)
+    bus.subscribe(seen.append)
+
+    bus.emit("event")
+
+    assert seen == ["event"]
+
+
+def test_callback_bus_same_callback_subscribed_twice_dispatches_twice():
+    """Insertion-ordered list semantics: duplicate subscriptions are independent.
+
+    A deliberate change from inproc's old set-based dispatch (which
+    deduplicated by identity), matching the RPC client's list-based bus.
+    """
+    bus = CallbackBus()
+    seen: list[object] = []
+    first = bus.subscribe(seen.append)
+    bus.subscribe(seen.append)
+
+    bus.emit("event")
+    assert seen == ["event", "event"]
+
+    first.unsubscribe()
+    seen.clear()
+    bus.emit("event")
+    assert seen == ["event"]

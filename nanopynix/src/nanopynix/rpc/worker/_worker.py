@@ -382,7 +382,14 @@ class WorkerServiceHandler(WorkerServiceBase):
         set_process_title(subname, project_name="nanopynix")
 
     async def subscribe_logs(self, message: SubscribeLogsRequest) -> AsyncIterator[LogEvent]:
-        """Server-streaming RPC — yield log events as they arrive."""
+        """Server-streaming RPC — yield log events as they arrive.
+
+        This is the wire-encoding hop from ``LogCollector`` to protobuf, so it
+        is deliberately not built on :class:`nanopynix.logging.CallbackBus`
+        (the in-process pub-sub shared by ``inproc.Session`` and the client's
+        ``_WorkerClient``) — there is nothing to subscribe/unsubscribe here,
+        only a single collector stream serialized onto a gRPC channel.
+        """
         collector = self._state.collector
         if collector is None:
             return
