@@ -26,10 +26,28 @@ from nanopynix_proto.nix.store import GcAction as PublicGcAction
 from nanopynix._core._extract import locked_flake as _locked_flake_proto
 from nanopynix._core._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
 from nanopynix._core._nix_executor import NixThreadExecutor
-from nanopynix.logging import LogCollector
-from nanopynix.models import BuildResult, Derivation, GcResult, LockedInput, LogEvent, MissingInfo, PathInfo
+from nanopynix.logging import LogCollector, LogStreamEventKind
+from nanopynix.models import (
+    DEFAULT_STORE_URI,
+    NIX_USER_CONF_FILES_ENV,
+    NO_GC_LIMIT,
+    BuildResult,
+    Derivation,
+    GcResult,
+    LockedInput,
+    LogEvent,
+    MissingInfo,
+    PathInfo,
+)
 from nanopynix.models import StorePath as PublicStorePath
-from nanopynix.settings import NixEvalSettings, NixFetchSettings, NixFlakeSettings, NixSettings, normalize_nix_settings
+from nanopynix.settings import (
+    NIX_PATH_SETTING_KEY,
+    NixEvalSettings,
+    NixFetchSettings,
+    NixFlakeSettings,
+    NixSettings,
+    normalize_nix_settings,
+)
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
 if TYPE_CHECKING:
@@ -160,7 +178,7 @@ class Session:
         experimental_features: Sequence[str] | None = None,
         verbosity: LogLevelInput | None = None,
         nix_path: str | Sequence[str] | None = None,
-        store_uri: str = "auto",
+        store_uri: str = DEFAULT_STORE_URI,
         store_workers: int = 4,
     ) -> None:
         if nix_conf is not None:
@@ -214,7 +232,7 @@ class Session:
         logger_installed = False
         try:
             if self._nix_conf is not None:
-                os.environ["NIX_USER_CONF_FILES"] = str(self._nix_conf)
+                os.environ[NIX_USER_CONF_FILES_ENV] = str(self._nix_conf)
             nanopynix_util.install_logger(self._collector.callback)
             logger_installed = True
             await executor.run(self._init_nix)
@@ -312,7 +330,7 @@ class Session:
     async def _forward_logs(self) -> None:
         async for raw in self._collector.stream():
             kind, request_id, *payload = raw
-            if kind != "nix":
+            if kind != LogStreamEventKind.NIX:
                 continue
             action, *args = payload
             event = LogEvent(request_id=request_id, action=action, args=args)
@@ -583,7 +601,7 @@ class Store:
         *,
         ignore_liveness: bool = False,
         paths_to_delete: list[str | PublicStorePath] | tuple[()] = (),
-        max_freed: int = 2**64 - 1,
+        max_freed: int = NO_GC_LIMIT,
     ) -> GcResult:
         """Run a garbage-collection pass; see :meth:`nanopynix.store.Store.collect_garbage`."""
         raw_paths = await self._session.run(
@@ -668,7 +686,7 @@ class EvalSession:
             else self._session._nix_path  # type: ignore[reportPrivateUsage] -- Session owns evaluator configuration
         )
         rendered_eval = self._eval_settings.to_worker_settings() if self._eval_settings is not None else {}
-        rendered_eval.pop("nix-path", None)  # applied via nix_path/searchPath, not the generic settings map
+        rendered_eval.pop(NIX_PATH_SETTING_KEY, None)  # applied via nix_path/searchPath, not the generic settings map
         rendered_fetch = self._fetch_settings.to_worker_settings() if self._fetch_settings is not None else {}
         try:
             self._local = await self.run(
@@ -707,7 +725,7 @@ class EvalSession:
         ``restrict_eval``) require a new :class:`EvalSession`.
         """
         rendered_eval = eval_settings.to_worker_settings() if eval_settings is not None else {}
-        rendered_eval.pop("nix-path", None)
+        rendered_eval.pop(NIX_PATH_SETTING_KEY, None)
         rendered_fetch = fetch_settings.to_worker_settings() if fetch_settings is not None else {}
         await self.run(self._require_local().configure, rendered_eval, rendered_fetch)
 

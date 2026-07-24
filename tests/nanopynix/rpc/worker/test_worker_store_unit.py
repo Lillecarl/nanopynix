@@ -10,6 +10,7 @@ import anyio
 import pytest
 from nanopynix_proto.nix.store import GetUriRequest
 
+from nanopynix.models import HandleKind
 from nanopynix.rpc.worker._worker import WorkerState
 from nanopynix.rpc.worker._worker_store import StoreServiceHandler
 
@@ -37,7 +38,7 @@ async def test_store_handler_runs_independent_calls_on_multiple_store_threads() 
                 with active_lock:
                     active -= 1
 
-    handle = handles.allocate(SlowStore(), "store")
+    handle = handles.allocate(SlowStore(), HandleKind.STORE)
     state.store_limiter = anyio.CapacityLimiter(2)
     handler = StoreServiceHandler(state)
     responses = cast(

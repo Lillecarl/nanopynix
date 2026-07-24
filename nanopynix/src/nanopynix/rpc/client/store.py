@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+from nanopynix_bindings.store import BuildMode
 from nanopynix_proto.nix.store import (
     AddIndirectRootRequest,
     AddPermRootRequest,
@@ -41,7 +42,7 @@ from nanopynix_proto.nix.store import (
 )
 from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
-from nanopynix.models import BuildResult, Derivation, GcResult, MissingInfo, StorePath
+from nanopynix.models import NO_GC_LIMIT, BuildResult, Derivation, GcResult, MissingInfo, StorePath
 from nanopynix.rpc.client._pool import (
     _RPC_TIMEOUT as _RPC_TIMEOUT,  # type: ignore[reportPrivateUsage] -- cross-class access
 )
@@ -55,6 +56,9 @@ if TYPE_CHECKING:
     from nanopynix.rpc.client._pool import (
         _WorkerClient,  # type: ignore[reportPrivateUsage] -- TYPE_CHECKING import of lifecycle type
     )
+
+_DEFAULT_CA_METHOD = "nar"
+_DEFAULT_HASH_ALGO = "sha256"
 
 
 class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreServiceBase):
@@ -281,7 +285,7 @@ class Store:
         derived_paths: list[str | StorePath],
         /,
         *,
-        build_mode: int = 0,
+        build_mode: int = BuildMode.Normal.value,
         eval_store: Store | None = None,
     ) -> list[BuildResult]:
         """Build derived paths and return Nix's result for each path.
@@ -311,7 +315,7 @@ class Store:
         *,
         ignore_liveness: bool = False,
         paths_to_delete: list[str | StorePath] | tuple[()] = (),
-        max_freed: int = 2**64 - 1,
+        max_freed: int = NO_GC_LIMIT,
     ) -> GcResult:
         """Run a garbage-collection pass.
 
@@ -402,8 +406,8 @@ class Store:
         path: str,
         *,
         name: str | None = None,
-        method: str = "nar",
-        hash_algo: str = "sha256",
+        method: str = _DEFAULT_CA_METHOD,
+        hash_algo: str = _DEFAULT_HASH_ALGO,
     ) -> StorePath:
         """Compute the store path content-addressing ``path`` without adding it."""
         response = await self.rpc.compute_store_path(
@@ -416,8 +420,8 @@ class Store:
         path: str,
         *,
         name: str | None = None,
-        method: str = "nar",
-        hash_algo: str = "sha256",
+        method: str = _DEFAULT_CA_METHOD,
+        hash_algo: str = _DEFAULT_HASH_ALGO,
     ) -> StorePath:
         """Add a file or directory to this store."""
         response = await self.rpc.add_to_store(

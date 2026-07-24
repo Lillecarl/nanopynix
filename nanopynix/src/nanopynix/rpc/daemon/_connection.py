@@ -9,6 +9,7 @@ from nanopynix_bindings import main as nanopynix_main
 from nanopynix_bindings import store as nanopynix_store
 from nanopynix_bindings import util as nanopynix_util
 
+from nanopynix.models import NIX_USER_CONF_FILES_ENV
 from nanopynix.rpc.daemon._config import DaemonConfig
 
 
@@ -26,7 +27,7 @@ def run_connection(*, connection_fd: int, config_fd: int) -> None:
     """Initialise Nix and serve one inherited Unix connection descriptor."""
     config = DaemonConfig.from_bytes(_read_all(config_fd))
     if config.nix_conf is not None:
-        os.environ["NIX_USER_CONF_FILES"] = config.nix_conf
+        os.environ[NIX_USER_CONF_FILES_ENV] = config.nix_conf
     for name, value in config.settings.items():
         nanopynix_util.set_setting(name, value)
     nanopynix_main.init_nix(load_config=config.load_config)

@@ -22,10 +22,13 @@ from nanopynix_proto.nix.daemon import (
     SubscribeDaemonLogsRequest,
 )
 
-from nanopynix.logging import LogCollector
+from nanopynix.logging import LogCollector, LogStreamEventKind
 from nanopynix.rpc.daemon._config import DaemonConfig
 from nanopynix.rpc.daemon._supervisor import DaemonSupervisor
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
+from nanopynix.rpc.worker._worker import (
+    _WORKER_MAX_CONCURRENCY,  # type: ignore[reportPrivateUsage] -- cross-class access
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -107,9 +110,9 @@ class DaemonServiceHandler(DaemonServiceBase):
         del message
         async for event in self._state.collector.stream():
             kind, request_id, *payload = event
-            if kind == "finalized":
+            if kind == LogStreamEventKind.FINALIZED:
                 yield LogEvent(request_id=request_id, request_finalized=RequestFinalized())
-            elif kind == "nix":
+            elif kind == LogStreamEventKind.NIX:
                 action, *args = payload
                 yield LogEvent(request_id=request_id, nix_log=NixLogEvent(action=action, args_json=json.dumps(args)))
 
@@ -122,7 +125,7 @@ def daemon_service_factory(*_args: object) -> list[IServable]:
 async def run_daemon_worker(
     endpoint: Any,
     tuning: Any = None,
-    max_concurrency: int | None = 32,
+    max_concurrency: int | None = _WORKER_MAX_CONCURRENCY,
 ) -> None:
     """Serve daemon lifecycle gRPC until its L3 transport closes."""
     state = DaemonWorkerState()

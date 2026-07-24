@@ -35,8 +35,13 @@ from nanopynix_proto.nix.worker import (
 )
 
 from nanopynix.exceptions import from_response
+from nanopynix.models import DEFAULT_STORE_URI, WORKER_INIT_STATUS_OK
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
-from nanopynix.rpc.worker._worker import worker_service_factory
+from nanopynix.rpc.worker._worker import (
+    _WORKER_MAX_CONCURRENCY,  # type: ignore[reportPrivateUsage] -- cross-class access
+    worker_service_factory,
+)
+from nanopynix.settings import DEFAULT_RPC_TIMEOUT_SECONDS, DEFAULT_SHUTDOWN_TIMEOUT_SECONDS
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Sequence
@@ -48,12 +53,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ────────────────────────────────────────────────────────────────────
-_RPC_TIMEOUT = 300.0
-# Keep space for long-lived streams (the primop backchannel and SubscribeLogs)
-# as well as a bounded number of independent Store calls. Evaluator calls have
-# their own session-local serialization, so this is transport capacity rather
-# than EvalState concurrency.
-_WORKER_MAX_CONCURRENCY = 32
+_RPC_TIMEOUT = DEFAULT_RPC_TIMEOUT_SECONDS
 _OOM_SCORE_ADJ_MIN = -1000
 _OOM_SCORE_ADJ_MAX = 1000
 
@@ -161,7 +161,7 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
     def __init__(
         self,
         *,
-        store_uri: str = "auto",
+        store_uri: str = DEFAULT_STORE_URI,
         nix_conf: Path | None = None,
         load_config: bool = True,
         settings: dict[str, str] | None = None,
@@ -172,7 +172,7 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
         primop_callables: dict[str, Callable[..., Any]] | None = None,
         worker_oom_score_adj: int | None = None,
         rpc_timeout: float = _RPC_TIMEOUT,
-        shutdown_timeout: float = 5.0,
+        shutdown_timeout: float = DEFAULT_SHUTDOWN_TIMEOUT_SECONDS,
     ) -> None:
         self._store_uri = store_uri
         self._nix_conf = nix_conf
@@ -249,7 +249,7 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
             ),
             timeout=self.rpc_timeout,
         )
-        if init_response.status != "ok":
+        if init_response.status != WORKER_INIT_STATUS_OK:
             raise RuntimeError(f"Worker init failed: {init_response.status}")
 
     async def close(self) -> None:

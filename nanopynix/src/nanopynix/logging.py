@@ -9,6 +9,7 @@ for the worker subprocess and an async interface for the Nix manager client.
 from __future__ import annotations
 
 import asyncio
+import enum
 import threading
 from typing import TYPE_CHECKING, Any
 
@@ -18,6 +19,13 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
     type LogCallback = Callable[..., None]
+
+
+class LogStreamEventKind(enum.StrEnum):
+    """Discriminant tag for the tuples LogCollector's queue carries."""
+
+    NIX = "nix"
+    FINALIZED = "finalized"
 
 
 class LogCollector:
@@ -56,13 +64,13 @@ class LogCollector:
         logger callback instead of dropping events. The worker event loop drains
         the async side through ``SubscribeLogs``.
         """
-        self._queue.sync_q.put(("nix", req_id, action, *args))
+        self._queue.sync_q.put((LogStreamEventKind.NIX, req_id, action, *args))
         with self._stats_lock:
             self._enqueued += 1
 
     def request_finalized(self, request_id: int) -> None:
         """Enqueue the typed operation boundary after its Nix work finishes."""
-        self._queue.sync_q.put(("finalized", request_id))
+        self._queue.sync_q.put((LogStreamEventKind.FINALIZED, request_id))
         with self._stats_lock:
             self._enqueued += 1
 

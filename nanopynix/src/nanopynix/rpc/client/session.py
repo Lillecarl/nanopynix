@@ -26,7 +26,7 @@ from nanopynix_proto.nix.common import LogEvent as LogEventProto
 from nanopynix_proto.nix.common import LogLevel
 
 from nanopynix._process_title import set_manager_title
-from nanopynix.models import LogEvent, PrimOpSpec
+from nanopynix.models import DEFAULT_STORE_URI, LogEvent, PrimOpSpec
 from nanopynix.rpc.client._pool import (
     _ACTIVE_LOG_CAPTURES,  # type: ignore[reportPrivateUsage] -- dispatch-owned task-local capture stack
     _WorkerClient,  # type: ignore[reportPrivateUsage] -- internal lifecycle integration
@@ -166,7 +166,7 @@ class Session:
     def __init__(
         self,
         *,
-        store_uri: str = "auto",
+        store_uri: str = DEFAULT_STORE_URI,
         nix_conf: Path | None = None,
         load_config: bool = True,
         settings: NixSettings | PathLike[str] | str | None = None,

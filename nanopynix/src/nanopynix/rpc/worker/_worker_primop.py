@@ -25,10 +25,11 @@ from nanopynix_bindings import util as nanopynix_util
 from nanopynix_proto.nix.common import DeepAttrs, DeepList, DeepValue, NullValue, ScalarValue
 from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
 
+from nanopynix.models import CALL_ROUTE
+
 if TYPE_CHECKING:
     from grpclib_transports import WorkerBackchannel
 
-_CALL_ROUTE = "/nix.manager.ManagerPrimopService/Call"
 _RPC_TIMEOUT = 300.0
 
 
@@ -145,7 +146,7 @@ class ThreadedRpcPrimopBridge:
         )
         with anyio.fail_after(_RPC_TIMEOUT):
             response: CallPrimopResponse = await self._backchannel.call_unary(
-                _CALL_ROUTE, request, CallPrimopResponse
+                CALL_ROUTE, request, CallPrimopResponse
             )
         return _deep_value_to_python(response.value)
 

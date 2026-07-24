@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast, get_type_hints
 
 import anyio
 
+from nanopynix.models import HandleKind
+
 if TYPE_CHECKING:
     from betterproto2 import Message
 
@@ -30,9 +32,8 @@ class HandleArgSpec:
     kwarg: str
     """Binding method keyword-arg name to pass the resolved object as, e.g.
     ``"dest_store"``."""
-    kind: str
-    """``HandleRegistry`` kind tag the popped handle is expected to resolve
-    to, e.g. ``"store"``."""
+    kind: HandleKind
+    """``HandleRegistry`` kind tag the popped handle is expected to resolve to."""
     required: bool = False
     """If true, a missing/falsy handle raises instead of omitting the kwarg."""
 

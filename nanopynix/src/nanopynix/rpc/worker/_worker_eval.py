@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import pydantic_core
-
 from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import flake as nanopynix_flake
 from nanopynix_proto.nix import common as common_pb
@@ -80,6 +79,7 @@ from nanopynix_proto.nix.eval import (
 from nanopynix._core._extract import flake_ref_attrs as _flake_ref_attrs
 from nanopynix._core._extract import locked_flake as _locked_flake
 from nanopynix._core._local import LocalLockedFlake, LocalValue
+from nanopynix.models import HandleKind
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
 from nanopynix.rpc.worker._service_adapter import (
     _proto_shape,  # type: ignore[reportPrivateUsage] -- internal module registry pattern
@@ -127,7 +127,7 @@ class EvalEntry:
 
 def find_evals_by_store(state: Any, store_handle: int) -> list[int]:
     """Return the handles of every open evaluator bound to ``store_handle``."""
-    return [handle for handle, entry in state.handles.iter_kind("eval") if entry.store_handle == store_handle]
+    return [handle for handle, entry in state.handles.iter_kind(HandleKind.EVAL) if entry.store_handle == store_handle]
 
 
 def release_eval_resources(state: Any, eval_handle: int) -> None:
@@ -136,10 +136,10 @@ def release_eval_resources(state: Any, eval_handle: int) -> None:
     Must run on that evaluator's own Nix thread — the ``.close()`` calls
     below touch thread-confined Nix C++ objects.
     """
-    for handle, value in state.handles.iter_owned(eval_handle, "value"):
+    for handle, value in state.handles.iter_owned(eval_handle, HandleKind.VALUE):
         value.close()
         state.handles.release(handle)
-    for handle, locked_flake in state.handles.iter_owned(eval_handle, "locked_flake"):
+    for handle, locked_flake in state.handles.iter_owned(eval_handle, HandleKind.LOCKED_FLAKE):
         locked_flake.close()
         state.handles.release(handle)
 
@@ -156,7 +156,7 @@ def close_eval_state(state: Any, eval_handle: int) -> None:
     executor via :meth:`NixThreadExecutor.run_sync`.
     """
     try:
-        entry: EvalEntry = state.handles.get_typed(eval_handle, "eval")
+        entry: EvalEntry = state.handles.get_typed(eval_handle, HandleKind.EVAL)
     except KeyError:
         return
     state.handles.release(eval_handle)
@@ -190,7 +190,7 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _get_entry(self, eval_handle: int) -> EvalEntry:
         try:
-            return self._state.handles.get_typed(eval_handle, "eval")
+            return self._state.handles.get_typed(eval_handle, HandleKind.EVAL)
         except KeyError as exc:
             raise RuntimeError("no EvalState is open — call OpenEval before evaluating") from exc
 
@@ -210,7 +210,7 @@ class EvalServiceHandler(EvalServiceBase):
         )
 
     async def open_eval(self, message: OpenEvalRequest) -> OpenEvalResponse:
-        store = self._state.handles.get_typed(message.store_handle, "store")
+        store = self._state.handles.get_typed(message.store_handle, HandleKind.STORE)
         executor = NixThreadExecutor(
             thread_name_prefix="nix-eval",
             thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook
@@ -223,7 +223,7 @@ class EvalServiceHandler(EvalServiceBase):
             args=(store, self._state.nix_path, None, dict(message.eval_settings), dict(message.fetch_settings)),
         )
         entry = EvalEntry(eval_state=eval_state, executor=executor, store_handle=message.store_handle)
-        eval_handle = self._state.handles.allocate(entry, "eval")
+        eval_handle = self._state.handles.allocate(entry, HandleKind.EVAL)
         return OpenEvalResponse(eval_handle=eval_handle)
 
     async def configure_eval(self, message: ConfigureEvalRequest) -> ConfigureEvalResponse:
@@ -244,16 +244,16 @@ class EvalServiceHandler(EvalServiceBase):
         return CloseEvalResponse()
 
     def _export(self, value: Any, eval_handle: int) -> common_pb.ValueHandle:
-        handle = self._state.handles.allocate(value, "value", owner=eval_handle)
+        handle = self._state.handles.allocate(value, HandleKind.VALUE, owner=eval_handle)
         type_name = value.type_name()
         nix_type = _NIX_TYPE_MAP.get(type_name, common_pb.NixType.UNSPECIFIED)
         return common_pb.ValueHandle(handle=handle, type=nix_type)
 
     def _resolve(self, handle: int) -> Any:
-        return self._state.handles.get_typed(handle, "value")
+        return self._state.handles.get_typed(handle, HandleKind.VALUE)
 
     def _get_store(self, store_handle: int) -> Any:
-        return self._state.handles.get_typed(store_handle, "store")
+        return self._state.handles.get_typed(store_handle, HandleKind.STORE)
 
     def _deep_value(self, pyv: Any, eval_handle: int) -> common_pb.DeepValue:
         pyv.force()
@@ -517,7 +517,7 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _do_lock_flake(self, message: LockFlakeRequest) -> common_pb.LockedFlake:
         if self._state.collector is not None:
-            self._state.log("msg", 3, f"lock_flake: parsing ref '{message.ref}'")
+            self._state.log("msg", int(common_pb.LogLevel.INFO), f"lock_flake: parsing ref '{message.ref}'")
         es = self._get_es(message.eval_handle)
 
         if message.update_all is not None:
@@ -529,7 +529,9 @@ class EvalServiceHandler(EvalServiceBase):
 
         if self._state.collector is not None:
             self._state.log(
-                "msg", 3, f"lock_flake: calling C++ lock_flake write_lock_file={message.write_lock_file}"
+                "msg",
+                int(common_pb.LogLevel.INFO),
+                f"lock_flake: calling C++ lock_flake write_lock_file={message.write_lock_file}",
             )
         lf = es.lock_flake(
             message.ref,
@@ -538,8 +540,8 @@ class EvalServiceHandler(EvalServiceBase):
             flake_settings=dict(message.flake_settings),
         )
         if self._state.collector is not None:
-            self._state.log("msg", 3, "lock_flake: C++ lock_flake returned")
-        handle = self._state.handles.allocate(lf, "locked_flake", owner=message.eval_handle)
+            self._state.log("msg", int(common_pb.LogLevel.INFO), "lock_flake: C++ lock_flake returned")
+        handle = self._state.handles.allocate(lf, HandleKind.LOCKED_FLAKE, owner=message.eval_handle)
 
         lf_pb = _locked_flake(lf.require_raw())
         lf_pb.handle = handle
@@ -549,7 +551,7 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._run(message, self._do_call_locked_flake)
 
     def _do_call_locked_flake(self, message: CallLockedFlakeRequest) -> common_pb.ValueHandle:
-        lf: LocalLockedFlake = self._state.handles.get_typed(message.handle, "locked_flake")
+        lf: LocalLockedFlake = self._state.handles.get_typed(message.handle, HandleKind.LOCKED_FLAKE)
         es = self._get_es(message.eval_handle)
         return self._export(es.call_locked_flake(lf), message.eval_handle)
 
@@ -557,7 +559,7 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._run(message, self._do_write_lock_file)
 
     def _do_write_lock_file(self, message: WriteLockFileRequest) -> WriteLockFileResponse:
-        lf: LocalLockedFlake = self._state.handles.get_typed(message.handle, "locked_flake")
+        lf: LocalLockedFlake = self._state.handles.get_typed(message.handle, HandleKind.LOCKED_FLAKE)
         lf.write_lock_file()
         return WriteLockFileResponse()
 
@@ -566,7 +568,7 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _do_release_locked_flake(self, message: ReleaseLockedFlakeRequest) -> ReleaseLockedFlakeResponse:
         try:
-            locked_flake: LocalLockedFlake = self._state.handles.get_typed(message.handle, "locked_flake")
+            locked_flake: LocalLockedFlake = self._state.handles.get_typed(message.handle, HandleKind.LOCKED_FLAKE)
         except KeyError:
             return ReleaseLockedFlakeResponse()
         locked_flake.close()
