@@ -34,8 +34,7 @@ surfaced 39 pre-existing hotspots above their thresholds, each suppressed
 with a `# noqa` pointing here rather than refactored blind as part of the
 lint-rule rollout (a refactor risks behavior changes; a lint sweep shouldn't
 bundle them). Worth tackling opportunistically when next touching one of
-these functions: `pynix/repl.py`'s `_run_repl_loop` (29 branches/91 statements),
-`tests/support/lsp_scenario.py`'s `_apply` (38 branches/87 statements),
+these functions: `tests/support/lsp_scenario.py`'s `_apply` (38 branches/87 statements),
 `tests/support/nix_runtime.py`'s `pytest_collection_modifyitems` (21
 branches/56 statements), `pynix/_lsp/_syntax.py`'s `_resolve_declaration`
 (18 branches) and `_identifier_path_at_node` (17 branches/11 returns), and a

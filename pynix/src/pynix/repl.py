@@ -40,7 +40,7 @@ from pynix.target import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable, Iterable
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable
 
     from prompt_toolkit.document import Document
 
@@ -273,7 +273,139 @@ class _ReplCompleter(Completer):
             return []
 
 
-async def _run_repl_loop(  # noqa: C901, PLR0912, PLR0915 tracked complexity/arg-count debt, see TODO.md
+class _ReplState:
+    """Mutable state threaded through one REPL session's command handlers."""
+
+    def __init__(
+        self,
+        repl: ReplSession,
+        line_editors: tuple[str, ...],
+        loaded: list[tuple[str, str]],
+        last_loaded: list[str],
+    ) -> None:
+        self.repl = repl
+        self.line_editors = line_editors
+        self.loaded = loaded
+        self.last_loaded = last_loaded
+
+    async def add_attrs(self, value: Any) -> list[str]:
+        self.last_loaded = await self.repl.add_attrs(value)
+        print_formatted_text(f"Added {len(self.last_loaded)} variables: {' '.join(self.last_loaded)}")
+        return self.last_loaded
+
+    async def evaluate(self, expr: str) -> Any:
+        value = await self.repl.string(expr)
+        print_formatted_text(format_json(await value.force_json()))
+        return value
+
+    async def reload_sources(self) -> None:
+        await self.repl.reset_file_cache()
+        for load_command, source in self.loaded:
+            value = await (self.repl.load_file(source) if load_command == ":load" else self.repl.eval_flake(source))
+            await self.add_attrs(value)
+
+
+async def _cmd_print(state: _ReplState, argument: str) -> None:
+    await state.evaluate(argument)
+
+
+async def _cmd_type(state: _ReplState, argument: str) -> None:
+    value = await state.repl.string(argument)
+    print_formatted_text((await value.get_type()).name.lower())
+
+
+async def _cmd_build(state: _ReplState, argument: str) -> None:
+    value = await state.repl.string(argument)
+    outputs = await value.build()
+    print_formatted_text(format_json(outputs))
+
+
+async def _cmd_edit(state: _ReplState, argument: str) -> None:
+    await _edit(await state.repl.string(argument), state.line_editors)
+    await state.reload_sources()
+
+
+async def _cmd_run(state: _ReplState, argument: str) -> None:
+    await _run_derivation(await state.repl.string(argument))
+
+
+async def _cmd_exec(state: _ReplState, argument: str) -> None:
+    await _exec_argv(await (await state.repl.string(argument)).realise_argv())
+
+
+async def _cmd_shell(state: _ReplState, argument: str) -> None:
+    await _shell(await (await state.repl.string(argument)).realise_string())
+
+
+async def _cmd_add(state: _ReplState, argument: str) -> None:
+    await state.add_attrs(await state.repl.string(argument))
+
+
+async def _cmd_load(state: _ReplState, argument: str) -> None:
+    await state.add_attrs(await state.repl.load_file(argument))
+    state.loaded.append((":load", argument))
+
+
+async def _cmd_load_flake(state: _ReplState, argument: str) -> None:
+    await state.add_attrs(await state.repl.eval_flake(argument))
+    state.loaded.append((":load-flake", argument))
+
+
+async def _cmd_last_loaded(state: _ReplState, argument: str) -> None:
+    del argument
+    print_formatted_text(" ".join(state.last_loaded) if state.last_loaded else "nothing has been loaded")
+
+
+async def _cmd_reload(state: _ReplState, argument: str) -> None:
+    del argument
+    await state.reload_sources()
+
+
+async def _cmd_help(state: _ReplState, argument: str) -> None:
+    del state, argument
+    print_formatted_text(_HELP)
+
+
+async def _cmd_verbosity(state: _ReplState, argument: str) -> None:
+    try:
+        verbosity = await (
+            state.repl.get_verbosity() if not argument else state.repl.set_verbosity(normalize_log_level(argument))
+        )
+    except (TypeError, ValueError) as exc:
+        print_formatted_text(f"error: {exc}")
+    else:
+        print_formatted_text(f"{verbosity.name.lower()} ({int(verbosity)})")
+
+
+_COMMAND_HANDLERS: dict[str, Callable[[_ReplState, str], Awaitable[None]]] = {
+    ":p": _cmd_print,
+    ":print": _cmd_print,
+    ":t": _cmd_type,
+    ":type": _cmd_type,
+    ":b": _cmd_build,
+    ":build": _cmd_build,
+    ":e": _cmd_edit,
+    ":edit": _cmd_edit,
+    ":run": _cmd_run,
+    ":exec": _cmd_exec,
+    ":shell": _cmd_shell,
+    ":a": _cmd_add,
+    ":add": _cmd_add,
+    ":l": _cmd_load,
+    ":load": _cmd_load,
+    ":lf": _cmd_load_flake,
+    ":load-flake": _cmd_load_flake,
+    ":ll": _cmd_last_loaded,
+    ":last-loaded": _cmd_last_loaded,
+    ":r": _cmd_reload,
+    ":reload": _cmd_reload,
+    ":help": _cmd_help,
+    ":?": _cmd_help,
+    ":verbosity": _cmd_verbosity,
+}
+
+
+async def _run_repl_loop(
     repl: ReplSession,
     prompt: Any,
     *,
@@ -282,25 +414,12 @@ async def _run_repl_loop(  # noqa: C901, PLR0912, PLR0915 tracked complexity/arg
     line_editors: tuple[str, ...] = (),
 ) -> None:
     """Read and evaluate lines until the user exits the REPL."""
-    loaded = list(initial_sources or [])
-    last_loaded = list(initial_loaded or [])
-
-    async def add_attrs(value: Any) -> list[str]:
-        nonlocal last_loaded
-        last_loaded = await repl.add_attrs(value)
-        print_formatted_text(f"Added {len(last_loaded)} variables: {' '.join(last_loaded)}")
-        return last_loaded
-
-    async def evaluate(expr: str) -> Any:
-        value = await repl.string(expr)
-        print_formatted_text(format_json(await value.force_json()))
-        return value
-
-    async def reload_sources() -> None:
-        await repl.reset_file_cache()
-        for load_command, source in loaded:
-            value = await (repl.load_file(source) if load_command == ":load" else repl.eval_flake(source))
-            await add_attrs(value)
+    state = _ReplState(
+        repl=repl,
+        line_editors=line_editors,
+        loaded=list(initial_sources or []),
+        last_loaded=list(initial_loaded or []),
+    )
 
     print_formatted_text(_HELP)
     while True:
@@ -319,69 +438,17 @@ async def _run_repl_loop(  # noqa: C901, PLR0912, PLR0915 tracked complexity/arg
         command, _, argument = text.partition(" ")
         if command in {":quit", ":q"}:
             return
-        if command in {":help", ":?"}:
-            print_formatted_text(_HELP)
-            continue
-        if command == ":verbosity":
-            try:
-                verbosity = await (
-                    repl.get_verbosity() if not argument else repl.set_verbosity(normalize_log_level(argument))
-                )
-            except (TypeError, ValueError) as exc:
-                print_formatted_text(f"error: {exc}")
-            else:
-                print_formatted_text(f"{verbosity.name.lower()} ({int(verbosity)})")
-            continue
 
+        handler = _COMMAND_HANDLERS.get(command)
         try:
-            if command in {":p", ":print"}:
-                await evaluate(argument)
-                continue
-            if command in {":t", ":type"}:
-                value = await repl.string(argument)
-                print_formatted_text((await value.get_type()).name.lower())
-                continue
-            if command in {":b", ":build"}:
-                value = await repl.string(argument)
-                outputs = await value.build()
-                print_formatted_text(format_json(outputs))
-                continue
-            if command in {":e", ":edit"}:
-                await _edit(await repl.string(argument), line_editors)
-                await reload_sources()
-                continue
-            if command == ":run":
-                await _run_derivation(await repl.string(argument))
-                continue
-            if command == ":exec":
-                await _exec_argv(await (await repl.string(argument)).realise_argv())
-                continue
-            if command == ":shell":
-                await _shell(await (await repl.string(argument)).realise_string())
-                continue
-            if command in {":a", ":add"}:
-                await add_attrs(await repl.string(argument))
-                continue
-            if command in {":l", ":load"}:
-                await add_attrs(await repl.load_file(argument))
-                loaded.append((":load", argument))
-                continue
-            if command in {":lf", ":load-flake"}:
-                await add_attrs(await repl.eval_flake(argument))
-                loaded.append((":load-flake", argument))
-                continue
-            if command in {":ll", ":last-loaded"}:
-                print_formatted_text(" ".join(last_loaded) if last_loaded else "nothing has been loaded")
-                continue
-            if command in {":r", ":reload"}:
-                await reload_sources()
-                continue
-            if command.startswith(":"):
+            if handler is not None:
+                await handler(state, argument)
+            elif command.startswith(":"):
                 print_formatted_text(f"unknown command: {command}; try :help")
-                continue
-            value = await repl.line(line)
-            if value is not None:
-                print_formatted_text(format_json(await value.force_json()))
+            else:
+                value = await repl.line(line)
+                if value is not None:
+                    print_formatted_text(format_json(await value.force_json()))
         except (NixError, ReplRunError) as exc:
             _print_error(exc)
 
