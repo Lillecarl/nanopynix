@@ -125,7 +125,7 @@ class BuildTargetError(EvaluationTargetError):
     pass
 
 
-async def _build_target(
+async def _build_target(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
     target: EvaluationTarget,
     session: Any,
     *,
@@ -166,7 +166,7 @@ def _print_diff(path: Path, before: str, after: str) -> None:
                 after.splitlines(keepends=True),
                 fromfile=str(path),
                 tofile=str(path),
-            )
+            ),
         ),
         markup=False,
         highlight=False,

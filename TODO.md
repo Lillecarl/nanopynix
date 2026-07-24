@@ -27,3 +27,22 @@ replace the manual isinstance/raise validation with declarative schema
 validation and clearer error messages -- a real improvement, but a
 separate, behavior-changing redesign rather than a type-error fix, so it
 wasn't bundled into this pass.
+
+# Tracked: pre-existing complexity/arg-count debt (ruff-strict C901/PLR09xx)
+Enabling mccabe (`C901`) and Pylint's too-many-{branches,returns,arguments,
+statements} (`PLR0911`/`PLR0912`/`PLR0913`/`PLR0915`) in `ruff-strict.toml`
+surfaced 39 pre-existing hotspots above their thresholds, each suppressed
+with a `# noqa` pointing here rather than refactored blind as part of the
+lint-rule rollout (a refactor risks behavior changes; a lint sweep shouldn't
+bundle them). Worth tackling opportunistically when next touching one of
+these functions: `ekn/cli.py`'s `Ekn.run` (25 branches/115 statements),
+`pynix/repl.py`'s `_run_repl_loop` (29 branches/91 statements),
+`tests/support/lsp_scenario.py`'s `_apply` (38 branches/87 statements),
+`tests/support/nix_runtime.py`'s `pytest_collection_modifyitems` (21
+branches/56 statements), `pynix/_lsp/_syntax.py`'s `_resolve_declaration`
+(18 branches) and `_identifier_path_at_node` (17 branches/11 returns), and a
+long tail of smaller too-many-arguments constructors/factories (`ekn/apply.py`,
+`nanopynix_helpers/build.py`, `nanopynix/inproc/_impl.py`,
+`rpc/client/_pool.py`, `rpc/client/session.py`, `rpc/client/_session.py`,
+among others). Run `ruff check --select C901,PLR0911,PLR0912,PLR0913,PLR0915`
+for the full current list.

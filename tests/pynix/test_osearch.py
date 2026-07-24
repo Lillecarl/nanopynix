@@ -57,7 +57,7 @@ async def test_osearch_builds_index_and_finds_a_match(
             "--json-output",
             "services.example-daemon.port",
             *shared_nix_environment.pynix_store_args(),
-        ]
+        ],
     )
     await cmd.astart()
     captured = capsys.readouterr()
@@ -90,7 +90,7 @@ async def test_osearch_survives_an_option_whose_default_cannot_be_evaluated(
             "100",
             "example-daemon",
             *shared_nix_environment.pynix_store_args(),
-        ]
+        ],
     )
     await cmd.astart()
     captured = capsys.readouterr()
@@ -115,7 +115,7 @@ async def test_osearch_filters_out_internal_options(
             "100",
             "secretInternal",
             *shared_nix_environment.pynix_store_args(),
-        ]
+        ],
     )
     await cmd.astart()
     captured = capsys.readouterr()
@@ -141,7 +141,7 @@ async def test_osearch_second_run_hits_the_cache_without_a_working_store(
             "services.example-daemon.enable",
             "--store",
             "local://?root=/nonexistent-store-root",
-        ]
+        ],
     )
     await cached_cmd.astart()
     captured = capsys.readouterr()
@@ -158,7 +158,7 @@ async def test_osearch_update_index_rebuilds_the_cache(
     capsys.readouterr()
 
     rebuild_cmd = Pynix.parse(
-        ["osearch", "--file", str(_SYSTEM_NIX), "--update-index", *shared_nix_environment.pynix_store_args()]
+        ["osearch", "--file", str(_SYSTEM_NIX), "--update-index", *shared_nix_environment.pynix_store_args()],
     )
     await rebuild_cmd.astart()
     captured = capsys.readouterr()
@@ -179,7 +179,7 @@ async def test_osearch_limit_truncates_results(
             "1",
             "example-daemon",
             *shared_nix_environment.pynix_store_args(),
-        ]
+        ],
     )
     await cmd.astart()
     captured = capsys.readouterr()

@@ -172,7 +172,7 @@ async def test_manager_primop_service_handler_register_all_and_awaits_coroutine(
         CallPrimopRequest(
             name="add",
             args=[DeepValue(scalar=ScalarValue(int_value=2)), DeepValue(scalar=ScalarValue(int_value=3))],
-        )
+        ),
     )
 
     assert response.value is not None

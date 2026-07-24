@@ -23,8 +23,10 @@ def _repo_path(path: str | None = None) -> str:
     return os.environ.get("EKN_REPO") or path or "."
 
 
-def flatten_manifests(
-    data: Sequence[JsonValue], subdir: str = "./", kustomize: bool = False
+def flatten_manifests(  # noqa: C901 tracked complexity/arg-count debt, see TODO.md
+    data: Sequence[JsonValue],
+    subdir: str = "./",
+    kustomize: bool = False,
 ) -> list[tuple[str, str]]:
     if not isinstance(data, list):
         raise TypeError(f"expected list, got {type(data).__name__}")
@@ -51,7 +53,10 @@ def flatten_manifests(
         # dominated by CRDs' multi-hundred-KB bodies) with identical output
         # for plain JSON-like data.
         yaml_content = yaml.dump(
-            manifest, default_flow_style=False, sort_keys=False, Dumper=yaml.CSafeDumper
+            manifest,
+            default_flow_style=False,
+            sort_keys=False,
+            Dumper=yaml.CSafeDumper,
         )
         files.append((str(path), yaml_content))
 
@@ -98,7 +103,10 @@ def flatten_manifests(
         if generators:
             kustomization["generators"] = generators
         kustomization_content = yaml.dump(
-            kustomization, default_flow_style=False, sort_keys=False, Dumper=yaml.CSafeDumper
+            kustomization,
+            default_flow_style=False,
+            sort_keys=False,
+            Dumper=yaml.CSafeDumper,
         )
         files.append((str(base / "kustomization.yaml"), kustomization_content))
 
@@ -158,11 +166,7 @@ def snapshot_source_tree(repo_path: str) -> pygit2.Oid:
                 mode = pygit2.GIT_FILEMODE_LINK
             else:
                 blob_id = repo.create_blob_fromworkdir(rel_path)
-                mode = (
-                    pygit2.GIT_FILEMODE_BLOB_EXECUTABLE
-                    if os.access(abs_path, os.X_OK)
-                    else pygit2.GIT_FILEMODE_BLOB
-                )
+                mode = pygit2.GIT_FILEMODE_BLOB_EXECUTABLE if os.access(abs_path, os.X_OK) else pygit2.GIT_FILEMODE_BLOB
             entry = pygit2.IndexEntry(rel_path, blob_id, mode)  # pyright: ignore[reportArgumentType] -- pygit2 GIT_FILEMODE_* are ints but IndexEntry.mode's stub wants its own enum, same as _build_tree below
             index.add(entry)
     return index.write_tree(repo)
@@ -275,16 +279,24 @@ def prepare_deploy_and_source_commits(
     source_parents = [expected_source_parent] if expected_source_parent is not None else []
     source_tree_id = snapshot_source_tree(repo_path)
     source_oid = repo.create_commit(
-        None, author, committer, message, source_tree_id, source_parents
+        None,
+        author,
+        committer,
+        message,
+        source_tree_id,
+        source_parents,
     )
 
     expected_deploy_parent = _branch_tip(repo, deploy_branch)
-    deploy_parents = (
-        [expected_deploy_parent, source_oid] if expected_deploy_parent is not None else [source_oid]
-    )
+    deploy_parents = [expected_deploy_parent, source_oid] if expected_deploy_parent is not None else [source_oid]
     deploy_tree_id = _build_tree(repo, manifest_files)
     deploy_oid = repo.create_commit(
-        None, author, committer, message, deploy_tree_id, deploy_parents
+        None,
+        author,
+        committer,
+        message,
+        deploy_tree_id,
+        deploy_parents,
     )
 
     return PreparedCommits(
@@ -315,11 +327,11 @@ def finalize_branches(
 
     if source_branch is not None and _branch_tip(repo, source_branch) != prepared.expected_source_parent:
         raise ConcurrentDeployError(
-            f"{source_branch} moved since prepare -- concurrent deploy detected, retry"
+            f"{source_branch} moved since prepare -- concurrent deploy detected, retry",
         )
     if _branch_tip(repo, deploy_branch) != prepared.expected_deploy_parent:
         raise ConcurrentDeployError(
-            f"{deploy_branch} moved since prepare -- concurrent deploy detected, retry"
+            f"{deploy_branch} moved since prepare -- concurrent deploy detected, retry",
         )
 
     pairs: list[tuple[str, pygit2.Oid]] = []
@@ -389,16 +401,24 @@ def rollback_branches(
         # dual-commit deploy never produces (its source parent is always
         # present) -- this fallback is purely defensive, e.g. `--to` pointed
         # at a commit made entirely outside this tooling.
-        source_tree_id = (
-            target_commit.parents[-1].tree_id if target_commit.parents else target_commit.tree_id
-        )
+        source_tree_id = target_commit.parents[-1].tree_id if target_commit.parents else target_commit.tree_id
         source_oid = repo.create_commit(
-            None, author, committer, message, source_tree_id, source_parents
+            None,
+            author,
+            committer,
+            message,
+            source_tree_id,
+            source_parents,
         )
         deploy_parents.append(source_oid)
 
     deploy_oid = repo.create_commit(
-        None, author, committer, message, target_commit.tree_id, deploy_parents
+        None,
+        author,
+        committer,
+        message,
+        target_commit.tree_id,
+        deploy_parents,
     )
 
     return PreparedCommits(
@@ -416,7 +436,8 @@ async def try_jj_status(repo_path: str | None = None) -> None:
     if shutil.which("jj") is None:
         return
     proc = await asyncio.create_subprocess_exec(
-        "jj", "st",
+        "jj",
+        "st",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=root,

@@ -135,7 +135,8 @@ class TestHashUtilities:
 
     def test_parse_hash_any_with_algo(self):
         result = nanopynix_util.parse_hash_any(
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", algo=44
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            algo=44,
         )
         assert result == "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
 
@@ -195,7 +196,7 @@ class TestParseStoreReference:
         default daemon socket.
         """
         result: Any = nanopynix_store.parse_store_reference(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
-            "unix:///tmp/foo/socket?root=/tmp/foo"
+            "unix:///tmp/foo/socket?root=/tmp/foo",
         )
         assert result["type"] == "Specified"
         assert result["scheme"] == "unix"
@@ -227,10 +228,7 @@ class TestRenderStoreReference:
 
     def test_without_params_drops_query_string(self):
         uri = "unix:///tmp/foo/socket?root=/tmp/foo"
-        assert (
-            nanopynix_store.render_store_reference(uri, with_params=False)
-            == "unix:///tmp/foo/socket"
-        )
+        assert nanopynix_store.render_store_reference(uri, with_params=False) == "unix:///tmp/foo/socket"
 
     def test_round_trips_auto(self):
         assert nanopynix_store.render_store_reference("auto") == "auto"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import difflib
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
 import kr8s
@@ -70,7 +71,7 @@ def _is_missing_namespace_error(exc: kr8s.ServerError) -> bool:
     doesn't get that translation.
     """
     response = exc.response
-    if response is None or response.status_code != 404:
+    if response is None or response.status_code != HTTPStatus.NOT_FOUND:
         return False
     try:
         body: JsonValue = response.json()
@@ -109,7 +110,7 @@ async def cluster_diff(
         except ValueError as exc:
             chunks.append(
                 f"# {label}: cannot diff -- {exc} (kind not yet registered on "
-                "this cluster; its CRD would need to apply first)\n"
+                "this cluster; its CRD would need to apply first)\n",
             )
             continue
 

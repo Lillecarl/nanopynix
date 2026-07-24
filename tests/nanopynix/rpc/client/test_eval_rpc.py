@@ -153,7 +153,8 @@ async def test_forced_attrs_borrow_the_parent_value_handle(rpc_session: RpcSessi
 
 
 async def test_eval_realise_command_values_preserves_string_context(
-    rpc_session: RpcSessionFactory, shared_nix_environment: NixTestEnvironment
+    rpc_session: RpcSessionFactory,
+    shared_nix_environment: NixTestEnvironment,
 ):
     """Realising strings and argv uses Nix's context-aware coercion path."""
     async with (
@@ -498,7 +499,8 @@ async def test_force_deep_preserves_nested_functions(rpc_session: RpcSessionFact
 
 
 async def test_evaluated_derivation_can_build_while_eval_session_is_active(
-    rpc_session: RpcSessionFactory, shared_nix_environment: NixTestEnvironment
+    rpc_session: RpcSessionFactory,
+    shared_nix_environment: NixTestEnvironment,
 ):
     """ValueProxy.build builds the evaluated derivation through the eval store handle."""
     async with (
@@ -519,7 +521,7 @@ async def test_evaluated_derivation_can_build_while_eval_session_is_active(
                   echo hello > "$out"
                 '';
               }
-            """
+            """,
         )
 
         outputs = await drv.build()
@@ -531,7 +533,8 @@ async def test_evaluated_derivation_can_build_while_eval_session_is_active(
 
 
 async def test_evaluated_derivation_can_build_with_explicit_build_store(
-    rpc_session: RpcSessionFactory, shared_nix_environment: NixTestEnvironment
+    rpc_session: RpcSessionFactory,
+    shared_nix_environment: NixTestEnvironment,
 ):
     """ValueProxy.build(store=...) uses that store for building, keeping the eval store as context."""
     async with (
@@ -553,7 +556,7 @@ async def test_evaluated_derivation_can_build_with_explicit_build_store(
                   echo explicit > "$out"
                 '';
               }
-            """
+            """,
         )
 
         outputs = await drv.build(store=build_store)
@@ -596,7 +599,7 @@ async def test_worker_yaml_primops(rpc_session: RpcSessionFactory):
         }
 
         rendered = await eval.string(
-            'builtins.toYAML { apiVersion = "v1"; kind = "ConfigMap"; metadata.name = "demo"; }'
+            'builtins.toYAML { apiVersion = "v1"; kind = "ConfigMap"; metadata.name = "demo"; }',
         )
         text = await rendered.force_as(NixType.STRING)
         assert "apiVersion: v1" in text
@@ -685,7 +688,7 @@ async def test_worker_yaml_stream_primops(rpc_session: RpcSessionFactory):
         session.eval(store) as eval,
     ):
         parsed = await eval.string(
-            'builtins.fromYAMLStream "apiVersion: v1\\nkind: ConfigMap\\n---\\napiVersion: v1\\nkind: Service\\n"'
+            'builtins.fromYAMLStream "apiVersion: v1\\nkind: ConfigMap\\n---\\napiVersion: v1\\nkind: Service\\n"',
         )
         assert await parsed.force_deep() == [
             {"apiVersion": "v1", "kind": "ConfigMap"},
@@ -693,7 +696,7 @@ async def test_worker_yaml_stream_primops(rpc_session: RpcSessionFactory):
         ]
 
         rendered = await eval.string(
-            'builtins.toYAML [ { apiVersion = "v1"; kind = "ConfigMap"; } { apiVersion = "v1"; kind = "Service"; } ]'
+            'builtins.toYAML [ { apiVersion = "v1"; kind = "ConfigMap"; } { apiVersion = "v1"; kind = "Service"; } ]',
         )
         text = await rendered.force_as(NixType.STRING)
         assert text.count("---") == 2
@@ -742,7 +745,7 @@ async def test_eval_concurrent_sessions(rpc_session: RpcSessionFactory, tmp_path
 # ── Flake evaluation over RPC ──────────────────────────────────────────
 
 
-def _init_git_flake(tmp_path: Path, outputs_body: str):
+def _init_git_flake(tmp_path: Path, outputs_body: str) -> None:
     """Create a temp flake with a git repo for RPC testing."""
     init_flake_repo(tmp_path, outputs_body)
 

@@ -205,7 +205,7 @@ async def _start_daemon(root: Path) -> _Daemon:
         if process.returncode is not None:
             raise RuntimeError(
                 f"temporary nix daemon exited with status {process.returncode}; "
-                f"log:\n{daemon_log_path.read_text(errors='replace')}"
+                f"log:\n{daemon_log_path.read_text(errors='replace')}",
             )
         await asyncio.sleep(0.05)
     else:
@@ -233,7 +233,7 @@ async def _start_daemon(root: Path) -> _Daemon:
     if warmup_status != 0 or not (root / "nix" / "store").is_dir():
         raise RuntimeError(
             f"temporary nix daemon warmup (nix store info) exited {warmup_status} "
-            f"without creating {root / 'nix' / 'store'}; log:\n{daemon_log_path.read_text(errors='replace')}"
+            f"without creating {root / 'nix' / 'store'}; log:\n{daemon_log_path.read_text(errors='replace')}",
         )
     return _Daemon(process, socket_path)
 

@@ -119,16 +119,25 @@ class LocalEvalState:
         return self.wrap_value(nanopynix_flake.call_flake(self.require_raw(), locked_flake.require_raw()))
 
     def eval_flake(
-        self, ref: str, *, write_lock_file: bool, flake_settings: Mapping[str, str] | None = None
+        self,
+        ref: str,
+        *,
+        write_lock_file: bool,
+        flake_settings: Mapping[str, str] | None = None,
     ) -> LocalValue:
         return self.wrap_value(
             nanopynix_flake.eval_flake(
-                self.require_raw(), ref, write_lock_file, dict(flake_settings) if flake_settings else {}
-            )
+                self.require_raw(),
+                ref,
+                write_lock_file,
+                dict(flake_settings) if flake_settings else {},
+            ),
         )
 
     def configure(
-        self, eval_settings: Mapping[str, str] | None = None, fetch_settings: Mapping[str, str] | None = None
+        self,
+        eval_settings: Mapping[str, str] | None = None,
+        fetch_settings: Mapping[str, str] | None = None,
     ) -> None:
         """Apply live-mutable eval/fetch settings to this already-open evaluator."""
         raw = self.require_raw()
@@ -158,7 +167,7 @@ class LocalValue:
         self._raw = None
         self._eval_state.discard_value(self)
         if raw is not None:
-            raw._release()  # type: ignore[reportPrivateUsage] -- L1 RootValue lifetime API
+            raw._release()  # type: ignore[reportPrivateUsage] -- L1 RootValue lifetime API  # noqa: SLF001
 
     def require_raw(self) -> Any:
         self._eval_state.require_raw()

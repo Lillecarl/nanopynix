@@ -64,7 +64,11 @@ class GeneratedServiceAdapterMixin:
             if binding_method_names is None:
                 raise TypeError("binding_method_names is required with rpc_service_base")
             _install_generated_service_methods(
-                cls, rpc_service_base, binding_method_names, method_prefix, nix_executor_attr
+                cls,
+                rpc_service_base,
+                binding_method_names,
+                method_prefix,
+                nix_executor_attr,
             )
 
     def _nanobind_rpc_call(self, binding_method_name: str, message: Message) -> Any:
@@ -77,7 +81,7 @@ class GeneratedServiceAdapterMixin:
         A spec's handle field is popped from ``request`` regardless of
         outcome, so callers never see it leak through as plain request data.
         """
-        state: Any = cast("Any", self)._state
+        state: Any = cast("Any", self)._state  # noqa: SLF001
         kwargs: dict[str, Any] = {}
         for spec in self._extra_handle_args.get(binding_method_name, ()):
             handle = request.pop(spec.field, 0)

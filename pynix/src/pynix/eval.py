@@ -62,7 +62,11 @@ class Eval(Command):
             nix.eval(store) as session,
         ):
             try:
-                root = await evaluate_target(target, session, auto_call_file=True) if expr is None else await session.string(expr)
+                root = (
+                    await evaluate_target(target, session, auto_call_file=True)
+                    if expr is None
+                    else await session.string(expr)
+                )
             except EvaluationTargetError as exc:
                 console.print(f"[red]Error:[/red] {exc}")
                 raise SystemExit(1) from exc

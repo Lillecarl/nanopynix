@@ -78,6 +78,7 @@ def _raw_gc_action(action: PublicGcAction) -> Any:
     except KeyError as exc:
         raise ValueError(f"unsupported garbage-collection action: {action!r}") from exc
 
+
 class _InprocProcessGuard:
     """Reflect the irreducible process-global portion of an in-process Nix runtime.
 
@@ -98,7 +99,9 @@ class _InprocProcessGuard:
                 raise RuntimeError("only one nanopynix.inproc.Session may be open per process")
             initialized = self._initialization_signature
             if initialized is not None and signature != initialized:
-                raise RuntimeError("Nix is already initialized in this process with different nanopynix.inproc settings")
+                raise RuntimeError(
+                    "Nix is already initialized in this process with different nanopynix.inproc settings"
+                )
             self._active_session = session
 
     def mark_initialized(self, signature: tuple[object, ...]) -> None:
@@ -170,7 +173,7 @@ class Session:
     owns one separate Nix thread.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
         self,
         *,
         nix_conf: Path | None = None,
@@ -268,7 +271,7 @@ class Session:
             verbosity=None if self._verbosity is None else int(self._verbosity),
         )
 
-    async def close(
+    async def close(  # noqa: C901, PLR0912 tracked complexity/arg-count debt, see TODO.md
         self,
         *,
         wait: bool = True,
@@ -284,15 +287,15 @@ class Session:
             raise RuntimeError("cannot close inproc Session while Nix work is outstanding")
         executor.begin_close(force=force)
         for eval_session in tuple(self._evals):
-            eval_session._begin_close(force=force)  # type: ignore[reportPrivateUsage] -- Session owns evaluator executors
+            eval_session._begin_close(force=force)  # type: ignore[reportPrivateUsage] -- Session owns evaluator executors  # noqa: SLF001
         try:
             await executor.drain(timeout=timeout)
             for eval_session in tuple(self._evals):
-                await eval_session._drain(timeout=timeout)  # type: ignore[reportPrivateUsage] -- Session owns evaluator executors
+                await eval_session._drain(timeout=timeout)  # type: ignore[reportPrivateUsage] -- Session owns evaluator executors  # noqa: SLF001
         except TimeoutError:
             executor.resume()
             for eval_session in tuple(self._evals):
-                eval_session._resume()  # type: ignore[reportPrivateUsage] -- Session owns evaluator executors
+                eval_session._resume()  # type: ignore[reportPrivateUsage] -- Session owns evaluator executors  # noqa: SLF001
             raise
 
         errors: list[BaseException] = []
@@ -394,9 +397,9 @@ class Session:
         each :class:`EvalSession` owns an independent Nix evaluator, so
         concurrently open sessions may use different settings.
         """
-        if store._session is not self:  # type: ignore[reportPrivateUsage] -- identity ownership boundary
+        if store._session is not self:  # type: ignore[reportPrivateUsage] -- identity ownership boundary  # noqa: SLF001
             raise ValueError("Store belongs to a different inproc Session")
-        if build_store is not None and build_store._session is not self:  # type: ignore[reportPrivateUsage] -- identity ownership boundary
+        if build_store is not None and build_store._session is not self:  # type: ignore[reportPrivateUsage] -- identity ownership boundary  # noqa: SLF001
             raise ValueError("build_store belongs to a different inproc Session")
         return EvalSession(self, store, build_store, eval_settings=eval_settings, fetch_settings=fetch_settings)
 
@@ -443,11 +446,11 @@ class Store:
     async def open(self) -> None:
         """Open the underlying store."""
         if self._local is None:
-            self._local = await self._session.run(self._session._runtime.open_store, self._uri)  # type: ignore[reportPrivateUsage] -- session owns local runtime
+            self._local = await self._session.run(self._session._runtime.open_store, self._uri)  # type: ignore[reportPrivateUsage] -- session owns local runtime  # noqa: SLF001
 
     async def close(self, *, force: bool = False) -> None:
         """Close the underlying store, optionally closing its evaluator first."""
-        evals = tuple(eval_session for eval_session in self._session._evals if eval_session._store is self)  # type: ignore[reportPrivateUsage] -- Session owns evaluator lifetime tracking
+        evals = tuple(eval_session for eval_session in self._session._evals if eval_session._store is self)  # type: ignore[reportPrivateUsage] -- Session owns evaluator lifetime tracking  # noqa: SLF001
         if evals:
             if not force:
                 raise RuntimeError("cannot close a store while its EvalState is open; close the EvalSession first")
@@ -455,9 +458,9 @@ class Store:
                 await eval_session.close()
         local = self._local
         self._local = None
-        self._session._stores.discard(self)  # type: ignore[reportPrivateUsage] -- session owns store lifetime tracking
+        self._session._stores.discard(self)  # type: ignore[reportPrivateUsage] -- session owns store lifetime tracking  # noqa: SLF001
         if local is not None:
-            await self._session._run_closing(local.close)  # type: ignore[reportPrivateUsage] -- Store teardown follows Session close ordering
+            await self._session._run_closing(local.close)  # type: ignore[reportPrivateUsage] -- Store teardown follows Session close ordering  # noqa: SLF001
 
     def _require_raw(self) -> Any:
         if self._local is None:
@@ -565,7 +568,9 @@ class Store:
     ) -> MissingInfo:
         """Return which of ``derived_paths`` still need to be built or substituted."""
         raw_paths = await self._session.run(
-            _parse_store_paths, self._require_raw(), [str(p) for p in derived_paths]
+            _parse_store_paths,
+            self._require_raw(),
+            [str(p) for p in derived_paths],
         )
         result = await self._session.run(self._require_raw().query_missing, raw_paths)
         return MissingInfo(**result)
@@ -583,7 +588,7 @@ class Store:
         A plain derivation path means all outputs. A ``^`` separator opts into
         Nix's explicit canonical DerivedPath output-selection syntax.
         """
-        if eval_store is not None and eval_store._session is not self._session:  # type: ignore[reportPrivateUsage] -- session ownership guard
+        if eval_store is not None and eval_store._session is not self._session:  # type: ignore[reportPrivateUsage] -- session ownership guard  # noqa: SLF001
             raise ValueError("eval_store belongs to a different inproc Session")
         mode = BuildMode.Normal.value if build_mode is None else int(build_mode)
         response = await self._session.run(
@@ -592,12 +597,14 @@ class Store:
                 "derived_paths": [str(path) for path in derived_paths],
                 "build_mode": mode,
             },
-            None if eval_store is None else eval_store._require_raw(),
+            None if eval_store is None else eval_store._require_raw(),  # noqa: SLF001
         )
         return [BuildResult(**result) for result in response["results"]]
 
     async def read_derivation(
-        self, drv_path: str | PublicStorePath, /
+        self,
+        drv_path: str | PublicStorePath,
+        /,
     ) -> Derivation:
         """Parse and return the ``.drv`` file at ``drv_path``."""
         raw_path = await self._session.run(self._require_raw().parse_store_path, str(drv_path))
@@ -615,7 +622,9 @@ class Store:
     ) -> GcResult:
         """Run a garbage-collection pass; see :meth:`nanopynix.store.Store.collect_garbage`."""
         raw_paths = await self._session.run(
-            _parse_store_paths, self._require_raw(), [str(p) for p in paths_to_delete]
+            _parse_store_paths,
+            self._require_raw(),
+            [str(p) for p in paths_to_delete],
         )
         result = await self._session.run(
             self._require_raw().collect_garbage,
@@ -625,7 +634,9 @@ class Store:
             max_freed,
         )
         paths = await self._session.run(
-            _print_store_paths, self._require_raw(), result["paths"]
+            _print_store_paths,
+            self._require_raw(),
+            result["paths"],
         )
         return GcResult(
             paths=[PublicStorePath(p) for p in paths],
@@ -669,8 +680,8 @@ class EvalSession:
         self._locked_flakes: set[LockedFlake] = set()
         self._executor = NixThreadExecutor(
             thread_name_prefix="nix-eval",
-            thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook
-            thread_finalizer=nanopynix_expr._exit_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook
+            thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
+            thread_finalizer=nanopynix_expr._exit_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
         )
 
     async def __aenter__(self) -> EvalSession:
@@ -687,23 +698,23 @@ class EvalSession:
         if self._executor.closed:
             self._executor = NixThreadExecutor(
                 thread_name_prefix="nix-eval",
-                thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook
-                thread_finalizer=nanopynix_expr._exit_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook
+                thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
+                thread_finalizer=nanopynix_expr._exit_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
             )
         nix_path = (
             self._eval_settings.nix_path
             if self._eval_settings is not None and self._eval_settings.nix_path is not None
-            else self._session._nix_path  # type: ignore[reportPrivateUsage] -- Session owns evaluator configuration
+            else self._session._nix_path  # type: ignore[reportPrivateUsage] -- Session owns evaluator configuration  # noqa: SLF001
         )
         rendered_eval = self._eval_settings.to_worker_settings() if self._eval_settings is not None else {}
         rendered_eval.pop(NIX_PATH_SETTING_KEY, None)  # applied via nix_path/searchPath, not the generic settings map
         rendered_fetch = self._fetch_settings.to_worker_settings() if self._fetch_settings is not None else {}
         try:
             self._local = await self.run(
-                self._session._runtime.open_eval_state,  # type: ignore[reportPrivateUsage] -- Session owns local runtime
-            self._store._require_local(),  # type: ignore[reportPrivateUsage] -- cross-class Store→EvalSession coupling
-            nix_path,
-            None if self._build_store is None else self._build_store._require_local(),  # type: ignore[reportPrivateUsage] -- cross-class Store→EvalSession coupling
+                self._session._runtime.open_eval_state,  # type: ignore[reportPrivateUsage] -- Session owns local runtime  # noqa: SLF001
+                self._store._require_local(),  # type: ignore[reportPrivateUsage] -- cross-class Store→EvalSession coupling  # noqa: SLF001
+                nix_path,
+                None if self._build_store is None else self._build_store._require_local(),  # type: ignore[reportPrivateUsage] -- cross-class Store→EvalSession coupling  # noqa: SLF001
                 rendered_eval,
                 rendered_fetch,
             )
@@ -719,7 +730,7 @@ class EvalSession:
             # collection cycle can crash on (pthread_kill on a dead tid).
             self._executor.shutdown(wait=True)
             raise
-        self._session._evals.add(self)  # type: ignore[reportPrivateUsage] -- Session owns evaluator lifetime tracking
+        self._session._evals.add(self)  # type: ignore[reportPrivateUsage] -- Session owns evaluator lifetime tracking  # noqa: SLF001
         self._active = True
 
     async def configure(
@@ -748,7 +759,7 @@ class EvalSession:
         local = self._local
         self._local = None
         self._active = False
-        self._session._evals.discard(self)  # type: ignore[reportPrivateUsage] -- Session owns evaluator lifetime tracking
+        self._session._evals.discard(self)  # type: ignore[reportPrivateUsage] -- Session owns evaluator lifetime tracking  # noqa: SLF001
         try:
             if local is not None:
                 await self._run_closing(local.close)
@@ -773,18 +784,18 @@ class EvalSession:
 
     async def run(self, func: Any, *args: Any) -> Any:
         """Run evaluator and Value work on this evaluator's dedicated thread."""
-        operation_id = self._session._next_operation_id()  # type: ignore[reportPrivateUsage] -- Session owns operation correlation
+        operation_id = self._session._next_operation_id()  # type: ignore[reportPrivateUsage] -- Session owns operation correlation  # noqa: SLF001
         try:
             return await self._executor.run(_run_with_log_context, operation_id, func, args)
         finally:
-            self._session._collector.request_finalized(operation_id)  # type: ignore[reportPrivateUsage] -- Session owns the log collector
+            self._session._collector.request_finalized(operation_id)  # type: ignore[reportPrivateUsage] -- Session owns the log collector  # noqa: SLF001
 
     async def _run_closing(self, func: Any, *args: Any) -> Any:
-        operation_id = self._session._next_operation_id()  # type: ignore[reportPrivateUsage] -- Session owns operation correlation
+        operation_id = self._session._next_operation_id()  # type: ignore[reportPrivateUsage] -- Session owns operation correlation  # noqa: SLF001
         try:
             return await self._executor.run_closing(_run_with_log_context, operation_id, func, args)
         finally:
-            self._session._collector.request_finalized(operation_id)  # type: ignore[reportPrivateUsage] -- Session owns the log collector
+            self._session._collector.request_finalized(operation_id)  # type: ignore[reportPrivateUsage] -- Session owns the log collector  # noqa: SLF001
 
     def _require_raw(self) -> Any:
         if not self._active or self._local is None:
@@ -836,7 +847,7 @@ class EvalSession:
                 update_inputs=update_inputs,
                 write_lock_file=write_lock_file,
                 flake_settings=flake_settings.to_worker_settings() if flake_settings is not None else None,
-            )
+            ),
         )
         proto = await self.run(_locked_flake_proto, local.require_raw())
         locked_flake = LockedFlake(self, local, proto.description, proto.inputs)
@@ -844,7 +855,11 @@ class EvalSession:
         return locked_flake
 
     async def eval_flake(
-        self, ref: str, *, write_lock_file: bool = True, flake_settings: NixFlakeSettings | None = None
+        self,
+        ref: str,
+        *,
+        write_lock_file: bool = True,
+        flake_settings: NixFlakeSettings | None = None,
     ) -> Value:
         """Lock and evaluate a flake in one step."""
         local = await self.run(
@@ -853,7 +868,7 @@ class EvalSession:
                 ref,
                 write_lock_file=write_lock_file,
                 flake_settings=flake_settings.to_worker_settings() if flake_settings is not None else None,
-            )
+            ),
         )
         return self._track_value(local)
 
@@ -874,26 +889,26 @@ class ReplSession:
         A binding such as ``x = 1`` returns ``None``. An expression returns a
         session-bound :class:`Value`.
         """
-        local = await self._eval_session.run(self._eval_session._require_local().repl_process_line, text, path)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling
-        return None if local is None else self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
+        local = await self._eval_session.run(self._eval_session._require_local().repl_process_line, text, path)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling  # noqa: SLF001
+        return None if local is None else self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
 
     async def load_file(self, path: str) -> Value:
         """Load a Nix expression file as ``nix repl :load`` does."""
-        local = await self._eval_session.run(self._eval_session._require_local().repl_load_file, path)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling
-        return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
+        local = await self._eval_session.run(self._eval_session._require_local().repl_load_file, path)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling  # noqa: SLF001
+        return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
 
     async def add_attrs(self, value: Value) -> list[str]:
         """Add all attributes from ``value`` to this REPL's lexical scope."""
-        local_value = value._local_for(self._eval_session)  # type: ignore[reportPrivateUsage] -- same-evaluator guard
-        return await self._eval_session.run(self._eval_session._require_local().repl_add_attrs, local_value)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling
+        local_value = value._local_for(self._eval_session)  # type: ignore[reportPrivateUsage] -- same-evaluator guard  # noqa: SLF001
+        return await self._eval_session.run(self._eval_session._require_local().repl_add_attrs, local_value)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling  # noqa: SLF001
 
     async def scope_names(self) -> list[str]:
         """Return the identifiers visible in this REPL's lexical scope."""
-        return await self._eval_session.run(self._eval_session._require_raw().repl_scope_names)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling
+        return await self._eval_session.run(self._eval_session._require_raw().repl_scope_names)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling  # noqa: SLF001
 
     async def reset_file_cache(self) -> None:
         """Discard parsed file cache entries before reloading REPL sources."""
-        await self._eval_session.run(self._eval_session._require_raw().reset_file_cache)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling
+        await self._eval_session.run(self._eval_session._require_raw().reset_file_cache)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling  # noqa: SLF001
 
 
 class LockedFlake:
@@ -912,19 +927,19 @@ class LockedFlake:
         self.inputs = inputs
 
     def _local_for(self) -> LocalLockedFlake:
-        self._eval_session._require_local()  # type: ignore[reportPrivateUsage] -- parent owns local evaluator lifetime
+        self._eval_session._require_local()  # type: ignore[reportPrivateUsage] -- parent owns local evaluator lifetime  # noqa: SLF001
         if self._local is None:
             raise InprocLockedFlakeReleasedError("LockedFlake has been released")
         return self._local
 
     async def eval(self) -> Value:
         """Evaluate this locked flake's outputs."""
-        evaluator = self._eval_session._require_local()  # type: ignore[reportPrivateUsage] -- parent owns the local evaluator
+        evaluator = self._eval_session._require_local()  # type: ignore[reportPrivateUsage] -- parent owns the local evaluator  # noqa: SLF001
         local = await self._eval_session.run(
             evaluator.call_locked_flake,
             self._local_for(),
         )
-        return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
+        return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
 
     async def write_lock_file(self) -> None:
         """Persist this locked flake's lock file to disk."""
@@ -934,9 +949,9 @@ class LockedFlake:
         """Release the underlying handle for this locked flake. Idempotent."""
         local = self._local
         self._local = None
-        self._eval_session._locked_flakes.discard(self)  # type: ignore[reportPrivateUsage] -- evaluator owns facade lifetime tracking
+        self._eval_session._locked_flakes.discard(self)  # type: ignore[reportPrivateUsage] -- evaluator owns facade lifetime tracking  # noqa: SLF001
         if local is not None:
-            await self._eval_session._run_closing(local.close)  # type: ignore[reportPrivateUsage] -- flake teardown follows evaluator close ordering
+            await self._eval_session._run_closing(local.close)  # type: ignore[reportPrivateUsage] -- flake teardown follows evaluator close ordering  # noqa: SLF001
 
 
 class Value:
@@ -961,7 +976,7 @@ class Value:
             await self._eval_session.run(local.close)
 
     def _local_for(self, eval_session: EvalSession) -> LocalValue:
-        self._eval_session._require_local()  # type: ignore[reportPrivateUsage] -- liveness check before pointer use
+        self._eval_session._require_local()  # type: ignore[reportPrivateUsage] -- liveness check before pointer use  # noqa: SLF001
         if eval_session is not self._eval_session:
             raise ValueError("Value belongs to a different inproc EvalSession")
         if self._local is None:
@@ -1026,7 +1041,7 @@ class Value:
     async def attr(self, name: str) -> Value:
         """Force this value as an attrset and return attribute ``name``."""
         local = await self._eval_session.run(self._local_for(self._eval_session).attr_get, name)
-        return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
+        return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
 
     async def has_attr(self, name: str) -> bool:
         """Force this value as an attrset and return whether ``name`` is present."""
@@ -1035,7 +1050,7 @@ class Value:
     async def list_get(self, index: int) -> Value:
         """Force this value as a list and return element ``index``."""
         local = await self._eval_session.run(self._local_for(self._eval_session).list_get, index)
-        return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
+        return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
 
     async def attr_names(self) -> list[str]:
         """Force this value as an attrset and return its attribute names."""
@@ -1055,17 +1070,17 @@ class Value:
         local = self._local_for(self._eval_session)
         argument_local = await self._argument_local(argument)
         result = await self._eval_session.run(local.call, argument_local)
-        return self._eval_session._track_value(result)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
+        return self._eval_session._track_value(result)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
 
     async def auto_call(self) -> Value:
         """Apply Nix top-level auto-call semantics to a function value."""
         result = await self._eval_session.run(self._local_for(self._eval_session).auto_call)
-        return self._eval_session._track_value(result)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking
+        return self._eval_session._track_value(result)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
 
     async def _argument_local(self, argument: Value | Any) -> LocalValue:
         if isinstance(argument, Value):
-            return argument._local_for(self._eval_session)
-        return await self._eval_session.run(self._eval_session._require_local().value_from_python, argument)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→Value coupling
+            return argument._local_for(self._eval_session)  # noqa: SLF001
+        return await self._eval_session.run(self._eval_session._require_local().value_from_python, argument)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→Value coupling  # noqa: SLF001
 
     async def build(self, *, store: Store | None = None, build_mode: Any = None) -> dict[str, str]:
         """Build the derivation represented by this evaluated value.
@@ -1075,23 +1090,19 @@ class Value:
                 ``EvalSession`` was opened with.
             build_mode: A :data:`BuildMode` value, or ``None`` for normal builds.
         """
-        target_store = self._eval_session._store if store is None else store  # type: ignore[reportPrivateUsage] -- evaluator's bound store is default
-        if target_store._session is not self._eval_session._session:  # type: ignore[reportPrivateUsage] -- session ownership guard
+        target_store = self._eval_session._store if store is None else store  # type: ignore[reportPrivateUsage] -- evaluator's bound store is default  # noqa: SLF001
+        if target_store._session is not self._eval_session._session:  # type: ignore[reportPrivateUsage] -- session ownership guard  # noqa: SLF001
             raise ValueError("Store belongs to a different inproc Session")
         derived_path = await self.get_derived_path()
         results = await target_store.build_paths_with_results(
             [derived_path],
             build_mode=build_mode,
-            eval_store=None if target_store is self._eval_session._store else self._eval_session._store,  # type: ignore[reportPrivateUsage] -- cross-store build source
+            eval_store=None if target_store is self._eval_session._store else self._eval_session._store,  # type: ignore[reportPrivateUsage] -- cross-store build source  # noqa: SLF001
         )
         if not results or not results[0].success:
             raise RuntimeError(results[0].error_msg if results else "build returned no result")
         derivation = await target_store.read_derivation(derived_path)
-        return {
-            name: output.path
-            for name, output in derivation.outputs.items()
-            if output.path is not None
-        }
+        return {name: output.path for name, output in derivation.outputs.items() if output.path is not None}
 
     async def get_derived_path(self) -> str:
         """Extract this derivation's canonical DerivedPath string.

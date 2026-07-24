@@ -224,25 +224,37 @@ class LspDriver(Protocol):
     async def hover(self, uri: str, position: types.Position) -> types.Hover | None: ...
 
     async def complete(
-        self, uri: str, position: types.Position
+        self,
+        uri: str,
+        position: types.Position,
     ) -> types.CompletionList | Sequence[types.CompletionItem] | None: ...
 
     async def definition(
-        self, uri: str, position: types.Position
+        self,
+        uri: str,
+        position: types.Position,
     ) -> types.Location | Sequence[types.Location] | Sequence[types.LocationLink] | None: ...
 
     async def prepare_rename(
-        self, uri: str, position: types.Position
+        self,
+        uri: str,
+        position: types.Position,
     ) -> types.Range | types.PrepareRenamePlaceholder | types.PrepareRenameDefaultBehavior | None: ...
 
     async def rename(self, uri: str, position: types.Position, new_name: str) -> types.WorkspaceEdit | None: ...
 
     async def document_highlight(
-        self, uri: str, position: types.Position
+        self,
+        uri: str,
+        position: types.Position,
     ) -> Sequence[types.DocumentHighlight] | None: ...
 
     async def references(
-        self, uri: str, position: types.Position, *, include_declaration: bool
+        self,
+        uri: str,
+        position: types.Position,
+        *,
+        include_declaration: bool,
     ) -> Sequence[types.Location] | None: ...
 
     async def diagnostics(self, uri: str) -> Sequence[types.Diagnostic]: ...
@@ -351,7 +363,7 @@ class Scenario:
         for action in self._actions:
             await self._apply(driver, action)
 
-    async def _apply(self, driver: LspDriver, action: Action) -> None:
+    async def _apply(self, driver: LspDriver, action: Action) -> None:  # noqa: C901, PLR0912, PLR0915 tracked complexity/arg-count debt, see TODO.md
         match action:
             case GoTo(marker):
                 self._cursor = self._markers[marker].range.start
@@ -417,7 +429,9 @@ class Scenario:
                     for uri, position in locations
                 )
                 if not matched:
-                    raise AssertionError(f"expected a definition at ({file_suffix!r}, {line}, {character}), got {locations}")
+                    raise AssertionError(
+                        f"expected a definition at ({file_suffix!r}, {line}, {character}), got {locations}"
+                    )
             case ExpectNoDefinition():
                 locations = _definition_locations(await driver.definition(self.uri, self._cursor))
                 if locations:
@@ -431,7 +445,9 @@ class Scenario:
                     raise AssertionError("rename returned no WorkspaceEdit")
                 text_edits = (edit.changes or {}).get(self.uri, [])
                 for text_edit in sorted(
-                    text_edits, key=lambda e: (e.range.start.line, e.range.start.character), reverse=True
+                    text_edits,
+                    key=lambda e: (e.range.start.line, e.range.start.character),
+                    reverse=True,
                 ):
                     await self._edit(driver, text_edit.range, text_edit.new_text)
             case ExpectNoRename():

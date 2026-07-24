@@ -23,7 +23,7 @@ def test_extracts_only_the_exact_ansi_colored_nix_fod_shape() -> None:
     mismatch = extract_fod_hash_mismatch(
         "error: hash mismatch in fixed-output derivation '\x1b[35;1m/nix/store/source.drv\x1b[0m':\n"
         "  specified: \x1b[35;1msha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\x1b[0m\n"
-        "     got:    \x1b[35;1msha256-XG19bBLOoknhsnwV5rVaVGB8DYUiNPMklhyNotZNcD4=\x1b[0m"
+        "     got:    \x1b[35;1msha256-XG19bBLOoknhsnwV5rVaVGB8DYUiNPMklhyNotZNcD4=\x1b[0m",
     )
 
     assert mismatch is not None
@@ -75,14 +75,18 @@ in [ first second ]
     )
 
     assert literal.derivation_name == "second"
-    assert replace_fod_hash(source, literal, "sha256-XG19bBLOoknhsnwV5rVaVGB8DYUiNPMklhyNotZNcD4=").count("sha256-") == 1
+    assert (
+        replace_fod_hash(source, literal, "sha256-XG19bBLOoknhsnwV5rVaVGB8DYUiNPMklhyNotZNcD4=").count("sha256-") == 1
+    )
 
 
 def test_find_fod_hash_literal_prefers_an_exact_value_match_over_ambiguity() -> None:
     """Two candidates exist, but one's stored value already equals *specified*
     (e.g. it was never actually empty); that one must win outright rather than
     falling through to the "multiple hash literals" ambiguity error."""
-    source = 'first = { hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; }; second = { hash = "sha256-BBBB"; };'
+    source = (
+        'first = { hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; }; second = { hash = "sha256-BBBB"; };'
+    )
 
     literal = find_fod_hash_literal(source, "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 
@@ -221,7 +225,9 @@ async def test_fixed_output_derivations_in_closure_walks_input_drvs_once_each() 
         fixed_dep: Derivation(name="fixed-dep", input_drvs={}, outputs={"out": DerivationOutput(type="CAFixed")}),
         # Points back to root -- exercises the visited-set cycle guard.
         plain_dep: Derivation(
-            name="plain-dep", input_drvs={root: DerivationOutputs(outputs=["out"])}, outputs={"out": DerivationOutput(type="Regular")}
+            name="plain-dep",
+            input_drvs={root: DerivationOutputs(outputs=["out"])},
+            outputs={"out": DerivationOutput(type="Regular")},
         ),
     }
     store = _FakeStore(derivations)
@@ -249,7 +255,9 @@ async def test_is_fixed_output_derivation_in_closure_true_via_matching_derivatio
     candidate = "/nix/store/newhash-dep.drv"
     derivations = {
         root: Derivation(
-            name="root", input_drvs={dep: DerivationOutputs(outputs=["out"])}, outputs={"out": DerivationOutput(type="Regular")}
+            name="root",
+            input_drvs={dep: DerivationOutputs(outputs=["out"])},
+            outputs={"out": DerivationOutput(type="Regular")},
         ),
         dep: Derivation(name="dep", input_drvs={}, outputs={"out": DerivationOutput(type="CAFixed")}),
     }
@@ -264,7 +272,9 @@ async def test_is_fixed_output_derivation_in_closure_false_when_name_match_is_no
     candidate = "/nix/store/newhash-dep.drv"
     derivations = {
         root: Derivation(
-            name="root", input_drvs={dep: DerivationOutputs(outputs=["out"])}, outputs={"out": DerivationOutput(type="Regular")}
+            name="root",
+            input_drvs={dep: DerivationOutputs(outputs=["out"])},
+            outputs={"out": DerivationOutput(type="Regular")},
         ),
         dep: Derivation(name="dep", input_drvs={}, outputs={"out": DerivationOutput(type="Regular")}),
     }

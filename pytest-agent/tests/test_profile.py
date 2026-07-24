@@ -34,11 +34,14 @@ def test_profile_fixture_writes_a_report_alongside_agent_mode_output(pytester: p
 
         def test_profiled(profile):
             _busy_loop()
-        """
+        """,
     )
 
     result = pytester.runpytest_subprocess(
-        *conftest.agent_plugin_cli_args(), "--agent", "--agent-dir=.pytest-agent", "-q"
+        *conftest.agent_plugin_cli_args(),
+        "--agent",
+        "--agent-dir=.pytest-agent",
+        "-q",
     )
     assert result.ret == pytest.ExitCode.OK
 

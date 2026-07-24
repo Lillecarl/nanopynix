@@ -168,7 +168,7 @@ class QueryMissing(Command):
                     "unknown": list(resp.unknown),
                     "downloadSize": resp.download_size,
                     "narSize": resp.nar_size,
-                }
+                },
             )
 
 
@@ -441,7 +441,7 @@ class DiffClosures(Command):
                 "beforeNarSize": before_size,
                 "afterNarSize": after_size,
                 "narSizeDelta": after_size - before_size,
-            }
+            },
         )
 
 
@@ -528,7 +528,7 @@ def _store_dirs_to_json(dirs: Any) -> dict[str, str | None]:
     }
 
 
-async def _add_to_store(
+async def _add_to_store(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
     *,
     path: str,
     name: str | None,

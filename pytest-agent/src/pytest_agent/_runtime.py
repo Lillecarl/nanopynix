@@ -32,7 +32,7 @@ class AgentRuntime:
     mode to configure.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
         self,
         config: pytest.Config,
         *,
@@ -56,7 +56,8 @@ class AgentRuntime:
         self.started_at_iso = ""
 
         self.counts: dict[str, int] = dict.fromkeys(
-            ("passed", "failed", "error", "skipped", "xfailed", "xpassed", "collect_error"), 0
+            ("passed", "failed", "error", "skipped", "xfailed", "xpassed", "collect_error"),
+            0,
         )
         self.total_collected = 0
 
@@ -77,7 +78,7 @@ class AgentRuntime:
         if self.autodetected_via is not None:
             self._print(
                 f"auto-activated: found {self.autodetected_via} in the environment "
-                "(set PYTEST_AGENT_NO_AUTODETECT=1 to disable this)"
+                "(set PYTEST_AGENT_NO_AUTODETECT=1 to disable this)",
             )
         self._print(f"run {self.run_number}: writing full per-test detail to: {self.root.resolve()}")
         self._thread = threading.Thread(target=self._watch, name="pytest-agent-watcher", daemon=True)

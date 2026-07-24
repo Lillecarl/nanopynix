@@ -24,7 +24,9 @@ async def test_flake_show_root(
 
 
 async def test_flake_show_with_hash_attrpath(
-    shared_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
+    shared_nix_environment: NixTestEnvironment,
+    capsys: pytest.CaptureFixture[str],
+    git_flake: Path,
 ) -> None:
     cmd = Pynix.parse(["flake", "show", f"{git_flake}#hello", *shared_nix_environment.pynix_store_args()])
     await cmd.astart()
@@ -34,7 +36,9 @@ async def test_flake_show_with_hash_attrpath(
 
 
 async def test_flake_show_with_a_separate_attrpath_flag_navigates_further(
-    shared_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
+    shared_nix_environment: NixTestEnvironment,
+    capsys: pytest.CaptureFixture[str],
+    git_flake: Path,
 ) -> None:
     """--attrpath narrows further than the flake_ref's own '#' fragment,
     a distinct code path from resolving the fragment alone (see the other

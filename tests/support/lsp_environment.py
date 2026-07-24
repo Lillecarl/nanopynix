@@ -45,7 +45,7 @@ async def lsp_server(rpc_session: RpcSessionFactory) -> AsyncIterator[PynixLangu
     # pygls exposes no public way to seed a Workspace without a real stdio
     # handshake -- see pygls' own test suite for the same pattern.
     server.protocol._workspace = Workspace(  # type: ignore[reportPrivateUsage] -- intentional, see comment above
-        root_uri=LSP_ASSETS_ROOT.as_uri()
+        root_uri=LSP_ASSETS_ROOT.as_uri(),
     )
     async with rpc_session() as nix:
         store = nix.store()
@@ -94,7 +94,7 @@ async def lsp_wire(
     """
     server = create_server()
     server.protocol._workspace = Workspace(  # type: ignore[reportPrivateUsage] -- see lsp_server's comment above
-        root_uri=LSP_ASSETS_ROOT.as_uri()
+        root_uri=LSP_ASSETS_ROOT.as_uri(),
     )
     client = pytest_lsp.make_test_lsp_client()
 
@@ -105,10 +105,10 @@ async def lsp_wire(
 
     stop_event = threading.Event()
     server_task = asyncio.create_task(
-        run_async(stop_event=stop_event, reader=to_server, protocol=server.protocol, logger=_logger)
+        run_async(stop_event=stop_event, reader=to_server, protocol=server.protocol, logger=_logger),
     )
     client_task = asyncio.create_task(
-        run_async(stop_event=stop_event, reader=to_client, protocol=client.protocol, logger=_logger)
+        run_async(stop_event=stop_event, reader=to_client, protocol=client.protocol, logger=_logger),
     )
 
     async with rpc_session() as nix:
@@ -121,7 +121,7 @@ async def lsp_wire(
                 types.InitializeParams(
                     capabilities=client_capabilities("visual-studio-code"),
                     workspace_folders=[types.WorkspaceFolder(uri=LSP_ASSETS_ROOT.as_uri(), name="test_lsp")],
-                )
+                ),
             )
             yield server, client
             await client.shutdown_session()

@@ -54,7 +54,8 @@ class StoreServiceHandler(
             # files -- same intentional cross-file mixin pattern _service_adapter.py's
             # own header comment already documents for _nanobind_rpc_call itself.
             extra_kwargs = self._resolve_extra_binding_args(  # pyright: ignore[reportPrivateUsage]
-                binding_method_name, request
+                binding_method_name,
+                request,
             )
             return method(request, **extra_kwargs)
         raise RuntimeError(f"missing checked nanobind store method: {binding_method_name}")

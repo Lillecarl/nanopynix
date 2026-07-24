@@ -22,6 +22,7 @@ from pytest_agent._terminal import RealTerminal
 # can explain why agent mode is active when nobody passed --agent explicitly.
 _autodetected_via: str | None = None
 
+
 def _make_real_terminal() -> RealTerminal | None:
     try:
         return RealTerminal()
@@ -41,7 +42,7 @@ def _env_flag(name: str) -> bool:
 
 
 def _agent_default() -> bool:
-    global _autodetected_via
+    global _autodetected_via  # noqa: PLW0603 -- one-shot record of which harness env var triggered autodetection, set once during pytest startup
     if _env_flag("PYTEST_AGENT"):
         return True
     if _env_flag("PYTEST_AGENT_NO_AUTODETECT"):
@@ -108,7 +109,7 @@ def pytest_cmdline_main(config: pytest.Config) -> int | None:
         "Run pytest without piping into head/tail/grep/sed/awk. Use --agent mode "
         "instead: it writes full per-test detail to disk and only prints a short "
         "periodic progress line, so there is nothing left that needs truncating.\n"
-        "Pass --agent-allow-pipe (or set PYTEST_AGENT_ALLOW_PIPE=1) if this is intentional.\n"
+        "Pass --agent-allow-pipe (or set PYTEST_AGENT_ALLOW_PIPE=1) if this is intentional.\n",
     )
     return 2
 
@@ -166,7 +167,7 @@ def _silence_terminal_reporter(config: pytest.Config) -> None:
     if terminal_reporter is None:
         return
     devnull = Path(os.devnull).open("w", encoding="utf-8")
-    terminal_reporter._tw = create_terminal_writer(config, devnull)  # type: ignore[reportPrivateUsage] -- see docstring above
+    terminal_reporter._tw = create_terminal_writer(config, devnull)  # type: ignore[reportPrivateUsage] -- see docstring above  # noqa: SLF001
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:

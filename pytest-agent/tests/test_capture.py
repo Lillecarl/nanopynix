@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     import pytest
 
 
-def _report(
+def _report(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
     nodeid: str,
     when: str,
     *,

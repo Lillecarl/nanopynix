@@ -88,7 +88,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
     async def open(self) -> None:
         """Open a store on the worker and activate the handle."""
         resp = await self._pool.invoke(
-            self._pool._worker_stub.open_store,  # type: ignore[reportPrivateUsage] -- cross-class access
+            self._pool._worker_stub.open_store,  # type: ignore[reportPrivateUsage] -- cross-class access  # noqa: SLF001
             OpenStoreRequest(uri=self._uri),
             timeout=self._rpc_timeout,
         )
@@ -104,7 +104,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
                 await dependent_eval.close()
         try:
             await self._pool.invoke(
-                self._pool._worker_stub.close_store,  # type: ignore[reportPrivateUsage] -- cross-class access
+                self._pool._worker_stub.close_store,  # type: ignore[reportPrivateUsage] -- cross-class access  # noqa: SLF001
                 CloseStoreRequest(store_handle=self._store_handle, force=force),
                 timeout=self._rpc_timeout,
             )
@@ -144,7 +144,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         if self._store_handle:
             message_any = cast("Any", message)
             message_any.store_handle = self._store_handle
-        method = getattr(self._pool._store_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
+        method = getattr(self._pool._store_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access  # noqa: SLF001
         return await self._pool.invoke(method, message, timeout=self._rpc_timeout)
 
 
@@ -168,7 +168,7 @@ class Store:
 
     @property
     def _session_id(self) -> str:
-        return self._rpc._session_id  # type: ignore[reportPrivateUsage] -- facade exposes transport ownership internally
+        return self._rpc._session_id  # type: ignore[reportPrivateUsage] -- facade exposes transport ownership internally  # noqa: SLF001
 
     @property
     def store_handle(self) -> int:
@@ -231,7 +231,7 @@ class Store:
                 flip_direction=flip_direction,
                 include_outputs=include_outputs,
                 include_derivers=include_derivers,
-            )
+            ),
         )
         return [StorePath(item) for item in response.paths]
 
@@ -262,7 +262,9 @@ class Store:
 
     async def query_substitutable_paths(self, paths: list[str | StorePath]) -> list[StorePath]:
         """Return the subset of ``paths`` that can be substituted from a binary cache."""
-        response = await self.rpc.query_substitutable_paths(QuerySubstitutablePathsRequest(paths=[str(path) for path in paths]))
+        response = await self.rpc.query_substitutable_paths(
+            QuerySubstitutablePathsRequest(paths=[str(path) for path in paths])
+        )
         return [StorePath(item) for item in response.paths]
 
     async def get_build_log(self, path: str | StorePath) -> str | None:
@@ -277,7 +279,7 @@ class Store:
     ) -> MissingInfo:
         """Return which of ``derived_paths`` still need to be built or substituted."""
         return await self.rpc.query_missing(
-            QueryMissingRequest(derived_paths=[str(p) for p in derived_paths])
+            QueryMissingRequest(derived_paths=[str(p) for p in derived_paths]),
         )
 
     async def build_paths_with_results(
@@ -293,14 +295,14 @@ class Store:
         A plain derivation path builds all outputs. Use Nix's ``^`` syntax to
         select explicit outputs in a canonical DerivedPath string.
         """
-        if eval_store is not None and eval_store._session_id != self._session_id:
+        if eval_store is not None and eval_store._session_id != self._session_id:  # noqa: SLF001
             raise ValueError("eval_store belongs to a different Session")
         response = await self.rpc.build_paths_with_results(
             BuildPathsWithResultsRequest(
                 derived_paths=[str(path) for path in derived_paths],
                 build_mode=build_mode,
                 eval_store_handle=0 if eval_store is None else eval_store.store_handle,
-            )
+            ),
         )
         return list(response.results)
 
@@ -336,7 +338,7 @@ class Store:
                 ignore_liveness=ignore_liveness,
                 paths_to_delete=[str(p) for p in paths_to_delete],
                 max_freed=max_freed,
-            )
+            ),
         )
         return GcResult(
             paths=[StorePath(p) for p in response.paths],
@@ -389,7 +391,7 @@ class Store:
                 repair=repair,
                 check_sigs=check_sigs,
                 substitute=substitute,
-            )
+            ),
         )
 
     async def optimise_store(self) -> None:
@@ -411,7 +413,7 @@ class Store:
     ) -> StorePath:
         """Compute the store path content-addressing ``path`` without adding it."""
         response = await self.rpc.compute_store_path(
-            ComputeStorePathRequest(path=path, name=name, method=method, hash_algo=hash_algo)
+            ComputeStorePathRequest(path=path, name=name, method=method, hash_algo=hash_algo),
         )
         return StorePath(response.path)
 
@@ -425,6 +427,6 @@ class Store:
     ) -> StorePath:
         """Add a file or directory to this store."""
         response = await self.rpc.add_to_store(
-            AddToStoreRequest(path=path, name=name, method=method, hash_algo=hash_algo)
+            AddToStoreRequest(path=path, name=name, method=method, hash_algo=hash_algo),
         )
         return StorePath(response.path)

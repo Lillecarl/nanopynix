@@ -213,8 +213,8 @@ class EvalServiceHandler(EvalServiceBase):
         store = self._state.handles.get_typed(message.store_handle, HandleKind.STORE)
         executor = NixThreadExecutor(
             thread_name_prefix="nix-eval",
-            thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook
-            thread_finalizer=nanopynix_expr._exit_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook
+            thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
+            thread_finalizer=nanopynix_expr._exit_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
         )
         eval_state = await self._state.run_request(
             request_id=message.request_id,
@@ -234,7 +234,6 @@ class EvalServiceHandler(EvalServiceBase):
         return ConfigureEvalResponse()
 
     async def close_eval(self, message: CloseEvalRequest) -> CloseEvalResponse:
-        assert self._state.executor is not None  # set by worker_service_factory before init
         if self._state.executor is None:
             raise RuntimeError("worker executor is unavailable")
         return await self._run(message, self._do_close_eval, executor=self._state.executor)
@@ -261,16 +260,14 @@ class EvalServiceHandler(EvalServiceBase):
         if typ == "attrs":
             return common_pb.DeepValue(
                 attrs=common_pb.DeepAttrs(
-                    entries={
-                        name: self._deep_value(pyv.attr_get(name), eval_handle) for name in pyv.attr_names()
-                    }
-                )
+                    entries={name: self._deep_value(pyv.attr_get(name), eval_handle) for name in pyv.attr_names()},
+                ),
             )
         if typ == "list":
             return common_pb.DeepValue(
                 list=common_pb.DeepList(
-                    items=[self._deep_value(pyv.list_get(idx), eval_handle) for idx in range(pyv.list_length())]
-                )
+                    items=[self._deep_value(pyv.list_get(idx), eval_handle) for idx in range(pyv.list_length())],
+                ),
             )
         if typ == "function":
             return common_pb.DeepValue(remote_value=self._export(pyv, eval_handle))
@@ -285,7 +282,7 @@ class EvalServiceHandler(EvalServiceBase):
             return common_pb.ForceValue(remote_value=self._export(value, eval_handle))
         return common_pb.ForceValue(scalar=_pyval_to_scalar(value.to_python()))
 
-    def _call_arg_to_python(self, arg: common_pb.CallArg, es: Any) -> Any:
+    def _call_arg_to_python(self, arg: common_pb.CallArg, es: Any) -> Any:  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
         if arg.scalar is not None:
             sv = arg.scalar
             if sv.string_value is not None:
@@ -326,8 +323,13 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _do_eval_string(self, message: EvalStringRequest) -> common_pb.ValueHandle:
         es = self._get_es(message.eval_handle)
-        value = es.repl_eval_string(message.expr, message.source_name) if es.repl_active() else es.eval_string(
-            message.expr, message.source_name
+        value = (
+            es.repl_eval_string(message.expr, message.source_name)
+            if es.repl_active()
+            else es.eval_string(
+                message.expr,
+                message.source_name,
+            )
         )
         return self._export(value, message.eval_handle)
 
@@ -581,7 +583,9 @@ class EvalServiceHandler(EvalServiceBase):
     def _do_eval_flake(self, message: EvalFlakeRequest) -> common_pb.ValueHandle:
         es = self._get_es(message.eval_handle)
         value = es.eval_flake(
-            message.ref, write_lock_file=message.write_lock_file, flake_settings=dict(message.flake_settings)
+            message.ref,
+            write_lock_file=message.write_lock_file,
+            flake_settings=dict(message.flake_settings),
         )
         return self._export(value, message.eval_handle)
 

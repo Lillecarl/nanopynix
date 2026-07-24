@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pynix._util import _forward_nix_logs
 
 from nanopynix import LogEvent
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
 
 class _Session:
-    async def log_stream(self):
+    async def log_stream(self) -> AsyncIterator[LogEvent]:
         yield LogEvent(action="stop", args=[42])
         yield LogEvent(action="result", args=[42, 1, [123]])
         yield LogEvent(action="msg", args=["useful message"])
@@ -38,4 +41,6 @@ async def test_nix_log_forwarder_skips_empty_activity_events(monkeypatch: Any) -
 
     await _forward_nix_logs(_Session(), print_build_logs=False)
 
-    assert logger.calls == [("info", ("nix log",), {"message": "useful message", "action": "msg", "request_id": 0, "result_type": None})]
+    assert logger.calls == [
+        ("info", ("nix log",), {"message": "useful message", "action": "msg", "request_id": 0, "result_type": None})
+    ]

@@ -869,7 +869,8 @@ class _ScriptedPromptSession:
 
 
 async def test_repl_run_executes_a_full_interactive_session(
-    shared_nix_environment: NixTestEnvironment, monkeypatch: Any
+    shared_nix_environment: NixTestEnvironment,
+    monkeypatch: Any,
 ) -> None:
     """Exercises Repl.run() itself against a real store/session with a scripted prompt.
 
@@ -877,6 +878,7 @@ async def test_repl_run_executes_a_full_interactive_session(
     nothing else builds and runs the real command end to end, so Repl.run()
     (PromptSession/store/repl-session wiring) has no coverage otherwise.
     """
+
     def _fake_prompt_session(**kwargs: object) -> _ScriptedPromptSession:
         return _ScriptedPromptSession(["1 + 1", ":quit"], **kwargs)
 
@@ -906,7 +908,9 @@ async def test_repl_run_rejects_mutually_exclusive_file_and_flake(tmp_path: Path
 
 
 async def test_repl_run_loads_a_file_target_into_initial_scope(
-    shared_nix_environment: NixTestEnvironment, tmp_path: Path, monkeypatch: Any
+    shared_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+    monkeypatch: Any,
 ) -> None:
     """Covers Repl.run()'s --file initial_sources branch, not exercised by the plain-session test above."""
 
@@ -926,7 +930,9 @@ async def test_repl_run_loads_a_file_target_into_initial_scope(
 
 
 async def test_repl_run_loads_a_flake_target_into_initial_scope(
-    shared_nix_environment: NixTestEnvironment, git_flake: Path, monkeypatch: Any
+    shared_nix_environment: NixTestEnvironment,
+    git_flake: Path,
+    monkeypatch: Any,
 ) -> None:
     """Covers Repl.run()'s --flake initial_sources branch (the --file variant is covered above)."""
 
@@ -947,7 +953,9 @@ async def test_repl_run_loads_a_flake_target_into_initial_scope(
 
 
 async def test_repl_run_reports_missing_attr_in_initial_target(
-    shared_nix_environment: NixTestEnvironment, tmp_path: Path, monkeypatch: Any
+    shared_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+    monkeypatch: Any,
 ) -> None:
     """Covers Repl.run()'s EvaluationTargetError handling around _load_initial_target."""
 
@@ -961,7 +969,7 @@ async def test_repl_run_reports_missing_attr_in_initial_target(
     nix_file.write_text("{ answer = 42; }")
 
     cmd = Pynix.parse(
-        ["repl", "--file", str(nix_file), "--attr", "missing", *shared_nix_environment.pynix_store_args()]
+        ["repl", "--file", str(nix_file), "--attr", "missing", *shared_nix_environment.pynix_store_args()],
     )
 
     with pytest.raises(SystemExit):

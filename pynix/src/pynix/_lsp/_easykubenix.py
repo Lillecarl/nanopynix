@@ -62,6 +62,13 @@ EASYKUBENIX_ENTRY_NAME = "easykubenixEntry"
 _OBJECT_ROOT_NAMES = ("objects", "resources")
 """Both the real ``kubernetes.objects`` option and its ``kubernetes.resources`` alias (``mkAliasOptionModule``)."""
 
+# Segment-count thresholds for `kubernetes.<objects|resources>.<ns>.<kind>.<name>.<field>...`.
+_PATH_DEPTH_OBJECTS = 2  # [kubernetes, objects]
+_PATH_DEPTH_NAMESPACE = 3  # [kubernetes, objects, ns]
+_PATH_DEPTH_KIND = 4  # [kubernetes, objects, ns, kind]
+_PATH_DEPTH_NAME = 5  # [kubernetes, objects, ns, kind, name]
+_PATH_DEPTH_FIELD = 6  # [kubernetes, objects, ns, kind, name, field...]
+
 
 def _object_path_at(source: str, byte_offset: int) -> list[str] | None:
     """Return the full attrpath at *byte_offset* if it's Kind-anchored (``kubernetes.objects.<ns>.<kind>...``).
@@ -79,7 +86,7 @@ def _object_path_at(source: str, byte_offset: int) -> list[str] | None:
     if local is None:
         return None
     path = enclosing_binding_path_at(source, byte_offset) + local
-    if len(path) < 4 or path[0] != "kubernetes" or path[1] not in _OBJECT_ROOT_NAMES:
+    if len(path) < _PATH_DEPTH_KIND or path[0] != "kubernetes" or path[1] not in _OBJECT_ROOT_NAMES:
         return None
     return path
 
@@ -161,7 +168,11 @@ class EasykubenixDialect(Dialect):
         return schema, key
 
     async def hover(
-        self, context: FileContext, source: str, byte_offset: int, dialects: list[Dialect]
+        self,
+        context: FileContext,
+        source: str,
+        byte_offset: int,
+        dialects: list[Dialect],
     ) -> str | None:
         del dialects
         path = _object_path_at(source, byte_offset)
@@ -172,7 +183,7 @@ class EasykubenixDialect(Dialect):
             return None
         schema, key = definition
         ref = {"$ref": f"#/definitions/{key}"}
-        if len(path) < 6:
+        if len(path) < _PATH_DEPTH_FIELD:
             # Cursor is on the Kind or object-instance name itself (``path``
             # has only ``[kubernetes, objects, ns, kind]`` or ``[..., name]``
             # segments, no field beyond that) -- there's no specific field to
@@ -183,8 +194,12 @@ class EasykubenixDialect(Dialect):
             return None
         return render(fragment, root=schema)
 
-    async def complete(
-        self, context: FileContext, source: str, byte_offset: int, dialects: list[Dialect]
+    async def complete(  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
+        self,
+        context: FileContext,
+        source: str,
+        byte_offset: int,
+        dialects: list[Dialect],
     ) -> list[types.CompletionItem] | None:
         del dialects
         target = completion_target_at(source, byte_offset)
@@ -196,9 +211,9 @@ class EasykubenixDialect(Dialect):
         # binding, losing the outer `kubernetes.objects.<ns>.<kind>.<name>`
         # prefix for a field completed inside a nested-style object body.
         prefix = enclosing_binding_path_at(source, byte_offset) + local_prefix
-        if len(prefix) < 2 or prefix[0] != "kubernetes" or prefix[1] not in _OBJECT_ROOT_NAMES:
+        if len(prefix) < _PATH_DEPTH_OBJECTS or prefix[0] != "kubernetes" or prefix[1] not in _OBJECT_ROOT_NAMES:
             return None
-        if len(prefix) == 2:
+        if len(prefix) == _PATH_DEPTH_OBJECTS:
             # Completing the namespace segment itself (e.g.
             # `kubernetes.objects.def<cursor>`) -- suggest names already
             # declared as real `Namespace` objects, not the (much larger,
@@ -208,7 +223,7 @@ class EasykubenixDialect(Dialect):
             if names is None:
                 return None
             return [types.CompletionItem(label=name) for name in names if name.startswith(partial)]
-        if len(prefix) == 3:
+        if len(prefix) == _PATH_DEPTH_NAMESPACE:
             # Completing the Kind segment (e.g.
             # `kubernetes.objects.default.Depl<cursor>`) -- every Kind name
             # this project knows an apiVersion for, real or CRD.
@@ -216,7 +231,7 @@ class EasykubenixDialect(Dialect):
             if names is None:
                 return None
             return [types.CompletionItem(label=name) for name in names if name.startswith(partial)]
-        if len(prefix) < 5:
+        if len(prefix) < _PATH_DEPTH_NAME:
             # The object's own instance name (e.g. `...Deployment.dem<cursor>`)
             # -- an arbitrary new name being chosen, no sensible source to
             # suggest from.

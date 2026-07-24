@@ -79,7 +79,9 @@ async def test_build_file_derivation(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     nix_file = tmp_path / "build-test.nix"
-    nix_file.write_text(with_nixpkgs("""
+    nix_file.write_text(
+        with_nixpkgs(
+            """
     let
       pkgs = import <nixpkgs> {};
     in
@@ -91,7 +93,10 @@ async def test_build_file_derivation(
           echo built-from-file > "$out"
         '';
       }
-    """, nixpkgs_path))
+    """,
+            nixpkgs_path,
+        )
+    )
     cmd = Pynix.parse(["build", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
 
     await cmd.astart()
@@ -110,7 +115,9 @@ async def test_build_file_derivation_attr(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     nix_file = tmp_path / "build-test.nix"
-    nix_file.write_text(with_nixpkgs("""
+    nix_file.write_text(
+        with_nixpkgs(
+            """
     let
       pkgs = import <nixpkgs> {};
     in
@@ -124,7 +131,10 @@ async def test_build_file_derivation_attr(
         '';
       };
     }
-    """, nixpkgs_path))
+    """,
+            nixpkgs_path,
+        )
+    )
     cmd = Pynix.parse(
         [
             "build",
@@ -134,7 +144,7 @@ async def test_build_file_derivation_attr(
             "package",
             *shared_nix_environment.pynix_store_args(),
             "--print-build-logs",
-        ]
+        ],
     )
 
     await cmd.astart()
@@ -153,7 +163,9 @@ async def test_build_file_auto_calls_defaulted_lambda_before_attr(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     nix_file = tmp_path / "default.nix"
-    nix_file.write_text(with_nixpkgs("""
+    nix_file.write_text(
+        with_nixpkgs(
+            """
     { pkgs ? import <nixpkgs> {}, name ? "pynix-build-autocall-test" }:
     {
       package = pkgs.stdenvNoCC.mkDerivation {
@@ -165,9 +177,12 @@ async def test_build_file_auto_calls_defaulted_lambda_before_attr(
         '';
       };
     }
-    """, nixpkgs_path))
+    """,
+            nixpkgs_path,
+        )
+    )
     cmd = Pynix.parse(
-        ["build", "--file", str(nix_file), "--attr", "package", *shared_nix_environment.pynix_store_args()]
+        ["build", "--file", str(nix_file), "--attr", "package", *shared_nix_environment.pynix_store_args()],
     )
 
     await cmd.astart()
@@ -186,7 +201,9 @@ async def test_build_missing_attr_errors_before_build(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     nix_file = tmp_path / "build-test.nix"
-    nix_file.write_text(with_nixpkgs("""
+    nix_file.write_text(
+        with_nixpkgs(
+            """
     let
       pkgs = import <nixpkgs> {};
     in
@@ -200,9 +217,12 @@ async def test_build_missing_attr_errors_before_build(
         '';
       };
     }
-    """, nixpkgs_path))
+    """,
+            nixpkgs_path,
+        )
+    )
     cmd = Pynix.parse(
-        ["build", "--file", str(nix_file), "--attr", "missing", *shared_nix_environment.pynix_store_args()]
+        ["build", "--file", str(nix_file), "--attr", "missing", *shared_nix_environment.pynix_store_args()],
     )
 
     with pytest.raises(SystemExit):
@@ -241,10 +261,12 @@ async def test_build_missing_input_errors(capsys: pytest.CaptureFixture[str]) ->
 
 
 async def test_build_update_fod_without_file_errors(
-    shared_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
+    shared_nix_environment: NixTestEnvironment,
+    capsys: pytest.CaptureFixture[str],
+    git_flake: Path,
 ) -> None:
     cmd = Pynix.parse(
-        ["build", "--flake", f"{git_flake}#hello", "--update-fod", *shared_nix_environment.pynix_store_args()]
+        ["build", "--flake", f"{git_flake}#hello", "--update-fod", *shared_nix_environment.pynix_store_args()],
     )
 
     with pytest.raises(SystemExit):
@@ -256,7 +278,9 @@ async def test_build_update_fod_without_file_errors(
 
 
 async def test_build_dry_run_without_update_fod_errors(
-    shared_nix_environment: NixTestEnvironment, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    shared_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     nix_file = tmp_path / "build-test.nix"
     nix_file.write_text("1\n")
@@ -279,7 +303,9 @@ async def test_build_propagates_a_non_fod_build_failure(
     """A build failure unrelated to a FOD hash mismatch must surface as the
     original StoreError, not be swallowed or turned into a FOD update."""
     nix_file = tmp_path / "build-test.nix"
-    nix_file.write_text(with_nixpkgs("""
+    nix_file.write_text(
+        with_nixpkgs(
+            """
     let
       pkgs = import <nixpkgs> {};
     in
@@ -289,7 +315,10 @@ async def test_build_propagates_a_non_fod_build_failure(
         dontUnpack = true;
         installPhase = "exit 1";
       }
-    """, nixpkgs_path))
+    """,
+            nixpkgs_path,
+        )
+    )
     cmd = Pynix.parse(["build", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
 
     with pytest.raises(StoreError):
@@ -305,7 +334,9 @@ async def test_build_with_separate_eval_store(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     nix_file = tmp_path / "build-test.nix"
-    nix_file.write_text(with_nixpkgs("""
+    nix_file.write_text(
+        with_nixpkgs(
+            """
     let
       pkgs = import <nixpkgs> {};
     in
@@ -317,7 +348,10 @@ async def test_build_with_separate_eval_store(
           echo built-with-eval-store > "$out"
         '';
       }
-    """, nixpkgs_path))
+    """,
+            nixpkgs_path,
+        )
+    )
     cmd = Pynix.parse(
         [
             "build",
@@ -326,7 +360,7 @@ async def test_build_with_separate_eval_store(
             *shared_nix_environment.pynix_store_args(),
             "--eval-store",
             shared_nix_environment.store_uri,
-        ]
+        ],
     )
 
     await cmd.astart()
@@ -339,7 +373,9 @@ async def test_build_with_separate_eval_store(
 
 
 async def test_build_update_fod_dry_run_reports_local_fetchurl_diff(
-    shared_nix_environment: NixTestEnvironment, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    shared_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     payload = tmp_path / "payload"
     payload.write_text("fixed-output payload\n")
@@ -347,7 +383,7 @@ async def test_build_update_fod_dry_run_reports_local_fetchurl_diff(
     source = f'builtins.fetchurl {{ url = "file://{payload}"; sha256 = ""; }}\n'
     nix_file.write_text(source)
     cmd = Pynix.parse(
-        ["build", "--file", str(nix_file), "--update-fod", "--dry-run", *shared_nix_environment.pynix_store_args()]
+        ["build", "--file", str(nix_file), "--update-fod", "--dry-run", *shared_nix_environment.pynix_store_args()],
     )
 
     await cmd.astart()
@@ -367,13 +403,16 @@ async def test_build_update_fod_rewrites_and_rebuilds(
 ) -> None:
     nix_file = tmp_path / "source.nix"
     nix_file.write_text(
-        with_nixpkgs("""with import <nixpkgs> {};
+        with_nixpkgs(
+            """with import <nixpkgs> {};
 runCommand "payload" {
   outputHash = "";
   outputHashAlgo = "sha256";
   outputHashMode = "flat";
 } "printf '%s\\n' fixed-output-payload > $out"
-""", nixpkgs_path)
+""",
+            nixpkgs_path,
+        ),
     )
     cmd = Pynix.parse(["build", "--file", str(nix_file), "--update-fod", *shared_nix_environment.pynix_store_args()])
 
@@ -393,7 +432,8 @@ async def test_build_update_fod_rewrites_each_named_run_command_dependency(
 ) -> None:
     nix_file = tmp_path / "source.nix"
     nix_file.write_text(
-        with_nixpkgs("""with import <nixpkgs> {};
+        with_nixpkgs(
+            """with import <nixpkgs> {};
 let
   first = runCommand "first" {
     outputHash = "";
@@ -406,7 +446,9 @@ let
     outputHashMode = "flat";
   } "printf '%s\\n' second > $out";
 in runCommand "combined" {} "cat ${first} ${second} > $out"
-""", nixpkgs_path)
+""",
+            nixpkgs_path,
+        ),
     )
     cmd = Pynix.parse(["build", "--file", str(nix_file), "--update-fod", *shared_nix_environment.pynix_store_args()])
 
@@ -426,7 +468,8 @@ async def test_eval_only_finds_fixed_output_dependencies_in_derivation_closure(
     """String context hides FOD values, but ``inputDrvs`` retains their identity."""
     nix_file = tmp_path / "source.nix"
     nix_file.write_text(
-        with_nixpkgs("""with import <nixpkgs> {};
+        with_nixpkgs(
+            """with import <nixpkgs> {};
 let
   first = runCommand "first" {
     outputHash = "";
@@ -439,7 +482,9 @@ let
     outputHashMode = "flat";
   } "printf '%s\\n' second > $out";
 in runCommand "combined" {} "cat ${first} ${second} > $out"
-""", nixpkgs_path)
+""",
+            nixpkgs_path,
+        ),
     )
 
     async with shared_nix_environment.rpc_session() as nix, nix.store() as store, nix.eval(store) as eval:
@@ -457,7 +502,9 @@ in runCommand "combined" {} "cat ${first} ${second} > $out"
 
 
 async def test_build_update_fod_reports_an_ambiguous_hash_literal(
-    shared_nix_environment: NixTestEnvironment, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    shared_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Two identical empty hash literals with no derivation_name to
     disambiguate them (a fetchurl mismatch carries no drv_path) must refuse
@@ -469,10 +516,10 @@ async def test_build_update_fod_reports_an_ambiguous_hash_literal(
     nix_file = tmp_path / "source.nix"
     nix_file.write_text(
         f'{{ a = builtins.fetchurl {{ url = "file://{payload_a}"; sha256 = ""; }};'
-        f' b = builtins.fetchurl {{ url = "file://{payload_b}"; sha256 = ""; }}; }}\n'
+        f' b = builtins.fetchurl {{ url = "file://{payload_b}"; sha256 = ""; }}; }}\n',
     )
     cmd = Pynix.parse(
-        ["build", "--file", str(nix_file), "--attr", "a", "--update-fod", *shared_nix_environment.pynix_store_args()]
+        ["build", "--file", str(nix_file), "--attr", "a", "--update-fod", *shared_nix_environment.pynix_store_args()],
     )
 
     with pytest.raises(SystemExit):
@@ -503,7 +550,7 @@ runCommand "payload" {
 } "printf '%s\\n' fixed-output-payload > $out"
 """,
             nixpkgs_path,
-        )
+        ),
     )
     target = EvaluationTarget(file=nix_file, attr=None, flake=None)
 
@@ -518,7 +565,8 @@ runCommand "payload" {
 
 
 async def test_build_target_requires_a_file_target_to_update_a_fod(
-    shared_nix_environment: NixTestEnvironment, tmp_path: Path
+    shared_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
 ) -> None:
     """The CLI already refuses --update-fod without --file before evaluation
     (see test_build_update_fod_without_file_errors); this pins
@@ -556,7 +604,7 @@ runCommand "payload" {
 } "printf '%s\\n' fixed-output-payload > $out"
 """,
             nixpkgs_path,
-        )
+        ),
     )
     target = EvaluationTarget(file=nix_file, attr=None, flake=None)
 

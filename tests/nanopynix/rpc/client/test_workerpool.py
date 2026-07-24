@@ -87,7 +87,7 @@ async def test_error_propagation():
     async with Nix() as nix, nix.store() as store:
         with pytest.raises(StoreError, match="is not valid"):
             await store.query_path_info(
-                "/nix/store/00000000000000000000000000000000-nonexistent-1.0"
+                "/nix/store/00000000000000000000000000000000-nonexistent-1.0",
             )
 
 

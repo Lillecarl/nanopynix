@@ -231,7 +231,10 @@ async def test_completion_resolves_options_through_a_full_module_system_eval(
 
     source = asset("module_system/mod2.nix").read_text()
     position = cursor_after(
-        source, "example", needle="config.programs.example.enable", offset=len("exa")
+        source,
+        "example",
+        needle="config.programs.example.enable",
+        offset=len("exa"),
     )
     completion = await _completion(lsp_server, types.CompletionParams(types.TextDocumentIdentifier(uri), position))
 
@@ -242,7 +245,8 @@ async def test_completion_resolves_options_through_a_full_module_system_eval(
 
 @pytest.mark.parametrize("fixture_name", ["config1.nix", "config2.nix"])
 async def test_bare_attrpath_completion_falls_back_to_the_options_tree(
-    lsp_server: PynixLanguageServer, fixture_name: str
+    lsp_server: PynixLanguageServer,
+    fixture_name: str,
 ) -> None:
     """A definition key like `services.example-daemon.enable = true;` has no `config.`/`options.` prefix at all.
 
@@ -257,7 +261,10 @@ async def test_bare_attrpath_completion_falls_back_to_the_options_tree(
 
     source = asset(f"module_system/{fixture_name}").read_text()
     position = cursor_after(
-        source, "services.example-daemon", needle="services.example-daemon.enable", offset=len("services.exam")
+        source,
+        "services.example-daemon",
+        needle="services.example-daemon.enable",
+        offset=len("services.exam"),
     )
     completion = await _completion(lsp_server, types.CompletionParams(types.TextDocumentIdentifier(uri), position))
 
@@ -268,7 +275,8 @@ async def test_bare_attrpath_completion_falls_back_to_the_options_tree(
 
 @pytest.mark.parametrize("fixture_name", ["config1.nix", "config2.nix"])
 async def test_pkgs_completion_lists_real_nixpkgs_attributes(
-    lsp_server: PynixLanguageServer, fixture_name: str
+    lsp_server: PynixLanguageServer,
+    fixture_name: str,
 ) -> None:
     """`pkgs.hel` -> real nixpkgs completion, not a guess.
 
@@ -283,7 +291,10 @@ async def test_pkgs_completion_lists_real_nixpkgs_attributes(
 
     source = asset(f"module_system/{fixture_name}").read_text()
     position = cursor_after(
-        source, "pkgs.hello", needle="programs.example.package = pkgs.hello", offset=len("pkgs.hel")
+        source,
+        "pkgs.hello",
+        needle="programs.example.package = pkgs.hello",
+        offset=len("pkgs.hel"),
     )
     completion = await _completion(lsp_server, types.CompletionParams(types.TextDocumentIdentifier(uri), position))
 
@@ -356,7 +367,7 @@ async def test_progressive_completion_after_typing_a_trailing_dot(lsp_server: Py
     uri = asset("module_system/config2.nix").as_uri()
     base_source = asset("module_system/config2.nix").read_text()
     lsp_server.workspace.put_text_document(
-        types.TextDocumentItem(uri=uri, language_id="nix", version=1, text=base_source)
+        types.TextDocumentItem(uri=uri, language_id="nix", version=1, text=base_source),
     )
     await _sync_document(lsp_server, uri)
 
@@ -364,7 +375,8 @@ async def test_progressive_completion_after_typing_a_trailing_dot(lsp_server: Py
     line_index = next(i for i, line in enumerate(lines) if "services.example-daemon.enable" in line)
 
     for version, (typed, expected_labels) in enumerate(
-        [("programs", {"programs"}), ("programs.", {"example"})], start=2
+        [("programs", {"programs"}), ("programs.", {"example"})],
+        start=2,
     ):
         edited_lines = list(lines)
         edited_lines[line_index] = f"  {typed}"
@@ -480,20 +492,13 @@ async def test_document_symbols_fall_back_to_the_last_error_free_parse(lsp_serve
         "}\n"
     )
     lsp_server.workspace.put_text_document(
-        types.TextDocumentItem(uri=uri, language_id="nix", version=1, text=good_source)
+        types.TextDocumentItem(uri=uri, language_id="nix", version=1, text=good_source),
     )
     await _sync_document(lsp_server, uri)
     good_names = {symbol.name for symbol in _document_symbols(lsp_server, uri)}
     assert "resource.local_file.third" in good_names
 
-    broken_source = (
-        "{\n"
-        "  f = { a, b\n"
-        "  resource.local_file.third = {\n"
-        '    content = "world";\n'
-        "  };\n"
-        "}\n"
-    )
+    broken_source = '{\n  f = { a, b\n  resource.local_file.third = {\n    content = "world";\n  };\n}\n'
     lsp_server.workspace.update_text_document(
         types.VersionedTextDocumentIdentifier(uri=uri, version=2),
         types.TextDocumentContentChangeWholeDocument(text=broken_source),
@@ -513,13 +518,14 @@ async def test_hover_falls_back_to_the_last_error_free_parse(lsp_server: PynixLa
     uri = asset("module_system/last_good_tree.nix").as_uri()
     good_source = asset("module_system/last_good_tree.nix").read_text()
     lsp_server.workspace.put_text_document(
-        types.TextDocumentItem(uri=uri, language_id="nix", version=1, text=good_source)
+        types.TextDocumentItem(uri=uri, language_id="nix", version=1, text=good_source),
     )
     await _sync_document(lsp_server, uri)
     assert not lsp_server.has_parse_errors[uri]
 
     broken_source = good_source.replace(
-        "services.example-daemon.enable = true;", "broken = { a, b"
+        "services.example-daemon.enable = true;",
+        "broken = { a, b",
     )
     assert broken_source != good_source
     lsp_server.workspace.update_text_document(

@@ -80,10 +80,7 @@ async def _sleep_derivations(
 ) -> list[inproc.Value]:
     function = await evaluator.string(_SLEEP_DERIVATION)
     seconds_function = await function.call(seconds)
-    return [
-        await seconds_function.call(f"{index}-{uuid.uuid4().hex}")
-        for index in range(count)
-    ]
+    return [await seconds_function.call(f"{index}-{uuid.uuid4().hex}") for index in range(count)]
 
 
 async def _release_all(values: list[inproc.Value]) -> None:
@@ -98,10 +95,7 @@ async def _output_paths(store: inproc.Store, drv_paths: list[str]) -> list[str]:
     """Resolve each just-built derivation's own output store path(s)."""
     derivations = await asyncio.gather(*(store.read_derivation(path) for path in drv_paths))
     return [
-        output.path
-        for derivation in derivations
-        for output in derivation.outputs.values()
-        if output.path is not None
+        output.path for derivation in derivations for output in derivation.outputs.values() if output.path is not None
     ]
 
 
@@ -208,7 +202,10 @@ async def test_inproc_parallel_evaluation_stress() -> None:
         await asyncio.gather(*(evaluator.open() for evaluator in evaluators))
         for _ in range(20):
             values = await asyncio.gather(
-                *(evaluator.string("builtins.foldl' (a: b: a + b) 0 (builtins.genList (x: x) 1000)") for evaluator in evaluators)
+                *(
+                    evaluator.string("builtins.foldl' (a: b: a + b) 0 (builtins.genList (x: x) 1000)")
+                    for evaluator in evaluators
+                ),
             )
             assert await asyncio.gather(*(value.as_int() for value in values)) == [499500] * 4
         await asyncio.gather(*(evaluator.close() for evaluator in evaluators))
@@ -223,7 +220,10 @@ async def test_inproc_parallel_values_navigate_force_and_release() -> None:
         try:
             for index in range(30):
                 values = await asyncio.gather(
-                    *(evaluator.string(f"{{ nested = {{ value = {index}; }}; list = [ {index} ]; }}") for evaluator in evaluators)
+                    *(
+                        evaluator.string(f"{{ nested = {{ value = {index}; }}; list = [ {index} ]; }}")
+                        for evaluator in evaluators
+                    ),
                 )
                 nested = await asyncio.gather(*(value.attr("nested") for value in values))
                 children = await asyncio.gather(*(value.attr("value") for value in nested))
@@ -232,7 +232,7 @@ async def test_inproc_parallel_values_navigate_force_and_release() -> None:
                 assert await asyncio.gather(*(value.as_int() for value in children)) == [index] * 4
                 assert await asyncio.gather(*(value.as_int() for value in elements)) == [index] * 4
                 await asyncio.gather(
-                    *(value.release() for value in (*values, *nested, *children, *list_values, *elements))
+                    *(value.release() for value in (*values, *nested, *children, *list_values, *elements)),
                 )
         finally:
             await asyncio.gather(*(evaluator.close() for evaluator in evaluators))
@@ -346,10 +346,12 @@ async def test_inproc_independent_builds_overlap_without_cpu_pressure(
                         second_eval.string(_SLEEP_DERIVATION),
                     )
                     first_seconds, second_seconds = await asyncio.gather(
-                        first_function.call(seconds), second_function.call(seconds)
+                        first_function.call(seconds),
+                        second_function.call(seconds),
                     )
                     first, second = await asyncio.gather(
-                        first_seconds.call(uuid.uuid4().hex), second_seconds.call(uuid.uuid4().hex)
+                        first_seconds.call(uuid.uuid4().hex),
+                        second_seconds.call(uuid.uuid4().hex),
                     )
                     first_path, second_path = await asyncio.gather(first.get_derived_path(), second.get_derived_path())
                     drv_paths.extend([first_path, second_path])
@@ -440,12 +442,12 @@ async def test_inproc_parallel_batch_builds_use_multiple_store_workers(
                 try:
                     await asyncio.gather(*(evaluator.open() for evaluator in evaluators))
                     values = await asyncio.gather(
-                        *(_sleep_derivations(evaluator, count=5, seconds=seconds) for evaluator in evaluators)
+                        *(_sleep_derivations(evaluator, count=5, seconds=seconds) for evaluator in evaluators),
                     )
                     derived_path_groups.extend(await asyncio.gather(*(_derived_paths(group) for group in values)))
                     async with _measuring_build_dispatch(nix) as starts:
                         outputs = await asyncio.gather(
-                            *(store.build_paths_with_results(paths) for paths in derived_path_groups)
+                            *(store.build_paths_with_results(paths) for paths in derived_path_groups),
                         )
                     assert [len(group) for group in outputs] == [5] * 4
                     assert all(result.success for group in outputs for result in group)
@@ -465,7 +467,8 @@ async def test_inproc_parallel_batch_builds_use_multiple_store_workers(
                     await asyncio.gather(*(_release_all(group) for group in values))
                     await asyncio.gather(*(evaluator.close() for evaluator in evaluators))
                 paths_to_delete = await _output_paths(
-                    store, [path for group in derived_path_groups for path in group]
+                    store,
+                    [path for group in derived_path_groups for path in group],
                 )
         finally:
             if paths_to_delete:
@@ -494,7 +497,7 @@ async def test_inproc_mixed_evaluation_build_and_store_workloads(
                 try:
                     await asyncio.gather(*(evaluator.open() for evaluator in evaluators))
                     build_values = await asyncio.gather(
-                        *(_sleep_derivations(evaluator, count=5, seconds=2) for evaluator in build_evaluators)
+                        *(_sleep_derivations(evaluator, count=5, seconds=2) for evaluator in build_evaluators),
                     )
                     paths = await store.query_all_valid_paths()
                     if not paths:
@@ -511,12 +514,15 @@ async def test_inproc_mixed_evaluation_build_and_store_workloads(
                     results = await asyncio.gather(*build_tasks, *evaluation_tasks, *query_tasks)
                     built = cast("list[list[BuildResult]]", results[: len(build_tasks)])
                     evaluated = cast(
-                        "list[inproc.Value]", results[len(build_tasks) : len(build_tasks) + len(evaluation_tasks)]
+                        "list[inproc.Value]",
+                        results[len(build_tasks) : len(build_tasks) + len(evaluation_tasks)],
                     )
                     closures = cast("list[list[StorePath]]", results[len(build_tasks) + len(evaluation_tasks) :])
                     assert [len(group) for group in built] == [5] * 2
                     assert all(result.success for group in built for result in group)
-                    assert await asyncio.gather(*(value.as_int() for value in evaluated)) == [49_995_000] * len(evaluated)
+                    assert await asyncio.gather(*(value.as_int() for value in evaluated)) == [49_995_000] * len(
+                        evaluated
+                    )
                     assert all(path in closure for path, closure in zip(selected, closures, strict=True))
                     await _release_all(evaluated)
                 finally:

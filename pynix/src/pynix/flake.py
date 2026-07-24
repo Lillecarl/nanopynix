@@ -18,7 +18,6 @@ import nanopynix
 from pynix._util import forward_nix_logs
 
 if TYPE_CHECKING:
-
     from nanopynix.rpc.client import ValueProxy
 
 logger = structlog.get_logger(__name__)
@@ -26,6 +25,8 @@ console = Console()
 
 _DEFAULT_STORE = "auto"
 _MAX_TREE_NODES = 200
+_MAX_TREE_DEPTH = 6
+_MAX_LIST_PREVIEW_ITEMS = 10
 
 
 @dataclass
@@ -94,7 +95,7 @@ def _navigate(root: ValueProxy, attrpath: str) -> ValueProxy:
     return root
 
 
-async def _build_tree(
+async def _build_tree(  # noqa: C901 tracked complexity/arg-count debt, see TODO.md
     tree: Tree,
     value: ValueProxy,
     nix_type_enum: type[NixType],
@@ -102,7 +103,7 @@ async def _build_tree(
     depth: int = 0,
     budget: _TreeBudget,
 ) -> None:
-    if depth > 6:
+    if depth > _MAX_TREE_DEPTH:
         tree.add("[dim]<...>[/dim]")
         return
     try:
@@ -133,7 +134,7 @@ async def _build_tree(
         length = 0
         with contextlib.suppress(Exception):
             length = await value.list_length()
-        for i in range(min(length, 10)):
+        for i in range(min(length, _MAX_LIST_PREVIEW_ITEMS)):
             if budget.remaining == 0:
                 tree.add("[dim]<...>[/dim]")
                 break
@@ -145,13 +146,13 @@ async def _build_tree(
             label = _format_attr(f"[{i}]", child_type, nix_type_enum)
             branch = tree.add(label)
             await _build_tree(branch, child, nix_type_enum, depth=depth + 1, budget=budget)
-        if length > 10:
-            tree.add(f"[dim]... {length - 10} more items[/dim]")
+        if length > _MAX_LIST_PREVIEW_ITEMS:
+            tree.add(f"[dim]... {length - _MAX_LIST_PREVIEW_ITEMS} more items[/dim]")
     elif nix_type in (nix_type_enum.THUNK, nix_type_enum.UNSPECIFIED):
         tree.add(f"[dim]{nix_type.name.lower()}[/dim]")
 
 
-def _format_attr(name: str, nix_type: NixType, nix_type_enum: type[NixType]) -> str:
+def _format_attr(name: str, nix_type: NixType, nix_type_enum: type[NixType]) -> str:  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
     if nix_type == nix_type_enum.ATTRS:
         return f"[cyan]{name}[/cyan]"
     if nix_type == nix_type_enum.LIST:

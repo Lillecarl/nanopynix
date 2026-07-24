@@ -19,7 +19,7 @@ from nanopynix.models import HandleKind
 @dataclass
 class HandleRegistry:
     _resources: dict[int, tuple[HandleKind, Any, int | None]] = field(
-        default_factory=dict[int, tuple[HandleKind, Any, "int | None"]]
+        default_factory=dict[int, tuple[HandleKind, Any, "int | None"]],
     )
     _next: int = 1
     _lock: threading.Lock = field(default_factory=threading.Lock)

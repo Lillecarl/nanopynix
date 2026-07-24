@@ -889,5 +889,3 @@ async def test_go_to_definition_on_a_composed_package_attribute_gracefully_finds
         ],
     )
     await scenario.run(module_system_driver)
-
-

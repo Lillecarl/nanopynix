@@ -28,6 +28,8 @@ from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
 from nanopynix.models import CALL_ROUTE
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from grpclib_transports import WorkerBackchannel
 
 _RPC_TIMEOUT = 300.0
@@ -47,7 +49,7 @@ def _python_to_scalar_value(value: Any) -> ScalarValue:
     raise TypeError(f"unsupported RPC primop value type: {type(value)}")
 
 
-def _scalar_value_to_python(sv: ScalarValue | None) -> Any:
+def _scalar_value_to_python(sv: ScalarValue | None) -> Any:  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
     if sv is None:
         return None
     kind = which_one_of(sv, "kind")[0]
@@ -146,7 +148,9 @@ class ThreadedRpcPrimopBridge:
         )
         with anyio.fail_after(_RPC_TIMEOUT):
             response: CallPrimopResponse = await self._backchannel.call_unary(
-                CALL_ROUTE, request, CallPrimopResponse
+                CALL_ROUTE,
+                request,
+                CallPrimopResponse,
             )
         return _deep_value_to_python(response.value)
 
@@ -162,7 +166,7 @@ class ThreadedRpcPrimopBridge:
             raise TimeoutError(f"manager primop {name!r} timed out after {_RPC_TIMEOUT:.0f}s") from exc
 
 
-def rpc_primop_callback_factory(bridge: ThreadedRpcPrimopBridge, name: str, arity: int):
+def rpc_primop_callback_factory(bridge: ThreadedRpcPrimopBridge, name: str, arity: int) -> Callable[..., Any]:
     """Return a synchronous callable suitable for ``register_primop()``.
 
     The worker-side primop registration calls this factory for each

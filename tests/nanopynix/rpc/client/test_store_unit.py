@@ -309,7 +309,7 @@ class TestPublicStore:
 
     async def test_build_paths_with_results_sends_derived_paths(self, public_store: PublicStore, pool: MagicMock):
         pool._store_stub.build_paths_with_results.return_value = _mock_build_result_list(  # type: ignore[reportPrivateUsage] -- test accesses private stub
-            [_mock_build_result(drv_path="/nix/store/aaa-foo.drv", success=True)]
+            [_mock_build_result(drv_path="/nix/store/aaa-foo.drv", success=True)],
         )
 
         results = await public_store.build_paths_with_results(["/nix/store/aaa-foo.drv"])
@@ -321,7 +321,9 @@ class TestPublicStore:
 
     async def test_read_derivation_sends_request(self, public_store: PublicStore, pool: MagicMock):
         pool._store_stub.read_derivation.return_value = _mock_derivation(  # type: ignore[reportPrivateUsage] -- test accesses private stub
-            name="foo", system="x86_64-linux", builder="/bin/sh"
+            name="foo",
+            system="x86_64-linux",
+            builder="/bin/sh",
         )
         result = await public_store.read_derivation("/nix/store/aaa-foo.drv")
         assert result.name == "foo"
@@ -385,7 +387,9 @@ class TestStorePathCoercion:
         assert result.valid is True
 
     async def test_follow_links_returns_storepath(self, store: Store, pool: MagicMock):
-        pool._store_stub.follow_links_to_store_path.return_value = FollowLinksToStorePathResponse(path="/nix/store/aaa-bbb")  # type: ignore[reportPrivateUsage] -- test accesses private stub
+        pool._store_stub.follow_links_to_store_path.return_value = FollowLinksToStorePathResponse(
+            path="/nix/store/aaa-bbb"
+        )  # type: ignore[reportPrivateUsage] -- test accesses private stub
         result = await store.follow_links_to_store_path(FollowLinksToStorePathRequest(path="/some/link"))
         assert result.path == "/nix/store/aaa-bbb"
 
@@ -408,7 +412,7 @@ class TestPathInfo:
 
     async def test_query_path_from_hash_part_found(self, store: Store, pool: MagicMock):
         pool._store_stub.query_path_from_hash_part.return_value = MagicMock(  # type: ignore[reportPrivateUsage] -- test accesses private stub
-            path="/nix/store/aaa-foo"
+            path="/nix/store/aaa-foo",
         )
         result = await store.query_path_from_hash_part(QueryPathFromHashPartRequest(hash_part="aaa"))
         assert result.path is not None
@@ -428,7 +432,7 @@ class TestPathInfo:
 class TestClosures:
     async def test_compute_fs_closure(self, store: Store, pool: MagicMock):
         pool._store_stub.compute_fs_closure.return_value = _mock_store_path_list(  # type: ignore[reportPrivateUsage] -- test accesses private stub
-            [_mock_store_path("aaa-foo", "aaa", "foo"), _mock_store_path("bbb-bar", "bbb", "bar")]
+            [_mock_store_path("aaa-foo", "aaa", "foo"), _mock_store_path("bbb-bar", "bbb", "bar")],
         )
         result = await store.compute_fs_closure(ComputeFsClosureRequest(path="/nix/store/aaa-foo", flip_direction=True))
         assert len(result.paths) == 2
@@ -448,7 +452,7 @@ class TestClosures:
 class TestDerivations:
     async def test_query_derivation_outputs_str(self, store: Store, pool: MagicMock):
         pool._store_stub.query_derivation_outputs.return_value = _mock_store_path_list(  # type: ignore[reportPrivateUsage] -- test accesses private stub
-            [_mock_store_path("aaa-out", "aaa", "out")]
+            [_mock_store_path("aaa-out", "aaa", "out")],
         )
         result = await store.query_derivation_outputs(QueryDerivationOutputsRequest(path="/nix/store/aaa-foo.drv"))
         assert len(result.paths) == 1
@@ -480,7 +484,7 @@ class TestBulk:
         pool._store_stub.query_substitutable_paths.return_value = _mock_store_path_list()  # type: ignore[reportPrivateUsage] -- test accesses private stub
         sp = _mock_store_path("a" * 32 + "-foo", "a" * 32, "foo")
         result = await store.query_substitutable_paths(
-            QuerySubstitutablePathsRequest(paths=[sp.to_string, "/nix/store/bbb-bar"])
+            QuerySubstitutablePathsRequest(paths=[sp.to_string, "/nix/store/bbb-bar"]),
         )
         assert result.paths == []
 
@@ -493,15 +497,17 @@ class TestBulk:
 class TestBuild:
     async def test_build_paths_with_results(self, store: Store, pool: MagicMock):
         pool._store_stub.build_paths_with_results.return_value = _mock_build_result_list(  # type: ignore[reportPrivateUsage] -- test accesses private stub
-            [_mock_build_result(drv_path="/nix/store/aaa.drv", success=True, status="built")]
+            [_mock_build_result(drv_path="/nix/store/aaa.drv", success=True, status="built")],
         )
-        result = await store.build_paths_with_results(BuildPathsWithResultsRequest(derived_paths=["/nix/store/aaa.drv"]))
+        result = await store.build_paths_with_results(
+            BuildPathsWithResultsRequest(derived_paths=["/nix/store/aaa.drv"])
+        )
         assert len(result.results) == 1
         assert result.results[0].success is True
 
     async def test_build_for_humans(self, store: Store, pool: MagicMock):
         pool._store_stub.build_for_humans.return_value = _mock_build_result_list(  # type: ignore[reportPrivateUsage] -- test accesses private stub
-            [_mock_build_result(drv_path="/nix/store/aaa.drv", success=True, status="substituted")]
+            [_mock_build_result(drv_path="/nix/store/aaa.drv", success=True, status="substituted")],
         )
         result = await store.build_for_humans(BuildPathsWithResultsRequest(derived_paths=["/nix/store/aaa.drv"]))
         assert len(result.results) == 1

@@ -1,4 +1,4 @@
-"""Generic, format-agnostic JSON Schema validation/introspection engine.
+r"""Generic, format-agnostic JSON Schema validation/introspection engine.
 
 Pure JSON-Schema-dict-in, plain-Python-value-in logic. No dependency on
 lsprotocol, tree-sitter, or nanopynix -- this must stay usable standalone
@@ -7,7 +7,7 @@ lsprotocol, tree-sitter, or nanopynix -- this must stay usable standalone
 in. Format-specific code (``pynix._lsp._terranix_jsonschema``, and later a
 Kubernetes equivalent) is responsible for converting its own native schema
 representation into a plain dict shaped like this module expects, and for
-mapping this module's generic :class:`Finding`\\ s to that format's own
+mapping this module's generic :class:`Finding`\ s to that format's own
 rule-code namespace (``TF001``, later ``K8S001``, ...).
 """
 
@@ -183,7 +183,10 @@ def _deref(schema: dict[str, Any], root: dict[str, Any]) -> dict[str, Any]:
 
 
 def walk(
-    schema: dict[str, Any], path: tuple[str, ...], *, root: dict[str, Any] | None = None
+    schema: dict[str, Any],
+    path: tuple[str, ...],
+    *,
+    root: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Return the schema fragment at *path*, descending one ``properties``/``additionalProperties`` hop per segment.
 
@@ -208,7 +211,10 @@ def walk(
 
 
 def list_properties(
-    schema: dict[str, Any], path: tuple[str, ...], *, root: dict[str, Any] | None = None
+    schema: dict[str, Any],
+    path: tuple[str, ...],
+    *,
+    root: dict[str, Any] | None = None,
 ) -> list[str] | None:
     """List declared property names at *path* within *schema* (for completion)."""
     root = schema if root is None else root

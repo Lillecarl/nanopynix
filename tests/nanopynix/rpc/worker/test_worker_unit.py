@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from grpclib.exceptions import GRPCError
@@ -37,6 +37,9 @@ from nanopynix.rpc.worker._worker import (  # type: ignore[reportPrivateUsage] -
 from nanopynix.rpc.worker._worker_nix import (
     NixThreadExecutor,  # type: ignore[reportPrivateUsage] -- test verifies thread confinement
 )
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 class _FakeBridge:
@@ -73,7 +76,9 @@ def test_register_primops_requires_a_bridge_for_rpc_primops() -> None:
         )
 
 
-def test_install_worker_diagnostics_dumps_stats_on_signal(monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
+def test_install_worker_diagnostics_dumps_stats_on_signal(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     # capfd (not capsys): faulthandler.dump_traceback() needs a real fileno(),
     # which capsys's in-memory replacement stream does not provide.
     installed: list[Any] = []
@@ -156,7 +161,9 @@ async def test_init_writes_nix_conf_and_skips_empty_settings_render(monkeypatch:
     assert os.environ["NIX_USER_CONF_FILES"] == "/tmp/fake-nix.conf"
 
 
-async def test_init_reports_and_reraises_initialization_failures(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+async def test_init_reports_and_reraises_initialization_failures(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     def _boom(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("nix init exploded")
 
@@ -268,7 +275,7 @@ async def test_subscribe_logs_breaks_on_a_none_sentinel_from_the_stream() -> Non
     this defends the same guard directly against a differently-behaved collector."""
 
     class _SentinelCollector:
-        async def stream(self):
+        async def stream(self) -> AsyncIterator[None]:
             yield None
 
     state = WorkerState()

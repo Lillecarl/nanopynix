@@ -114,7 +114,7 @@ def _single_document(values: Iterable[Any], builtin: str, stream_builtin: str) -
     if len(docs) != 1:
         raise ValueError(
             f"{builtin}: expected exactly one YAML document, got {len(docs)}; "
-            f"use {stream_builtin} for multi-document YAML"
+            f"use {stream_builtin} for multi-document YAML",
         )
     return _validate_document(docs[0], builtin)
 
@@ -143,7 +143,9 @@ def from_yaml11(source: str) -> JsonValue:
 
     try:
         return _single_document(
-            yaml.load_all(source, Loader=_yaml11_loader()), "fromYAML11", "fromYAML11Stream"
+            yaml.load_all(source, Loader=_yaml11_loader()),
+            "fromYAML11",
+            "fromYAML11Stream",
         )
     except yaml.YAMLError as exc:
         raise ValueError(f"fromYAML11: failed to parse YAML 1.1 document: {_parse_error_message(exc)}") from exc
@@ -163,7 +165,8 @@ def from_yaml11_stream(source: str) -> list[JsonValue]:
 
     try:
         return _validate_documents(
-            yaml.load_all(source, Loader=_yaml11_loader()), "fromYAML11Stream"
+            yaml.load_all(source, Loader=_yaml11_loader()),
+            "fromYAML11Stream",
         )
     except yaml.YAMLError as exc:
         raise ValueError(f"fromYAML11Stream: failed to parse YAML 1.1 stream: {_parse_error_message(exc)}") from exc
@@ -187,7 +190,9 @@ class _BlockStyleDumper(yaml.CSafeDumper):
 def _represent_str(dumper: _BlockStyleDumper, data: str) -> yaml.Node:
     style = "|" if "\n" in data else None
     return dumper.represent_scalar(  # type: ignore[reportUnknownMemberType] -- PyYAML stubs don't type represent_scalar's return precisely
-        "tag:yaml.org,2002:str", data, style=style
+        "tag:yaml.org,2002:str",
+        data,
+        style=style,
     )
 
 
@@ -201,11 +206,16 @@ def to_yaml(value: JsonValue) -> str:
     try:
         if isinstance(value, list):
             rendered = yaml.dump_all(  # type: ignore[reportUnknownVariableType] -- PyYAML's dump_all overloads don't narrow the return type for a custom Dumper
-                value, explicit_start=True, sort_keys=False, Dumper=_BlockStyleDumper
+                value,
+                explicit_start=True,
+                sort_keys=False,
+                Dumper=_BlockStyleDumper,
             )
         else:
             rendered = yaml.dump(  # type: ignore[reportUnknownVariableType] -- PyYAML's dump overloads don't narrow the return type for a custom Dumper
-                value, sort_keys=False, Dumper=_BlockStyleDumper
+                value,
+                sort_keys=False,
+                Dumper=_BlockStyleDumper,
             )
     except yaml.YAMLError as exc:
         raise ValueError(f"toYAML: failed to render YAML: {_parse_error_message(exc)}") from exc

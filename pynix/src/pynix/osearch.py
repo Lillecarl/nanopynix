@@ -91,7 +91,11 @@ class Osearch(Command):
             raise SystemExit(1) from exc
 
         cache_path = _cache_path(target, self.options_attr, self.lib_attr)
-        records = _load_cache(cache_path) if cache_path.exists() and not self.update_index else await self._build_index(target, cache_path)
+        records = (
+            _load_cache(cache_path)
+            if cache_path.exists() and not self.update_index
+            else await self._build_index(target, cache_path)
+        )
 
         if self.query is not None:
             self._search(records, self.query)

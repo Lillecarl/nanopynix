@@ -97,14 +97,16 @@ async def test_a_second_file_opening_a_shared_entry_gets_fast_completion_after_t
     extra_line = "    kubernetes.objects.default.Deployment.asdf.spec.template.metadata.annotations = pkgs.\n"
     source = base.rstrip("\n").removesuffix("}").rstrip() + "\n" + extra_line + "  };\n}\n"
     lsp_server.workspace.put_text_document(
-        types.TextDocumentItem(uri=config_uri, language_id="nix", version=1, text=source)
+        types.TextDocumentItem(uri=config_uri, language_id="nix", version=1, text=source),
     )
     await _sync_document(lsp_server, config_uri)
 
     idx = source.rindex("pkgs.") + len("pkgs.")
     lines = source[:idx].split("\n")
     position = types.Position(len(lines) - 1, len(lines[-1]))
-    completion = await _completion(lsp_server, types.CompletionParams(types.TextDocumentIdentifier(config_uri), position))
+    completion = await _completion(
+        lsp_server, types.CompletionParams(types.TextDocumentIdentifier(config_uri), position)
+    )
 
     assert completion is not None
     labels = {item.label for item in completion.items}

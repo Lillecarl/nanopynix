@@ -88,6 +88,11 @@ if TYPE_CHECKING:
 TERRANIX_ENTRY_NAME = "terranixEntry"
 _BLOCK_KINDS = ("resource", "data")
 _DEFAULT_TOFU_VERSION = "1.12"
+
+# Segment-count thresholds for `<kind>.<type>.<instance>.<field>...`.
+_PATH_DEPTH_KIND_TYPE = 2  # [kind, type]
+_PATH_DEPTH_INSTANCE = 3  # [kind, type, instance]
+_PATH_DEPTH_FIELD = 4  # [kind, type, instance, field...]
 _DIAGNOSTIC_SOURCE = "pynix-lsp"
 
 
@@ -254,7 +259,7 @@ class TerranixDialect(Dialect):
             if string_path is None:
                 return None
             path = ["resource", *string_path]
-        if len(path) < 2 or path[0] not in _BLOCK_KINDS:
+        if len(path) < _PATH_DEPTH_KIND_TYPE or path[0] not in _BLOCK_KINDS:
             return None
         return path
 
@@ -284,7 +289,11 @@ class TerranixDialect(Dialect):
         return merge_schema_blocks(provider_block, core_block.block)
 
     async def hover(
-        self, context: FileContext, source: str, byte_offset: int, dialects: list[Dialect]
+        self,
+        context: FileContext,
+        source: str,
+        byte_offset: int,
+        dialects: list[Dialect],
     ) -> str | None:
         path = self._schema_path_at(source, byte_offset)
         if path is None:
@@ -292,7 +301,7 @@ class TerranixDialect(Dialect):
         block = await self._block_for(context, path[0], path[1])
         if block is None:
             return None
-        if len(path) < 4:
+        if len(path) < _PATH_DEPTH_FIELD:
             # Cursor is on the resource/data *type* name itself (``path`` has
             # only ``[kind, type]`` or ``[kind, type, instance]`` segments) --
             # there's no specific attribute to describe, so this renders the
@@ -313,7 +322,9 @@ class TerranixDialect(Dialect):
         return "\n\n".join(sections)
 
     async def _resolve_assigned_value(
-        self, context: FileContext, path: list[str]
+        self,
+        context: FileContext,
+        path: list[str],
     ) -> nanopynix.ValueProxy | None:
         if path[0] not in context.roots:
             return None
@@ -326,8 +337,12 @@ class TerranixDialect(Dialect):
             return None
         return value
 
-    async def complete(
-        self, context: FileContext, source: str, byte_offset: int, dialects: list[Dialect]
+    async def complete(  # noqa: C901, PLR0911 tracked complexity/arg-count debt, see TODO.md
+        self,
+        context: FileContext,
+        source: str,
+        byte_offset: int,
+        dialects: list[Dialect],
     ) -> list[types.CompletionItem] | None:
         del dialects
         # The string-literal check is tried first: it's strictly AST-gated
@@ -376,7 +391,7 @@ class TerranixDialect(Dialect):
                 return None
             names = list_resource_type_names(schemas, prefix[0])
             return [types.CompletionItem(label=name) for name in names if name.startswith(partial)]
-        if len(prefix) < 3 or prefix[0] not in _BLOCK_KINDS:
+        if len(prefix) < _PATH_DEPTH_INSTANCE or prefix[0] not in _BLOCK_KINDS:
             return None
         block = await self._block_for(context, prefix[0], prefix[1])
         if block is None:
@@ -386,7 +401,7 @@ class TerranixDialect(Dialect):
             return None
         return [types.CompletionItem(label=name) for name in names if name.startswith(partial)]
 
-    async def diagnostics(self, context: FileContext, source: str) -> list[types.Diagnostic] | None:
+    async def diagnostics(self, context: FileContext, source: str) -> list[types.Diagnostic] | None:  # noqa: C901, PLR0912 tracked complexity/arg-count debt, see TODO.md
         """Flag unknown attributes/nested-block types on every resource/data instance declared in *source*.
 
         ``context.roots`` reflects the *whole* terranix project (every

@@ -39,7 +39,7 @@ async def client(lsp_client: LanguageClient) -> AsyncIterator[None]:
         types.InitializeParams(
             capabilities=client_capabilities("visual-studio-code"),
             workspace_folders=[types.WorkspaceFolder(uri=_MODULE_SYSTEM.as_uri(), name="module_system")],
-        )
+        ),
     )
     # pytest_lsp's fixture machinery injects `lsp_client` itself as the
     # `client` fixture value (the bare `yield` above is not what tests
@@ -82,7 +82,10 @@ async def test_e2e_bare_attrpath_completion_falls_back_to_the_options_tree(clien
     await client.wait_for_notification(types.TEXT_DOCUMENT_PUBLISH_DIAGNOSTICS)
 
     position = cursor_after(
-        source, "services.example-daemon", needle="services.example-daemon.enable", offset=len("services.exam")
+        source,
+        "services.example-daemon",
+        needle="services.example-daemon.enable",
+        offset=len("services.exam"),
     )
     completion = await complete_at(client, uri, position)
 
@@ -102,7 +105,10 @@ async def test_e2e_pkgs_completion_lists_real_nixpkgs_attributes(client: Languag
     await client.wait_for_notification(types.TEXT_DOCUMENT_PUBLISH_DIAGNOSTICS)
 
     position = cursor_after(
-        source, "pkgs.hello", needle="programs.example.package = pkgs.hello", offset=len("pkgs.hel")
+        source,
+        "pkgs.hello",
+        needle="programs.example.package = pkgs.hello",
+        offset=len("pkgs.hel"),
     )
     completion = await complete_at(client, uri, position)
 
@@ -165,14 +171,16 @@ async def test_e2e_renaming_a_let_binding_updates_every_reference_over_real_stdi
     position = cursor_after(source, "greeting", needle='greeting = "hello"')
 
     prepared = await client.text_document_prepare_rename_async(
-        params=types.PrepareRenameParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
+        params=types.PrepareRenameParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position),
     )
     assert prepared is not None
 
     edit = await client.text_document_rename_async(
         params=types.RenameParams(
-            text_document=types.TextDocumentIdentifier(uri=uri), position=position, new_name="salutation"
-        )
+            text_document=types.TextDocumentIdentifier(uri=uri),
+            position=position,
+            new_name="salutation",
+        ),
     )
     assert edit is not None
     assert edit.changes is not None

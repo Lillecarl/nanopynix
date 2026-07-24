@@ -120,7 +120,7 @@ def _version_in_exclusions(version: NixVersion, values: Iterable[object]) -> str
     return None
 
 
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:  # noqa: C901, PLR0912, PLR0915 tracked complexity/arg-count debt, see TODO.md
     runtime = linked_nix_runtime()
     sanitizer = config.getoption("--nix-sanitizer", default=None)
     for item in items:
@@ -138,7 +138,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             reason = version_marker.kwargs.get("reason", "linked Nix version is unsupported")
             if minimum is not None and (not isinstance(minimum, str) or runtime.version < NixVersion.parse(minimum)):
                 item.add_marker(pytest.mark.skip(reason=f"{reason}; requires Nix >= {minimum}"))
-            if maximum is not None and (not isinstance(maximum, str) or not runtime.version < NixVersion.parse(maximum)):
+            if maximum is not None and (
+                not isinstance(maximum, str) or not runtime.version < NixVersion.parse(maximum)
+            ):
                 item.add_marker(pytest.mark.skip(reason=f"{reason}; requires Nix < {maximum}"))
             if not isinstance(exclude, (tuple, list)):
                 raise pytest.UsageError("nix_version exclude must be a tuple or list")
@@ -155,7 +157,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
         sanitizer_marker = item.get_closest_marker("nix_sanitizer")
         if sanitizer_marker is not None:
-            if sanitizer_marker.kwargs or len(sanitizer_marker.args) != 1 or not isinstance(sanitizer_marker.args[0], str):
+            if (
+                sanitizer_marker.kwargs
+                or len(sanitizer_marker.args) != 1
+                or not isinstance(sanitizer_marker.args[0], str)
+            ):
                 raise pytest.UsageError("nix_sanitizer requires one sanitizer name")
             if sanitizer != sanitizer_marker.args[0]:
                 item.add_marker(pytest.mark.skip(reason=f"requires {sanitizer_marker.args[0]} sanitizer"))

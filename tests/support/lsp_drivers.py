@@ -45,7 +45,7 @@ class InProcessDriver:
     async def open(self, uri: str, text: str) -> None:
         self._versions[uri] = 1
         self._server.workspace.put_text_document(
-            types.TextDocumentItem(uri=uri, language_id="nix", version=1, text=text)
+            types.TextDocumentItem(uri=uri, language_id="nix", version=1, text=text),
         )
         await _sync_document(self._server, uri)
 
@@ -65,7 +65,8 @@ class InProcessDriver:
 
     async def definition(self, uri: str, position: types.Position) -> types.Location | list[types.Location] | None:
         return await _definition(
-            self._server, types.DefinitionParams(text_document=types.TextDocumentIdentifier(uri), position=position)
+            self._server,
+            types.DefinitionParams(text_document=types.TextDocumentIdentifier(uri), position=position),
         )
 
     async def prepare_rename(self, uri: str, position: types.Position) -> types.PrepareRenameResult | None:
@@ -87,7 +88,11 @@ class InProcessDriver:
         )
 
     async def references(
-        self, uri: str, position: types.Position, *, include_declaration: bool
+        self,
+        uri: str,
+        position: types.Position,
+        *,
+        include_declaration: bool,
     ) -> list[types.Location] | None:
         return await _references(
             self._server,
@@ -118,8 +123,8 @@ class WireDriver:
         self._versions[uri] = 1
         self._client.text_document_did_open(
             types.DidOpenTextDocumentParams(
-                text_document=types.TextDocumentItem(uri=uri, language_id="nix", version=1, text=text)
-            )
+                text_document=types.TextDocumentItem(uri=uri, language_id="nix", version=1, text=text),
+            ),
         )
         await self._client.wait_for_notification(types.TEXT_DOCUMENT_PUBLISH_DIAGNOSTICS)
 
@@ -129,59 +134,75 @@ class WireDriver:
             types.DidChangeTextDocumentParams(
                 text_document=types.VersionedTextDocumentIdentifier(uri=uri, version=self._versions[uri]),
                 content_changes=[types.TextDocumentContentChangePartial(range=edit_range, text=text)],
-            )
+            ),
         )
         await self._client.wait_for_notification(types.TEXT_DOCUMENT_PUBLISH_DIAGNOSTICS)
 
     async def hover(self, uri: str, position: types.Position) -> types.Hover | None:
         return await self._client.text_document_hover_async(
-            params=types.HoverParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
+            params=types.HoverParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position),
         )
 
     async def complete(
-        self, uri: str, position: types.Position
+        self,
+        uri: str,
+        position: types.Position,
     ) -> types.CompletionList | Sequence[types.CompletionItem] | None:
         return await self._client.text_document_completion_async(
-            params=types.CompletionParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
+            params=types.CompletionParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position),
         )
 
     async def definition(
-        self, uri: str, position: types.Position
+        self,
+        uri: str,
+        position: types.Position,
     ) -> types.Location | Sequence[types.Location] | Sequence[types.LocationLink] | None:
         return await self._client.text_document_definition_async(
-            params=types.DefinitionParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
+            params=types.DefinitionParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position),
         )
 
     async def prepare_rename(
-        self, uri: str, position: types.Position
+        self,
+        uri: str,
+        position: types.Position,
     ) -> types.Range | types.PrepareRenamePlaceholder | types.PrepareRenameDefaultBehavior | None:
         return await self._client.text_document_prepare_rename_async(
-            params=types.PrepareRenameParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
+            params=types.PrepareRenameParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position),
         )
 
     async def rename(self, uri: str, position: types.Position, new_name: str) -> types.WorkspaceEdit | None:
         return await self._client.text_document_rename_async(
             params=types.RenameParams(
-                text_document=types.TextDocumentIdentifier(uri=uri), position=position, new_name=new_name
-            )
+                text_document=types.TextDocumentIdentifier(uri=uri),
+                position=position,
+                new_name=new_name,
+            ),
         )
 
     async def document_highlight(
-        self, uri: str, position: types.Position
+        self,
+        uri: str,
+        position: types.Position,
     ) -> Sequence[types.DocumentHighlight] | None:
         return await self._client.text_document_document_highlight_async(
-            params=types.DocumentHighlightParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
+            params=types.DocumentHighlightParams(
+                text_document=types.TextDocumentIdentifier(uri=uri), position=position
+            ),
         )
 
     async def references(
-        self, uri: str, position: types.Position, *, include_declaration: bool
+        self,
+        uri: str,
+        position: types.Position,
+        *,
+        include_declaration: bool,
     ) -> Sequence[types.Location] | None:
         return await self._client.text_document_references_async(
             params=types.ReferenceParams(
                 text_document=types.TextDocumentIdentifier(uri=uri),
                 position=position,
                 context=types.ReferenceContext(include_declaration),
-            )
+            ),
         )
 
     async def diagnostics(self, uri: str) -> Sequence[types.Diagnostic]:

@@ -43,7 +43,8 @@ def test_agent_mode_stays_off_with_no_harness_env_var_present(pytester: pytest.P
 
 
 def test_agent_mode_turns_on_by_itself_when_a_harness_env_var_is_set(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CLAUDECODE", "1")
     pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
@@ -53,7 +54,8 @@ def test_agent_mode_turns_on_by_itself_when_a_harness_env_var_is_set(
 
 
 def test_no_autodetect_env_var_disables_the_automatic_activation(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CLAUDECODE", "1")
     monkeypatch.setenv("PYTEST_AGENT_NO_AUTODETECT", "1")
@@ -64,7 +66,8 @@ def test_no_autodetect_env_var_disables_the_automatic_activation(
 
 
 def test_explicit_agent_flag_still_works_alongside_no_autodetect(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PYTEST_AGENT_NO_AUTODETECT", "1")
     pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")

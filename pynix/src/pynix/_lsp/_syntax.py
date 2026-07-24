@@ -49,7 +49,7 @@ def parse_errors(source: str) -> list[ParseErrorRange]:
                     node.end_point[0],
                     node.end_point[1],
                     message,
-                )
+                ),
             )
             continue
         stack.extend(node.children)
@@ -89,7 +89,8 @@ def identifier_path_at(source: str, byte_offset: int) -> list[str] | None:
     if result is not None or byte_offset == 0:
         return result
     return _identifier_path_at_node(
-        source, tree.root_node.descendant_for_byte_range(byte_offset - 1, byte_offset - 1)
+        source,
+        tree.root_node.descendant_for_byte_range(byte_offset - 1, byte_offset - 1),
     )
 
 
@@ -167,7 +168,7 @@ def enclosing_binding_path_at(source: str, byte_offset: int) -> list[str]:
     return [segment for group in segments for segment in group]
 
 
-def _identifier_path_at_node(source: str, node: Any | None) -> list[str] | None:
+def _identifier_path_at_node(source: str, node: Any | None) -> list[str] | None:  # noqa: C901, PLR0911, PLR0912 tracked complexity/arg-count debt, see TODO.md
     if node is None:
         return None
 
@@ -412,7 +413,7 @@ def top_level_symbols(source: str) -> list[SymbolRange]:
                         node.start_point[1],
                         node.end_point[0],
                         node.end_point[1],
-                    )
+                    ),
                 )
         stack.extend(node.children)
     symbols.sort(key=lambda symbol: (symbol.start_row, symbol.start_column))
@@ -439,7 +440,7 @@ def _direct_bindings(node: Any) -> list[Any]:
     return bindings
 
 
-def attrpath_range(source: str, path: tuple[str, ...]) -> tuple[int, int, int, int] | None:
+def attrpath_range(source: str, path: tuple[str, ...]) -> tuple[int, int, int, int] | None:  # noqa: C901 tracked complexity/arg-count debt, see TODO.md
     """Return the ``(start_row, start_column, end_row, end_column)`` span of the binding at *path*.
 
     Handles both a single flat dotted binding (``a.b.c = ...;``) and nested
@@ -620,7 +621,7 @@ def _let_declared_names(let_expression: Any, encoded: bytes) -> set[str]:
     return names
 
 
-def _binding_site_at(node: Any, encoded: bytes) -> tuple[str, Any, Any] | None:
+def _binding_site_at(node: Any, encoded: bytes) -> tuple[str, Any, Any] | None:  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
     """If *node* is itself a v1-renameable binding's own name, return ``(name, scope_root, definition_node)``.
 
     Renameable kinds: a ``formal``'s ``name``, a ``function_expression``'s
@@ -663,7 +664,7 @@ def _binding_site_at(node: Any, encoded: bytes) -> tuple[str, Any, Any] | None:
     return None
 
 
-def _resolve_declaration(node: Any, name: str, encoded: bytes) -> tuple[Any, Any] | None:
+def _resolve_declaration(node: Any, name: str, encoded: bytes) -> tuple[Any, Any] | None:  # noqa: C901, PLR0912 tracked complexity/arg-count debt, see TODO.md
     """Climb ancestors of a reference *node* for the nearest enclosing declaration of *name*.
 
     Returns ``(definition_node, scope_root)``, or None if the nearest
@@ -758,7 +759,11 @@ def local_scope_at(source: str, byte_offset: int) -> LocalScope | None:
             name, scope_root, definition_node = site
             references = _collect_references(scope_root, name, encoded)
             return LocalScope(_node_range(definition_node), [_node_range(r) for r in references])
-        if candidate.type == "identifier" and candidate.parent is not None and candidate.parent.type == "variable_expression":
+        if (
+            candidate.type == "identifier"
+            and candidate.parent is not None
+            and candidate.parent.type == "variable_expression"
+        ):
             name = _node_text(encoded, candidate)
             resolved = _resolve_declaration(candidate, name, encoded)
             if resolved is not None:

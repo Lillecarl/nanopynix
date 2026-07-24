@@ -62,20 +62,7 @@ if Ekn is not None:
 if TYPE_CHECKING:
     from ekn.cli import Ekn as _Ekn
 
-    _PynixSubcommand = (
-        Build
-        | Config
-        | Eval
-        | Derivation
-        | Flake
-        | Log
-        | Lsp
-        | Osearch
-        | PathInfo
-        | Repl
-        | Store
-        | _Ekn
-    )
+    _PynixSubcommand = Build | Config | Eval | Derivation | Flake | Log | Lsp | Osearch | PathInfo | Repl | Store | _Ekn
 else:
     _PynixSubcommand = functools.reduce(operator.or_, _subcommand_types)
 

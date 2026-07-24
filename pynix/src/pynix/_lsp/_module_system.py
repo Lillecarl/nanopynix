@@ -39,6 +39,8 @@ if TYPE_CHECKING:
 
 MODULE_ENTRY_NAME = "moduleEntry"
 CONFIG_NAME = "config"
+# A path needs a parent segment to look the last one up in.
+_MIN_PATH_SEGMENTS_FOR_PARENT_LOOKUP = 2
 OPTIONS_NAME = "options"
 
 
@@ -217,7 +219,11 @@ class ModuleSystemDialect(Dialect):
         return None
 
     async def hover(
-        self, context: FileContext, source: str, byte_offset: int, dialects: list[Dialect]
+        self,
+        context: FileContext,
+        source: str,
+        byte_offset: int,
+        dialects: list[Dialect],
     ) -> str | None:
         path = identifier_path_at(source, byte_offset)
         if path is None:
@@ -231,7 +237,10 @@ class ModuleSystemDialect(Dialect):
             return None
 
     async def _best_effort_location(
-        self, context: FileContext, source: str, path: list[str]
+        self,
+        context: FileContext,
+        source: str,
+        path: list[str],
     ) -> types.Location | None:
         """Best-effort ``builtins.unsafeGetAttrPos`` lookup for a non-option *path* (e.g. a module arg like ``pkgs.hello``).
 
@@ -245,7 +254,7 @@ class ModuleSystemDialect(Dialect):
         tracking -- a graceful "no definition available" is the correct
         outcome, not a bug, for most of nixpkgs' own attributes.
         """
-        if len(path) < 2:
+        if len(path) < _MIN_PATH_SEGMENTS_FOR_PARENT_LOOKUP:
             return None
         eval_session = context.eval_session(MODULE_ENTRY_NAME)
         if eval_session is None:
@@ -262,7 +271,11 @@ class ModuleSystemDialect(Dialect):
         return _position_from_json(position)
 
     async def definition(
-        self, context: FileContext, source: str, byte_offset: int, dialects: list[Dialect]
+        self,
+        context: FileContext,
+        source: str,
+        byte_offset: int,
+        dialects: list[Dialect],
     ) -> types.Location | list[types.Location] | None:
         del dialects
         path = identifier_path_at(source, byte_offset)
@@ -276,7 +289,11 @@ class ModuleSystemDialect(Dialect):
         return await self._best_effort_location(context, source, path)
 
     async def complete(
-        self, context: FileContext, source: str, byte_offset: int, dialects: list[Dialect]
+        self,
+        context: FileContext,
+        source: str,
+        byte_offset: int,
+        dialects: list[Dialect],
     ) -> list[types.CompletionItem] | None:
         del dialects
         target = completion_target_at(source, byte_offset)

@@ -181,7 +181,7 @@ async def test_inproc_locked_flake_facade(tmp_path: Path, inproc_session: Inproc
 async def test_inproc_store_query_missing(inproc_session: InprocSessionFactory) -> None:
     async with inproc_session() as nix, nix.store() as store:
         mi = await store.query_missing(
-            ["/nix/store/00000000000000000000000000000000-nonexistent-1.0"]
+            ["/nix/store/00000000000000000000000000000000-nonexistent-1.0"],
         )
         assert isinstance(mi, MissingInfo)
         assert isinstance(mi.will_build, list)
@@ -194,7 +194,7 @@ async def test_inproc_store_read_derivation(inproc_session: InprocSessionFactory
     """read_derivation via direct string argument."""
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         drv_value = await eval.string(
-            '(builtins.derivation { name = "inproc-read-derivation"; system = builtins.currentSystem; builder = "/bin/sh"; }).drvPath'
+            '(builtins.derivation { name = "inproc-read-derivation"; system = builtins.currentSystem; builder = "/bin/sh"; }).drvPath',
         )
         drv = StorePath(await drv_value.as_string())
         d = await store.read_derivation(str(drv))
@@ -225,7 +225,8 @@ async def test_inproc_store_uri_and_store_dir(inproc_session: InprocSessionFacto
 
 @pytest.mark.anyio
 async def test_inproc_store_parse_and_is_valid_path(
-    inproc_session: InprocSessionFactory, seeded_store_path: StorePath
+    inproc_session: InprocSessionFactory,
+    seeded_store_path: StorePath,
 ) -> None:
     async with inproc_session() as nix, nix.store() as store:
         parsed = await store.parse_store_path(str(seeded_store_path))
@@ -235,7 +236,8 @@ async def test_inproc_store_parse_and_is_valid_path(
 
 @pytest.mark.anyio
 async def test_inproc_store_compute_fs_closure(
-    inproc_session: InprocSessionFactory, seeded_store_path: StorePath
+    inproc_session: InprocSessionFactory,
+    seeded_store_path: StorePath,
 ) -> None:
     async with inproc_session() as nix, nix.store() as store:
         closure = await store.compute_fs_closure(seeded_store_path)
@@ -249,7 +251,7 @@ async def test_inproc_store_query_derivation_outputs_and_valid_derivers(
 ) -> None:
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         drv_value = await eval.string(
-            '(builtins.derivation { name = "inproc-derivation-outputs"; system = builtins.currentSystem; builder = "/bin/sh"; }).drvPath'
+            '(builtins.derivation { name = "inproc-derivation-outputs"; system = builtins.currentSystem; builder = "/bin/sh"; }).drvPath',
         )
         drv = StorePath(await drv_value.as_string())
         outputs = await store.query_derivation_outputs(drv)
@@ -261,7 +263,8 @@ async def test_inproc_store_query_derivation_outputs_and_valid_derivers(
 
 @pytest.mark.anyio
 async def test_inproc_store_query_referrers_and_substitutable_paths(
-    inproc_session: InprocSessionFactory, seeded_store_path: StorePath
+    inproc_session: InprocSessionFactory,
+    seeded_store_path: StorePath,
 ) -> None:
     async with inproc_session() as nix, nix.store() as store:
         referrers = await store.query_referrers(seeded_store_path)
@@ -272,7 +275,9 @@ async def test_inproc_store_query_referrers_and_substitutable_paths(
 
 @pytest.mark.anyio
 async def test_inproc_store_follow_links_to_store_path(
-    tmp_path: Path, inproc_session: InprocSessionFactory, seeded_store_path: StorePath
+    tmp_path: Path,
+    inproc_session: InprocSessionFactory,
+    seeded_store_path: StorePath,
 ) -> None:
     async with inproc_session() as nix, nix.store() as store:
         target = str(seeded_store_path)
@@ -284,7 +289,8 @@ async def test_inproc_store_follow_links_to_store_path(
 
 @pytest.mark.anyio
 async def test_inproc_store_query_path_from_hash_part(
-    inproc_session: InprocSessionFactory, seeded_store_path: StorePath
+    inproc_session: InprocSessionFactory,
+    seeded_store_path: StorePath,
 ) -> None:
     async with inproc_session() as nix, nix.store() as store:
         hash_part = seeded_store_path.hash_part
@@ -330,7 +336,8 @@ async def test_inproc_eval_flake(tmp_path: Path, inproc_session: InprocSessionFa
 
 @pytest.mark.anyio
 async def test_inproc_lock_flake_update_inputs_variants(
-    tmp_path: Path, inproc_session: InprocSessionFactory
+    tmp_path: Path,
+    inproc_session: InprocSessionFactory,
 ) -> None:
     init_flake_repo(tmp_path, "x = 1;")
 
@@ -340,7 +347,9 @@ async def test_inproc_lock_flake_update_inputs_variants(
         await locked_all.release()
 
         locked_specific = await eval.lock_flake(
-            str(tmp_path), update_inputs=["nonexistent"], write_lock_file=False
+            str(tmp_path),
+            update_inputs=["nonexistent"],
+            write_lock_file=False,
         )
         assert isinstance(locked_specific.description, str)
         await locked_specific.release()
@@ -410,7 +419,8 @@ async def test_inproc_value_auto_call(inproc_session: InprocSessionFactory) -> N
 
 @pytest.mark.anyio
 async def test_inproc_value_build_and_release(
-    inproc_session: InprocSessionFactory, shared_nix_environment: NixTestEnvironment
+    inproc_session: InprocSessionFactory,
+    shared_nix_environment: NixTestEnvironment,
 ) -> None:
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         drv = await eval.string("""
@@ -600,7 +610,7 @@ def test_inproc_session_nix_conf_accepts_existing_path(tmp_path: Path) -> None:
 
 def test_inproc_normalize_nix_path_str_and_list_variants() -> None:
     assert inproc.Session._normalize_nix_path("foo=/bar") == list(  # type: ignore[reportPrivateUsage] -- exercising the str branch directly
-        nanopynix_expr.parse_nix_path("foo=/bar")
+        nanopynix_expr.parse_nix_path("foo=/bar"),
     )
     assert inproc.Session._normalize_nix_path(["a", "b"]) == ["a", "b"]  # type: ignore[reportPrivateUsage] -- exercising the sequence branch directly
 
@@ -610,7 +620,8 @@ def test_inproc_normalize_nix_path_str_and_list_variants() -> None:
 
 @pytest.mark.anyio
 async def test_inproc_store_query_path_info(
-    inproc_session: InprocSessionFactory, seeded_store_path: StorePath
+    inproc_session: InprocSessionFactory,
+    seeded_store_path: StorePath,
 ) -> None:
     async with inproc_session() as nix, nix.store() as store:
         info = await store.query_path_info(seeded_store_path)
@@ -619,7 +630,8 @@ async def test_inproc_store_query_path_info(
 
 @pytest.mark.anyio
 async def test_inproc_store_get_build_log(
-    inproc_session: InprocSessionFactory, seeded_store_path: StorePath
+    inproc_session: InprocSessionFactory,
+    seeded_store_path: StorePath,
 ) -> None:
     async with inproc_session() as nix, nix.store() as store:
         log = await store.get_build_log(seeded_store_path)
@@ -684,7 +696,8 @@ async def test_inproc_session_close_auto_closes_open_eval(inproc_session: Inproc
 
 @pytest.mark.anyio
 async def test_inproc_eval_close_releases_leftover_locked_flakes(
-    tmp_path: Path, inproc_session: InprocSessionFactory
+    tmp_path: Path,
+    inproc_session: InprocSessionFactory,
 ) -> None:
     init_flake_repo(tmp_path, "val = 1;")
 
@@ -701,7 +714,8 @@ async def test_inproc_eval_close_releases_leftover_locked_flakes(
 
 @pytest.mark.anyio
 async def test_inproc_locked_flake_release_is_idempotent(
-    tmp_path: Path, inproc_session: InprocSessionFactory
+    tmp_path: Path,
+    inproc_session: InprocSessionFactory,
 ) -> None:
     init_flake_repo(tmp_path, "val = 1;")
 

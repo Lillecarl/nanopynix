@@ -295,8 +295,7 @@ async def _sync_document(ls: PynixLanguageServer, uri: str) -> None:
     if context is not None:
         directives_by_name = {directive.name: directive for directive in context.directives}
         diagnostics.extend(
-            _context_error_diagnostic(error, directives_by_name[name].line)
-            for name, error in context.errors.items()
+            _context_error_diagnostic(error, directives_by_name[name].line) for name, error in context.errors.items()
         )
         for dialect in DIALECTS:
             dialect_diagnostics = await dialect.diagnostics(context, source)
@@ -411,7 +410,8 @@ async def _path_literal_location(uri: str, path_literal: str) -> types.Location 
 
 
 async def _definition(
-    ls: PynixLanguageServer, params: types.DefinitionParams
+    ls: PynixLanguageServer,
+    params: types.DefinitionParams,
 ) -> types.Location | list[types.Location] | None:
     """Structural lookups (path literal, local scope) first, then dialects -- mirrors ``_hover``'s dispatch order.
 
@@ -444,7 +444,8 @@ async def _definition(
 
 
 async def _prepare_rename(
-    ls: PynixLanguageServer, params: types.PrepareRenameParams
+    ls: PynixLanguageServer,
+    params: types.PrepareRenameParams,
 ) -> types.PrepareRenameResult | None:
     """Refuse (return None) unless the cursor is on a v1-renameable local binding -- see ``local_scope_at``'s docstring."""
     uri = params.text_document.uri
@@ -475,7 +476,8 @@ async def _rename(ls: PynixLanguageServer, params: types.RenameParams) -> types.
 
 
 async def _document_highlight(
-    ls: PynixLanguageServer, params: types.DocumentHighlightParams
+    ls: PynixLanguageServer,
+    params: types.DocumentHighlightParams,
 ) -> list[types.DocumentHighlight] | None:
     uri = params.text_document.uri
     source, byte_offset = _resolve_source(ls, uri, params.position)
@@ -522,7 +524,7 @@ def _document_symbols(ls: PynixLanguageServer, uri: str) -> list[types.DocumentS
                 kind=types.SymbolKind.Field,
                 range=symbol_range,
                 selection_range=symbol_range,
-            )
+            ),
         )
     return symbols
 

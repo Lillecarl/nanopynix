@@ -29,7 +29,7 @@ class FodBuildError(RuntimeError):
     """A build could not be completed, or safely retried, after a FOD mismatch."""
 
 
-async def build_with_fod_update(
+async def build_with_fod_update(  # noqa: C901, PLR0912, PLR0913 tracked complexity/arg-count debt, see TODO.md
     evaluate: Callable[[], Awaitable[ValueProxy]],
     *,
     nix: Session,
@@ -82,7 +82,7 @@ async def build_with_fod_update(
             if root is not None:
                 await root.release()
             raise FodBuildError(
-                "fixed-output hash mismatch was not found in the evaluated target derivation closure"
+                "fixed-output hash mismatch was not found in the evaluated target derivation closure",
             ) from build_error
         if root is not None:
             await root.release()
