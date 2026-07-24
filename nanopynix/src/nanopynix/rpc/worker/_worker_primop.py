@@ -16,15 +16,14 @@ No ``nest_asyncio`` needed.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import anyio
 import anyio.from_thread
-from betterproto2 import which_one_of
 from nanopynix_bindings import util as nanopynix_util
-from nanopynix_proto.nix.common import DeepAttrs, DeepList, DeepValue, NullValue, ScalarValue
 from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
 
+from nanopynix._core._codec import deep_value_to_python, python_to_deep_value
 from nanopynix.models import CALL_ROUTE
 
 if TYPE_CHECKING:
@@ -33,63 +32,6 @@ if TYPE_CHECKING:
     from grpclib_transports import WorkerBackchannel
 
 _RPC_TIMEOUT = 300.0
-
-
-def _python_to_scalar_value(value: Any) -> ScalarValue:
-    if value is None:
-        return ScalarValue(null_value=NullValue())
-    if isinstance(value, bool):
-        return ScalarValue(bool_value=value)
-    if isinstance(value, int):
-        return ScalarValue(int_value=value)
-    if isinstance(value, float):
-        return ScalarValue(float_value=value)
-    if isinstance(value, str):
-        return ScalarValue(string_value=value)
-    raise TypeError(f"unsupported RPC primop value type: {type(value)}")
-
-
-def _scalar_value_to_python(sv: ScalarValue | None) -> Any:  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
-    if sv is None:
-        return None
-    kind = which_one_of(sv, "kind")[0]
-    if kind == "string_value":
-        return sv.string_value
-    if kind == "int_value":
-        return sv.int_value
-    if kind == "float_value":
-        return sv.float_value
-    if kind == "bool_value":
-        return sv.bool_value
-    if kind == "null_value":
-        return None
-    return None
-
-
-def _python_to_deep_value(value: Any) -> DeepValue:
-    """Encode a Python value (JSON-compatible: scalar/list/dict, arbitrarily
-    nested) as the wire ``DeepValue`` primop RPC args/results carry."""
-    if isinstance(value, dict):
-        value_dict = cast("dict[str, Any]", value)
-        return DeepValue(attrs=DeepAttrs(entries={k: _python_to_deep_value(v) for k, v in value_dict.items()}))
-    if isinstance(value, list):
-        value_list = cast("list[Any]", value)
-        return DeepValue(list=DeepList(items=[_python_to_deep_value(v) for v in value_list]))
-    return DeepValue(scalar=_python_to_scalar_value(value))
-
-
-def _deep_value_to_python(dv: DeepValue | None) -> Any:
-    if dv is None:
-        return None
-    if dv.scalar is not None:
-        return _scalar_value_to_python(dv.scalar)
-    if dv.list is not None:
-        return [_deep_value_to_python(item) for item in dv.list.items]
-    if dv.attrs is not None:
-        return {k: _deep_value_to_python(v) for k, v in dv.attrs.entries.items()}
-    if dv.remote_value is not None:
-        raise TypeError("remote value handles are not supported for primop RPC args/results")
-    return None
 
 
 class ThreadedRpcPrimopBridge:
@@ -144,7 +86,7 @@ class ThreadedRpcPrimopBridge:
     async def _invoke_async(self, name: str, args: list[Any]) -> Any:
         request = CallPrimopRequest(
             name=name,
-            args=[_python_to_deep_value(a) for a in args],
+            args=[python_to_deep_value(a) for a in args],
             request_id=nanopynix_util.get_logger_request_id(),
         )
         with anyio.fail_after(_RPC_TIMEOUT):
@@ -153,7 +95,7 @@ class ThreadedRpcPrimopBridge:
                 request,
                 CallPrimopResponse,
             )
-        return _deep_value_to_python(response.value)
+        return deep_value_to_python(response.value)
 
     # ── called from the Nix thread ──────────────────────────────────
 

@@ -1,13 +1,16 @@
 """Unit coverage for nanopynix.rpc.client._manager.
 
-This module is pure Python (no daemon/store/nix dependency): scalar
-(de)serialization helpers and small grpclib ServiceBase classes. The
-existing integration coverage in test_primop_rpc.py only exercises the
-success path through a real Nix session, so it never reaches the base
-classes' UNIMPLEMENTED stubs, the non-string/int/bool/float/null scalar
-branches, or the NOT_FOUND / exception-wrapping error paths in
-ManagerPrimopServiceHandler.call. These are "dumb coverage" tests: each
-one pins down a single small branch directly, without an RPC round trip.
+This module is pure Python (no daemon/store/nix dependency): small grpclib
+ServiceBase classes. The existing integration coverage in
+test_primop_rpc.py only exercises the success path through a real Nix
+session, so it never reaches the base classes' UNIMPLEMENTED stubs or the
+NOT_FOUND / exception-wrapping error paths in ManagerPrimopServiceHandler.call.
+These are "dumb coverage" tests: each one pins down a single small branch
+directly, without an RPC round trip.
+
+Scalar (de)serialization coverage for the shared codec itself lives in
+tests/nanopynix/core/test_codec.py, not here -- _manager.py no longer
+defines its own copy.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ from typing import Any
 import grpclib
 import pytest
 from grpclib.const import Status
-from nanopynix_proto.nix.common import DeepValue, LogEvent, NullValue, ScalarValue
+from nanopynix_proto.nix.common import DeepValue, LogEvent, ScalarValue
 from nanopynix_proto.nix.manager import CallPrimopRequest
 
 from nanopynix.rpc.client._manager import (
@@ -25,8 +28,6 @@ from nanopynix.rpc.client._manager import (
     ManagerPrimopServiceHandler,
     ManagerServiceBase,
     ManagerServiceHandler,
-    _python_to_scalar_value,  # pyright: ignore[reportPrivateUsage]
-    _scalar_value_to_python,  # pyright: ignore[reportPrivateUsage]
 )
 
 
@@ -42,40 +43,6 @@ class _FakeStream:
 
     async def send_message(self, message: Any) -> None:
         self.sent.append(message)
-
-
-@pytest.mark.parametrize(
-    ("scalar", "expected"),
-    [
-        (ScalarValue(string_value="hi"), "hi"),
-        (ScalarValue(int_value=42), 42),
-        (ScalarValue(float_value=1.5), 1.5),
-        (ScalarValue(bool_value=True), True),
-        (ScalarValue(null_value=NullValue()), None),
-    ],
-)
-def test_scalar_value_to_python_covers_every_kind(scalar: ScalarValue, expected: Any) -> None:
-    assert _scalar_value_to_python(scalar) == expected
-
-
-@pytest.mark.parametrize(
-    ("value", "field", "expected"),
-    [
-        (None, "null_value", NullValue()),
-        (True, "bool_value", True),
-        (42, "int_value", 42),
-        (1.5, "float_value", 1.5),
-        ("hi", "string_value", "hi"),
-    ],
-)
-def test_python_to_scalar_value_covers_every_type(value: Any, field: str, expected: Any) -> None:
-    sv = _python_to_scalar_value(value)
-    assert getattr(sv, field) == expected
-
-
-def test_python_to_scalar_value_rejects_unsupported_type() -> None:
-    with pytest.raises(TypeError, match="unsupported RPC primop value type"):
-        _python_to_scalar_value(object())
 
 
 async def test_manager_service_base_log_is_unimplemented() -> None:

@@ -76,6 +76,7 @@ from nanopynix_proto.nix.eval import (
     WriteLockFileResponse,
 )
 
+from nanopynix._core._codec import python_to_scalar
 from nanopynix._core._extract import flake_ref_attrs as _flake_ref_attrs
 from nanopynix._core._extract import locked_flake as _locked_flake
 from nanopynix._core._local import LocalLockedFlake, LocalValue
@@ -102,18 +103,6 @@ _NIX_TYPE_MAP: dict[str, common_pb.NixType] = {
 }
 
 _FORCE_SCALAR_TYPES = frozenset({"null", "int", "float", "bool", "string", "path"})
-
-
-def _pyval_to_scalar(v: Any) -> common_pb.ScalarValue:
-    if v is None:
-        return common_pb.ScalarValue(null_value=common_pb.NullValue())
-    if isinstance(v, bool):
-        return common_pb.ScalarValue(bool_value=v)
-    if isinstance(v, int):
-        return common_pb.ScalarValue(int_value=v)
-    if isinstance(v, float):
-        return common_pb.ScalarValue(float_value=v)
-    return common_pb.ScalarValue(string_value=str(v))
 
 
 @dataclass
@@ -272,7 +261,7 @@ class EvalServiceHandler(EvalServiceBase):
         if typ == "function":
             return common_pb.DeepValue(remote_value=self._export(pyv, eval_handle))
         if typ in _FORCE_SCALAR_TYPES:
-            return common_pb.DeepValue(scalar=_pyval_to_scalar(pyv.to_python()))
+            return common_pb.DeepValue(scalar=python_to_scalar(pyv.to_python(), on_unsupported="stringify"))
         raise TypeError(f"cannot forceDeep unsupported Nix value type '{typ}' over RPC")
 
     def _force_handle(self, handle: int, eval_handle: int) -> common_pb.ForceValue:
@@ -280,7 +269,7 @@ class EvalServiceHandler(EvalServiceBase):
         value.force()
         if value.type_name() == "function":
             return common_pb.ForceValue(remote_value=self._export(value, eval_handle))
-        return common_pb.ForceValue(scalar=_pyval_to_scalar(value.to_python()))
+        return common_pb.ForceValue(scalar=python_to_scalar(value.to_python(), on_unsupported="stringify"))
 
     def _call_arg_to_python(self, arg: common_pb.CallArg, es: Any) -> Any:  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
         if arg.scalar is not None:
