@@ -34,9 +34,9 @@ from nanopynix_proto.nix.worker import (
     WorkerServiceStub,
 )
 
+from nanopynix._wire import DEFAULT_STORE_URI, WORKER_INIT_STATUS_OK
 from nanopynix.exceptions import from_response
 from nanopynix.logging import BusSubscription, CallbackBus
-from nanopynix.models import DEFAULT_STORE_URI, WORKER_INIT_STATUS_OK
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
 from nanopynix.rpc.worker._worker import worker_service_factory
 from nanopynix.settings import (

@@ -17,7 +17,7 @@ import anyio
 if TYPE_CHECKING:
     from betterproto2 import Message
 
-    from nanopynix.models import HandleKind
+    from nanopynix._wire import HandleKind
 
 
 @dataclass(frozen=True)

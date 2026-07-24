@@ -13,7 +13,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
-from nanopynix.models import HandleKind
+from nanopynix._wire import HandleKind
 
 
 @dataclass

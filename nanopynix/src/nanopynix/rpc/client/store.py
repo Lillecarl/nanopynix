@@ -42,7 +42,8 @@ from nanopynix_proto.nix.store import (
 )
 from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
-from nanopynix.models import NO_GC_LIMIT, BuildResult, Derivation, GcResult, MissingInfo, StorePath
+from nanopynix._wire import NO_GC_LIMIT
+from nanopynix.models import BuildResult, Derivation, GcResult, MissingInfo, StorePath
 from nanopynix.rpc.client._pool import WorkerDiedError
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
 from nanopynix.settings import DEFAULT_RPC_TIMEOUT_SECONDS

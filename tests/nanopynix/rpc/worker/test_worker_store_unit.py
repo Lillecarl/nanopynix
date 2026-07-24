@@ -10,7 +10,7 @@ import anyio
 import pytest
 from nanopynix_proto.nix.store import GetUriRequest
 
-from nanopynix.models import HandleKind
+from nanopynix._wire import HandleKind
 from nanopynix.rpc.worker._worker import WorkerState
 from nanopynix.rpc.worker._worker_store import StoreServiceHandler
 

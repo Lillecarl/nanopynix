@@ -61,6 +61,7 @@ from nanopynix_proto.nix.eval import (
 )
 
 from nanopynix._core._codec import python_to_scalar, scalar_to_python
+from nanopynix._wire import HandleKind
 from nanopynix.exceptions import (
     EvalSessionClosedError,
     ForeignValueError,
@@ -70,7 +71,7 @@ from nanopynix.exceptions import (
     ValueReleasedError,
     WrongNixTypeError,
 )
-from nanopynix.models import FlakeRef, HandleKind, JsonScalar, JsonValue, LockedInput, NixType
+from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedInput, NixType
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
 from nanopynix.settings import (
     DEFAULT_LINE_EDITORS,
