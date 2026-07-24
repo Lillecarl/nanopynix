@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import json
-import sys
-from typing import override
+from typing import TYPE_CHECKING, override
 
 import structlog
 from clypi import Command, Positional, arg
-from nanopynix_proto.nix.common import PathInfo as PathInfoProto  # noqa: TC002
 from rich.console import Console
 
-import nanopynix
-from pynix._util import forward_nix_logs
+from pynix._util import print_json, store_session
+
+if TYPE_CHECKING:
+    import nanopynix
 
 logger = structlog.get_logger(__name__)
 console = Console()
@@ -26,9 +25,9 @@ class PathInfo(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             try:
-                info: PathInfoProto = await store.query_path_info(self.path)
+                info: nanopynix.PathInfo = await store.query_path_info(self.path)
             except Exception as exc:
                 console.print(f"[red]Error:[/red] {exc}")
                 raise SystemExit(1) from exc
@@ -43,5 +42,4 @@ class PathInfo(Command):
             }
             if info.deriver is not None:
                 result["deriver"] = info.deriver
-            sys.stdout.write(json.dumps(result, sort_keys=True, indent=2))
-            sys.stdout.write("\n")
+            print_json(result)

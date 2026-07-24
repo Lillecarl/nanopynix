@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path  # noqa: TC003 -- clypi evaluates annotations at runtime, Path must be importable
 from typing import override
@@ -9,8 +8,7 @@ import structlog
 from clypi import Command, arg
 from rich.console import Console
 
-import nanopynix
-from pynix._util import forward_nix_logs
+from pynix._util import eval_session, print_json
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
@@ -55,12 +53,7 @@ class Eval(Command):
             expr = sys.stdin.read()
             logger.info("reading expression from stdin")
 
-        async with (
-            nanopynix.rpc.Session() as nix,
-            forward_nix_logs(nix),
-            nix.store(self.store) as store,
-            nix.eval(store) as session,
-        ):
+        async with eval_session(self.store) as (_nix, _store, session):
             try:
                 root = (
                     await evaluate_target(target, session, auto_call_file=True)
@@ -71,6 +64,4 @@ class Eval(Command):
                 console.print(f"[red]Error:[/red] {exc}")
                 raise SystemExit(1) from exc
             value = await root.force_json()
-            result = json.dumps(value, sort_keys=True, indent=2)
-            sys.stdout.write(result)
-            sys.stdout.write("\n")
+            print_json(value)

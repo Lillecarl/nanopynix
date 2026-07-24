@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
@@ -10,10 +9,9 @@ if TYPE_CHECKING:
 
 import structlog
 from clypi import Command, Positional, arg
-from nanopynix_proto.nix.store import GcAction
 
 import nanopynix
-from pynix._util import forward_nix_logs
+from pynix._util import print_json, store_session
 
 logger = structlog.get_logger(__name__)
 
@@ -27,7 +25,7 @@ class PrintRoots(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             found_roots = await store.find_roots()
             roots = [
                 {
@@ -36,7 +34,7 @@ class PrintRoots(Command):
                 }
                 for root in found_roots
             ]
-            _print_json({"roots": roots})
+            print_json({"roots": roots})
 
 
 class PrintDead(Command):
@@ -51,10 +49,10 @@ class PrintDead(Command):
 
     @override
     async def run(self) -> None:
-        action = GcAction.DELETE_DEAD if self.rip else GcAction.RETURN_DEAD
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        action = nanopynix.GcAction.DELETE_DEAD if self.rip else nanopynix.GcAction.RETURN_DEAD
+        async with store_session(self.store) as (_nix, store):
             result = await store.collect_garbage(action)
-            _print_json({"paths": list(result.paths), "bytesFreed": result.bytes_freed})
+            print_json({"paths": list(result.paths), "bytesFreed": result.bytes_freed})
 
 
 class PrintAlive(Command):
@@ -64,9 +62,9 @@ class PrintAlive(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
-            result = await store.collect_garbage(GcAction.RETURN_LIVE)
-            _print_json({"paths": list(result.paths)})
+        async with store_session(self.store) as (_nix, store):
+            result = await store.collect_garbage(nanopynix.GcAction.RETURN_LIVE)
+            print_json({"paths": list(result.paths)})
 
 
 class Gc(Command):
@@ -82,11 +80,11 @@ class Info(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             uri = await store.uri()
             store_dir = await store.store_dir()
             dirs = await store.store_dirs()
-            _print_json({"uri": uri, "storeDir": store_dir, "dirs": _store_dirs_to_json(dirs)})
+            print_json({"uri": uri, "storeDir": store_dir, "dirs": _store_dirs_to_json(dirs)})
 
 
 class Dirs(Command):
@@ -96,9 +94,9 @@ class Dirs(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             dirs = await store.store_dirs()
-            _print_json(_store_dirs_to_json(dirs))
+            print_json(_store_dirs_to_json(dirs))
 
 
 class IsValidPath(Command):
@@ -109,9 +107,9 @@ class IsValidPath(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             valid = await store.is_valid_path(self.path)
-            _print_json({"path": self.path, "valid": valid})
+            print_json({"path": self.path, "valid": valid})
 
 
 class FollowLinksToStorePath(Command):
@@ -122,9 +120,9 @@ class FollowLinksToStorePath(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             path = await store.follow_links_to_store_path(self.path)
-            _print_json({"path": path})
+            print_json({"path": path})
 
 
 class ComputeFsClosure(Command):
@@ -138,7 +136,7 @@ class ComputeFsClosure(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             paths = await store.compute_fs_closure(
                 self.path,
                 flip_direction=self.flip_direction,
@@ -159,9 +157,9 @@ class QueryMissing(Command):
         if not self.paths:
             raise SystemExit("query-missing requires at least one path")
 
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             resp = await store.query_missing(self.paths)
-            _print_json(
+            print_json(
                 {
                     "willBuild": list(resp.will_build),
                     "willSubstitute": list(resp.will_substitute),
@@ -180,7 +178,7 @@ class QueryDerivationOutputs(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             paths = await store.query_derivation_outputs(self.path)
             _print_paths(paths)
 
@@ -193,7 +191,7 @@ class QueryValidDerivers(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             paths = await store.query_valid_derivers(self.path)
             _print_paths(paths)
 
@@ -205,7 +203,7 @@ class ListValidPaths(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             paths = await store.query_all_valid_paths()
             _print_paths(paths)
 
@@ -218,7 +216,7 @@ class QueryReferrers(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             paths = await store.query_referrers(self.path)
             _print_paths(paths)
 
@@ -234,7 +232,7 @@ class QuerySubstitutablePaths(Command):
         if not self.paths:
             raise SystemExit("query-substitutable-paths requires at least one path")
 
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             paths = await store.query_substitutable_paths(self.paths)
             _print_paths(paths)
 
@@ -247,9 +245,9 @@ class AddTempRoot(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             await store.add_temp_root(self.path)
-            _print_json({"path": self.path, "added": True})
+            print_json({"path": self.path, "added": True})
 
 
 class AddPermRoot(Command):
@@ -261,9 +259,9 @@ class AddPermRoot(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             gc_root = await store.add_perm_root(self.path, self.gc_root)
-            _print_json({"path": self.path, "gcRoot": gc_root})
+            print_json({"path": self.path, "gcRoot": gc_root})
 
 
 class AddIndirectRoot(Command):
@@ -274,9 +272,9 @@ class AddIndirectRoot(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             await store.add_indirect_root(self.path)
-            _print_json({"path": self.path, "added": True})
+            print_json({"path": self.path, "added": True})
 
 
 class PathFromHashPart(Command):
@@ -287,9 +285,9 @@ class PathFromHashPart(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             path = await store.query_path_from_hash_part(self.hash_part)
-            _print_json({"path": path})
+            print_json({"path": path})
 
 
 class EnsurePath(Command):
@@ -300,9 +298,9 @@ class EnsurePath(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             await store.ensure_path(self.path)
-            _print_json({"path": self.path, "valid": True})
+            print_json({"path": self.path, "valid": True})
 
 
 class Cat(Command):
@@ -313,7 +311,7 @@ class Cat(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             resolved = await _resolve_local_store_path(store, self.path)
 
         if not resolved.is_file():
@@ -331,7 +329,7 @@ class Ls(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             resolved = await _resolve_local_store_path(store, self.path)
 
         if resolved.is_dir():
@@ -342,7 +340,7 @@ class Ls(Command):
             raise SystemExit(f"{self.path} does not exist")
 
         if self.json:
-            _print_json({"entries": [_directory_entry_to_json(entry) for entry in entries]})
+            print_json({"entries": [_directory_entry_to_json(entry) for entry in entries]})
             return
         for entry in entries:
             sys.stdout.write(entry.name)
@@ -422,7 +420,7 @@ class DiffClosures(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             before = await _closure_path_infos(store, self.before)
             after = await _closure_path_infos(store, self.after)
 
@@ -432,7 +430,7 @@ class DiffClosures(Command):
         removed = sorted(before_paths - after_paths)
         before_size = sum(before.values())
         after_size = sum(after.values())
-        _print_json(
+        print_json(
             {
                 "before": self.before,
                 "after": self.after,
@@ -452,9 +450,9 @@ class Optimise(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             await store.optimise_store()
-            _print_json({"optimised": True})
+            print_json({"optimised": True})
 
 
 class Verify(Command):
@@ -466,9 +464,9 @@ class Verify(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             errors = await store.verify_store(check_contents=self.check_contents, repair=self.repair)
-            _print_json({"errors": errors})
+            print_json({"errors": errors})
 
 
 class Store(Command):
@@ -503,17 +501,8 @@ class Store(Command):
     )
 
 
-def _json_dumps(obj: object) -> str:
-    return json.dumps(obj, sort_keys=True, indent=2, ensure_ascii=False)
-
-
-def _print_json(obj: object) -> None:
-    sys.stdout.write(_json_dumps(obj))
-    sys.stdout.write("\n")
-
-
 def _print_paths(paths: Iterable[str]) -> None:
-    _print_json({"paths": list(paths)})
+    print_json({"paths": list(paths)})
 
 
 def _store_dirs_to_json(dirs: Any) -> dict[str, str | None]:
@@ -537,12 +526,12 @@ async def _add_to_store(  # noqa: PLR0913 tracked complexity/arg-count debt, see
     dry_run: bool,
     store_uri: str,
 ) -> None:
-    async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(store_uri) as store:
+    async with store_session(store_uri) as (_nix, store):
         if dry_run:
             result_path = await store.compute_store_path(path, name=name, method=method, hash_algo=hash_algo)
         else:
             result_path = await store.add_to_store(path, name=name, method=method, hash_algo=hash_algo)
-        _print_json({"path": result_path})
+        print_json({"path": result_path})
 
 
 async def _resolve_local_store_path(store: Any, path: str) -> Path:

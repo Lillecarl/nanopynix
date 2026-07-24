@@ -5,8 +5,7 @@ from typing import override
 
 from clypi import Command, Positional, arg
 
-import nanopynix
-from pynix._util import forward_nix_logs
+from pynix._util import store_session
 
 _DEFAULT_STORE = "auto"
 
@@ -19,7 +18,7 @@ class Log(Command):
 
     @override
     async def run(self) -> None:
-        async with nanopynix.rpc.Session() as nix, forward_nix_logs(nix), nix.store(self.store) as store:
+        async with store_session(self.store) as (_nix, store):
             log = await store.get_build_log(self.path)
 
         if log is None:

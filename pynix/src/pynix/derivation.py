@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import sys
 from pathlib import Path  # noqa: TC003 -- clypi evaluates annotations at runtime, Path must be importable
 from typing import TYPE_CHECKING, Any, override
 
@@ -12,8 +10,7 @@ from rich.console import Console
 if TYPE_CHECKING:
     from nanopynix.rpc import ValueProxy
 
-import nanopynix
-from pynix._util import forward_nix_logs
+from pynix._util import print_json, store_session
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
@@ -51,11 +48,7 @@ class Show(Command):
             console.print(f"[red]Error:[/red] {exc}")
             raise SystemExit(1) from exc
 
-        async with (
-            nanopynix.rpc.Session(experimental_features=["flakes", "nix-command"]) as nix,
-            forward_nix_logs(nix),
-            nix.store(self.store) as store,
-        ):
+        async with store_session(self.store, experimental_features=["flakes", "nix-command"]) as (nix, store):
             async with nix.eval(store) as session:
                 try:
                     root = await evaluate_target(target, session, auto_call_file=True)
@@ -67,8 +60,7 @@ class Show(Command):
 
             derivation = await store.read_derivation(drv_path)
             result = {drv_path: self._derivation_to_dict(derivation)}
-            sys.stdout.write(json.dumps(result, sort_keys=True, indent=2))
-            sys.stdout.write("\n")
+            print_json(result)
 
     @staticmethod
     async def _get_drv_path(value: ValueProxy) -> str:
