@@ -9,12 +9,32 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, cast, get_type_hints
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, ClassVar, cast, get_type_hints
 
 import anyio
 
 if TYPE_CHECKING:
     from betterproto2 import Message
+
+
+@dataclass(frozen=True)
+class HandleArgSpec:
+    """One extra resolved-handle keyword arg a binding method needs beyond the
+    generic request dict -- e.g. a nanobind method that must receive another
+    live object (a cross-object reference) rather than plain request data.
+    """
+
+    field: str
+    """Request dict key to pop, e.g. ``"dest_store_handle"``."""
+    kwarg: str
+    """Binding method keyword-arg name to pass the resolved object as, e.g.
+    ``"dest_store"``."""
+    kind: str
+    """``HandleRegistry`` kind tag the popped handle is expected to resolve
+    to, e.g. ``"store"``."""
+    required: bool = False
+    """If true, a missing/falsy handle raises instead of omitting the kwarg."""
 
 
 class GeneratedServiceAdapterMixin:
@@ -25,6 +45,8 @@ class GeneratedServiceAdapterMixin:
     run on the dedicated Nix thread rather than blocking the event loop.
     """
 
+    _extra_handle_args: ClassVar[Mapping[str, tuple[HandleArgSpec, ...]]] = {}
+
     def __init_subclass__(
         cls,
         *,
@@ -32,9 +54,11 @@ class GeneratedServiceAdapterMixin:
         binding_method_names: set[str] | None = None,
         method_prefix: str = "",
         nix_executor_attr: str | None = None,
+        extra_handle_args: Mapping[str, tuple[HandleArgSpec, ...]] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init_subclass__(**kwargs)
+        cls._extra_handle_args = extra_handle_args or {}
         if rpc_service_base is not None:
             if binding_method_names is None:
                 raise TypeError("binding_method_names is required with rpc_service_base")
@@ -44,6 +68,24 @@ class GeneratedServiceAdapterMixin:
 
     def _nanobind_rpc_call(self, binding_method_name: str, message: Message) -> Any:
         raise NotImplementedError
+
+    def _resolve_extra_binding_args(self, binding_method_name: str, request: dict[str, Any]) -> dict[str, Any]:
+        """Pop and resolve any ``HandleArgSpec``s declared for this method into
+        a kwargs dict, e.g. ``{"dest_store": <raw nanobind Store>}``.
+
+        A spec's handle field is popped from ``request`` regardless of
+        outcome, so callers never see it leak through as plain request data.
+        """
+        state: Any = cast("Any", self)._state
+        kwargs: dict[str, Any] = {}
+        for spec in self._extra_handle_args.get(binding_method_name, ()):
+            handle = request.pop(spec.field, 0)
+            if not handle:
+                if spec.required:
+                    raise RuntimeError(f"{spec.field} is required for {binding_method_name}")
+                continue
+            kwargs[spec.kwarg] = state.handles.get_typed(handle, spec.kind).require_raw()
+        return kwargs
 
 
 def _install_generated_service_methods(

@@ -9,7 +9,7 @@ from nanopynix_bindings import store as nanopynix_store
 from nanopynix_proto.nix.store import StoreServiceBase
 
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
-from nanopynix.rpc.worker._service_adapter import GeneratedServiceAdapterMixin
+from nanopynix.rpc.worker._service_adapter import GeneratedServiceAdapterMixin, HandleArgSpec
 
 
 def _store_binding_method_names() -> set[str]:
@@ -24,6 +24,11 @@ class StoreServiceHandler(
     binding_method_names=_store_binding_method_names(),
     method_prefix="store_",
     nix_executor_attr="_state.store_limiter",
+    extra_handle_args={
+        "store_copy_closure": (HandleArgSpec("dest_store_handle", "dest_store", "store", required=True),),
+        "store_build_paths_with_results": (HandleArgSpec("eval_store_handle", "eval_store", "store"),),
+        "store_build_for_humans": (HandleArgSpec("eval_store_handle", "eval_store", "store"),),
+    },
 ):
     """gRPC handler backed by proto-shaped nanobind store methods.
 
@@ -43,18 +48,12 @@ class StoreServiceHandler(
         store = self._get_store(store_handle)
         if hasattr(store, binding_method_name):
             method = getattr(store, binding_method_name)
-            return method(request, *self._extra_binding_args(binding_method_name, request))
+            # GeneratedServiceAdapterMixin's extension-point helper is meant to be
+            # called from subclass overrides of _nanobind_rpc_call defined in other
+            # files -- same intentional cross-file mixin pattern _service_adapter.py's
+            # own header comment already documents for _nanobind_rpc_call itself.
+            extra_kwargs = self._resolve_extra_binding_args(  # pyright: ignore[reportPrivateUsage]
+                binding_method_name, request
+            )
+            return method(request, **extra_kwargs)
         raise RuntimeError(f"missing checked nanobind store method: {binding_method_name}")
-
-    def _extra_binding_args(self, binding_method_name: str, request: dict[str, Any]) -> tuple[Any, ...]:
-        if binding_method_name == "store_copy_closure":
-            dest_store_handle = request.pop("dest_store_handle", 0)
-            dest_store = self._get_store(dest_store_handle) if dest_store_handle else None
-            if dest_store is None:
-                raise RuntimeError("dest_store_handle is required for copy_closure")
-            return (dest_store.require_raw(),)
-        if binding_method_name not in {"store_build_paths_with_results", "store_build_for_humans"}:
-            return ()
-        eval_store_handle = request.pop("eval_store_handle", 0)
-        eval_store = self._get_store(eval_store_handle) if eval_store_handle else None
-        return (None if eval_store is None else eval_store.require_raw(),)
