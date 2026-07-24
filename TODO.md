@@ -19,3 +19,20 @@ default, `rpc/client/_session.py`'s hardcoded store-handle-`1` default
 (implicitly tied to `HandleRegistry._next`'s start value), and
 `session.py`'s uncoordinated `anyio.fail_after(60)` shutdown deadline.
 Revisit if/when a stronger convention or a concrete bug motivates it.
+
+# Deferred: pydantic models for ekn's fixed-schema Nix-JSON inputs
+Fixing ekn's remaining pyright errors retyped raw Nix/YAML/kr8s JSON data
+from `Any`/`object`/`dict[str, Any]` to `nanopynix.models.JsonValue` (and a
+new `ekn.apply.Manifest = dict[str, JsonValue]` alias), which resolves the
+type erasure with isinstance-narrowing + a few small per-item validation
+helpers (`gitops.py`'s `_as_manifest_list`, `sops.py`'s `_as_str_list`).
+That's the proportionate fix for genuinely open-ended k8s manifest dicts
+(arbitrary Kind, no fixed schema). Two of the retyped inputs, though, DO
+have a small fixed schema: `kubernetes.sopsAgeIdentities` entries
+(`sops.py`'s `ensure_age_identities`) and `kubernetes.gitOpsTargets` entries
+(`gitops.py`'s `resolved_targets`). Upgrading those specifically to real
+pydantic models (matching the rest of `eval.py`'s config models) would
+replace the manual isinstance/raise validation with declarative schema
+validation and clearer error messages -- a real improvement, but a
+separate, behavior-changing redesign rather than a type-error fix, so it
+wasn't bundled into this pass.
