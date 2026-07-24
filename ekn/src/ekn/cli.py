@@ -5,7 +5,7 @@ import json
 import logging
 import sys
 from pathlib import Path as _Path
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal, NoReturn, cast
 
 import kr8s.asyncio
 import pygit2
@@ -59,6 +59,34 @@ if TYPE_CHECKING:
 _log = structlog.get_logger()
 
 
+def _report_nix_error(exc: NixError) -> NoReturn:
+    """Log a Nix eval/build failure and exit(1) -- shared by every Command
+    that evaluates Nix and can't do anything useful once it fails."""
+    _log.error(exc.msg_without_ansi)
+    raise SystemExit(1) from exc
+
+
+def _report_validation_error(context: str, exc: ValidationError) -> NoReturn:
+    """Log a pydantic ValidationError against `context` (e.g. "GitOps
+    config") and exit(1) -- shared by every Command whose evaluate_* result
+    is validated into a pydantic model."""
+    _log.error(f"invalid {context}: {exc}")
+    raise SystemExit(1) from exc
+
+
+def _report_server_error(action: str, exc: kr8s.ServerError) -> NoReturn:
+    """Log a kr8s.ServerError with its response body and exit(1).
+
+    kr8s only extracts the JSON `message` field for 4xx errors (see
+    kr8s._api.Api.call_api) -- for 5xx it falls back to str(httpx
+    exception), which omits the API server's actual response body. Surface
+    it ourselves since that body is usually the only clue for a 500.
+    """
+    body = exc.response.text if exc.response is not None else None
+    _log.error("%s failed\n%s\nresponse body: %s", action, exc, body)
+    raise SystemExit(1) from exc
+
+
 def _parse_flake(flake_ref: str) -> tuple[str, str | None]:
     if "#" in flake_ref:
         uri, _, customer = flake_ref.partition("#")
@@ -84,8 +112,7 @@ async def _evaluate(
             return await evaluate_file(file, attr)
         raise ValueError("specify --file or --flake")
     except NixError as exc:
-        _log.error(exc.msg_without_ansi)
-        raise SystemExit(1) from exc
+        _report_nix_error(exc)
 
 
 async def _evaluate_gitops(
@@ -99,11 +126,9 @@ async def _evaluate_gitops(
         uri, customer = _parse_flake(flake) if flake is not None else (None, None)
         return await evaluate_gitops_manifests(file, uri, customer, attr)
     except NixError as exc:
-        _log.error(exc.msg_without_ansi)
-        raise SystemExit(1) from exc
+        _report_nix_error(exc)
     except ValidationError as exc:
-        _log.error(f"invalid GitOps config: {exc}")
-        raise SystemExit(1) from exc
+        _report_validation_error("GitOps config", exc)
 
 
 class Eval(Command):
@@ -136,8 +161,7 @@ class Eval(Command):
                     source_file=self.source_file,
                 )
             except NixError as exc:
-                _log.error(exc.msg_without_ansi)
-                raise SystemExit(1) from exc
+                _report_nix_error(exc)
         else:
             result = await _evaluate(self.file, self.flake, self.attr)
         json.dump(result, sys.stdout, indent=2, default=str)
@@ -156,8 +180,7 @@ class Render(Command):
         try:
             manifests = await evaluate_generated_manifests(self.file, uri, customer, self.attr)
         except NixError as exc:
-            _log.error(exc.msg_without_ansi)
-            raise SystemExit(1) from exc
+            _report_nix_error(exc)
         if not isinstance(manifests, list):
             _log.error("expected a list result, got %s", type(manifests).__name__)
             raise SystemExit(1)
@@ -323,8 +346,7 @@ async def _push_cache(  # noqa: PLR0913 tracked complexity/arg-count debt, see T
             check_sigs=check_sigs,
         )
     except NixError as exc:
-        _log.error(exc.msg_without_ansi)
-        raise SystemExit(1) from exc
+        _report_nix_error(exc)
     _log.info(f"pushed {path} to {to}")
 
 
@@ -341,11 +363,9 @@ async def _push_ekn_cache(file: _Path | None, flake: str | None, attr: str | Non
         uri, customer = _parse_flake(flake) if flake is not None else (None, None)
         cfg = await evaluate_cache_config(file, uri, customer, attr)
     except NixError as exc:
-        _log.error(exc.msg_without_ansi)
-        raise SystemExit(1) from exc
+        _report_nix_error(exc)
     except ValidationError as exc:
-        _log.error(f"invalid cache config: {exc}")
-        raise SystemExit(1) from exc
+        _report_validation_error("cache config", exc)
 
     cache_to = cfg.cache_to
     if cache_to is None:
@@ -364,8 +384,7 @@ async def _push_ekn_cache(file: _Path | None, flake: str | None, attr: str | Non
                 f"cache push to {cache_to} failed, continuing anyway (--cache-allow-failure)\n{exc.msg_without_ansi}"
             )
             return
-        _log.error(exc.msg_without_ansi)
-        raise SystemExit(1) from exc
+        _report_nix_error(exc)
     _log.info(f"pushed {cache_package_out} to {cache_to}")
 
 
@@ -408,14 +427,7 @@ class Validate(Command):
                     resource_priority=c.kluctl.resource_priority,
                 )
             except kr8s.ServerError as exc:
-                # kr8s only extracts the JSON `message` field for 4xx errors
-                # (see kr8s._api.Api.call_api) -- for 5xx it falls back to
-                # str(httpx exception), which omits the API server's actual
-                # response body. Surface it ourselves since that body is
-                # usually the only clue for a 500.
-                body = exc.response.text if exc.response is not None else None
-                _log.error("apply failed\n%s\nresponse body: %s", exc, body)
-                raise SystemExit(1) from exc
+                _report_server_error("apply", exc)
             except Exception as exc:
                 _log.error("apply failed\n%s", exc)
                 raise SystemExit(1) from exc
@@ -674,11 +686,9 @@ class KubeApply(Command):
         try:
             cfg = await evaluate_kubeapply_config(self.file, uri, customer, self.attr, self.target)
         except NixError as exc:
-            _log.error(exc.msg_without_ansi)
-            raise SystemExit(1) from exc
+            _report_nix_error(exc)
         except ValidationError as exc:
-            _log.error(f"invalid kubeapply config: {exc}")
-            raise SystemExit(1) from exc
+            _report_validation_error("kubeapply config", exc)
         api = await kr8s.asyncio.api()
         if cfg.sops_age_identities:
             await ensure_age_identities(cfg.sops_age_identities, api=api)
@@ -692,9 +702,7 @@ class KubeApply(Command):
                 prune=self.prune,
             )
         except kr8s.ServerError as exc:
-            body = exc.response.text if exc.response is not None else None
-            _log.error("apply failed\n%s\nresponse body: %s", exc, body)
-            raise SystemExit(1) from exc
+            _report_server_error("apply", exc)
 
 
 class ClusterDiff(Command):
@@ -725,19 +733,15 @@ class ClusterDiff(Command):
         try:
             cfg = await evaluate_kubeapply_config(self.file, uri, customer, self.attr, self.target)
         except NixError as exc:
-            _log.error(exc.msg_without_ansi)
-            raise SystemExit(1) from exc
+            _report_nix_error(exc)
         except ValidationError as exc:
-            _log.error(f"invalid kubeapply config: {exc}")
-            raise SystemExit(1) from exc
+            _report_validation_error("kubeapply config", exc)
         objects = [await maybe_decrypt(obj) for obj in cfg.objects]
         api = await kr8s.asyncio.api()
         try:
             diff_output = await cluster_diff(objects, api=api)
         except kr8s.ServerError as exc:
-            body = exc.response.text if exc.response is not None else None
-            _log.error("clusterdiff failed\n%s\nresponse body: %s", exc, body)
-            raise SystemExit(1) from exc
+            _report_server_error("clusterdiff", exc)
         if diff_output:
             sys.stdout.write(diff_output)
         else:
