@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from os import PathLike
-from typing import Any
+from typing import Annotated, Any
 
 from anyio import Path
 from nanopynix_helpers.eval_target import select_attr
@@ -19,9 +19,10 @@ from nanopynix_helpers.fod import (
     replace_fod_hash,
 )
 from nanopynix_proto.nix.common import LogEvent as LogEventProto
+from pydantic import BaseModel, Field, StringConstraints
 
 from nanopynix import NixError, NixEvalSettings, NixSettings, Session
-from nanopynix.models import LogEvent
+from nanopynix.models import JsonValue, LogEvent
 from nanopynix.primops import yaml_primops
 from nanopynix.verbosity import LogLevelInput
 
@@ -33,6 +34,104 @@ _SESSION_SETTINGS = NixSettings()
 # parameters through every `evaluate_*` helper's signature.
 _VERBOSITY: ContextVar[LogLevelInput] = ContextVar("_verbosity", default="error")
 _PRINT_BUILD_LOGS: ContextVar[bool] = ContextVar("_print_build_logs", default=False)
+
+
+_NonEmptyStr = Annotated[str, StringConstraints(min_length=1)]
+
+
+class _OutPathInfo(BaseModel):
+    out_path: str = Field(alias="outPath")
+
+
+class GitOpsBranches(BaseModel):
+    """Validated `gitOps.deployBranch`/`gitOps.sourceBranch` -- `source_branch`
+    null disables the dual-commit source-snapshot feature for this instance,
+    see `cli.py`'s `_gitops_branches`."""
+
+    deploy_branch: _NonEmptyStr = Field(alias="deployBranch")
+    source_branch: _NonEmptyStr | None = Field(default=None, alias="sourceBranch")
+
+
+class _GitOpsKubernetesConfig(BaseModel):
+    gitops_targets: dict[str, Any] = Field(alias="gitOpsTargets")
+
+
+class _GitOpsManifestsConfig(BaseModel):
+    kubernetes: _GitOpsKubernetesConfig
+    git_ops: GitOpsBranches = Field(alias="gitOps")
+
+
+class GitOpsManifestsResult(BaseModel):
+    """Return shape of `evaluate_gitops_manifests`, consumed by cli.py's
+    `_gitops_branches`/`_gitops_file_groups`. Validating this at the Nix
+    boundary (rather than `_dig()`-ing raw JSON apart by hand downstream)
+    means a misconfigured `gitOps.deployBranch` fails here, once, with a
+    precise field-path error message."""
+
+    config: _GitOpsManifestsConfig
+
+
+class CacheConfigResult(BaseModel):
+    cache_to: str | None
+    cache_package_out: str | None
+
+
+class KubeApplyConfigResult(BaseModel):
+    objects: list[dict[str, Any]]
+    discriminator: str
+    resource_priority: dict[str, int]
+    sops_age_identities: list[dict[str, Any]]
+
+
+class _ValidationPackageInfo(BaseModel):
+    out_path: str = Field(alias="outPath")
+    version: str
+
+
+class _ValidationKubernetesConfig(BaseModel):
+    package: _ValidationPackageInfo
+
+
+class _ValidationInfo(BaseModel):
+    kubeadm_config: dict[str, Any] = Field(alias="kubeadmConfig")
+    pod_subnet: str = Field(alias="podSubnet")
+    service_subnet: str = Field(alias="serviceSubnet")
+    debug: bool
+    etcd_package: _OutPathInfo = Field(alias="etcdPackage")
+    kubeconform_package: _OutPathInfo = Field(alias="kubeconformPackage")
+
+
+class _KluctlInfo(BaseModel):
+    resource_priority: dict[str, int] = Field(alias="resourcePriority")
+    discriminator: str
+
+
+class _InternalInfo(BaseModel):
+    manifest_json_file: _OutPathInfo = Field(alias="manifestJSONFile")
+
+
+class _ValidationConfig(BaseModel):
+    kubernetes: _ValidationKubernetesConfig
+    validation: _ValidationInfo
+    kluctl: _KluctlInfo
+    internal: _InternalInfo
+    novalidate_keys: list[dict[str, str]] = Field(alias="novalidateKeys")
+
+
+class ValidationResult(BaseModel):
+    config: _ValidationConfig
+
+
+class _FlakeEknKubernetesConfig(BaseModel):
+    generated: list[dict[str, Any]]
+
+
+class _FlakeEknConfig(BaseModel):
+    kubernetes: _FlakeEknKubernetesConfig
+
+
+class FlakeEknResult(BaseModel):
+    config: _FlakeEknConfig
 
 
 def _print_log_event(raw: object) -> None:
@@ -227,7 +326,7 @@ async def evaluate_flake(flake_uri: str, attr_path: str | None) -> object:
         return await proxy.force_json()
 
 
-async def evaluate_flake_ekn(flake_uri: str, customer: str) -> dict:
+async def evaluate_flake_ekn(flake_uri: str, customer: str) -> FlakeEknResult:
     async with (
         _session() as session,
         session.store() as store,
@@ -240,13 +339,13 @@ async def evaluate_flake_ekn(flake_uri: str, customer: str) -> dict:
             proxy = proxy.attr("config")
 
         generated = await proxy.attr("kubernetes").attr("generated").force_json()
-        return {
+        return FlakeEknResult.model_validate({
             "config": {
                 "kubernetes": {
                     "generated": generated,
                 },
             }
-        }
+        })
 
 
 def _timing_enabled() -> bool:
@@ -279,7 +378,7 @@ async def evaluate_generated_manifests(
     flake_uri: str | None,
     customer: str | None,
     attr_path: str | None,
-) -> Any:
+) -> JsonValue:
     """Resolve a file or flake target down to `kubernetes.generated`.
 
     Unlike `evaluate_file`/`evaluate_flake`, this never force_json's the whole
@@ -330,7 +429,7 @@ async def evaluate_gitops_manifests(
     flake_uri: str | None,
     customer: str | None,
     attr_path: str | None,
-) -> dict:
+) -> GitOpsManifestsResult:
     """Resolve to `{"config": {"kubernetes": {"gitOpsTargets": ...},
     "gitOps": {"deployBranch": ..., "sourceBranch": ...}}}`.
 
@@ -369,7 +468,7 @@ async def evaluate_gitops_manifests(
             gitops_targets = await proxy.attr("kubernetes").attr("gitOpsTargets").force_json()
             deploy_branch = await gitops_proxy.attr("deployBranch").force_json()
             source_branch = await gitops_proxy.attr("sourceBranch").force_json()
-        return {
+        return GitOpsManifestsResult.model_validate({
             "config": {
                 "kubernetes": {
                     "gitOpsTargets": gitops_targets,
@@ -379,7 +478,7 @@ async def evaluate_gitops_manifests(
                     "sourceBranch": source_branch,
                 },
             }
-        }
+        })
 
 
 async def evaluate_kubeapply_config(
@@ -388,7 +487,7 @@ async def evaluate_kubeapply_config(
     customer: str | None,
     attr_path: str | None,
     target: str | None,
-) -> dict[str, Any]:
+) -> KubeApplyConfigResult:
     """Resolve the object list `ekn kubeapply` should apply, plus the
     `kluctl.discriminator`/`kluctl.resourcePriority` `apply_and_prune` needs
     and `kubernetes.sopsAgeIdentities` (SOPS age decrypt identities some
@@ -447,12 +546,12 @@ async def evaluate_kubeapply_config(
         resource_priority = await proxy.attr("kluctl").attr("resourcePriority").force_json()
         sops_age_identities = await proxy.attr("kubernetes").attr("sopsAgeIdentities").force_json()
 
-        return {
+        return KubeApplyConfigResult.model_validate({
             "objects": objects,
             "discriminator": discriminator,
             "resource_priority": resource_priority,
             "sops_age_identities": sops_age_identities,
-        }
+        })
 
 
 async def evaluate_cache_config(
@@ -460,7 +559,7 @@ async def evaluate_cache_config(
     flake_uri: str | None,
     customer: str | None,
     attr_path: str | None,
-) -> dict:
+) -> CacheConfigResult:
     """Resolve `ekn.cacheTo` and build `ekn.cachePackage`, for `Deploy`'s
     automatic pre-git-push cache push (see `cli.py`'s `Deploy.run`).
 
@@ -496,11 +595,11 @@ async def evaluate_cache_config(
 
         cache_to = await proxy.attr("ekn").attr("cacheTo").force_json()
         if cache_to is None:
-            return {"cache_to": None, "cache_package_out": None}
+            return CacheConfigResult.model_validate({"cache_to": None, "cache_package_out": None})
 
         with timed_stage("cache-push: build ekn.cachePackage"):
             cache_package_out = (await proxy.attr("ekn").attr("cachePackage").build()).get("out")
-        return {"cache_to": cache_to, "cache_package_out": cache_package_out}
+        return CacheConfigResult.model_validate({"cache_to": cache_to, "cache_package_out": cache_package_out})
 
 
 async def realise_attr(
@@ -563,7 +662,7 @@ async def push_closure_to_store(
         )
 
 
-async def _validation_config(proxy: Any) -> dict:
+async def _validation_config(proxy: Any) -> ValidationResult:
     if await proxy.has_attr("config"):
         proxy = proxy.attr("config")
 
@@ -602,7 +701,7 @@ async def _validation_config(proxy: Any) -> dict:
     with timed_stage("validate: build internal.manifestJSONFile (forces kubernetes.generated)"):
         manifest_out = (await proxy.attr("internal").attr("manifestJSONFile").build()).get("out")
 
-    return {
+    return ValidationResult.model_validate({
         "config": {
             "kubernetes": {
                 "package": {"version": k8s_version, "outPath": k8s_out},
@@ -622,12 +721,12 @@ async def _validation_config(proxy: Any) -> dict:
             "internal": {"manifestJSONFile": {"outPath": manifest_out}},
             "novalidateKeys": novalidate_keys,
         }
-    }
+    })
 
 
 async def evaluate_validation_file(
     file: str | PathLike[str], attr_path: str | None
-) -> dict:
+) -> ValidationResult:
     async with (
         _session() as session,
         session.store() as store,
@@ -639,7 +738,7 @@ async def evaluate_validation_file(
         return await _validation_config(proxy)
 
 
-async def evaluate_validation_config(flake_uri: str, customer: str) -> dict:
+async def evaluate_validation_config(flake_uri: str, customer: str) -> ValidationResult:
     async with (
         _session() as session,
         session.store() as store,
@@ -652,6 +751,7 @@ async def evaluate_validation_config(flake_uri: str, customer: str) -> dict:
 
 
 __all__ = [
+    "GitOpsManifestsResult",
     "NixError",
     "evaluate_file",
     "evaluate_file_multi",

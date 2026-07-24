@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shutil
+import socket
 import sys
 import tempfile
 from collections.abc import Callable
@@ -21,6 +22,7 @@ from pydantic import TypeAdapter, ValidationError
 from ekn.apply import apply_and_prune
 from ekn.clusterdiff import cluster_diff
 from ekn.eval import (
+    GitOpsManifestsResult,
     evaluate_cache_config,
     evaluate_file,
     evaluate_flake,
@@ -108,7 +110,7 @@ async def _evaluate_gitops(
     file: _Path | None,
     flake: str | None,
     attr: str | None,
-) -> dict:
+) -> GitOpsManifestsResult:
     """Like `_evaluate`, but only forces kubernetes.gitOpsTargets -- the
     only field Diff/Commit/Deploy read via `_gitops_file_groups`."""
     try:
@@ -117,44 +119,34 @@ async def _evaluate_gitops(
     except NixError as exc:
         _log.error(exc.msg_without_ansi)
         raise SystemExit(1) from exc
+    except ValidationError as exc:
+        _log.error(f"invalid GitOps config: {exc}")
+        raise SystemExit(1) from exc
 
 
-def _dig(data: object, *keys: str) -> Any:
-    for key in keys:
-        if not isinstance(data, dict):
-            return None
-        data = data.get(key)
-    return data
-
-
-def _gitops_branches(result: dict[str, Any]) -> tuple[str, str | None]:
+def _gitops_branches(result: GitOpsManifestsResult) -> tuple[str, str | None]:
     """Read the instance-wide `(deployBranch, sourceBranch)` pair.
 
     One pair per easykubenix instance -- an "environment" is just whichever
     `--file`/`--flake`+`--attr` entrypoint you evaluate, so there is no
     separate environment concept here. `sourceBranch` is `None` when the
     dual-commit source-snapshot feature is disabled for this instance.
+    Validated by `GitOpsBranches` (see eval.py) at evaluation time, so
+    there's nothing left to check here.
     """
-    deploy_branch = _dig(result, "config", "gitOps", "deployBranch")
-    if not isinstance(deploy_branch, str) or not deploy_branch:
-        _log.error("config.gitOps.deployBranch is not set in the evaluated config")
-        raise SystemExit(1)
-    source_branch = _dig(result, "config", "gitOps", "sourceBranch")
-    if source_branch is not None and (not isinstance(source_branch, str) or not source_branch):
-        _log.error("config.gitOps.sourceBranch must be a non-empty string or null")
-        raise SystemExit(1)
-    return deploy_branch, source_branch
+    branches = result.config.git_ops
+    return branches.deploy_branch, branches.source_branch
 
 
-def _gitops_file_groups(result: dict[str, Any]) -> list[tuple[str, str]]:
+def _gitops_file_groups(result: GitOpsManifestsResult) -> list[tuple[str, str]]:
     """Merge every GitOps target's rendered objects into one file list.
 
     Targets are pure path-routing (`gitOps.targets.<name>.path`) -- there is
     only one `(deployBranch, sourceBranch)` pair per instance (see
     `_gitops_branches`), so there is nothing left to group by branch here.
     """
-    gitops_targets = _dig(result, "config", "kubernetes", "gitOpsTargets")
-    if not isinstance(gitops_targets, dict) or not gitops_targets:
+    gitops_targets = result.config.kubernetes.gitops_targets
+    if not gitops_targets:
         raise GitOpsTargetError("no GitOps-routed Kubernetes objects found")
 
     routed = resolved_targets(gitops_targets)
@@ -382,21 +374,34 @@ async def _push_ekn_cache(file: _Path | None, flake: str | None, attr: str | Non
     except NixError as exc:
         _log.error(exc.msg_without_ansi)
         raise SystemExit(1) from exc
+    except ValidationError as exc:
+        _log.error(f"invalid cache config: {exc}")
+        raise SystemExit(1) from exc
 
-    cache_to = cfg["cache_to"]
+    cache_to = cfg.cache_to
     if cache_to is None:
         _log.info("ekn.cacheTo is null -- skipping pre-deploy cache push")
         return
+    cache_package_out = cfg.cache_package_out
+    if cache_package_out is None:
+        _log.error("ekn.cachePackage's build produced no 'out' output")
+        raise SystemExit(1)
 
     try:
-        await push_closure_to_store([cfg["cache_package_out"]], cache_to)
+        await push_closure_to_store([cache_package_out], cache_to)
     except NixError as exc:
         if allow_failure:
             _log.warning(f"cache push to {cache_to} failed, continuing anyway (--cache-allow-failure)\n{exc.msg_without_ansi}")
             return
         _log.error(exc.msg_without_ansi)
         raise SystemExit(1) from exc
-    _log.info(f"pushed {cfg['cache_package_out']} to {cache_to}")
+    _log.info(f"pushed {cache_package_out} to {cache_to}")
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
 
 
 class Validate(Command):
@@ -404,13 +409,6 @@ class Validate(Command):
     file: _Path | None = arg(None, short="f", inherited=True)
     flake: str | None = arg(None, inherited=True)
     attr: str | None = arg(None, short="A", help="Dot-separated attribute path within the evaluation result.")
-
-    @staticmethod
-    def _free_port() -> int:
-        import socket
-        with socket.socket() as s:
-            s.bind(("", 0))
-            return s.getsockname()[1]
 
     async def run(self) -> None:
         if self.file is not None:
@@ -421,7 +419,7 @@ class Validate(Command):
                 _log.error("--flake must include a customer attr (e.g. '.#myapp')")
                 raise SystemExit(1)
             cfg = await evaluate_validation_config(uri, customer)
-        c = cfg["config"]
+        c = cfg.config
 
         tmp = Path(tempfile.mkdtemp(suffix="eknvalidation"))
         cert_dir = str(tmp / "pki")
@@ -429,16 +427,16 @@ class Validate(Command):
         kubeadm_cfg = str(tmp / "kubeadm-config.json")
         schema_file = str(tmp / "k8s-schema.json")
 
-        k8s_bin = c["kubernetes"]["package"]["outPath"] + "/bin"
-        etcd_bin = c["validation"]["etcdPackage"]["outPath"] + "/bin"
-        kubeconform_bin = c["validation"]["kubeconformPackage"]["outPath"] + "/bin"
-        manifest_path = c["internal"]["manifestJSONFile"]["outPath"]
+        k8s_bin = c.kubernetes.package.out_path + "/bin"
+        etcd_bin = c.validation.etcd_package.out_path + "/bin"
+        kubeconform_bin = c.validation.kubeconform_package.out_path + "/bin"
+        manifest_path = c.internal.manifest_json_file.out_path
 
-        subnet = c["validation"]["serviceSubnet"]
+        subnet = c.validation.service_subnet
         bind = "127.0.0.1"
-        k8s_port = self._free_port()
-        etcd_client_port = self._free_port()
-        etcd_peer_port = self._free_port()
+        k8s_port = _free_port()
+        etcd_client_port = _free_port()
+        etcd_peer_port = _free_port()
 
         os.environ["CERT_DIR"] = cert_dir
         os.environ["KUBECONFIG"] = kubeconfig
@@ -457,7 +455,7 @@ class Validate(Command):
             # kubeadm; kubeadm itself does no env-var expansion on its config
             # files, so do the same substitution here.
             kubeadm_config_text = (
-                json.dumps(c["validation"]["kubeadmConfig"])
+                json.dumps(c.validation.kubeadm_config)
                 .replace("$BIND_ADDRESS", bind)
                 .replace("$KUBERNETES_PORT", str(k8s_port))
                 .replace("$CERT_DIR", cert_dir)
@@ -576,14 +574,20 @@ class Validate(Command):
                 raise SystemExit(1)
 
             _log.info("applying manifests")
-            manifest_list = json.loads(await Path(manifest_path).read_text())
-            objects = manifest_list["items"] if isinstance(manifest_list, dict) else manifest_list
+            manifest_list: JsonValue = json.loads(await Path(manifest_path).read_text())
+            unwrapped = manifest_list["items"] if isinstance(manifest_list, dict) else manifest_list
+            if not isinstance(unwrapped, list):
+                _log.error("internal.manifestJSONFile did not produce a list of objects")
+                raise SystemExit(1)
+            # internal.manifestJSONFile always contains one k8s object dict
+            # per list entry -- see kubernetes.nix's `internal.nix`.
+            objects = cast("list[dict[str, Any]]", unwrapped)
             # Skip objects that can never be meaningfully verified in this
             # throwaway, controller-less apiserver (e.g. an aggregated
             # APIService whose backing Service/Pod never actually runs
             # here) -- see kubernetes.nix's `ekn.novalidate`/`novalidateKeys`.
             novalidate_keys = {
-                (k["kind"], k["namespace"], k["name"]) for k in c.get("novalidateKeys", [])
+                (k["kind"], k["namespace"], k["name"]) for k in c.novalidate_keys
             }
             if novalidate_keys:
                 skipped = [
@@ -608,8 +612,8 @@ class Validate(Command):
                 await apply_and_prune(
                     objects,
                     api=kr8s_api,
-                    discriminator=c["kluctl"]["discriminator"],
-                    resource_priority=c["kluctl"]["resourcePriority"],
+                    discriminator=c.kluctl.discriminator,
+                    resource_priority=c.kluctl.resource_priority,
                 )
             except kr8s.ServerError as exc:
                 # kr8s only extracts the JSON `message` field for 4xx errors
@@ -645,7 +649,7 @@ class Validate(Command):
                 _log.error("%s\nkubeconform verification failed", err)
                 raise SystemExit(1)
 
-            _log.info("Your manifests are as valid as they can be against Kubernetes %s", c["kubernetes"]["package"]["version"])
+            _log.info("Your manifests are as valid as they can be against Kubernetes %s", c.kubernetes.package.version)
 
         finally:
             for proc in (etcd_proc, apiserver_proc):
@@ -715,8 +719,6 @@ class Deploy(Commit):
         help="Stream build/eval log lines from nanopynix's worker to stderr as they "
         "happen, for visibility into what's taking long during Validate/cache-push/Commit.",
     )
-    _free_port = staticmethod(Validate._free_port)
-
     async def run(self) -> None:
         with verbose_session(self.verbosity, print_build_logs=self.print_build_logs):
             deploy_branch, source_branch, files = await _resolve_gitops(self.file, self.flake, self.attr)
@@ -777,8 +779,6 @@ class Rollback(Command):
         "Off by default: an incident rollback should be fast, and the restored tree was already "
         "validated when it was first deployed.",
     )
-    _free_port = staticmethod(Validate._free_port)
-
     async def run(self) -> None:
         has_nix_entrypoint = self.file is not None or self.flake is not None
         if self.deploy_branch is not None:
@@ -873,16 +873,19 @@ class KubeApply(Command):
         except NixError as exc:
             _log.error(exc.msg_without_ansi)
             raise SystemExit(1) from exc
+        except ValidationError as exc:
+            _log.error(f"invalid kubeapply config: {exc}")
+            raise SystemExit(1) from exc
         api = await kr8s.asyncio.api()
-        if cfg["sops_age_identities"]:
-            await ensure_age_identities(cfg["sops_age_identities"], api=api)
-        objects = [await maybe_decrypt(obj) for obj in cfg["objects"]]
+        if cfg.sops_age_identities:
+            await ensure_age_identities(cfg.sops_age_identities, api=api)
+        objects = [await maybe_decrypt(obj) for obj in cfg.objects]
         try:
             await apply_and_prune(
                 objects,
                 api=api,
-                discriminator=cfg["discriminator"],
-                resource_priority=cfg["resource_priority"],
+                discriminator=cfg.discriminator,
+                resource_priority=cfg.resource_priority,
                 prune=self.prune,
             )
         except kr8s.ServerError as exc:
@@ -920,7 +923,10 @@ class ClusterDiff(Command):
         except NixError as exc:
             _log.error(exc.msg_without_ansi)
             raise SystemExit(1) from exc
-        objects = [await maybe_decrypt(obj) for obj in cfg["objects"]]
+        except ValidationError as exc:
+            _log.error(f"invalid kubeapply config: {exc}")
+            raise SystemExit(1) from exc
+        objects = [await maybe_decrypt(obj) for obj in cfg.objects]
         api = await kr8s.asyncio.api()
         try:
             diff_output = await cluster_diff(objects, api=api)
@@ -979,7 +985,7 @@ class SplitManifest(Command):
     out_dir: Positional[_Path]
 
     async def run(self) -> None:
-        data = json.loads(await Path(str(self.json_file)).read_text())
+        data: JsonValue = json.loads(await Path(str(self.json_file)).read_text())
         if not isinstance(data, list):
             _log.error("expected a JSON list, got %s", type(data).__name__)
             raise SystemExit(1)
