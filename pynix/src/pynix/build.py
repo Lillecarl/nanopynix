@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any, override
 
 import structlog
 from clypi import Command, arg
-from rich.console import Console
 
 if TYPE_CHECKING:
     from nanopynix.rpc import ValueProxy
@@ -14,7 +13,7 @@ if TYPE_CHECKING:
 from nanopynix_helpers.build import FodBuildError, build_with_fod_update
 
 import nanopynix
-from pynix._util import nix_session, print_json
+from pynix._util import error_console, error_exit, nix_session, print_json, report_and_exit
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
@@ -24,8 +23,6 @@ from pynix.target import (
     flake_option,
 )
 
-console = Console()
-error_console = Console(stderr=True)
 logger = structlog.get_logger("pynix.build")
 
 _DEFAULT_SUBSTITUTERS = "https://cache.nixos.org/"
@@ -57,14 +54,11 @@ class Build(Command):
         try:
             target.validate(required=True)
         except EvaluationTargetError as exc:
-            error_console.print(f"[red]Error:[/red] {exc}")
-            raise SystemExit(1) from exc
+            report_and_exit(exc)
         if self.update_fod and target.file is None:
-            error_console.print("[red]Error:[/red] --update-fod currently requires --file")
-            raise SystemExit(1)
+            error_exit("--update-fod currently requires --file")
         if self.dry_run and not self.update_fod:
-            error_console.print("[red]Error:[/red] --dry-run requires --update-fod")
-            raise SystemExit(1)
+            error_exit("--dry-run requires --update-fod")
 
         settings = nanopynix.NixSettingsEnv(
             substituters=self.substituters.split(),
@@ -107,8 +101,7 @@ class Build(Command):
                             )
                         logger.info("pynix build finished")
             except BuildTargetError as exc:
-                error_console.print(f"[red]Error:[/red] {exc}")
-                raise SystemExit(1) from exc
+                report_and_exit(exc)
 
         print_json({"outputs": outputs, "updatedFods": updates, "dryRun": self.dry_run})
 

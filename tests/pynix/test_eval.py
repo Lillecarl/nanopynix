@@ -89,7 +89,7 @@ async def test_eval_attr_without_file_or_flake_errors(capsys: pytest.CaptureFixt
     with pytest.raises(SystemExit):
         await cmd.astart()
     captured = capsys.readouterr()
-    assert "--attr requires --file or --flake" in captured.out
+    assert "--attr requires --file or --flake" in captured.err
 
 
 async def test_eval_expr_combined_with_file_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -99,7 +99,7 @@ async def test_eval_expr_combined_with_file_errors(tmp_path: Path, capsys: pytes
     with pytest.raises(SystemExit):
         await cmd.astart()
     captured = capsys.readouterr()
-    assert "expression argument cannot be combined with --file or --flake" in captured.out
+    assert "expression argument cannot be combined with --file or --flake" in captured.err
 
 
 async def test_eval_reads_expression_from_stdin(
@@ -127,4 +127,4 @@ async def test_eval_file_missing_attr_errors(
     with pytest.raises(SystemExit):
         await cmd.astart()
     captured = capsys.readouterr()
-    assert "attribute 'missing' not found" in strip_ansi(captured.out)
+    assert "attribute 'missing' not found" in strip_ansi(captured.err)

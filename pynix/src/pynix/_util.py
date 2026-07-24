@@ -4,16 +4,19 @@ import functools
 import json
 import sys
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, TextIO, cast
+from typing import TYPE_CHECKING, Any, NoReturn, TextIO, cast
 
 import anyio
 import structlog
+from rich.console import Console
 
 import nanopynix
 
 if TYPE_CHECKING:
     import os
     from collections.abc import AsyncGenerator, Sequence
+
+    from nanopynix_helpers import EvaluationTargetError
 
     from nanopynix.rpc import EvalSession, Session, Store
 
@@ -24,10 +27,31 @@ _LOG_DRAIN_SECONDS = 0.5
 # optional trailing fields list.
 _MIN_RESULT_EVENT_ARGS = 2
 
+# Build-progress/error messages go here, not stdout -- so a command's
+# print_json() output stays clean, machine-parseable JSON even when the same
+# invocation also fails partway through (e.g. `pynix derivation show ... |
+# jq` must never see "Error: ..." text mixed into its stdin).
+error_console = Console(stderr=True)
+
 
 def print_json(obj: object) -> None:
     sys.stdout.write(json.dumps(obj, sort_keys=True, indent=2, ensure_ascii=False))
     sys.stdout.write("\n")
+
+
+def error_exit(message: str) -> NoReturn:
+    """Print `[red]Error:[/red] message` to stderr and exit(1)."""
+    error_console.print(f"[red]Error:[/red] {message}")
+    raise SystemExit(1)
+
+
+def report_and_exit(exc: EvaluationTargetError) -> NoReturn:
+    """Like `error_exit`, but for an EvaluationTargetError (or subclass, e.g.
+    build.py's BuildTargetError) caught from `target.validate()`/
+    `evaluate_target()` -- chains `from exc` so --debug tracebacks keep the
+    real cause."""
+    error_console.print(f"[red]Error:[/red] {exc}")
+    raise SystemExit(1) from exc
 
 
 def configure_logging(*, file: TextIO | None = None) -> None:
