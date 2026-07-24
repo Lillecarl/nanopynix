@@ -35,7 +35,9 @@ async def test_scenario_starts_with_empty_temporary_store(pynix_store_scenario: 
 
 
 @pytest.mark.dependency(name="scenario:store-dirs", depends=["scenario:store"])
-async def test_scenario_verifies_temporary_store_dirs(pynix_store_scenario: PynixStoreScenario, request: pytest.FixtureRequest):
+async def test_scenario_verifies_temporary_store_dirs(
+    pynix_store_scenario: PynixStoreScenario, request: pytest.FixtureRequest
+):
     scenario = pynix_store_scenario
 
     dirs = await scenario.assert_temp_store_dirs(test_name=request.node.nodeid)
@@ -55,7 +57,9 @@ async def test_scenario_adds_file_with_pynix(pynix_store_scenario: PynixStoreSce
 
 
 @pytest.mark.dependency(name="scenario:build-hello", depends=["scenario:store-dirs"])
-async def test_scenario_adds_local_package_with_pynix(pynix_store_scenario: PynixStoreScenario, request: pytest.FixtureRequest):
+async def test_scenario_adds_local_package_with_pynix(
+    pynix_store_scenario: PynixStoreScenario, request: pytest.FixtureRequest
+):
     scenario = pynix_store_scenario
 
     hello_path = await scenario.build_hello(test_name=request.node.nodeid)
@@ -77,8 +81,7 @@ async def test_scenario_builds_local_derivation_and_forwards_logs(
     assert scenario.physical_path(log_path).read_text() == "log-output\n"
     assert scenario.last_logs is not None
     assert any(
-        entry.get("event") == "nix build log"
-        and entry.get("message") == "pynix-log-line"
+        entry.get("event") == "nix build log" and entry.get("message") == "pynix-log-line"
         for entry in scenario.last_logs
     )
 
@@ -87,7 +90,9 @@ async def test_scenario_builds_local_derivation_and_forwards_logs(
     name="scenario:read-log",
     depends=["scenario:build-local-log"],
 )
-async def test_scenario_reads_local_build_log_with_pynix(pynix_store_scenario: PynixStoreScenario, request: pytest.FixtureRequest):
+async def test_scenario_reads_local_build_log_with_pynix(
+    pynix_store_scenario: PynixStoreScenario, request: pytest.FixtureRequest
+):
     scenario = pynix_store_scenario
 
     stdout, _stderr = await scenario.run_pynix(
@@ -124,7 +129,9 @@ async def test_scenario_reuses_paths_for_follow_up_store_queries(
 
 
 @pytest.mark.dependency(name="scenario:build-nixpkgs-hello", depends=["scenario:store-dirs"])
-async def test_scenario_builds_nixpkgs_hello_from_file(pynix_store_scenario: PynixStoreScenario, request: pytest.FixtureRequest):
+async def test_scenario_builds_nixpkgs_hello_from_file(
+    pynix_store_scenario: PynixStoreScenario, request: pytest.FixtureRequest
+):
     scenario = pynix_store_scenario
 
     hello_path = await scenario.build_nixpkgs_package("hello", test_name=request.node.nodeid)

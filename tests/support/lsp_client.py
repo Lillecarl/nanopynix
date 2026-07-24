@@ -23,31 +23,35 @@ def open_document(client: LanguageClient, uri: str, text: str, *, language_id: s
     """Send a real ``textDocument/didOpen`` notification."""
     client.text_document_did_open(
         types.DidOpenTextDocumentParams(
-            text_document=types.TextDocumentItem(uri=uri, language_id=language_id, version=version, text=text)
-        )
+            text_document=types.TextDocumentItem(uri=uri, language_id=language_id, version=version, text=text),
+        ),
     )
 
 
 async def complete_at(
-    client: LanguageClient, uri: str, position: types.Position
+    client: LanguageClient,
+    uri: str,
+    position: types.Position,
 ) -> types.CompletionList | Sequence[types.CompletionItem] | None:
     """Send a real ``textDocument/completion`` request."""
     return await client.text_document_completion_async(
-        params=types.CompletionParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
+        params=types.CompletionParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position),
     )
 
 
 async def hover_at(client: LanguageClient, uri: str, position: types.Position) -> types.Hover | None:
     """Send a real ``textDocument/hover`` request."""
     return await client.text_document_hover_async(
-        params=types.HoverParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
+        params=types.HoverParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position),
     )
 
 
 async def definition_at(
-    client: LanguageClient, uri: str, position: types.Position
+    client: LanguageClient,
+    uri: str,
+    position: types.Position,
 ) -> types.Location | Sequence[types.Location] | Sequence[types.LocationLink] | None:
     """Send a real ``textDocument/definition`` request."""
     return await client.text_document_definition_async(
-        params=types.DefinitionParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position)
+        params=types.DefinitionParams(text_document=types.TextDocumentIdentifier(uri=uri), position=position),
     )

@@ -119,7 +119,7 @@ class _LogBus:
 
     def _unsubscribe(self, sub: _Subscription) -> None:
         with contextlib.suppress(ValueError):
-            self._subscribers.remove(sub._callback)  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks
+            self._subscribers.remove(sub._callback)  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks  # noqa: SLF001
 
     def emit(self, event: object) -> None:
         if not self._subscribers:
@@ -141,7 +141,7 @@ class _Subscription:
         self._callback = callback
 
     def unsubscribe(self) -> None:
-        self._bus._unsubscribe(self)  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks
+        self._bus._unsubscribe(self)  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks  # noqa: SLF001
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -158,7 +158,7 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
     - Direct access to ``_store_stub`` and ``_eval_stub`` for gRPC calls.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
         self,
         *,
         store_uri: str = DEFAULT_STORE_URI,
@@ -215,7 +215,7 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
                 on_process_start=self._on_worker_process_start,
                 preload=["nanopynix.rpc.worker._worker"],
                 max_concurrency=_WORKER_MAX_CONCURRENCY,
-            )
+            ),
         )
         self._worker_service_stub = WorkerServiceStub(self._channel)
         self._store_service_stub = StoreServiceStub(self._channel)
@@ -289,7 +289,7 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
         self._next_request_id += 1
         request.request_id = request_id
         for capture in _ACTIVE_LOG_CAPTURES.get():
-            capture._register_request(request_id)  # type: ignore[reportPrivateUsage] -- capture registration is the dispatch contract
+            capture._register_request(request_id)  # type: ignore[reportPrivateUsage] -- capture registration is the dispatch contract  # noqa: SLF001
         return await _grpc_call(method(request, timeout=timeout))
 
     # ── log access ─────────────────────────────────────────────────
@@ -350,7 +350,9 @@ class _WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pu
 
     async def set_verbosity(self, verbosity: LogLevel) -> LogLevel:
         """Set the worker-side Nix log verbosity."""
-        response = await self.invoke(self._worker_stub.set_verbosity, SetVerbosityRequest(verbosity=verbosity), timeout=self.rpc_timeout)
+        response = await self.invoke(
+            self._worker_stub.set_verbosity, SetVerbosityRequest(verbosity=verbosity), timeout=self.rpc_timeout
+        )
         self._verbosity = response.verbosity
         return response.verbosity
 

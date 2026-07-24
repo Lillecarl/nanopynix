@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     import nanopynix
 
 _HEADER_LINE_RE = re.compile(
-    r"^\s*#\s*pynix-lsp:\s*(?P<name>[A-Za-z_][A-Za-z0-9_'-]*)\s*=\s*(?P<expr>.+?)\s*$"
+    r"^\s*#\s*pynix-lsp:\s*(?P<name>[A-Za-z_][A-Za-z0-9_'-]*)\s*=\s*(?P<expr>.+?)\s*$",
 )
 _HEADER_SCAN_LINES = 5
 
@@ -111,7 +111,9 @@ class SharedEvalCache:
         self._entries: dict[tuple[str, str], _SharedEval] = {}
         self._lock = anyio.Lock()
 
-    async def acquire(self, expr: str, path: str) -> tuple[nanopynix.EvalSession, nanopynix.ValueProxy | None, NixError | None]:
+    async def acquire(
+        self, expr: str, path: str
+    ) -> tuple[nanopynix.EvalSession, nanopynix.ValueProxy | None, NixError | None]:
         """Evaluate *expr* (against base directory *path*) on first use, or hand back the already-evaluated result.
 
         Increments the entry's refcount either way -- callers must pair this

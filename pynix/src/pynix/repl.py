@@ -40,7 +40,7 @@ from pynix.target import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import AsyncGenerator, Callable, Iterable
 
     from prompt_toolkit.document import Document
 
@@ -75,7 +75,9 @@ _COMMANDS = {
     ":verbosity": "Show or set Nix log verbosity",
     ":?": "Show this help",
 }
-_NIX_EXPRESSION_COMMANDS = frozenset({":a", ":add", ":b", ":build", ":e", ":edit", ":exec", ":p", ":print", ":run", ":shell", ":t", ":type"})
+_NIX_EXPRESSION_COMMANDS = frozenset(
+    {":a", ":add", ":b", ":build", ":e", ":edit", ":exec", ":p", ":print", ":run", ":shell", ":t", ":type"}
+)
 _NIX_HIGHLIGHTS = Query(
     NIX_LANGUAGE,
     (Path(NIX_GRAMMAR_PATH) / "queries" / "highlights.scm").read_text(),
@@ -131,7 +133,7 @@ _REPL_STYLE = Style.from_dict(
         "nix.punctuation": "ansibrightblack",
         "nix.string": "ansigreen",
         "nix.variable": "ansiblue",
-    }
+    },
 )
 _HELP_ROWS = (
     ("<expr>", "Evaluate and print an expression"),
@@ -234,7 +236,11 @@ class _ReplCompleter(Completer):
         del document, complete_event
         return ()
 
-    async def get_completions_async(self, document: Document, complete_event: CompleteEvent):
+    async def get_completions_async(
+        self,
+        document: Document,
+        complete_event: CompleteEvent,
+    ) -> AsyncGenerator[Completion]:
         del complete_event
         before_cursor = document.text_before_cursor
         command, separator, _argument = before_cursor.partition(" ")
@@ -267,7 +273,7 @@ class _ReplCompleter(Completer):
             return []
 
 
-async def _run_repl_loop(
+async def _run_repl_loop(  # noqa: C901, PLR0912, PLR0915 tracked complexity/arg-count debt, see TODO.md
     repl: ReplSession,
     prompt: Any,
     *,
@@ -318,7 +324,9 @@ async def _run_repl_loop(
             continue
         if command == ":verbosity":
             try:
-                verbosity = await (repl.get_verbosity() if not argument else repl.set_verbosity(normalize_log_level(argument)))
+                verbosity = await (
+                    repl.get_verbosity() if not argument else repl.set_verbosity(normalize_log_level(argument))
+                )
             except (TypeError, ValueError) as exc:
                 print_formatted_text(f"error: {exc}")
             else:
@@ -535,7 +543,11 @@ class Repl(Command):
 
         async with nanopynix.Session(experimental_features=["flakes", "nix-command"]) as nix:
             with patch_stdout():
-                async with forward_nix_logs(nix, log_file=sys.stdout), nix.store(self.store) as store, nix.repl(store) as repl:
+                async with (
+                    forward_nix_logs(nix, log_file=sys.stdout),
+                    nix.store(self.store) as store,
+                    nix.repl(store) as repl,
+                ):
                     prompt: PromptSession[str] = PromptSession(
                         completer=_ReplCompleter(repl),
                         complete_while_typing=True,

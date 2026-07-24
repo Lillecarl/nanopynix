@@ -20,6 +20,7 @@ from nanopynix_helpers.fod import (
 from nanopynix_proto.nix.common import LogEvent as LogEventProto
 from pydantic import BaseModel, Field, StringConstraints
 
+from ekn.gitops import load_raw_manifest
 from nanopynix import NixError, NixEvalSettings, NixSettings, Session
 from nanopynix.models import JsonValue, LogEvent
 from nanopynix.primops import yaml_primops
@@ -237,7 +238,7 @@ async def evaluate_file_multi(
     return results
 
 
-async def evaluate_with_fod_update(
+async def evaluate_with_fod_update(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
     file: str | PathLike[str] | None,
     flake_uri: str | None,
     customer: str | None,
@@ -342,13 +343,15 @@ async def evaluate_flake_ekn(flake_uri: str, customer: str) -> FlakeEknResult:
             proxy = proxy.attr("config")
 
         generated = await proxy.attr("kubernetes").attr("generated").force_json()
-        return FlakeEknResult.model_validate({
-            "config": {
-                "kubernetes": {
-                    "generated": generated,
+        return FlakeEknResult.model_validate(
+            {
+                "config": {
+                    "kubernetes": {
+                        "generated": generated,
+                    },
                 },
             }
-        })
+        )
 
 
 def _timing_enabled() -> bool:
@@ -471,20 +474,22 @@ async def evaluate_gitops_manifests(
             gitops_targets = await proxy.attr("kubernetes").attr("gitOpsTargets").force_json()
             deploy_branch = await gitops_proxy.attr("deployBranch").force_json()
             source_branch = await gitops_proxy.attr("sourceBranch").force_json()
-        return GitOpsManifestsResult.model_validate({
-            "config": {
-                "kubernetes": {
-                    "gitOpsTargets": gitops_targets,
-                },
-                "gitOps": {
-                    "deployBranch": deploy_branch,
-                    "sourceBranch": source_branch,
+        return GitOpsManifestsResult.model_validate(
+            {
+                "config": {
+                    "kubernetes": {
+                        "gitOpsTargets": gitops_targets,
+                    },
+                    "gitOps": {
+                        "deployBranch": deploy_branch,
+                        "sourceBranch": source_branch,
+                    },
                 },
             }
-        })
+        )
 
 
-async def evaluate_kubeapply_config(
+async def evaluate_kubeapply_config(  # noqa: C901, PLR0912 tracked complexity/arg-count debt, see TODO.md
     file: str | PathLike[str] | None,
     flake_uri: str | None,
     customer: str | None,
@@ -535,26 +540,43 @@ async def evaluate_kubeapply_config(
             if not isinstance(resolved_objects, list):
                 raise ValueError(f"gitops target {target!r} has no objects list")
             objects = [
-                {k: v for k, v in obj.items() if k != "ekn"}
-                for obj in resolved_objects
-                if isinstance(obj, dict)
+                {k: v for k, v in obj.items() if k != "ekn"} for obj in resolved_objects if isinstance(obj, dict)
             ]
+            raw_file_paths = resolved.get("rawFiles") or []
+            if not isinstance(raw_file_paths, list):
+                raise ValueError(f"gitops target {target!r} rawFiles must be a list")
         else:
             generated = await proxy.attr("kubernetes").attr("generated").force_json()
             if not isinstance(generated, list):
                 raise ValueError("kubernetes.generated did not evaluate to a list")
             objects = generated
+            raw_files = await proxy.attr("kubernetes").attr("rawFiles").force_json()
+            if not isinstance(raw_files, list):
+                raise ValueError("kubernetes.rawFiles did not evaluate to a list")
+            raw_file_paths = [
+                entry["path"] for entry in raw_files if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+            ]
+
+        # Read here, in Python -- not by having Nix `builtins.readFile` +
+        # `fromJSON`/eval it, which is exactly the round-trip
+        # `kubernetes.rawFiles` exists to avoid (see its description in
+        # easykubenix's kubernetes.nix). Appended to `objects`: once
+        # parsed, a raw-file-sourced manifest applies through
+        # apply_and_prune/maybe_decrypt identically to any other object.
+        objects = [*objects, *(load_raw_manifest(p) for p in raw_file_paths if isinstance(p, str))]
 
         discriminator = await proxy.attr("kluctl").attr("discriminator").force_json()
         resource_priority = await proxy.attr("kluctl").attr("resourcePriority").force_json()
         sops_age_identities = await proxy.attr("kubernetes").attr("sopsAgeIdentities").force_json()
 
-        return KubeApplyConfigResult.model_validate({
-            "objects": objects,
-            "discriminator": discriminator,
-            "resource_priority": resource_priority,
-            "sops_age_identities": sops_age_identities,
-        })
+        return KubeApplyConfigResult.model_validate(
+            {
+                "objects": objects,
+                "discriminator": discriminator,
+                "resource_priority": resource_priority,
+                "sops_age_identities": sops_age_identities,
+            }
+        )
 
 
 async def evaluate_cache_config(
@@ -659,7 +681,8 @@ async def push_closure_to_store(
         session.store(uri=to) as dest,
     ):
         await source.copy_closure(
-            paths, dest,
+            paths,
+            dest,
             substitute=substitute_on_destination,
             check_sigs=check_sigs,
         )
@@ -704,31 +727,34 @@ async def _validation_config(proxy: Any) -> ValidationResult:
     with timed_stage("validate: build internal.manifestJSONFile (forces kubernetes.generated)"):
         manifest_out = (await proxy.attr("internal").attr("manifestJSONFile").build()).get("out")
 
-    return ValidationResult.model_validate({
-        "config": {
-            "kubernetes": {
-                "package": {"version": k8s_version, "outPath": k8s_out},
+    return ValidationResult.model_validate(
+        {
+            "config": {
+                "kubernetes": {
+                    "package": {"version": k8s_version, "outPath": k8s_out},
+                },
+                "validation": {
+                    "kubeadmConfig": kubeadm_config,
+                    "podSubnet": pod_subnet,
+                    "serviceSubnet": service_subnet,
+                    "debug": debug,
+                    "etcdPackage": {"outPath": etcd_out},
+                    "kubeconformPackage": {"outPath": kubeconform_out},
+                },
+                "kluctl": {
+                    "resourcePriority": resource_priority,
+                    "discriminator": discriminator,
+                },
+                "internal": {"manifestJSONFile": {"outPath": manifest_out}},
+                "novalidateKeys": novalidate_keys,
             },
-            "validation": {
-                "kubeadmConfig": kubeadm_config,
-                "podSubnet": pod_subnet,
-                "serviceSubnet": service_subnet,
-                "debug": debug,
-                "etcdPackage": {"outPath": etcd_out},
-                "kubeconformPackage": {"outPath": kubeconform_out},
-            },
-            "kluctl": {
-                "resourcePriority": resource_priority,
-                "discriminator": discriminator,
-            },
-            "internal": {"manifestJSONFile": {"outPath": manifest_out}},
-            "novalidateKeys": novalidate_keys,
         }
-    })
+    )
 
 
 async def evaluate_validation_file(
-    file: str | PathLike[str], attr_path: str | None
+    file: str | PathLike[str],
+    attr_path: str | None,
 ) -> ValidationResult:
     async with (
         _session() as session,

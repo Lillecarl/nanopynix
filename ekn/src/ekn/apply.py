@@ -21,7 +21,8 @@ type Manifest = dict[str, JsonValue]
 
 
 def barriers(
-    objects: list[Manifest], resource_priority: dict[str, int]
+    objects: list[Manifest],
+    resource_priority: dict[str, int],
 ) -> list[list[Manifest]]:
     """Group objects into ordered apply barriers by kind priority.
 
@@ -66,7 +67,11 @@ async def build_object(spec: Manifest, api: Api) -> APIObject:
 
 
 async def ssa_apply(
-    obj: APIObject, *, field_manager: str, force: bool = True, dry_run: bool = False
+    obj: APIObject,
+    *,
+    field_manager: str,
+    force: bool = True,
+    dry_run: bool = False,
 ) -> Manifest:
     """Server-side apply.
 
@@ -84,7 +89,8 @@ async def ssa_apply(
     # (kr8s/_objects.py), so pyright can only infer a partially-Unknown union
     # for it -- cast to the precise type its docstring/behavior guarantees.
     api = cast("Api | None", obj.api)  # pyright: ignore[reportUnknownMemberType]
-    assert api is not None
+    if api is None:
+        raise RuntimeError("APIObject has no attached kr8s Api instance")
     params = {"fieldManager": field_manager, "force": "true" if force else "false"}
     if dry_run:
         params["dryRun"] = "All"
@@ -122,7 +128,7 @@ def _with_discriminator_label(spec: Manifest, label: str, value: str) -> Manifes
     return labeled
 
 
-async def apply_and_prune(
+async def apply_and_prune(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
     objects: list[Manifest],
     *,
     api: Api,

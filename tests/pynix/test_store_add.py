@@ -24,7 +24,7 @@ async def test_nanopynix_add_to_store_imports_file(
 
     async with shared_nix_environment.rpc_session() as nix, nix.store() as store:
         computed = await store.rpc.compute_store_path(
-            ComputeStorePathRequest(path=str(source), method="flat", hash_algo="sha256")
+            ComputeStorePathRequest(path=str(source), method="flat", hash_algo="sha256"),
         )
         added = await store.rpc.add_to_store(AddToStoreRequest(path=str(source), method="flat", hash_algo="sha256"))
 
@@ -60,16 +60,14 @@ async def test_pynix_store_add_path_imports_directory(
     (source / "share" / "message").write_text("pynix-add-path\n")
 
     cmd = Pynix.parse(
-        ["store", "add-path", str(source), "--name", "custom-dir", *shared_nix_environment.pynix_store_args()]
+        ["store", "add-path", str(source), "--name", "custom-dir", *shared_nix_environment.pynix_store_args()],
     )
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
 
     assert data["path"].endswith("-custom-dir")
-    assert (
-        shared_nix_environment.physical_path(data["path"]) / "share" / "message"
-    ).read_text() == "pynix-add-path\n"
+    assert (shared_nix_environment.physical_path(data["path"]) / "share" / "message").read_text() == "pynix-add-path\n"
 
 
 async def test_pynix_store_add_dry_run_does_not_import(
@@ -89,7 +87,7 @@ async def test_pynix_store_add_dry_run_does_not_import(
             "flat",
             "--dry-run",
             *shared_nix_environment.pynix_store_args(),
-        ]
+        ],
     )
     await cmd.astart()
     captured = capsys.readouterr()

@@ -59,6 +59,7 @@ from nanopynix.rpc.client.session import Session
 from nanopynix.rpc.client.store import Store, StoreHandle
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from pathlib import Path
 
 # ════════════════════════════════════════════════════════════════════
@@ -97,7 +98,7 @@ def _make_eval_stub() -> MagicMock:
     return stub
 
 
-def _mock_value_handle(handle: int = 1, type_str: str = "int"):
+def _mock_value_handle(handle: int = 1, type_str: str = "int") -> MagicMock:
     """Return a MagicMock that looks like a ValueHandle proto."""
     vh = MagicMock()
     vh.handle = handle
@@ -166,7 +167,7 @@ def _mock_has_attr_response(has: bool = True) -> MagicMock:
     return resp
 
 
-def _mock_pool():
+def _mock_pool() -> MagicMock:
     """Return a mock worker client that serializes individual RPCs."""
     pool = MagicMock()
     pool._eval_stub = _make_eval_stub()
@@ -179,7 +180,7 @@ def _mock_pool():
     return pool
 
 
-def _mock_worker_client():
+def _mock_worker_client() -> MagicMock:
     """Return a mock worker client with eval and Store RPC stubs."""
     rw = MagicMock()
     rw._eval_stub = _make_eval_stub()
@@ -903,7 +904,7 @@ class TestLazyChildProxy:
         return ctx.child(parent_proxy, selector)
 
     async def test_attrs_getitem_force_calls_attr(self):
-        """attrs[\"x\"].force() calls eval.attr with parent handle and name."""
+        """attrs["x"].force() calls eval.attr with parent handle and name."""
         w = self._worker()
         w._eval_stub.attr.return_value = _mock_value_handle(5, "int")
         w._eval_stub.force.return_value = _mock_force_value_scalar(99)
@@ -947,8 +948,8 @@ class TestLazyChildProxy:
                 entries={
                     "a": DeepValue(scalar=ScalarValue(int_value=1)),
                     "b": DeepValue(scalar=ScalarValue(int_value=2)),
-                }
-            )
+                },
+            ),
         )
         w._eval_stub.force_deep.return_value = deep_val
         cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), "name")
@@ -1003,6 +1004,7 @@ class TestWorkerOomScore:
         assert manager._worker_pid == 1234  # type: ignore[reportPrivateUsage] -- test accesses pool internals
         assert calls == [(1234, 500)]
 
+
 # ════════════════════════════════════════════════════════════════════
 # log_stream request-id handling (C1 fix)
 # ════════════════════════════════════════════════════════════════════
@@ -1012,20 +1014,26 @@ class TestLogStreamRequestId:
     """Verify Session.log_stream() correctly maps worker wire format to LogEvent."""
 
     @staticmethod
-    def _events_to_log_stream(events: list[Any]):
+    def _events_to_log_stream(events: list[Any]) -> AsyncIterator[Any]:
         """Return an async generator that yields the given events."""
 
-        async def _gen():
+        async def _gen() -> AsyncIterator[Any]:
             for e in events:
                 yield e
 
         return _gen()
 
     @staticmethod
-    def _proto_log_event(request_id: int, action: str, args: list[Any], result_type: int | None = None) -> LogEventProto:
+    def _proto_log_event(
+        request_id: int, action: str, args: list[Any], result_type: int | None = None
+    ) -> LogEventProto:
         return LogEventProto(
             request_id=request_id,
-            nix_log=NixLogEvent(action=action, args_json=_json.dumps(args), result_type=ResultType(result_type) if result_type is not None else None),
+            nix_log=NixLogEvent(
+                action=action,
+                args_json=_json.dumps(args),
+                result_type=ResultType(result_type) if result_type is not None else None,
+            ),
         )
 
     async def test_worker_request_id_mapped_correctly(self):
@@ -1038,8 +1046,8 @@ class TestLogStreamRequestId:
                     self._proto_log_event(42, "msg", [3, "hello from nix"]),
                     self._proto_log_event(7, "start", [0, "building"]),
                     self._proto_log_event(7, "result", [0, 100], result_type=100),
-                ]
-            )
+                ],
+            ),
         )
         session._manager = manager  # type: ignore[reportPrivateUsage] -- test injects mock manager
 
@@ -1070,8 +1078,8 @@ class TestLogStreamRequestId:
                 [
                     None,
                     self._proto_log_event(1, "msg", [3, "after sentinel"]),
-                ]
-            )
+                ],
+            ),
         )
         session._manager = manager  # type: ignore[reportPrivateUsage] -- test injects mock manager
 
@@ -1109,8 +1117,14 @@ class TestLogCapture:
         assert logs.events[0].args == ["inside"]
 
     @staticmethod
-    def _proto_log_event(request_id: int, action: str, args: list[Any], result_type: int | None = None) -> LogEventProto:
+    def _proto_log_event(
+        request_id: int, action: str, args: list[Any], result_type: int | None = None
+    ) -> LogEventProto:
         return LogEventProto(
             request_id=request_id,
-            nix_log=NixLogEvent(action=action, args_json=_json.dumps(args), result_type=ResultType(result_type) if result_type is not None else None),
+            nix_log=NixLogEvent(
+                action=action,
+                args_json=_json.dumps(args),
+                result_type=ResultType(result_type) if result_type is not None else None,
+            ),
         )

@@ -65,7 +65,9 @@ class TestLockFlake:
         assert isinstance(locked.description(), str)
 
     def test_lock_flake_rejects_unknown_flake_setting(
-        self, eval_state: nanopynix.EvalState, tmp_path: Path
+        self,
+        eval_state: nanopynix.EvalState,
+        tmp_path: Path,
     ) -> None:
         _init_git_flake(tmp_path)
         ref = nanopynix.parse_flake_ref(str(tmp_path))
@@ -122,7 +124,7 @@ class TestEvalFlake:
                 val = 1;
             }};
         }}
-        """
+        """,
         )
         repo = init_repo(tmp_path)
         commit_files(repo, tmp_path / "flake.nix")

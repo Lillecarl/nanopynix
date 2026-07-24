@@ -12,6 +12,9 @@ class EvaluationTargetError(RuntimeError):
     """An evaluation target or attribute selection is invalid."""
 
 
+_MAX_SUGGESTED_ATTRS = 10
+
+
 async def select_attr(value: ValueProxy, attrpath: str) -> ValueProxy:
     """Select a dot-separated attribute path with useful missing-attribute errors."""
     for part in attrpath.split("."):
@@ -19,8 +22,8 @@ async def select_attr(value: ValueProxy, attrpath: str) -> ValueProxy:
             raise EvaluationTargetError("attribute path contains an empty component")
         if not await value.has_attr(part):
             names = await value.attr_names()
-            available = ", ".join(names[:10])
-            suffix = "" if len(names) <= 10 else f", ... ({len(names)} total)"
+            available = ", ".join(names[:_MAX_SUGGESTED_ATTRS])
+            suffix = "" if len(names) <= _MAX_SUGGESTED_ATTRS else f", ... ({len(names)} total)"
             raise EvaluationTargetError(f"attribute {part!r} not found; available attributes: {available}{suffix}")
         value = value.attr(part)
     return value

@@ -50,7 +50,7 @@ class SchemaNestedBlock(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    block: SchemaBlock = Field(default_factory=lambda: SchemaBlock())
+    block: SchemaBlock = Field(default_factory=lambda: SchemaBlock())  # noqa: PLW0108 -- SchemaBlock is defined below; the lambda defers the name lookup past class-body time
     nesting_mode: str | None = None
     """``terraform-json``'s ``SchemaBlockType.NestingMode``: ``"single"``/``"list"``/``"set"``/``"map"``/``"group"``."""
 

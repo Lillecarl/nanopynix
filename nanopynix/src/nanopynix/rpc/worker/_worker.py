@@ -262,7 +262,12 @@ class WorkerServiceHandler(WorkerServiceBase):
                 # OpenEval/primop registration, so this is ready before any
                 # primop could actually fire.
                 await self._state.rpc_bridge.start()
-            await self._state.run_request(request_id=message.request_id, executor=self._state.executor, operation=self._init_nix, args=(message, settings))
+            await self._state.run_request(
+                request_id=message.request_id,
+                executor=self._state.executor,
+                operation=self._init_nix,
+                args=(message, settings),
+            )
 
             return InitResponse(status=WORKER_INIT_STATUS_OK)
 
@@ -293,13 +298,19 @@ class WorkerServiceHandler(WorkerServiceBase):
             }
             for p in message.primops
         ]
-        assert self._state.rpc_bridge is not None  # set by worker_service_factory before init
+        if self._state.rpc_bridge is None:
+            raise RuntimeError("worker rpc_bridge is unavailable")  # set by worker_service_factory before init
         _register_primops(primops_raw, rpc_bridge=self._state.rpc_bridge)
 
     async def open_store(self, message: OpenStoreRequest) -> OpenStoreResponse:
         if self._state.store_limiter is None:
             raise RuntimeError("worker store limiter is unavailable")
-        store_handle, uri, store_dir = await self._state.run_request(request_id=message.request_id, limiter=self._state.store_limiter, operation=self._open_store, args=(message.uri,))
+        store_handle, uri, store_dir = await self._state.run_request(
+            request_id=message.request_id,
+            limiter=self._state.store_limiter,
+            operation=self._open_store,
+            args=(message.uri,),
+        )
         return OpenStoreResponse(
             store_handle=store_handle,
             uri=uri,
@@ -319,7 +330,12 @@ class WorkerServiceHandler(WorkerServiceBase):
             raise RuntimeError("worker executor is unavailable")
         # A forced close may have to destroy the thread-confined EvalState, so
         # retain the evaluator lane for this lifecycle operation.
-        await self._state.run_request(request_id=message.request_id, executor=self._state.executor, operation=self._close_store, args=(message.store_handle, message.force))
+        await self._state.run_request(
+            request_id=message.request_id,
+            executor=self._state.executor,
+            operation=self._close_store,
+            args=(message.store_handle, message.force),
+        )
         return CloseStoreResponse()
 
     def _close_store(self, store_handle: int, force: bool = False) -> None:
@@ -344,14 +360,21 @@ class WorkerServiceHandler(WorkerServiceBase):
         """Return the worker's current Nix logger verbosity."""
         if self._state.executor is None:
             raise RuntimeError("worker executor is unavailable")
-        verbosity = await self._state.run_request(request_id=message.request_id, executor=self._state.executor, operation=self._state.runtime.get_verbosity)
+        verbosity = await self._state.run_request(
+            request_id=message.request_id, executor=self._state.executor, operation=self._state.runtime.get_verbosity
+        )
         return GetVerbosityResponse(verbosity=LogLevel(verbosity))
 
     async def set_verbosity(self, message: SetVerbosityRequest) -> SetVerbosityResponse:
         """Update Nix logger verbosity on the Nix thread."""
         if self._state.executor is None:
             raise RuntimeError("worker executor is unavailable")
-        verbosity = await self._state.run_request(request_id=message.request_id, executor=self._state.executor, operation=self._state.runtime.set_verbosity, args=(int(message.verbosity),))
+        verbosity = await self._state.run_request(
+            request_id=message.request_id,
+            executor=self._state.executor,
+            operation=self._state.runtime.set_verbosity,
+            args=(int(message.verbosity),),
+        )
         return SetVerbosityResponse(verbosity=LogLevel(verbosity))
 
     def _update_store_title(self) -> None:
@@ -371,7 +394,10 @@ class WorkerServiceHandler(WorkerServiceBase):
                 kind, request_id, *payload = event
                 if kind == LogStreamEventKind.NIX:
                     action, *args = payload
-                    yield LogEvent(request_id=request_id, nix_log=NixLogEvent(action=action, args_json=json.dumps(args, default=str)))
+                    yield LogEvent(
+                        request_id=request_id,
+                        nix_log=NixLogEvent(action=action, args_json=json.dumps(args, default=str)),
+                    )
                 elif kind == LogStreamEventKind.FINALIZED:
                     yield LogEvent(request_id=request_id, request_finalized=RequestFinalized())
         except anyio.get_cancelled_exc_class():
@@ -384,7 +410,9 @@ class WorkerServiceHandler(WorkerServiceBase):
         """
         if self._state.executor is None:
             raise RuntimeError("worker executor is unavailable")
-        await self._state.run_request(request_id=message.request_id, executor=self._state.executor, operation=lambda: None)
+        await self._state.run_request(
+            request_id=message.request_id, executor=self._state.executor, operation=lambda: None
+        )
         if self._state.rpc_bridge is not None:
             await self._state.rpc_bridge.stop()
         if self._state.owns_executor:
@@ -467,7 +495,7 @@ async def run_worker(
     )
 
     # Cleanup after transport closes
-    worker_state: WorkerState = cast("WorkerServiceHandler", handlers[0])._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType, reportUnknownMemberType] -- private attr access, cascade from Any
+    worker_state: WorkerState = cast("WorkerServiceHandler", handlers[0])._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType, reportUnknownMemberType] -- private attr access, cascade from Any  # noqa: SLF001
     collector = worker_state.collector  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- cascade from WorkerState Any attributes
     if collector is not None:
         collector.close()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
@@ -500,7 +528,7 @@ async def _stdio_main() -> None:
     await serve_stdio(handlers, max_concurrency=_WORKER_MAX_CONCURRENCY)
 
     # Cleanup after transport closes
-    worker_state: WorkerState = cast("WorkerServiceHandler", handlers[0])._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType, reportUnknownMemberType] -- private attr access, cascade from Any
+    worker_state: WorkerState = cast("WorkerServiceHandler", handlers[0])._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType, reportUnknownMemberType] -- private attr access, cascade from Any  # noqa: SLF001
     collector = worker_state.collector  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- cascade from WorkerState Any attributes
     if collector is not None:
         collector.close()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes

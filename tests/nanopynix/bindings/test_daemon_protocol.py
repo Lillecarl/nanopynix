@@ -33,7 +33,7 @@ async def _serve_one_connection(listener: socket.socket, store: Any) -> None:
     "interrupt flag set after this test passes, poisoning every real eval/build "
     "in the rest of the pytest session with 'error: interrupted by the user' "
     "(see project_nanopynix_ci_segfault_investigation memory). Root cause is in "
-    "upstream Nix's daemon protocol handler, not nanopynix's binding."
+    "upstream Nix's daemon protocol handler, not nanopynix's binding.",
 )
 async def test_process_connection_serves_nix_daemon_protocol(tmp_path: Path) -> None:
     socket_path = tmp_path / "daemon.sock"

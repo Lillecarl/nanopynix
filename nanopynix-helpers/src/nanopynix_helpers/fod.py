@@ -26,6 +26,9 @@ _FOD_MISMATCH = re.compile(
 )
 _NIX_LANGUAGE = Language(cast("int", tree_sitter_nix.language()))  # type: ignore[reportDeprecated, reportUnknownMemberType] -- tree-sitter-nix 0.3 exposes the legacy integer language pointer
 
+# An `apply_expression` node is always a binary (function, argument) application.
+_APPLY_EXPRESSION_ARITY = 2
+
 
 class FodSourceUpdateError(ValueError):
     """A fixed-output mismatch could not be mapped to one safe source literal."""
@@ -87,7 +90,9 @@ def find_fod_hash_literal(source: str, specified: str, *, derivation_name: str |
         return candidates[0]
     if not candidates:
         raise FodSourceUpdateError("no plain hash, sha256, or outputHash string literal found")
-    raise FodSourceUpdateError("multiple hash literals found; refusing to guess which one produced the failed derivation")
+    raise FodSourceUpdateError(
+        "multiple hash literals found; refusing to guess which one produced the failed derivation"
+    )
 
 
 def replace_fod_hash(source: str, literal: FodHashLiteral, got: str) -> str:
@@ -221,31 +226,35 @@ def _fod_hash_literals(source: bytes) -> list[FodHashLiteral]:
                 string.start_byte,
                 string.end_byte,
                 run_command_bindings.get(node.start_byte),
-            )
+            ),
         )
     return literals
 
 
-def _run_command_hash_bindings(root: Any, source: bytes) -> dict[int, str]:
+def _run_command_hash_bindings(root: Any, source: bytes) -> dict[int, str]:  # noqa: C901 tracked complexity/arg-count debt, see TODO.md
     """Return direct output-hash bindings of ``runCommand NAME { ... }`` calls."""
     names: dict[int, str] = {}
     nodes: list[Any] = [root]
     while nodes:
         node = nodes.pop()
         nodes.extend(reversed(node.children))
-        if node.type != "apply_expression" or len(node.named_children) != 2:
+        if node.type != "apply_expression" or len(node.named_children) != _APPLY_EXPRESSION_ARITY:
             continue
         function, attrs = node.named_children
         if attrs.type != "attrset_expression" or function.type != "apply_expression":
             continue
-        if len(function.named_children) != 2:
+        if len(function.named_children) != _APPLY_EXPRESSION_ARITY:
             continue
         callee, name = function.named_children
         if name.type != "string_expression" or any(child.type == "interpolation" for child in name.children):
             continue
         callee_text = source[callee.start_byte : callee.end_byte]
         rendered_name = source[name.start_byte : name.end_byte]
-        if not callee_text.endswith(b"runCommand") or not rendered_name.startswith(b'"') or not rendered_name.endswith(b'"'):
+        if (
+            not callee_text.endswith(b"runCommand")
+            or not rendered_name.startswith(b'"')
+            or not rendered_name.endswith(b'"')
+        ):
             continue
         derivation_name = rendered_name[1:-1].decode()
         binding_set = next((child for child in attrs.named_children if child.type == "binding_set"), None)

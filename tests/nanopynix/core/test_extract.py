@@ -190,7 +190,7 @@ def test_locked_input_with_ref():
         {
             "ref": "github:NixOS/nixpkgs/123abc",
             "is_flake": True,
-        }
+        },
     )
     assert result.is_flake is True
     assert result.attrs is not None
@@ -204,7 +204,7 @@ def test_locked_input_without_ref():
         {
             "is_flake": True,
             "follows": ["nixpkgs"],
-        }
+        },
     )
     assert result.attrs is None
     assert result.follows == ["nixpkgs"]

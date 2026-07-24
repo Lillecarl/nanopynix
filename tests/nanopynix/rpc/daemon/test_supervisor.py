@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.skip(
     reason="nanopynix.rpc.daemon ('pump the nix daemon from Python') is unfinished "
     "lab/prototype work, not a supported feature -- per author, this should have "
-    "stayed on a throwaway branch."
+    "stayed on a throwaway branch.",
 )
 
 

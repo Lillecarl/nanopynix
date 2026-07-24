@@ -45,6 +45,7 @@ def _with_test_timeout(func: Callable[..., Awaitable[None]]) -> Callable[..., Aw
 
     return wrapper
 
+
 _COVERAGE_SITECUSTOMIZE_DIR = str(Path(__file__).resolve().parent / "_coverage_subprocess")
 
 
@@ -172,7 +173,7 @@ def store_path_recorder() -> StorePathRecorder:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _init():  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
+def _init() -> None:  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     """Initialize libstore without opening a host-selected store."""
     nanopynix_util.set_setting("build-users-group", "")
     nanopynix_util.set_setting("require-drop-supplementary-groups", "false")
@@ -227,7 +228,7 @@ def store_seeded_path(store: Any, l1_nix_environment: NixTestEnvironment) -> Any
     source = l1_nix_environment.root.parent / "l1-store-fixture.txt"
     source.write_text("nanopynix L1 binding fixture\n", encoding="utf-8")
     result = store.store_add_to_store(
-        {"path": str(source), "name": "nanopynix-l1-fixture", "method": "flat", "hash_algo": "sha256"}
+        {"path": str(source), "name": "nanopynix-l1-fixture", "method": "flat", "hash_algo": "sha256"},
     )
     return store.parse_store_path(result["path"])
 
@@ -239,7 +240,7 @@ def init_expr() -> None:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _register_test_primops():  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
+def _register_test_primops() -> None:  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     """Register all test primops before EvalState is created."""
     build_info: Any = nanopynix.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
     if not build_info["capabilities"]["dynamic_primop_registration"]:
@@ -248,7 +249,7 @@ def _register_test_primops():  # type: ignore[reportUnusedFunction] -- pytest au
     nanopynix.register_primop("test_add", 2, ["x", "y"], "add two ints", lambda x, y: x + y)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
     nanopynix.register_primop("test_shout", 1, ["s"], "uppercase a string", lambda s: s.upper())  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
     nanopynix.register_primop("test_not", 1, ["b"], "negate a boolean", lambda b: not b)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
-    nanopynix.register_primop("test_sum", 1, ["xs"], "sum a list of ints", lambda xs: sum(xs))  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_sum", 1, ["xs"], "sum a list of ints", sum)
     nanopynix.register_primop("test_get", 2, ["attrs", "key"], "get attr from set", lambda attrs, key: attrs[key])  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
     nanopynix.register_primop("test_null", 1, ["_x"], "always returns null", lambda _x: None)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
     nanopynix.register_primop("test_half", 1, ["x"], "divide by 2 as float", lambda x: x / 2.0)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
@@ -310,16 +311,17 @@ def eval_state(store: Any, init_expr: object, _register_test_primops: object) ->
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _enable_flakes():  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
+def _enable_flakes() -> None:  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     """Enable flakes experimental feature for all tests."""
     nanopynix.enable_experimental_feature("flakes")
     nanopynix.enable_experimental_feature("nix-command")
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _cleanup_primops():  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
+def _cleanup_primops() -> None:  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     """Clear C++ primop registry at process exit to avoid segfault
     when nb::object destructors fire after Python finalization."""
+
     class _PrimopRegistryModule(Protocol):
         def _cleanup_primop_registry(self) -> None: ...
 

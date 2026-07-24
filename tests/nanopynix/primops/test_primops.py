@@ -93,7 +93,9 @@ class TestRegisterPrimop:
         assert v.as_int() == 42
 
     def test_string_arg_with_context_is_realised(
-        self, eval_state: nanopynix.EvalState, l1_nix_environment: NixTestEnvironment
+        self,
+        eval_state: nanopynix.EvalState,
+        l1_nix_environment: NixTestEnvironment,
     ):
         """A string carrying string context (e.g. "${someDerivation}") must be
         built and substituted for the primop, not rejected -- primops run at
@@ -114,7 +116,9 @@ class TestRegisterPrimop:
         assert l1_nix_environment.physical_path(result).exists()
 
     def test_string_return_value_carries_context_from_arg(
-        self, eval_state: nanopynix.EvalState, store: Any
+        self,
+        eval_state: nanopynix.EvalState,
+        store: Any,
     ):
         """The string context of a context-bearing argument -- e.g.
         "${someDerivation}" -- must survive on the primop's *return* value
@@ -189,6 +193,7 @@ class TestCallableToNixFunction:
 
     def test_value_from_python_lambda(self, eval_state: nanopynix.EvalState) -> None:
         """value_from_python converts a lambda to a Nix primop value."""
+
         def triple(value: int) -> int:
             return value * 3
 
@@ -198,6 +203,7 @@ class TestCallableToNixFunction:
 
     def test_value_from_python_dict_with_lambda(self, eval_state: nanopynix.EvalState) -> None:
         """value_from_python converts a dict with a lambda → attrset with Nix function."""
+
         def add_one(value: int) -> int:
             return value + 1
 

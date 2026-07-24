@@ -15,7 +15,7 @@ def set_process_title(subname: str, *, project_name: str | None = None) -> None:
 
 def set_manager_title(project_name: str | None = None) -> None:
     """Set the manager title, optionally selecting a project name for this process."""
-    global _manager_project_name
+    global _manager_project_name  # noqa: PLW0603 -- one-shot process-wide title override, set once at manager startup
     if project_name is not None:
         _manager_project_name = project_name
     set_process_title("manager")

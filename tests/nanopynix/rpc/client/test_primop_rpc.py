@@ -90,7 +90,10 @@ async def test_manager_rpc_primop_lambda(shared_nix_environment: NixTestEnvironm
         rpc=True,
     )
     async with (
-        shared_nix_environment.rpc_session(primops=[spec], primop_callables={"managerTriple": lambda x: x * 3}) as session,  # type: ignore[reportUnknownLambdaType] -- lambda within dict value has no type context
+        shared_nix_environment.rpc_session(
+            primops=[spec],
+            primop_callables={"managerTriple": lambda x: x * 3},  # type: ignore[reportUnknownLambdaType] -- lambda within dict value has no type context
+        ) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
@@ -122,7 +125,9 @@ async def test_manager_rpc_primop_deep_value(shared_nix_environment: NixTestEnvi
         rpc=True,
     )
     async with (
-        shared_nix_environment.rpc_session(primops=[spec], primop_callables={"managerReshape": _rpc_reshape}) as session,
+        shared_nix_environment.rpc_session(
+            primops=[spec], primop_callables={"managerReshape": _rpc_reshape}
+        ) as session,
         session.store() as store,
         session.eval(store) as eval,
     ):

@@ -51,7 +51,7 @@ async def _create_derivation(eval: Any) -> StorePath:
               builder = "/not-used-by-this-test";
             }).drvPath
           )
-        """
+        """,
     )
     result = await path_value.force()
     if not isinstance(result, str):
@@ -106,7 +106,7 @@ async def test_query_path_info_and_hash_part(
         assert info.path == str(seeded_store_path)
         assert info.nar_size > 0
         response = await store.rpc.query_path_from_hash_part(
-            QueryPathFromHashPartRequest(hash_part=seeded_store_path.hash_part)
+            QueryPathFromHashPartRequest(hash_part=seeded_store_path.hash_part),
         )
         assert response.path == str(seeded_store_path)
 
@@ -123,7 +123,7 @@ async def test_compute_fs_closure(
 async def test_query_missing(shared_nix_environment: NixTestEnvironment) -> None:
     async with shared_nix_environment.rpc_session() as session, session.store() as store:
         missing = await store.rpc.query_missing(
-            QueryMissingRequest(derived_paths=["/nix/store/00000000000000000000000000000000-nonexistent-1.0"])
+            QueryMissingRequest(derived_paths=["/nix/store/00000000000000000000000000000000-nonexistent-1.0"]),
         )
         assert isinstance(missing, MissingInfo)
 
@@ -257,7 +257,7 @@ async def test_add_perm_root_and_indirect_root(
     root_path = tmp_path / "nanopynix-gc-root"
     async with shared_nix_environment.rpc_session() as session, session.store() as store:
         response = await store.rpc.add_perm_root(
-            AddPermRootRequest(store_path=str(seeded_store_path), gc_root=str(root_path))
+            AddPermRootRequest(store_path=str(seeded_store_path), gc_root=str(root_path)),
         )
         assert response.path == str(root_path)
         assert root_path.is_symlink()

@@ -56,7 +56,7 @@ def validate_json_schema(value: JsonValue, schema_path: str) -> JsonValue:
     """
     schema = _read_schema(schema_path)
     validator_cls = jsonschema.validators.validator_for(  # type: ignore[reportUnknownMemberType] -- jsonschema's bundled stubs leave the schema param under-specified
-        schema
+        schema,
     )
     try:
         validator_cls.check_schema(schema)
@@ -67,6 +67,6 @@ def validate_json_schema(value: JsonValue, schema_path: str) -> JsonValue:
     errors = sorted(validator.iter_errors(value), key=lambda error: list(map(str, error.absolute_path)))
     if errors:
         raise PrimopError(
-            f"validateJSONSchema: value does not match schema '{schema_path}':\n{_format_errors(errors)}"
+            f"validateJSONSchema: value does not match schema '{schema_path}':\n{_format_errors(errors)}",
         )
     return value

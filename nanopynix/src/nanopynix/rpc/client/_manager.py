@@ -45,7 +45,7 @@ class ManagerServiceBase(betterproto2_grpclib.ServiceBase):
                 Cardinality.UNARY_UNARY,
                 LogEvent,
                 LogAck,
-            )
+            ),
         }
 
 
@@ -79,11 +79,11 @@ class ManagerPrimopServiceBase(betterproto2_grpclib.ServiceBase):
                 Cardinality.UNARY_UNARY,
                 CallPrimopRequest,
                 CallPrimopResponse,
-            )
+            ),
         }
 
 
-def _scalar_value_to_python(sv: ScalarValue | None) -> Any:
+def _scalar_value_to_python(sv: ScalarValue | None) -> Any:  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
     if sv is None:
         return None
     kind = betterproto2.which_one_of(sv, "kind")[0]

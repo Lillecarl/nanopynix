@@ -46,11 +46,14 @@ def test_agent_mode_writes_per_test_detail_and_exits_nonzero_on_failure(pytester
         def test_skips():
             import pytest
             pytest.skip("nope")
-        """
+        """,
     )
 
     result = pytester.runpytest_subprocess(
-        *conftest.agent_plugin_cli_args(), "--agent", "--agent-dir=.pytest-agent", "-q"
+        *conftest.agent_plugin_cli_args(),
+        "--agent",
+        "--agent-dir=.pytest-agent",
+        "-q",
     )
     assert result.ret == pytest.ExitCode.TESTS_FAILED
 
@@ -118,6 +121,7 @@ def test_cli_wrapper_forces_agent_mode_on_with_no_flags(pytester: pytest.Pyteste
         cwd=pytester.path,
         capture_output=True,
         timeout=15,
+        check=False,  # returncode asserted explicitly below
     )
 
     assert result.returncode == 0

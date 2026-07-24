@@ -38,6 +38,8 @@ if TYPE_CHECKING:
     from tests.support.nix_environment import NixTestEnvironment
 
 _CURRENT_PYNIX_TEST: ContextVar[str] = ContextVar("_CURRENT_PYNIX_TEST", default="unknown")
+
+
 @dataclass
 class PynixLiveLog:
     path: Path
@@ -120,7 +122,7 @@ class PynixStoreScenario:
                 "args": args,
                 "stdout_bytes": len(self.last_stdout),
                 "stderr_bytes": len(self.last_stderr),
-            }
+            },
         )
         return self.last_stdout, self.last_stderr
 
@@ -145,9 +147,7 @@ class PynixStoreScenario:
             # A native daemon owns builds in its connection process, so its
             # RemoteStore does not expose a local build directory.
             "buildDir": (
-                str(self.store_root / "nix" / "var" / "nix" / "builds")
-                if self.environment.backend == "local"
-                else None
+                str(self.store_root / "nix" / "var" / "nix" / "builds") if self.environment.backend == "local" else None
             ),
         }
         for key, value in expected.items():
@@ -170,7 +170,8 @@ class PynixStoreScenario:
         source = self.work_root / "message.txt"
         source.write_text(contents)
         data = await self.run_pynix_json(
-            ["store", "add-file", str(source), "--store", self.store_url], test_name=test_name
+            ["store", "add-file", str(source), "--store", self.store_url],
+            test_name=test_name,
         )
         if not isinstance(data, dict):
             raise TypeError("store add-file must produce an object")
@@ -393,7 +394,7 @@ async def nixpkgs_path(repo_root: Path) -> str:
 
 
 @pytest.fixture(scope="module")
-async def pynix_store_scenario(
+async def pynix_store_scenario(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
     request: pytest.FixtureRequest,
     repo_root: Path,
     nixpkgs_path: str,
@@ -434,6 +435,7 @@ async def populated_store(pynix_store_scenario: PynixStoreScenario) -> dict[str,
         "text_path": scenario.require_text_path(),
         "log_path": scenario.require_local_log_path(),
     }
+
 
 @pytest.fixture
 async def git_flake(nixpkgs_path: str) -> AsyncIterator[Path]:
@@ -487,7 +489,7 @@ async def _run(*args: str, env: dict[str, str] | None = None) -> bytes:
         raise RuntimeError(
             f"{' '.join(args)} failed with exit code {proc.returncode}\n"
             f"stdout:\n{stdout.decode(errors='replace')}\n"
-            f"stderr:\n{stderr.decode(errors='replace')}"
+            f"stderr:\n{stderr.decode(errors='replace')}",
         )
     return stdout
 

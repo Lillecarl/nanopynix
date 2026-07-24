@@ -31,7 +31,9 @@ async def test_nanopynix_store_get_build_log_from_populated_store(
     assert "pynix-log-line" in response.log
 
 
-async def test_pynix_log_prints_build_log_from_populated_store(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]) -> None:
+async def test_pynix_log_prints_build_log_from_populated_store(
+    populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]
+) -> None:
     cmd = Pynix.parse(["log", populated_store["log_path"], "--store", populated_store["store_url"]])
     await cmd.astart()
     captured = capsys.readouterr()

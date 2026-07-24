@@ -163,7 +163,7 @@ class Session:
                 info = await store.query_path_info(str(sp))
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
         self,
         *,
         store_uri: str = DEFAULT_STORE_URI,
@@ -228,7 +228,7 @@ class Session:
                 selected_uri,
                 self._session_id,
                 self._manager.rpc_timeout,
-            )
+            ),
         )
 
     async def open(self) -> None:
@@ -320,7 +320,7 @@ class Session:
         thread in the worker. Store operations remain available and may run
         concurrently alongside them.
         """
-        if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID
+        if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID  # noqa: SLF001
             raise ValueError("Store belongs to a different session")
         return EvalSession(
             self._manager,
@@ -339,7 +339,7 @@ class Session:
         Bindings entered through :meth:`ReplSession.line` remain available
         until the returned context manager exits.
         """
-        if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID
+        if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID  # noqa: SLF001
             raise ValueError("Store belongs to a different session")
         return ReplSession(
             self._manager,

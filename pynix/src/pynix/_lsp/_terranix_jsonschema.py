@@ -25,8 +25,11 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from pynix._lsp._terranix_schema import SchemaAttribute, SchemaBlock
 
+# Every compound cty type is encoded as a 2-element [kind, arg] JSON array.
+_CTY_COMPOUND_TYPE_ARITY = 2
 
-def cty_type_to_json_schema(cty_type: Any) -> dict[str, Any]:
+
+def cty_type_to_json_schema(cty_type: Any) -> dict[str, Any]:  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
     """Translate one cty type-constraint JSON value into a JSON Schema fragment."""
     if cty_type == "string":
         return {"type": "string"}
@@ -34,7 +37,7 @@ def cty_type_to_json_schema(cty_type: Any) -> dict[str, Any]:
         return {"type": "number"}
     if cty_type == "bool":
         return {"type": "boolean"}
-    if isinstance(cty_type, list) and len(cast("list[Any]", cty_type)) == 2:
+    if isinstance(cty_type, list) and len(cast("list[Any]", cty_type)) == _CTY_COMPOUND_TYPE_ARITY:
         kind, arg = cast("tuple[Any, Any]", cty_type)
         if kind in ("list", "set"):
             return {"type": "array", "items": cty_type_to_json_schema(arg)}

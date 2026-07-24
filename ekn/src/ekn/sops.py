@@ -80,7 +80,7 @@ async def maybe_decrypt(obj: Manifest) -> Manifest:
         metadata: Manifest = metadata_value if isinstance(metadata_value, dict) else {}
         name = metadata.get("name", "?")
         raise SopsDecryptError(
-            f"sops --decrypt failed for {kind}/{name}: {stderr.decode()}"
+            f"sops --decrypt failed for {kind}/{name}: {stderr.decode()}",
         )
     decrypted: JsonValue = json.loads(stdout)
     if not isinstance(decrypted, dict):
@@ -89,11 +89,7 @@ async def maybe_decrypt(obj: Manifest) -> Manifest:
 
 
 def _public_key_from_identity_text(key_text: str) -> str:
-    return next(
-        line.split(":", 1)[1].strip()
-        for line in key_text.splitlines()
-        if line.startswith("# public key:")
-    )
+    return next(line.split(":", 1)[1].strip() for line in key_text.splitlines() if line.startswith("# public key:"))
 
 
 async def _generate_age_identity() -> str:
@@ -113,7 +109,9 @@ async def _generate_age_identity() -> str:
 
 
 def _add_recipient_to_sops_config(
-    config_file: str, sops_files: list[str], public_key: str
+    config_file: str,
+    sops_files: list[str],
+    public_key: str,
 ) -> bool:
     """Add `public_key` as an age recipient to every `creation_rules` entry
     in `config_file` whose `path_regex` matches one of `sops_files` (matched
@@ -180,7 +178,7 @@ async def _run_sops_updatekeys(config_file: str, sops_files: list[str]) -> None:
         stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
             raise SopsUpdateKeysError(
-                f"sops updatekeys failed for {sops_file}: {stderr.decode() or stdout.decode()}"
+                f"sops updatekeys failed for {sops_file}: {stderr.decode() or stdout.decode()}",
             )
 
 
@@ -240,7 +238,8 @@ async def ensure_age_identities(
             # applied in this same `ekn kubeapply` run) -- ensure it
             # directly rather than depending on apply ordering.
             namespace_obj = await build_object(
-                {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}}, api
+                {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}},
+                api,
             )
             await ssa_apply(namespace_obj, field_manager=field_manager)
 

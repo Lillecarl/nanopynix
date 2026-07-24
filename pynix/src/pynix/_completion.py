@@ -20,7 +20,7 @@ from typing import Any
 from pynix._nix_syntax import parse_nix
 
 _ATTRPATH_TAIL_RE = re.compile(
-    r"(?:^|[^A-Za-z0-9_'.-])((?:[A-Za-z_][A-Za-z0-9_'-]*\.)*)([A-Za-z_][A-Za-z0-9_'-]*)?$"
+    r"(?:^|[^A-Za-z0-9_'.-])((?:[A-Za-z_][A-Za-z0-9_'-]*\.)*)([A-Za-z_][A-Za-z0-9_'-]*)?$",
 )
 
 
@@ -55,13 +55,13 @@ def _inside_comment(nodes: list[Any], byte_offset: int) -> bool:
     comment, e.g. ``# see pkgs.lib.<cursor>`` offering completions for
     ``pkgs.lib`` as if it were real code.
     """
-    return any(
-        node.type in _COMMENT_NODE_TYPES and node.start_byte <= byte_offset <= node.end_byte for node in nodes
-    )
+    return any(node.type in _COMMENT_NODE_TYPES and node.start_byte <= byte_offset <= node.end_byte for node in nodes)
 
 
 def _attrpath_binding_prefix_before_dot(
-    nodes: list[Any], byte_offset: int, encoded: bytes
+    nodes: list[Any],
+    byte_offset: int,
+    encoded: bytes,
 ) -> tuple[str, str] | None:
     """If a binding's own attrpath ends right before the dot at *byte_offset*, return its prefix.
 
@@ -137,7 +137,7 @@ def _flat_identifier_chain_before_dot(nodes: list[Any], byte_offset: int, encode
     return ".".join(segments)
 
 
-def _tree_prefix_at(source: str, byte_offset: int) -> tuple[str | None, str] | None | _NoMatch:
+def _tree_prefix_at(source: str, byte_offset: int) -> tuple[str | None, str] | None | _NoMatch:  # noqa: C901, PLR0911 tracked complexity/arg-count debt, see TODO.md
     """Tier 1: a tree-sitter structural match ending exactly at *byte_offset*.
 
     Matches three shapes: a ``select_expression`` (so it can complete after
@@ -224,9 +224,7 @@ def _tree_prefix_at(source: str, byte_offset: int) -> tuple[str | None, str] | N
         # expression just before it, so the original tree already has
         # everything needed.
         expressions = [
-            node
-            for node in nodes
-            if node.start_byte < node.end_byte == byte_offset - 1 and not node.has_error
+            node for node in nodes if node.start_byte < node.end_byte == byte_offset - 1 and not node.has_error
         ]
         if expressions:
             # The widest-spanning match, not just the last one found in

@@ -16,10 +16,15 @@ if TYPE_CHECKING:
 
 
 async def test_show_file(
-    shared_nix_environment: NixTestEnvironment, nixpkgs_path: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    shared_nix_environment: NixTestEnvironment,
+    nixpkgs_path: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     nix_file = tmp_path / "test.nix"
-    nix_file.write_text(with_nixpkgs("""
+    nix_file.write_text(
+        with_nixpkgs(
+            """
     let
       pkgs = import <nixpkgs> {};
     in
@@ -31,9 +36,12 @@ async def test_show_file(
         echo hi > "$out"
       '';
     }
-    """, nixpkgs_path))
+    """,
+            nixpkgs_path,
+        )
+    )
     cmd = Pynix.parse(
-        ["derivation", "show", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()]
+        ["derivation", "show", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()],
     )
     await cmd.astart()
     captured = capsys.readouterr()
@@ -47,10 +55,15 @@ async def test_show_file(
 
 
 async def test_show_file_with_attr(
-    shared_nix_environment: NixTestEnvironment, nixpkgs_path: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    shared_nix_environment: NixTestEnvironment,
+    nixpkgs_path: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     nix_file = tmp_path / "test.nix"
-    nix_file.write_text(with_nixpkgs("""
+    nix_file.write_text(
+        with_nixpkgs(
+            """
     let
       pkgs = import <nixpkgs> {};
     in
@@ -64,9 +77,12 @@ async def test_show_file_with_attr(
         '';
       };
     }
-    """, nixpkgs_path))
+    """,
+            nixpkgs_path,
+        )
+    )
     cmd = Pynix.parse(
-        ["derivation", "show", "--file", str(nix_file), "--attr", "hello", *shared_nix_environment.pynix_store_args()]
+        ["derivation", "show", "--file", str(nix_file), "--attr", "hello", *shared_nix_environment.pynix_store_args()],
     )
     await cmd.astart()
     captured = capsys.readouterr()
@@ -76,9 +92,13 @@ async def test_show_file_with_attr(
 
 
 async def test_show_flake(
-    shared_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
+    shared_nix_environment: NixTestEnvironment,
+    capsys: pytest.CaptureFixture[str],
+    git_flake: Path,
 ) -> None:
-    cmd = Pynix.parse(["derivation", "show", "--flake", f"{git_flake}#hello", *shared_nix_environment.pynix_store_args()])
+    cmd = Pynix.parse(
+        ["derivation", "show", "--flake", f"{git_flake}#hello", *shared_nix_environment.pynix_store_args()]
+    )
     await cmd.astart()
     captured = capsys.readouterr()
     result = json.loads(captured.out)
@@ -89,10 +109,12 @@ async def test_show_flake(
 
 
 async def test_show_flake_greeting_is_not_derivation(
-    shared_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
+    shared_nix_environment: NixTestEnvironment,
+    capsys: pytest.CaptureFixture[str],
+    git_flake: Path,
 ) -> None:
     cmd = Pynix.parse(
-        ["derivation", "show", "--flake", f"{git_flake}#greeting", *shared_nix_environment.pynix_store_args()]
+        ["derivation", "show", "--flake", f"{git_flake}#greeting", *shared_nix_environment.pynix_store_args()],
     )
     with pytest.raises(SystemExit):
         await cmd.astart()
@@ -119,12 +141,22 @@ async def test_show_both_file_and_flake_errors(tmp_path: Path, capsys: pytest.Ca
 
 
 async def test_show_file_missing_attr_errors(
-    shared_nix_environment: NixTestEnvironment, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    shared_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ present = 1; }")
     cmd = Pynix.parse(
-        ["derivation", "show", "--file", str(nix_file), "--attr", "missing", *shared_nix_environment.pynix_store_args()]
+        [
+            "derivation",
+            "show",
+            "--file",
+            str(nix_file),
+            "--attr",
+            "missing",
+            *shared_nix_environment.pynix_store_args(),
+        ],
     )
     with pytest.raises(SystemExit):
         await cmd.astart()
@@ -133,7 +165,9 @@ async def test_show_file_missing_attr_errors(
 
 
 async def test_show_file_wrong_type_attr_errors(
-    shared_nix_environment: NixTestEnvironment, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    shared_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text('{ type = "not-a-derivation"; }')
@@ -145,7 +179,9 @@ async def test_show_file_wrong_type_attr_errors(
 
 
 async def test_show_file_non_string_drv_path_errors(
-    shared_nix_environment: NixTestEnvironment, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    shared_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text('{ type = "derivation"; drvPath = 123; }')

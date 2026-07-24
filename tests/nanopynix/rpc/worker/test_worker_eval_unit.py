@@ -110,7 +110,7 @@ def test_worker_title_lists_open_store_uris(monkeypatch: pytest.MonkeyPatch) -> 
         def close(self) -> None:
             closed.append(self.uri)
 
-    monkeypatch.setattr(nix_core.nanopynix_store, "open_store", lambda uri: Store(uri))  # type: ignore[reportUnknownLambdaType, reportUnknownArgumentType] -- lambda receives Any from setattr
+    monkeypatch.setattr(nix_core.nanopynix_store, "open_store", Store)  # type: ignore[reportUnknownArgumentType] -- callable receives Any from setattr
     state = WorkerState()
     state.worker_subname = "quiet-otter"
     handler = WorkerServiceHandler(state)

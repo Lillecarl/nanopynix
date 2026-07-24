@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.skip(
     reason="nanopynix.rpc.daemon ('pump the nix daemon from Python') is unfinished "
     "lab/prototype work, not a supported feature -- per author, this should have "
-    "stayed on a throwaway branch."
+    "stayed on a throwaway branch.",
 )
 
 
@@ -55,7 +55,7 @@ async def test_daemon_worker_controls_native_listener(tmp_path: Path) -> None:
                 socket_path=str(socket_path),
                 store_uri=f"local?root={tmp_path / 'store'}",
                 load_config=False,
-            )
+            ),
         )
         assert started.socket_path == str(socket_path)
         running = await daemon.get_status(GetDaemonStatusRequest(request_id=3))

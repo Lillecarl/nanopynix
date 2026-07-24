@@ -74,9 +74,10 @@ async def _exec(
         env=env,
     )
     stdout, stderr = await proc.communicate(
-        input=stdin.encode() if stdin is not None else None
+        input=stdin.encode() if stdin is not None else None,
     )
-    assert proc.returncode is not None
+    if proc.returncode is None:
+        raise RuntimeError("subprocess returncode is unset after communicate() completed")
     return proc.returncode, stdout.decode(), stderr.decode()
 
 
@@ -166,6 +167,7 @@ def _gitops_file_groups(result: GitOpsManifestsResult) -> list[tuple[str, str]]:
 
 class Eval(Command):
     """Evaluate Nix and dump JSON."""
+
     file: _Path | None = arg(None, short="f", inherited=True)
     flake: str | None = arg(None, inherited=True)
     attr: str | None = arg(None, short="A", help="Dot-separated attribute path within the evaluation result.")
@@ -186,7 +188,11 @@ class Eval(Command):
             uri, customer = _parse_flake(self.flake) if self.flake is not None else (None, None)
             try:
                 result = await evaluate_with_fod_update(
-                    self.file, uri, customer, self.attr, source_file=self.source_file
+                    self.file,
+                    uri,
+                    customer,
+                    self.attr,
+                    source_file=self.source_file,
                 )
             except NixError as exc:
                 _log.error(exc.msg_without_ansi)
@@ -199,6 +205,7 @@ class Eval(Command):
 
 class Render(Command):
     """Render Kubernetes manifests as YAML on stdout."""
+
     file: _Path | None = arg(None, short="f", inherited=True)
     flake: str | None = arg(None, inherited=True)
     attr: str | None = arg(None, short="A", help="Dot-separated attribute path within the evaluation result.")
@@ -220,6 +227,7 @@ class Render(Command):
 
 class Diff(Command):
     """Diff GitOps-routed manifests against the deploy branch."""
+
     file: _Path | None = arg(None, short="f", inherited=True)
     flake: str | None = arg(None, inherited=True)
     attr: str | None = arg(None, short="A", help="Dot-separated attribute path within the evaluation result.")
@@ -239,7 +247,9 @@ class Diff(Command):
 
 
 async def _resolve_gitops(
-    file: _Path | None, flake: str | None, attr: str | None
+    file: _Path | None,
+    flake: str | None,
+    attr: str | None,
 ) -> tuple[str, str | None, list[tuple[str, str]]]:
     """Evaluate GitOps manifests and return `(deploy_branch, source_branch,
     files)` -- one branch pair per easykubenix instance, see
@@ -263,7 +273,7 @@ def _default_commit_message(attr: str | None) -> str:
     return f"ekn: render manifests from {attr or 'root'} @ {head_sha}"
 
 
-async def _finalize_commit(
+async def _finalize_commit(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
     deploy_branch: str,
     source_branch: str | None,
     files: list[tuple[str, str]],
@@ -294,7 +304,11 @@ async def _finalize_commit(
         try:
             if prepared is None:
                 prepared = prepare_deploy_and_source_commits(
-                    ".", deploy_branch, source_branch, files, message
+                    ".",
+                    deploy_branch,
+                    source_branch,
+                    files,
+                    message,
                 )
             finalize_branches(".", deploy_branch, source_branch, prepared)
         except ConcurrentDeployError as exc:
@@ -305,7 +319,10 @@ async def _finalize_commit(
             raise SystemExit(1) from exc
         _log.info(
             "committed to %s @ %s (source %s @ %s)",
-            deploy_branch, prepared.deploy_oid, source_branch, prepared.source_oid,
+            deploy_branch,
+            prepared.deploy_oid,
+            source_branch,
+            prepared.source_oid,
         )
     if push:
         await _git_push(remote, deploy_branch, source_branch)
@@ -314,6 +331,7 @@ async def _finalize_commit(
 class Commit(Command):
     """Render manifests and write them to the GitOps deploy (and paired
     source) branch."""
+
     file: _Path | None = arg(None, short="f", inherited=True)
     flake: str | None = arg(None, inherited=True)
     attr: str | None = arg(None, short="A", help="Dot-separated attribute path within the evaluation result.")
@@ -329,8 +347,13 @@ class Commit(Command):
         deploy_branch, source_branch, files = await _resolve_gitops(self.file, self.flake, self.attr)
         message = self.message or _default_commit_message(self.attr)
         await _finalize_commit(
-            deploy_branch, source_branch, files, message, None,
-            push=self.push, remote=self.remote,
+            deploy_branch,
+            source_branch,
+            files,
+            message,
+            None,
+            push=self.push,
+            remote=self.remote,
         )
         await try_jj_status(".")
 
@@ -347,11 +370,14 @@ async def _git_push(remote: str, deploy_branch: str, source_branch: str | None) 
         raise SystemExit(1)
 
 
-async def _push_cache(attr: str, file: _Path | None, flake: str | None, to: str, *, substitute_on_destination: bool, check_sigs: bool) -> None:
+async def _push_cache(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
+    attr: str, file: _Path | None, flake: str | None, to: str, *, substitute_on_destination: bool, check_sigs: bool
+) -> None:
     try:
         path = await realise_attr(file, flake, attr)
         await push_closure_to_store(
-            [path], to,
+            [path],
+            to,
             substitute_on_destination=substitute_on_destination,
             check_sigs=check_sigs,
         )
@@ -393,7 +419,9 @@ async def _push_ekn_cache(file: _Path | None, flake: str | None, attr: str | Non
         await push_closure_to_store([cache_package_out], cache_to)
     except NixError as exc:
         if allow_failure:
-            _log.warning(f"cache push to {cache_to} failed, continuing anyway (--cache-allow-failure)\n{exc.msg_without_ansi}")
+            _log.warning(
+                f"cache push to {cache_to} failed, continuing anyway (--cache-allow-failure)\n{exc.msg_without_ansi}"
+            )
             return
         _log.error(exc.msg_without_ansi)
         raise SystemExit(1) from exc
@@ -408,11 +436,12 @@ def _free_port() -> int:
 
 class Validate(Command):
     """Boot real etcd+kube-apiserver, apply manifests, and run kubeconform."""
+
     file: _Path | None = arg(None, short="f", inherited=True)
     flake: str | None = arg(None, inherited=True)
     attr: str | None = arg(None, short="A", help="Dot-separated attribute path within the evaluation result.")
 
-    async def run(self) -> None:
+    async def run(self) -> None:  # noqa: C901, PLR0912, PLR0915 tracked complexity/arg-count debt, see TODO.md
         if self.file is not None:
             cfg = await evaluate_validation_file(self.file, self.attr)
         else:
@@ -465,11 +494,16 @@ class Validate(Command):
             await Path(kubeadm_cfg).write_text(kubeadm_config_text)
 
             env = os.environ | {
-                "PATH": f"{k8s_bin}:{etcd_bin}:{kubeconform_bin}:" + os.environ.get("PATH", "")
+                "PATH": f"{k8s_bin}:{etcd_bin}:{kubeconform_bin}:" + os.environ.get("PATH", ""),
             }
 
             rc, _, err = await _exec(
-                "kubeadm", "init", "phase", "certs", "all", f"--config={kubeadm_cfg}",
+                "kubeadm",
+                "init",
+                "phase",
+                "certs",
+                "all",
+                f"--config={kubeadm_cfg}",
                 env=env,
             )
             if rc != 0:
@@ -477,8 +511,13 @@ class Validate(Command):
                 raise SystemExit(1)
 
             rc, _, err = await _exec(
-                "kubeadm", "init", "phase", "kubeconfig", "admin",
-                f"--config={kubeadm_cfg}", f"--kubeconfig-dir={tmp}",
+                "kubeadm",
+                "init",
+                "phase",
+                "kubeconfig",
+                "admin",
+                f"--config={kubeadm_cfg}",
+                f"--kubeconfig-dir={tmp}",
                 env=env,
             )
             if rc != 0:
@@ -486,8 +525,13 @@ class Validate(Command):
                 raise SystemExit(1)
 
             rc, _, err = await _exec(
-                "kubeadm", "init", "phase", "kubeconfig", "admin",
-                f"--config={kubeadm_cfg}", f"--kubeconfig-dir={tmp}",
+                "kubeadm",
+                "init",
+                "phase",
+                "kubeconfig",
+                "admin",
+                f"--config={kubeadm_cfg}",
+                f"--kubeconfig-dir={tmp}",
                 env=env,
             )
             if rc != 0:
@@ -496,24 +540,28 @@ class Validate(Command):
 
             _log.info("starting etcd")
             etcd_proc = await asyncio.create_subprocess_exec(
-                *["etcd",
-                  f"--data-dir={tmp}/etcd-data",
-                  "--name=default",
-                  f"--listen-client-urls=https://{bind}:{etcd_client_port}",
-                  f"--advertise-client-urls=https://{bind}:{etcd_client_port}",
-                  f"--listen-peer-urls=https://{bind}:{etcd_peer_port}",
-                  f"--initial-advertise-peer-urls=https://{bind}:{etcd_peer_port}",
-                  f"--initial-cluster=default=https://{bind}:{etcd_peer_port}",
-                  "--client-cert-auth=true",
-                  f"--trusted-ca-file={cert_dir}/etcd/ca.crt",
-                  f"--cert-file={cert_dir}/etcd/server.crt",
-                  f"--key-file={cert_dir}/etcd/server.key",
-                  "--peer-client-cert-auth=true",
-                  f"--peer-trusted-ca-file={cert_dir}/etcd/ca.crt",
-                  f"--peer-cert-file={cert_dir}/etcd/peer.crt",
-                  f"--peer-key-file={cert_dir}/etcd/peer.key",
-                  "--log-level=error"],
-                env=env, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+                *[
+                    "etcd",
+                    f"--data-dir={tmp}/etcd-data",
+                    "--name=default",
+                    f"--listen-client-urls=https://{bind}:{etcd_client_port}",
+                    f"--advertise-client-urls=https://{bind}:{etcd_client_port}",
+                    f"--listen-peer-urls=https://{bind}:{etcd_peer_port}",
+                    f"--initial-advertise-peer-urls=https://{bind}:{etcd_peer_port}",
+                    f"--initial-cluster=default=https://{bind}:{etcd_peer_port}",
+                    "--client-cert-auth=true",
+                    f"--trusted-ca-file={cert_dir}/etcd/ca.crt",
+                    f"--cert-file={cert_dir}/etcd/server.crt",
+                    f"--key-file={cert_dir}/etcd/server.key",
+                    "--peer-client-cert-auth=true",
+                    f"--peer-trusted-ca-file={cert_dir}/etcd/ca.crt",
+                    f"--peer-cert-file={cert_dir}/etcd/peer.crt",
+                    f"--peer-key-file={cert_dir}/etcd/peer.key",
+                    "--log-level=error",
+                ],
+                env=env,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
             )
 
             for attempt in range(10):
@@ -523,7 +571,8 @@ class Validate(Command):
                     f"--cacert={cert_dir}/etcd/ca.crt",
                     f"--cert={cert_dir}/etcd/healthcheck-client.crt",
                     f"--key={cert_dir}/etcd/healthcheck-client.key",
-                    "endpoint", "health",
+                    "endpoint",
+                    "health",
                     env=env,
                 )
                 if rc == 0:
@@ -538,31 +587,38 @@ class Validate(Command):
 
             _log.info("starting kube-apiserver")
             apiserver_proc = await asyncio.create_subprocess_exec(
-                *["kube-apiserver",
-                  "--watch-cache=false",
-                  "--anonymous-auth=false",
-                  f"--etcd-cafile={cert_dir}/etcd/ca.crt",
-                  f"--etcd-certfile={cert_dir}/apiserver-etcd-client.crt",
-                  f"--etcd-keyfile={cert_dir}/apiserver-etcd-client.key",
-                  f"--etcd-servers=https://{bind}:{etcd_client_port}",
-                  f"--service-cluster-ip-range={subnet}",
-                  f"--bind-address={bind}",
-                  f"--secure-port={k8s_port}",
-                  "--allow-privileged=true",
-                  f"--client-ca-file={cert_dir}/ca.crt",
-                  f"--kubelet-client-certificate={cert_dir}/apiserver-kubelet-client.crt",
-                  f"--kubelet-client-key={cert_dir}/apiserver-kubelet-client.key",
-                  "--service-account-issuer=https://kubernetes.default.svc.cluster.local",
-                  f"--service-account-key-file={cert_dir}/sa.pub",
-                  f"--service-account-signing-key-file={cert_dir}/sa.key",
-                  f"--tls-cert-file={cert_dir}/apiserver.crt",
-                  f"--tls-private-key-file={cert_dir}/apiserver.key"],
-                env=env, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+                *[
+                    "kube-apiserver",
+                    "--watch-cache=false",
+                    "--anonymous-auth=false",
+                    f"--etcd-cafile={cert_dir}/etcd/ca.crt",
+                    f"--etcd-certfile={cert_dir}/apiserver-etcd-client.crt",
+                    f"--etcd-keyfile={cert_dir}/apiserver-etcd-client.key",
+                    f"--etcd-servers=https://{bind}:{etcd_client_port}",
+                    f"--service-cluster-ip-range={subnet}",
+                    f"--bind-address={bind}",
+                    f"--secure-port={k8s_port}",
+                    "--allow-privileged=true",
+                    f"--client-ca-file={cert_dir}/ca.crt",
+                    f"--kubelet-client-certificate={cert_dir}/apiserver-kubelet-client.crt",
+                    f"--kubelet-client-key={cert_dir}/apiserver-kubelet-client.key",
+                    "--service-account-issuer=https://kubernetes.default.svc.cluster.local",
+                    f"--service-account-key-file={cert_dir}/sa.pub",
+                    f"--service-account-signing-key-file={cert_dir}/sa.key",
+                    f"--tls-cert-file={cert_dir}/apiserver.crt",
+                    f"--tls-private-key-file={cert_dir}/apiserver.key",
+                ],
+                env=env,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
             )
 
             for attempt in range(10):
                 rc, _, err = await _exec(
-                    "kubectl", "get", "--raw", "/healthz",
+                    "kubectl",
+                    "get",
+                    "--raw",
+                    "/healthz",
                     env=env,
                 )
                 if rc == 0:
@@ -588,23 +644,24 @@ class Validate(Command):
             # throwaway, controller-less apiserver (e.g. an aggregated
             # APIService whose backing Service/Pod never actually runs
             # here) -- see kubernetes.nix's `ekn.novalidate`/`novalidateKeys`.
-            novalidate_keys = {
-                (k["kind"], k["namespace"], k["name"]) for k in c.novalidate_keys
-            }
+            novalidate_keys = {(k["kind"], k["namespace"], k["name"]) for k in c.novalidate_keys}
             if novalidate_keys:
                 skipped = [
-                    obj for obj in objects
+                    obj
+                    for obj in objects
                     if (obj["kind"], obj.get("metadata", {}).get("namespace", "none"), obj["metadata"]["name"])
                     in novalidate_keys
                 ]
                 for obj in skipped:
                     _log.debug(
-                        "skipping (novalidate)", kind=obj["kind"],
+                        "skipping (novalidate)",
+                        kind=obj["kind"],
                         namespace=obj.get("metadata", {}).get("namespace"),
                         name=obj["metadata"]["name"],
                     )
                 objects = [
-                    obj for obj in objects
+                    obj
+                    for obj in objects
                     if (obj["kind"], obj.get("metadata", {}).get("namespace", "none"), obj["metadata"]["name"])
                     not in novalidate_keys
                 ]
@@ -632,7 +689,10 @@ class Validate(Command):
 
             _log.info("dumping OpenAPI schema")
             rc, out, err = await _exec(
-                "kubectl", "get", "--raw", "/openapi/v2",
+                "kubectl",
+                "get",
+                "--raw",
+                "/openapi/v2",
                 env=env,
             )
             if rc != 0:
@@ -643,8 +703,11 @@ class Validate(Command):
             _log.info("running kubeconform")
             manifest_data = await Path(manifest_path).read_text()
             rc, out, err = await _exec(
-                "kubeconform", f"-schema-location={schema_file}", "-summary",
-                stdin=manifest_data, env=env,
+                "kubeconform",
+                f"-schema-location={schema_file}",
+                "-summary",
+                stdin=manifest_data,
+                env=env,
             )
             sys.stdout.write(out)
             if rc != 0:
@@ -721,6 +784,7 @@ class Deploy(Commit):
         help="Stream build/eval log lines from nanopynix's worker to stderr as they "
         "happen, for visibility into what's taking long during Validate/cache-push/Commit.",
     )
+
     async def run(self) -> None:
         with verbose_session(self.verbosity, print_build_logs=self.print_build_logs):
             deploy_branch, source_branch, files = await _resolve_gitops(self.file, self.flake, self.attr)
@@ -734,7 +798,11 @@ class Deploy(Commit):
             if source_branch is not None:
                 with timed_stage("deploy: prepare commits"):
                     prepared = prepare_deploy_and_source_commits(
-                        ".", deploy_branch, source_branch, files, message
+                        ".",
+                        deploy_branch,
+                        source_branch,
+                        files,
+                        message,
                     )
 
             if not self.no_verify:
@@ -744,8 +812,13 @@ class Deploy(Commit):
                 await _push_ekn_cache(self.file, self.flake, self.attr, allow_failure=self.cache_allow_failure)
             with timed_stage("deploy: commit (total, incl. git push)"):
                 await _finalize_commit(
-                    deploy_branch, source_branch, files, message, prepared,
-                    push=self.push, remote=self.remote,
+                    deploy_branch,
+                    source_branch,
+                    files,
+                    message,
+                    prepared,
+                    push=self.push,
+                    remote=self.remote,
                 )
         await try_jj_status(".")
 
@@ -761,12 +834,14 @@ class Rollback(Command):
     `--file`/`--flake` is the routine convenience for a one-step-back
     during normal testing, when Nix eval is healthy.
     """
+
     deploy_branch: str | None = arg(
-        None, help="Deploy branch to roll back, bypassing Nix evaluation entirely. "
-        "Mutually exclusive with --file/--flake.",
+        None,
+        help="Deploy branch to roll back, bypassing Nix evaluation entirely. Mutually exclusive with --file/--flake.",
     )
     source_branch: str | None = arg(
-        None, help="Paired source branch to roll back alongside --deploy-branch (optional).",
+        None,
+        help="Paired source branch to roll back alongside --deploy-branch (optional).",
     )
     file: _Path | None = arg(None, short="f", inherited=True)
     flake: str | None = arg(None, inherited=True)
@@ -781,6 +856,7 @@ class Rollback(Command):
         "Off by default: an incident rollback should be fast, and the restored tree was already "
         "validated when it was first deployed.",
     )
+
     async def run(self) -> None:
         has_nix_entrypoint = self.file is not None or self.flake is not None
         if self.deploy_branch is not None:
@@ -801,7 +877,11 @@ class Rollback(Command):
 
         try:
             prepared = rollback_branches(
-                ".", deploy_branch, source_branch, steps_back=self.steps_back, to=self.to
+                ".",
+                deploy_branch,
+                source_branch,
+                steps_back=self.steps_back,
+                to=self.to,
             )
         except (ValueError, TypeError) as exc:
             _log.error("rollback failed: %s", exc)
@@ -839,6 +919,7 @@ class KubeApply(Command):
     SOPS-decrypting workload bootstrapped (e.g. argocd.nix's ksops
     support) declares it there instead of a bespoke bootstrap script.
     """
+
     @classmethod
     def prog(cls) -> str:
         return "kubeapply"
@@ -906,6 +987,7 @@ class ClusterDiff(Command):
     manual kubectl edits or other controllers. Read-only: nothing is
     applied, pruned, or waited on.
     """
+
     @classmethod
     def prog(cls) -> str:
         return "clusterdiff"
@@ -950,6 +1032,7 @@ class PushCache(Command):
     already does this automatically from `ekn.cacheTo`/`ekn.cachePackage`,
     no flags needed (see `Deploy`).
     """
+
     @classmethod
     def prog(cls) -> str:
         return "pushcache"
@@ -959,10 +1042,12 @@ class PushCache(Command):
     attr: str = arg(help="Dot-separated attribute path to build and push, e.g. 'kubenix.config.kluctl.projectDir'.")
     to: str = arg(help="Destination store URI, e.g. ssh-ng://nix@host:2222")
     substitute_on_destination: bool = arg(
-        True, help="Let the destination substitute from its own configured caches instead of streaming everything."
+        True,
+        help="Let the destination substitute from its own configured caches instead of streaming everything.",
     )
     check_sigs: bool = arg(
-        False, help="Verify signatures when copying (off by default, matching kluctl's existing preDeployScript)."
+        False,
+        help="Verify signatures when copying (off by default, matching kluctl's existing preDeployScript).",
     )
 
     async def run(self) -> None:
@@ -983,6 +1068,7 @@ class SplitManifest(Command):
     GitOps tree renders as a single build instead of one derivation per
     object. Not intended for interactive use.
     """
+
     json_file: Positional[_Path]
     out_dir: Positional[_Path]
 
@@ -1018,8 +1104,10 @@ class YamlToJson(Command):
     volume's `defaultMode: 0644` as octal) -- unlike the `yq`-based approach
     this replaced. Not intended for interactive use.
     """
+
     yaml_version: Literal["yaml11", "yaml12"] = arg(
-        "yaml12", help="YAML version to parse the input stream with."
+        "yaml12",
+        help="YAML version to parse the input stream with.",
     )
 
     @classmethod
@@ -1061,6 +1149,7 @@ class JsonToYaml(Command):
 
 class Ekn(Command):
     """easykubenix CLI — evaluate Nix and manage GitOps release branches."""
+
     subcommand: (
         Deploy
         | Eval
@@ -1078,7 +1167,9 @@ class Ekn(Command):
         | None
     ) = None
     file: _Path | None = arg(None, short="f", help="Nix file to evaluate.")
-    flake: str | None = arg(None, help="Flake reference (e.g. '.#myconfig'). Evaluates outputs.eknConfig.<system>.<attr>.")
+    flake: str | None = arg(
+        None, help="Flake reference (e.g. '.#myconfig'). Evaluates outputs.eknConfig.<system>.<attr>."
+    )
     attr: str | None = arg(None, short="A", help="Dot-separated attribute path within the evaluation result.")
 
     async def run(self) -> None:

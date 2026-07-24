@@ -145,7 +145,8 @@ class NixSettings(_NixConfigModel):
     filetransfer_retry_attempts: int | None = Field(default=None, json_schema_extra={"nix_version_min": _NIX_2_35})
     filetransfer_retry_delay: int | None = Field(default=None, json_schema_extra={"nix_version_min": _NIX_2_35})
     filetransfer_retry_delay_rate_limited: int | None = Field(
-        default=None, json_schema_extra={"nix_version_min": _NIX_2_35}
+        default=None,
+        json_schema_extra={"nix_version_min": _NIX_2_35},
     )
     filetransfer_retry_jitter: bool | None = Field(default=None, json_schema_extra={"nix_version_min": _NIX_2_35})
     filetransfer_retry_max_delay: int | None = Field(default=None, json_schema_extra={"nix_version_min": _NIX_2_35})
@@ -181,10 +182,12 @@ class NixSettings(_NixConfigModel):
     narinfo_cache_positive_ttl: int | None = None
     netrc_file: str | None = None
     nix_shell_always_looks_for_shell_nix: bool | None = Field(
-        default=None, json_schema_extra={"nix_version_min": _NIX_2_24}
+        default=None,
+        json_schema_extra={"nix_version_min": _NIX_2_24},
     )
     nix_shell_shebang_arguments_relative_to_script: bool | None = Field(
-        default=None, json_schema_extra={"nix_version_min": _NIX_2_24}
+        default=None,
+        json_schema_extra={"nix_version_min": _NIX_2_24},
     )
     plugin_files: list[str] | None = None
     post_build_hook: str | None = None
@@ -401,11 +404,7 @@ def check_settings_model_drift(
         metadata = {name: setting for name, setting in metadata.items() if name not in non_global_settings}
     known = set(metadata.keys())
     model_type = _model_for_surface(surface)
-    model = {
-        _alias(name)
-        for name, field in model_type.model_fields.items()
-        if _field_is_supported(field)
-    }
+    model = {_alias(name) for name, field in model_type.model_fields.items() if _field_is_supported(field)}
     registered_aliases = {alias for setting in metadata.values() for alias in setting.aliases}
     return SettingsDrift(missing=sorted(known - model), extra=sorted(model - known - registered_aliases))
 

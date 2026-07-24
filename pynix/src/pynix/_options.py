@@ -73,7 +73,9 @@ class OptionRecord:
 
 
 async def fetch_option_doc_list(
-    session: EvalSession, options_value: ValueProxy, lib_value: ValueProxy
+    session: EvalSession,
+    options_value: ValueProxy,
+    lib_value: ValueProxy,
 ) -> list[OptionRecord]:
     """Bulk-extract every visible, non-internal option under *options_value*.
 

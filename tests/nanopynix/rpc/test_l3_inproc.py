@@ -58,6 +58,7 @@ class _InprocWorkerClient:
             self._next_request_id += 1
             return await method(request)
 
+
 class _InprocManager:
     def __init__(self, worker: _InprocWorkerClient) -> None:
         self._worker = worker
@@ -128,7 +129,7 @@ async def l3_inproc(isolated_nix_environment: NixTestEnvironment) -> AsyncIterat
                 load_config=False,
                 settings=isolated_nix_environment.settings.to_worker_settings(),
                 experimental_features=["flakes"],
-            )
+            ),
         )
         store = await worker_stub.open_store(OpenStoreRequest(request_id=2, uri=store_uri))
         worker = _InprocWorkerClient(eval_stub, worker_stub)
@@ -305,19 +306,20 @@ async def test_store_cannot_close_while_its_eval_state_is_open(l3_inproc: _L3Inp
 
     with pytest.raises(GRPCError) as error:
         await l3_inproc.worker_stub.close_store(
-            CloseStoreRequest(request_id=1_000_002, store_handle=l3_inproc.initial_store_handle)
+            CloseStoreRequest(request_id=1_000_002, store_handle=l3_inproc.initial_store_handle),
         )
 
     assert "call CloseEval first" in str(error.value)
     await l3_inproc.worker_stub.close_store(
-        CloseStoreRequest(request_id=1_000_003, store_handle=l3_inproc.initial_store_handle, force=True)
+        CloseStoreRequest(request_id=1_000_003, store_handle=l3_inproc.initial_store_handle, force=True),
     )
     assert l3_inproc.state.handles.iter_kind(HandleKind.EVAL) == []
     assert l3_inproc.state.handles.iter_kind(HandleKind.STORE) == []
 
 
 async def test_locked_flake_explicit_release_removes_exact_worker_handle(
-    l3_inproc: _L3Inproc, tmp_path: Path
+    l3_inproc: _L3Inproc,
+    tmp_path: Path,
 ) -> None:
     init_flake_repo(tmp_path, "val = 1;")
     async with l3_inproc.eval as eval:
@@ -338,7 +340,8 @@ async def test_locked_flake_explicit_release_removes_exact_worker_handle(
 
 
 async def test_failed_locked_flake_release_retries_at_the_next_rpc_boundary(
-    l3_inproc: _L3Inproc, tmp_path: Path
+    l3_inproc: _L3Inproc,
+    tmp_path: Path,
 ) -> None:
     init_flake_repo(tmp_path, "val = 1;")
     async with l3_inproc.eval as eval:
@@ -368,7 +371,8 @@ async def test_locked_flake_finalizer_defers_then_drains_to_worker(l3_inproc: _L
 
 
 async def test_session_close_closes_eval_state_and_clears_values_and_locked_flakes(
-    l3_inproc: _L3Inproc, tmp_path: Path
+    l3_inproc: _L3Inproc,
+    tmp_path: Path,
 ) -> None:
     init_flake_repo(tmp_path, "val = 1;")
     eval = l3_inproc.eval

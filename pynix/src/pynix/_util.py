@@ -14,6 +14,9 @@ if TYPE_CHECKING:
 _RESULT_BUILD_LOG_LINE = 101
 _RESULT_POST_BUILD_LOG_LINE = 107
 _LOG_DRAIN_SECONDS = 0.5
+# A Nix "result" action's args are at least [_, result_type], with an
+# optional trailing fields list.
+_MIN_RESULT_EVENT_ARGS = 2
 
 
 def configure_logging(*, file: TextIO | None = None) -> None:
@@ -28,7 +31,10 @@ def configure_logging(*, file: TextIO | None = None) -> None:
 
 @asynccontextmanager
 async def forward_nix_logs(
-    session: Any, *, print_build_logs: bool = False, log_file: TextIO | None = None
+    session: Any,
+    *,
+    print_build_logs: bool = False,
+    log_file: TextIO | None = None,
 ) -> AsyncGenerator[None]:
     old_config = structlog.get_config()
     if log_file is None:
@@ -73,7 +79,10 @@ async def _forward_nix_logs(session: Any, *, print_build_logs: bool) -> None:
         if result_type in {_RESULT_BUILD_LOG_LINE, _RESULT_POST_BUILD_LOG_LINE}:
             if print_build_logs:
                 logger.info(
-                    "nix build log", message=result_message, request_id=event.request_id, result_type=result_type
+                    "nix build log",
+                    message=result_message,
+                    request_id=event.request_id,
+                    result_type=result_type,
                 )
             continue
         if event.action == "error":
@@ -94,10 +103,10 @@ def _result_event(event: Any) -> tuple[int | None, str | None]:
     if event.action != "result":
         return None, None
     args = event.args
-    if len(args) < 2 or not isinstance(args[1], int):
+    if len(args) < _MIN_RESULT_EVENT_ARGS or not isinstance(args[1], int):
         return None, None
     result_type = args[1]
-    fields: list[Any] = cast("list[Any]", args[2]) if len(args) > 2 else []
+    fields: list[Any] = cast("list[Any]", args[2]) if len(args) > _MIN_RESULT_EVENT_ARGS else []
     message = None
     for field in reversed(fields):
         if isinstance(field, str):

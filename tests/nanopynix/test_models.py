@@ -81,7 +81,7 @@ class TestPathInfo:
                 "path": "/nix/store/" + "a" * 32 + "-p",
                 "nar_hash": "sha256:abc",
                 "nar_size": 0,
-            }
+            },
         )
         assert isinstance(pi.path, str)
         assert pi.nar_size == 0
@@ -112,7 +112,7 @@ class TestBuildResult:
                 "drv_path": "/nix/store/x.drv",
                 "success": False,
                 "status": "timed-out",
-            }
+            },
         )
         assert br.success is False
 
@@ -139,7 +139,7 @@ class TestInput:
                 "owner": AttrsValue(string_value="NixOS"),
                 "repo": AttrsValue(string_value="nixpkgs"),
                 "ref": AttrsValue(string_value="nixos-24.11"),
-            }
+            },
         )
         assert inp.attrs["type"].string_value == "github"
 
@@ -148,7 +148,7 @@ class TestInput:
             attrs={
                 "type": AttrsValue(string_value="indirect"),
                 "id": AttrsValue(string_value="nixpkgs"),
-            }
+            },
         )
         assert inp.attrs["id"].string_value == "nixpkgs"
 
@@ -169,7 +169,7 @@ class TestFlakeRef:
                 "repo": AttrsValue(string_value="nixpkgs"),
                 "ref": AttrsValue(string_value="nixos-24.11"),
                 "dir": AttrsValue(string_value="lib"),
-            }
+            },
         )
         assert fr.attrs["dir"].string_value == "lib"
 
@@ -179,7 +179,7 @@ class TestFlakeRef:
                 "type": AttrsValue(string_value="github"),
                 "owner": AttrsValue(string_value="NixOS"),
                 "repo": AttrsValue(string_value="nixpkgs"),
-            }
+            },
         )
         assert fr.attrs["repo"].string_value == "nixpkgs"
 
@@ -201,7 +201,7 @@ class TestLockedInput:
                     "repo": AttrsValue(string_value="nixpkgs"),
                     "ref": AttrsValue(string_value="nixos-24.11"),
                     "rev": AttrsValue(string_value="abc123"),
-                }
+                },
             ),
             is_flake=True,
         )
@@ -221,7 +221,7 @@ class TestLockedInput:
                 entries={
                     "type": AttrsValue(string_value="tarball"),
                     "url": AttrsValue(string_value="https://..."),
-                }
+                },
             ),
             is_flake=False,
         )
@@ -247,7 +247,7 @@ class TestLockedFlake:
                             "owner": AttrsValue(string_value="NixOS"),
                             "repo": AttrsValue(string_value="nixpkgs"),
                             "rev": AttrsValue(string_value="abc"),
-                        }
+                        },
                     ),
                     is_flake=True,
                 ),
@@ -257,7 +257,7 @@ class TestLockedFlake:
                             "type": AttrsValue(string_value="github"),
                             "owner": AttrsValue(string_value="x"),
                             "repo": AttrsValue(string_value="y"),
-                        }
+                        },
                     ),
                     is_flake=False,
                 ),
@@ -281,7 +281,7 @@ class TestLockedFlake:
                             "owner": AttrsValue(string_value="NixOS"),
                             "repo": AttrsValue(string_value="nixpkgs"),
                             "rev": AttrsValue(string_value="abc"),
-                        }
+                        },
                     ),
                     is_flake=True,
                 ),
@@ -396,7 +396,7 @@ def test_derivation_from_dict():
                     "dynamic_outputs": {"dev": "out"},
                 },
             },
-        }
+        },
     )
 
     assert drv.system == "x86_64-linux"

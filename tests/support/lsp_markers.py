@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from lsprotocol import types
 
 _MARKER_RE = re.compile(
-    r'(?P<pre>v)?LS(?P<role>POINT|START|END)(?P<id>[A-Za-z0-9_]+)(?(pre)|v)(?:"(?P<check>[^"]*)")?'
+    r'(?P<pre>v)?LS(?P<role>POINT|START|END)(?P<id>[A-Za-z0-9_]+)(?(pre)|v)(?:"(?P<check>[^"]*)")?',
 )
 _LINE_MARKER_RE = re.compile(r"LSLINE(?P<id>[A-Za-z0-9_]+)")
 
@@ -72,7 +72,9 @@ def _target_line(lines: list[str], comment_line_number: int) -> tuple[int, str]:
         raise ValueError(f"line {comment_line_number + 1}: marker has no target line below it")
     target_line = lines[target_number]
     if target_line.lstrip().startswith("#"):
-        raise ValueError(f"line {comment_line_number + 1}: marker's target line {target_number + 1} is itself a comment")
+        raise ValueError(
+            f"line {comment_line_number + 1}: marker's target line {target_number + 1} is itself a comment"
+        )
     return target_number, target_line
 
 
@@ -83,11 +85,11 @@ def _check_column(target_line: str, column: int, check: str | None, *, context: 
     if actual != check:
         raise ValueError(
             f"{context}: expected {check!r} at column {column} of {target_line!r}, found {actual!r} "
-            "-- the marker's caret column no longer lines up with its target text"
+            "-- the marker's caret column no longer lines up with its target text",
         )
 
 
-def parse_markers(source: str) -> dict[str, Marker]:
+def parse_markers(source: str) -> dict[str, Marker]:  # noqa: C901 tracked complexity/arg-count debt, see TODO.md
     """Parse every ``# LS...`` marker comment in *source* into a name -> ``Marker`` map.
 
     Raises ``ValueError`` on a malformed scenario file: a marker with no

@@ -28,7 +28,11 @@ def test_prepare_finalize_two_deploys_with_source(tmp_path: Path) -> None:
     _init_repo(tmp_path)
 
     prepared1 = prepare_deploy_and_source_commits(
-        str(tmp_path), "deploy", "source", [("app.yaml", "v1")], "deploy 1"
+        str(tmp_path),
+        "deploy",
+        "source",
+        [("app.yaml", "v1")],
+        "deploy 1",
     )
     finalize_branches(str(tmp_path), "deploy", "source", prepared1)
 
@@ -43,7 +47,11 @@ def test_prepare_finalize_two_deploys_with_source(tmp_path: Path) -> None:
     assert len(source1.parents) == 0
 
     prepared2 = prepare_deploy_and_source_commits(
-        str(tmp_path), "deploy", "source", [("app.yaml", "v2")], "deploy 2"
+        str(tmp_path),
+        "deploy",
+        "source",
+        [("app.yaml", "v2")],
+        "deploy 2",
     )
     finalize_branches(str(tmp_path), "deploy", "source", prepared2)
 
@@ -73,12 +81,20 @@ def test_finalize_detects_concurrent_deploy(tmp_path: Path) -> None:
     _init_repo(tmp_path)
 
     prepared_a = prepare_deploy_and_source_commits(
-        str(tmp_path), "deploy", "source", [("a.yaml", "a")], "a"
+        str(tmp_path),
+        "deploy",
+        "source",
+        [("a.yaml", "a")],
+        "a",
     )
     # A concurrent deploy finishes (prepare + finalize) before `prepared_a`
     # gets its turn to finalize.
     prepared_b = prepare_deploy_and_source_commits(
-        str(tmp_path), "deploy", "source", [("b.yaml", "b")], "b"
+        str(tmp_path),
+        "deploy",
+        "source",
+        [("b.yaml", "b")],
+        "b",
     )
     finalize_branches(str(tmp_path), "deploy", "source", prepared_b)
 
@@ -90,11 +106,19 @@ def test_rollback_creates_new_commit_without_altering_history(tmp_path: Path) ->
     _init_repo(tmp_path)
 
     prepared1 = prepare_deploy_and_source_commits(
-        str(tmp_path), "deploy", "source", [("a.yaml", "v1")], "deploy 1"
+        str(tmp_path),
+        "deploy",
+        "source",
+        [("a.yaml", "v1")],
+        "deploy 1",
     )
     finalize_branches(str(tmp_path), "deploy", "source", prepared1)
     prepared2 = prepare_deploy_and_source_commits(
-        str(tmp_path), "deploy", "source", [("a.yaml", "v2")], "deploy 2"
+        str(tmp_path),
+        "deploy",
+        "source",
+        [("a.yaml", "v2")],
+        "deploy 2",
     )
     finalize_branches(str(tmp_path), "deploy", "source", prepared2)
 

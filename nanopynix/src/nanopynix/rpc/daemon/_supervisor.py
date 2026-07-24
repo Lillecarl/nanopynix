@@ -123,7 +123,8 @@ class DaemonSupervisor:
         self._stop_event = anyio.Event()
         ready = anyio.Event()
         self._run_task = asyncio.create_task(
-            self._run(listener, ready), name=f"nanopynix-daemon-supervisor:{self._socket_path}"
+            self._run(listener, ready),
+            name=f"nanopynix-daemon-supervisor:{self._socket_path}",
         )
         await ready.wait()
 
@@ -184,7 +185,7 @@ class DaemonSupervisor:
             await listener.serve(self._serve_connection, task_group)
 
     async def _serve_connection(self, connection: SocketStream) -> None:
-        raw = connection.extra(SocketAttribute.raw_socket)
+        raw = connection.extra(SocketAttribute.raw_socket)  # noqa: S610 -- anyio SocketStream.extra(), not Django QuerySet.extra()
         # anyio accepts from a non-blocking listener. Nix's FdSource uses
         # blocking reads, so restore the daemon protocol's expected
         # descriptor mode before the exec'd worker inherits it.

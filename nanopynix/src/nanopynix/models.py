@@ -98,6 +98,8 @@ from strip_ansi import (  # type: ignore[reportMissingTypeStubs] -- strip_ansi h
 class StorePath(str):
     """A store path string with parsed Nix store-path properties."""
 
+    __slots__ = ()
+
     HashLen = 32
     MaxPathLen = 211
 
@@ -140,8 +142,8 @@ class GcResult:
 class LogEventExt(_LogEventProto):
     """Typed worker log event with Nix-log convenience accessors."""
 
-    _ = _LogEventProto._betterproto
-    _betterproto_meta = _LogEventProto._betterproto_meta
+    _ = _LogEventProto._betterproto  # noqa: SLF001
+    _betterproto_meta = _LogEventProto._betterproto_meta  # noqa: SLF001
 
     def __init__(self, **kwargs: Any) -> None:
         if "args" in kwargs:

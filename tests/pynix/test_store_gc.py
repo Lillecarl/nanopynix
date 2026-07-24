@@ -106,7 +106,7 @@ async def test_is_valid_path(populated_store: dict[str, str], capsys: pytest.Cap
 
 async def test_follow_links_to_store_path(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     cmd = Pynix.parse(
-        ["store", "follow-links-to-store-path", populated_store["hello_path"], "--store", populated_store["store_url"]]
+        ["store", "follow-links-to-store-path", populated_store["hello_path"], "--store", populated_store["store_url"]],
     )
     await cmd.astart()
     captured = capsys.readouterr()
@@ -125,7 +125,7 @@ async def test_compute_fs_closure(populated_store: dict[str, str], capsys: pytes
 
 async def test_query_missing(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     cmd = Pynix.parse(
-        ["store", "query-missing", populated_store["hello_path"], "--store", populated_store["store_url"]]
+        ["store", "query-missing", populated_store["hello_path"], "--store", populated_store["store_url"]],
     )
     await cmd.astart()
     captured = capsys.readouterr()
@@ -144,7 +144,9 @@ async def test_query_derivation_outputs(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     nix_file = tmp_path / "test.nix"
-    nix_file.write_text(with_nixpkgs("""
+    nix_file.write_text(
+        with_nixpkgs(
+            """
     let
       pkgs = import <nixpkgs> {};
     in
@@ -156,14 +158,17 @@ async def test_query_derivation_outputs(
         echo hi > "$out"
       '';
     }
-    """, nixpkgs_path))
+    """,
+            nixpkgs_path,
+        )
+    )
     show = Pynix.parse(["derivation", "show", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
     await show.astart()
     captured = capsys.readouterr()
     drv_path = next(iter(json.loads(captured.out)))
 
     cmd = Pynix.parse(
-        ["store", "query-derivation-outputs", drv_path, *shared_nix_environment.pynix_store_args()]
+        ["store", "query-derivation-outputs", drv_path, *shared_nix_environment.pynix_store_args()],
     )
     await cmd.astart()
     captured = capsys.readouterr()
@@ -200,7 +205,7 @@ async def test_query_referrers(populated_store: dict[str, str], capsys: pytest.C
 
 async def test_query_substitutable_paths(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     cmd = Pynix.parse(
-        ["store", "query-substitutable-paths", populated_store["hello_path"], "--store", populated_store["store_url"]]
+        ["store", "query-substitutable-paths", populated_store["hello_path"], "--store", populated_store["store_url"]],
     )
     await cmd.astart()
     captured = capsys.readouterr()
@@ -210,7 +215,7 @@ async def test_query_substitutable_paths(populated_store: dict[str, str], capsys
 
 async def test_add_temp_root(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     cmd = Pynix.parse(
-        ["store", "add-temp-root", populated_store["hello_path"], "--store", populated_store["store_url"]]
+        ["store", "add-temp-root", populated_store["hello_path"], "--store", populated_store["store_url"]],
     )
     await cmd.astart()
     captured = capsys.readouterr()
@@ -218,7 +223,9 @@ async def test_add_temp_root(populated_store: dict[str, str], capsys: pytest.Cap
     assert data == {"path": populated_store["hello_path"], "added": True}
 
 
-async def test_add_perm_root_and_indirect_root(populated_store: dict[str, str], tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+async def test_add_perm_root_and_indirect_root(
+    populated_store: dict[str, str], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
     root_path = tmp_path / "pynix-gc-root"
     cmd = Pynix.parse(
         [
@@ -228,7 +235,7 @@ async def test_add_perm_root_and_indirect_root(populated_store: dict[str, str], 
             str(root_path),
             "--store",
             populated_store["store_url"],
-        ]
+        ],
     )
     await cmd.astart()
     captured = capsys.readouterr()
@@ -252,7 +259,9 @@ async def test_ensure_path(populated_store: dict[str, str], capsys: pytest.Captu
     assert data == {"path": store_path, "valid": True}
 
 
-async def test_store_cat_reads_file_from_populated_store(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
+async def test_store_cat_reads_file_from_populated_store(
+    populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]
+):
     cmd = Pynix.parse(["store", "cat", populated_store["text_path"], "--store", populated_store["store_url"]])
     await cmd.astart()
     captured = capsys.readouterr()
@@ -272,7 +281,9 @@ async def test_store_ls_lists_populated_store_path(populated_store: dict[str, st
     assert {"name": "bin", "type": "directory"} in data["entries"]
 
 
-async def test_store_cat_local_path_mapping_unit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+async def test_store_cat_local_path_mapping_unit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
     store_root = tmp_path / "store-root"
     store_url = "test://store"
     out_path = "/nix/store/00000000000000000000000000000000-pynix-store-cat-test"
@@ -287,7 +298,9 @@ async def test_store_cat_local_path_mapping_unit(tmp_path: Path, monkeypatch: py
     assert captured.out == "cat-output\n"
 
 
-async def test_store_ls_local_path_mapping_unit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+async def test_store_ls_local_path_mapping_unit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
     store_root = tmp_path / "store-root"
     store_url = "test://store"
     out_path = "/nix/store/00000000000000000000000000000000-pynix-store-ls-test"
@@ -311,11 +324,13 @@ async def test_store_ls_local_path_mapping_unit(tmp_path: Path, monkeypatch: pyt
         "entries": [
             {"name": "bin", "type": "directory"},
             {"name": "share", "type": "directory"},
-        ]
+        ],
     }
 
 
-async def test_store_diff_closures_reports_added_removed_and_size_delta(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+async def test_store_diff_closures_reports_added_removed_and_size_delta(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
     before_path = "/nix/store/00000000000000000000000000000000-before"
     after_path = "/nix/store/11111111111111111111111111111111-after"
     common_path = "/nix/store/22222222222222222222222222222222-common"
@@ -388,7 +403,7 @@ def _install_fake_nanopynix(
                 store_root,
                 closures=closures or {},
                 nar_sizes=nar_sizes or {},
-            )
+            ),
         ),
     )
 

@@ -174,7 +174,7 @@ class _EvalOwner:
     active: _ActiveFlag | None = None
 
     def owns(self, value: ValueProxy) -> bool:
-        return value._ctx.owner.token is self.token  # type: ignore[reportPrivateUsage] -- cross-class access
+        return value._ctx.owner.token is self.token  # type: ignore[reportPrivateUsage] -- cross-class access  # noqa: SLF001
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,7 +311,7 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
                 await self._drain_deferred_releases_locked()
             if method_name != "open_eval":
                 message.eval_handle = self._eval_handle  # type: ignore[attr-defined] -- every non-OpenEval EvalService request carries eval_handle=100
-            method = getattr(self._worker._eval_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
+            method = getattr(self._worker._eval_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access  # noqa: SLF001
             return await self._worker.invoke(method, message, timeout=self._rpc_timeout)
 
     async def drain_deferred_releases(self) -> None:
@@ -327,14 +327,14 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
         try:
             for ref in self._releases.drain():
                 if ref.kind == HandleKind.VALUE:
-                    method = self._worker._eval_stub.release  # type: ignore[reportPrivateUsage] -- EvalProxy owns the worker RPC boundary
+                    method = self._worker._eval_stub.release  # type: ignore[reportPrivateUsage] -- EvalProxy owns the worker RPC boundary  # noqa: SLF001
                     await self._worker.invoke(
                         method,
                         ReleaseRequest(handle=ref.handle, eval_handle=self._eval_handle),
                         timeout=self._rpc_timeout,
                     )
                 elif ref.kind == HandleKind.LOCKED_FLAKE:
-                    method = self._worker._eval_stub.release_locked_flake  # type: ignore[reportPrivateUsage] -- EvalProxy owns the worker RPC boundary
+                    method = self._worker._eval_stub.release_locked_flake  # type: ignore[reportPrivateUsage] -- EvalProxy owns the worker RPC boundary  # noqa: SLF001
                     await self._worker.invoke(
                         method,
                         ReleaseLockedFlakeRequest(handle=ref.handle, eval_handle=self._eval_handle),
@@ -347,7 +347,7 @@ class EvalProxy(RpcProxyMixin, EvalServiceBase, rpc_service_base=EvalServiceBase
 
     async def _store_proxy_call(self, method_name: str, message: Message) -> Any:
         self._check_active()
-        method = getattr(self._worker._store_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access
+        method = getattr(self._worker._store_stub, method_name)  # type: ignore[reportPrivateUsage] -- cross-class access  # noqa: SLF001
         return await self._worker.invoke(method, message, timeout=self._rpc_timeout)
 
 
@@ -361,7 +361,7 @@ class _EvalProxyContext:
     releases: _DeferredReleases = field(init=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "releases", self.proxy._releases)  # type: ignore[reportPrivateUsage] -- context shares its proxy's session cleanup queue
+        object.__setattr__(self, "releases", self.proxy._releases)  # type: ignore[reportPrivateUsage] -- context shares its proxy's session cleanup queue  # noqa: SLF001
 
     def with_timeout(self, timeout: float | None) -> _EvalProxyContext:
         if timeout is None:
@@ -480,8 +480,8 @@ class ValueProxy:
         if isinstance(self._state, _ResolvedValue):
             return
         lazy = self._state
-        await lazy.parent._ensure_resolved(timeout=timeout)
-        parent = lazy.parent._resolved
+        await lazy.parent._ensure_resolved(timeout=timeout)  # noqa: SLF001
+        parent = lazy.parent._resolved  # noqa: SLF001
         if isinstance(lazy.selector, str):
             handle = await self._ctx.proxy.attr(AttrRequest(handle=parent.handle, name=lazy.selector))
         else:
@@ -523,17 +523,17 @@ class ValueProxy:
         if isinstance(value, ValueProxy):
             if not self._ctx.owner.owns(value):
                 raise ForeignValueError("cannot pass a ValueProxy from another EvalSession")
-            await value._ensure_resolved(timeout=timeout)
+            await value._ensure_resolved(timeout=timeout)  # noqa: SLF001
             return CallArg(remote_value=RemoteCallArg(handle=value.handle))
         if isinstance(value, list):
             return CallArg(
-                list=CallArgList(items=[await self._encode_call_arg(item, timeout=timeout) for item in value])
+                list=CallArgList(items=[await self._encode_call_arg(item, timeout=timeout) for item in value]),
             )
         if isinstance(value, dict):
             return CallArg(
                 attrs=CallArgAttrs(
-                    entries={key: await self._encode_call_arg(item, timeout=timeout) for key, item in value.items()}
-                )
+                    entries={key: await self._encode_call_arg(item, timeout=timeout) for key, item in value.items()},
+                ),
             )
         return CallArg(scalar=_pyval_to_scalar(value))
 
@@ -680,6 +680,8 @@ class ValueProxy:
             copy_to_store: If True, ``path`` values are copied into the Nix store
                 and rendered as store paths. If False (default), paths are
                 rendered as literal filesystem paths.
+            timeout: Maximum seconds to wait for the value to resolve. None
+                (default) waits indefinitely.
         """
         await self._ensure_resolved(timeout=timeout)
         resp = await self._ctx.proxy.force_json(
@@ -721,7 +723,7 @@ class ValueProxy:
     def _build_store_handle(self, store: Store | None) -> int:
         if store is None:
             return self._ctx.store_handle
-        if store._session_id != self._ctx.session_id:  # type: ignore[reportPrivateUsage] -- cross-class access
+        if store._session_id != self._ctx.session_id:  # type: ignore[reportPrivateUsage] -- cross-class access  # noqa: SLF001
             raise ValueError("Store belongs to a different session")
         return store.store_handle
 
@@ -746,11 +748,12 @@ class ValueProxy:
                 handle=self.handle,
                 build_mode=build_mode,
                 build_store_handle=request_build_store_handle,
-            )
+            ),
         )
         if not build_response.results:
             raise StoreError(
-                "StoreError", f"build returned no result for evaluated derivation {build_response.drv_path}"
+                "StoreError",
+                f"build returned no result for evaluated derivation {build_response.drv_path}",
             )
         result = build_response.results[0]
         if not result.success:
@@ -804,6 +807,8 @@ class ValueProxy:
             *args: Each argument may be a ``ValueProxy`` from the same
                 ``EvalSession``, or a JSON-scalar/list/dict, which is encoded
                 as a Nix value on the worker side.
+            timeout: Maximum seconds to wait for this value to resolve to a
+                function before calling it. None (default) waits indefinitely.
 
         Raises:
             WrongNixTypeError: This value is not a function.
@@ -885,7 +890,7 @@ class ValueAttrs:
         self._keys = keys
 
     def _check_active(self) -> None:
-        self._parent._check_active()  # type: ignore[reportPrivateUsage] -- views delegate liveness to their owning proxy
+        self._parent._check_active()  # type: ignore[reportPrivateUsage] -- views delegate liveness to their owning proxy  # noqa: SLF001
 
     def keys(self) -> list[str]:
         """Return the attrset's attribute names."""
@@ -921,7 +926,7 @@ class ValueList:
         self._length = length
 
     def _check_active(self) -> None:
-        self._parent._check_active()  # type: ignore[reportPrivateUsage] -- views delegate liveness to their owning proxy
+        self._parent._check_active()  # type: ignore[reportPrivateUsage] -- views delegate liveness to their owning proxy  # noqa: SLF001
 
     def _check_index(self, idx: int) -> None:
         normalized = idx if idx >= 0 else idx + self._length
@@ -961,7 +966,7 @@ class LockedFlakeHandle:
     _finalizer: Any = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        releases = self._session._deferred_releases()  # type: ignore[reportPrivateUsage] -- session owns resource cleanup generation
+        releases = self._session._deferred_releases()  # type: ignore[reportPrivateUsage] -- session owns resource cleanup generation  # noqa: SLF001
         self._lease = releases.new_lease(HandleKind.LOCKED_FLAKE, self.handle)
         self._finalizer = weakref.finalize(self, _finalize_lease, self._lease, releases)
 
@@ -998,7 +1003,7 @@ class LockedFlakeHandle:
         try:
             await self._session.release_locked_flake(self, timeout=timeout)
         except BaseException:
-            self._session._deferred_releases().defer(ref)  # type: ignore[reportPrivateUsage] -- session owns cleanup retry queue
+            self._session._deferred_releases().defer(ref)  # type: ignore[reportPrivateUsage] -- session owns cleanup retry queue  # noqa: SLF001
             raise
 
 
@@ -1027,7 +1032,7 @@ class EvalSession:
         "_worker",
     )
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
         self,
         worker: _WorkerClient,
         owner_session: _EvalSessionOwner | None = None,
@@ -1080,9 +1085,9 @@ class EvalSession:
                     store_handle=self._store_handle,
                     eval_settings=rendered_eval,
                     fetch_settings=rendered_fetch,
-                )
+                ),
             )
-            proxy._eval_handle = response.eval_handle  # type: ignore[reportPrivateUsage] -- EvalSession owns its proxy's eval_handle assignment
+            proxy._eval_handle = response.eval_handle  # type: ignore[reportPrivateUsage] -- EvalSession owns its proxy's eval_handle assignment  # noqa: SLF001
         except BaseException:
             proxy.deactivate()
             releases.close()
@@ -1095,7 +1100,7 @@ class EvalSession:
         self._proxy = proxy
         self._ctx = _EvalProxyContext(proxy, self._owner, self._timeout, self._store_handle, self._session_id)
         if self._store is not None:
-            self._store.rpc._register_dependent_eval(self)  # type: ignore[reportPrivateUsage] -- Store owns the public force-close lifecycle hook
+            self._store.rpc._register_dependent_eval(self)  # type: ignore[reportPrivateUsage] -- Store owns the public force-close lifecycle hook  # noqa: SLF001
 
     async def get_verbosity(self) -> LogLevel:
         """Return the current Nix log verbosity while this eval session is open."""
@@ -1123,7 +1128,7 @@ class EvalSession:
         rendered_eval.pop(NIX_PATH_SETTING_KEY, None)
         rendered_fetch = fetch_settings.to_worker_settings() if fetch_settings is not None else {}
         await self._ensure_proxy().configure_eval(
-            ConfigureEvalRequest(eval_settings=rendered_eval, fetch_settings=rendered_fetch)
+            ConfigureEvalRequest(eval_settings=rendered_eval, fetch_settings=rendered_fetch),
         )
 
     async def close(self) -> None:
@@ -1150,7 +1155,7 @@ class EvalSession:
             if releases is not None:
                 releases.close()
             if self._store is not None:
-                self._store.rpc._unregister_dependent_eval(self)  # type: ignore[reportPrivateUsage] -- Store owns the public force-close lifecycle hook
+                self._store.rpc._unregister_dependent_eval(self)  # type: ignore[reportPrivateUsage] -- Store owns the public force-close lifecycle hook  # noqa: SLF001
             if self._owner_session is not None:
                 self._owner_session.release_eval(self)
 
@@ -1183,9 +1188,11 @@ class EvalSession:
         Args:
             expr: Nix source to evaluate.
             path: Source name attributed to ``expr`` in error messages.
+            timeout: Maximum seconds to wait for evaluation to complete. None
+                (default) waits indefinitely.
         """
         handle = await self._ensure_proxy().eval_string(
-            EvalStringRequest(expr=expr, source_name=path)
+            EvalStringRequest(expr=expr, source_name=path),
         )
         return self._proxy_context().value(handle.handle, handle.type)
 
@@ -1218,7 +1225,7 @@ class EvalSession:
                     update_all=True,
                     write_lock_file=write_lock_file,
                     flake_settings=rendered_flake,
-                )
+                ),
             )
         elif isinstance(update_inputs, list):
             locked = await proxy.lock_flake(
@@ -1227,7 +1234,7 @@ class EvalSession:
                     update_inputs_list=UpdateInputsList(inputs=update_inputs),
                     write_lock_file=write_lock_file,
                     flake_settings=rendered_flake,
-                )
+                ),
             )
         else:
             locked = await proxy.lock_flake(
@@ -1235,7 +1242,7 @@ class EvalSession:
                     ref=ref,
                     write_lock_file=write_lock_file,
                     flake_settings=rendered_flake,
-                )
+                ),
             )
         return self._locked_flake_handle(locked)
 
@@ -1248,7 +1255,7 @@ class EvalSession:
         )
 
     def _locked_flake_id(self, locked: LockedFlakeHandle) -> int:
-        if locked._session is not self:  # type: ignore[reportPrivateUsage] -- cross-class access
+        if locked._session is not self:  # type: ignore[reportPrivateUsage] -- cross-class access  # noqa: SLF001
             raise ForeignValueError("cannot use a LockedFlakeHandle from another EvalSession")
         return locked.handle
 
@@ -1260,7 +1267,7 @@ class EvalSession:
         evaluating with an updated lock that hasn't been written to disk yet.
         """
         result = await self._ensure_proxy().call_locked_flake(
-            CallLockedFlakeRequest(handle=self._locked_flake_id(locked))
+            CallLockedFlakeRequest(handle=self._locked_flake_id(locked)),
         )
         return self._proxy_context().value(result.handle, result.type)
 
@@ -1299,7 +1306,7 @@ class EvalSession:
                 ref=ref,
                 write_lock_file=write_lock_file,
                 flake_settings=flake_settings.to_worker_settings() if flake_settings is not None else {},
-            )
+            ),
         )
         return self._proxy_context().value(handle.handle, handle.type)
 
@@ -1344,7 +1351,7 @@ class ReplSession(EvalSession):
         session-bound :class:`ValueProxy`.
         """
         response = await self._ensure_proxy().repl_process_line(
-            ReplProcessLineRequest(line=text, source_name=path)
+            ReplProcessLineRequest(line=text, source_name=path),
         )
         if response.is_binding:
             return None
@@ -1360,7 +1367,7 @@ class ReplSession(EvalSession):
         returning the resulting attribute set for :meth:`add_attrs`.
         """
         handle = await self._ensure_proxy().repl_load_file(
-            ReplLoadFileRequest(path=path)
+            ReplLoadFileRequest(path=path),
         )
         return self._proxy_context().value(handle.handle, handle.type)
 
@@ -1368,7 +1375,7 @@ class ReplSession(EvalSession):
         """Add all attributes from ``value`` to this REPL's lexical scope."""
         if not self._owner.owns(value):
             raise ForeignValueError("cannot add attributes from another EvalSession")
-        await value._ensure_resolved(timeout=timeout)  # type: ignore[reportPrivateUsage] -- session owns the value context
+        await value._ensure_resolved(timeout=timeout)  # type: ignore[reportPrivateUsage] -- session owns the value context  # noqa: SLF001
         response = await self._ensure_proxy().repl_add_attrs(ReplAddAttrsRequest(handle=value.handle))
         return response.names
 

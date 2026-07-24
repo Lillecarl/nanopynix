@@ -67,6 +67,7 @@ async def test_evaluate_target_raises_if_flake_is_missing_after_bypassing_valida
     already raise "either --file or --flake is required" before this branch;
     bypass it (on the frozen dataclass's class, since instances can't be
     patched) to pin the defensive fallback directly."""
+
     def _no_op_validate(_self: EvaluationTarget, *, required: bool = False) -> None:
         del required
 

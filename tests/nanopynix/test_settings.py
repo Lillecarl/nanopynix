@@ -114,7 +114,7 @@ def test_eval_settings_accepts_nix_aliases() -> None:
             "allow-import-from-derivation": False,
             "debugger-on-warn": True,
             "nix-path": ["nixpkgs=/tmp/nixpkgs"],
-        }
+        },
     )
 
     assert settings.allow_import_from_derivation is False

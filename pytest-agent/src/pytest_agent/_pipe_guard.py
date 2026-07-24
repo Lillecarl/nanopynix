@@ -11,11 +11,11 @@ from pathlib import Path
 # see CLAUDE.md's "Pytest output discipline" section for the human-authored
 # version of this same rule.
 _BANNED_READERS = frozenset(
-    {"head", "tail", "grep", "egrep", "fgrep", "sed", "awk", "gawk", "mawk", "nawk"}
+    {"head", "tail", "grep", "egrep", "fgrep", "sed", "awk", "gawk", "mawk", "nawk"},
 )
 
 
-def find_banned_pipe_reader(fd: int = 1) -> str | None:
+def find_banned_pipe_reader(fd: int = 1) -> str | None:  # noqa: C901 tracked complexity/arg-count debt, see TODO.md
     """Return the process name reading the other end of *fd*, if it is one of
     the common output-truncating tools; otherwise None.
 
