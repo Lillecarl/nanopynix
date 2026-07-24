@@ -357,7 +357,7 @@ def _timing_enabled() -> bool:
 
 def _log_timing(label: str, elapsed: float) -> None:
     if _timing_enabled():
-        print(f"[EKN_TIMING] {label}: {elapsed:.3f}s", file=sys.stderr)
+        sys.stderr.write(f"[EKN_TIMING] {label}: {elapsed:.3f}s\n")
 
 
 @contextmanager

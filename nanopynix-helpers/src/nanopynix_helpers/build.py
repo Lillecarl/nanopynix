@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from anyio import Path as AsyncPath
+
 from nanopynix.exceptions import StoreError
 from nanopynix_helpers.fod import (
     FodSourceUpdateError,
@@ -89,7 +91,7 @@ async def build_with_fod_update(
         if updates >= max_updates:
             raise FodBuildError(f"stopped after {max_updates} fixed-output hash updates") from build_error
         try:
-            source = source_file.read_text()
+            source = await AsyncPath(source_file).read_text()
             literal = find_fod_hash_literal(
                 source,
                 mismatch.specified,
@@ -103,5 +105,5 @@ async def build_with_fod_update(
         updates += 1
         if dry_run:
             return {}, updates
-        source_file.write_text(updated)
+        await AsyncPath(source_file).write_text(updated)
         await eval_session.reset_file_cache()
