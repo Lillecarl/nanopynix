@@ -196,43 +196,17 @@ LEDGER: dict[str, str] = {
         )
     },
     # ── Value ──────────────────────────────────────────────────────
-    # These eight names look like one concept spelled two ways. They are not.
-    # `tests/temp/test_coercion_semantics.py` ran both families over the same
-    # five values and they disagree on nearly every cell:
+    # The `as_*` strict family and `coerce_str` used to be listed here, eight
+    # entries' worth, on the false premise that they were one concept spelled
+    # two ways. They are not -- `as_*` assert a type, `coerce_*` convert -- and
+    # both are now present on both engines, so all eight entries are gone. What
+    # is left below is what remains genuinely one-sided.
     #
-    #             "42"                 42                  true
-    #   as_int    NixTypeError         42                  NixTypeError
-    #   coerce_int  42                 42                  NixCoercionError
-    #   as_string   "42"               NixTypeError        NixTypeError
-    #   coerce_str  "42"               "42"                "1"
-    #
-    # inproc's `as_*` are strict type assertions; `coerce_*` convert. So the
-    # counterpart of `as_int` is rpc's `force_as(NixType.INT)` (which
-    # type-checks and then forces), NOT `coerce_int`. Renaming one family to
-    # the other would put a single name on two behaviours -- strictly worse
-    # than the current asymmetry.
-    "Value.as_bool:inproc-only": (
-        "DEFECT (strict family): the strict spelling divergence -- rpc's equivalent is "
-        "force_as(NixType.BOOL), not coerce_bool. Also asymmetric on null: inproc as_bool(null) "
-        "returns False for optional-flag callers, rpc coerce_bool(null) raises."
-    ),
-    "Value.as_int:inproc-only": "DEFECT (strict family): rpc's equivalent is force_as(NixType.INT), not coerce_int.",
-    "Value.as_float:inproc-only": (
-        "DEFECT (strict family): rpc's equivalent is force_as(NixType.FLOAT), not coerce_float."
-    ),
-    "Value.as_string:inproc-only": (
-        "DEFECT (strict family): rpc's equivalent is force_as(NixType.STRING), not coerce_str."
-    ),
-    # `coerce_str` used to be rpc-only, and used to be a Python reimplementation
-    # that did not match Nix ("true" where Nix says "1", "null" where Nix says
-    # ""). It is now `builtins.toString` on both engines, delegated to
-    # EvalState::coerceToString, so it is absent from this ledger entirely --
-    # which is the point.
-    #
-    # The other three have no Nix analogue at all: Nix has no toInt/toFloat/
-    # toBool, so there is nothing to be faithful to. They stay rpc-only rather
-    # than spreading a shape that cannot be justified by Nix semantics; the
-    # open question of whether they should exist at all is tracked in TODO.md.
+    # `coerce_int`/`coerce_float`/`coerce_bool` have no Nix analogue at all:
+    # Nix has no toInt/toFloat/toBool, so unlike coerce_str there is nothing to
+    # be faithful to. They stay rpc-only rather than spreading a shape that
+    # cannot be justified by Nix semantics; whether they should exist at all is
+    # tracked in TODO.md.
     "Value.coerce_bool:rpc-only": "DEFECT (lenient, non-Nix): no Nix bool coercion exists; inproc's as_bool is strict.",
     "Value.coerce_int:rpc-only": "DEFECT (lenient, non-Nix): no Nix int coercion exists; inproc's as_int is strict.",
     "Value.coerce_float:rpc-only": (

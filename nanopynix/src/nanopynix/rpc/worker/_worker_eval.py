@@ -18,6 +18,7 @@ from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import flake as nanopynix_flake
 from nanopynix_proto.nix import common as common_pb
 from nanopynix_proto.nix.eval import (
+    AsScalarRequest,
     AttrNamesRequest,
     AttrNamesResponse,
     AttrRequest,
@@ -105,6 +106,17 @@ _NIX_TYPE_MAP: dict[str, common_pb.NixType] = {
 }
 
 _FORCE_SCALAR_TYPES = frozenset({"null", "int", "float", "bool", "string", "path"})
+
+# The strict scalar reads AsScalar can serve, and the LocalValue accessor for
+# each. Deliberately runs Nix's own force* rather than comparing type names
+# here: a mismatch then raises the same nix::TypeError, with the same message,
+# that an inproc caller gets, instead of a separately-invented client error.
+_AS_SCALAR_ACCESSORS: dict[common_pb.NixType, str] = {
+    common_pb.NixType.INT: "as_int",
+    common_pb.NixType.FLOAT: "as_float",
+    common_pb.NixType.BOOL: "as_bool",
+    common_pb.NixType.STRING: "as_string",
+}
 
 
 @dataclass
@@ -385,6 +397,16 @@ class EvalServiceHandler(EvalServiceBase):
         # serialization rather than going through TypeAdapter validation.
         json_bytes = pydantic_core.to_json(value.to_json(copy_to_store=message.copy_to_store))
         return ForceJsonResponse(json=json_bytes.decode("utf-8"))
+
+    async def as_scalar(self, message: AsScalarRequest) -> common_pb.ScalarValue:
+        return await self._run(message, self._do_as_scalar)
+
+    def _do_as_scalar(self, message: AsScalarRequest) -> common_pb.ScalarValue:
+        accessor = _AS_SCALAR_ACCESSORS.get(message.nix_type)
+        if accessor is None:
+            raise ValueError(f"AsScalar does not support {message.nix_type!r}")
+        value = getattr(self._resolve(message.handle), accessor)()
+        return python_to_scalar(value)
 
     async def coerce_to_string(self, message: CoerceToStringRequest) -> CoerceToStringResponse:
         return await self._run(message, self._do_coerce_to_string)

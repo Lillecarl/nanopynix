@@ -8,7 +8,7 @@ import threading
 import weakref
 from dataclasses import dataclass, field
 from math import isfinite
-from typing import TYPE_CHECKING, Any, Literal, Never, Protocol, overload
+from typing import TYPE_CHECKING, Any, Literal, Never, Protocol, cast, overload
 
 import anyio
 import pydantic_core
@@ -23,6 +23,7 @@ from nanopynix_proto.nix.common import (
     RemoteCallArg,
 )
 from nanopynix_proto.nix.eval import (
+    AsScalarRequest,
     AttrNamesRequest,
     AttrRequest,
     AutoCallRequest,
@@ -558,6 +559,43 @@ class ValueProxy:
         if actual != typ:
             raise WrongNixTypeError(expected=typ, actual=actual)
         return await self.force(timeout=timeout)
+
+    async def _as_scalar(self, typ: NixType, *, timeout: float | None) -> Any:
+        """Strict scalar read, type-checked by Nix in the worker.
+
+        Not built on ``force_as``: that compares type names client-side and
+        raises ``WrongNixTypeError``, whereas inproc's ``as_*`` let Nix's own
+        ``force*`` reject and so raise ``NixTypeError``. Doing the check on the
+        worker is what makes the two engines raise the same exception, with the
+        same Nix-authored message, for the same mistake.
+        """
+        await self._ensure_resolved(timeout=timeout)
+        scalar = await self._ctx.proxy.as_scalar(AsScalarRequest(handle=self.handle, nix_type=typ))
+        return scalar_to_python(scalar)
+
+    async def as_int(self, *, timeout: float | None = None) -> int:
+        """Force this value and return it as ``int``. Raises if not an int."""
+        return cast("int", await self._as_scalar(NixType.INT, timeout=timeout))
+
+    async def as_float(self, *, timeout: float | None = None) -> float:
+        """Force this value and return it as ``float``. Raises if not a float.
+
+        An int widens to float, because Nix's own ``forceFloat`` accepts one --
+        the same rule that lets ``1 + 1.0`` evaluate.
+        """
+        return float(cast("float", await self._as_scalar(NixType.FLOAT, timeout=timeout)))
+
+    async def as_bool(self, *, timeout: float | None = None) -> bool:
+        """Force this value and return it as ``bool``. Raises if not a bool."""
+        return cast("bool", await self._as_scalar(NixType.BOOL, timeout=timeout))
+
+    async def as_string(self, *, timeout: float | None = None) -> str:
+        """Force this value and return it as ``str``. Raises if not a string.
+
+        Nix string context is dropped, not rejected; use ``realise_string()``
+        when the store paths it names have to exist.
+        """
+        return cast("str", await self._as_scalar(NixType.STRING, timeout=timeout))
 
     async def coerce_str(self, *, timeout: float | None = None) -> str:
         """``builtins.toString`` on this value.

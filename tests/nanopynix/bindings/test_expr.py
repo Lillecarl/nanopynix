@@ -42,7 +42,11 @@ class TestEvalString:
     def test_eval_null(self, eval_state: nanopynix.EvalState):
         v = eval_state.eval_string("null")
         assert v.type() == "null"
-        assert v.as_bool() is False  # null coerces to false
+        # null is not a bool, and as_* raises on the wrong type. This used to
+        # read as False; see is_null() for the lenient check.
+        assert v.is_null() is True
+        with pytest.raises(Exception, match="bool"):
+            v.as_bool()
 
     def test_eval_nested_string_interpolation(self, eval_state: nanopynix.EvalState):
         v = eval_state.eval_string('"hello ${"world"}"')

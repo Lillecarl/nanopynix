@@ -31,6 +31,8 @@ WRONG_TYPE_CASES = [
     ("{ a = 1; }", ("as_string", "as_int", "as_float", "as_bool")),
     ("[ 1 2 ]", ("as_string", "as_int", "as_float", "as_bool")),
     ("x: x", ("as_string", "as_int", "as_float", "as_bool")),
+    # null included deliberately: as_bool used to read it as False.
+    ("null", ("as_string", "as_int", "as_float", "as_bool")),
 ]
 
 
@@ -55,11 +57,8 @@ async def test_accessor_on_the_wrong_type_raises_instead_of_crashing(
         ('"text"', "as_string", "text"),
         ("true", "as_bool", True),
         ("false", "as_bool", False),
-        # null reading as false is deliberate, not an accident of the union:
-        # callers use as_bool for optional flags where null means "off".
-        ("null", "as_bool", False),
     ],
-    ids=["int", "float", "string", "true", "false", "null-is-false"],
+    ids=["int", "float", "string", "true", "false"],
 )
 async def test_accessor_on_the_right_type_still_works(
     expr: str,

@@ -41,9 +41,10 @@ STRICT_TABLE: dict[str, dict[str, Any]] = {
     "42": {"as_int": 42, "as_float": 42.0, "as_bool": RAISES, "as_string": RAISES},
     "42.0": {"as_int": RAISES, "as_float": 42.0, "as_bool": RAISES, "as_string": RAISES},
     "true": {"as_int": RAISES, "as_float": RAISES, "as_bool": True, "as_string": RAISES},
-    # null -> False is the one deliberate leniency in the strict family:
-    # callers use as_bool for optional flags, where absent means off.
-    "null": {"as_int": RAISES, "as_float": RAISES, "as_bool": False, "as_string": RAISES},
+    # No leniency anywhere in this family, including null -> bool. Use
+    # is_null()/coerce_str() when a null should mean something other than an
+    # error.
+    "null": {"as_int": RAISES, "as_float": RAISES, "as_bool": RAISES, "as_string": RAISES},
 }
 
 # `coerce_str` is `builtins.toString`, delegated to Nix on both engines rather
@@ -102,6 +103,20 @@ async def _check(
 async def test_inproc_as_accessors_are_strict(expr: str, inproc_session: InprocSessionFactory) -> None:
     """``as_*`` asserts the value already has the type -- it never converts."""
     async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
+        value = await ev.string(expr)
+        for name, expected in STRICT_TABLE[expr].items():
+            await _check(getattr(value, name), expected, NixTypeError, f"{expr}.{name}")
+
+
+@pytest.mark.parametrize("expr", list(STRICT_TABLE), ids=list(STRICT_TABLE))
+async def test_rpc_as_accessors_are_strict_the_same_way(expr: str, rpc_session: RpcSessionFactory) -> None:
+    """rpc's ``as_*`` accepts, rejects, and *raises* exactly as inproc's does.
+
+    Same table, same expected ``NixTypeError`` -- not merely "both fail". The
+    type check runs in the worker so the error is Nix's own, which is the only
+    way the two engines agree on the exception type and its message.
+    """
+    async with rpc_session() as session, session.store() as store, session.eval(store) as ev:
         value = await ev.string(expr)
         for name, expected in STRICT_TABLE[expr].items():
             await _check(getattr(value, name), expected, NixTypeError, f"{expr}.{name}")
