@@ -199,7 +199,7 @@ async def _drv_path(eval_session: Any, expr: str) -> str:
     Done as its own expression rather than by navigating the value, because
     every route through the value API hits an engine asymmetry (all CIP3
     findings): rpc's ValueProxy has no derived-path accessor at all while
-    inproc's Value has ``get_derived_path``; ``attr()`` is sync on rpc and
+    inproc's Value has ``_derived_path``; ``attr()`` is sync on rpc and
     async on inproc (item 9); and the string accessor is ``coerce_str`` on rpc
     but ``as_string`` on inproc (item 8). ``unsafeDiscardStringContext`` is
     needed because ``coerce_str`` refuses a string carrying store-path context.
