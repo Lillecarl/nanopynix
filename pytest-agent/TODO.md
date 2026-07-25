@@ -3,9 +3,11 @@
 ## Tracked debt
 
 `noqa: C901` / `noqa: PLR0913` comments in this package point here. The
-complexity and argument-count suppressions in `_pipe_guard.find_banned_pipe_reader`,
-`AgentRuntime.__init__`, and `tests/test_capture.py::_report` are accepted for
-now rather than restructured.
+complexity and argument-count suppressions in `AgentRuntime.__init__` and
+`tests/test_capture.py::_report` are accepted for now rather than
+restructured. (`_pipe_guard.find_banned_pipe_reader` was on this list until
+the reader-identity work below split it up and the suppression stopped being
+needed -- which is the outcome this section is for.)
 
 ## Run labels: one source of truth, deliberately
 
@@ -170,6 +172,78 @@ heartbeat, because the stuck check rides the same loop. Ticking at the
 heartbeat quantized `--agent-stuck-after` to it, so a test that wedged and was
 killed between two ticks left no stack behind -- the one run the dumps exist
 for.
+
+## The pipe guard identifies a reader by three names, not one
+
+The guard used to read `/proc/<pid>/comm` and nothing else, and that let
+through the one caller it exists to stop.
+
+Reported as a command that ran to completion when it should have been refused:
+
+```
+direnv exec . timeout 800 python -m pytest tests --agent-label item76a-full 2>&1 \
+  | grep -viE "^evaluation warning" | tail -12
+```
+
+Under fish that pipeline *is* caught -- `grep` there is a thin function around
+gnugrep, so `comm` reads `grep`. Under the bash that Claude Code's own Bash
+tool runs, `grep` is a shell function ending in
+
+```
+exec -a ugrep "$CLAUDE_CODE_EXECPATH" -G --ignore-files ...
+```
+
+so the reader appears in /proc as `comm=.claude-wrapped`, `argv[0]=ugrep`.
+Neither name was in the banned set. The guard's entire audience is an agent,
+and the agent harness's own `grep` replacement was what made it invisible.
+
+Three sources are now read per candidate reader, and a match on any of them
+counts:
+
+- **argv[0]** -- what the caller meant. Survives `exec -a` and busybox's
+  applet dispatch, both of which leave `comm` saying something else.
+- **comm** -- the executable actually running, truncated to 15 bytes.
+- **/proc/<pid>/exe** -- the binary on disk, which is what remains when
+  argv[0] has been faked to something innocuous.
+
+Two deliberate limits:
+
+- **argv[1..n] is not scanned.** `| tee grep.log` and `| some-tool --exclude
+  awk` are ordinary commands, and a guard that refuses honest ones is a guard
+  people switch off. Pinned by
+  `test_a_banned_name_in_a_later_argument_is_not_a_banned_reader`.
+- **Only the immediate reader is inspected**, so `pytest | cat | grep x` is
+  still not caught. Following the chain would collide with the `tee` allowance
+  -- `tee out.log | tail` destroys nothing, because the full output is in the
+  file -- so a correct chain walk needs a notion of which links preserve
+  output, which is more machinery than the gap justifies today. Recorded here
+  so it is a known limitation rather than a second silent hole.
+
+The banned set also grew past GNU: `ugrep`, `rg`, `ripgrep`, `ag`, `ack`,
+`pcregrep`, `pcre2grep`, and `cut`. An agent told to stop using `grep` reaches
+for `rg`, and `rg` is on PATH in this very environment. `wc` stays out for the
+same reason `tee` does -- it destroys the output wholesale rather than
+selectively, which is an explicit choice to want a count.
+
+The refusal now names both the matched tool and the process running it
+(`ugrep (running as .claude-wrapped)`). Naming only the match would tell an
+agent it piped into a `ugrep` it never wrote, which reads as the tool being
+confused rather than as the harness having substituted one for the other.
+
+Each source and each limit is mutation-tested: comm-only, argv0-only, dropping
+`exe`, scanning all of argv rather than argv[0], and dropping either `ugrep` or
+`rg` from the set all turn the suite red. `exe` needed a test written for it
+specifically -- every other case is decided by argv[0] or comm, so dropping
+`exe` passed the whole suite until
+`test_detects_a_banned_binary_reached_through_an_innocuous_symlink` existed.
+The kernel takes `comm` from the basename of the path passed to execve, so
+reaching grep through a symlink named something else is what leaves `exe` as
+the only honest source.
+
+The `noqa: C901` on `find_banned_pipe_reader` is gone as a side effect --
+pulling the three procfs reads into `read_identity` and the match into
+`ReaderIdentity.banned_name` left the scan loop simple enough to pass on its
+own.
 
 ## Not supported: pytest-xdist
 
