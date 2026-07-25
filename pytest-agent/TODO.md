@@ -99,6 +99,29 @@ only reaches junit-xml), `index.jsonl` against `--junit-xml` and
 pytest-reportlog (raw report dumps rather than a curated per-test record),
 and `rerun` against `--lf` (a single-slot cache rather than an archive).
 
+## history.jsonl needs no locking, and should not grow any
+
+Concurrent runs are a supported scenario, and `history.jsonl` is the one file
+they all append to -- so it looks like it wants the same `.lock` treatment the
+run directories got. It does not, and adding one would be a regression: a lock
+is another shared file two sessions have to agree on, which is the failure mode
+that work was about.
+
+`append_run_record` opens with mode `"a"` (`O_APPEND`), and a record is written
+in a single `write()` syscall even when it is far larger than Python's 8 KiB
+buffer -- `BufferedWriter` hands oversized data straight to the raw file object
+rather than chunking it. On Linux an `O_APPEND` write to a regular file holds
+the inode lock for the whole call, so records cannot interleave.
+
+Measured rather than assumed, because the reachable worst case is not small:
+`rerun` puts every recorded nodeid into the next run's invocation args, and
+those land in its history record. Four processes appending concurrently, first
+at 27 KB per record (a 400-failure rerun) and then at 709 KB (8000 failures,
+past anything real), produced 240 and 60 records with zero corrupt lines.
+
+A network filesystem is the case this reasoning does not cover. `.pytest-agent`
+on NFS is out of scope; it is a per-checkout scratch directory.
+
 ## Agent mode must never be why a run fails
 
 Everything this plugin does happens inside somebody else's test session, in
@@ -121,6 +144,23 @@ because the next `pytest-agent last-failures` answers from a stale run.
 
 Anything new that touches the filesystem from inside a hook belongs behind
 the same discipline.
+
+The same rule covers the terminal, where two more were found the same way.
+`--agent-heartbeat 0` was an unguarded `Event.wait(0)`: a spin loop that pegged
+a core and wrote 454,512 progress lines through a three-second run. Zero now
+means "off" for both intervals, which is what `--agent-stuck-after` already
+documented. And every line agent mode prints is now width-bounded
+(`abbreviate_nodeid`), because the progress line reprints the running nodeid
+on every tick -- ids in this repo's own suite run to a median of 88 characters
+and a maximum of 144, and a hung test with a long parametrized id repeated its
+line until the run was killed. Files always keep the full id; only terminal
+copies are shortened.
+
+The watcher ticks at the finer of the two intervals rather than at the
+heartbeat, because the stuck check rides the same loop. Ticking at the
+heartbeat quantized `--agent-stuck-after` to it, so a test that wedged and was
+killed between two ticks left no stack behind -- the one run the dumps exist
+for.
 
 ## Not supported: pytest-xdist
 

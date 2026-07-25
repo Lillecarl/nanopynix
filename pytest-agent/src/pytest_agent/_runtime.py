@@ -13,7 +13,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pytest_agent._capture import TestRecorder, nodeid_is_evident_from, nodeid_to_relpath
+from pytest_agent._capture import (
+    TestRecorder,
+    abbreviate_nodeid,
+    nodeid_is_evident_from,
+    nodeid_to_relpath,
+)
 from pytest_agent._history import (
     append_run_record,
     git_revision,
@@ -56,9 +61,13 @@ TERMINAL_LOG_NAME = "terminal.txt"
 # is elided. Head and tail are both kept: a coverage table's TOTAL is on the
 # last line and its header on the first, and cutting either end loses the
 # half somebody was reading for.
-MAX_TERMINAL_SUMMARY_LINES = 40
 _SUMMARY_HEAD_LINES = 20
 _SUMMARY_TAIL_LINES = 15
+# Derived, not chosen: eliding replaces the dropped lines with one "... N lines
+# elided ..." line, so below head + tail + 2 it costs more terminal than it
+# saves. Three independent constants could be set so that eliding a report
+# makes it longer.
+MAX_TERMINAL_SUMMARY_LINES = _SUMMARY_HEAD_LINES + _SUMMARY_TAIL_LINES + 2
 
 
 class AgentRuntime:
@@ -301,9 +310,35 @@ class AgentRuntime:
             signal.signal(signal.SIGTERM, previous)
 
     def _watch(self) -> None:
-        while not self._stop_event.wait(self.heartbeat_interval):
-            self._print(self._progress_line())
+        """Tick until the session ends, printing progress and checking for hangs.
+
+        The two jobs have separate intervals, so the loop runs at the finer of
+        them and prints on the coarser. Ticking at the heartbeat alone
+        quantized --agent-stuck-after to it: a stuck-after below the heartbeat
+        dumped late, and a test that wedged and was killed between two ticks
+        left no stack at all -- the one case the dumps exist for.
+        """
+        tick = self._tick_interval()
+        if tick is None:
+            return
+        since_heartbeat = 0.0
+        while not self._stop_event.wait(tick):
+            since_heartbeat += tick
+            if self.heartbeat_interval > 0 and since_heartbeat >= self.heartbeat_interval:
+                since_heartbeat = 0.0
+                self._print(self._progress_line())
             self._check_stuck()
+
+    def _tick_interval(self) -> float | None:
+        """How often the watcher wakes, or None when it has nothing to do.
+
+        A non-positive interval means "off" for both options, matching what
+        --agent-stuck-after already documented. Before this, --agent-heartbeat 0
+        was an unguarded Event.wait(0): a spin loop that pegged a core and
+        printed hundreds of thousands of progress lines through a short run.
+        """
+        intervals = [value for value in (self.heartbeat_interval, self.stuck_after) if value > 0]
+        return min(intervals) if intervals else None
 
     def _check_stuck(self) -> None:
         """Dump the stack of a test that has been running an implausibly long time.
@@ -334,11 +369,13 @@ class AgentRuntime:
                 # shows the wait without showing what it is waiting for.
                 faulthandler.dump_traceback(file=stack_file, all_threads=True)
         except OSError as error:
-            self._print(f"could not write stack dump for {nodeid}: {error}")
+            self._print(f"could not write stack dump for {abbreviate_nodeid(nodeid)}: {error}")
             return
         # "still running", not "stuck": a slow test and a hung one look
         # identical from here, and only the stacks can tell them apart.
-        self._print(f"still running after {elapsed:.0f}s: {nodeid} -- stack dumped to {display_path(path)}")
+        self._print(
+            f"still running after {elapsed:.0f}s: {abbreviate_nodeid(nodeid)} -- stack dumped to {display_path(path)}",
+        )
 
     def stuck_path_for(self, nodeid: str) -> Path:
         """Where stack dumps for *nodeid* go: beside the test's log, not inside it.
@@ -354,7 +391,8 @@ class AgentRuntime:
         finished = sum(self.counts.values())
         return (
             f"{elapsed:.0f}s pass={self.counts['passed']} fail={self.counts['failed']} "
-            f"done={finished} tot={self.total_collected or '?'} cur={self.current_nodeid or '?'}"
+            f"done={finished} tot={self.total_collected or '?'} "
+            f"cur={abbreviate_nodeid(self.current_nodeid) if self.current_nodeid else '?'}"
         )
 
     def pytest_runtest_logstart(self, nodeid: str, location: object) -> None:
@@ -431,7 +469,7 @@ class AgentRuntime:
                 # appended when the path can't be read back as one.
                 line = display_path(self.root / record["log_file"])
                 if not nodeid_is_evident_from(record["log_file"], record["nodeid"]):
-                    line = f"{line}  ({record['nodeid']})"
+                    line = f"{line}  ({abbreviate_nodeid(record['nodeid'])})"
                 self._print(f"  {line}")
             if len(failed) > 1:
                 # Only worth a line when there is actually a "do these share
@@ -457,7 +495,7 @@ class AgentRuntime:
             return
         self._print(f"{len(affected)} tests recorded an outcome but no detail file:")
         for record in affected[:MAX_CAPTURE_ERRORS_SHOWN]:
-            self._print(f"  {record['nodeid']}  ({record['capture_error']})")
+            self._print(f"  {abbreviate_nodeid(record['nodeid'])}  ({record['capture_error']})")
         if len(affected) > MAX_CAPTURE_ERRORS_SHOWN:
             self._print(f"  +{len(affected) - MAX_CAPTURE_ERRORS_SHOWN} more (see capture_error in index.jsonl)")
 

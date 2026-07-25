@@ -93,7 +93,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--agent-heartbeat",
         type=float,
         default=float(os.environ.get("PYTEST_AGENT_HEARTBEAT", "10")),
-        help="Seconds between progress lines while tests run (default: %(default)s).",
+        help=("Seconds between progress lines while tests run; 0 prints none (default: %(default)s)."),
     )
     group.addoption(
         "--agent-stuck-after",

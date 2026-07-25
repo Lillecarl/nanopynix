@@ -214,3 +214,53 @@ def test_stuck_dumps_can_be_turned_off(pytester: pytest.Pytester) -> None:
     assert "still running after" not in out
     assert not (_run_dir(pytester.path) / "test_slow.py" / "test_slow_one.stuck.txt").exists()
     assert "1 passed" in out
+
+
+def test_progress_lines_can_be_turned_off_without_spinning(pytester: pytest.Pytester) -> None:
+    # --agent-stuck-after documents 0 as "disables", so an agent reaching for
+    # a quieter run reasonably tries the same on its sibling. That used to be
+    # an unguarded Event.wait(0): a spin loop that pegged a core and wrote
+    # hundreds of thousands of progress lines through a three-second run.
+    pytester.makepyfile(
+        test_slow="""
+        import time
+
+
+        def test_slow_one():
+            time.sleep(1.5)
+        """,
+    )
+
+    with running_pytest(pytester.path, "--agent-heartbeat", "0", "--agent-stuck-after", "0") as proc:
+        out, _ = proc.communicate(timeout=WAIT_TIMEOUT)
+
+    assert "1 passed" in out
+    assert "pass=" not in out
+    # The bug was unbounded output, so bound it: the run's own banners only.
+    assert len(out.splitlines()) < 10
+
+
+def test_a_hang_is_dumped_on_time_even_when_the_heartbeat_is_slow(
+    pytester: pytest.Pytester,
+) -> None:
+    # The stuck check used to run only on the heartbeat tick, which quantized
+    # --agent-stuck-after to it. With a heartbeat longer than the test, a
+    # wedged test that got killed between two ticks left no stack behind --
+    # exactly the run the dumps exist for.
+    pytester.makepyfile(
+        test_slow="""
+        import time
+
+
+        def test_slow_one():
+            time.sleep(30)
+        """,
+    )
+    stuck_path = _run_dir(pytester.path) / "test_slow.py" / "test_slow_one.stuck.txt"
+
+    with running_pytest(pytester.path, "--agent-heartbeat", "60", "--agent-stuck-after", "0.5") as proc:
+        wait_until(stuck_path.is_file, "a stack dump despite a heartbeat longer than the run")
+        proc.send_signal(signal.SIGTERM)
+        proc.communicate(timeout=WAIT_TIMEOUT)
+
+    assert "=== still running after" in stuck_path.read_text(encoding="utf-8")

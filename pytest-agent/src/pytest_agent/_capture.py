@@ -38,6 +38,14 @@ MAX_NOTE_CHARS = 2000
 MAX_NAME_BYTES = 245
 _NAME_HASH_CHARS = 8
 
+# Characters of a nodeid that may reach a terminal line. Sized above the long
+# tail of real ids rather than to make normal output shorter -- in the suite
+# this plugin was written against, ids run to a median of 88 characters and a
+# 95th percentile of 119, so this leaves ordinary output untouched and bounds
+# only the pathological case.
+MAX_NODEID_DISPLAY_CHARS = 140
+_ELLIPSIS = "..."
+
 # Where a test's attached files live: a directory beside its .log, named after
 # it. Attachments and the log can't collide (`.files` vs `.log`), and one
 # directory per test keeps `rm -rf` on a run directory the only cleanup there is.
@@ -229,6 +237,27 @@ def nodeid_to_relpath(nodeid: str) -> Path:
     file_part, _, test_part = nodeid.partition("::")
     test_part = safe_component(test_part.replace("::", "__")) or "_module_"
     return Path(file_part) / test_part
+
+
+def abbreviate_nodeid(nodeid: str, limit: int = MAX_NODEID_DISPLAY_CHARS) -> str:
+    """Shorten *nodeid* to at most *limit* characters for a terminal line.
+
+    Only for display. Everything written to a file keeps the full id, so the
+    queries and the records are unaffected -- this exists because the progress
+    line reprints the running nodeid on every heartbeat, and a hung test with
+    a long parametrized id would otherwise repeat a several-hundred-character
+    line until the run is killed.
+
+    The middle goes rather than the tail: the file path at the front and the
+    parameters at the back are what tell two ids apart, and dropping the tail
+    would collapse a whole parametrized family to one indistinguishable line.
+    """
+    if len(nodeid) <= limit:
+        return nodeid
+    keep = limit - len(_ELLIPSIS)
+    head = keep - keep // 3
+    tail = keep - head
+    return f"{nodeid[:head]}{_ELLIPSIS}{nodeid[len(nodeid) - tail :]}"
 
 
 def nodeid_is_evident_from(log_file: str, nodeid: str) -> bool:
