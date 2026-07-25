@@ -41,7 +41,6 @@ from nanopynix_proto.nix.eval import (
     EvalStringRequest,
     ForceJsonRequest,
     ForceJsonResponse,
-    ForceRequest,
     GetFlakeRequest,
     HasAttrRequest,
     HasAttrResponse,
@@ -255,13 +254,6 @@ class EvalServiceHandler(EvalServiceBase):
     def _get_store(self, store_handle: int) -> Any:
         return self._state.handles.get_typed(store_handle, HandleKind.STORE)
 
-    def _force_handle(self, handle: int, eval_handle: int) -> common_pb.ForceValue:
-        value = self._resolve(handle)
-        value.force()
-        if value.type_name() == "function":
-            return common_pb.ForceValue(remote_value=self._export(value, eval_handle))
-        return common_pb.ForceValue(scalar=python_to_scalar(value.to_python(), on_unsupported="stringify"))
-
     def _call_arg_to_python(self, arg: common_pb.CallArg, es: Any) -> Any:  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
         if arg.scalar is not None:
             sv = arg.scalar
@@ -348,12 +340,6 @@ class EvalServiceHandler(EvalServiceBase):
     def _do_reset_file_cache(self, message: ResetFileCacheRequest) -> ResetFileCacheResponse:
         self._get_es(message.eval_handle).reset_file_cache()
         return ResetFileCacheResponse()
-
-    async def force(self, message: ForceRequest) -> common_pb.ForceValue:
-        return await self._run(message, self._do_force)
-
-    def _do_force(self, message: ForceRequest) -> common_pb.ForceValue:
-        return self._force_handle(message.handle, message.eval_handle)
 
     # Named for the wire op, not the client method: the RPC is ForceJson and
     # really does transfer JSON. ValueProxy.to_python() decodes it.

@@ -148,13 +148,6 @@ message DeepAttrs {
   map<string, DeepValue> entries = 1;
 }
 
-message ForceValue {
-  oneof kind {
-    ScalarValue scalar = 1;
-    ValueHandle remote_value = 2;
-  }
-}
-
 message CallArg {
   oneof kind {
     ScalarValue scalar = 1;
