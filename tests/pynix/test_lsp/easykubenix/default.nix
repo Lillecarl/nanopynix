@@ -47,4 +47,13 @@ in
   inherit pkgs;
   moduleSystem = eku.passthru.eval;
   openApiSchemaPath = "${k8sOpenApiSchema}";
+
+  # The derivation behind `openApiSchemaPath`, exposed so the test suite can
+  # realise it. Interpolating it above yields a store path but never builds
+  # one, and nothing downstream builds either -- the LSP only *evaluates* this
+  # file, then reads the path off disk. Without a `nix-build -A openApiSchema`
+  # first, every easykubenix scenario fails with FileNotFoundError on a path
+  # that is perfectly valid and simply absent. See
+  # `tests/pynix/conftest.py`'s `easykubenix_openapi_schema` fixture.
+  openApiSchema = k8sOpenApiSchema;
 }
