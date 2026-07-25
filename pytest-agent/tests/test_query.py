@@ -342,6 +342,190 @@ def test_a_corrupt_index_line_that_is_not_the_last_one_is_an_error(
     assert "is corrupt: line 2 is not valid JSON" in capsys.readouterr().err
 
 
+@pytest.fixture
+def three_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Three runs of the same two tests, with one of them flipping outcome."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PYTEST_AGENT_DIR", raising=False)
+    agent_dir = tmp_path / ".pytest-agent"
+    _write_run(
+        agent_dir,
+        1,
+        [
+            _record("tests/test_a.py::test_flaky", "passed"),
+            _record("tests/test_a.py::test_steady", "passed"),
+        ],
+    )
+    _write_run(
+        agent_dir,
+        2,
+        [
+            _record("tests/test_a.py::test_flaky", "failed", **_crash("AssertionError: assert 1 == 2")),
+            _record("tests/test_a.py::test_steady", "passed"),
+        ],
+    )
+    _write_run(
+        agent_dir,
+        3,
+        [
+            _record("tests/test_a.py::test_flaky", "failed", **_crash("AssertionError: assert 1 == 2")),
+            _record("tests/test_a.py::test_steady", "passed"),
+            _record("tests/test_new.py::test_added", "failed", **_crash("ValueError: brand new")),
+        ],
+    )
+    return tmp_path
+
+
+def test_history_answers_whether_a_failure_is_new_or_was_already_there(
+    three_runs: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    del three_runs
+    assert run(["history", "test_flaky"]) == 0
+
+    out = capsys.readouterr().out
+    # The count is the whole point: "failed in 2 of the 3 runs" is the
+    # evidence a claim of "pre-existing" needs, and the per-run list below it
+    # says *which* runs, so the next question has somewhere to go.
+    assert "failed in 2 of the 3 runs" in out
+    assert "runs-0003  failed" in out
+    assert "runs-0001  passed" in out
+    assert "AssertionError: assert 1 == 2" in out
+
+
+def test_history_says_out_loud_that_pruned_runs_are_not_in_the_count(
+    three_runs: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    del three_runs
+    assert run(["history", "test_flaky"]) == 0
+
+    out = capsys.readouterr().out
+    # --agent-keep-runs prunes runs-* while history.jsonl keeps its entries
+    # forever, so the denominator is silently truncated. An agent about to
+    # write "this has always failed" needs to see the limit of what was read.
+    assert "3 runs on disk (runs-0001..runs-0003)" in out
+    assert "not the full history" in out
+
+
+def test_history_reports_a_test_that_only_some_runs_ran(
+    three_runs: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    del three_runs
+    assert run(["history", "test_added"]) == 0
+
+    out = capsys.readouterr().out
+    # Counted against the runs that ran it, not all three: a test added
+    # yesterday has not been "passing 0 of 3 runs".
+    assert "failed in 1 of the 1 runs that ran it" in out
+    assert "runs-0001  (not in this run)" in out
+
+
+def test_history_of_an_unknown_test_names_what_was_searched(
+    three_runs: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    del three_runs
+    assert run(["history", "test_nonexistent"]) == 1
+    assert "no test matching 'test_nonexistent' in 3 runs on disk" in capsys.readouterr().err
+
+
+def test_history_limit_looks_at_the_newest_runs_only(
+    three_runs: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    del three_runs
+    assert run(["history", "test_flaky", "--limit", "2"]) == 0
+
+    out = capsys.readouterr().out
+    assert "failed in 2 of the 2 runs" in out
+    assert "runs-0001" not in out
+
+
+def test_compare_defaults_to_the_two_newest_runs_and_names_what_changed(
+    three_runs: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    del three_runs
+    assert run(["compare"]) == 0
+
+    out = capsys.readouterr().out
+    assert "runs-0002 -> runs-0003" in out
+    # test_flaky failed in both, so it is *not* news; the new test is only in
+    # runs-0003, so it can't be "newly failing" either -- it is counted apart.
+    assert "0 newly failing, 0 newly passing, 1 still failing" in out
+    assert "only in runs-0003: 1 tests" in out
+
+
+def test_compare_of_two_named_runs_separates_newly_failing_from_newly_passing(
+    three_runs: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    del three_runs
+    assert run(["compare", "1", "2"]) == 0
+
+    out = capsys.readouterr().out
+    assert "1 newly failing, 0 newly passing, 0 still failing" in out
+    assert "newly failing:" in out
+    assert "tests/test_a.py::test_flaky" in out
+    assert "AssertionError: assert 1 == 2" in out
+    # A test that passed in both is not mentioned at all -- the point of the
+    # command is the delta, and 900 unchanged passes would bury it.
+    assert "test_steady" not in out
+
+
+def test_compare_the_other_way_round_reports_the_fix(
+    three_runs: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    del three_runs
+    assert run(["compare", "2", "1"]) == 0
+
+    out = capsys.readouterr().out
+    assert "0 newly failing, 1 newly passing" in out
+    assert "newly passing:" in out
+
+
+def test_compare_with_one_run_number_says_what_it_wanted(
+    three_runs: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    del three_runs
+    assert run(["compare", "2"]) == 1
+    assert "compare takes two run numbers, or none at all" in capsys.readouterr().err
+
+
+def test_compare_needs_two_runs_to_exist(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PYTEST_AGENT_DIR", raising=False)
+    _write_run(tmp_path / ".pytest-agent", 1, [_record("tests/test_a.py::test_ok", "passed")])
+
+    assert run(["compare"]) == 1
+    assert "only 1 run(s)" in capsys.readouterr().err
+
+
+def test_compare_reports_no_change_rather_than_printing_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PYTEST_AGENT_DIR", raising=False)
+    agent_dir = tmp_path / ".pytest-agent"
+    for number in (1, 2):
+        _write_run(agent_dir, number, [_record("tests/test_a.py::test_ok", "passed")])
+
+    assert run(["compare"]) == 0
+    # Silence would read as "the command didn't work", which costs a turn to
+    # rule out; "nothing changed" is the answer to the question asked.
+    assert "no outcome changed between these runs" in capsys.readouterr().out
+
+
 def test_querying_a_directory_with_no_runs_explains_itself(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

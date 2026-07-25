@@ -1,11 +1,16 @@
-"""`pytest-agent show|last-failures|digest` -- read-only queries over what a
-previous agent-mode run wrote to disk.
+"""`pytest-agent show|last-failures|digest|history|compare` -- read-only queries
+over what previous agent-mode runs wrote to disk.
 
 The point of these is that reading one failure should not require the agent
 to *construct* anything. Before them, getting at a single test's detail meant
 knowing the run number, mirroring the test file's path into the run
 directory, and shell-quoting the brackets in a parametrized id -- three
 independent chances to get it wrong, each costing a whole turn.
+
+`history` and `compare` read across runs rather than within one, for the
+question the others can't answer: was this failing before I touched it? An
+agent that can't check that either claims "pre-existing" without evidence or
+spends two turns re-running an old revision to find out.
 
 Everything here reads ``index.jsonl`` and the per-test ``.log`` files. No
 pytest session is started, and in particular nothing routes through
@@ -34,18 +39,25 @@ if TYPE_CHECKING:
 
 # argv[0] values that mean "query", not "run pytest". Everything else the
 # console script sees is forwarded to pytest untouched.
-SUBCOMMANDS = ("show", "last-failures", "digest", "help")
+SUBCOMMANDS = ("show", "last-failures", "digest", "history", "compare", "help")
 
 FAILING_OUTCOMES = frozenset({"failed", "error", "collect_error"})
 
-# Failures per digest group listed in full before collapsing into a count.
-# The whole point of the digest is to answer "are these all the same bug?" --
-# an exhaustive nodeid list per group works against that.
+# Nodeids listed in full, per digest group and per compare/history section,
+# before collapsing into a count. These commands answer "what shape is this
+# run in?" -- an exhaustive nodeid list works against that.
 MAX_LISTED_NODEIDS = 10
+
+# A crash message under a list entry is a label, not the failure itself:
+# `show` prints the whole thing.
+MAX_MESSAGE_CHARS = 160
 
 _NO_CRASH_GROUP = "\x00no-crash"
 
 _EPILOG = """\
+`pytest-agent rerun [--run N] [pytest args...]` re-runs the tests that failed
+in a recorded run.
+
 Anything else is forwarded to pytest with --agent, so `pytest-agent -x tests/`
 is `pytest --agent -x tests/`. Only the exact words above are subcommands; a
 path that collides with one still works as `pytest-agent ./show`.
@@ -73,6 +85,22 @@ class Frame:
     first_party: bool
 
 
+@dataclass(frozen=True)
+class RunResult:
+    """One run's records, kept with the run it came from."""
+
+    number: int
+    run_dir: Path
+    by_nodeid: dict[str, dict[str, Any]]
+
+    def outcome_of(self, nodeid: str) -> str | None:
+        record = self.by_nodeid.get(nodeid)
+        return str(record["outcome"]) if record is not None else None
+
+    def failed(self, nodeid: str) -> bool:
+        return self.outcome_of(nodeid) in FAILING_OUTCOMES
+
+
 @dataclass
 class FailureGroup:
     """Failures sharing one normalized crash message."""
@@ -94,19 +122,23 @@ def _build_parser() -> argparse.ArgumentParser:
         epilog=_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    common = argparse.ArgumentParser(add_help=False)
+    # Split in two because the cross-run subcommands span every run on disk:
+    # --run has no meaning for them, and offering it would only invite the
+    # question of what `history --run 3` could possibly mean.
+    where = argparse.ArgumentParser(add_help=False)
+    where.add_argument(
+        "--dir",
+        default=None,
+        metavar="PATH",
+        help="Agent directory to read (default: the nearest .pytest-agent at or above the cwd).",
+    )
+    common = argparse.ArgumentParser(add_help=False, parents=[where])
     common.add_argument(
         "--run",
         type=int,
         default=None,
         metavar="N",
         help="Query run N instead of the most recent one.",
-    )
-    common.add_argument(
-        "--dir",
-        default=None,
-        metavar="PATH",
-        help="Agent directory to read (default: the nearest .pytest-agent at or above the cwd).",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -139,6 +171,33 @@ def _build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="Group failures by root cause: one entry per distinct exception, with a count.",
     )
+    history = subparsers.add_parser(
+        "history",
+        parents=[where],
+        help="Show a test's outcome in every run still on disk -- is this failure new, or old?",
+    )
+    history.add_argument("pattern", help="A full nodeid, or any substring that matches one.")
+    history.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Look at the newest N runs only (default: every run still on disk).",
+    )
+
+    compare = subparsers.add_parser(
+        "compare",
+        parents=[where],
+        help="Diff two runs: which tests started failing, which started passing.",
+    )
+    compare.add_argument(
+        "runs",
+        nargs="*",
+        type=int,
+        metavar="OLD NEW",
+        help="Two run numbers (default: the two newest runs on disk).",
+    )
+
     subparsers.add_parser("help", help="Show this message.")
     return parser
 
@@ -151,16 +210,26 @@ def run(argv: Sequence[str]) -> int:
         parser.print_help()
         return 0
     try:
-        run_dir = _resolve_run_dir(args.dir, args.run)
-        records = _load_records(run_dir)
-        if args.command == "show":
-            return _cmd_show(args, run_dir, records)
-        if args.command == "last-failures":
-            return _cmd_last_failures(args, run_dir, records)
-        return _cmd_digest(run_dir, records)
+        return _dispatch(args)
     except QueryError as error:
         print(f"pytest-agent: {error}", file=sys.stderr)
         return 1
+
+
+def _dispatch(args: argparse.Namespace) -> int:
+    # history and compare read every run on disk rather than one, so they
+    # resolve their own inputs instead of taking the single run dir below.
+    if args.command == "history":
+        return _cmd_history(args)
+    if args.command == "compare":
+        return _cmd_compare(args)
+    run_dir = _resolve_run_dir(args.dir, args.run)
+    records = _load_records(run_dir)
+    if args.command == "show":
+        return _cmd_show(args, run_dir, records)
+    if args.command == "last-failures":
+        return _cmd_last_failures(args, run_dir, records)
+    return _cmd_digest(run_dir, records)
 
 
 def _resolve_agent_dir(explicit: str | None) -> Path:
@@ -202,21 +271,35 @@ def _resolve_run_dir(explicit_dir: str | None, run: int | None) -> Path:
     """
     agent_dir = _resolve_agent_dir(explicit_dir)
     if run is not None:
-        candidate = agent_dir / f"runs-{run:04d}"
-        if not candidate.is_dir():
-            available = sorted(existing_run_numbers(agent_dir))
-            have = ", ".join(str(number) for number in available) if available else "none"
-            raise QueryError(f"run {run} not found under {display_path(agent_dir)} (runs present: {have})")
-        return candidate
+        return _run_dir_for(agent_dir, run)
 
-    usable = sorted(
+    usable = _usable_run_numbers(agent_dir)
+    if not usable:
+        raise QueryError(f"no completed runs under {display_path(agent_dir)} -- run `pytest --agent` first")
+    return agent_dir / f"runs-{usable[-1]:04d}"
+
+
+def _run_dir_for(agent_dir: Path, number: int) -> Path:
+    candidate = agent_dir / f"runs-{number:04d}"
+    if not candidate.is_dir():
+        available = sorted(existing_run_numbers(agent_dir))
+        have = ", ".join(str(present) for present in available) if available else "none"
+        raise QueryError(f"run {number} not found under {display_path(agent_dir)} (runs present: {have})")
+    return candidate
+
+
+def _usable_run_numbers(agent_dir: Path) -> list[int]:
+    """Runs that recorded something, oldest first.
+
+    A run that claimed its directory and then died before writing a single
+    record has nothing to say; leaving it in would make it the "newest run"
+    for every query and hide the last run that actually ran tests.
+    """
+    return sorted(
         number
         for number in existing_run_numbers(agent_dir)
         if (agent_dir / f"runs-{number:04d}" / "index.jsonl").is_file()
     )
-    if not usable:
-        raise QueryError(f"no completed runs under {display_path(agent_dir)} -- run `pytest --agent` first")
-    return agent_dir / f"runs-{usable[-1]:04d}"
 
 
 def _load_records(run_dir: Path) -> list[dict[str, Any]]:
@@ -241,6 +324,20 @@ def _load_records(run_dir: Path) -> list[dict[str, Any]]:
             if number != last_populated:
                 raise QueryError(f"{display_path(index_path)} is corrupt: line {number} is not valid JSON") from None
     return records
+
+
+def failing_nodeids(explicit_dir: str | None, run: int | None) -> tuple[list[str], Path]:
+    """The failing nodeids of one recorded run, and the run they came from.
+
+    Public because `pytest-agent rerun` (in cli.py) turns these straight into
+    pytest arguments. Reading them from the archive rather than from pytest's
+    own `--lf` cache is the point: the cache only ever remembers the last run
+    in a rootdir, so re-running a subset overwrites it, while runs-NNNN keeps
+    every run until it is pruned.
+    """
+    run_dir = _resolve_run_dir(explicit_dir, run)
+    records = _load_records(run_dir)
+    return [str(record["nodeid"]) for record in records if record["outcome"] in FAILING_OUTCOMES], run_dir
 
 
 def _run_label(run_dir: Path) -> str:
@@ -297,6 +394,157 @@ def _cmd_last_failures(args: argparse.Namespace, run_dir: Path, records: list[di
         if crash is not None:
             print(f"    {crash.message}")
     return 0
+
+
+def _load_run(agent_dir: Path, number: int) -> RunResult:
+    run_dir = _run_dir_for(agent_dir, number)
+    # Last record wins for a nodeid recorded twice (a rerun plugin, or a
+    # parametrization collected twice): the later outcome is the run's answer.
+    by_nodeid = {str(record["nodeid"]): record for record in _load_records(run_dir)}
+    return RunResult(number=number, run_dir=run_dir, by_nodeid=by_nodeid)
+
+
+def _scanned_line(numbers: list[int]) -> str:
+    """What was actually read -- said out loud, because it is not the whole history.
+
+    `--agent-keep-runs` deletes old runs-* directories while history.jsonl keeps
+    its entries forever, so "failed 2 of 3" means 3 runs *still on disk*. An
+    agent reaching for this command is usually about to claim a failure is
+    pre-existing, and that claim is only as good as its denominator.
+    """
+    span = f"runs-{numbers[0]:04d}" if len(numbers) == 1 else f"runs-{numbers[0]:04d}..runs-{numbers[-1]:04d}"
+    plural = "run" if len(numbers) == 1 else "runs"
+    return f"{len(numbers)} {plural} on disk ({span}); older runs are pruned, so this is not the full history"
+
+
+def _cmd_history(args: argparse.Namespace) -> int:
+    agent_dir = _resolve_agent_dir(args.dir)
+    numbers = _usable_run_numbers(agent_dir)
+    if not numbers:
+        raise QueryError(f"no completed runs under {display_path(agent_dir)} -- run `pytest --agent` first")
+    limit = int(args.limit)
+    if limit > 0:
+        numbers = numbers[-limit:]
+    runs = [_load_run(agent_dir, number) for number in numbers]
+
+    pattern = str(args.pattern)
+    nodeids = _matching_nodeids(runs, pattern)
+    if not nodeids:
+        raise QueryError(f"no test matching {pattern!r} in {_scanned_line(numbers)}")
+
+    print(_scanned_line(numbers))
+    for nodeid in nodeids[:MAX_LISTED_NODEIDS]:
+        print()
+        _print_history(nodeid, runs)
+    if len(nodeids) > MAX_LISTED_NODEIDS:
+        print(f"\n+{len(nodeids) - MAX_LISTED_NODEIDS} more tests match {pattern!r} -- narrow the pattern")
+    return 0
+
+
+def _matching_nodeids(runs: list[RunResult], pattern: str) -> list[str]:
+    """Every nodeid matching *pattern* in any run, in the newest run's order.
+
+    Matched across all runs, not just the newest: a test that was deleted or
+    renamed is precisely the one whose history somebody is asking about.
+    """
+    seen: dict[str, None] = {}
+    for run in reversed(runs):
+        for nodeid in run.by_nodeid:
+            if nodeid == pattern:
+                return [nodeid]
+            if pattern in nodeid:
+                seen.setdefault(nodeid, None)
+    return list(seen)
+
+
+def _print_history(nodeid: str, runs: list[RunResult]) -> None:
+    ran = [run for run in runs if run.outcome_of(nodeid) is not None]
+    failed = [run for run in ran if run.failed(nodeid)]
+    scope = f"{len(ran)} runs that ran it" if len(ran) != len(runs) else f"{len(runs)} runs"
+    print(f"{nodeid} -- failed in {len(failed)} of the {scope}")
+    for run in reversed(runs):
+        record = run.by_nodeid.get(nodeid)
+        if record is None:
+            print(f"  {run.run_dir.name}  (not in this run)")
+            continue
+        duration = record.get("duration_s")
+        elapsed = f"{duration:>7.2f}s" if isinstance(duration, (int, float)) else " " * 8
+        print(f"  {run.run_dir.name}  {record['outcome']!s:<9}{elapsed}")
+        crash = _crash_of(record)
+        if crash is not None:
+            print(f"      {_one_line(crash.message)}")
+
+
+def _one_line(message: str) -> str:
+    """A crash message shrunk to fit under a list entry.
+
+    These lists exist to be scanned -- if one test's message is a 40-line
+    assertion diff, the shape of the run stops being visible. `show` prints
+    the whole thing.
+    """
+    first = message.strip().splitlines()[0] if message.strip() else message
+    return first if len(first) <= MAX_MESSAGE_CHARS else f"{first[:MAX_MESSAGE_CHARS]}..."
+
+
+def _cmd_compare(args: argparse.Namespace) -> int:
+    agent_dir = _resolve_agent_dir(args.dir)
+    old, new = _runs_to_compare(agent_dir, [int(number) for number in args.runs])
+
+    shared = [nodeid for nodeid in new.by_nodeid if nodeid in old.by_nodeid]
+    newly_failing = [nodeid for nodeid in shared if new.failed(nodeid) and not old.failed(nodeid)]
+    newly_passing = [nodeid for nodeid in shared if old.failed(nodeid) and not new.failed(nodeid)]
+    still_failing = [nodeid for nodeid in shared if old.failed(nodeid) and new.failed(nodeid)]
+
+    print(
+        f"{old.run_dir.name} -> {new.run_dir.name}: "
+        f"{len(newly_failing)} newly failing, {len(newly_passing)} newly passing, "
+        f"{len(still_failing)} still failing ({len(shared)} tests in both runs)",
+    )
+    _print_changed("newly failing", newly_failing, new)
+    _print_changed("newly passing", newly_passing, old)
+    _print_changed("still failing", still_failing, new)
+
+    if not (newly_failing or newly_passing or still_failing):
+        # Printed rather than left as silence: nothing at all reads as "the
+        # command didn't work", which costs a turn to rule out.
+        print("no outcome changed between these runs")
+    # Counted, not listed, and last: the usual cause is one of the two runs
+    # being a filtered `-k` re-run, where "these 900 tests are missing" is
+    # noise above the answer.
+    for label, other, run in ((new.run_dir.name, old, new), (old.run_dir.name, new, old)):
+        only = [nodeid for nodeid in run.by_nodeid if nodeid not in other.by_nodeid]
+        if only:
+            print(f"only in {label}: {len(only)} tests (`pytest-agent last-failures --run {run.number}`)")
+    return 0
+
+
+def _runs_to_compare(agent_dir: Path, requested: list[int]) -> tuple[RunResult, RunResult]:
+    if len(requested) == 1:
+        raise QueryError("compare takes two run numbers, or none at all (the two newest runs on disk)")
+    if len(requested) > 2:
+        raise QueryError(f"compare takes at most two run numbers, got {len(requested)}")
+    if requested:
+        return _load_run(agent_dir, requested[0]), _load_run(agent_dir, requested[1])
+    numbers = _usable_run_numbers(agent_dir)
+    if len(numbers) < 2:
+        raise QueryError(
+            f"only {len(numbers)} run(s) under {display_path(agent_dir)} -- "
+            "compare needs two (run `pytest --agent` again)",
+        )
+    return _load_run(agent_dir, numbers[-2]), _load_run(agent_dir, numbers[-1])
+
+
+def _print_changed(title: str, nodeids: list[str], run: RunResult) -> None:
+    if not nodeids:
+        return
+    print(f"{title}:")
+    for nodeid in nodeids[:MAX_LISTED_NODEIDS]:
+        print(f"  {nodeid}")
+        crash = _crash_of(run.by_nodeid[nodeid])
+        if crash is not None:
+            print(f"    {_one_line(crash.message)}")
+    if len(nodeids) > MAX_LISTED_NODEIDS:
+        print(f"  +{len(nodeids) - MAX_LISTED_NODEIDS} more")
 
 
 def _crash_of(record: dict[str, Any]) -> Crash | None:
