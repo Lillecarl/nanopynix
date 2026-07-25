@@ -415,6 +415,13 @@ def translate_nix_exception(exc: BaseException) -> NixError | None:
     classes share a name with a Python builtin (``TypeError``,
     ``AssertionError``), and matching on the name alone would silently convert
     an ordinary Python ``TypeError`` from caller code into a Nix eval error.
+
+    ``raw``/``info`` come from the ``nix_raw``/``nix_info`` attributes the
+    bindings attach (``nanopynix-bindings/src/nix_error_info.hh``), carrying
+    the ``nix::ErrorInfo`` -- position, evaluation trace, suggestions -- that
+    ``str(exc)`` alone cannot express. They are read defensively because the
+    binding translator degrades to a message-only raise if building them
+    fails, which must stay a loss of detail rather than an ``AttributeError``.
     """
     if isinstance(exc, NixError):
         return None
@@ -426,7 +433,9 @@ def translate_nix_exception(exc: BaseException) -> NixError | None:
         return None
     message = str(exc)
     cls, error_type = refine_within(base, message)
-    return cls(error_type, message)
+    raw = getattr(exc, "nix_raw", "")
+    info = getattr(exc, "nix_info", None)
+    return cls(error_type, message, raw=raw if isinstance(raw, str) else "", info=info)
 
 
 def split_type_prefix(message: str) -> tuple[str | None, str]:

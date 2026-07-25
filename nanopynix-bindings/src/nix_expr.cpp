@@ -42,6 +42,7 @@
 
 #include <nanopynix/nix_compat_config.hh>
 
+#include "nix_error_info.hh"
 #include "py_value.hh"
 
 namespace nb = nanobind;
@@ -1482,18 +1483,13 @@ NB_MODULE(expr, m) {
     bind_eval_state(m);
     // ── Exception bindings (LIFO: last registered tried first.
     // Register base classes FIRST so specific subclasses are tried before them)
-    nb::exception<nix::EvalError> py_eval_err(m, "EvalError", PyExc_RuntimeError);
-    nb::exception<nix::ParseError> py_parse_err(m, "ParseError", PyExc_RuntimeError);
-    nb::exception<nix::TypeError> py_type_err(m, "TypeError", PyExc_RuntimeError);
-    nb::exception<nix::UndefinedVarError> py_undef_err(m, "UndefinedVarError", PyExc_RuntimeError);
-    nb::exception<nix::AssertionError> py_assert_err(m, "AssertionError", PyExc_RuntimeError);
-    nb::exception<nix::ThrownError> py_thrown_err(m, "ThrownError", PyExc_RuntimeError);
-    (void) py_eval_err;
-    (void) py_parse_err;
-    (void) py_type_err;
-    (void) py_undef_err;
-    (void) py_assert_err;
-    (void) py_thrown_err;
+    using nanopynix::errinfo::bind_nix_error;
+    bind_nix_error<nix::EvalError>(m, "EvalError");
+    bind_nix_error<nix::ParseError>(m, "ParseError");
+    bind_nix_error<nix::TypeError>(m, "TypeError");
+    bind_nix_error<nix::UndefinedVarError>(m, "UndefinedVarError");
+    bind_nix_error<nix::AssertionError>(m, "AssertionError");
+    bind_nix_error<nix::ThrownError>(m, "ThrownError");
 
     // PrimopError: a plain Python exception (never thrown from C++ --
     // PrimopErrorTag only exists to give nb::exception<T> a type to bind
