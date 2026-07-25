@@ -24,9 +24,10 @@ import anyio
 from nanopynix_proto.nix.common import LogEvent as LogEventProto
 from nanopynix_proto.nix.common import LogLevel
 
+from nanopynix._core._primops import to_primop_specs
 from nanopynix._process_title import set_manager_title
 from nanopynix._wire import DEFAULT_STORE_URI
-from nanopynix.models import LogEvent, PrimOpSpec
+from nanopynix.models import LogEvent
 from nanopynix.rpc.client._pool import ACTIVE_LOG_CAPTURES, WorkerClient
 from nanopynix.rpc.client._session import EvalSession, ReplSession
 from nanopynix.rpc.client.store import Store, StoreHandle
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
     from os import PathLike
 
     from nanopynix.logging import BusSubscription
+    from nanopynix.models import PrimOpSpec
 
 logger = logging.getLogger(__name__)
 
@@ -131,17 +133,6 @@ class LogCapture:
                 self._sub = None
 
 
-def _to_primop_specs(specs: Sequence[PrimOpSpec | Mapping[str, Any]] | None) -> list[PrimOpSpec]:
-    """Convert a sequence of PrimOpSpecs or dicts to a list of PrimOpSpecs."""
-    result: list[PrimOpSpec] = []
-    for spec in specs or []:
-        if isinstance(spec, PrimOpSpec):
-            result.append(spec)
-        else:
-            result.append(PrimOpSpec(**spec))
-    return result
-
-
 class Session:
     """Session runtime — manages a single subprocess worker.
 
@@ -193,7 +184,7 @@ class Session:
             experimental_features=list(nix_settings.experimental_features or []),
             verbosity=normalize_log_level(verbosity) if verbosity is not None else None,
             nix_path=normalize_nix_path(nix_path),
-            primops=_to_primop_specs(primops),
+            primops=to_primop_specs(primops),
             primop_callables=dict(primop_callables) if primop_callables is not None else None,
             worker_oom_score_adj=worker_oom_score_adj,
             rpc_timeout=nanopynix_settings.rpc_timeout,
