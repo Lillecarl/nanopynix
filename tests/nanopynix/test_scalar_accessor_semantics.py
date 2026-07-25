@@ -194,6 +194,53 @@ async def test_apply_accepts_an_already_evaluated_function(inproc_session: Inpro
             assert await (await value.apply(to_string)).as_string() == expected
 
 
+# An interpolated derivation is a string that carries store-path context. It is
+# also the single most common shape of Nix string a caller will ever hold, so
+# every path that turns a Nix string into a Python str has to accept it.
+#
+# `forceStringNoCtx` -- the accessor Nix uses where context would be *unsound*,
+# such as an import path -- rejects exactly this. It was wired into
+# `PyValue::to_python()`, which meant force()/force_deep() raised
+# "the string '/nix/store/...' is not allowed to refer to a store path" on both
+# engines while as_string() on the same value succeeded. Dropping the context is
+# the only honest option here: a Python str cannot carry one.
+CONTEXT_STRING_EXPR = """
+  let
+    drv = builtins.derivation {
+      name = "context-string";
+      system = builtins.currentSystem;
+      builder = "/bin/sh";
+    };
+  in { s = "${drv}"; }
+"""
+
+
+def _is_store_path(value: object) -> bool:
+    return isinstance(value, str) and value.startswith("/nix/store/") and value.endswith("-context-string")
+
+
+async def test_inproc_reads_a_string_carrying_store_path_context(inproc_session: InprocSessionFactory) -> None:
+    """force/force_deep/as_string all accept an interpolated derivation, and agree."""
+    async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
+        value = await ev.string(CONTEXT_STRING_EXPR)
+        attr = await value.attr("s")
+        forced = await attr.force()
+        assert _is_store_path(forced), forced
+        assert await attr.as_string() == forced
+        assert await value.force_deep() == {"s": forced}
+
+
+async def test_rpc_reads_a_string_carrying_store_path_context(rpc_session: RpcSessionFactory) -> None:
+    """The same, over the wire -- the worker converts with the same binding."""
+    async with rpc_session() as session, session.store() as store, session.eval(store) as ev:
+        value = await ev.string(CONTEXT_STRING_EXPR)
+        attr = value.attr("s")
+        forced = await attr.force()
+        assert _is_store_path(forced), forced
+        assert await attr.as_string() == forced
+        assert await value.force_deep() == {"s": forced}
+
+
 # force_as is the generic by-NixType entry point and still covers what no
 # as_* does (attrs/list/function). Bool is omitted here only because the
 # table's null row would need a second expected exception.
