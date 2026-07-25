@@ -199,13 +199,35 @@ def fit_component(name: str) -> str:
     return f"{head}~{digest}"
 
 
+def safe_component(name: str) -> str:
+    """Turn one test's name into a filename that is unique to it.
+
+    Sanitizing alone is not injective: ``test_p[a/b]`` and ``test_p[a_b]`` are
+    two different tests that both sanitize to ``test_p[a_b]``, so the second
+    to finish silently overwrote the first's log -- and `show` would then
+    print a passing test's detail for a failing one, which is worse than
+    printing nothing. A name that had to be changed carries a hash of what it
+    was, so it can only stand for that test.
+    """
+    sanitized = sanitize_component(name)
+    if sanitized != name:
+        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:_NAME_HASH_CHARS]
+        sanitized = f"{sanitized}~{digest}"
+    return fit_component(sanitized)
+
+
 def nodeid_to_relpath(nodeid: str) -> Path:
     """Map a test nodeid to a filesystem-safe relative path, mirroring the
     test file's own path as directories, e.g.
-    'tests/test_foo.py::test_bar[a/b]' -> 'tests/test_foo.py/test_bar[a_b]'.
+    'tests/test_foo.py::test_bar[a-b]' -> 'tests/test_foo.py/test_bar[a-b]'.
+
+    A name that survives unchanged reads back as its nodeid, which is what
+    lets the queries print one path instead of a path and an id; one that had
+    to be sanitized or shortened does not, and nodeid_is_evident_from detects
+    exactly that.
     """
     file_part, _, test_part = nodeid.partition("::")
-    test_part = fit_component(sanitize_component(test_part.replace("::", "__")) or "_module_")
+    test_part = safe_component(test_part.replace("::", "__")) or "_module_"
     return Path(file_part) / test_part
 
 

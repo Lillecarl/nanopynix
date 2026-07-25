@@ -217,9 +217,45 @@ def test_the_final_summary_adds_the_nodeid_when_the_path_lost_it(pytester: pytes
     assert result.ret == pytest.ExitCode.TESTS_FAILED
     printed = "\n".join(result.outlines)
     # Shell-quoted, because the brackets would otherwise glob (fish refuses
-    # such a path outright).
-    assert "'.pytest-agent/runs-0001/test_sample.py/test_p[a_b].log'  (test_sample.py::test_p[a/b])" in printed
-    assert (pytester.path / ".pytest-agent/runs-0001/test_sample.py/test_p[a_b].log").is_file()
+    # such a path outright). The name carries a hash of the id it came from,
+    # so it cannot also stand for a differently-spelled test that sanitizes
+    # to the same thing -- see the collision test below.
+    logs = list((pytester.path / ".pytest-agent/runs-0001/test_sample.py").glob("test_p[[]a_b[]]~*.log"))
+    assert len(logs) == 1, f"expected one disambiguated log, got {logs}"
+    assert f"'.pytest-agent/runs-0001/test_sample.py/{logs[0].name}'  (test_sample.py::test_p[a/b])" in printed
+
+
+def test_two_tests_whose_names_sanitize_alike_keep_separate_logs(pytester: pytest.Pytester) -> None:
+    # test_p[a/b] and test_p[a_b] are two different tests that both sanitize
+    # to "test_p[a_b]". The second to finish silently overwrote the first's
+    # log, so `show` on the failing one printed the passing one's detail --
+    # a wrong answer, which is worse than no answer.
+    pytester.makepyfile(
+        test_sample="""
+        import pytest
+
+
+        @pytest.mark.parametrize("x", ["a/b", "a_b"])
+        def test_p(x):
+            assert x != "a/b", "only the slash one fails"
+        """,
+    )
+
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent", "-q")
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+
+    run_dir = pytester.path / ".pytest-agent" / "runs-0001"
+    logs = sorted(path.name for path in (run_dir / "test_sample.py").glob("*.log"))
+    assert len(logs) == 2, f"one test's detail overwrote the other's: {logs}"
+
+    records = [json.loads(line) for line in (run_dir / "index.jsonl").read_text(encoding="utf-8").splitlines()]
+    by_nodeid = {record["nodeid"]: record for record in records}
+    # Each record points at its own file, and that file describes that test.
+    for nodeid, record in by_nodeid.items():
+        text = (run_dir / record["log_file"]).read_text(encoding="utf-8")
+        assert f"nodeid: {nodeid}" in text
+    assert by_nodeid["test_sample.py::test_p[a/b]"]["outcome"] == "failed"
+    assert by_nodeid["test_sample.py::test_p[a_b]"]["outcome"] == "passed"
 
 
 def test_the_cli_dispatches_query_subcommands_instead_of_running_pytest(pytester: pytest.Pytester) -> None:

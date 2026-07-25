@@ -4,7 +4,13 @@ import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
-from pytest_agent._capture import MAX_NAME_BYTES, TestRecorder, fit_component, nodeid_to_relpath
+from pytest_agent._capture import (
+    MAX_NAME_BYTES,
+    TestRecorder,
+    fit_component,
+    nodeid_to_relpath,
+    safe_component,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -150,3 +156,18 @@ def test_a_test_whose_detail_cannot_be_written_is_still_recorded(tmp_path: Path)
     assert indexed["nodeid"] == "t.py::test_a"
     assert indexed["capture_error"] == record["capture_error"]
     assert recorder.records_with_capture_error() == [record]
+
+
+def test_a_name_needing_no_change_is_used_as_it_is() -> None:
+    # The common case, and the one that makes a log path readable back as a
+    # nodeid -- which is why last-failures can print one path instead of a
+    # path and an id.
+    assert safe_component("test_ok[in_process-local]") == "test_ok[in_process-local]"
+
+
+def test_names_that_sanitize_alike_stay_distinct() -> None:
+    # Sanitizing is not injective: both of these become "test_p[a_b]", so
+    # without disambiguation one test's log overwrites the other's and a
+    # query answers about the wrong test.
+    assert safe_component("test_p[a/b]") != safe_component("test_p[a_b]")
+    assert safe_component("test_p[a/b]") != safe_component("test_p[a\\b]")
