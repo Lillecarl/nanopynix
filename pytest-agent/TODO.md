@@ -156,6 +156,15 @@ and a maximum of 144, and a hung test with a long parametrized id repeated its
 line until the run was killed. Files always keep the full id; only terminal
 copies are shortened.
 
+The cap is applied to lines that *repeat* -- the progress line and the stuck
+notices -- and deliberately not to the two end-of-run lists. The failure list
+appends a nodeid exactly when the log path lost it, which for a name over
+`MAX_NAME_BYTES` makes that copy the only addressable form of the test left,
+and `pytest-agent show` takes a nodeid or a unique substring, neither of which
+an elided middle is. Capping it there was written, caught by the round-trip
+test, and reverted: bounding a list that prints once buys nothing and costs the
+one thing the list is for.
+
 The watcher ticks at the finer of the two intervals rather than at the
 heartbeat, because the stuck check rides the same loop. Ticking at the
 heartbeat quantized `--agent-stuck-after` to it, so a test that wedged and was
