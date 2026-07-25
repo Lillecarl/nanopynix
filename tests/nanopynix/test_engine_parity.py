@@ -149,14 +149,10 @@ LEDGER: dict[str, str] = {
     **{
         f"Store.{name}:rpc-only": "DEFECT: a plain libstore operation the inproc engine never got. No transport reason."
         for name in (
-            "add_indirect_root",
-            "add_perm_root",
-            "add_temp_root",
             "add_to_store",
             "compute_store_path",
             "copy_closure",
             "ensure_path",
-            "find_roots",
             "optimise_store",
             "store_dirs",
             "verify_store",

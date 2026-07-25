@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import pytest
 from nanopynix_proto.nix.store import (
     AddIndirectRootRequest,
     AddPermRootRequest,
@@ -29,16 +29,10 @@ from nanopynix_proto.nix.store import (
 )
 
 from nanopynix import Derivation, GcResult, MissingInfo, PathInfo, StorePath
+from tests.support.nix_markers import NIX_GC_ROOTS_BUG
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from tests.support.nix_environment import NixTestEnvironment
-
-NIX_GC_ROOTS_BUG = pytest.mark.nix_version(
-    exclude=("2.31", "2.34"),
-    reason="findRoots/collectGarbage crash on nonnumeric temproots filenames; https://github.com/NixOS/nix/issues/16138",
-)
 
 
 async def _create_derivation(eval: Any) -> StorePath:
@@ -198,6 +192,7 @@ async def test_add_temp_root(
 ) -> None:
     async with shared_nix_environment.rpc_session() as session, session.store() as store:
         await store.rpc.add_temp_root(AddTempRootRequest(path=str(seeded_store_path)))
+        await store.add_temp_root(seeded_store_path)
 
 
 @NIX_GC_ROOTS_BUG
@@ -208,6 +203,7 @@ async def test_find_roots(shared_nix_environment: NixTestEnvironment) -> None:
         for root in roots:
             assert isinstance(root.link, str)
             assert isinstance(root.path, str)
+        assert isinstance(await store.find_roots(censor=True), list)
 
 
 @NIX_GC_ROOTS_BUG
@@ -252,6 +248,7 @@ async def test_add_perm_root_and_indirect_root(
     tmp_path: Path,
 ) -> None:
     root_path = tmp_path / "nanopynix-gc-root"
+    public_root_path = tmp_path / "nanopynix-gc-root-public"
     async with shared_nix_environment.rpc_session() as session, session.store() as store:
         response = await store.rpc.add_perm_root(
             AddPermRootRequest(store_path=str(seeded_store_path), gc_root=str(root_path)),
@@ -259,6 +256,14 @@ async def test_add_perm_root_and_indirect_root(
         assert response.path == str(root_path)
         assert root_path.is_symlink()
         await store.rpc.add_indirect_root(AddIndirectRootRequest(path=str(root_path)))
+
+        # The same thing through the public wrappers, which the raw-proxy calls
+        # above never touch. inproc has these too now, so this is the rpc half
+        # of a parity claim -- see tests/nanopynix/inproc/test_inproc.py's
+        # "GC roots" block.
+        assert await store.add_perm_root(seeded_store_path, str(public_root_path)) == str(public_root_path)
+        assert public_root_path.readlink() == Path(seeded_store_path)
+        await store.add_indirect_root(str(public_root_path))
 
 
 async def test_ensure_path(
