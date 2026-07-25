@@ -327,14 +327,32 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
 
 ## Verification
 
-8. **`test_engine_parity.py` compares signatures**, so "same name, same
-   signature, different behaviour" passes. It missed every divergence
-   above. Seed a semantic layer from the matrix: `(expression, operation)`
-   -> same result or same exception type on both engines.
+8. ~~**`test_engine_parity.py` compares signatures**, so "same name, same
+   signature, different behaviour" passes.~~ -- DONE.
+   `tests/nanopynix/test_engine_parity_semantics.py` is the other half:
+   `(expression, operation)` run on both engines, outcomes compared as
+   either a returned value or an exception *type*. 25 success cases, 19
+   failure cases.
 
-   Do this **before** item 6, not after: the matrix is the seed, item 6
-   changes three more of the behaviours it measures, and landing 6 first
-   means writing the parity tests against a moving target twice.
+   It found a divergence on its first run, which is the point. rpc's
+   `attr()`/`list_get()` are sync and lazy, so `{ x = 1; }.attr("nope")`
+   hands back an unresolved proxy where inproc raises
+   `MissingAttributeError` immediately. The paired `*_forced` cases show
+   the engines agree once the value is forced -- so it is *when* the error
+   arrives, not whether. Recorded in `SEMANTIC_LEDGER` with the same
+   discipline as the signature `LEDGER`: an entry asserts the engines
+   still disagree, so it cannot outlive what it documents. Item 6's
+   unification of `attr` should delete both entries.
+
+   `tests/temp/` is gone. `test_exception_translation.py` moved to
+   `tests/nanopynix/` unchanged; the matrix moved to
+   `test_error_boundaries.py`, keeping the three invariants the semantic
+   layer does not cover (store/build failures across both backends,
+   `NixError`-catchability, and `nix::ErrorInfo` compared field by field
+   across boundaries A and B) and dropping the JSON side-file recorder in
+   favour of pytest-agent notes. Its `repo_root`/`nixpkgs_path` fixtures
+   were duplicated in three conftests; they now live once in
+   `tests/conftest.py`.
 
 # Tracked: pre-existing complexity/arg-count debt (ruff-strict C901/PLR09xx)
 Enabling mccabe (`C901`) and Pylint's too-many-{branches,returns,arguments,
