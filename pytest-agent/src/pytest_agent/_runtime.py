@@ -7,8 +7,9 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from pytest_agent._capture import TestRecorder
+from pytest_agent._capture import TestRecorder, nodeid_is_evident_from
 from pytest_agent._history import append_run_record, git_revision, prune_old_runs
+from pytest_agent._paths import display_path
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -52,7 +53,7 @@ class AgentRuntime:
         self.heartbeat_interval = heartbeat_interval
         self.terminal = terminal
         self.autodetected_via = autodetected_via
-        self.recorder = TestRecorder(root)
+        self.recorder = TestRecorder(root, rootpath=config.rootpath)
         self.started_at_iso = ""
 
         self.counts: dict[str, int] = dict.fromkeys(
@@ -140,11 +141,27 @@ class AgentRuntime:
         prune_old_runs(self.top_root, self.keep_runs, protect=self.root)
 
         self._print(f"done in {duration:.1f}s -- {self._final_counts_line()}")
-        failed_nodeids = self.recorder.nodeids_with_outcome({"failed", "error", "collect_error"})
-        if failed_nodeids:
-            self._print(f"{len(failed_nodeids)} failed/errored:")
-            for nodeid in failed_nodeids:
-                self._print(f"  {nodeid}")
+        failed = self.recorder.records_with_outcome({"failed", "error", "collect_error"})
+        if failed:
+            self._print(f"{len(failed)} failed/errored:")
+            for record in failed:
+                # One line per failure: the resolved, shell-quoted log path
+                # rather than the nodeid. Reconstructing that path by hand
+                # means knowing the run number, mirroring the test file's
+                # path, and quoting the brackets in a parametrized id --
+                # three chances to get it wrong before reading a single line
+                # of the failure -- while the nodeid is right there in the
+                # path (and on the log's own first line). The nodeid is only
+                # appended when the path can't be read back as one.
+                line = display_path(self.root / record["log_file"])
+                if not nodeid_is_evident_from(record["log_file"], record["nodeid"]):
+                    line = f"{line}  ({record['nodeid']})"
+                self._print(f"  {line}")
+            if len(failed) > 1:
+                # Only worth a line when there is actually a "do these share
+                # one cause?" question to ask -- with a single failure the
+                # log path above is already the whole answer.
+                self._print("shared root cause? pytest-agent digest")
         self._print(f"full detail: {self.root.resolve()} (see index.jsonl)")
 
     def _final_counts_line(self) -> str:

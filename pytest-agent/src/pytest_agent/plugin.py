@@ -12,7 +12,7 @@ from _pytest.config import (
 
 from pytest_agent._harness_detect import detect_agent_harness
 from pytest_agent._history import next_run_dir
-from pytest_agent._pipe_guard import find_banned_pipe_reader
+from pytest_agent._pipe_guard import find_banned_pipe_reader, zero_detail_mode
 from pytest_agent._profile import profile as profile
 from pytest_agent._runtime import RUNTIME_PLUGIN_NAME, AgentRuntime
 from pytest_agent._terminal import RealTerminal
@@ -100,16 +100,23 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_cmdline_main(config: pytest.Config) -> int | None:
     if config.getoption("agent_allow_pipe"):
         return None
+    if zero_detail_mode(config) is not None:
+        return None
     reader = find_banned_pipe_reader()
     if reader is None:
         return None
+    # Deliberately no mention of --agent-allow-pipe here. The flag exists
+    # (documented in the README) for the rare human who means it, but naming
+    # it in the refusal an agent is reading turns "stop truncating" into
+    # "add this flag and carry on truncating" -- the opposite of the point.
     sys.stderr.write(
         f"pytest-agent: refusing to run -- stdout is piped directly into '{reader}', "
         "which truncates pytest's output and can hide the real failure.\n"
-        "Run pytest without piping into head/tail/grep/sed/awk. Use --agent mode "
-        "instead: it writes full per-test detail to disk and only prints a short "
-        "periodic progress line, so there is nothing left that needs truncating.\n"
-        "Pass --agent-allow-pipe (or set PYTEST_AGENT_ALLOW_PIPE=1) if this is intentional.\n",
+        "This guard is independent of agent mode: it applies to every pytest run in "
+        "this environment, and PYTEST_AGENT_NO_AUTODETECT=1 does not turn it off.\n"
+        "Re-run without the pipe. Agent mode writes full per-test detail to disk, and "
+        "`pytest-agent last-failures|show|digest` answer the question you were "
+        "reaching for head/tail/grep to answer.\n",
     )
     return 2
 
@@ -117,6 +124,14 @@ def pytest_cmdline_main(config: pytest.Config) -> int | None:
 @pytest.hookimpl(trylast=True)
 def pytest_configure(config: pytest.Config) -> None:
     if not config.getoption("agent"):
+        return
+
+    # A listing-only run (--collect-only, --fixtures, ...) has no per-test
+    # detail to record, and its listing *is* the answer being asked for --
+    # silencing the terminal reporter would leave the caller with nothing at
+    # all, and claiming a runs-NNNN directory for it would be pure litter.
+    # Agent mode is a no-op here, so plain pytest behavior stands.
+    if zero_detail_mode(config) is not None:
         return
 
     _silence_terminal_reporter(config)
