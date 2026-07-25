@@ -256,18 +256,22 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
      catch-all must stay rooted at `Error`, never `BaseError`.
 
 4. ~~**`get_derived_path` is inproc-only with zero consumers.**~~ -- DONE,
-   by making it private (`Value._derived_path`) rather than by adding it
-   to rpc. "Zero consumers" was right about the outside world and wrong
-   inside: `build()` needs it, and two multithreaded tests want the
-   intermediate path so they can build it twice.
+   deleted outright. It was public on inproc and absent on rpc, which the
+   parity ledger recorded as a defect; the two ways to settle that were to
+   add it to rpc or to stop having it, and nothing needed it.
 
-   The defect was that it was public on one engine and absent on the
-   other. Two ways to settle that; adding public surface with no
-   demonstrated consumer is the more expensive one, and `build()` -- the
-   operation callers actually want -- is already on both engines. The
-   `^output` selection question therefore does not need answering yet; it
-   does the day someone has a real use for the string, at which point it
-   goes on *both* engines.
+   `build()` -- its only non-test caller -- takes the DerivedPath from L1
+   inline, since it is the only caller. The tests that wanted the
+   intermediate path use `attr("drvPath")`, which is what any caller would
+   reach for and is byte-identical (measured, not assumed: same store path
+   both ways). They need the path rather than `build()` because they build
+   in batches of 50 to measure how many builds Nix dispatches concurrently,
+   which building one at a time would destroy.
+
+   Made private first, then deleted: private still keeps the method and the
+   parity question alive, and neither was earning its place. The `^output`
+   selection-syntax question is moot until someone has a real use for the
+   string, at which point it goes on *both* engines.
 
 ## Consolidation -- mechanical, unique names, `sed`-able
 

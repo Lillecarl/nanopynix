@@ -87,13 +87,6 @@ async def _release_all(values: list[inproc.Value]) -> None:
     await asyncio.gather(*(value.release() for value in values))
 
 
-async def _derived_paths(values: list[inproc.Value]) -> list[str]:
-    # Private on purpose -- see Value._derived_path. build() is the public
-    # operation; this test wants the intermediate path to build it twice.
-    paths = (value._derived_path() for value in values)  # type: ignore[reportPrivateUsage] -- see above
-    return list(await asyncio.gather(*paths))
-
-
 async def _output_paths(store: inproc.Store, drv_paths: list[str]) -> list[str]:
     """Resolve each just-built derivation's own output store path(s)."""
     derivations = await asyncio.gather(*(store.read_derivation(path) for path in drv_paths))
@@ -356,10 +349,9 @@ async def test_inproc_independent_builds_overlap_without_cpu_pressure(
                         first_seconds.call(uuid.uuid4().hex),
                         second_seconds.call(uuid.uuid4().hex),
                     )
-                    first_path, second_path = await asyncio.gather(
-                        first._derived_path(),  # type: ignore[reportPrivateUsage] -- see Value._derived_path
-                        second._derived_path(),  # type: ignore[reportPrivateUsage] -- see Value._derived_path
-                    )
+                    first_path, second_path = [
+                        await (await value.attr("drvPath")).as_string() for value in (first, second)
+                    ]
                     drv_paths.extend([first_path, second_path])
                     async with _measuring_build_dispatch(nix) as starts:
                         first_result, second_result = await asyncio.gather(
@@ -404,7 +396,13 @@ async def test_inproc_one_evaluator_extracts_and_builds_fifty_derivations(
                     seconds = 2
                     values = await _sleep_derivations(evaluator, count=50, seconds=seconds)
                     try:
-                        drv_paths.extend(await _derived_paths(values))
+                        # Built in one batch rather than through value.build(), because
+                        # what this measures is how many builds Nix dispatches
+                        # concurrently -- building one at a time would destroy it.
+                        # .drvPath is byte-identical to the DerivedPath string
+                        # build() uses internally: a plain derivation selects all
+                        # outputs.
+                        drv_paths.extend([await (await value.attr("drvPath")).as_string() for value in values])
                         async with _measuring_build_dispatch(nix) as starts:
                             results = await store.build_paths_with_results(drv_paths)
                         assert len(results) == 50
@@ -450,7 +448,13 @@ async def test_inproc_parallel_batch_builds_use_multiple_store_workers(
                     values = await asyncio.gather(
                         *(_sleep_derivations(evaluator, count=5, seconds=seconds) for evaluator in evaluators),
                     )
-                    derived_path_groups.extend(await asyncio.gather(*(_derived_paths(group) for group in values)))
+                    for group in values:
+                        # noqa/PERF401 below: the body awaits, so the comprehension
+                        # ruff wants would be an *async* generator, which extend()
+                        # cannot consume.
+                        derived_path_groups.append(  # noqa: PERF401 -- see comment above
+                            [await (await value.attr("drvPath")).as_string() for value in group]
+                        )
                     async with _measuring_build_dispatch(nix) as starts:
                         outputs = await asyncio.gather(
                             *(store.build_paths_with_results(paths) for paths in derived_path_groups),
@@ -509,7 +513,9 @@ async def test_inproc_mixed_evaluation_build_and_store_workloads(
                     if not paths:
                         pytest.skip("test store contains no valid paths")
                     selected = paths[: min(4, len(paths))]
-                    build_paths.extend(await asyncio.gather(*(_derived_paths(values) for values in build_values)))
+                    for values in build_values:
+                        # As above: an awaiting comprehension is an async generator.
+                        build_paths.append([await (await value.attr("drvPath")).as_string() for value in values])  # noqa: PERF401 -- see comment above
                     build_tasks = [store.build_paths_with_results(paths) for paths in build_paths]
                     evaluation_tasks = [
                         evaluator.string("builtins.foldl' (a: b: a + b) 0 (builtins.genList (x: x) 10000)")
