@@ -86,9 +86,20 @@ class TestEvalAttrs:
             v.attr_get("y")
 
     def test_attr_get_on_non_attrs_raises(self, eval_state: nanopynix.EvalState):
+        """The wrong type is Nix's own TypeError, not a generic RuntimeError.
+
+        This used to be ``RuntimeError("value is not an attribute set")`` from a
+        hand-written ``v->type() != nAttrs`` check. Routing through nix's
+        ``forceAttrs`` means the message names the type it did find, and the
+        exception lands inside the NixError hierarchy where callers can catch
+        it alongside every other type mismatch.
+        """
         v = eval_state.eval_string("1")
-        with pytest.raises(RuntimeError, match="not an attribute set"):
+        # Nix colourises its messages, so there are ANSI escapes between
+        # "found" and the type name -- match only up to that point.
+        with pytest.raises(Exception, match="expected a set but found") as excinfo:
             v.attr_get("x")
+        assert type(excinfo.value).__name__ == "TypeError"
 
 
 class TestEvalList:

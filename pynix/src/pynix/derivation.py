@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any, override
 import structlog
 from clypi import Command, arg
 
+from nanopynix import NixType
+
 if TYPE_CHECKING:
     from nanopynix.rpc import ValueProxy
 
@@ -60,7 +62,12 @@ class Show(Command):
 
     @staticmethod
     async def _get_drv_path(value: ValueProxy) -> str:
-        if not await value.has_attr("type"):
+        # has_attr() is an attrset question, so ask whether this is an attrset
+        # first. It used to answer False for any non-attrset, which made
+        # "is this a derivation?" work by accident on a string or a list; it
+        # now raises, which is right for an accessor but means the type test
+        # has to be explicit.
+        if await value.get_type() != NixType.ATTRS or not await value.has_attr("type"):
             error_exit("value is not a derivation")
         value_type = await value.attr("type").force_json()
         if value_type != "derivation":
