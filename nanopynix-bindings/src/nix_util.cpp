@@ -12,6 +12,7 @@
 #include <nix/util/logging.hh>
 #include <nix/util/url.hh>
 
+#include "nix_error_info.hh"
 #include "nix_compat.hh"
 
 #include <memory>
@@ -316,14 +317,16 @@ NB_MODULE(util, m) {
           "Parse a hash string in any format (SRI, hex, base32, base64) and return SRI form.");
 
     // ── Exception bindings ──────────────────────────────────────
-    // Register specific Nix C++ exceptions as Python types.
-    // nb::exception catches strictly by C++ type, so subclasses
-    // must be registered BEFORE their base (nix::Error is NOT
-    // registered to avoid shadowing more specific translators).
-    nb::exception<nix::SysError> py_sys_err(m, "SysError", PyExc_RuntimeError);
-    nb::exception<nix::UsageError> py_usage_err(m, "UsageError", PyExc_RuntimeError);
-    nb::exception<nix::UnimplementedError> py_unimpl_err(m, "UnimplementedError", PyExc_RuntimeError);
-    (void) py_sys_err;
-    (void) py_usage_err;
-    (void) py_unimpl_err;
+    // Register specific Nix C++ exceptions as Python types. Translators are
+    // tried last-registered-first, so a base class must be registered BEFORE
+    // its subclasses or it would shadow them (see nix_error_info.hh).
+    // nix::Error itself is deliberately NOT registered: it is the base of
+    // every type here and of the ones bound in nix_expr.cpp/nix_store.cpp,
+    // which live in different translation units with no ordering guarantee
+    // between them, so it could shadow any of them.
+    // These three are siblings, so their relative order does not matter.
+    using nanopynix::errinfo::bind_nix_error;
+    bind_nix_error<nix::SysError>(m, "SysError");
+    bind_nix_error<nix::UsageError>(m, "UsageError");
+    bind_nix_error<nix::UnimplementedError>(m, "UnimplementedError");
 }

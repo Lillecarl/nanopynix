@@ -40,6 +40,7 @@
 #include <nix/util/posix-source-accessor.hh>
 #endif
 
+#include "nix_error_info.hh"
 #include "py_store_impl.hh"
 
 namespace nb = nanobind;
@@ -1321,10 +1322,10 @@ NB_MODULE(store, m) {
           "can apply -- see that function's docstring for why.");
 
     // ── Exception bindings ──────────────────────────────────────
-    nb::exception<nix::InvalidPath> py_invalid_path(m, "InvalidPath", PyExc_RuntimeError);
-    nb::exception<nix::Unsupported> py_unsupported(m, "Unsupported", PyExc_RuntimeError);
-    nb::exception<nix::BadStorePath> py_bad_sp(m, "BadStorePath", PyExc_RuntimeError);
-    (void) py_invalid_path;
-    (void) py_unsupported;
-    (void) py_bad_sp;
+    // Siblings, all direct subclasses of nix::Error, so the base-before-
+    // subclass ordering rule (see nix_error_info.hh) does not bind here.
+    using nanopynix::errinfo::bind_nix_error;
+    bind_nix_error<nix::InvalidPath>(m, "InvalidPath");
+    bind_nix_error<nix::Unsupported>(m, "Unsupported");
+    bind_nix_error<nix::BadStorePath>(m, "BadStorePath");
 }

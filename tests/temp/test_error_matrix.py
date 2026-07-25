@@ -252,6 +252,46 @@ async def test_record_error_matrix(
     ]
     assert not not_nix_errors, f"not NixError subclasses: {not_nix_errors}"
 
+    # ── Structured detail (nix::ErrorInfo), boundary A ──────────────
+    #
+    # Anything raised by the C++ evaluator or store carries a `nix::ErrorInfo`
+    # -- position, evaluation trace, suggestions -- which C++ is the only place
+    # to have. inproc now propagates it (nix_error_info.hh -> nix_raw/nix_info
+    # -> NixError.raw/.info), so assert it rather than merely record it.
+    #
+    # Deliberately NOT asserted for the two `build_*` cases: those are built by
+    # `build_error_from_result` out of Nix's BuildResult{status, error_msg,
+    # drv_path}, which has no ErrorInfo anywhere in it on either engine or
+    # either backend. Empty raw/info there is the honest answer, not a gap.
+    missing_detail = [
+        f"inproc/{case} (raw={described['raw_populated']} info={described['info_populated']})"
+        for case, described in matrix["inproc"].items()
+        if not case.startswith("build_")
+        and not case.endswith("__structured_status")
+        and not (described["raw_populated"] and described["info_populated"])
+    ]
+    assert not missing_detail, f"inproc lost nix::ErrorInfo for: {missing_detail}"
+
+    # ── OPEN: boundary B does not carry ErrorInfo yet ───────────────
+    #
+    # The rpc engine's raw/info are still empty for these same cases. The
+    # payload has nowhere to ride: grpclib's channel-level
+    # `status_details_codec` is the natural slot, but the client channel is
+    # constructed inside grpclib_transports' `open_channel()`, which does not
+    # forward that argument -- so closing this needs a decision (upstream
+    # passthrough vs. something else), not just more code here.
+    #
+    # Recorded, not asserted, so this file states the gap instead of hiding it.
+    # When boundary B lands, fold these into the parity comparison above.
+    rpc_detail_gap = sorted(
+        case
+        for case, described in matrix["rpc"].items()
+        if not case.startswith("build_")
+        and not case.endswith("__structured_status")
+        and not (described["raw_populated"] and described["info_populated"])
+    )
+    print(f"[{backend}] rpc cases still missing ErrorInfo: {rpc_detail_gap}")  # noqa: T201 -- see module docstring
+
 
 def test_inproc_raises_the_public_hierarchy_not_raw_bindings() -> None:
     """The raw nanobind classes must not be what reaches inproc callers.
