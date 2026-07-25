@@ -202,6 +202,9 @@ class LocalValue:
     def as_string(self) -> str:
         return self.require_raw().as_string()
 
+    def coerce_to_string(self) -> str:
+        return self.require_raw().coerce_to_string()
+
     def realise_string(self) -> str:
         return self.require_raw().realise_string()
 

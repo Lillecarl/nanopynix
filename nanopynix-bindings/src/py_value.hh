@@ -39,6 +39,7 @@ struct PyValue {
     double as_float() const;
     bool as_bool() const;
     std::string as_string() const;
+    std::string coerce_to_string() const;
 
     void force();
     void force_deep();

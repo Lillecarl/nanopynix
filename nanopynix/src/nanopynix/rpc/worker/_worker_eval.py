@@ -30,6 +30,8 @@ from nanopynix_proto.nix.eval import (
     CallRequest,
     CloseEvalRequest,
     CloseEvalResponse,
+    CoerceToStringRequest,
+    CoerceToStringResponse,
     ConfigureEvalRequest,
     ConfigureEvalResponse,
     EditLocationRequest,
@@ -383,6 +385,12 @@ class EvalServiceHandler(EvalServiceBase):
         # serialization rather than going through TypeAdapter validation.
         json_bytes = pydantic_core.to_json(value.to_json(copy_to_store=message.copy_to_store))
         return ForceJsonResponse(json=json_bytes.decode("utf-8"))
+
+    async def coerce_to_string(self, message: CoerceToStringRequest) -> CoerceToStringResponse:
+        return await self._run(message, self._do_coerce_to_string)
+
+    def _do_coerce_to_string(self, message: CoerceToStringRequest) -> CoerceToStringResponse:
+        return CoerceToStringResponse(value=self._resolve(message.handle).coerce_to_string())
 
     async def realise_string(self, message: RealiseStringRequest) -> RealiseStringResponse:
         return await self._run(message, self._do_realise_string)

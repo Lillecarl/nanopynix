@@ -31,6 +31,7 @@ from nanopynix_proto.nix.eval import (
     CallLockedFlakeRequest,
     CallRequest,
     CloseEvalRequest,
+    CoerceToStringRequest,
     ConfigureEvalRequest,
     EditLocationRequest,
     EvalFileRequest,
@@ -545,6 +546,13 @@ class ValueProxy:
     async def force_as(self, typ: Literal[NixType.LIST], *, timeout: float | None = None) -> ValueList: ...
     @overload
     async def force_as(self, typ: Literal[NixType.FUNCTION], *, timeout: float | None = None) -> ValueProxy: ...
+    @overload
+    # Widening fallback, and it must stay last. Without it a caller holding a
+    # NixType in a variable rather than a literal cannot call force_as at all:
+    # the implementation signature is invisible to type checkers, so every such
+    # call fails to match an overload. Literals still resolve to their precise
+    # return type above; only the dynamic case lands here.
+    async def force_as(self, typ: NixType, *, timeout: float | None = None) -> NixValue: ...
     async def force_as(self, typ: NixType, *, timeout: float | None = None) -> NixValue:
         actual = await self._ensure_type(timeout=timeout)
         if actual != typ:
@@ -552,21 +560,24 @@ class ValueProxy:
         return await self.force(timeout=timeout)
 
     async def coerce_str(self, *, timeout: float | None = None) -> str:
-        """Force and coerce to ``str``, converting bools/numbers/null as Nix would.
+        """``builtins.toString`` on this value.
+
+        Nix's own coercion, evaluated by Nix in the worker rather than
+        reimplemented here, so there is nothing to drift: ``true`` is ``"1"``
+        while ``false`` and ``null`` are both ``""``, floats print as
+        ``"42.500000"``, lists coerce elementwise and join on a space, and an
+        attrset defers to its ``__toString`` or ``outPath``.
+
+        Store paths in the result are not built. Use ``realise_string()`` when
+        they have to exist, or ``as_string()`` to assert the value already is a
+        string instead of coercing one.
 
         Raises:
-            NixCoercionError: The value has no string coercion (e.g. an attrset).
+            NixError: The value has no string coercion (e.g. a bare attrset).
         """
-        value = await self.force(timeout=timeout)
-        if isinstance(value, str):
-            return value
-        if isinstance(value, bool):
-            return "true" if value else "false"
-        if isinstance(value, int | float):
-            return str(value)
-        if value is None:
-            return "null"
-        raise NixCoercionError(f"cannot coerce Nix {self.nix_type.name.lower()} to string")
+        await self._ensure_resolved(timeout=timeout)
+        result = await self._ctx.proxy.coerce_to_string(CoerceToStringRequest(handle=self.handle))
+        return result.value
 
     async def coerce_int(self, *, timeout: float | None = None) -> int:
         """Force and coerce to ``int``.

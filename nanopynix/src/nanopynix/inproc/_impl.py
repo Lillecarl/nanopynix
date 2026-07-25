@@ -1020,6 +1020,21 @@ class Value:
         """Force this value and return it as ``str``. Raises if not a string."""
         return await self._eval_session.run(self._local_for(self._eval_session).as_string)
 
+    async def coerce_str(self) -> str:
+        """``builtins.toString`` on this value.
+
+        Nix's own coercion, run by Nix rather than reimplemented, so there is
+        nothing to drift: ``true`` is ``"1"`` while ``false`` and ``null`` are
+        both ``""``, floats print as ``"42.500000"``, lists coerce elementwise
+        and join on a space, and an attrset defers to its ``__toString`` or
+        ``outPath``.
+
+        Store paths in the result are not built. Use ``realise_string()`` when
+        they have to exist, or ``as_string()`` to assert the value already is a
+        string instead of coercing one.
+        """
+        return await self._eval_session.run(self._local_for(self._eval_session).coerce_to_string)
+
     async def realise_string(self) -> str:
         """Coerce this value to a string and realise its Nix string context."""
         return await self._eval_session.run(self._local_for(self._eval_session).realise_string)
