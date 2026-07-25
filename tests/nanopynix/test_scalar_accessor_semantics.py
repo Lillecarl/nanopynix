@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from nanopynix import NixError, NixType, NixTypeError, WrongNixTypeError
+from nanopynix import NixError, NixEvalSettings, NixType, NixTypeError, WrongNixTypeError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -343,16 +343,54 @@ async def test_deep_conversion_of_a_true_cycle_raises_instead_of_crashing(
 ) -> None:
     """A cycle with no ``outPath`` to stop at must still be an error, not SIGSEGV.
 
-    Nix answers this with "stack overflow; max-call-depth exceeded". The
-    assertion is deliberately only "it raised and the process survived": the
-    exception currently arrives as a bare ``RuntimeError`` rather than a
-    ``NixError``, which is a separate error-mapping gap -- pinning the exact
-    type here would enshrine it.
+    Nix answers this with "stack overflow; max-call-depth exceeded", which it
+    raises as ``nix::StackOverflowError``. That derives from
+    ``nix::EvalBaseError`` rather than ``nix::EvalError``, so before
+    ``EvalBaseError`` was registered it matched no exception translator and
+    arrived here as a bare ``RuntimeError`` carrying no ``ErrorInfo`` at all.
+    Hence the two assertions beyond the message: the type, and that Nix's own
+    structured detail survived the boundary.
     """
     async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
         value = await ev.string("let x = { y = x; }; in x")
-        with pytest.raises(Exception, match="max-call-depth"):
+        with pytest.raises(NixError, match="max-call-depth") as excinfo:
             await value.to_python()
+        assert excinfo.value.info is not None
+
+
+async def test_max_call_depth_is_a_nix_error_with_error_info(inproc_session: InprocSessionFactory) -> None:
+    """``nix::StackOverflowError`` must not bypass the ``NixError`` hierarchy.
+
+    The direct test for the same mapping the cycle above reaches incidentally,
+    and the one that pins it: it drives the guard through plain recursion at an
+    explicit ``max_call_depth`` rather than relying on Nix's default of 10000.
+    That matters because the default does not survive the C stack at all --
+    ``let f = n: f (n + 1); in f 0`` at the default depth exhausts it and takes
+    the process with it (TODO.md item 0). A low explicit limit reaches the
+    guard the same way with room to spare.
+
+    ``StackOverflowError`` derives from ``nix::EvalBaseError``, not
+    ``nix::EvalError``, so it is only bound because ``EvalBaseError`` itself is
+    registered. ``IFDError`` and ``RecoverableEvalError`` sit in the same
+    position and ride on the same registration.
+    """
+    settings = NixEvalSettings(max_call_depth=1000)
+    async with (
+        inproc_session() as session,
+        session.store() as store,
+        session.eval(store, eval_settings=settings) as ev,
+    ):
+        # ev.string() already forces to WHNF, so the guard fires here rather
+        # than at a later accessor.
+        with pytest.raises(NixError, match="max-call-depth") as excinfo:
+            await ev.string("let f = n: f (n + 1); in f 0")
+        # Nix's structured detail is the whole point: C++ is the only place
+        # that has the source position, so losing it is unrecoverable. The
+        # position, not the trace -- Nix throws this one at the offending call
+        # with no frames accumulated yet, so `traces` is legitimately empty.
+        info = excinfo.value.info
+        assert info is not None
+        assert info["pos"] is not None
 
 
 # force_as is the generic by-NixType entry point and still covers what no

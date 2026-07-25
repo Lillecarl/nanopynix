@@ -1572,6 +1572,17 @@ NB_MODULE(expr, m) {
     // ── Exception bindings (LIFO: last registered tried first.
     // Register base classes FIRST so specific subclasses are tried before them)
     using nanopynix::errinfo::bind_nix_error;
+    // EvalBaseError is EvalError's *parent*, and Nix derives three errors from
+    // it directly rather than from EvalError: StackOverflowError (the
+    // max-call-depth guard), IFDError, and RecoverableEvalError
+    // (nix/expr/eval-error.hh). Without this line none of the three matched any
+    // translator, so they reached Python as a bare RuntimeError carrying no
+    // ErrorInfo at all -- no position, no trace, no suggestions -- which is
+    // exactly the information C++ is the only place to have. Registering it
+    // here is safe precisely because it sits in the same translation unit as
+    // EvalError: the LIFO rule that makes ordering load-bearing is only
+    // unreliable *across* translation units.
+    bind_nix_error<nix::EvalBaseError>(m, "EvalBaseError");
     bind_nix_error<nix::EvalError>(m, "EvalError");
     bind_nix_error<nix::ParseError>(m, "ParseError");
     bind_nix_error<nix::TypeError>(m, "TypeError");
