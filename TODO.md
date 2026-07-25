@@ -27,25 +27,37 @@ validation and clearer error messages -- a real improvement, but a
 separate, behavior-changing redesign rather than a type-error fix, so it
 wasn't bundled into this pass.
 
-# Open: coerce_int/coerce_float/coerce_bool have no Nix analogue
+# Resolved: `apply()` replaced the coercion family
 
-The engine-parity ledger originally recorded inproc's `as_*` and rpc's
-`coerce_*` as one concept spelled two ways. They are not: `as_*` are strict
-type assertions, `coerce_*` convert. `tests/nanopynix/test_scalar_accessor_semantics.py`
-now pins both.
+Recorded because the reasoning is worth not re-deriving, and because it is the
+rule to apply to the next helper someone wants to add.
 
-Resolved: `coerce_str` is `builtins.toString` on both engines, delegated to
-`EvalState::coerceToString` rather than reimplemented, so Nix-familiar callers
-get no surprises and there is nothing to drift.
+The engine-parity ledger once listed twelve entries for two accessor families.
+They turned out to be different operations, not one concept spelled two ways,
+and they were resolved in opposite directions:
 
-Still open: `coerce_int`/`coerce_float`/`coerce_bool` are rpc-only and are
-**not** Nix operations -- Nix has no `toInt`/`toFloat`/`toBool`, so there is no
-behaviour to be faithful to. They were left as-is rather than ported to inproc,
-because spreading them would double the surface of a shape Nix does not have,
-and they sit oddly beside the now-Nix-faithful `coerce_str` (`coerce_str true`
-is `"1"`, yet `coerce_bool "true"` is `True` -- two mental models in one API).
-Decide whether they should exist at all; if they stay, they want a name that
-does not imply Nix coercion.
+- `as_int`/`as_float`/`as_bool`/`as_string` are the FFI boundary -- producing an
+  actual Python object is the one thing no Nix expression can do. Added to rpc
+  so both engines have them, with the type check running in the worker so both
+  raise the same `NixTypeError`.
+- `coerce_str`/`coerce_int`/`coerce_float`/`coerce_bool` were **deleted**.
+  `coerce_str` was `builtins.toString` reimplemented in Python, and wrong with
+  it (`"true"` where Nix says `"1"`, `"null"` where Nix says `""`, no handling
+  of `__toString`/`outPath`/lists at all). The other three had no Nix
+  counterpart -- Nix has no `toInt`/`toFloat`/`toBool` -- so there was nothing
+  to be faithful to.
+
+`Value.apply(function)` replaced them: a Nix function expression, or an
+already-evaluated function value, applied to the value. It reimplements
+nothing, reaches every builtin rather than four hand-picked conversions, and
+needed no new wire surface -- it is `eval.string()` plus the existing `call()`.
+Passing an evaluated function is also the memoisation story, without `apply`
+owning a cache.
+
+The rule that follows: **if Nix can already express it, expose the door, not a
+copy of the room.** A helper that wraps a builtin has to justify itself against
+`apply("builtins.thatOne")`, and a helper with no Nix counterpart has to
+justify existing at all.
 
 # Tracked: pre-existing complexity/arg-count debt (ruff-strict C901/PLR09xx)
 Enabling mccabe (`C901`) and Pylint's too-many-{branches,returns,arguments,

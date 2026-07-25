@@ -252,34 +252,6 @@ std::string PyValue::as_string() const {
     return std::string(es.forceString(*v, nix::noPos, "while reading a Nix value as a string"));
 }
 
-// `builtins.toString`, exactly -- not an approximation of it.
-//
-// Nix's string coercion is much bigger than the scalar cases it looks like:
-// `true` is "1" but `false` and `null` are both "", floats print via %f
-// ("42.500000", not "42.5"), lists coerce elementwise and join on a space, and
-// an attrset defers to its own `__toString` or `outPath`. Reimplementing that
-// in Python would drift from Nix the moment any of it changed, which is the
-// whole thing this is meant to avoid, so it delegates to EvalState.
-//
-// coerceMore=true / copyToStore=false are exactly prim_toString's arguments.
-// copyToStore=false means the result can name store paths that do not exist
-// yet; that matches `toString` and matches as_string above, which drops string
-// context rather than rejecting it. Use realise_string() when the referenced
-// paths actually have to be there.
-std::string PyValue::coerce_to_string() const {
-    auto *v = checkedValue();
-    auto &es = requireEvalState();
-    nb::gil_scoped_release release;
-    nix::NixStringContext context;
-    return es.coerceToString(
-        nix::noPos,
-        *v,
-        context,
-        "while coercing a Nix value to a string",
-        true,
-        false).toOwned();
-}
-
 void PyValue::force() {
     if (auto *es = evalState()) {
         nb::gil_scoped_release release;
@@ -1339,7 +1311,6 @@ static void bind_value(nb::module_ &m) {
         .def("as_float", &PyValue::as_float)
         .def("as_bool", &PyValue::as_bool)
         .def("as_string", &PyValue::as_string)
-        .def("coerce_to_string", &PyValue::coerce_to_string)
         .def("force", &PyValue::force)
         .def("force_deep", &PyValue::force_deep)
         .def("realise_string", &PyValue::realise_string)

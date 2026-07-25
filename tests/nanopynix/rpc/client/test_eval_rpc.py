@@ -15,7 +15,7 @@ from anyio import Path as AnyioPath
 
 from nanopynix import (
     EvalSessionClosedError,
-    NixCoercionError,
+    NixError,
     NixType,
     ValueReleasedError,
     WrongNixTypeError,
@@ -448,8 +448,8 @@ async def test_eval_call_non_function_raises(rpc_session: RpcSessionFactory):
             await value(1)
 
 
-async def test_eval_force_as_and_coerce_helpers(rpc_session: RpcSessionFactory):
-    """force_as checks remote type; coerce_* applies explicit scalar conversions."""
+async def test_eval_force_as_and_apply(rpc_session: RpcSessionFactory):
+    """force_as checks the remote type; apply() runs a Nix function on the value."""
     async with (
         rpc_session() as session,
         session.store() as store,
@@ -464,12 +464,12 @@ async def test_eval_force_as_and_coerce_helpers(rpc_session: RpcSessionFactory):
         with pytest.raises(WrongNixTypeError):
             await text_number.force_as(NixType.INT)
 
-        assert await text_number.coerce_int() == 42
-        assert await number.coerce_str() == "42"
-        with pytest.raises(NixCoercionError):
-            await text_bad.coerce_int()
-        with pytest.raises(NixCoercionError):
-            await attrs.coerce_str()
+        # The dedicated coercion methods are gone; apply() covers them with
+        # Nix's own builtins, which is where the semantics should come from.
+        assert await (await number.apply("builtins.toString")).as_string() == "42"
+        assert await (await text_bad.apply("builtins.stringLength")).as_int() == len("forty-two")
+        with pytest.raises(NixError):
+            await (await attrs.apply("builtins.toString")).as_string()
 
 
 async def test_force_deep_preserves_nested_functions(rpc_session: RpcSessionFactory):

@@ -7,7 +7,6 @@ import queue
 import threading
 import weakref
 from dataclasses import dataclass, field
-from math import isfinite
 from typing import TYPE_CHECKING, Any, Literal, Never, Protocol, cast, overload
 
 import anyio
@@ -32,7 +31,6 @@ from nanopynix_proto.nix.eval import (
     CallLockedFlakeRequest,
     CallRequest,
     CloseEvalRequest,
-    CoerceToStringRequest,
     ConfigureEvalRequest,
     EditLocationRequest,
     EvalFileRequest,
@@ -67,7 +65,6 @@ from nanopynix._wire import HandleKind
 from nanopynix.exceptions import (
     EvalSessionClosedError,
     ForeignValueError,
-    NixCoercionError,
     StoreError,
     UnresolvedValueError,
     ValueReleasedError,
@@ -597,90 +594,32 @@ class ValueProxy:
         """
         return cast("str", await self._as_scalar(NixType.STRING, timeout=timeout))
 
-    async def coerce_str(self, *, timeout: float | None = None) -> str:
-        """``builtins.toString`` on this value.
+    async def apply(self, function: str | ValueProxy, *, timeout: float | None = None) -> ValueProxy:
+        """Apply a Nix function to this value and return the result.
 
-        Nix's own coercion, evaluated by Nix in the worker rather than
-        reimplemented here, so there is nothing to drift: ``true`` is ``"1"``
-        while ``false`` and ``null`` are both ``""``, floats print as
-        ``"42.500000"``, lists coerce elementwise and join on a space, and an
-        attrset defers to its ``__toString`` or ``outPath``.
+        The general form of "do a Nix thing to this value". A ``str`` is any
+        Nix function expression -- a builtin, or a lambda::
 
-        Store paths in the result are not built. Use ``realise_string()`` when
-        they have to exist, or ``as_string()`` to assert the value already is a
-        string instead of coercing one.
+            await (await value.apply("builtins.toString")).as_string()
+            await (await value.apply("builtins.length")).as_int()
+            await (await value.apply("x: x * 2")).as_int()
 
-        Raises:
-            NixError: The value has no string coercion (e.g. a bare attrset).
+        Passing an already-evaluated function instead of a string hoists the
+        evaluation out of a loop, which is the whole of what a memoised
+        ``apply`` would buy::
+
+            to_string = await eval_session.string("builtins.toString")
+            for value in values:
+                await (await value.apply(to_string)).as_string()
+
+        This deliberately replaces a family of dedicated coercion methods.
+        ``coerce_str`` was only ``builtins.toString`` spelled a second way, and
+        the int/float/bool variants had no Nix counterpart at all.
         """
-        await self._ensure_resolved(timeout=timeout)
-        result = await self._ctx.proxy.coerce_to_string(CoerceToStringRequest(handle=self.handle))
-        return result.value
-
-    async def coerce_int(self, *, timeout: float | None = None) -> int:
-        """Force and coerce to ``int``.
-
-        Raises:
-            NixCoercionError: The value is a bool, a non-integral float, a
-                non-numeric string, or another non-coercible type.
-        """
-        value = await self.force(timeout=timeout)
-        if isinstance(value, bool):
-            raise NixCoercionError("cannot coerce Nix bool to int")
-        if isinstance(value, int):
-            return value
-        if isinstance(value, float):
-            if value.is_integer():
-                return int(value)
-            raise NixCoercionError(f"cannot coerce non-integral float {value!r} to int")
-        if isinstance(value, str):
-            text = value.strip()
-            if text and text.lstrip("+-").isdigit():
-                return int(text, 10)
-            raise NixCoercionError(f"cannot coerce string {value!r} to int")
-        raise NixCoercionError(f"cannot coerce Nix {self.nix_type.name.lower()} to int")
-
-    async def coerce_float(self, *, timeout: float | None = None) -> float:
-        """Force and coerce to ``float``.
-
-        Raises:
-            NixCoercionError: The value is a bool, a non-numeric string, a
-                non-finite result, or another non-coercible type.
-        """
-        value = await self.force(timeout=timeout)
-        if isinstance(value, bool):
-            raise NixCoercionError("cannot coerce Nix bool to float")
-        if isinstance(value, int | float):
-            result = float(value)
-        elif isinstance(value, str):
-            try:
-                result = float(value.strip())
-            except ValueError as exc:
-                raise NixCoercionError(f"cannot coerce string {value!r} to float") from exc
-        else:
-            raise NixCoercionError(f"cannot coerce Nix {self.nix_type.name.lower()} to float")
-        if not isfinite(result):
-            raise NixCoercionError(f"cannot coerce non-finite value {value!r} to float")
-        return result
-
-    async def coerce_bool(self, *, timeout: float | None = None) -> bool:
-        """Force and coerce to ``bool``.
-
-        Raises:
-            NixCoercionError: The value is not a bool or one of the strings
-                ``"true"``/``"false"``.
-        """
-        value = await self.force(timeout=timeout)
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            text = value.strip().lower()
-            if text == "true":
-                return True
-            if text == "false":
-                return False
-            raise NixCoercionError(f"cannot coerce string {value!r} to bool")
-        raise NixCoercionError(f"cannot coerce Nix {self.nix_type.name.lower()} to bool")
+        if isinstance(function, str):
+            handle = await self._ctx.proxy.eval_string(EvalStringRequest(expr=function, source_name="<apply>"))
+            function = self._ctx.value(handle.handle, handle.type)
+        return await function.call(self, timeout=timeout)
 
     async def force_deep(self, *, timeout: float | None = None) -> NixDeepValue:
         """Recursive Nix force. Functions remain remote callable ValueProxy objects."""

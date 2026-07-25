@@ -1020,20 +1020,31 @@ class Value:
         """Force this value and return it as ``str``. Raises if not a string."""
         return await self._eval_session.run(self._local_for(self._eval_session).as_string)
 
-    async def coerce_str(self) -> str:
-        """``builtins.toString`` on this value.
+    async def apply(self, function: str | Value) -> Value:
+        """Apply a Nix function to this value and return the result.
 
-        Nix's own coercion, run by Nix rather than reimplemented, so there is
-        nothing to drift: ``true`` is ``"1"`` while ``false`` and ``null`` are
-        both ``""``, floats print as ``"42.500000"``, lists coerce elementwise
-        and join on a space, and an attrset defers to its ``__toString`` or
-        ``outPath``.
+        The general form of "do a Nix thing to this value". A ``str`` is any
+        Nix function expression -- a builtin, or a lambda::
 
-        Store paths in the result are not built. Use ``realise_string()`` when
-        they have to exist, or ``as_string()`` to assert the value already is a
-        string instead of coercing one.
+            await (await value.apply("builtins.toString")).as_string()
+            await (await value.apply("builtins.length")).as_int()
+            await (await value.apply("x: x * 2")).as_int()
+
+        Passing an already-evaluated function instead of a string hoists the
+        evaluation out of a loop, which is the whole of what a memoised
+        ``apply`` would buy::
+
+            to_string = await eval_session.string("builtins.toString")
+            for value in values:
+                await (await value.apply(to_string)).as_string()
+
+        This deliberately replaces a family of dedicated coercion methods.
+        ``coerce_str`` was only ``builtins.toString`` spelled a second way, and
+        the int/float/bool variants had no Nix counterpart at all.
         """
-        return await self._eval_session.run(self._local_for(self._eval_session).coerce_to_string)
+        if isinstance(function, str):
+            function = await self._eval_session.string(function, "<apply>")
+        return await function.call(self)
 
     async def realise_string(self) -> str:
         """Coerce this value to a string and realise its Nix string context."""

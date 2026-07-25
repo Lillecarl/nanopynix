@@ -1,15 +1,20 @@
-"""Pin what the two scalar-accessor families actually do, on both engines.
+"""Pin how a Nix value becomes a Python value, on both engines.
 
-inproc's ``as_int``/``as_float``/``as_bool``/``as_string`` and rpc's
-``coerce_int``/``coerce_float``/``coerce_bool``/``coerce_str`` were once
-recorded as one concept spelled two ways. They are not: ``as_*`` are strict
-type assertions, ``coerce_*`` convert. rpc's strict counterpart is
-``force_as(NixType.X)``, and inproc has no coercing accessor at all.
+Two things, deliberately kept separate:
 
-That distinction is invisible from the names, so it is easy to "unify" the
-two families into one and silently change behaviour for every caller. These
-tables exist to make that impossible without a failing test. See TODO.md's
-"the two scalar-accessor families are not one concept" for the open decision.
+``as_int``/``as_float``/``as_bool``/``as_string`` are the FFI boundary -- they
+assert the value already has that type and raise ``NixTypeError`` otherwise.
+They are the one thing no Nix expression can do for you, since something has to
+hand back an actual Python object.
+
+Everything else is a Nix operation, so ``apply()`` runs the Nix function rather
+than reimplementing it. There used to be a ``coerce_str``/``coerce_int``/
+``coerce_float``/``coerce_bool`` family; ``coerce_str`` was ``builtins.toString``
+spelled a second way (and got it wrong -- it returned ``"true"`` where Nix says
+``"1"``), and the other three had no Nix counterpart at all.
+
+These tables exist so that "unifying" or reintroducing a coercion helper cannot
+silently disagree with Nix.
 """
 
 from __future__ import annotations
@@ -18,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from nanopynix import NixCoercionError, NixError, NixType, NixTypeError, WrongNixTypeError
+from nanopynix import NixError, NixType, NixTypeError, WrongNixTypeError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -30,10 +35,9 @@ RAISES = object()
 
 # expression -> {accessor: expected value or RAISES}
 #
-# Read the two tables side by side: they disagree in 11 of 20 cells, which is
-# the whole point. `"42"` is a string an int-accessor rejects but an
-# int-coercer accepts; `42` is an int a string-accessor rejects but a
-# string-coercer stringifies.
+# Nothing here converts: a string is not an int, an int is not a string.
+# Compare NIX_TOSTRING below, where `42` does become `"42"` -- because that
+# is Nix's coercion, reached through apply(), not through an accessor.
 STRICT_TABLE: dict[str, dict[str, Any]] = {
     '"42"': {"as_int": RAISES, "as_float": RAISES, "as_bool": RAISES, "as_string": "42"},
     # forceFloat accepts an int, so as_float widens 42 -> 42.0; forceInt does
@@ -42,19 +46,18 @@ STRICT_TABLE: dict[str, dict[str, Any]] = {
     "42.0": {"as_int": RAISES, "as_float": 42.0, "as_bool": RAISES, "as_string": RAISES},
     "true": {"as_int": RAISES, "as_float": RAISES, "as_bool": True, "as_string": RAISES},
     # No leniency anywhere in this family, including null -> bool. Use
-    # is_null()/coerce_str() when a null should mean something other than an
-    # error.
+    # is_null(), or apply("builtins.toString"), when a null should mean
+    # something other than an error.
     "null": {"as_int": RAISES, "as_float": RAISES, "as_bool": RAISES, "as_string": RAISES},
 }
 
-# `coerce_str` is `builtins.toString`, delegated to Nix on both engines rather
-# than reimplemented in Python. These expectations were taken from a real
-# `nix eval` of `builtins.toString` over the same expressions -- so if Nix ever
-# changes them, this fails rather than silently diverging.
+# `apply("builtins.toString")` is Nix's own string coercion. These
+# expectations were taken from a real `nix eval` of builtins.toString over the
+# same expressions, so they fail rather than drift if Nix ever changes them.
 #
 # The last four cases are the ones that matter: no plausible Python
-# reimplementation joins lists on a space or honours `__toString`/`outPath`, so
-# they are what distinguishes delegating from approximating.
+# reimplementation joins lists on a space or honours `__toString`/`outPath`.
+# They are why there is no hand-written coercion here to get wrong.
 NIX_TOSTRING: dict[str, str] = {
     '"x"': "x",
     "42": "42",
@@ -70,18 +73,8 @@ NIX_TOSTRING: dict[str, str] = {
     '{ outPath = "/nix/store/xxx"; }': "/nix/store/xxx",
 }
 
-# Nix has no string coercion for a bare attrset, and neither do we.
+# Nix will not stringify these, and neither do we.
 NIX_TOSTRING_REJECTS = ["{ a = 1; }", "x: x"]
-
-# rpc-only, and NOT Nix operations -- Nix has no toInt/toFloat/toBool. They are
-# kept as-is rather than ported to inproc; see TODO.md.
-LENIENT_TABLE: dict[str, dict[str, Any]] = {
-    '"42"': {"coerce_int": 42, "coerce_float": 42.0, "coerce_bool": RAISES},
-    "42": {"coerce_int": 42, "coerce_float": 42.0, "coerce_bool": RAISES},
-    "42.0": {"coerce_int": 42, "coerce_float": 42.0, "coerce_bool": RAISES},
-    "true": {"coerce_int": RAISES, "coerce_float": RAISES, "coerce_bool": True},
-    "null": {"coerce_int": RAISES, "coerce_float": RAISES, "coerce_bool": RAISES},
-}
 
 
 async def _check(
@@ -122,33 +115,24 @@ async def test_rpc_as_accessors_are_strict_the_same_way(expr: str, rpc_session: 
             await _check(getattr(value, name), expected, NixTypeError, f"{expr}.{name}")
 
 
-@pytest.mark.parametrize("expr", list(LENIENT_TABLE), ids=list(LENIENT_TABLE))
-async def test_rpc_coerce_accessors_convert(expr: str, rpc_session: RpcSessionFactory) -> None:
-    """``coerce_int``/``coerce_float``/``coerce_bool`` convert rather than reject."""
-    async with rpc_session() as session, session.store() as store, session.eval(store) as ev:
-        value = await ev.string(expr)
-        for name, expected in LENIENT_TABLE[expr].items():
-            await _check(getattr(value, name), expected, NixCoercionError, f"{expr}.{name}")
-
-
 @pytest.mark.parametrize("expr", list(NIX_TOSTRING), ids=list(NIX_TOSTRING))
-async def test_inproc_coerce_str_is_nix_tostring(expr: str, inproc_session: InprocSessionFactory) -> None:
-    """inproc's ``coerce_str`` is ``builtins.toString``, not an approximation."""
+async def test_inproc_apply_tostring_is_nix_tostring(expr: str, inproc_session: InprocSessionFactory) -> None:
+    """String coercion comes from Nix's builtin, so it cannot be an approximation."""
     async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
         value = await ev.string(expr)
-        assert await value.coerce_str() == NIX_TOSTRING[expr]
+        assert await (await value.apply("builtins.toString")).as_string() == NIX_TOSTRING[expr]
 
 
 @pytest.mark.parametrize("expr", list(NIX_TOSTRING), ids=list(NIX_TOSTRING))
-async def test_rpc_coerce_str_is_nix_tostring(expr: str, rpc_session: RpcSessionFactory) -> None:
-    """rpc's ``coerce_str`` agrees with inproc's, because both are Nix's own."""
+async def test_rpc_apply_tostring_is_nix_tostring(expr: str, rpc_session: RpcSessionFactory) -> None:
+    """rpc agrees with inproc, because neither one implements the coercion."""
     async with rpc_session() as session, session.store() as store, session.eval(store) as ev:
         value = await ev.string(expr)
-        assert await value.coerce_str() == NIX_TOSTRING[expr]
+        assert await (await value.apply("builtins.toString")).as_string() == NIX_TOSTRING[expr]
 
 
 @pytest.mark.parametrize("expr", NIX_TOSTRING_REJECTS, ids=NIX_TOSTRING_REJECTS)
-async def test_coerce_str_rejects_what_nix_rejects(
+async def test_apply_tostring_rejects_what_nix_rejects(
     expr: str,
     inproc_session: InprocSessionFactory,
     rpc_session: RpcSessionFactory,
@@ -156,16 +140,63 @@ async def test_coerce_str_rejects_what_nix_rejects(
     """A value Nix will not stringify is an error on both engines, not a fallback."""
     async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
         with pytest.raises(NixError):
-            await (await ev.string(expr)).coerce_str()
+            await (await (await ev.string(expr)).apply("builtins.toString")).as_string()
 
     async with rpc_session() as session, session.store() as store, session.eval(store) as ev:
         with pytest.raises(NixError):
-            await (await ev.string(expr)).coerce_str()
+            await (await (await ev.string(expr)).apply("builtins.toString")).as_string()
 
 
-# The strict accessor's real cross-engine counterpart, by NixType rather than
-# by four method names. Bool is omitted: inproc's as_bool(null) -> False has no
-# rpc equivalent, which is itself part of the open decision.
+# apply() is not a stringification helper -- it is the one door to every
+# builtin. These are the cases a dedicated coerce_* family could never cover.
+APPLY_CASES = [
+    ("[ 1 2 3 ]", "builtins.length", "as_int", 3),
+    ("[ 1 2 3 ]", "builtins.typeOf", "as_string", "list"),
+    ("[ 1 2 3 ]", "builtins.toJSON", "as_string", "[1,2,3]"),
+    ("[ 1 2 3 ]", "xs: builtins.elemAt xs 1", "as_int", 2),
+    ("{ a = 1; b = 2; }", "builtins.attrNames", "apply-length", 2),
+    ('"hello"', "builtins.stringLength", "as_int", 5),
+]
+
+
+@pytest.mark.parametrize(
+    ("expr", "function", "accessor", "expected"),
+    APPLY_CASES,
+    ids=[f"{f}" for _, f, _, _ in APPLY_CASES],
+)
+async def test_apply_reaches_any_builtin(
+    expr: str,
+    function: str,
+    accessor: str,
+    expected: object,
+    inproc_session: InprocSessionFactory,
+) -> None:
+    """One method, the whole of builtins, plus arbitrary lambdas."""
+    async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
+        value = await ev.string(expr)
+        applied = await value.apply(function)
+        if accessor == "apply-length":
+            assert await (await applied.apply("builtins.length")).as_int() == expected
+        else:
+            assert await getattr(applied, accessor)() == expected
+
+
+async def test_apply_accepts_an_already_evaluated_function(inproc_session: InprocSessionFactory) -> None:
+    """Hoisting the function out of a loop is what a memoising apply() would buy.
+
+    Passing the evaluated function instead of its source means one evaluation
+    for many values, without apply() owning a cache or its lifetime.
+    """
+    async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
+        to_string = await ev.string("builtins.toString")
+        for expr, expected in (("1", "1"), ("true", "1"), ("null", "")):
+            value = await ev.string(expr)
+            assert await (await value.apply(to_string)).as_string() == expected
+
+
+# force_as is the generic by-NixType entry point and still covers what no
+# as_* does (attrs/list/function). Bool is omitted here only because the
+# table's null row would need a second expected exception.
 FORCE_AS_TYPES = [
     ("as_int", NixType.INT),
     ("as_float", NixType.FLOAT),

@@ -196,22 +196,18 @@ LEDGER: dict[str, str] = {
         )
     },
     # ── Value ──────────────────────────────────────────────────────
-    # The `as_*` strict family and `coerce_str` used to be listed here, eight
-    # entries' worth, on the false premise that they were one concept spelled
-    # two ways. They are not -- `as_*` assert a type, `coerce_*` convert -- and
-    # both are now present on both engines, so all eight entries are gone. What
-    # is left below is what remains genuinely one-sided.
+    # Twelve entries used to live here: the `as_*` strict family (inproc-only)
+    # and a `coerce_*` family (rpc-only). Both are gone, by opposite routes.
     #
-    # `coerce_int`/`coerce_float`/`coerce_bool` have no Nix analogue at all:
-    # Nix has no toInt/toFloat/toBool, so unlike coerce_str there is nothing to
-    # be faithful to. They stay rpc-only rather than spreading a shape that
-    # cannot be justified by Nix semantics; whether they should exist at all is
-    # tracked in TODO.md.
-    "Value.coerce_bool:rpc-only": "DEFECT (lenient, non-Nix): no Nix bool coercion exists; inproc's as_bool is strict.",
-    "Value.coerce_int:rpc-only": "DEFECT (lenient, non-Nix): no Nix int coercion exists; inproc's as_int is strict.",
-    "Value.coerce_float:rpc-only": (
-        "DEFECT (lenient, non-Nix): no Nix float coercion exists; inproc's as_float is strict."
-    ),
+    # `as_*` is the FFI boundary -- turning a Nix value into a Python one is the
+    # one thing no Nix expression can do -- so it was added to rpc, and both
+    # engines now raise the same NixTypeError because the check runs in the
+    # worker.
+    #
+    # `coerce_*` was deleted instead. `coerce_str` was `builtins.toString`
+    # reimplemented (and wrong: "true" where Nix says "1"), and coerce_int/
+    # float/bool had no Nix counterpart at all. `apply()` replaced the lot on
+    # both engines, and reaches every other builtin besides.
     # Not a rename: inproc.type is `async -> str` (a name like "string") and
     # rpc.get_type is `async -> NixType`. Porting a caller means changing how
     # the result is compared, not just what the method is called.

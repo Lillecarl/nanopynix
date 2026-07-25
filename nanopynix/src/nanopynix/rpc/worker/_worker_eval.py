@@ -31,8 +31,6 @@ from nanopynix_proto.nix.eval import (
     CallRequest,
     CloseEvalRequest,
     CloseEvalResponse,
-    CoerceToStringRequest,
-    CoerceToStringResponse,
     ConfigureEvalRequest,
     ConfigureEvalResponse,
     EditLocationRequest,
@@ -407,12 +405,6 @@ class EvalServiceHandler(EvalServiceBase):
             raise ValueError(f"AsScalar does not support {message.nix_type!r}")
         value = getattr(self._resolve(message.handle), accessor)()
         return python_to_scalar(value)
-
-    async def coerce_to_string(self, message: CoerceToStringRequest) -> CoerceToStringResponse:
-        return await self._run(message, self._do_coerce_to_string)
-
-    def _do_coerce_to_string(self, message: CoerceToStringRequest) -> CoerceToStringResponse:
-        return CoerceToStringResponse(value=self._resolve(message.handle).coerce_to_string())
 
     async def realise_string(self, message: RealiseStringRequest) -> RealiseStringResponse:
         return await self._run(message, self._do_realise_string)
