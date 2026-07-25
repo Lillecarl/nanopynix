@@ -6,7 +6,9 @@ from typing import TYPE_CHECKING, cast
 
 from pytest_agent._capture import (
     MAX_NAME_BYTES,
+    MAX_NODEID_DISPLAY_CHARS,
     TestRecorder,
+    abbreviate_nodeid,
     fit_component,
     nodeid_to_relpath,
     safe_component,
@@ -171,3 +173,33 @@ def test_names_that_sanitize_alike_stay_distinct() -> None:
     # query answers about the wrong test.
     assert safe_component("test_p[a/b]") != safe_component("test_p[a_b]")
     assert safe_component("test_p[a/b]") != safe_component("test_p[a\\b]")
+
+
+def test_a_name_at_the_limit_leaves_room_for_the_stuck_suffix() -> None:
+    # MAX_NAME_BYTES reserves slack under NAME_MAX (255) for the longest
+    # suffix appended to a test's name. If that reserve is ever shaved, the
+    # failure is silent and lands on exactly the run that needs it most: a
+    # hang, whose stack dump is written best-effort and would be dropped.
+    fitted = fit_component("z" * 400)
+    assert len(fitted.encode("utf-8")) == MAX_NAME_BYTES
+    assert len(f"{fitted}.stuck.txt".encode()) <= 255
+
+
+def test_a_long_nodeid_is_shortened_for_the_terminal() -> None:
+    # The progress line reprints the running nodeid on every heartbeat, so a
+    # hung test with a monster parametrized id would repeat that line until
+    # the run is killed.
+    nodeid = f"tests/test_mod.py::test_thing[{'z' * 400}-local]"
+    shortened = abbreviate_nodeid(nodeid)
+    assert len(shortened) <= MAX_NODEID_DISPLAY_CHARS
+    # Both ends survive: the file path tells you where, the trailing
+    # parameters tell you which member of the family.
+    assert shortened.startswith("tests/test_mod.py::test_thing[")
+    assert shortened.endswith("-local]")
+
+
+def test_an_ordinary_nodeid_is_left_exactly_as_it_is() -> None:
+    # The cap bounds the pathological case; it must not quietly rewrite the
+    # ids a normal suite prints, which the queries are matched against by eye.
+    nodeid = "tests/pynix/test_lsp_scenarios.py::test_hover_resolves[in_process-local]"
+    assert abbreviate_nodeid(nodeid) == nodeid
