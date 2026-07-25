@@ -62,12 +62,18 @@ overwritten:
                              # failures also carry `crash` (exception type,
                              # message, file:line) and `frames` (traceback
                              # locations, each tagged first-party or not)
+    notes.jsonl               # one line per note() call, appended as it happens
+                             # (only when a test recorded something -- see below)
     summary.json              # the same fields as this run's history.jsonl line
     collect_errors/          # one log per module that failed to import/collect
     tests/test_foo.py/
-      test_bar.log            # nodeid, outcome, duration, traceback, captured
-                               # stdout/stderr/log, one file per phase section
+      test_bar.log            # nodeid, outcome, duration, notes, traceback,
+                               # captured stdout/stderr/log, one section each
       test_bar.json            # the same record that's in index.jsonl
+      test_bar.files/          # whatever the test attached, if anything
+      test_bar.stuck.txt       # every thread's stack, dumped while this test was
+                               # still running (only if it ran long enough --
+                               # see --agent-stuck-after)
   runs-0002/
     ...
 ```
@@ -105,11 +111,16 @@ the per-test logs, so they're safe to pipe anywhere.
 | `pytest-agent last-failures --detail` | ...with every failure's full log inlined |
 | `pytest-agent show '<nodeid>'` | One test's full detail, by nodeid or any unique substring of one |
 | `pytest-agent digest` | Failures grouped by root cause, so 18 failures sharing one bug read as one entry |
+| `pytest-agent history '<nodeid>'` | That test's outcome in every run still on disk -- did I break this, or was it already failing? |
+| `pytest-agent compare [A B]` | What changed between two runs: newly failing, newly passing, still failing |
+| `pytest-agent rerun` | Re-run exactly the tests that failed, without re-running the suite |
 | `pytest-agent help` | The above, with flags |
 
-All of them take `--run N` to read an older run instead of the newest, and
-`--dir PATH` to point at an agent directory other than the nearest
-`.pytest-agent` at or above the current directory.
+`show`, `last-failures` and `digest` take `--run N` to read an older run
+instead of the newest. `history` and `compare` read across runs instead, so
+they have no `--run`. All of them take `--dir PATH` to point at an agent
+directory other than the nearest `.pytest-agent` at or above the current
+directory.
 
 ```sh
 $ pytest-agent digest
@@ -134,7 +145,70 @@ vendored `.venv` inside the project filtered out.
 Runs recorded by an older pytest-agent have no structured crash data; the
 queries still work on them and say so rather than failing.
 
-The first argument decides: `show`, `last-failures`, `digest`, and `help` are
+### Re-running the failures
+
+```sh
+$ pytest-agent rerun
+re-running 18 failed from .pytest-agent/runs-0259
+[pytest-agent] run 260: writing full per-test detail to: ...
+```
+
+`rerun` is the one subcommand that starts a pytest session: it reads a
+recorded run's failures and passes those nodeids to `pytest --agent`. Anything
+it doesn't recognize goes to pytest too, so `pytest-agent rerun -x` and
+`pytest-agent rerun --agent-stuck-after 30` work as expected.
+
+pytest's own `--lf` does the common case and needs no plugin. Reach for
+`rerun` when `--lf` can't help:
+
+- **`--run N` re-runs an older run's failures.** pytest's cache holds only the
+  last run in a rootdir, so the first `-k`-filtered or `-x` re-run overwrites
+  the list you were working through. Every run on disk keeps its own.
+- **The ids never touch a shell.** `test_hover[in_process-local]` goes
+  straight into pytest's argv; nothing has to quote the brackets.
+- **A run with no failures re-runs nothing** and says so, rather than falling
+  through to the whole suite.
+
+Because the re-run is itself a recorded run, `pytest-agent compare` then shows
+exactly what the fix changed.
+
+### Is this failure mine?
+
+`history` and `compare` answer the question the single-run commands can't.
+Every run is already on disk; these read across them instead of re-running an
+old revision to find out.
+
+```sh
+$ pytest-agent history test_hover_on_a_kind_name
+3 runs on disk (runs-0257..runs-0259); older runs are pruned, so this is not the full history
+
+tests/pynix/test_lsp_scenarios.py::test_hover_on_a_kind_name[in_process-local] -- failed in 2 of the 3 runs
+  runs-0259  failed      2.13s
+      FileNotFoundError: /nix/store/8jz...-swagger.json
+  runs-0258  failed      2.09s
+      FileNotFoundError: /nix/store/8jz...-swagger.json
+  runs-0257  passed      1.98s
+
+$ pytest-agent compare
+runs-0258 -> runs-0259: 1 newly failing, 3 newly passing, 17 still failing (311 tests in both runs)
+newly failing:
+  tests/pynix/test_store.py::test_add_to_store
+    AssertionError: assert 0 == 1
+```
+
+Both are honest about their limits. The first line says how many runs were
+actually read: `--agent-keep-runs` deletes old `runs-*` directories, so
+"failed in 2 of the 3 runs" means three runs *still on disk*, not three runs
+ever. A test only some runs executed is counted against the runs that ran it
+("failed in 1 of the 1 runs that ran it"), not against all of them.
+
+`compare` with no arguments takes the two newest runs. Give it two run numbers
+to compare any others -- in either order, so `compare 259 258` reports the same
+change from the other side. Tests present in only one of the two runs (a
+filtered `-k` re-run, say) are counted, not listed.
+
+The first argument decides: `show`, `last-failures`, `digest`, `history`,
+`compare`, `rerun`, and `help` are
 subcommands, and anything else is forwarded to pytest with `--agent`
 (`pytest-agent -x tests/` is `pytest --agent -x tests/`). A path that happens
 to collide with a subcommand name still works as `pytest-agent ./show`, and a
@@ -152,6 +226,81 @@ jq -c 'select(.outcome == "failed" or .outcome == "error")' .pytest-agent/runs-0
 cat .pytest-agent/runs-0002/tests/test_foo.py/test_bar.log
 ```
 
+## Extra output while troubleshooting
+
+A `print()` in a test already lands in that test's log. What it can't do is be
+queried across a whole run, hold something too big to read as a log line, or
+come from five frames inside the code under test. That's what notes are for.
+
+```python
+def test_resolution(agent_notes):
+    agent_notes.note(store=store_path, backend=backend)   # structured, queryable
+    agent_notes.attach("payload.json", raw_response)      # too big for a line
+    (agent_notes.dir / "dump.bin").write_bytes(blob)      # or write files yourself
+```
+
+```python
+from pytest_agent import note  # no fixture; callable from anywhere at all
+
+def resolve(digest):           # ...including the code under test
+    note(resolving=digest)
+```
+
+Everything a note reaches, it reaches at once:
+
+| Where it lands | What that's for |
+| --- | --- |
+| the end-of-run summary | reading it in the same turn that ran the test |
+| `notes.jsonl` in the run directory | one line per note, appended as it's taken -- a probe survives the crash it was added to investigate |
+| `index.jsonl`, as `notes` | `jq 'select(.notes.backend == "daemon")' .pytest-agent/runs-*/index.jsonl` |
+| the test's `.log`, above the traceback | reading one failure with its probe in context |
+
+```
+[pytest-agent] done in 3.1s -- 2 passed, 1 failed, 0 error, 0 skipped, 0 collection errors
+[pytest-agent] 1 failed/errored:
+[pytest-agent]   .pytest-agent/runs-0004/tests/test_lsp.py/test_hover.log
+[pytest-agent] notes:
+[pytest-agent]   tests/test_lsp.py::test_hover
+[pytest-agent]     resolving=0lqkw72fqnp7q1kr
+[pytest-agent]     attached: .pytest-agent/runs-0004/tests/test_lsp.py/test_hover.files/payload.json
+[pytest-agent]   tests/test_lsp.py::test_completion  backend=daemon
+```
+
+Details worth knowing before you rely on them:
+
+- **Values needn't be JSON-serializable.** Anything else is recorded as its
+  `repr`. A probe must never be the thing that fails the test it was added to.
+- **A repeated key collapses to its last value** in the summary and the record,
+  so a probe inside a loop reads as "where did it get to". Every value is still
+  in `notes.jsonl`.
+- **Values over 2000 characters are clipped** in the summary, the record, and
+  the log -- never in `notes.jsonl`. Something that big wants `attach()`.
+- **Attachments are found by listing the directory**, not by remembering what
+  `attach()` wrote, so a file a subprocess dropped in `agent_notes.dir` is
+  listed just the same.
+- **A note taken after the last test has finished** -- from another plugin's
+  `pytest_sessionfinish`, an `atexit` handler, a background thread -- is in
+  `notes.jsonl` but nowhere else: the summary has already been printed and
+  there is no test's record left to put it in.
+- **With agent mode off**, notes print (into pytest's own captured output) and
+  attachments go under `<agent-dir>/attachments/`, since there is no run
+  directory to record them in.
+
+### Instead of `python -c`
+
+A one-off `python -c '...'` to check what some function returns throws away
+everything the test suite already has: fixtures, a configured environment,
+imports that work, `profile` for timing it, and a place to put the output.
+A throwaway test file costs the same to write and keeps all of it:
+
+```python
+def test_scratch_what_does_resolve_return(agent_notes, store):  # your own fixtures
+    agent_notes.note(result=resolve(store, "0lqkw72fqnp7q1kr"))
+```
+
+`pytest tests/test_scratch.py` then prints the answer in its summary. Delete
+the file when the question is answered.
+
 ### Options
 
 | Flag | Env var | Default | Meaning |
@@ -159,9 +308,50 @@ cat .pytest-agent/runs-0002/tests/test_foo.py/test_bar.log
 | `--agent` | `PYTEST_AGENT` | auto-detected | Turn on agent mode |
 | `--agent-dir` | `PYTEST_AGENT_DIR` | `.pytest-agent` | Where to write run detail (relative to rootdir) |
 | `--agent-heartbeat` | `PYTEST_AGENT_HEARTBEAT` | `10` | Seconds between progress lines |
+| `--agent-stuck-after` | `PYTEST_AGENT_STUCK_AFTER` | `300` | Dump every thread's stack after one test has run this long (0 disables) |
 | `--agent-keep-runs` | `PYTEST_AGENT_KEEP_RUNS` | `20` | Keep only the newest N `runs-*` dirs (the just-finished run is never pruned); `history.jsonl` entries are kept forever regardless |
 | `--agent-allow-pipe` | `PYTEST_AGENT_ALLOW_PIPE` | off | Skip the piped-stdout guard below |
 | n/a | `PYTEST_AGENT_NO_AUTODETECT` | off | Disable the harness-env-var auto-activation |
+
+### When a run hangs or gets killed
+
+A run that never finishes is the one that most needs explaining, and it used
+to be the only one that left nothing behind. Two things now cover it.
+
+**A test that keeps running** gets its stack dumped where it stands. After
+`--agent-stuck-after` seconds on one test (300 by default -- under the
+`timeout 500 pytest` an agent typically uses, so the dump happens *before* the
+kill), every thread's traceback is appended to `<test>.stuck.txt`, next to
+where that test's `.log` will go, and one line names the file:
+
+```
+[pytest-agent] still running after 300s: tests/test_store.py::test_gc -- stack dumped to .pytest-agent/runs-0259/tests/test_store.py/test_gc.stuck.txt
+```
+
+It repeats up to five times per test and then stops: five stacks is enough to
+tell a wedged test (identical every time) from a slow one (the stack moves).
+
+**A killed run still reports.** SIGTERM is turned into the interrupt pytest
+already handles gracefully, so `timeout 500 pytest tests` -- or any other
+`kill` -- still ends with the usual summary block, still appends to
+`history.jsonl`, and names what it died in:
+
+```
+[pytest-agent] done in 500.2s -- 284 passed, 1 failed, 0 error, 3 skipped, 0 collection errors
+[pytest-agent] interrupted by SIGTERM while running: tests/test_store.py::test_gc
+[pytest-agent]   its stack, dumped while it ran: .pytest-agent/runs-0259/tests/test_store.py/test_gc.stuck.txt
+```
+
+`summary.json` and `history.jsonl` carry the same as `interrupted_at` and
+`killed_by`, so a killed run is greppable after the fact rather than being an
+absence. A suite that installs its own SIGTERM handler keeps it -- pytest-agent
+only takes over the default action.
+
+The two halves complement each other on purpose. A signal handler can only run
+when the interpreter gets a chance to run it, so a thread wedged inside a C
+call never sees the SIGTERM at all -- but its stack was already written while
+it hung. A second SIGTERM always kills the process outright, so an unresponsive
+run stays killable.
 
 ### Profiling a slow test
 
@@ -203,6 +393,25 @@ and `--version`. So `pytest --collect-only -q | tail -1` -- the normal way to
 ask how many tests a selection matches -- just works. `--setup-only` is
 deliberately not exempt: it really does execute fixtures, and a fixture error
 there is exactly what the guard protects.
+
+### Known incompatibility: pytest-xdist
+
+Agent mode and `pytest -n auto` should not be expected to work together, and
+this is untested rather than merely unsupported.
+
+The mechanism: `pytest_configure` runs in every xdist worker process, so each
+worker independently calls `next_run_dir()` and claims its own `runs-NNNN`
+directory. One logical run would scatter across N run directories with N
+partial `index.jsonl` files, N summaries, and N `history.jsonl` entries, and
+every query -- `last-failures`, `digest`, `compare` -- would silently answer
+from whichever worker happened to claim the highest number. The controller
+process, meanwhile, is the only one that sees the whole run, and it is the one
+whose terminal output agent mode silences.
+
+Making these work together means recording per-worker and merging in the
+controller. Until then, run the suite without `-n` when you want agent mode's
+detail, and turn agent mode off (`--agent` is opt-out via
+`PYTEST_AGENT_NO_AUTODETECT=1`) when you want xdist's speed.
 
 `--agent-allow-pipe` (or `PYTEST_AGENT_ALLOW_PIPE=1`) skips the guard. It is
 intentionally not mentioned in the refusal message: an agent reading that
