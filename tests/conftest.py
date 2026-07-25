@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
 import functools
 import inspect
 import os
@@ -326,3 +327,36 @@ def _cleanup_primops() -> None:  # type: ignore[reportUnusedFunction] -- pytest 
         def _cleanup_primop_registry(self) -> None: ...
 
     atexit.register(cast("_PrimopRegistryModule", nanopynix_expr)._cleanup_primop_registry)  # type: ignore[reportPrivateUsage] -- intentional cleanup of C++ state at process exit
+
+
+@pytest.fixture(scope="session")
+def repo_root() -> Path:
+    """The checkout root.
+
+    Here rather than in a suite's conftest because three suites need it --
+    tests/pynix, tests/nanopynix's error-boundary tests, and anything that
+    evaluates this repo's own flake.
+    """
+    return Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture(scope="module")
+async def nixpkgs_path(repo_root: Path) -> str:
+    """The pinned nixpkgs, realised once per module.
+
+    Shared for the same reason as ``repo_root``: it used to be copy-pasted per
+    suite, which meant every copy paid the evaluation separately.
+    """
+    process = await anyio.open_process(
+        ["nix", "eval", "--impure", "--raw", "--file", str(repo_root), "pkgs.path"],
+    )
+    async with process:
+        stdout = b""
+        if process.stdout is not None:
+            with contextlib.suppress(anyio.EndOfStream):
+                while True:
+                    stdout += await process.stdout.receive()
+        await process.wait()
+    if process.returncode != 0:
+        raise RuntimeError(f"nix eval of pkgs.path exited {process.returncode}")
+    return stdout.decode().strip()

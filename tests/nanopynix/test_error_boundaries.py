@@ -1,12 +1,6 @@
-"""TEMPORARY matrix: what error detail survives each boundary, on each engine?
+"""What error detail survives each boundary, on each engine and each backend?
 
-Started as pure scaffolding for CIP3 items 2-3 -- a recording of what both
-engines *actually* raise for the same failure, against a local store and
-against a daemon store. It still writes that recording to
-``NANOPYNIX_ERROR_MATRIX_OUT`` (default: ``.pytest-agent/error-matrix``), but
-now also asserts the invariants the recording was used to establish.
-
-Three boundaries, which the pipeline used to conflate:
+Three boundaries, which the error pipeline used to conflate:
 
 * **A** Nix C++ -> Python via nanobind. Ours. The bound exception types name
   the C++ class, and ``nix_error_info.hh`` attaches the ``nix::ErrorInfo``
@@ -21,24 +15,33 @@ Three boundaries, which the pipeline used to conflate:
   This is why ``build_fod_hash_mismatch`` is the one cell that legitimately
   differs between the local and daemon backends.
 
+This began as a temporary recording of what both engines *actually* raise,
+used to find CIP3's error-pipeline defects; it is kept because three of its
+invariants have no other home. :mod:`tests.nanopynix.test_engine_parity_semantics`
+covers "both engines raise the same type" for eval failures in a far more
+readable form -- what only this file covers is:
+
+1. the same invariant across *store* and *build* failures, and across both
+   backends, where the daemon protocol is a third boundary;
+2. every Nix failure being catchable as ``nanopynix.NixError``;
+3. the ``nix::ErrorInfo`` surviving A and B intact, compared field by field
+   between the engines rather than merely "both non-empty".
+
+(3) is the one that cannot be dropped. Boundary B fails **silently**: grpclib
+omits the status-details trailer if either end lacks the codec, with no error
+on either side, so a missed wiring looks exactly like success everywhere else.
+
 Run with both backends -- plain ``pytest`` is local-only, so the daemon half
 silently vanishes and every cell looks identical::
 
-    pytest tests/temp --nix-test-backends local,daemon
-
-Delete this directory once these assertions have a permanent home in
-``tests/nanopynix``.
+    pytest tests/nanopynix/test_error_boundaries.py --nix-test-backends local,daemon
 """
 
 from __future__ import annotations
 
-import json
-import os
 import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-import anyio
 import pytest
 from nanopynix_bindings import errors as nanopynix_errors
 
@@ -54,8 +57,6 @@ if TYPE_CHECKING:
 # will never be, present -- so `query_path_info` fails on lookup rather than on
 # parsing, which is a different error entirely.
 NONEXISTENT_PATH = "/nix/store/00000000000000000000000000000000-nanopynix-absent"
-
-_OUT_DIR = Path(os.environ.get("NANOPYNIX_ERROR_MATRIX_OUT", ".pytest-agent/error-matrix"))
 
 # Sentinel for "key absent", distinct from a key present with value None --
 # a dropped `pos` and a `pos: None` are different findings.
@@ -226,34 +227,33 @@ async def _build_status(store: Any, derived_path: str) -> dict[str, Any]:
 
 
 @pytest.mark.anyio
-async def test_record_error_matrix(
+async def test_error_detail_survives_every_boundary(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,
+    agent_notes: Any,
 ) -> None:
-    """Record both engines' errors for this backend, and assert they agree."""
+    """Both engines, one backend: same exception type, same ErrorInfo."""
     backend = shared_nix_environment.backend
     matrix = {
         engine: await _collect_engine(shared_nix_environment, engine=engine, nixpkgs=nixpkgs_path)
         for engine in ("rpc", "inproc")
     }
 
-    out_dir = anyio.Path(_OUT_DIR)
-    await out_dir.mkdir(parents=True, exist_ok=True)
-    await (out_dir / f"{backend}.json").write_text(
-        json.dumps(matrix, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
-
-    # Also emit to captured stdout so the pytest-agent detail file is readable
-    # on its own without going hunting for the JSON.
+    # Every cell is recorded as a pytest-agent note rather than written to a
+    # side file: a note lands in the run summary, in notes.jsonl, and in this
+    # test's own log, so the recording is readable in the same turn that
+    # produced it without hunting for JSON.
     for engine, cases in matrix.items():
         for case, described in sorted(cases.items()):
-            print(  # noqa: T201 -- diagnostic scaffolding, see module docstring
-                f"[{backend}/{engine}/{case}] "
-                f"{described['module']}.{described['class']} "
-                f"NixError={described.get('is_nanopynix_NixError')} "
-                f"error_type={described.get('error_type')!r} "
-                f"raw={described.get('raw_populated')} info={described.get('info_populated')}",
+            agent_notes.note(
+                **{
+                    f"{backend}/{engine}/{case}": (
+                        f"{described['module']}.{described['class']} "
+                        f"NixError={described.get('is_nanopynix_NixError')} "
+                        f"error_type={described.get('error_type')!r} "
+                        f"raw={described.get('raw_populated')} info={described.get('info_populated')}"
+                    )
+                }
             )
 
     # ── The invariant this whole file exists to defend ──────────────

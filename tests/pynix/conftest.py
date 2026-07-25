@@ -339,11 +339,6 @@ class PynixStoreScenario:
 
 
 @pytest.fixture(scope="session")
-def repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
-
-
-@pytest.fixture(scope="session")
 def easykubenix_openapi_schema(repo_root: Path) -> str:
     """Realise the pinned Kubernetes OpenAPI schema the easykubenix scenarios read.
 
@@ -414,12 +409,6 @@ def _capture_pynix_test_structlog(  # type: ignore[reportUnusedFunction] -- pyte
             pynix_live_log.append({"event": "pytest test finish", "test": test_name})
             structlog.configure(**old_config)
             _CURRENT_PYNIX_TEST.reset(token)
-
-
-@pytest.fixture(scope="module")
-async def nixpkgs_path(repo_root: Path) -> str:
-    stdout = await _run("nix", "eval", "--impure", "--raw", "--file", str(repo_root), "pkgs.path")
-    return stdout.decode().strip()
 
 
 @pytest.fixture(scope="module")
@@ -504,23 +493,6 @@ async def git_flake(nixpkgs_path: str) -> AsyncIterator[Path]:
             )
             await proc.wait()
         yield flake_dir
-
-
-async def _run(*args: str, env: dict[str, str] | None = None) -> bytes:
-    proc = await asyncio.create_subprocess_exec(
-        *args,
-        env=env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"{' '.join(args)} failed with exit code {proc.returncode}\n"
-            f"stdout:\n{stdout.decode(errors='replace')}\n"
-            f"stderr:\n{stderr.decode(errors='replace')}",
-        )
-    return stdout
 
 
 @contextlib.contextmanager
