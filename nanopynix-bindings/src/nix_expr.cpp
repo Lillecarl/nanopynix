@@ -769,6 +769,24 @@ nix::Value *PyValue::checkedValue() const {
 // PyValue::to_python
 // =========================================================================
 
+// Scalars are converted directly; everything compound is handed to Nix's own
+// printValueAsJSON (see to_json below).
+//
+// The compound cases used to be a hand-rolled recursive walk over attrs and
+// list elements. That walk was a reimplementation of printValueAsJSON minus
+// every rule that makes it terminate, and it did not survive contact with a
+// derivation: a derivation's `out`/`all`/`drvAttrs` point back at the
+// derivation, so the walk recursed until the C++ stack ran out and the process
+// took SIGSEGV. Nix stops there instead -- an attrset with `__toString` becomes
+// that string, an attrset with `outPath` becomes the output path, so a
+// derivation converts to its store path (confirmed against `nix eval --json`)
+// -- and a genuine non-derivation cycle raises Nix's own "max-call-depth
+// exceeded" rather than killing the interpreter.
+//
+// The scalar cases stay direct because the rpc worker converts every scalar
+// leaf through here one at a time, and routing an int through a json round trip
+// to get the same int back is pure overhead. copy_to_store is false so nPath
+// keeps rendering as a literal filesystem path.
 nb::object PyValue::to_python() {
     auto *es = evalState();
     auto *value = checkedValue();
@@ -809,33 +827,13 @@ nb::object PyValue::to_python() {
             }
             return nb::str(path.c_str());
         }
-        case nix::nList: {
-            auto list = nb::list();
-            auto n = value->listSize();
-            auto lv = value->listView();
-            for (size_t i = 0; i < n; i++)
-                list.append(PyValue(lv[i], eval, eval_alive).to_python());
-            return list;
-        }
-        case nix::nAttrs: {
-            auto dict = nb::dict();
-            if (auto *bindings = value->attrs()) {
-                for (auto &attr : *bindings) {
-                    nix::Value *v;
-                    {
-                        nb::gil_scoped_release release;
-                        v = es->allocValue();
-                        es->forceValue(*attr.value, nix::noPos);
-                    }
-                    *v = *attr.value;
-                    auto key = std::string(es->symbols[attr.name]);
-                    dict[nb::str(key.c_str())] = PyValue(v, eval, eval_alive).to_python();
-                }
-            }
-            return dict;
-        }
         default:
-            return nb::str(type_name().c_str());
+            // nList, nAttrs, and the types Nix refuses to flatten at all
+            // (nFunction, nExternal). Previously the default arm returned the
+            // *name* of the type as a string, so a lambda silently converted to
+            // the string "function"; now it raises whatever printValueAsJSON
+            // raises, which is Nix's own error.
+            return to_json(/*copy_to_store=*/false);
     }
 }
 
