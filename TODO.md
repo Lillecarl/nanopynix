@@ -163,7 +163,8 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
    `WorkerDiedError` -- and only with a per-thread alt-stack buffer of
    our own rather than Nix's shared static.
 
-3. **Bare `RuntimeError` escapes the `NixError` hierarchy.** `attr()` on a
+3. ~~**Bare `RuntimeError` escapes the `NixError` hierarchy.**~~ -- DONE,
+   both causes and all four symptoms. `attr()` on a
    non-attrs value and `list_get()` on a non-list were incidentally fixed
    by item 1 (they raise Nix `TypeError` now), and `to_python()`'s
    max-call-depth error is fixed below. `realise_string()` on a derivation
@@ -209,19 +210,33 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
      public `EvalError` -- Nix's reason for the split is cacheability,
      which no Python caller can act on, so it earns no new public type.
 
-   - **Plain `nix::Error` is deliberately not registered**
+   - ~~**Plain `nix::Error` is deliberately not registered**
      (`nix_util.cpp:323`), and we throw it ourselves in
-     `nix_expr.cpp` at lines 318, 330, 468, 471, 491, 494 -- so
-     `edit_location()` and `get_derived_path()` on a wrong-typed value
-     produce a bare `RuntimeError`, measured. Two halves:
+     `nix_expr.cpp`~~ -- DONE, both halves.
 
-     *Our own throws* are easy: pick a registered subclass. Note that
-     matching Nix here is not the tiebreaker it usually is -- Nix throws
-     plain `nix::Error` for the analogous conditions (`nix edit`'s
+     *Our own throws*: the conversion from plain `nix::Error` to
+     `nix::EvalError` landed with the single-translator work below, not
+     here -- every site is already converted (`nix_expr.cpp:321,330,333`
+     for `edit_location`, `:485,488,508,511` for `derived_path`). What was
+     left open here was that nothing *pinned* it. Verified
+     from Python, not just read: `edit_location()` on a function raises
+     `nanopynix.exceptions.EvalError` with `info` intact. Matching Nix
+     was explicitly *not* the tiebreaker -- Nix throws plain
+     `nix::Error` for the analogous conditions (`nix edit`'s
      `findPackageFilename`, installables' "expected a derivation")
-     because `Error` is simply its default, not because it judged the
+     because `Error` is its default, not because it judged the
      category. `EvalError` is the honest answer: these are all
      eval-domain errors about a `Value`.
+
+     Pinned by
+     `test_exception_translation.py::test_our_own_binding_throws_pick_a_registered_subclass`,
+     added because a regression here is **silent**: reverting a throw to
+     plain `nix::Error` still yields a `NixError` with intact
+     `ErrorInfo` via the catch-all, so only the class coarsens and
+     nothing else would notice. Its teeth come from the contrast with
+     the test above it -- the *same method* on an int gives base
+     `NixError` (Nix's own throw) and on a function gives `EvalError`
+     (ours).
 
      ~~*Nix throwing a bare `nix::Error` from libstore/libexpr
      internals*~~ -- DONE, and it dissolved the constraint rather than
@@ -241,7 +256,7 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
      kept in sync).
 
      Three things that design must keep doing, all pinned by
-     `tests/temp/test_exception_translation.py`: the catch-all fires; it
+     `tests/nanopynix/test_exception_translation.py`: the catch-all fires; it
      does not shadow the specific subclasses; and it does not overreach
      -- standard C++ exceptions (`std::bad_alloc`, nlohmann-json,
      our own `std::out_of_range` in `list_get`) have no clause and must

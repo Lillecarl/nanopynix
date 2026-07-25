@@ -75,6 +75,38 @@ async def test_a_plain_nix_error_from_nix_itself_is_a_nix_error(
     assert excinfo.value.info is not None, "ErrorInfo is what C++ alone has; losing it is unrecoverable"
 
 
+async def test_our_own_binding_throws_pick_a_registered_subclass(
+    shared_nix_environment: NixTestEnvironment,
+) -> None:
+    """The other half: throws nanopynix itself writes must not be plain ``nix::Error``.
+
+    The test above drives a throw from inside Nix, where we have no say in
+    the type. This one drives a throw from our own binding code --
+    ``edit_location()`` on a function hits ``nix_expr.cpp``'s "selected
+    function cannot be shown in an editor" -- where we do.
+
+    Worth pinning precisely because a regression here is *silent*: reverting
+    the throw to plain ``nix::Error`` still produces a ``NixError`` with
+    intact ``ErrorInfo``, because the catch-all would take it. Only the
+    class would quietly coarsen, so nothing but this assertion would notice.
+    ``EvalError`` is the honest type -- this is an eval-domain error about a
+    ``Value`` -- and matching Nix is explicitly *not* the tiebreaker here:
+    Nix throws plain ``nix::Error`` for its analogous conditions because
+    ``Error`` is its default, not because it judged the category.
+    """
+    async with (
+        shared_nix_environment.inproc_session() as session,
+        session.store() as store,
+        session.eval(store) as ev,
+    ):
+        value = await ev.string("x: x")
+        with pytest.raises(nanopynix.EvalError) as excinfo:
+            await value.edit_location()
+
+    assert type(excinfo.value) is nanopynix.EvalError, "coarsened to the catch-all's base type"
+    assert excinfo.value.info is not None
+
+
 # ════════════════════════════════════════════════════════════════════
 # 2. The catch-all does not shadow the specific subclasses
 # ════════════════════════════════════════════════════════════════════
