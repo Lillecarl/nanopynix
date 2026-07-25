@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from nanopynix import NixError, NixEvalSettings, NixType, NixTypeError, WrongNixTypeError
+from nanopynix import NixError, NixEvalSettings, NixTypeError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -425,49 +425,12 @@ async def test_rpc_reports_runaway_recursion_at_nixs_default_depth(
         assert excinfo.value.info is not None
 
 
-# force_as is the generic by-NixType entry point and still covers what no
-# as_* does (attrs/list/function). Bool is omitted here only because the
-# table's null row would need a second expected exception.
-FORCE_AS_TYPES = [
-    ("as_int", NixType.INT),
-    ("as_float", NixType.FLOAT),
-    ("as_string", NixType.STRING),
-]
-
-# (expr, accessor) pairs where force_as does NOT match inproc's as_*, with why.
+# `force_as` used to live here, tested against this same STRICT_TABLE to show
+# it was the rpc spelling of `as_*`. It is deleted: once `as_int`/`as_float`/
+# `as_bool`/`as_string` existed on rpc too, it was a second spelling of the
+# same operation reached by NixType argument -- and the worse one. It compared
+# `typeOf` for equality client-side, so it rejected an int for FLOAT where
+# Nix's own `forceFloat` widens (the rule that makes `1 + 1.0` work), and it
+# raised `WrongNixTypeError` where inproc raised Nix's `NixTypeError`.
 #
-# force_as compares `typeOf` for equality, so an int is not a float. inproc's
-# as_float goes through nix's own `forceFloat`, which accepts nInt and widens
-# -- the same rule that makes `1 + 1.0` work in Nix. So on this one cell rpc is
-# stricter than Nix itself. Which side should move is part of the open decision
-# in TODO.md; this pins the current answer so the change cannot be silent.
-FORCE_AS_DIVERGENCES = {
-    ("42", "as_float"): "force_as(FLOAT) rejects an int; nix's forceFloat widens it",
-}
-
-
-@pytest.mark.parametrize(("accessor", "nix_type"), FORCE_AS_TYPES, ids=[name for name, _ in FORCE_AS_TYPES])
-@pytest.mark.parametrize("expr", ['"42"', "42", "42.0", "true", "null"])
-async def test_force_as_is_the_rpc_spelling_of_the_strict_accessor(
-    accessor: str,
-    nix_type: NixType,
-    expr: str,
-    rpc_session: RpcSessionFactory,
-) -> None:
-    """rpc's ``force_as(NixType.X)`` accepts and rejects what inproc's ``as_x`` does, bar one cell.
-
-    This near-equivalence is what makes ``force_as`` -- not ``coerce_*`` -- the
-    thing to unify ``as_*`` with. The one exception is tabulated above rather
-    than smoothed over, because it is a genuine semantic difference and not a
-    naming one.
-    """
-    expected = STRICT_TABLE[expr][accessor]
-    diverges = (expr, accessor) in FORCE_AS_DIVERGENCES
-
-    async with rpc_session() as session, session.store() as store, session.eval(store) as ev:
-        value = await ev.string(expr)
-        if expected is RAISES or diverges:
-            with pytest.raises(WrongNixTypeError):
-                await value.force_as(nix_type)
-        else:
-            assert await value.force_as(nix_type) == expected
+# The tables above already pin what replaced it, on both engines.

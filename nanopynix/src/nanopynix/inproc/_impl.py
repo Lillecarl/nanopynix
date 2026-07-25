@@ -38,6 +38,7 @@ from nanopynix.models import (
     LockedInput,
     LogEvent,
     MissingInfo,
+    NixType,
     PathInfo,
 )
 from nanopynix.models import StorePath as PublicStorePath
@@ -963,10 +964,16 @@ class Value:
         return self
 
     async def __aexit__(self, *args: object) -> None:
-        await self.close()
+        await self.release()
 
-    async def close(self) -> None:
-        """Release this value's rooted L1 object. This operation is idempotent."""
+    async def release(self) -> None:
+        """Release this value's rooted L1 object. This operation is idempotent.
+
+        ``release`` and not ``close``: rpc has only ``release``, inproc used to
+        have both with ``release`` a one-line alias, and two names for one
+        operation on one engine is the kind of thing that makes an API look
+        like it has two concepts.
+        """
         local = self._local
         self._local = None
         if local is not None:
@@ -1015,9 +1022,17 @@ class Value:
         """
         return await self._eval_session.run(self._local_for(self._eval_session).to_json, copy_to_store)
 
-    async def type(self) -> str:
-        """Resolve this value and return its Nix type name (e.g. ``"string"``)."""
-        return await self._eval_session.run(self._local_for(self._eval_session).type_name)
+    async def get_type(self) -> NixType:
+        """Resolve this value and return its Nix type.
+
+        Named and typed to match rpc's. This used to be ``type() -> str``,
+        returning a name like ``"string"``, so the two engines disagreed on
+        both the spelling and the return type -- porting a caller meant
+        changing how the result was compared, not just what it was called.
+        Every real consumer was already on the rpc spelling.
+        """
+        name = await self._eval_session.run(self._local_for(self._eval_session).type_name)
+        return NixType.from_string(name)  # type: ignore[attr-defined] -- added in models.py
 
     async def as_int(self) -> int:
         """Force this value and return it as ``int``. Raises if not an int."""
@@ -1184,9 +1199,6 @@ class Value:
         derivation = await target_store.read_derivation(derived_path)
         return {name: output.path for name, output in derivation.outputs.items() if output.path is not None}
 
-    async def release(self) -> None:
-        """Alias for :meth:`close`, matching the RPC value lifecycle API."""
-        await self.close()
 
 
 def _call(target: Any, args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> Any:

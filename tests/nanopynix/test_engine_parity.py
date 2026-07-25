@@ -208,18 +208,12 @@ LEDGER: dict[str, str] = {
     # reimplemented (and wrong: "true" where Nix says "1"), and coerce_int/
     # float/bool had no Nix counterpart at all. `apply()` replaced the lot on
     # both engines, and reaches every other builtin besides.
-    # Not a rename: inproc.type is `async -> str` (a name like "string") and
-    # rpc.get_type is `async -> NixType`. Porting a caller means changing how
-    # the result is compared, not just what the method is called.
-    "Value.type:inproc-only": "DEFECT: rpc spells this get_type *and* returns a different type -- NixType enum vs inproc's str name.",
-    "Value.get_type:rpc-only": "DEFECT: inproc spells this `type` and returns a str name rather than this NixType enum.",
+    # Three more entries retired with those: inproc's `type() -> str` (rpc
+    # spelled it `get_type() -> NixType`, so porting a caller meant changing
+    # how the result was compared, not just the name), rpc-only `force_as`,
+    # and inproc's `close()` alias for `release()`. All resolved by deleting
+    # the odd one out rather than by adding its twin to the other engine.
     "Value.nix_type:rpc-only": "TRANSPORT: a sync property peeking at the type already known locally, no round trip. In-process there is no round trip to avoid, so `type` is always cheap and a separate peek would mean nothing.",
-    "Value.close:inproc-only": "DEFECT: rpc spells value teardown release() only; inproc has both close() and release().",
-    "Value.force_as:rpc-only": (
-        "DEFECT: this is rpc's *strict* accessor -- the real counterpart of inproc's as_int/as_float/"
-        "as_bool/as_string, reached by NixType argument rather than by four method names. One of the "
-        "two spellings should win; see the strict-family entries above."
-    ),
     "Value.handle:rpc-only": "TRANSPORT: the worker-side value handle this proxy stands for.",
     "Value.attr:async": "DEFECT: inproc awaits, rpc returns a proxy synchronously. Callers cannot be written once against both.",
     "Value.list_get:async": "DEFECT: as Value.attr.",

@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from nanopynix import NixType
 from nanopynix.primops import ipaddress_primops
 from nanopynix.rpc import Session
 
@@ -196,9 +195,9 @@ async def test_network_address():
         session.eval(store) as eval,
     ):
         a0 = await eval.string('(builtins.parseNetwork "192.168.1.0/30").address 0')
-        assert await a0.force_as(NixType.STRING) == "192.168.1.0"  # network
+        assert await a0.as_string() == "192.168.1.0"  # network
         a1 = await eval.string('(builtins.parseNetwork "192.168.1.0/30").address 1')
-        assert await a1.force_as(NixType.STRING) == "192.168.1.1"
+        assert await a1.as_string() == "192.168.1.1"
 
 
 @pytest.mark.anyio
@@ -210,7 +209,7 @@ async def test_network_address_negative():
         session.eval(store) as eval,
     ):
         a = await eval.string('(builtins.parseNetwork "192.168.1.0/24").address (-1)')
-        assert await a.force_as(NixType.STRING) == "192.168.1.255"
+        assert await a.as_string() == "192.168.1.255"
 
 
 @pytest.mark.anyio
@@ -222,9 +221,9 @@ async def test_network_subnet():
         session.eval(store) as eval,
     ):
         s0 = await eval.string('(builtins.parseNetwork "192.168.1.0/24").subnet 0 1')
-        assert await s0.force_as(NixType.STRING) == "192.168.1.0/25"
+        assert await s0.as_string() == "192.168.1.0/25"
         s1 = await eval.string('(builtins.parseNetwork "192.168.1.0/24").subnet 1 1')
-        assert await s1.force_as(NixType.STRING) == "192.168.1.128/25"
+        assert await s1.as_string() == "192.168.1.128/25"
 
 
 @pytest.mark.anyio
@@ -236,7 +235,7 @@ async def test_network_subnet_ipv6():
         session.eval(store) as eval,
     ):
         s = await eval.string('(builtins.parseNetwork "2001:db8::/32").subnet 0 16')
-        assert await s.force_as(NixType.STRING) == "2001:db8::/48"
+        assert await s.as_string() == "2001:db8::/48"
 
 
 @pytest.mark.anyio

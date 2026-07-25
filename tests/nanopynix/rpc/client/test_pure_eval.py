@@ -46,7 +46,7 @@ async def test_impure_allows_impure_builtins(
         session.eval(store, eval_settings=NixEvalSettings(pure_eval=False)) as eval,
     ):
         v = await eval.string("builtins.currentTime")
-        assert await v.force_as(NixType.INT) > 0
+        assert await v.as_int() > 0
 
         system = await eval.string("builtins.currentSystem")
         assert isinstance(await system.force(), str)
@@ -69,7 +69,7 @@ async def test_default_is_impure(shared_nix_environment: NixTestEnvironment) -> 
     """Omitting eval_settings defaults to impure (pure_eval=False)."""
     async with shared_nix_environment.rpc_session() as session, session.store() as store, session.eval(store) as eval:
         v = await eval.string("builtins.currentTime")
-        assert await v.force_as(NixType.INT) > 0
+        assert await v.as_int() > 0
 
 
 @pytest.mark.anyio
@@ -106,7 +106,7 @@ async def test_allowed_uris_is_exposed(shared_nix_environment: NixTestEnvironmen
         async with session.eval(store, eval_settings=eval_settings) as eval:
             # Just smoke-test: eval should work with allowed_uris set.
             v = await eval.string("1 + 1")
-            assert await v.force_as(NixType.INT) == 2
+            assert await v.as_int() == 2
 
 
 @pytest.mark.anyio
@@ -131,7 +131,7 @@ async def test_concurrent_eval_sessions_have_independent_pure_eval(
             await pure.string("builtins.currentTime")
 
         v = await impure.string("builtins.currentTime")
-        assert await v.force_as(NixType.INT) > 0
+        assert await v.as_int() > 0
 
         await pure.close()
         await impure.close()

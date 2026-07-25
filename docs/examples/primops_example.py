@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 
-from nanopynix import NixType, PrimOpSpec, yaml_primops
+from nanopynix import PrimOpSpec, yaml_primops
 from nanopynix.rpc import Session
 
 
@@ -47,7 +47,7 @@ async def main() -> None:
         # --- custom RPC-backed primop ------------------------------------
 
         doubled = await eval_.string("builtins.pyDouble 21")
-        assert await doubled.force_as(NixType.INT) == 42
+        assert await doubled.as_int() == 42
         print("pyDouble 21 =", await doubled.force())
 
         # --- built-in YAML primops ----------------------------------------
@@ -57,7 +57,7 @@ async def main() -> None:
         print("fromYAML:", await parsed.to_python())
 
         rendered = await eval_.string("builtins.toYAML { a = 1; b = [ 2 3 ]; }")
-        rendered_str = await rendered.force_as(NixType.STRING)
+        rendered_str = await rendered.as_string()
         assert rendered_str == "a: 1\nb:\n- 2\n- 3\n"
         print("toYAML:\n" + rendered_str)
 

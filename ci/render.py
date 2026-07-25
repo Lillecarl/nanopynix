@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from nanopynix import NixType, yaml_primops
+from nanopynix import yaml_primops
 from nanopynix.rpc import EvalSession, Session
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -27,7 +27,7 @@ HEADER = "# GENERATED FILE -- do not edit by hand.\n# Edit ci/workflows/{name}.n
 
 async def render_workflow(eval_: EvalSession, nix_file: Path) -> str:
     value = await eval_.string(f"builtins.toYAML (import {nix_file})")
-    return await value.force_as(NixType.STRING)
+    return await value.as_string()
 
 
 async def main() -> None:
