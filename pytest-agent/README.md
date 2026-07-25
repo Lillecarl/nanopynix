@@ -67,6 +67,9 @@ overwritten:
     notes.jsonl               # one line per note() call, appended as it happens
                              # (only when a test recorded something -- see below)
     summary.json              # the same fields as this run's history.jsonl line
+    terminal.txt              # what plain pytest would have printed to the
+                               # terminal, verbatim -- agent mode redirects the
+                               # builtin reporter here rather than discarding it
     collect_errors/          # one log per module that failed to import/collect
     tests/test_foo.py/
       test_bar.log            # nodeid, outcome, duration, notes, traceback,
@@ -421,6 +424,36 @@ They compose: pytest-agent deliberately leaves `faulthandler`'s
 process-global `dump_traceback_later` timer alone, so turning on
 `faulthandler_timeout` does not disable either one. If all you want is "dump
 and die", use pytest's and set `--agent-stuck-after=0`.
+
+### Other plugins' reports are not swallowed
+
+Agent mode replaces pytest's own per-test terminal output, which it does by
+pointing the builtin terminal reporter at `terminal.txt` instead of the
+terminal. Everything that reports *through* that writer would go with it --
+so anything a plugin prints at the end of a run is picked back up and printed:
+
+```sh
+$ pytest --agent --cov=mypkg --cov-report=term-missing
+[pytest-agent] done in 41.2s -- 311 passed, 0 failed, ...
+[pytest-agent] full detail: /repo/.pytest-agent/runs-0262 (see index.jsonl)
+[pytest-agent] also reported by other plugins (.pytest-agent/runs-0262/terminal.txt):
+================================ tests coverage ================================
+Name                       Stmts   Miss  Cover   Missing
+--------------------------------------------------------
+mypkg/parser.py              184      6    97%   88-93
+--------------------------------------------------------
+TOTAL                        184      6    97%
+```
+
+This covers `--durations`, `--junit-xml`'s "generated xml file" line, and any
+third-party plugin's `pytest_terminal_summary` -- pytest-agent needs no
+knowledge of them. Long reports are elided in the middle, keeping the head and
+the tail (a coverage table's `TOTAL` is its last line), with the full text in
+`terminal.txt`.
+
+Nothing pytest itself would have printed is destroyed either; it is all in
+`terminal.txt`, which is the file to read when a problem is about pytest's own
+reporting rather than about a test.
 
 ### Profiling a slow test
 

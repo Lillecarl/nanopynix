@@ -11,6 +11,8 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+import pytest
+
 from pytest_agent._capture import TestRecorder, nodeid_is_evident_from, nodeid_to_relpath
 from pytest_agent._history import (
     append_run_record,
@@ -22,11 +24,10 @@ from pytest_agent._history import (
 from pytest_agent._paths import display_path
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Generator
     from pathlib import Path
     from types import FrameType
-
-    import pytest
+    from typing import TextIO
 
     from pytest_agent._terminal import RealTerminal
 
@@ -42,6 +43,17 @@ MAX_STUCK_DUMPS = 5
 # budget is generous -- but a probe inside a loop over 300 tests must not bury
 # the failure list above it.
 MAX_NOTE_LINES = 60
+
+# Where the builtin terminal reporter's output goes in agent mode.
+TERMINAL_LOG_NAME = "terminal.txt"
+
+# Terminal lines an end-of-run report from another plugin may take before it
+# is elided. Head and tail are both kept: a coverage table's TOTAL is on the
+# last line and its header on the first, and cutting either end loses the
+# half somebody was reading for.
+MAX_TERMINAL_SUMMARY_LINES = 40
+_SUMMARY_HEAD_LINES = 20
+_SUMMARY_TAIL_LINES = 15
 
 
 class AgentRuntime:
@@ -67,6 +79,8 @@ class AgentRuntime:
         heartbeat_interval: float,
         stuck_after: float,
         terminal: RealTerminal | None,
+        terminal_log: TextIO | None = None,
+        terminal_log_path: Path | None = None,
         label: str | None = None,
         autodetected_via: str | None = None,
     ) -> None:
@@ -79,6 +93,8 @@ class AgentRuntime:
         self.heartbeat_interval = heartbeat_interval
         self.stuck_after = stuck_after
         self.terminal = terminal
+        self.terminal_log = terminal_log
+        self.terminal_log_path = terminal_log_path
         self.autodetected_via = autodetected_via
         self.recorder = TestRecorder(root, rootpath=config.rootpath)
         self.started_at_iso = ""
@@ -150,6 +166,83 @@ class AgentRuntime:
 
     def pytest_collection_finish(self, session: pytest.Session) -> None:
         self.total_collected = len(session.items)
+
+    @pytest.hookimpl(wrapper=True, trylast=True)
+    def pytest_terminal_summary(self) -> Generator[None]:
+        """Print what other plugins reported at the end of the run.
+
+        Agent mode replaces pytest's own per-test reporting, but it has no
+        equivalent for an end-of-run report from another plugin: a coverage
+        table, `--durations`, the path `--junit-xml` just wrote. Those go
+        through the terminal writer, which agent mode has redirected to a
+        file, so before this they were asked for and silently never appeared.
+
+        `trylast` makes this the *innermost* wrapper, which is what selects
+        the right content. Plain (non-wrapper) hookimpls -- pytest-cov's,
+        `--durations` in _pytest.runner, `--junit-xml`'s -- all run inside
+        every wrapper, so they land in this window. TerminalReporter's own
+        wrapper writes the failure tracebacks before the yield and the short
+        summary after it, both outside this window, and both things agent
+        mode already reports in its own form.
+        """
+        log = self.terminal_log
+        path = self.terminal_log_path
+        if log is None or path is None:
+            return (yield)
+        # Byte offsets from stat rather than TextIO.tell(), whose return value
+        # is an opaque cookie that must not be used as a length.
+        log.flush()
+        start = path.stat().st_size
+        try:
+            return (yield)
+        finally:
+            log.flush()
+            self._print_terminal_summary(path.read_bytes()[start:].decode("utf-8", errors="replace"))
+
+    def _print_terminal_summary(self, text: str) -> None:
+        lines = [line.rstrip() for line in text.splitlines()]
+        # Leading and trailing blank lines are separators from a report that
+        # assumed it was sitting in the middle of pytest's own output.
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while lines and not lines[-1].strip():
+            lines.pop()
+        if not lines:
+            return
+
+        self._print(f"also reported by other plugins ({display_path(self.root / TERMINAL_LOG_NAME)}):")
+        shown = lines
+        elided = 0
+        if len(lines) > MAX_TERMINAL_SUMMARY_LINES:
+            shown = lines[:_SUMMARY_HEAD_LINES]
+            elided = len(lines) - _SUMMARY_HEAD_LINES - _SUMMARY_TAIL_LINES
+        if self.terminal is None:
+            return
+        for line in shown:
+            # Written raw, without the [pytest-agent] prefix the rest of this
+            # output carries: these are somebody else's aligned tables, and a
+            # prefix on every row makes a coverage report unreadable.
+            self.terminal.write_line(line)
+        if elided:
+            self.terminal.write_line(f"... {elided} lines elided, full text in {TERMINAL_LOG_NAME} ...")
+            for line in lines[-_SUMMARY_TAIL_LINES:]:
+                self.terminal.write_line(line)
+
+    def close_terminal_log(self) -> None:
+        """Close the redirected terminal-reporter output.
+
+        Called from pytest_unconfigure rather than sessionfinish: the reporter
+        keeps writing after the terminal-summary hook (its stats line), and a
+        closed file there would turn a finished run into a ValueError.
+        """
+        log = self.terminal_log
+        self.terminal_log = None
+        if log is None:
+            return
+        with contextlib.suppress(OSError, ValueError):
+            # Already closed, or the file went away under us. Nothing here is
+            # worth failing a finished run over.
+            log.close()
 
     def _install_sigterm_handler(self) -> None:
         """Turn SIGTERM into the interrupt pytest already knows how to handle.
