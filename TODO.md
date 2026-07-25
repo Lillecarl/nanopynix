@@ -255,11 +255,19 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
      not be caught, as it has Interrupted as a subclass" -- so the
      catch-all must stay rooted at `Error`, never `BaseError`.
 
-4. **`get_derived_path` is inproc-only with zero consumers.** The parity
-   ledger already calls it `"DEFECT: extracting a DerivedPath is pure
-   libexpr."` `build_paths_with_results` already accepts
-   `Sequence[str | PublicStorePath]`, so DerivedPath construction belongs
-   in the build receiver. Check the `^output` selection syntax first.
+4. ~~**`get_derived_path` is inproc-only with zero consumers.**~~ -- DONE,
+   by making it private (`Value._derived_path`) rather than by adding it
+   to rpc. "Zero consumers" was right about the outside world and wrong
+   inside: `build()` needs it, and two multithreaded tests want the
+   intermediate path so they can build it twice.
+
+   The defect was that it was public on one engine and absent on the
+   other. Two ways to settle that; adding public surface with no
+   demonstrated consumer is the more expensive one, and `build()` -- the
+   operation callers actually want -- is already on both engines. The
+   `^output` selection question therefore does not need answering yet; it
+   does the day someone has a real use for the string, at which point it
+   goes on *both* engines.
 
 ## Consolidation -- mechanical, unique names, `sed`-able
 

@@ -1129,7 +1129,7 @@ class Value:
         target_store = self._eval_session._store if store is None else store  # type: ignore[reportPrivateUsage] -- evaluator's bound store is default  # noqa: SLF001
         if target_store._session is not self._eval_session._session:  # type: ignore[reportPrivateUsage] -- session ownership guard  # noqa: SLF001
             raise ValueError("Store belongs to a different inproc Session")
-        derived_path = await self.get_derived_path()
+        derived_path = await self._derived_path()
         results = await target_store.build_paths_with_results(
             [derived_path],
             build_mode=build_mode,
@@ -1148,11 +1148,20 @@ class Value:
         derivation = await target_store.read_derivation(derived_path)
         return {name: output.path for name, output in derivation.outputs.items() if output.path is not None}
 
-    async def get_derived_path(self) -> str:
+    async def _derived_path(self) -> str:
         """Extract this derivation's canonical DerivedPath string.
 
         The result contains no evaluator pointer and can be built by any Store
         in this session. Plain derivation paths select all outputs by default.
+
+        Private because it was public on inproc and absent on rpc, with no
+        caller outside this module and this repo's own tests. The two ways to
+        settle that were to add it to rpc or to stop exposing it, and adding
+        public surface with no demonstrated consumer is the more expensive
+        answer -- ``build()`` is the operation callers actually want, and it
+        is on both engines. If a real need for the DerivedPath string appears,
+        it should be added to *both* engines, at which point ``^output``
+        selection syntax has to be settled too.
         """
         return await self._eval_session.run(self._local_for(self._eval_session).derived_path)
 

@@ -215,7 +215,6 @@ LEDGER: dict[str, str] = {
     "Value.get_type:rpc-only": "DEFECT: inproc spells this `type` and returns a str name rather than this NixType enum.",
     "Value.nix_type:rpc-only": "TRANSPORT: a sync property peeking at the type already known locally, no round trip. In-process there is no round trip to avoid, so `type` is always cheap and a separate peek would mean nothing.",
     "Value.close:inproc-only": "DEFECT: rpc spells value teardown release() only; inproc has both close() and release().",
-    "Value.get_derived_path:inproc-only": "DEFECT: extracting a DerivedPath is pure libexpr.",
     "Value.force_as:rpc-only": (
         "DEFECT: this is rpc's *strict* accessor -- the real counterpart of inproc's as_int/as_float/"
         "as_bool/as_string, reached by NixType argument rather than by four method names. One of the "

@@ -88,7 +88,10 @@ async def _release_all(values: list[inproc.Value]) -> None:
 
 
 async def _derived_paths(values: list[inproc.Value]) -> list[str]:
-    return list(await asyncio.gather(*(value.get_derived_path() for value in values)))
+    # Private on purpose -- see Value._derived_path. build() is the public
+    # operation; this test wants the intermediate path to build it twice.
+    paths = (value._derived_path() for value in values)  # type: ignore[reportPrivateUsage] -- see above
+    return list(await asyncio.gather(*paths))
 
 
 async def _output_paths(store: inproc.Store, drv_paths: list[str]) -> list[str]:
@@ -353,7 +356,10 @@ async def test_inproc_independent_builds_overlap_without_cpu_pressure(
                         first_seconds.call(uuid.uuid4().hex),
                         second_seconds.call(uuid.uuid4().hex),
                     )
-                    first_path, second_path = await asyncio.gather(first.get_derived_path(), second.get_derived_path())
+                    first_path, second_path = await asyncio.gather(
+                        first._derived_path(),  # type: ignore[reportPrivateUsage] -- see Value._derived_path
+                        second._derived_path(),  # type: ignore[reportPrivateUsage] -- see Value._derived_path
+                    )
                     drv_paths.extend([first_path, second_path])
                     async with _measuring_build_dispatch(nix) as starts:
                         first_result, second_result = await asyncio.gather(
