@@ -171,32 +171,37 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
      category. `EvalError` is the honest answer: these are all
      eval-domain errors about a `Value`.
 
-     *Nix throwing a bare `nix::Error` from libstore/libexpr internals* is
-     the hard half. Concrete measured case, still open after the above:
-     `edit_location()` on `42` reaches `nix::findPackageFilename`, which
-     throws a plain `nix::Error` ("package 'selected value' has no source
-     location information"), so it still arrives as a bare `RuntimeError`
-     -- the one branch of `edit_location` this could not fix from our
-     side. The stated reason for not registering `nix::Error` is real:
-     it is the base of every bound type, and the translators live in
-     different translation units with no cross-TU ordering guarantee, so
-     registering it could shadow any subclass. Two ways out, neither
-     chosen -- this needs a decision, not just typing:
+     ~~*Nix throwing a bare `nix::Error` from libstore/libexpr
+     internals*~~ -- DONE, and it dissolved the constraint rather than
+     working around it. All the exception classes and **one** translator
+     now live in `nanopynix-bindings/src/nix_errors.cpp`; with a single
+     translator owning the hierarchy there is no registration order left
+     to get wrong, so `nix::Error` can finally be the catch-all. The
+     ordering that remains is the `catch` chain's, which is in one place
+     and is checked by the compiler (`-Wexceptions` rejects a base
+     preceding its subclass) rather than by convention.
 
-     1. **Rely on import order.** nanobind prepends translators and walks
-        head-first, so the *first* registered is tried *last*.
-        `nanopynix_bindings/__init__.py` imports `expr` first, so a
-        `nix::Error` fallback registered at the top of `expr`'s
-        `NB_MODULE` would be tried after every other module's. That works
-        today and is one line, but it makes a line in `__init__.py`
-        load-bearing and silently breakable -- so it only holds up if a
-        test pins it (a bare `nix::Error` maps to `NixError` *and* a
-        `nix::TypeError` still maps to `NixTypeError`).
-     2. **Make the fallback ordering-independent** by having it rethrow
-        for the specific types it must not shadow before falling through
-        to `catch (nix::Error &)`. Correct regardless of order, but it
-        duplicates the registry in a second place that must be kept in
-        sync.
+     Two rejected alternatives, recorded so they are not re-proposed:
+     relying on `nanopynix_bindings/__init__.py`'s import order (one
+     line, but silently breakable), and an ordering-independent fallback
+     that rethrows for each specific type before `catch (nix::Error &)`
+     (correct, but duplicates the registry in a second list that must be
+     kept in sync).
+
+     Three things that design must keep doing, all pinned by
+     `tests/temp/test_exception_translation.py`: the catch-all fires; it
+     does not shadow the specific subclasses; and it does not overreach
+     -- standard C++ exceptions (`std::bad_alloc`, nlohmann-json,
+     our own `std::out_of_range` in `list_get`) have no clause and must
+     keep falling through to nanobind's default translator. A
+     `catch (...)` would silently destroy the third.
+
+     Also handled there: `nix::Interrupted` is a `BaseError` sibling of
+     `nix::Error`, not a subclass, and now maps to `KeyboardInterrupt`
+     instead of degrading to a bare `RuntimeError`. Nix warns about
+     exactly this in `nix/util/error.hh` -- "BaseError should generally
+     not be caught, as it has Interrupted as a subclass" -- so the
+     catch-all must stay rooted at `Error`, never `BaseError`.
 
 4. **`get_derived_path` is inproc-only with zero consumers.** The parity
    ledger already calls it `"DEFECT: extracting a DerivedPath is pure
