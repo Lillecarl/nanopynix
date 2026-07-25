@@ -9,7 +9,26 @@ fake EvalState so it doesn't bit-rot before it gets a real caller.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from nanopynix._core._nix_core import NixCore
+
+if TYPE_CHECKING:
+    from nanopynix_bindings.expr import EvalState
+
+    from nanopynix._core._nix_core import EvalSettingsTarget
+
+    def _a_real_eval_state_satisfies_the_protocol(  # type: ignore[reportUnusedFunction] -- a static assertion; pyright checking it is the entire point
+        state: EvalState,
+    ) -> EvalSettingsTarget:
+        """Pin ``EvalSettingsTarget`` to the concrete type it abstracts.
+
+        ``configure_eval_state`` has no production caller yet, so without this
+        the Protocol's only consumer is the fake below -- and it could drift
+        into a shape a real ``EvalState`` no longer satisfies without anything
+        noticing. Checked by pyright; never executed.
+        """
+        return state
 
 
 class _FakeEvalState:

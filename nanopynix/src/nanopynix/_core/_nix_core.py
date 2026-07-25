@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Protocol
 
 from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import store as nanopynix_store
@@ -10,6 +10,20 @@ from nanopynix_bindings import util as nanopynix_util
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+
+class EvalSettingsTarget(Protocol):
+    """The two live-mutable setters :meth:`NixCore.configure_eval_state` needs.
+
+    Structural rather than the concrete ``EvalState`` because that is the whole
+    of the contract -- the method applies settings and touches nothing else --
+    and stating it exactly is what lets a test substitute a recorder without a
+    cast. ``nanopynix_bindings.expr.EvalState`` satisfies it as written.
+    """
+
+    def set_eval_setting(self, name: str, value: str) -> None: ...
+
+    def set_fetch_setting(self, name: str, value: str) -> None: ...
 
 
 def build_mode_value(build_mode: nanopynix_store.BuildMode | int | None) -> int:
@@ -50,17 +64,17 @@ class NixCore:
             nanopynix_util.set_verbosity(verbosity)
         nanopynix_expr.init_libexpr()
 
-    def open_store(self, uri: str) -> Any:
+    def open_store(self, uri: str) -> nanopynix_store.Store:
         return nanopynix_store.open_store(uri)
 
     def open_eval_state(
         self,
-        store: Any,
+        store: nanopynix_store.Store,
         nix_path: Sequence[str],
-        build_store: Any | None = None,
+        build_store: nanopynix_store.Store | None = None,
         eval_settings: Mapping[str, str] | None = None,
         fetch_settings: Mapping[str, str] | None = None,
-    ) -> Any:
+    ) -> nanopynix_expr.EvalState:
         return nanopynix_expr.EvalState(
             store,
             list(nix_path),
@@ -71,7 +85,7 @@ class NixCore:
 
     def configure_eval_state(
         self,
-        eval_state: Any,
+        eval_state: EvalSettingsTarget,
         eval_settings: Mapping[str, str] | None = None,
         fetch_settings: Mapping[str, str] | None = None,
     ) -> None:
