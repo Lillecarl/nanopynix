@@ -300,3 +300,38 @@ def test_a_mistyped_subcommand_is_named_as_such_instead_of_reaching_pytest(pytes
     assert "did you mean 'last-failures'?" in result.stderr
     # It must not have started a pytest session on the way to saying so.
     assert not (pytester.path / ".pytest-agent").exists()
+
+
+def test_rerun_can_target_a_run_by_its_label(pytester: pytest.Pytester) -> None:
+    # The workflow labels are for: the long suite is started once, under a
+    # name, and every later command refers to that name -- so re-running its
+    # failures doesn't depend on counting the runs done while it went.
+    pytester.makepyfile(schema_helper=_HELPER)
+    pytester.makepyfile(test_lsp_scenarios=_TESTS)
+    result = pytester.runpytest_subprocess(
+        *conftest.agent_plugin_cli_args(),
+        "--agent",
+        "--agent-label=full-suite",
+        "-q",
+    )
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+
+    reran = conftest.run_cli(["rerun", "--run", "full-suite"], cwd=pytester.path)
+
+    assert reran.returncode != 0, "the failures were re-run, so the run must still fail"
+    assert "re-running 5 failed from .pytest-agent/runs-0001" in reran.stdout
+    assert len(_recorded_nodeids(pytester.path, 2)) == 5
+
+
+def test_a_label_that_could_be_read_as_a_run_number_is_refused_up_front(pytester: pytest.Pytester) -> None:
+    # Refused at the writing end so the reading end never has to guess: with a
+    # run labeled "2" on disk, `--run 2` would mean different runs depending
+    # on what else was there.
+    pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
+
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent", "--agent-label=2", "-q")
+
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    result.stderr.fnmatch_lines(["*--agent-label*all digits*"])
+    # And nothing was claimed on disk for a run that never started.
+    assert not (pytester.path / ".pytest-agent").exists()

@@ -7,7 +7,7 @@ import re
 import shutil
 import subprocess
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -18,11 +18,45 @@ _RUN_DIR_RE = re.compile(r"^runs-(\d+)$")
 # inside /tmp/pytest-of-$USER recognizes it.
 RUN_LOCK_NAME = ".lock"
 
+# Written when the run claims its directory, not when it ends: a label's whole
+# purpose is naming a run you intend to ask about later, and "later" starts
+# while the run is still going. summary.json can't serve -- it appears at
+# sessionfinish, so a 10-minute suite would be unfindable by name for 10
+# minutes, and a killed one forever.
+RUN_META_NAME = "meta.json"
+
+# Labels name a run on the command line, so they may not need quoting, and may
+# not be mistaken for the run number they sit beside in `--run`.
+_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+MAX_LABEL_CHARS = 64
+
 # How long a lock is believed. Long enough that no plausible suite outlives
 # it (this repo's own is documented to run under `timeout 500`), short enough
 # that a directory orphaned by a SIGKILL rejoins the pruning rotation the same
 # day rather than accumulating one leaked run per hard kill.
 RUN_LOCK_STALE_AFTER = 60 * 60 * 12
+
+
+def validate_run_label(label: str) -> str:
+    """Return *label* unchanged, or explain why it can't name a run.
+
+    Rejecting a purely numeric label is the point of the check: `--run` takes
+    either a number or a label, and a run labeled "123" would make
+    `--run 123` mean two different runs depending on what else is on disk.
+    Ruling it out at the writing end means the reading end never has to guess.
+    """
+    if not label:
+        raise ValueError("a run label cannot be empty")
+    if len(label) > MAX_LABEL_CHARS:
+        raise ValueError(f"a run label is at most {MAX_LABEL_CHARS} characters, got {len(label)}")
+    if label.isdigit():
+        raise ValueError(f"{label!r} is all digits, which `--run` already reads as a run number")
+    if _LABEL_RE.match(label) is None:
+        raise ValueError(
+            f"{label!r} is not a usable run label -- use letters, digits, '.', '_' and '-' "
+            "(starting with a letter or digit)",
+        )
+    return label
 
 
 def existing_run_numbers(root: Path) -> list[int]:
@@ -60,6 +94,56 @@ def next_run_dir(root: Path) -> tuple[int, Path]:
         # a concurrent prune landing in the gap on age alone.
         create_run_lock(candidate)
         return n, candidate
+
+
+def run_number_of(run_dir: Path) -> int | None:
+    """The N in runs-NNNN, or None if *run_dir* isn't a run directory."""
+    match = _RUN_DIR_RE.match(run_dir.name)
+    return int(match.group(1)) if match is not None else None
+
+
+def write_run_meta(run_dir: Path, meta: dict[str, Any]) -> None:
+    """Record what a run is, while it is still running.
+
+    Written whole or not at all, because concurrent runs read this file: the
+    prune path reads every run's meta on every sessionfinish, and a reader
+    that caught a half-written file would see a run lose its label -- and its
+    retention -- for the duration of a write.
+    """
+    temp_path = run_dir / f"{RUN_META_NAME}.tmp"
+    temp_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    temp_path.replace(run_dir / RUN_META_NAME)
+
+
+def read_run_meta(run_dir: Path) -> dict[str, Any] | None:
+    """*run_dir*'s meta.json, or None if it hasn't got a readable one.
+
+    Deliberately total: this is read while pruning, on every run's
+    sessionfinish, across directories owned by other processes -- including
+    one killed between claiming its directory and writing its meta. A raise
+    here would turn one run's bad luck into every later run failing at
+    sessionfinish, which is the shape of bug that wipes an archive.
+    """
+    try:
+        raw = (run_dir / RUN_META_NAME).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        meta: object = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(meta, dict):
+        return None
+    return cast("dict[str, Any]", meta)
+
+
+def run_label(run_dir: Path) -> str | None:
+    """The label *run_dir* was started with, or None if it was unlabeled."""
+    meta = read_run_meta(run_dir)
+    if meta is None:
+        return None
+    label = meta.get("label")
+    return label if isinstance(label, str) and label else None
 
 
 def create_run_lock(run_dir: Path) -> Path:
@@ -151,6 +235,15 @@ def prune_old_runs(top_root: Path, keep: int, protect: Path) -> None:
     number: *protect* covers only the pruning session's own run, and with a
     small --agent-keep-runs an older concurrent run sits outside the newest N
     while being very much alive. See create_run_lock.
+
+    Labeled runs get their own budget of the same size, on top of the general
+    one rather than carved out of it. A label is somebody saying "I intend to
+    come back to this", and the case it exists for -- start a 10-minute suite
+    in the background, then work through focused runs while it goes -- is
+    exactly the case where that run falls out of the newest N before anyone
+    asks about it. Additive so that the newest directory is still a survivor
+    for any keep >= 1, which is what makes the claim-then-lock window in
+    next_run_dir safe.
     """
     numbered = sorted(
         ((n, top_root / f"runs-{n:04d}") for n in existing_run_numbers(top_root)),
@@ -158,6 +251,8 @@ def prune_old_runs(top_root: Path, keep: int, protect: Path) -> None:
     )
     effective_keep = max(keep, 1)
     survivors = {run_dir for _, run_dir in numbered[-effective_keep:]}
+    labeled = [run_dir for _, run_dir in numbered if run_label(run_dir) is not None]
+    survivors.update(labeled[-effective_keep:])
     survivors.add(protect)
     now = time.time()
     for _, run_dir in numbered:

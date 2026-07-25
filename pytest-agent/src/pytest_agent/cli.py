@@ -72,7 +72,9 @@ def _rerun(argv: list[str]) -> int:
     Reading runs-NNNN instead means `--run N` can re-run a failure set from any
     run still on disk, and the ids come back already exact -- no quoting a
     parametrized `[in_process-local]` through a shell that treats brackets as
-    globs.
+    globs. `--run` also takes a label, which is what makes "re-run what the
+    background suite found" a single command that doesn't depend on how many
+    focused runs happened in between.
     """
     parser = argparse.ArgumentParser(
         prog="pytest-agent rerun",
@@ -81,7 +83,12 @@ def _rerun(argv: list[str]) -> int:
         # through to pytest rather than being abbreviation-matched to --run.
         allow_abbrev=False,
     )
-    parser.add_argument("--run", type=int, default=None, metavar="N", help="Re-run run N's failures.")
+    parser.add_argument(
+        "--run",
+        default=None,
+        metavar="N|LABEL",
+        help="Re-run the failures of a run named by number, or by its --agent-label.",
+    )
     parser.add_argument("--dir", default=None, metavar="PATH", help="Agent directory to read.")
     args, forwarded = parser.parse_known_args(argv)
 
