@@ -59,6 +59,90 @@ copy of the room.** A helper that wraps a builtin has to justify itself against
 `apply("builtins.thatOne")`, and a helper with no Nix counterpart has to
 justify existing at all.
 
+# Tracked: the value-reading API, measured
+
+Ordered by measured cost, not by how appealing the change is. "Consumer
+sites" counts `pynix/src` + `ekn/src` + `docs` only -- not nanopynix's own
+layers (each method spans ~6: protocol, proto, worker, client, inproc,
+binding) and not tests.
+
+The evidence is a matrix of 10 input shapes (int/string/bool/null/attrs/
+list/function/derivation/`throw`/lazy-`throw`) x 15 methods x both engines.
+Regenerate it before acting on anything here; the numbers below are from
+the run right after `to_python()` moved onto `printValueAsJSON`.
+
+## Defects -- zero consumer sites, fix independently of any naming
+
+1. **`attr_names`/`has_attr`/`list_length` answer for the wrong type
+   instead of raising**, identically on both engines. `attr_names()` on
+   `42` is `[]`; `has_attr("a")` on `42` is `False`; `list_length()` on
+   `{ a = 1; }` is `0`. So `for i in range(await v.list_length())` is a
+   silent no-op on an attrset -- a plausible answer, not an exception,
+   which is the worst failure mode an API can have.
+
+2. **rpc's `force_deep` still dies on a derivation.** The walk was
+   implemented three times: `to_python()` in C++ (fixed -- it delegates to
+   `printValueAsJSON`), `_deep_value()` in `rpc/worker/_worker_eval.py`
+   (a separate Python-level recursion that never calls `to_python()`, so
+   the fix did not reach it), and `printValueAsJSON` itself. rpc raises
+   where inproc now returns the store path.
+
+3. **Bare `RuntimeError` escapes the `NixError` hierarchy** on inproc from
+   `attr()` on a non-attrs value, `list_get()` on a non-list,
+   `realise_string()` on a derivation, and `to_python()`'s
+   max-call-depth cycle error.
+
+4. **`get_derived_path` is inproc-only with zero consumers.** The parity
+   ledger already calls it `"DEFECT: extracting a DerivedPath is pure
+   libexpr."` `build_paths_with_results` already accepts
+   `Sequence[str | PublicStorePath]`, so DerivedPath construction belongs
+   in the build receiver. Check the `^output` selection syntax first.
+
+## Consolidation -- mechanical, unique names, `sed`-able
+
+5. **`force_deep` / `force_json` / inproc's `json()` are one operation**
+   (~63 consumer sites). `force_json` and `json()` are both
+   `printValueAsJSON`; `force_deep` is a broken duplicate whose only extra
+   -- function leaves stay callable -- is rpc-only, since inproc used to
+   return the *string* `"function"` for them. Keep one, as
+   `to_python(*, copy_to_store=False)`: it returns Python objects, not
+   JSON, and "json" names the ruleset, which belongs in the docstring.
+   `copy_to_store` decides what a *path value* becomes -- `true` copies
+   the source into the store as string interpolation does, `false`
+   renders the literal filesystem path as `nix eval --json` does.
+
+6. **`force_as` (8 sites), `get_type`/`type` (12), `close`, and the view
+   classes.** `force_as(INT)` is `as_int` with a worse rule: it rejects an
+   int for `FLOAT` where Nix's own `forceFloat` widens. `get_type` and
+   `type` also differ in *return* -- `NixType` enum vs a plain string.
+   `close()` duplicates `release()`. `ValueAttrs`/`ValueList` have zero
+   consumers outside their own unit tests and are the sole reason
+   `force()` diverges; `force()` should return `NixType` on both engines,
+   keeping Nix's verb.
+
+## Deferred -- the only item with real semantic migration cost
+
+7. **`as_dict() -> dict[str, Value]` / `as_list() -> list[Value]`** (32
+   consumer sites, each needing thought rather than a regex). Keys and
+   length now, contents still lazy -- which is exactly WHNF for a compound
+   value as Nix models it, since forcing an attrset leaves its values as
+   thunks. They would subsume `attr_names`/`has_attr`/`list_length` and
+   let plain `dict`/`list` supply `len`/`in`/`.keys()`/iteration for free.
+   Deliberately *not* bundled with item 1: once those three raise, the
+   defect is closed and this is judged on ergonomics alone.
+
+   The `as_`/`to_` split is load-bearing and should survive: `as_*` means
+   "this already *is* that, hand it over" and never converts, `to_python`
+   means "convert, with Nix's `toJSON` rules" and is lossy on purpose.
+   Renaming `as_int` to `to_int` would imply `to_int()` on `"42"` works.
+
+## Verification
+
+8. **`test_engine_parity.py` compares signatures**, so "same name, same
+   signature, different behaviour" passes. It missed every divergence
+   above. Seed a semantic layer from the matrix: `(expression, operation)`
+   -> same result or same exception type on both engines.
+
 # Tracked: pre-existing complexity/arg-count debt (ruff-strict C901/PLR09xx)
 Enabling mccabe (`C901`) and Pylint's too-many-{branches,returns,arguments,
 statements} (`PLR0911`/`PLR0912`/`PLR0913`/`PLR0915`) in `ruff-strict.toml`
