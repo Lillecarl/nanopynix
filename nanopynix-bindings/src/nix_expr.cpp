@@ -788,7 +788,15 @@ nb::object PyValue::to_python() {
             std::string string;
             {
                 nb::gil_scoped_release release;
-                string = es->forceStringNoCtx(*value, nix::noPos, "");
+                // forceString, NOT forceStringNoCtx, for the same reason as
+                // as_string() above: an interpolated derivation path
+                // ("${drv}") is an ordinary string that happens to carry
+                // store-path context, and refusing to convert it would make
+                // to_python() unable to read the single most common shape of
+                // Nix string there is. The context is dropped because a Python
+                // str cannot carry one; callers that need it must stay on the
+                // Nix side (Value.apply, or realise the path).
+                string = es->forceString(*value, nix::noPos, "while converting a Nix string to Python");
             }
             return nb::str(string.c_str());
         }
