@@ -489,11 +489,31 @@ without a profiler" install worth supporting.
 Independently of `--agent` -- and independently of
 `PYTEST_AGENT_NO_AUTODETECT`, which only governs auto-activation -- this
 plugin refuses to run at all (exit code 2, before collecting a single test)
-if it detects its own stdout is piped directly into `head`, `tail`, `grep`,
-`sed`, `awk`, or a close variant -- exactly the mistake this project exists
-to prevent, since those tools silently discard the output that would explain
-a failure. Piping into `tee` is unaffected (and is how you'd capture full
-output to a file while still watching it live).
+if it detects its own stdout is piped directly into `head`, `tail`, `cut`,
+`sed`, `awk`, or any grep -- GNU's, plus `ugrep`, `rg`, `ag`, `ack`,
+`pcregrep` and friends -- exactly the mistake this project exists to prevent,
+since those tools silently discard the output that would explain a failure.
+
+The whole grep family is listed rather than just `grep`, because the guard's
+audience is an agent, and an agent told to stop using `grep` reaches for `rg`.
+`wc` is deliberately absent, for the same reason `tee` is unaffected: asking
+for a count destroys the output wholesale rather than reading it through a
+keyhole, which is an explicit choice rather than a mistake. (`tee` is also how
+you'd capture full output to a file while still watching it live.)
+
+The reader is identified by three things -- argv[0], `comm`, and
+`/proc/<pid>/exe` -- not by any one of them. A wrapper makes those disagree:
+Claude Code replaces `grep` with a shell function running
+`exec -a ugrep "$CLAUDE_CODE_EXECPATH"`, so a pipe an agent wrote as
+`| grep ...` appears in /proc as `comm=.claude-wrapped`, `argv[0]=ugrep`.
+Matching on `comm` alone missed it, which meant the guard was blind to
+precisely the caller it exists to stop. Later arguments are deliberately not
+scanned: `| tee grep.log` is not a violation, and a guard that refuses honest
+commands is one people switch off.
+
+Only the *immediate* reader is inspected, so `pytest | cat | grep x` is not
+caught. Following the chain conflicts with the `tee` allowance above, so this
+is a known limitation rather than an oversight (see TODO.md).
 
 Runs that only print a listing and execute no test body are exempt, because
 there is no failure detail for a pipe to discard: `--collect-only`,
@@ -502,6 +522,11 @@ and `--version`. So `pytest --collect-only -q | tail -1` -- the normal way to
 ask how many tests a selection matches -- just works. `--setup-only` is
 deliberately not exempt: it really does execute fixtures, and a fixture error
 there is exactly what the guard protects.
+
+`--agent-allow-pipe` (or `PYTEST_AGENT_ALLOW_PIPE=1`) skips the guard. It is
+intentionally not mentioned in the refusal message: an agent reading that
+refusal should stop truncating, not learn a flag that lets it keep
+truncating.
 
 ### Known incompatibility: pytest-xdist
 

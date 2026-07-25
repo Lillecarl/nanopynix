@@ -18,8 +18,8 @@ there are commands that read it.
 
 ## The one hard rule
 
-**Never pipe pytest's stdout into `head`, `tail`, `grep`, `sed`, `awk`, or a
-variant.** The plugin detects this and refuses to run: exit code 2, before a
+**Never pipe pytest's stdout into `head`, `tail`, `cut`, `sed`, `awk`, or any
+grep.** The plugin detects this and refuses to run: exit code 2, before a
 single test is collected. This guard is independent of agent mode and is *not*
 turned off by `PYTEST_AGENT_NO_AUTODETECT=1`.
 
@@ -27,10 +27,18 @@ There is nothing to work around here. Those pipes exist to cut output down,
 and the output is already cut down — piping it only discards the one line
 naming the failure you were looking for. Run it unpiped and query afterwards.
 
-Piping into `tee` is fine. Listing-only runs are exempt (`--collect-only`,
-`--fixtures`, `--fixtures-per-test`, `--markers`, `--setup-plan`, `--help`,
-`--version`), so `pytest --collect-only -q | tail -1` works. `--setup-only` is
-not exempt — it really executes fixtures.
+Reaching for a different grep does not help: `ugrep`, `rg`, `ag`, `ack` and
+`pcregrep` are all recognized, and the reader is identified by argv[0], `comm`
+*and* `/proc/<pid>/exe`, so a wrapper or alias that renames one of them is
+still caught. If you see `refusing to run -- stdout is piped directly into
+'ugrep (running as .claude-wrapped)'`, that is your harness's `grep` shim, and
+the fix is the same: drop the pipe.
+
+Piping into `tee` is fine — it preserves everything. So is `| wc -l`.
+Listing-only runs are exempt (`--collect-only`, `--fixtures`,
+`--fixtures-per-test`, `--markers`, `--setup-plan`, `--help`, `--version`), so
+`pytest --collect-only -q | tail -1` works. `--setup-only` is not exempt — it
+really executes fixtures.
 
 The query subcommands below are ordinary read-only programs. Grepping *those*
 is fine.
@@ -236,8 +244,11 @@ releases the GIL, which the Python watchdog cannot cover; use it (with
 | `--agent-heartbeat` | `PYTEST_AGENT_HEARTBEAT` | `10` | Seconds between progress lines (0 prints none) |
 | `--agent-stuck-after` | `PYTEST_AGENT_STUCK_AFTER` | `300` | Dump thread stacks after one test runs this long (0 disables) |
 | `--agent-keep-runs` | `PYTEST_AGENT_KEEP_RUNS` | `20` | Keep the newest N `runs-*` dirs; labeled runs get a second budget of the same size; `history.jsonl` is kept forever |
-| `--agent-allow-pipe` | `PYTEST_AGENT_ALLOW_PIPE` | off | Skip the piped-stdout guard |
 | n/a | `PYTEST_AGENT_NO_AUTODETECT` | off | Disable harness auto-activation |
+
+(The guard has an override. It is documented in the README, for a human who
+means it, and left out here on purpose: an agent that hits the refusal should
+stop truncating, not learn a flag for truncating anyway.)
 
 ## Things that will otherwise surprise you
 
