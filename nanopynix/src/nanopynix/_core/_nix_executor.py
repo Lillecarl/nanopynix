@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import logging
 import threading
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -13,6 +14,38 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 _T = TypeVar("_T")
+
+logger = logging.getLogger(__name__)
+
+# Nix's own evaluator stack size, in bytes: `60 * 1024 * 1024`, straight from
+# `nix::setStackSize(60 * 1024 * 1024)` in Nix's `src/nix/main.cc`. (60 rather
+# than 64 because macOS on GitHub Actions has a hard limit slightly under
+# 64 MiB, per the comment there.) Nix has no `stack-size` setting to read it
+# from, so it is a constant here too.
+#
+# Note *where* Nix calls it: the CLI's `main()`, not `initNix()`. We call
+# `initNix()` and so never inherited this, which is the whole bug -- Nix's
+# default `max-call-depth` of 10000 needs roughly 27 MB of C stack, so on the
+# 8 MiB a thread inherits from `RLIMIT_STACK` the stack is exhausted long
+# before the counter fires and `let f = n: f (n + 1); in f 0` segfaults
+# instead of raising.
+#
+# We apply it per-thread rather than by calling `nix::setStackSize`, which
+# raises `RLIMIT_STACK` and so cannot exceed the *hard* limit -- 8 MiB on a
+# stock host, where Nix itself warns ("Stack size hard limit is 8388608, which
+# is less than the desired 62914560") and falls back to its SIGSEGV handler. A
+# pthread stack is mmap'd and not bound by `RLIMIT_STACK`, so this succeeds
+# where Nix's own mechanism does not.
+NIX_EVALUATOR_STACK_SIZE = 62914560
+
+# `threading.stack_size()` is process-global: it must be held only across the
+# thread creation it is meant for, and always restored, or threads the host
+# application creates afterwards silently inherit a 60 MiB reservation.
+_STACK_SIZE_LOCK = threading.Lock()
+
+
+def _noop() -> None:
+    """Warm-up body: exists only so the pool has a reason to spawn its thread."""
 
 
 class NixThreadExecutor:
@@ -29,9 +62,18 @@ class NixThreadExecutor:
         thread_name_prefix: str = "nix",
         thread_initializer: Callable[[], None] | None = None,
         thread_finalizer: Callable[[], None] | None = None,
+        stack_size: int | None = None,
     ) -> None:
         if max_workers < 1:
             raise ValueError("max_workers must be at least 1")
+        if stack_size is not None and max_workers != 1:
+            # Sizing more than one thread means holding the process-global
+            # setting across several spawns, which needs a barrier to keep them
+            # concurrent. No caller wants it -- Nix stores do not recurse, so
+            # only the single-threaded evaluators ask for a stack at all.
+            raise ValueError("stack_size is only supported with max_workers=1")
+        self._stack_size = stack_size
+        self._worker_spawned = False
         self._thread_initializer = thread_initializer
         self._thread_finalizer = thread_finalizer
         self._thread_started = threading.Event()
@@ -45,6 +87,48 @@ class NixThreadExecutor:
         self._accepting = True
         self._closed = False
         self._shutdown_started = False
+
+    def _ensure_worker_spawned(self) -> None:
+        """Create this executor's thread with ``stack_size`` in force, once.
+
+        ``ThreadPoolExecutor`` spawns lazily inside ``submit()``, so the stack
+        size that takes effect is whatever is set at the *first submit* -- not
+        at construction. A warm-up task run to completion pins it down: when it
+        returns, the thread exists and its stack is already the right size.
+
+        Degrades rather than fails. A host that has made
+        ``threading.stack_size()`` unusable gets the old, too-small stack and a
+        warning, not a Session that refuses to open.
+
+        The caller must hold ``self._lock``.
+        """
+        size = self._stack_size
+        if size is None or self._worker_spawned:
+            return
+        self._worker_spawned = True
+        with _STACK_SIZE_LOCK:
+            previous = threading.stack_size()
+            # A floor, not an override: `nix::setStackSize` only ever raises
+            # (`if (limit.rlim_cur < stackSize)`), so a host that has asked for
+            # a bigger stack -- to run a raised `max-call-depth`, say -- keeps
+            # it. `threading.stack_size()` returns 0 for "the system default",
+            # which is the 8 MiB case this exists to replace.
+            size = max(size, previous)
+            try:
+                threading.stack_size(size)
+            except (ValueError, RuntimeError):
+                logger.warning(
+                    "could not request a %d-byte stack for the Nix evaluator thread; "
+                    "deep recursion may exhaust the stack before Nix's max-call-depth "
+                    "limit reports it",
+                    size,
+                    exc_info=True,
+                )
+                return
+            try:
+                self._pool.submit(_noop).result()
+            finally:
+                threading.stack_size(previous)
 
     def _initialize_thread(self) -> None:
         initializer = self._thread_initializer
@@ -65,6 +149,7 @@ class NixThreadExecutor:
         with self._lock:
             if not self._accepting:
                 raise RuntimeError("Nix executor is closing")
+            self._ensure_worker_spawned()
             future = self._pool.submit(func, *args)
             self._futures.add(future)
         future.add_done_callback(self._discard_future)
@@ -84,6 +169,7 @@ class NixThreadExecutor:
         with self._lock:
             if not self._accepting and not allow_when_closing:
                 raise RuntimeError("Nix executor is closing")
+            self._ensure_worker_spawned()
             future = self._pool.submit(func, *args)
             self._futures.add(future)
         future.add_done_callback(self._discard_future)

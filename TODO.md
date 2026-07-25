@@ -83,50 +83,85 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
 2. ~~**rpc's `force_deep` still dies on a derivation.**~~ -- DONE with
    item 5; the third walk (`_deep_value()`) is deleted.
 
-0. **CRASH: infinite recursion segfaults the process.**
-   `let f = n: f (n + 1); in f 0` -- the canonical Nix mistake -- kills the
-   interpreter with SIGSEGV on `inproc` and kills the worker
-   (`WorkerDiedError: Connection lost`) on `rpc`. `nix eval` on the same
-   expression prints `error: stack overflow; max-call-depth exceeded` and
-   exits cleanly.
+0. ~~**CRASH: infinite recursion segfaults the process.**~~ -- DONE.
+   `let f = n: f (n + 1); in f 0` -- the canonical Nix mistake -- killed
+   the interpreter with SIGSEGV on `inproc` and killed the worker
+   (`WorkerDiedError: Connection lost`) on `rpc`. Both engines now raise
+   `NixError: stack overflow; max-call-depth exceeded`, with Nix's
+   `ErrorInfo` intact.
 
-   Measured cause: the C stack is exhausted *before* Nix's `max-call-depth`
-   counter (default 10000) can fire. Bisected on `inproc` with
-   `NixEvalSettings(max_call_depth=N)`: clean `RuntimeError` at
-   N<=4000, SIGSEGV at N>=6000. Running the *same* default-depth
-   expression under `ulimit -s 262144` raises cleanly -- so it is stack
-   size, not the counter.
+   Cause: the C stack was exhausted *before* Nix's `max-call-depth`
+   counter (default 10000) could fire. Nix's default depth needs roughly
+   27 MB of C stack; a thread inherits 8 MiB from `RLIMIT_STACK`.
 
-   Why the CLI survives and we don't: Nix raises `RLIMIT_STACK` at startup
-   (`nix::setStackSize`, `nix/util/current-process.hh`) and evaluates on
-   the main thread. Measured: `RLIMIT_STACK` is `8388608` both before and
-   after our `init_nix()`, so nanopynix never gets that. We also evaluate
-   on a `ThreadPoolExecutor` thread, whose stack is fixed at creation.
+   Fix: the evaluator thread is created with the stack Nix itself asks
+   for -- `setStackSize(60 * 1024 * 1024)` = 62914560, a number with no
+   setting to read it from. See `NIX_EVALUATOR_STACK_SIZE` in
+   `_core/_nix_executor.py`; all three evaluator executors pass it, the
+   store pools do not (Nix stores do not recurse).
 
-   `threading.stack_size()` does **not** reach the eval thread, so the
-   obvious Python-side lever is not available. Two measurements, together
-   conclusive: a 1 MiB thread stack still survives 4000 frames (<=262
-   B/frame), while the 8 MiB default already dies at 6000 (>1398 B/frame)
-   -- inconsistent by more than 5x; and 6000 frames crash identically at
-   requested stack sizes of 1 MiB, 256 MiB, and default, a 256x range with
-   no effect at all. Whatever thread Nix evaluates on, its stack tracks the
-   process `RLIMIT_STACK`, not the `threading` module setting. Find out why
-   before picking the fix -- most likely the eval is not on the
-   `ThreadPoolExecutor` thread that `_nix_executor.py` appears to run it
-   on, which would be worth knowing on its own.
+   The reason we never inherited it is sharper than "the CLI evaluates on
+   the main thread": Nix makes that call from the **CLI's `main()`**
+   (`src/nix/main.cc:605`), not from `initNix()`. Any embedder of libnix
+   is in the same position we were, however it threads.
 
-   `nix::detectStackOverflow()` (`nix/main/shared.hh`) is the other half of
-   a fix: it installs a SIGSEGV handler so an overflow is *reported*
-   ("stack overflow (possible infinite recursion)") rather than silent.
-   Read before relying on it -- in the Lix fork of the same function
-   (`lix/libmain/stack.cc:44-63`, the only copy present in the store; the
-   CppNix 2.34 source we actually build against was not available to
-   check) it pairs a process-wide `sigaction` with a **per-thread**
-   `sigaltstack`, which would mean it has to run on the eval thread and
-   not merely at init. Supporting observation: `python -X faulthandler`
-   printed nothing on the crash, consistent with a handler that cannot run
-   because the stack is exhausted and no alt stack is installed.
-   `ulimit -s 262144` fixing it is the load-bearing evidence, not this.
+   **Correcting what this item previously recorded as conclusive.**
+   It claimed `threading.stack_size()` "does not reach the eval thread"
+   and that the eval probably did not run on the `ThreadPoolExecutor`
+   thread. Both are false. Measured with `pthread_getattr_np` called
+   *from inside* `ev.run()`: the thread is `nix-eval_0`, the pool thread,
+   and its stack is exactly what was requested (1 MiB -> 1048576,
+   256 MiB -> 268435456). Two things made the old reading wrong -- a
+   `ctypes` probe that let `pthread_self()` default to a 32-bit return,
+   truncating the handle; and the fact that `ThreadPoolExecutor` spawns
+   lazily inside `submit()`, so the value in force at the *first submit*
+   is the one that takes effect, not the value at construction. That is
+   why the fix needs `_ensure_worker_spawned`'s warm-up task rather than
+   just setting the size in `__init__`.
+
+   Applied as a floor, not an override (`max(size, previous)`), matching
+   `nix::setStackSize`, which only ever raises
+   (`if (limit.rlim_cur < stackSize)`). A host that wants a raised
+   `max-call-depth` can still set `threading.stack_size()` higher and keep
+   it. Verified: default depth is clean; `max_call_depth=100000` at 60 MiB
+   segfaults, and the same at a host-requested 512 MiB is clean.
+
+   Note we succeed where Nix's own mechanism fails. `setStackSize` raises
+   `RLIMIT_STACK` and so cannot exceed the *hard* limit -- 8 MiB on a
+   stock host, where the CLI prints that warning and falls back. A pthread
+   stack is mmap'd and not bound by `RLIMIT_STACK`.
+
+   **Deliberately not done: `nix::detectStackOverflow()`**
+   (`nix/main/shared.hh:96`). It is what still separates us from the CLI
+   in one residual case: `nix eval --option max-call-depth 100000` on the
+   runaway expression prints "stack overflow (possible infinite
+   recursion)" and exits 1, where we segfault. Read
+   `src/libmain/unix/stack.cc` before reconsidering; three things there
+   decide it, and all three are now confirmed from source rather than
+   inferred:
+
+   - `defaultStackOverflowHandler` is literally
+     `write(2, "error: stack overflow ...")` then `_exit(1)`. For an
+     embedded library that turns "segfault kills the host's Python
+     process" into "nicer message, then still kills the host's Python
+     process". `stackOverflowHandler` is a replaceable function pointer,
+     but replacing it does not change that you are in a signal handler on
+     an exhausted stack, where throwing is not available.
+   - `detectStackOverflow()` installs a process-wide SIGSEGV `sigaction`,
+     which fights `faulthandler` and anything the host set up. The
+     handler does hand genuine unrelated faults back (restores `SIG_DFL`
+     and returns unless the faulting address is within 4096 bytes of the
+     stack pointer), but the `sigaction` is still ours to have taken.
+   - The alt stack is the blocker for doing it per-thread. `sigaltstack`
+     is per-thread, so it would have to run in `thread_initializer` --
+     but the buffer behind it is a single **`static`** `stackBuf`.
+     Concurrent `EvalSession`s each own a thread, so they would share one
+     alt stack and corrupt each other's handler frames.
+
+   The honest place for it, if ever, is the rpc worker alone -- a process
+   already allowed to die, whose death is already surfaced as
+   `WorkerDiedError` -- and only with a per-thread alt-stack buffer of
+   our own rather than Nix's shared static.
 
 3. **Bare `RuntimeError` escapes the `NixError` hierarchy.** `attr()` on a
    non-attrs value and `list_get()` on a non-list were incidentally fixed

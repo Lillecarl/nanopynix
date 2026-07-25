@@ -38,7 +38,7 @@ Usage::
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, cast
 
 from nanopynix_proto.nix.common import NixType
 from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
@@ -192,8 +192,7 @@ class MissingAttributeError(EvalError, KeyError):
         raw: object = info.get("suggestions")
         if not isinstance(raw, list):
             return []
-        items: list[object] = raw
-        return [str(item) for item in items]
+        return [str(item) for item in cast("list[object]", raw)]
 
 
 class ListIndexError(EvalError, IndexError):

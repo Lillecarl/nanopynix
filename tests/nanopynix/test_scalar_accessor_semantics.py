@@ -364,10 +364,9 @@ async def test_max_call_depth_is_a_nix_error_with_error_info(inproc_session: Inp
     The direct test for the same mapping the cycle above reaches incidentally,
     and the one that pins it: it drives the guard through plain recursion at an
     explicit ``max_call_depth`` rather than relying on Nix's default of 10000.
-    That matters because the default does not survive the C stack at all --
-    ``let f = n: f (n + 1); in f 0`` at the default depth exhausts it and takes
-    the process with it (TODO.md item 0). A low explicit limit reaches the
-    guard the same way with room to spare.
+    A low explicit limit reaches the guard with room to spare no matter how big
+    the evaluator's stack is; the two tests below cover the default depth,
+    which is the case that depends on the stack being sized correctly.
 
     ``StackOverflowError`` derives from ``nix::EvalBaseError``, not
     ``nix::EvalError``, so it is only bound because ``EvalBaseError`` itself is
@@ -391,6 +390,39 @@ async def test_max_call_depth_is_a_nix_error_with_error_info(inproc_session: Inp
         info = excinfo.value.info
         assert info is not None
         assert info["pos"] is not None
+
+
+# The canonical Nix mistake. At Nix's *default* max-call-depth of 10000 this
+# needs roughly 27 MB of C stack, which is the whole point of the two tests
+# below: a thread inherits 8 MiB from RLIMIT_STACK, so the stack used to run
+# out thousands of frames before Nix's counter could fire. That was not an
+# ugly error, it was SIGSEGV -- it killed the host process outright on inproc,
+# and killed the worker (`WorkerDiedError: Connection lost`) on rpc.
+#
+# The evaluator thread now gets the 60 MiB `nix::initNix()` asks for; see
+# NIX_EVALUATOR_STACK_SIZE. A regression here does not fail these tests, it
+# aborts the whole pytest process -- which is exactly why they exist.
+RUNAWAY_RECURSION = "let f = n: f (n + 1); in f 0"
+
+
+async def test_inproc_reports_runaway_recursion_at_nixs_default_depth(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    """Nix's own counter must win the race against the C stack, not lose it."""
+    async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
+        with pytest.raises(NixError, match="max-call-depth") as excinfo:
+            await ev.string(RUNAWAY_RECURSION)
+        assert excinfo.value.info is not None
+
+
+async def test_rpc_reports_runaway_recursion_at_nixs_default_depth(
+    rpc_session: RpcSessionFactory,
+) -> None:
+    """The same, in the worker -- it sizes its evaluator thread the same way."""
+    async with rpc_session() as session, session.store() as store, session.eval(store) as ev:
+        with pytest.raises(NixError, match="max-call-depth") as excinfo:
+            await ev.string(RUNAWAY_RECURSION)
+        assert excinfo.value.info is not None
 
 
 # force_as is the generic by-NixType entry point and still covers what no

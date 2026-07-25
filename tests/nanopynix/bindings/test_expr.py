@@ -95,7 +95,7 @@ class TestEvalAttrs:
         matching on the words either side rather than on ``'y'``.
         """
         v = eval_state.eval_string("{ x = 1; }")
-        with pytest.raises(RuntimeError, match="attribute .* missing") as excinfo:
+        with pytest.raises(RuntimeError, match=r"attribute .* missing") as excinfo:
             v.attr_get("y")
         assert "Did you mean" in str(excinfo.value)
 

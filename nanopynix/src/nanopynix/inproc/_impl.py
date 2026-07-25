@@ -26,7 +26,7 @@ from nanopynix_proto.nix.store import GcAction as PublicGcAction
 
 from nanopynix._core._extract import locked_flake as _locked_flake_proto
 from nanopynix._core._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
-from nanopynix._core._nix_executor import NixThreadExecutor
+from nanopynix._core._nix_executor import NIX_EVALUATOR_STACK_SIZE, NixThreadExecutor
 from nanopynix._core._primops import register_import_path_primops, to_primop_specs
 from nanopynix._wire import DEFAULT_STORE_URI, NIX_USER_CONF_FILES_ENV, NO_GC_LIMIT
 from nanopynix.exceptions import StoreError, build_error_from_result, translate_nix_exception
@@ -677,6 +677,7 @@ class EvalSession:
             thread_name_prefix="nix-eval",
             thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
             thread_finalizer=nanopynix_expr._exit_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
+            stack_size=NIX_EVALUATOR_STACK_SIZE,
         )
 
     async def __aenter__(self) -> EvalSession:
@@ -695,6 +696,7 @@ class EvalSession:
                 thread_name_prefix="nix-eval",
                 thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
                 thread_finalizer=nanopynix_expr._exit_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
+                stack_size=NIX_EVALUATOR_STACK_SIZE,
             )
         nix_path = (
             self._eval_settings.nix_path
