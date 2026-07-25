@@ -4,31 +4,13 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import conftest
 import pytest
-from pytest_agent._harness_detect import HARNESS_ENV_VARS
 
-_SRC = Path(__file__).resolve().parents[1] / "src"
-
-
-@pytest.fixture(autouse=True)
-def _clean_agent_env(monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
-    # Same PYTHONPATH wiring as test_integration.py's fixture (subprocesses
-    # don't inherit pyproject.toml's `pythonpath` ini option), plus a clean
-    # slate for every harness env var: this repo's own dev environment is
-    # itself a Claude Code session, so CLAUDECODE and AI_AGENT are genuinely
-    # set here and would otherwise make every subprocess in this file
-    # auto-activate regardless of what's being tested.
-    existing = os.environ.get("PYTHONPATH", "")
-    parts = [str(_SRC), *([existing] if existing else [])]
-    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(parts))
-    for name in HARNESS_ENV_VARS:
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.delenv("PYTEST_AGENT", raising=False)
-    monkeypatch.delenv("PYTEST_AGENT_NO_AUTODETECT", raising=False)
+# The PYTHONPATH wiring and harness-env-var cleanup these subprocess runs
+# depend on live in conftest._clean_agent_env, which is autouse for every
+# test in this package -- and matters most here, since this repo's own dev
+# environment really does set CLAUDECODE.
 
 
 def _agent_dir_was_written(pytester: pytest.Pytester) -> bool:

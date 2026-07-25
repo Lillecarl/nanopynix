@@ -244,8 +244,12 @@ ignorelist = ["eval"]
 "tests/**" = ["SLF001", "S101", "S108", "ANN201", "PLR2004"]
 # doc/example snippets use bare assert and illustrative literal comparisons
 "docs/**" = ["S101", "PLR2004"]
-# dev-tooling subprocess/git-plumbing harness, not shipped production code
-"pytest-agent/**" = ["S101", "S108", "S603", "S607", "PLR2004"]
+# dev-tooling subprocess/git-plumbing harness, not shipped production code.
+# T20 too: pytest-agent is a CLI whose entire job is printing to stdout
+# (`pytest-agent show/last-failures/digest`), so print() is the interface,
+# not a stray debug statement -- unlike the library code everywhere else in
+# this tree, which must route output through logging.
+"pytest-agent/**" = ["S101", "S108", "S603", "S607", "PLR2004", "T20"]
 
 [lint.isort]
 known-first-party = [

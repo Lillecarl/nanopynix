@@ -4,23 +4,12 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import conftest
 import pytest
-from pytest_agent._harness_detect import HARNESS_ENV_VARS
 
-_SRC = Path(__file__).resolve().parents[1] / "src"
-
-
-@pytest.fixture(autouse=True)
-def _agent_on_pythonpath(monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
-    existing = os.environ.get("PYTHONPATH", "")
-    parts = [str(_SRC), *([existing] if existing else [])]
-    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(parts))
-    for name in HARNESS_ENV_VARS:
-        monkeypatch.delenv(name, raising=False)
+# The PYTHONPATH wiring and harness-env-var cleanup these subprocess runs
+# depend on live in conftest._clean_agent_env, which is autouse for every
+# test in this package.
 
 
 def test_profile_fixture_writes_a_report_alongside_agent_mode_output(pytester: pytest.Pytester) -> None:
