@@ -530,3 +530,29 @@ def test_a_test_with_an_enormous_parametrized_id_does_not_abort_the_run(pytester
     # Every component fits, including the longest suffix the run may add.
     assert all(len(part.encode("utf-8")) <= 255 for part in log_path.parts)
     assert long_record["nodeid"] in log_path.read_text(encoding="utf-8")
+
+
+def test_an_unwritable_agent_dir_turns_agent_mode_off_instead_of_killing_the_run(
+    pytester: pytest.Pytester,
+) -> None:
+    # A read-only checkout, a CI workspace mounted read-only, a .pytest-agent
+    # left root-owned by a container. This used to be an INTERNALERROR in
+    # pytest_configure: no tests ran at all, because of the plugin watching
+    # them. Agent mode is a way of watching a run, so it must never be the
+    # reason one cannot happen.
+    agent_dir = pytester.path / ".pytest-agent"
+    agent_dir.mkdir()
+    agent_dir.chmod(0o500)
+    pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
+
+    try:
+        result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent")
+    finally:
+        agent_dir.chmod(0o700)
+
+    assert result.ret == pytest.ExitCode.OK
+    # Plain pytest output, because agent mode never silenced the reporter.
+    result.stdout.fnmatch_lines(["*1 passed*"])
+    # And it said so, rather than leaving the caller to notice the archive
+    # stopped growing -- a later `last-failures` would answer from a stale run.
+    result.stderr.fnmatch_lines(["*agent mode is OFF for this run*", "*somewhere writable*"])
