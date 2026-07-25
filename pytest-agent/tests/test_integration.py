@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import re
 import signal
 import subprocess
 import sys
@@ -592,3 +593,28 @@ def test_an_unwritable_agent_dir_turns_agent_mode_off_instead_of_killing_the_run
     # And it said so, rather than leaving the caller to notice the archive
     # stopped growing -- a later `last-failures` would answer from a stale run.
     result.stderr.fnmatch_lines(["*agent mode is OFF for this run*", "*somewhere writable*"])
+
+
+def test_the_nodeid_printed_for_a_long_test_is_one_show_can_resolve(
+    pytester: pytest.Pytester,
+) -> None:
+    # The failure line appends the nodeid exactly when the log path lost it,
+    # which for a name over MAX_NAME_BYTES makes that copy the only addressable
+    # form left. Shortening it for width made the printed id resolve to
+    # nothing: `show` takes a nodeid or a unique substring, and an elided
+    # middle is neither. So the contract is the round trip, not the width.
+    pytester.makepyfile(
+        test_sample=("import pytest\n\n@pytest.mark.parametrize('x', ['z' * 400])\ndef test_p(x):\n    assert False\n"),
+    )
+
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent", "-q")
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+
+    printed = "\n".join(result.outlines)
+    match = re.search(r"\((test_sample\.py::test_p\[[^)]*\])\)", printed)
+    assert match is not None, f"expected the nodeid alongside the log path in:\n{printed}"
+    printed_nodeid = match.group(1)
+
+    shown = conftest.run_cli(["show", printed_nodeid], cwd=pytester.path)
+    assert shown.returncode == 0, f"show could not resolve the id it was given:\n{shown.stdout}{shown.stderr}"
+    assert "outcome: failed" in shown.stdout

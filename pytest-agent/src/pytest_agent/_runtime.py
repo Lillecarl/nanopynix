@@ -469,7 +469,14 @@ class AgentRuntime:
                 # appended when the path can't be read back as one.
                 line = display_path(self.root / record["log_file"])
                 if not nodeid_is_evident_from(record["log_file"], record["nodeid"]):
-                    line = f"{line}  ({abbreviate_nodeid(record['nodeid'])})"
+                    # Deliberately the full nodeid, not an abbreviated one.
+                    # This branch is reached precisely when the log path lost
+                    # the id, so this copy is the only addressable form left --
+                    # and `pytest-agent show` takes a nodeid or a unique
+                    # substring, neither of which an elided middle is. The
+                    # width cap is for lines that repeat on every tick; this
+                    # list prints once.
+                    line = f"{line}  ({record['nodeid']})"
                 self._print(f"  {line}")
             if len(failed) > 1:
                 # Only worth a line when there is actually a "do these share
@@ -495,7 +502,10 @@ class AgentRuntime:
             return
         self._print(f"{len(affected)} tests recorded an outcome but no detail file:")
         for record in affected[:MAX_CAPTURE_ERRORS_SHOWN]:
-            self._print(f"  {abbreviate_nodeid(record['nodeid'])}  ({record['capture_error']})")
+            # Full id, for the same reason as the failure list above: this is
+            # a once-per-run list of tests to go and look at, and it is capped
+            # at MAX_CAPTURE_ERRORS_SHOWN lines rather than by width.
+            self._print(f"  {record['nodeid']}  ({record['capture_error']})")
         if len(affected) > MAX_CAPTURE_ERRORS_SHOWN:
             self._print(f"  +{len(affected) - MAX_CAPTURE_ERRORS_SHOWN} more (see capture_error in index.jsonl)")
 

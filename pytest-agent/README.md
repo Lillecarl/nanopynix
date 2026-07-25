@@ -360,7 +360,7 @@ the file when the question is answered.
 | --- | --- | --- | --- |
 | `--agent` | `PYTEST_AGENT` | auto-detected | Turn on agent mode |
 | `--agent-dir` | `PYTEST_AGENT_DIR` | `.pytest-agent` | Where to write run detail (relative to rootdir) |
-| `--agent-heartbeat` | `PYTEST_AGENT_HEARTBEAT` | `10` | Seconds between progress lines |
+| `--agent-heartbeat` | `PYTEST_AGENT_HEARTBEAT` | `10` | Seconds between progress lines (0 prints none) |
 | `--agent-stuck-after` | `PYTEST_AGENT_STUCK_AFTER` | `300` | Dump every thread's stack after one test has run this long (0 disables) |
 | `--agent-keep-runs` | `PYTEST_AGENT_KEEP_RUNS` | `20` | Keep only the newest N `runs-*` dirs (the just-finished run is never pruned); labeled runs get a second budget of the same size; `history.jsonl` entries are kept forever regardless |
 | `--agent-label` | `PYTEST_AGENT_LABEL` | *(none)* | Name this run, so later queries can find it by name instead of by number |
