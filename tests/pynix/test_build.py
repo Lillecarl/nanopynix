@@ -40,10 +40,10 @@ async def _fixed_output_derivations_in_value(
         return
     if value_type != nanopynix.NixType.ATTRS:
         return
-    if await value.has_attr("type") and await value.attr("type").force_json() == "derivation":
+    if await value.has_attr("type") and await value.attr("type").to_python() == "derivation":
         drv_attrs = value.attr("drvAttrs")
         if await drv_attrs.has_attr("outputHash"):
-            drv_path = await value.attr("drvPath").force_json()
+            drv_path = await value.attr("drvPath").to_python()
             if not isinstance(drv_path, str):
                 raise TypeError("derivation drvPath was not a string")
             derivations.add(drv_path)
@@ -492,7 +492,7 @@ in runCommand "combined" {} "cat ${first} ${second} > $out"
         fixed_output_values: set[str] = set()
         await _fixed_output_derivations_in_value(root, set(), fixed_output_values)
 
-        root_drv_path = await root.attr("drvPath").force_json()
+        root_drv_path = await root.attr("drvPath").to_python()
         if not isinstance(root_drv_path, str):
             raise TypeError("root derivation drvPath was not a string")
         fixed_output_closure = await _fixed_output_derivations_in_closure(store, root_drv_path)

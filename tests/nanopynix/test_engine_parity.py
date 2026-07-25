@@ -8,9 +8,9 @@ parameters in a different order -- is invisible to it. Every such difference
 found here was invisible there.
 
 How weak that is, concretely: :class:`~nanopynix.protocols.AsyncValue`
-declares nine members, all lifecycle and forcing (``force``, ``force_deep``,
-``force_json``, ``realise_string``, ``realise_argv``, ``edit_location``,
-``release``, and the two context-manager hooks). Attribute access, coercion,
+declares eight members, all lifecycle and forcing (``force``, ``to_python``,
+``realise_string``, ``realise_argv``, ``edit_location``, ``release``, and the
+two context-manager hooks). Attribute access, coercion,
 calling, list indexing and building -- the entire surface a caller actually
 reaches for -- sit outside it, which is exactly where the divergences below
 are concentrated.
@@ -214,7 +214,6 @@ LEDGER: dict[str, str] = {
     "Value.type:inproc-only": "DEFECT: rpc spells this get_type *and* returns a different type -- NixType enum vs inproc's str name.",
     "Value.get_type:rpc-only": "DEFECT: inproc spells this `type` and returns a str name rather than this NixType enum.",
     "Value.nix_type:rpc-only": "TRANSPORT: a sync property peeking at the type already known locally, no round trip. In-process there is no round trip to avoid, so `type` is always cheap and a separate peek would mean nothing.",
-    "Value.json:inproc-only": "DEFECT: rpc has force_json but not the plain json convenience.",
     "Value.close:inproc-only": "DEFECT: rpc spells value teardown release() only; inproc has both close() and release().",
     "Value.get_derived_path:inproc-only": "DEFECT: extracting a DerivedPath is pure libexpr.",
     "Value.force_as:rpc-only": (

@@ -83,7 +83,7 @@ def test_repl_history_uses_xdg_state_home(monkeypatch: Any, tmp_path: Path) -> N
 
 
 class _Value:
-    async def force_json(self) -> object:
+    async def to_python(self) -> object:
         return {"answer": 42}
 
 
@@ -99,7 +99,7 @@ class _RunValue:
         value = self._attrs[name]
         return value if isinstance(value, _RunValue) else _RunValue({"value": value}, {})
 
-    async def force_json(self) -> object:
+    async def to_python(self) -> object:
         return self._attrs["value"]
 
     async def build(self) -> dict[str, str]:

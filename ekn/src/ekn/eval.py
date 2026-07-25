@@ -250,13 +250,13 @@ async def _resolve_proxy(
     evaluate_validation_config. Deliberately does not descend into `.config`
     -- callers that need that (all but evaluate_with_fod_update) do it
     themselves right after, since evaluate_with_fod_update's retry loop
-    force_json's whatever attr_path picks directly and never descended into
+    to_python's whatever attr_path picks directly and never descended into
     `.config`.
     """
     if flake_uri is not None:
         outputs = await eval_.eval_flake(flake_uri)
         if customer:
-            system = await (await eval_.string("builtins.currentSystem")).force_json()
+            system = await (await eval_.string("builtins.currentSystem")).to_python()
             proxy = outputs.attr("eknConfig").attr(str(system)).attr(customer)
         else:
             proxy = outputs
@@ -283,7 +283,7 @@ async def evaluate_file(file: str | PathLike[str], attr_path: str | None) -> obj
         if attr_path:
             proxy = await select_attr(proxy, attr_path)
 
-        return await proxy.force_json()
+        return await proxy.to_python()
 
 
 async def evaluate_file_multi(
@@ -301,7 +301,7 @@ async def evaluate_file_multi(
             proxy = root
             if attr_path:
                 proxy = await select_attr(proxy, attr_path)
-            results.append(await proxy.force_json())
+            results.append(await proxy.to_python())
     return results
 
 
@@ -341,7 +341,7 @@ async def evaluate_with_fod_update(  # noqa: PLR0913 tracked complexity/arg-coun
             async with session.capture_logs() as logs:
                 try:
                     proxy = await _resolve_proxy(eval_, file, flake_uri, customer, attr_path)
-                    return await proxy.force_json()
+                    return await proxy.to_python()
                 except NixError as exc:
                     error = exc
             # The exception's own message is sometimes just a wrapper
@@ -382,7 +382,7 @@ async def evaluate_flake(flake_uri: str, attr_path: str | None) -> object:
         if attr_path:
             proxy = await select_attr(proxy, attr_path)
 
-        return await proxy.force_json()
+        return await proxy.to_python()
 
 
 async def evaluate_flake_ekn(flake_uri: str, customer: str) -> FlakeEknResult:
@@ -395,7 +395,7 @@ async def evaluate_flake_ekn(flake_uri: str, customer: str) -> FlakeEknResult:
         if await proxy.has_attr("config"):
             proxy = proxy.attr("config")
 
-        generated = await proxy.attr("kubernetes").attr("generated").force_json()
+        generated = await proxy.attr("kubernetes").attr("generated").to_python()
         return FlakeEknResult.model_validate(
             {
                 "config": {
@@ -440,7 +440,7 @@ async def evaluate_generated_manifests(
 ) -> JsonValue:
     """Resolve a file or flake target down to `kubernetes.generated`.
 
-    Unlike `evaluate_file`/`evaluate_flake`, this never force_json's the whole
+    Unlike `evaluate_file`/`evaluate_flake`, this never to_python's the whole
     module `config` -- easykubenix options without a default (e.g. unset
     `gitops.branch`) would blow up a blanket deep evaluation even when unused.
     Uses `generated` (a flat list) rather than `generatedByPath`, which costs
@@ -462,9 +462,9 @@ async def evaluate_generated_manifests(
             proxy = proxy.attr("config")
 
         t_before_force = time.monotonic()
-        result = await proxy.attr("kubernetes").attr("generated").force_json()
+        result = await proxy.attr("kubernetes").attr("generated").to_python()
         t_after_force = time.monotonic()
-        _log_timing("force_json(kubernetes.generated)", t_after_force - t_before_force)
+        _log_timing("to_python(kubernetes.generated)", t_after_force - t_before_force)
         _log_timing("total evaluate_generated_manifests", t_after_force - t_start)
         return result
 
@@ -481,7 +481,7 @@ async def evaluate_gitops_manifests(
     Used by Diff/Commit/Deploy, which only ever read these fields via
     `_gitops_file_groups`/`_gitops_branches`. Diff/Commit previously went
     through the generic `_evaluate` -> `evaluate_file`/`evaluate_flake`,
-    which force_json's the *entire* narrowed `config` (every option in
+    which to_python's the *entire* narrowed `config` (every option in
     every module, not just these fields) before `_dig()`-ing them out --
     forcing everything else was pure waste.
     """
@@ -495,10 +495,10 @@ async def evaluate_gitops_manifests(
             proxy = proxy.attr("config")
 
         gitops_proxy = proxy.attr("gitOps")
-        with timed_stage("gitops: force_json(kubernetes.gitOpsTargets, gitOps.deployBranch/sourceBranch)"):
-            gitops_targets = await proxy.attr("kubernetes").attr("gitOpsTargets").force_json()
-            deploy_branch = await gitops_proxy.attr("deployBranch").force_json()
-            source_branch = await gitops_proxy.attr("sourceBranch").force_json()
+        with timed_stage("gitops: to_python(kubernetes.gitOpsTargets, gitOps.deployBranch/sourceBranch)"):
+            gitops_targets = await proxy.attr("kubernetes").attr("gitOpsTargets").to_python()
+            deploy_branch = await gitops_proxy.attr("deployBranch").to_python()
+            source_branch = await gitops_proxy.attr("sourceBranch").to_python()
         return GitOpsManifestsResult.model_validate(
             {
                 "config": {
@@ -527,7 +527,7 @@ async def evaluate_kubeapply_config(
     consumer needs bootstrapped as a Secret -- see `ekn.sops.ensure_age_identities`).
 
     `target` narrows to one `kubernetes.gitOpsTargets` entry's objects,
-    `.ekn` routing metadata stripped; omitted, force_json's the full
+    `.ekn` routing metadata stripped; omitted, to_python's the full
     `kubernetes.generated` instead -- never both, so this only ever forces
     the one field it actually needs.
     """
@@ -541,7 +541,7 @@ async def evaluate_kubeapply_config(
             proxy = proxy.attr("config")
 
         if target:
-            gitops_targets = await proxy.attr("kubernetes").attr("gitOpsTargets").force_json()
+            gitops_targets = await proxy.attr("kubernetes").attr("gitOpsTargets").to_python()
             if not isinstance(gitops_targets, dict):
                 raise ValueError("kubernetes.gitOpsTargets did not evaluate to an object")
             resolved = gitops_targets.get(target)
@@ -557,11 +557,11 @@ async def evaluate_kubeapply_config(
             if not isinstance(raw_file_paths, list):
                 raise ValueError(f"gitops target {target!r} rawFiles must be a list")
         else:
-            generated = await proxy.attr("kubernetes").attr("generated").force_json()
+            generated = await proxy.attr("kubernetes").attr("generated").to_python()
             if not isinstance(generated, list):
                 raise ValueError("kubernetes.generated did not evaluate to a list")
             objects = generated
-            raw_files = await proxy.attr("kubernetes").attr("rawFiles").force_json()
+            raw_files = await proxy.attr("kubernetes").attr("rawFiles").to_python()
             if not isinstance(raw_files, list):
                 raise ValueError("kubernetes.rawFiles did not evaluate to a list")
             raw_file_paths = [
@@ -576,9 +576,9 @@ async def evaluate_kubeapply_config(
         # apply_and_prune/maybe_decrypt identically to any other object.
         objects = [*objects, *(load_raw_manifest(p) for p in raw_file_paths if isinstance(p, str))]
 
-        discriminator = await proxy.attr("kluctl").attr("discriminator").force_json()
-        resource_priority = await proxy.attr("kluctl").attr("resourcePriority").force_json()
-        sops_age_identities = await proxy.attr("kubernetes").attr("sopsAgeIdentities").force_json()
+        discriminator = await proxy.attr("kluctl").attr("discriminator").to_python()
+        resource_priority = await proxy.attr("kluctl").attr("resourcePriority").to_python()
+        sops_age_identities = await proxy.attr("kubernetes").attr("sopsAgeIdentities").to_python()
 
         return KubeApplyConfigResult.model_validate(
             {
@@ -615,7 +615,7 @@ async def evaluate_cache_config(
         if await proxy.has_attr("config"):
             proxy = proxy.attr("config")
 
-        cache_to = await proxy.attr("ekn").attr("cacheTo").force_json()
+        cache_to = await proxy.attr("ekn").attr("cacheTo").to_python()
         if cache_to is None:
             return CacheConfigResult.model_validate({"cache_to": None, "cache_package_out": None})
 
@@ -696,24 +696,24 @@ async def _validation_config(proxy: Any) -> ValidationResult:
     # this function returns beyond what's assembled below -- forcing them
     # here would just be wasted eval work.
     v = proxy.attr("validation")
-    with timed_stage("validate: force_json cheap validation/kluctl fields"):
-        kubeadm_config = await v.attr("kubeadmConfig").force_json()
-        pod_subnet = await v.attr("podSubnet").force_json()
-        service_subnet = await v.attr("serviceSubnet").force_json()
-        debug = await v.attr("debug").force_json()
-        k8s_version = await proxy.attr("kubernetes").attr("package").attr("version").force_json()
+    with timed_stage("validate: to_python cheap validation/kluctl fields"):
+        kubeadm_config = await v.attr("kubeadmConfig").to_python()
+        pod_subnet = await v.attr("podSubnet").to_python()
+        service_subnet = await v.attr("serviceSubnet").to_python()
+        debug = await v.attr("debug").to_python()
+        k8s_version = await proxy.attr("kubernetes").attr("package").attr("version").to_python()
 
         # kluctl.resourcePriority/discriminator are plain data (no build), used
         # by Validate.run()'s kr8s-based apply_and_prune instead of shelling out
         # to `kluctl deploy` -- see apply.py.
-        resource_priority = await proxy.attr("kluctl").attr("resourcePriority").force_json()
-        discriminator = await proxy.attr("kluctl").attr("discriminator").force_json()
+        resource_priority = await proxy.attr("kluctl").attr("resourcePriority").to_python()
+        discriminator = await proxy.attr("kluctl").attr("discriminator").to_python()
 
         # Cheap -- just {kind, namespace, name} triples, not full objects (see
         # kubernetes.nix's novalidateKeys) -- lets Validate.run() skip applying
         # objects that can never be meaningfully verified in this ephemeral
         # harness without re-forcing the entire generated set a second time.
-        novalidate_keys = await proxy.attr("kubernetes").attr("novalidateKeys").force_json()
+        novalidate_keys = await proxy.attr("kubernetes").attr("novalidateKeys").to_python()
 
     with timed_stage("validate: build etcdPackage"):
         etcd_out = (await v.attr("etcdPackage").build()).get("out")

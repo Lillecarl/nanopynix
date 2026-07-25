@@ -11,15 +11,35 @@ from nanopynix.primops import ipaddress_primops
 from nanopynix.rpc import Session
 
 if TYPE_CHECKING:
-    from nanopynix.rpc import NixDeepValue
+    from nanopynix.models import JsonValue
 
 
 pytestmark = pytest.mark.nix_version(minimum="2.32")
 
 
-def _as_dict(v: NixDeepValue) -> dict[str, NixDeepValue]:
+def _as_dict(v: JsonValue) -> dict[str, JsonValue]:
     assert isinstance(v, dict)
     return v
+
+
+# parseNetwork deliberately returns Nix *functions* alongside its data --
+# `.address n` and `.subnet n d` are part of its documented interface -- and
+# parseInterface nests a network attrset under `.network`.
+#
+# Nix will not convert a function to JSON, so neither will to_python(). That is
+# the right answer rather than a regression: the previous deep conversion kept
+# them as callable proxies over rpc but produced the useless *string*
+# "function" for them in-process, so the two engines disagreed about what this
+# very value converted to. A caller who wants only the data drops the callables
+# first, which is what this does.
+_DROP_CALLABLES = """
+  let strip = a: builtins.removeAttrs a [ "address" "subnet" ];
+  in x: if x ? network then x // { network = strip x.network; } else strip x
+"""
+
+
+async def _data_only(value: object) -> JsonValue:
+    return await (await value.apply(_DROP_CALLABLES)).to_python()  # type: ignore[reportAttributeAccessIssue] -- ValueProxy, untyped in this test module
 
 
 @pytest.mark.anyio
@@ -30,7 +50,7 @@ async def test_parse_address_v4():
         session.eval(store) as eval,
     ):
         v = await eval.string('builtins.parseAddress "192.168.1.1"')
-        result = await v.force_deep()
+        result = await v.to_python()
         assert result == {
             "version": 4,
             "compressed": "192.168.1.1",
@@ -56,7 +76,7 @@ async def test_parse_address_v6():
         session.eval(store) as eval,
     ):
         v = await eval.string('builtins.parseAddress "2a00:1450:4001:830::200e"')
-        result = await v.force_deep()
+        result = await v.to_python()
         assert result == {
             "version": 6,
             "compressed": "2a00:1450:4001:830::200e",
@@ -83,7 +103,7 @@ async def test_parse_network_v4():
         session.eval(store) as eval,
     ):
         v = await eval.string('builtins.parseNetwork "192.168.1.0/24"')
-        result = _as_dict(await v.force_deep())
+        result = _as_dict(await _data_only(v))
         assert result["version"] == 4
         assert result["prefixlen"] == 24
         assert result["numAddresses"] == 256
@@ -102,7 +122,7 @@ async def test_parse_network_v6():
         session.eval(store) as eval,
     ):
         v = await eval.string('builtins.parseNetwork "2a00:1450::/32"')
-        result = _as_dict(await v.force_deep())
+        result = _as_dict(await _data_only(v))
         assert result["version"] == 6
         assert result["prefixlen"] == 32
         assert result["isSiteLocal"] is False
@@ -118,7 +138,7 @@ async def test_parse_interface():
         session.eval(store) as eval,
     ):
         v = await eval.string('builtins.parseInterface "192.168.1.1/24"')
-        result = _as_dict(await v.force_deep())
+        result = _as_dict(await _data_only(v))
         assert result["withPrefixlen"] == "192.168.1.1/24"
         assert result["withNetmask"] == "192.168.1.1/255.255.255.0"
         ip = _as_dict(result["ip"])
@@ -191,7 +211,7 @@ async def test_loopback_address():
         session.eval(store) as eval,
     ):
         v = await eval.string('builtins.parseAddress "127.0.0.1"')
-        result = _as_dict(await v.force_deep())
+        result = _as_dict(await v.to_python())
         assert result["isLoopback"] is True
         assert result["isGlobal"] is False
         assert result["version"] == 4
@@ -205,5 +225,5 @@ async def test_multicast_address():
         session.eval(store) as eval,
     ):
         v = await eval.string('builtins.parseAddress "224.0.0.1"')
-        result = _as_dict(await v.force_deep())
+        result = _as_dict(await v.to_python())
         assert result["isMulticast"] is True

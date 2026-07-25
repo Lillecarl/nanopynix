@@ -70,11 +70,11 @@ async def main() -> None:
 
             info = outputs.attr("info")
             assert await info.get_type() == NixType.ATTRS
-            info_json = await info.force_json()
+            info_json = await info.to_python()
             assert isinstance(info_json, dict)
             assert info_json["name"] == "demo-flake"
             assert info_json["features"] == ["fast", "reliable"]
-            print("info force_json:", info_json)
+            print("info to_python:", info_json)
 
             # List all output attribute names.
             names = await outputs.attr_names()

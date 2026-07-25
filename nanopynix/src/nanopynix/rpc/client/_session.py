@@ -16,7 +16,6 @@ from nanopynix_proto.nix.common import (
     CallArg,
     CallArgAttrs,
     CallArgList,
-    DeepValue,
     ForceValue,
     LogLevel,
     RemoteCallArg,
@@ -37,7 +36,6 @@ from nanopynix_proto.nix.eval import (
     EvalFlakeRequest,
     EvalServiceBase,
     EvalStringRequest,
-    ForceDeepRequest,
     ForceJsonRequest,
     ForceRequest,
     GetFlakeRequest,
@@ -374,7 +372,6 @@ class _EvalProxyContext:
 
 type NixArg = ValueProxy | JsonScalar | list[NixArg] | dict[str, NixArg]
 type NixValue = ValueProxy | ValueAttrs | ValueList | JsonValue
-type NixDeepValue = ValueProxy | JsonScalar | list[NixDeepValue] | dict[str, NixDeepValue]
 
 
 class ValueProxy:
@@ -479,17 +476,6 @@ class ValueProxy:
         if value.remote_value is not None:
             return self._ctx.value(value.remote_value.handle, value.remote_value.type)
         return scalar_to_python(value.scalar)
-
-    def _decode_deep_value(self, value: DeepValue) -> NixDeepValue:
-        if value.remote_value is not None:
-            return self._ctx.value(value.remote_value.handle, value.remote_value.type)
-        if value.scalar is not None:
-            return scalar_to_python(value.scalar)
-        if value.list is not None:
-            return [self._decode_deep_value(item) for item in value.list.items]
-        if value.attrs is not None:
-            return {key: self._decode_deep_value(item) for key, item in value.attrs.entries.items()}
-        raise TypeError(f"unsupported force_deep RPC value: {value!r}")
 
     async def _encode_call_arg(self, value: NixArg, *, timeout: float | None) -> CallArg:
         if isinstance(value, ValueProxy):
@@ -621,30 +607,36 @@ class ValueProxy:
             function = self._ctx.value(handle.handle, handle.type)
         return await function.call(self, timeout=timeout)
 
-    async def force_deep(self, *, timeout: float | None = None) -> NixDeepValue:
-        """Recursive Nix force. Functions remain remote callable ValueProxy objects."""
-        await self._ensure_resolved(timeout=timeout)
-        result = await self._ctx.proxy.force_deep(ForceDeepRequest(handle=self.handle))
-        return self._decode_deep_value(result)
+    async def to_python(self, *, copy_to_store: bool = False, timeout: float | None = None) -> JsonValue:
+        """Convert the whole value tree to plain Python data, in one C++ pass.
 
-    async def force_json(self, *, copy_to_store: bool = False, timeout: float | None = None) -> JsonValue:
-        """Serialize the Nix value to JSON-compatible Python objects in one C++ pass.
+        This is Nix's own ``printValueAsJSON`` with ``strict=true``, so the
+        rules are Nix's rather than ours: an attrset with ``__toString``
+        becomes that string, an attrset with ``outPath`` (a derivation, for
+        instance) becomes the output path, and anything Nix will not flatten
+        -- a function -- is an error rather than a placeholder.
 
-        Uses Nix's ``printValueAsJSON`` with ``strict=true``: attrsets with a
-        ``__toString`` attribute are coerced to its string result, attrsets with
-        an ``outPath`` attribute (e.g. derivations) are serialized to that store
-        path string, and everything else is recursively forced and converted.
-        Avoids the cyclic-``all`` stack overflow that ``force_deep`` hits on
-        derivations, and avoids per-value RPC round-trips.
+        Converting *is* lossy, deliberately: that ``outPath`` rule is what
+        makes a derivation convertible at all, since ``drv.out`` is ``drv``.
+        Contrast the ``as_*`` accessors, which convert nothing and raise when
+        the value is not already of the type asked for.
+
+        This replaces ``to_python``, which walked the tree itself, died on
+        any derivation, and disagreed with the in-process engine about what
+        happens to function leaves.
 
         Args:
-            copy_to_store: If True, ``path`` values are copied into the Nix store
-                and rendered as store paths. If False (default), paths are
-                rendered as literal filesystem paths.
+            copy_to_store: If True, a ``path`` value is copied into the Nix
+                store and rendered as a store path -- what string
+                interpolation of a path does. If False (default), it renders
+                as a literal filesystem path, matching ``nix eval --json``.
             timeout: Maximum seconds to wait for the value to resolve. None
                 (default) waits indefinitely.
         """
         await self._ensure_resolved(timeout=timeout)
+        # The wire op stays ForceJson: it really does transfer JSON, and the
+        # conversion to Python objects happens here. Only the Python-facing
+        # name changed.
         resp = await self._ctx.proxy.force_json(
             ForceJsonRequest(handle=self.handle, copy_to_store=copy_to_store),
         )
@@ -1263,7 +1255,7 @@ class EvalSession:
 
         Equivalent to ``nix eval <ref>#`` — calls ``lockFlake`` then
         ``callFlake`` and returns the outputs attrset.  Navigate with
-        ``.attr()``, ``.force_json()``, etc.
+        ``.attr()``, ``.to_python()``, etc.
 
         For more control (e.g. updating locks in memory before evaluating),
         use ``lock_flake()`` + ``eval_locked_flake()`` instead.

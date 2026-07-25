@@ -32,7 +32,7 @@ async def render_value(value: nanopynix.rpc.ValueProxy, dialects: list[Dialect])
         sections.extend(extra)
     elif nix_type != nanopynix.NixType.FUNCTION:
         try:
-            json_value = await value.force_json()
+            json_value = await value.to_python()
         except NixError:
             pass
         else:

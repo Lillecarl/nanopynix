@@ -22,7 +22,6 @@ from nanopynix import (
     strip_ansi,
     yaml_primops,
 )
-from nanopynix.rpc import ValueProxy
 from tests.support.git import init_flake_repo
 
 if TYPE_CHECKING:
@@ -46,7 +45,7 @@ async def test_force_closing_store_closes_dependent_eval_state(rpc_session: RpcS
 
 
 async def test_eval_file_simple(rpc_session: RpcSessionFactory, tmp_path: Path):
-    """session.file returns a ValueProxy, force_deep() resolves to Python dict."""
+    """session.file returns a ValueProxy, to_python() resolves to Python dict."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text('{ a = 1; b = "hello"; c = true; }')
 
@@ -57,7 +56,7 @@ async def test_eval_file_simple(rpc_session: RpcSessionFactory, tmp_path: Path):
     ):
         root = await eval.file(str(nix_file))
         assert root.nix_type == NixType.ATTRS
-        result = await root.force_deep()
+        result = await root.to_python()
         assert result == {"a": 1, "b": "hello", "c": True}
 
 
@@ -291,7 +290,7 @@ async def test_eval_has_attr(rpc_session: RpcSessionFactory, tmp_path: Path):
 
 
 async def test_eval_force_does_not_consume(rpc_session: RpcSessionFactory, tmp_path: Path):
-    """force_deep() does NOT release the handle — we can force again."""
+    """to_python() does NOT release the handle — we can force again."""
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ a = 1; }")
 
@@ -301,8 +300,8 @@ async def test_eval_force_does_not_consume(rpc_session: RpcSessionFactory, tmp_p
         session.eval(store) as eval,
     ):
         root = await eval.file(str(nix_file))
-        r1 = await root.force_deep()
-        r2 = await root.force_deep()
+        r1 = await root.to_python()
+        r2 = await root.to_python()
         assert r1 == r2 == {"a": 1}
 
 
@@ -472,30 +471,33 @@ async def test_eval_force_as_and_apply(rpc_session: RpcSessionFactory):
             await (await attrs.apply("builtins.toString")).as_string()
 
 
-async def test_force_deep_preserves_nested_functions(rpc_session: RpcSessionFactory):
-    """force_deep recursively forces data but leaves functions callable."""
+async def test_to_python_refuses_a_tree_containing_a_function(rpc_session: RpcSessionFactory):
+    """The deep conversion no longer preserves function leaves -- it refuses them.
+
+    ``force_deep`` used to return a tree in which a function leaf survived as
+    a callable ValueProxy. That was rpc-only -- the in-process engine returned
+    the *string* ``"function"`` for the same tree -- and it came bundled with a
+    walk that died on any derivation. ``to_python`` is Nix's own
+    ``printValueAsJSON``, which refuses a function outright on both engines.
+
+    Reaching a function inside a tree is still navigation: ``attr()`` down to
+    it and keep it as a value, rather than asking for the whole tree as data
+    and expecting live handles to survive inside it -- which the second half
+    of this test does.
+    """
     async with (
         rpc_session() as session,
         session.store() as store,
         session.eval(store) as eval,
     ):
         root = await eval.string("{ x = 1; f = y: y + 2; nested.g = z: z.name; }")
-        result = await root.force_deep()
 
-        assert isinstance(result, dict)
-        assert result["x"] == 1
-        f = result["f"]
-        nested = result["nested"]
-        assert isinstance(f, ValueProxy)
-        assert isinstance(nested, dict)
-        g = nested["g"]
-        assert isinstance(g, ValueProxy)
+        with pytest.raises(NixError):
+            await root.to_python()
 
-        f_result = await f(40)
-        assert await f_result.force_as(NixType.INT) == 42
-
-        g_result = await g({"name": "deep"})
-        assert await g_result.force_as(NixType.STRING) == "deep"
+        assert await root.attr("x").as_int() == 1
+        f_result = await root.attr("f")(40)
+        assert await f_result.as_int() == 42
 
 
 async def test_evaluated_derivation_can_build_while_eval_session_is_active(
@@ -592,7 +594,7 @@ async def test_worker_yaml_primops(rpc_session: RpcSessionFactory):
         session.eval(store) as eval,
     ):
         parsed = await eval.string('builtins.fromYAML "apiVersion: v1\\nkind: ConfigMap\\nmetadata:\\n  name: demo\\n"')
-        assert await parsed.force_deep() == {
+        assert await parsed.to_python() == {
             "apiVersion": "v1",
             "kind": "ConfigMap",
             "metadata": {"name": "demo"},
@@ -616,7 +618,7 @@ async def test_worker_yaml_primops_parse_yaml12_modes(rpc_session: RpcSessionFac
         session.eval(store) as eval,
     ):
         parsed = await eval.string('builtins.fromYAML "mode1: 0444\\nmode2: 0o444\\nmode3: \\"0444\\"\\n"')
-        assert await parsed.force_deep() == {
+        assert await parsed.to_python() == {
             "mode1": 444,
             "mode2": 292,
             "mode3": "0444",
@@ -632,7 +634,7 @@ async def test_worker_yaml_primops_parse_yaml11_modes(rpc_session: RpcSessionFac
         session.eval(store) as eval,
     ):
         parsed = await eval.string('builtins.fromYAML11 "mode: 0444\\ntruth: yes\\n"')
-        assert await parsed.force_deep() == {"mode": 292, "truth": True}
+        assert await parsed.to_python() == {"mode": 292, "truth": True}
 
 
 @requires_dynamic_primops
@@ -644,7 +646,7 @@ async def test_worker_from_yaml_root_list_is_single_document(rpc_session: RpcSes
         session.eval(store) as eval,
     ):
         parsed = await eval.string('builtins.fromYAML "- a\\n- b\\n"')
-        assert await parsed.force_deep() == ["a", "b"]
+        assert await parsed.to_python() == ["a", "b"]
 
 
 @requires_dynamic_primops
@@ -690,7 +692,7 @@ async def test_worker_yaml_stream_primops(rpc_session: RpcSessionFactory):
         parsed = await eval.string(
             'builtins.fromYAMLStream "apiVersion: v1\\nkind: ConfigMap\\n---\\napiVersion: v1\\nkind: Service\\n"',
         )
-        assert await parsed.force_deep() == [
+        assert await parsed.to_python() == [
             {"apiVersion": "v1", "kind": "ConfigMap"},
             {"apiVersion": "v1", "kind": "Service"},
         ]
@@ -767,8 +769,8 @@ async def test_eval_flake(rpc_session: RpcSessionFactory, tmp_path: Path):
         assert await count.force() == 42
 
 
-async def test_eval_flake_force_json(rpc_session: RpcSessionFactory, tmp_path: Path):
-    """eval_flake + force_json on a sub-attrset serializes it to JSON."""
+async def test_eval_flake_to_python(rpc_session: RpcSessionFactory, tmp_path: Path):
+    """eval_flake + to_python on a sub-attrset serializes it to JSON."""
     _init_git_flake(tmp_path, 'lib = { name = "test"; nested = { x = 1; y = [ "a" "b" ]; }; };')
 
     async with (
@@ -778,7 +780,7 @@ async def test_eval_flake_force_json(rpc_session: RpcSessionFactory, tmp_path: P
     ):
         outputs = await eval.eval_flake(str(tmp_path), write_lock_file=False)
         lib = outputs.attr("lib")
-        result = await lib.force_json()
+        result = await lib.to_python()
         assert isinstance(result, dict)
         assert result["name"] == "test"
         nested = result["nested"]

@@ -224,7 +224,7 @@ class TestForce:
 
     def test_force_deep(self, eval_state: nanopynix.EvalState):
         v = eval_state.eval_string("rec { a = 1 + 2; b = [(3 + 4)]; }")
-        v.force_deep()  # Should not raise
+        v.to_python()  # Should not raise
 
 
 class TestEvalFile:

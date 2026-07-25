@@ -56,7 +56,7 @@ async def test_primop_error_message_is_shown_bare_and_multiline():
         session.eval(store) as eval,
     ):
         with pytest.raises(Exception) as exc_info:  # noqa: PT011
-            await (await eval.string("builtins.testRaiseCustomError null")).force_deep()
+            await (await eval.string("builtins.testRaiseCustomError null")).to_python()
         message = str(exc_info.value)
         # Nix's own error pretty-printer re-indents continuation lines under
         # "error:", so check each line survived rather than the exact
@@ -75,6 +75,6 @@ async def test_unexpected_exception_keeps_its_type_name_prefix():
         session.eval(store) as eval,
     ):
         with pytest.raises(Exception) as exc_info:  # noqa: PT011
-            await (await eval.string("builtins.testRaiseUnexpected null")).force_deep()
+            await (await eval.string("builtins.testRaiseUnexpected null")).to_python()
         message = str(exc_info.value)
         assert "KeyError" in message

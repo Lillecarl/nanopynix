@@ -87,7 +87,7 @@ async def fetch_option_doc_list(
     """
     collector = await session.string(_COLLECT_OPTION_METADATA)
     doc_list_value = await collector.call(lib_value, options_value)
-    raw = await doc_list_value.force_json()
+    raw = await doc_list_value.to_python()
     if not isinstance(raw, list):
         raise TypeError(f"option metadata walk must return a list, got {type(raw).__name__}")
     records: list[OptionRecord] = []

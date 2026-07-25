@@ -39,7 +39,6 @@ from nanopynix_proto.nix.eval import (
     EvalFlakeRequest,
     EvalServiceBase,
     EvalStringRequest,
-    ForceDeepRequest,
     ForceJsonRequest,
     ForceJsonResponse,
     ForceRequest,
@@ -255,27 +254,6 @@ class EvalServiceHandler(EvalServiceBase):
     def _get_store(self, store_handle: int) -> Any:
         return self._state.handles.get_typed(store_handle, HandleKind.STORE)
 
-    def _deep_value(self, pyv: Any, eval_handle: int) -> common_pb.DeepValue:
-        pyv.force()
-        typ = pyv.type_name()
-        if typ == "attrs":
-            return common_pb.DeepValue(
-                attrs=common_pb.DeepAttrs(
-                    entries={name: self._deep_value(pyv.attr_get(name), eval_handle) for name in pyv.attr_names()},
-                ),
-            )
-        if typ == "list":
-            return common_pb.DeepValue(
-                list=common_pb.DeepList(
-                    items=[self._deep_value(pyv.list_get(idx), eval_handle) for idx in range(pyv.list_length())],
-                ),
-            )
-        if typ == "function":
-            return common_pb.DeepValue(remote_value=self._export(pyv, eval_handle))
-        if typ in _FORCE_SCALAR_TYPES:
-            return common_pb.DeepValue(scalar=python_to_scalar(pyv.to_python(), on_unsupported="stringify"))
-        raise TypeError(f"cannot forceDeep unsupported Nix value type '{typ}' over RPC")
-
     def _force_handle(self, handle: int, eval_handle: int) -> common_pb.ForceValue:
         value = self._resolve(handle)
         value.force()
@@ -376,14 +354,8 @@ class EvalServiceHandler(EvalServiceBase):
     def _do_force(self, message: ForceRequest) -> common_pb.ForceValue:
         return self._force_handle(message.handle, message.eval_handle)
 
-    async def force_deep(self, message: ForceDeepRequest) -> common_pb.DeepValue:
-        return await self._run(message, self._do_force_deep)
-
-    def _do_force_deep(self, message: ForceDeepRequest) -> common_pb.DeepValue:
-        value = self._resolve(message.handle)
-        value.force_deep()
-        return self._deep_value(value, message.eval_handle)
-
+    # Named for the wire op, not the client method: the RPC is ForceJson and
+    # really does transfer JSON. ValueProxy.to_python() decodes it.
     async def force_json(self, message: ForceJsonRequest) -> ForceJsonResponse:
         return await self._run(message, self._do_force_json)
 

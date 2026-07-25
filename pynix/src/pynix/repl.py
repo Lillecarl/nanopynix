@@ -295,7 +295,7 @@ class _ReplState:
 
     async def evaluate(self, expr: str) -> Any:
         value = await self.repl.string(expr)
-        print_formatted_text(format_json(await value.force_json()))
+        print_formatted_text(format_json(await value.to_python()))
         return value
 
     async def reload_sources(self) -> None:
@@ -448,7 +448,7 @@ async def _run_repl_loop(
             else:
                 value = await repl.line(line)
                 if value is not None:
-                    print_formatted_text(format_json(await value.force_json()))
+                    print_formatted_text(format_json(await value.to_python()))
         except (NixError, ReplRunError) as exc:
             _print_error(exc)
 
@@ -563,20 +563,20 @@ async def _main_program(value: Any) -> tuple[str, str | None]:
     if await value.has_attr("meta"):
         meta = value.attr("meta")
         if await meta.has_attr("mainProgram"):
-            main_program = await meta.attr("mainProgram").force_json()
+            main_program = await meta.attr("mainProgram").to_python()
             if not isinstance(main_program, str):
                 raise ReplRunError("derivation meta.mainProgram is not a string")
             return main_program, None
 
     if await value.has_attr("pname"):
-        pname = await value.attr("pname").force_json()
+        pname = await value.attr("pname").to_python()
         if not isinstance(pname, str):
             raise ReplRunError("derivation pname is not a string")
         return pname, f"derivation has no meta.mainProgram; using pname {pname!r}"
 
     if not await value.has_attr("name"):
         raise ReplRunError("derivation has neither meta.mainProgram, pname, nor name")
-    name = await value.attr("name").force_json()
+    name = await value.attr("name").to_python()
     if not isinstance(name, str):
         raise ReplRunError("derivation name is not a string")
     main_program = _derivation_name_part(name)

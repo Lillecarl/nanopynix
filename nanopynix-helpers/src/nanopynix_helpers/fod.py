@@ -129,11 +129,11 @@ async def evaluated_derivation_path(value: ValueProxy) -> str | None:
     """Return an evaluated derivation value's ``drvPath``, if it has one."""
     if not await value.has_attr("type"):
         return None
-    if await value.attr("type").force_json() != "derivation":
+    if await value.attr("type").to_python() != "derivation":
         return None
     if not await value.has_attr("drvPath"):
         return None
-    drv_path = await value.attr("drvPath").force_json()
+    drv_path = await value.attr("drvPath").to_python()
     if not isinstance(drv_path, str):
         raise FodSourceUpdateError("evaluated derivation drvPath was not a string")
     return drv_path

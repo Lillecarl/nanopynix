@@ -100,13 +100,13 @@ async def is_option_declaration(value: nanopynix.rpc.ValueProxy) -> bool:
     """True if *value* looks like an ``mkOption``-produced option declaration.
 
     These attrsets implement nixpkgs' ``__toString`` (returning their dotted
-    location, e.g. ``"services.foo.port"``), so a plain ``force_json()`` just
+    location, e.g. ``"services.foo.port"``), so a plain ``to_python()`` just
     prints that location string instead of anything useful for hover --
     render their actual ``description``/``type``/``default`` fields
     explicitly instead, in ``render_option_declaration``.
     """
     try:
-        marker = await value.attr("_type").force_json()
+        marker = await value.attr("_type").to_python()
     except NixError:
         return False
     return marker == "option"
@@ -115,21 +115,21 @@ async def is_option_declaration(value: nanopynix.rpc.ValueProxy) -> bool:
 async def render_option_declaration(value: nanopynix.rpc.ValueProxy) -> list[str]:
     sections: list[str] = []
     try:
-        description = await value.attr("description").force_json()
+        description = await value.attr("description").to_python()
     except NixError:
         pass
     else:
         if isinstance(description, str):
             sections.append(description)
     try:
-        type_description = await value.attr("type").attr("description").force_json()
+        type_description = await value.attr("type").attr("description").to_python()
     except NixError:
         pass
     else:
         if isinstance(type_description, str):
             sections.append(f"type: `{type_description}`")
     try:
-        default = await value.attr("default").force_json()
+        default = await value.attr("default").to_python()
     except NixError:
         pass
     else:
@@ -169,7 +169,7 @@ async def _option_declaration_locations(value: nanopynix.rpc.ValueProxy) -> list
     system's fixed-point merging (see this feature's design notes).
     """
     try:
-        positions = await value.attr("declarationPositions").force_json()
+        positions = await value.attr("declarationPositions").to_python()
     except NixError:
         return None
     if not isinstance(positions, list):
@@ -265,7 +265,7 @@ class ModuleSystemDialect(Dialect):
         try:
             unsafe_get_attr_pos = await eval_session.string("builtins.unsafeGetAttrPos")
             position_value = await unsafe_get_attr_pos.call(path[-1], parent_value)
-            position = await position_value.force_json()
+            position = await position_value.to_python()
         except NixError:
             return None
         return _position_from_json(position)
