@@ -336,23 +336,48 @@ nb::dict PyValue::edit_location() {
 
 // to_python and to_json are implemented below.
 
+// The five navigation accessors below all go through nix's own forceAttrs /
+// forceList rather than testing `v->type()` themselves.
+//
+// Two bugs at once. They used to answer for the wrong type instead of
+// refusing: list_length() returned 0 for an attrset, attr_names() returned {}
+// for an int, has_attr() returned false for a function. A plausible answer is
+// worse than an exception -- `for i in range(await v.list_length())` on an
+// attrset is a silent no-op that surfaces as wrong output much later. The two
+// that did refuse threw std::runtime_error, which lands outside the NixError
+// hierarchy on the Python side.
+//
+// And none of them forced first, so an unforced thunk read as "not a list" and
+// took the same silent path.
+//
+// forceAttrs/forceList fix all three: they force, they raise nix::TypeError
+// with nix's own message, and that maps to NixTypeError like every other
+// type mismatch in the bindings.
 size_t PyValue::list_length() const {
     auto *v = checkedValue();
-    if (v->type() != nix::nList) return 0;
+    auto &es = requireEvalState();
+    {
+        nb::gil_scoped_release release;
+        es.forceList(*v, nix::noPos, "while reading the length of a Nix list");
+    }
     return v->listSize();
 }
 
 PyValue PyValue::list_get(size_t idx) const {
     auto *v = checkedValue();
-    if (v->type() != nix::nList) throw std::runtime_error("value is not a list");
+    auto &es = requireEvalState();
+    {
+        nb::gil_scoped_release release;
+        es.forceList(*v, nix::noPos, "while indexing a Nix list");
+    }
     auto size = v->listSize();
     if (idx >= size)
         throw std::out_of_range(
             "list index " + std::to_string(idx) + " out of range for length " + std::to_string(size));
     auto *elem = v->listView()[idx];
-    if (auto *es = evalState()) {
+    {
         nb::gil_scoped_release release;
-        es->forceValue(*elem, nix::noPos);
+        es.forceValue(*elem, nix::noPos);
     }
     return PyValue(elem, eval, eval_alive);
 }
@@ -360,16 +385,24 @@ PyValue PyValue::list_get(size_t idx) const {
 std::vector<std::string> PyValue::attr_names() const {
     std::vector<std::string> names;
     auto *v = checkedValue();
-    if (v->type() != nix::nAttrs) return names;
+    auto &es = requireEvalState();
+    {
+        nb::gil_scoped_release release;
+        es.forceAttrs(*v, nix::noPos, "while listing the attributes of a Nix value");
+    }
     for (auto &attr : *v->attrs())
-        names.push_back(std::string(evalState()->symbols[attr.name]));
+        names.push_back(std::string(es.symbols[attr.name]));
     return names;
 }
 
 bool PyValue::has_attr(const std::string &name) const {
     auto *v = checkedValue();
-    if (v->type() != nix::nAttrs) return false;
-    auto sym = evalState()->symbols.create(name);
+    auto &es = requireEvalState();
+    {
+        nb::gil_scoped_release release;
+        es.forceAttrs(*v, nix::noPos, "while testing for a Nix attribute");
+    }
+    auto sym = es.symbols.create(name);
     for (auto &attr : *v->attrs())
         if (attr.name == sym) return true;
     return false;
@@ -377,16 +410,19 @@ bool PyValue::has_attr(const std::string &name) const {
 
 PyValue PyValue::attr_get(const std::string &name) const {
     auto *value = checkedValue();
-    if (value->type() != nix::nAttrs) throw std::runtime_error("value is not an attribute set");
-    auto *es = evalState();
-    auto sym = es->symbols.create(name);
+    auto &es = requireEvalState();
+    {
+        nb::gil_scoped_release release;
+        es.forceAttrs(*value, nix::noPos, "while selecting a Nix attribute");
+    }
+    auto sym = es.symbols.create(name);
     for (auto &attr : *value->attrs()) {
         if (attr.name == sym) {
             nix::Value *v;
             {
                 nb::gil_scoped_release release;
-                v = es->allocValue();
-                es->forceValue(*attr.value, nix::noPos);
+                v = es.allocValue();
+                es.forceValue(*attr.value, nix::noPos);
             }
             *v = *attr.value;
             return PyValue(v, eval, eval_alive);

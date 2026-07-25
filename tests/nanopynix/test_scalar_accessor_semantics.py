@@ -51,6 +51,49 @@ STRICT_TABLE: dict[str, dict[str, Any]] = {
     "null": {"as_int": RAISES, "as_float": RAISES, "as_bool": RAISES, "as_string": RAISES},
 }
 
+# The navigation accessors are strict the same way, which they were not.
+#
+# They each used to answer for the wrong type rather than refuse:
+# ``attr_names()`` returned ``[]`` for an int, ``has_attr()`` returned ``False``
+# for a function, and ``list_length()`` returned ``0`` for an attrset -- so
+# ``for i in range(await v.list_length())`` was a silent no-op on an attrset,
+# which surfaces as wrong output much later instead of as an exception here.
+# Identically on both engines, so the parity harness saw nothing wrong.
+#
+# The one non-obvious row is `list_length` on an attrset and `attr_names` on a
+# list: adjacent compound types are still the wrong type.
+NAVIGATION_TABLE: dict[str, dict[str, Any]] = {
+    "42": {"attr_names": RAISES, "has_attr": RAISES, "list_length": RAISES},
+    '"s"': {"attr_names": RAISES, "has_attr": RAISES, "list_length": RAISES},
+    "null": {"attr_names": RAISES, "has_attr": RAISES, "list_length": RAISES},
+    "x: x": {"attr_names": RAISES, "has_attr": RAISES, "list_length": RAISES},
+    "{ a = 1; }": {"attr_names": ["a"], "has_attr": True, "list_length": RAISES},
+    "[ 1 2 ]": {"attr_names": RAISES, "has_attr": RAISES, "list_length": 2},
+}
+
+
+async def _check_navigation(value: Any, expectations: dict[str, Any], engine: str) -> None:
+    for name, expected in expectations.items():
+        accessor = value.has_attr("a") if name == "has_attr" else getattr(value, name)()
+        label = f"{engine}.{name}"
+        if expected is RAISES:
+            with pytest.raises(NixTypeError):
+                await accessor
+        else:
+            assert await accessor == expected, label
+
+
+@pytest.mark.parametrize("expr", list(NAVIGATION_TABLE), ids=list(NAVIGATION_TABLE))
+async def test_inproc_navigation_accessors_are_strict(expr: str, inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
+        await _check_navigation(await ev.string(expr), NAVIGATION_TABLE[expr], "inproc")
+
+
+@pytest.mark.parametrize("expr", list(NAVIGATION_TABLE), ids=list(NAVIGATION_TABLE))
+async def test_rpc_navigation_accessors_are_strict(expr: str, rpc_session: RpcSessionFactory) -> None:
+    async with rpc_session() as session, session.store() as store, session.eval(store) as ev:
+        await _check_navigation(await ev.string(expr), NAVIGATION_TABLE[expr], "rpc")
+
 # `apply("builtins.toString")` is Nix's own string coercion. These
 # expectations were taken from a real `nix eval` of builtins.toString over the
 # same expressions, so they fail rather than drift if Nix ever changes them.
