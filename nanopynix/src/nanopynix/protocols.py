@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar
 
 from nanopynix_bindings.store import BuildMode
-from nanopynix_proto.nix.store import GcAction
+from nanopynix_proto.nix.store import GcAction, StoreDirs
 
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
 
@@ -237,6 +237,41 @@ class AsyncStore(Protocol):
         hash_algo: str = DEFAULT_HASH_ALGO,
     ) -> StorePath:
         """Add a file or directory to this store, returning its store path."""
+        ...
+
+    async def store_dirs(self) -> StoreDirs:
+        """Return this store's full set of configured directories."""
+        ...
+
+    async def ensure_path(self, path: str | StorePath, /) -> None:
+        """Make ``path`` valid in this store, substituting it if necessary."""
+        ...
+
+    async def copy_closure(
+        self,
+        paths: list[str | StorePath],
+        /,
+        dest_store: Self,
+        *,
+        repair: bool = False,
+        check_sigs: bool = True,
+        substitute: bool = False,
+    ) -> None:
+        """Copy the closure of ``paths`` from this store to ``dest_store``.
+
+        ``dest_store`` is ``Self`` for the same reason as
+        :meth:`build_paths_with_results`'s ``eval_store`` -- both engines
+        reject a store from another session, so no implementation can honestly
+        accept an arbitrary ``AsyncStore`` here.
+        """
+        ...
+
+    async def optimise_store(self) -> None:
+        """Reclaim disk space by hard-linking identical files in this store."""
+        ...
+
+    async def verify_store(self, *, check_contents: bool = False, repair: bool = False) -> bool:
+        """Check this store's consistency, returning whether errors were found."""
         ...
 
 

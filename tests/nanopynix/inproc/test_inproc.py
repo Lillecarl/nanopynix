@@ -417,6 +417,128 @@ async def test_inproc_and_rpc_compute_the_same_store_path(
     assert len(computed) == len(variants)
 
 
+# ── Whole-store operations ──────────────────────────────────────────────
+# The last five rpc-only entries in test_engine_parity.py's ledger. Unlike the
+# content-addressed pair above these already had native bindings, so only the
+# Python glue was missing; with them the Store half of the ledger is empty.
+
+
+@pytest.mark.anyio
+async def test_inproc_store_dirs_agrees_with_rpc_and_with_store_dir(
+    shared_nix_environment: NixTestEnvironment,
+) -> None:
+    """Both engines read the same libstore config, so they must report it alike.
+
+    Also checks ``store_dirs().store_dir`` against the standalone
+    :meth:`store_dir` -- two bindings onto the same field, which is exactly
+    where a copy-paste in the C++ dict builder would show up.
+    """
+    async with (
+        shared_nix_environment.inproc_session() as inproc_nix,
+        inproc_nix.store() as inproc_store,
+        shared_nix_environment.rpc_session() as rpc_nix,
+        rpc_nix.store() as rpc_store,
+    ):
+        dirs = await inproc_store.store_dirs()
+        assert dirs == await rpc_store.store_dirs()
+        assert dirs.store_dir == await inproc_store.store_dir()
+        # The test environment is a LocalStore, so the filesystem-layout fields
+        # Nix leaves unset for other store types are populated here.
+        assert dirs.state_dir is not None
+        assert dirs.real_store_dir is not None
+
+
+@pytest.mark.anyio
+async def test_inproc_ensure_path_accepts_a_valid_path_and_raises_for_an_absent_one(
+    inproc_session: InprocSessionFactory,
+    seeded_store_path: StorePath,
+) -> None:
+    """The negative half is the point: ensure_path must not fail quietly.
+
+    A well-formed path that is neither valid nor substitutable has to raise,
+    and raise the same ``NixError`` the rpc engine raises for it -- the two
+    engines translate Nix's exception through different chokepoints.
+    """
+    absent = "/nix/store/00000000000000000000000000000000-nanopynix-absent"
+    async with inproc_session() as nix, nix.store() as store:
+        await store.ensure_path(seeded_store_path)  # already valid: a no-op
+        assert await store.is_valid_path(seeded_store_path)
+
+        with pytest.raises(nanopynix.NixError, match="no substituter"):
+            await store.ensure_path(absent)
+
+
+@pytest.mark.anyio
+async def test_inproc_copy_closure_copies_between_two_stores_in_one_session(
+    inproc_session: InprocSessionFactory,
+    tmp_path: Path,
+) -> None:
+    """Mirrors the rpc engine's copy_closure test one for one.
+
+    The pre-copy assertion keeps it honest -- without it a destination that
+    already had the path would pass without copying anything.
+    """
+    async with (
+        inproc_session() as nix,
+        nix.store() as source,
+        nix.store(uri=f"local?root={tmp_path / 'dest'}") as dest,
+    ):
+        source_file = tmp_path / "copy-closure-fixture.txt"
+        source_file.write_text("nanopynix inproc copy_closure fixture\n", encoding="utf-8")
+        path = await source.add_to_store(str(source_file), name="nanopynix-inproc-copy-closure")
+
+        assert not await dest.is_valid_path(path)
+        await source.copy_closure([path], dest)
+        assert await dest.is_valid_path(path)
+
+
+@pytest.mark.anyio
+async def test_inproc_copy_closure_rejects_a_store_from_another_session(
+    inproc_session: InprocSessionFactory,
+    tmp_path: Path,
+) -> None:
+    """Both stores are driven from one session's Nix thread, so a foreign store
+    is rejected up front rather than handed to libstore -- and with the same
+    ``ValueError`` the rpc engine raises for the same mistake.
+
+    The two sessions are sequential, not concurrent: ``_InprocProcessGuard``
+    permits only one open inproc Session per process, so a caller can only
+    reach this by holding a Store object past the session that made it.
+    """
+    async with inproc_session() as first_nix, first_nix.store(uri=f"local?root={tmp_path / 'other'}") as foreign:
+        pass
+
+    async with inproc_session() as nix, nix.store() as source:
+        with pytest.raises(ValueError, match="different Session"):
+            await source.copy_closure([], foreign)
+
+
+@pytest.mark.anyio
+async def test_inproc_optimise_and_verify_a_private_store(
+    inproc_session: InprocSessionFactory,
+    tmp_path: Path,
+) -> None:
+    """Runs against a store private to this test, never the shared one.
+
+    ``optimise_store`` hard-links across the whole store and ``verify_store``
+    walks every path in it; pointing either at a store other tests depend on
+    would be a cross-test side effect. The seeded path is re-checked afterwards
+    so "optimise did not raise" cannot pass while it quietly broke the store.
+    """
+    source_file = tmp_path / "optimise-fixture.txt"
+    source_file.write_text("nanopynix optimise fixture\n", encoding="utf-8")
+
+    async with (
+        inproc_session() as nix,
+        nix.store(uri=f"local?root={tmp_path / 'private'}") as store,
+    ):
+        path = await store.add_to_store(str(source_file), name="nanopynix-optimise-fixture")
+        assert await store.verify_store() is False
+        await store.optimise_store()
+        assert await store.is_valid_path(path)
+        assert await store.verify_store(check_contents=True) is False
+
+
 # ── Store query methods against a seeded hermetic store ─────────────────
 
 
