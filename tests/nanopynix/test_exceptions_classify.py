@@ -7,7 +7,10 @@ fallback behavior, and the from_response() factory.
 from __future__ import annotations
 
 from nanopynix.exceptions import (
+    BuildHashMismatchError,
     EvalError,
+    EvalHashMismatchError,
+    HashMismatchError,
     InfiniteRecursionError,
     MissingArgumentError,
     NixAssertionError,
@@ -238,9 +241,36 @@ def test_classify_store_not_in_store():
 
 
 def test_classify_hash_mismatch():
+    """A fixed-output mismatch classifies to the build-time hash variant.
+
+    Previously this returned a bare ``StoreError``. It now resolves to the
+    specific type, which is still a ``StoreError`` -- so existing
+    ``except StoreError`` callers are unaffected -- while also being a
+    ``HashMismatchError``, letting fixed-output update logic catch the
+    build-time and eval-time (``builtins.fetchurl``) variants uniformly.
+    """
     cls, name = _classify("hash mismatch in fixed-output derivation", "Error")
-    assert cls is StoreError
-    assert name == "StoreError"
+    assert cls is BuildHashMismatchError
+    assert name == "HashMismatchError"
+    assert issubclass(cls, StoreError)
+    assert issubclass(cls, HashMismatchError)
+
+
+def test_classify_hash_mismatch_from_a_fetchurl_is_an_eval_error():
+    """``builtins.fetchurl`` fails during evaluation, not during a build."""
+    cls, name = _classify("hash mismatch in file downloaded from 'file:///tmp/x'", "Error")
+    assert cls is EvalHashMismatchError
+    assert name == "HashMismatchError"
+    assert issubclass(cls, EvalError)
+    assert issubclass(cls, HashMismatchError)
+
+
+def test_classify_bare_hash_mismatch_stays_neutral():
+    """Boundary C: the daemon protocol discarded which kind it was."""
+    cls, _ = _classify("hash mismatch somewhere unspecified", "Error")
+    assert cls is HashMismatchError
+    assert not issubclass(cls, StoreError)
+    assert not issubclass(cls, EvalError)
 
 
 def test_classify_does_not_exist():
