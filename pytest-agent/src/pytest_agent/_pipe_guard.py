@@ -3,6 +3,43 @@ from __future__ import annotations
 import os
 import stat
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pytest
+
+# Options that make pytest print a listing and exit without running any test
+# body. The guard's whole rationale -- "truncating hides the real failure" --
+# does not apply to these: there are no failures to hide, and for
+# --collect-only the interesting part (the collected count) is deliberately
+# *last*, which makes `| tail -1` the right command rather than a mistake.
+# Each entry is (option dest, the user-facing flag to name in messages).
+_ZERO_DETAIL_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("collectonly", "--collect-only"),
+    ("showfixtures", "--fixtures"),
+    ("show_fixtures_per_test", "--fixtures-per-test"),
+    ("markers", "--markers"),
+    ("setupplan", "--setup-plan"),
+    ("help", "--help"),
+    ("version", "--version"),
+)
+
+
+def zero_detail_mode(config: pytest.Config) -> str | None:
+    """Return the listing-only flag active in *config*, or None.
+
+    ``--setup-only`` is deliberately absent: unlike the flags above it really
+    does execute fixtures, so a fixture error there is exactly the kind of
+    detail the guard exists to protect.
+    """
+    for dest, flag in _ZERO_DETAIL_OPTIONS:
+        # default= keeps this working if a builtin plugin declaring one of
+        # these options is disabled via -p no:...; getoption would raise
+        # ValueError for an unknown dest otherwise.
+        if config.getoption(dest, default=False):
+            return flag
+    return None
+
 
 # Common CLI tools that truncate or filter piped stdout. If pytest's own
 # stdout is piped straight into one of these, the reader silently discards
