@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar
 from nanopynix_bindings.store import BuildMode
 from nanopynix_proto.nix.store import GcAction
 
-from nanopynix._wire import NO_GC_LIMIT
+from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
 
 if TYPE_CHECKING:
     from nanopynix.models import (
@@ -215,6 +215,28 @@ class AsyncStore(Protocol):
 
     async def find_roots(self, *, censor: bool = False) -> list[GcRoot]:
         """Return the garbage collector's roots."""
+        ...
+
+    async def compute_store_path(
+        self,
+        path: str,
+        *,
+        name: str | None = None,
+        method: str = DEFAULT_CA_METHOD,
+        hash_algo: str = DEFAULT_HASH_ALGO,
+    ) -> StorePath:
+        """Compute the store path content-addressing ``path`` without adding it."""
+        ...
+
+    async def add_to_store(
+        self,
+        path: str,
+        *,
+        name: str | None = None,
+        method: str = DEFAULT_CA_METHOD,
+        hash_algo: str = DEFAULT_HASH_ALGO,
+    ) -> StorePath:
+        """Add a file or directory to this store, returning its store path."""
         ...
 
 

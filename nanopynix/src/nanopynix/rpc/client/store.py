@@ -42,7 +42,7 @@ from nanopynix_proto.nix.store import (
 )
 from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
-from nanopynix._wire import NO_GC_LIMIT
+from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
 from nanopynix.models import BuildResult, Derivation, GcResult, MissingInfo, StorePath
 from nanopynix.rpc.client._pool import WorkerDiedError
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
@@ -53,10 +53,6 @@ if TYPE_CHECKING:
     from nanopynix_proto.nix.common import PathInfo
 
     from nanopynix.rpc.client._pool import WorkerClient
-
-_DEFAULT_CA_METHOD = "nar"
-_DEFAULT_HASH_ALGO = "sha256"
-
 
 class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreServiceBase):
     """Private session-bound proxy for the generated ``StoreService`` API.
@@ -405,8 +401,8 @@ class Store:
         path: str,
         *,
         name: str | None = None,
-        method: str = _DEFAULT_CA_METHOD,
-        hash_algo: str = _DEFAULT_HASH_ALGO,
+        method: str = DEFAULT_CA_METHOD,
+        hash_algo: str = DEFAULT_HASH_ALGO,
     ) -> StorePath:
         """Compute the store path content-addressing ``path`` without adding it."""
         response = await self.rpc.compute_store_path(
@@ -419,8 +415,8 @@ class Store:
         path: str,
         *,
         name: str | None = None,
-        method: str = _DEFAULT_CA_METHOD,
-        hash_algo: str = _DEFAULT_HASH_ALGO,
+        method: str = DEFAULT_CA_METHOD,
+        hash_algo: str = DEFAULT_HASH_ALGO,
     ) -> StorePath:
         """Add a file or directory to this store."""
         response = await self.rpc.add_to_store(

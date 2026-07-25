@@ -285,10 +285,8 @@ async def test_inproc_perm_root_appears_in_find_roots(
     source = tmp_path / "find-roots-fixture.txt"
     source.write_text("nanopynix find_roots fixture\n", encoding="utf-8")
     root_path = tmp_path / "inproc-find-roots-gc-root"
-    async with isolated_nix_environment.rpc_session() as rpc_nix, rpc_nix.store() as rpc_store:
-        seeded = await rpc_store.add_to_store(str(source), name="inproc-find-roots", method="flat")
-
     async with isolated_nix_environment.inproc_session() as nix, nix.store() as store:
+        seeded = await store.add_to_store(str(source), name="inproc-find-roots", method="flat")
         await store.add_perm_root(seeded, str(root_path))
         roots = await store.find_roots()
         assert [root.path for root in roots if root.link == str(root_path)] == [str(seeded)]
@@ -312,15 +310,111 @@ async def test_inproc_temp_root_survives_a_delete_dead_pass(
     doomed_source = tmp_path / "temp-root-drop.txt"
     doomed_source.write_text("nanopynix temp-root drop\n", encoding="utf-8")
 
-    async with isolated_nix_environment.rpc_session() as rpc_nix, rpc_nix.store() as rpc_store:
-        kept = await rpc_store.add_to_store(str(rooted_source), name="inproc-temp-root-keep", method="flat")
-        doomed = await rpc_store.add_to_store(str(doomed_source), name="inproc-temp-root-drop", method="flat")
+    # Seeding happens in a session that closes before the collecting one opens.
+    # Nix's LocalStore::addToStoreFromDump calls addTempRoot on what it adds
+    # (local-store.cc:1200), so a still-open adding session would protect
+    # `doomed` as well and the control half below would pass vacuously.
+    async with isolated_nix_environment.inproc_session() as seed_nix, seed_nix.store() as seed_store:
+        kept = await seed_store.add_to_store(str(rooted_source), name="inproc-temp-root-keep", method="flat")
+        doomed = await seed_store.add_to_store(str(doomed_source), name="inproc-temp-root-drop", method="flat")
 
     async with isolated_nix_environment.inproc_session() as nix, nix.store() as store:
         await store.add_temp_root(kept)
         await store.collect_garbage(GcAction.DELETE_DEAD)
         assert await store.is_valid_path(kept)
         assert not await store.is_valid_path(doomed)
+
+
+# ── Content-addressed adds ──────────────────────────────────────────────
+# add_to_store and compute_store_path were the last two rpc-only entries in
+# test_engine_parity.py's ledger that needed C++: unlike the other five, they
+# had no native binding at all, only the proto-shaped one the RPC worker uses.
+# That is *why* inproc never got them, and the reason the two tests above had
+# to open an rpc session purely to seed a path.
+
+
+@pytest.mark.anyio
+async def test_inproc_add_to_store_returns_the_path_compute_predicted(
+    isolated_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+) -> None:
+    """The three operations check each other, so there is no golden hash to rot.
+
+    ``compute_store_path`` predicts, ``add_to_store`` produces, ``is_valid_path``
+    confirms it landed. A wrong answer from any one of them breaks the chain.
+    Isolated because this writes to the store.
+    """
+    source = tmp_path / "content-addressed"
+    source.mkdir()
+    (source / "f").write_text("nanopynix content-addressed fixture\n", encoding="utf-8")
+
+    async with isolated_nix_environment.inproc_session() as nix, nix.store() as store:
+        predicted = await store.compute_store_path(str(source))
+        # Nothing was added by computing it.
+        assert not await store.is_valid_path(predicted)
+        added = await store.add_to_store(str(source))
+        assert added == predicted
+        assert await store.is_valid_path(added)
+        # name defaults to the source's filename; overriding it must move the path.
+        assert str(predicted).endswith("-content-addressed")
+        renamed = await store.compute_store_path(str(source), name="chosen")
+        assert str(renamed).endswith("-chosen")
+        assert renamed != predicted
+
+
+@pytest.mark.anyio
+async def test_inproc_and_rpc_compute_the_same_store_path(
+    shared_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+) -> None:
+    """A store path is a pure function of content and parameters -- so the two
+    engines must produce byte-identical answers or one of them is wrong.
+
+    ``compute_store_path`` writes nothing, which is what lets this run against
+    the shared store and what makes it a clean parity probe: any disagreement
+    is in the binding or the defaults, not in store state. Both hashing
+    parameters are varied because a default applied on only one side would
+    otherwise stay invisible.
+    """
+    source = tmp_path / "parity-fixture"
+    source.mkdir()
+    (source / "f").write_text("nanopynix cross-engine fixture\n", encoding="utf-8")
+
+    # Consecutive entries differ by exactly one parameter against the same
+    # target, so a parameter silently dropped on the floor collapses two paths
+    # into one and trips the distinctness guard below. Both `name` and
+    # `hash_algo` are isolated this way, the latter in both the nar and flat
+    # cases, because they reach Nix through separate C++ parsers.
+    variants: list[dict[str, str]] = [
+        {},
+        {"name": "explicit-name"},
+        {"hash_algo": "sha512"},
+        {"method": "flat", "name": "flat-variant"},
+        {"method": "flat", "name": "flat-variant", "hash_algo": "sha512"},
+    ]
+
+    computed: set[str] = set()
+    async with (
+        shared_nix_environment.inproc_session() as inproc_nix,
+        inproc_nix.store() as inproc_store,
+        shared_nix_environment.rpc_session() as rpc_nix,
+        rpc_nix.store() as rpc_store,
+    ):
+        for variant in variants:
+            # "flat" only accepts a single file, so point those at the file.
+            target = source / "f" if variant.get("method") == "flat" else source
+            inproc_path = await inproc_store.compute_store_path(str(target), **variant)
+            rpc_path = await rpc_store.compute_store_path(str(target), **variant)
+            assert str(inproc_path) == str(rpc_path), f"engines disagree for {variant!r}"
+            computed.add(str(inproc_path))
+
+    # A guard against the comparison above passing because every variant
+    # collapsed to the same path: varying the parameters has to actually vary
+    # the answer. Collected from the same calls the comparison used, so the
+    # guard measures the paths that were compared rather than recomputing them;
+    # distinctness for one engine implies it for the other, since each pair was
+    # just asserted equal.
+    assert len(computed) == len(variants)
 
 
 # ── Store query methods against a seeded hermetic store ─────────────────

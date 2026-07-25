@@ -480,34 +480,35 @@ static nix::LogStore &require_log_store(nix::Store &s) {
     return *store;
 }
 
-static nix::ContentAddressMethod request_content_address_method(const nb::dict &request) {
-    auto raw = request_string(request, "method");
-    if (raw.empty())
-        raw = "nar";
-    return nix::ContentAddressMethod::parse(raw);
+// The four ingredients addToStoreSlow and computeStorePath both need. These
+// take plain arguments rather than an nb::dict so the native and proto-shaped
+// entrypoints share one definition instead of two copies of the same prelude.
+// An empty method/hash_algo means "unset" on the proto side, where a missing
+// string field arrives as "" rather than absent -- both fall back to Nix's own
+// defaults rather than being passed to a parser that would reject them.
+static nix::ContentAddressMethod parse_content_address_method(const std::string &raw) {
+    return nix::ContentAddressMethod::parse(raw.empty() ? std::string("nar") : raw);
 }
 
-static nix::HashAlgorithm request_hash_algo(const nb::dict &request) {
-    auto raw = request_string(request, "hash_algo");
-    if (raw.empty())
-        raw = "sha256";
-    return nix::parseHashAlgo(raw);
+static nix::HashAlgorithm parse_store_hash_algo(const std::string &raw) {
+    return nix::parseHashAlgo(raw.empty() ? std::string("sha256") : raw);
 }
 
-static std::string request_store_add_name(const nb::dict &request) {
-    if (auto name = request_optional_string(request, "name"))
+// Nix names a content-addressed path after its source's filename unless the
+// caller overrides it.
+static std::string store_add_name(const std::optional<std::string> &name, const std::string &path) {
+    if (name)
         return *name;
-    auto path = std::filesystem::path(request_string(request, "path"));
-    return path.filename().string();
+    return std::filesystem::path(path).filename().string();
 }
 
-static nix::SourcePath request_source_path(const nb::dict &request) {
+static nix::SourcePath source_path_from(const std::string &path) {
 #if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35
     return nix::PosixSourceAccessor::createAtRoot(
-        nix::makeParentCanonical(std::filesystem::path(request_string(request, "path"))));
+        nix::makeParentCanonical(std::filesystem::path(path)));
 #else
     return nix::SourcePath(nix::makeFSSourceAccessor(
-        std::filesystem::absolute(std::filesystem::path(request_string(request, "path")))));
+        std::filesystem::absolute(std::filesystem::path(path))));
 #endif
 }
 
@@ -1060,33 +1061,65 @@ static nb::dict store_get_build_log(nix::Store &s, const nb::dict &request) {
     return d;
 }
 
-static nb::dict store_add_to_store(nix::Store &s, const nb::dict &request) {
-    auto name = request_store_add_name(request);
-    auto source_path = request_source_path(request);
-    auto method = request_content_address_method(request);
-    auto hash_algo = request_hash_algo(request);
-    std::optional<nix::StorePath> path;
+static nix::StorePath add_to_store(
+    nix::Store &s,
+    const std::string &path,
+    const std::optional<std::string> &name,
+    const std::string &method,
+    const std::string &hash_algo) {
+    auto resolved_name = store_add_name(name, path);
+    auto source_path = source_path_from(path);
+    auto ca_method = parse_content_address_method(method);
+    auto algo = parse_store_hash_algo(hash_algo);
+    std::optional<nix::StorePath> result;
     {
         nb::gil_scoped_release release;
-        path.emplace(s.addToStoreSlow(name, source_path, method, hash_algo, {}).path);
+        result.emplace(s.addToStoreSlow(resolved_name, source_path, ca_method, algo, {}).path);
     }
+    return *result;
+}
+
+static nix::StorePath compute_store_path(
+    nix::Store &s,
+    const std::string &path,
+    const std::optional<std::string> &name,
+    const std::string &method,
+    const std::string &hash_algo) {
+    auto resolved_name = store_add_name(name, path);
+    auto source_path = source_path_from(path);
+    auto ca_method = parse_content_address_method(method);
+    auto algo = parse_store_hash_algo(hash_algo);
+    std::optional<nix::StorePath> result;
+    {
+        nb::gil_scoped_release release;
+        result.emplace(s.computeStorePath(resolved_name, source_path, ca_method, algo, {}).first);
+    }
+    return *result;
+}
+
+// The proto-shaped pair are adapters over the native ones above: unpack the
+// request, hand back a printed path. They carry no store logic of their own.
+static nb::dict store_add_to_store(nix::Store &s, const nb::dict &request) {
+    auto path = add_to_store(
+        s,
+        request_string(request, "path"),
+        request_optional_string(request, "name"),
+        request_string(request, "method"),
+        request_string(request, "hash_algo"));
     nb::dict d;
-    d["path"] = store_path_to_string(s, *path);
+    d["path"] = store_path_to_string(s, path);
     return d;
 }
 
 static nb::dict store_compute_store_path(nix::Store &s, const nb::dict &request) {
-    auto name = request_store_add_name(request);
-    auto source_path = request_source_path(request);
-    auto method = request_content_address_method(request);
-    auto hash_algo = request_hash_algo(request);
-    std::optional<nix::StorePath> path;
-    {
-        nb::gil_scoped_release release;
-        path.emplace(s.computeStorePath(name, source_path, method, hash_algo, {}).first);
-    }
+    auto path = compute_store_path(
+        s,
+        request_string(request, "path"),
+        request_optional_string(request, "name"),
+        request_string(request, "method"),
+        request_string(request, "hash_algo"));
     nb::dict d;
-    d["path"] = store_path_to_string(s, *path);
+    d["path"] = store_path_to_string(s, path);
     return d;
 }
 
@@ -1146,6 +1179,21 @@ static void bind_store(nb::module_ &m) {
         .def("query_all_valid_paths", &query_all_valid_paths)
         .def("query_referrers", &query_referrers, "path"_a)
         .def("query_substitutable_paths", &query_substitutable_paths, "paths"_a)
+        // Content-addressed adds
+        .def(
+            "add_to_store",
+            &add_to_store,
+            "path"_a,
+            "name"_a = nb::none(),
+            "method"_a = "nar",
+            "hash_algo"_a = "sha256")
+        .def(
+            "compute_store_path",
+            &compute_store_path,
+            "path"_a,
+            "name"_a = nb::none(),
+            "method"_a = "nar",
+            "hash_algo"_a = "sha256")
         // GC
         .def("add_temp_root", [](nix::Store &s, const nix::StorePath &p) { s.addTempRoot(p); },
              nb::call_guard<nb::gil_scoped_release>(), "path"_a)

@@ -28,7 +28,13 @@ from nanopynix._core._extract import locked_flake as _locked_flake_proto
 from nanopynix._core._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
 from nanopynix._core._nix_executor import NIX_EVALUATOR_STACK_SIZE, NixThreadExecutor
 from nanopynix._core._primops import register_import_path_primops, to_primop_specs
-from nanopynix._wire import DEFAULT_STORE_URI, NIX_USER_CONF_FILES_ENV, NO_GC_LIMIT
+from nanopynix._wire import (
+    DEFAULT_CA_METHOD,
+    DEFAULT_HASH_ALGO,
+    DEFAULT_STORE_URI,
+    NIX_USER_CONF_FILES_ENV,
+    NO_GC_LIMIT,
+)
 from nanopynix.exceptions import StoreError, build_error_from_result, translate_nix_exception
 from nanopynix.logging import BusSubscription, CallbackBus, LogCollector, LogStreamEventKind
 from nanopynix.models import (
@@ -674,6 +680,50 @@ class Store:
         """Return the garbage collector's roots."""
         roots = await self._session.run(self._require_raw().find_roots, censor)
         return [GcRoot(link=root["link"], path=root["path"]) for root in roots]
+
+    async def compute_store_path(
+        self,
+        path: str,
+        *,
+        name: str | None = None,
+        method: str = DEFAULT_CA_METHOD,
+        hash_algo: str = DEFAULT_HASH_ALGO,
+    ) -> PublicStorePath:
+        """Compute the store path content-addressing ``path`` without adding it.
+
+        Pure computation -- it reads ``path`` but writes nothing, so it works
+        even against a store that cannot accept an add.
+        """
+        raw_path = await self._session.run(
+            self._require_raw().compute_store_path,
+            path,
+            name,
+            method,
+            hash_algo,
+        )
+        return PublicStorePath(await self._session.run(_print_store_path, self._require_raw(), raw_path))
+
+    async def add_to_store(
+        self,
+        path: str,
+        *,
+        name: str | None = None,
+        method: str = DEFAULT_CA_METHOD,
+        hash_algo: str = DEFAULT_HASH_ALGO,
+    ) -> PublicStorePath:
+        """Add a file or directory to this store, returning its store path.
+
+        The result is the path :meth:`compute_store_path` predicts for the same
+        arguments. ``name`` defaults to the source's filename.
+        """
+        raw_path = await self._session.run(
+            self._require_raw().add_to_store,
+            path,
+            name,
+            method,
+            hash_algo,
+        )
+        return PublicStorePath(await self._session.run(_print_store_path, self._require_raw(), raw_path))
 
     async def _public_store_paths(self, raw_paths: Any) -> list[PublicStorePath]:
         paths = await self._session.run(_print_store_paths, self._require_raw(), raw_paths)
