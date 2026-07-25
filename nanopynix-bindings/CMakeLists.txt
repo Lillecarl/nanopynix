@@ -56,6 +56,21 @@ option(BUILD_FETCHERS "Build nanopynix_fetchers" ON)
 option(BUILD_FLAKE    "Build nanopynix_flake"    ON)
 option(BUILD_MAIN     "Build nanopynix_main"     ON)
 
+# --- nanopynix_errors ---
+# Owns every Nix exception class and the single translator that dispatches
+# them (src/nix_errors.cpp explains why they must stay in one translation
+# unit). Needs expr+store+util headers for the type definitions and their
+# libraries for the RTTI the catch chain dispatches on.
+if(BUILD_EXPR)
+  nanobind_add_module(errors src/nix_errors.cpp)
+  target_include_directories(errors PRIVATE
+    ${NIX_EXPR_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS} ${NIX_UTIL_INCLUDE_DIRS})
+  target_link_libraries(errors PRIVATE
+    ${NIX_EXPR_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES})
+  target_compile_options(errors PRIVATE -std=c++23)
+  nanopynix_target_uses_nix_compat(errors)
+endif()
+
 # --- nanopynix_util ---
 if(BUILD_UTIL)
   nanobind_add_module(util src/nix_util.cpp)
@@ -141,6 +156,9 @@ if(BUILD_MAIN)
 endif()
 
 # --- Install rules ---
+if(BUILD_EXPR)
+  install(TARGETS errors LIBRARY DESTINATION nanopynix_bindings)
+endif()
 if(BUILD_UTIL)
   install(TARGETS util LIBRARY DESTINATION nanopynix_bindings)
 endif()

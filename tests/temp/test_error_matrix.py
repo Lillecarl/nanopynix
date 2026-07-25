@@ -40,8 +40,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import anyio
 import pytest
-from nanopynix_bindings import expr as nanopynix_expr
-from nanopynix_bindings import store as nanopynix_store
+from nanopynix_bindings import errors as nanopynix_errors
 
 import nanopynix
 from nanopynix import inproc
@@ -333,20 +332,33 @@ def test_inproc_raises_the_public_hierarchy_not_raw_bindings() -> None:
     at its call chokepoint instead of relying on inheritance.
     """
     # Unchanged upstream fact: the bound types are unrelated to NixError.
-    assert not issubclass(nanopynix_expr.EvalError, nanopynix.NixError)
-    assert not issubclass(nanopynix_store.InvalidPath, nanopynix.NixError)
-    assert nanopynix_expr.EvalError is not nanopynix.EvalError
+    assert not issubclass(nanopynix_errors.EvalError, nanopynix.NixError)
+    assert not issubclass(nanopynix_errors.InvalidPath, nanopynix.NixError)
+    assert nanopynix_errors.EvalError is not nanopynix.EvalError
 
     # ...which is why translation is required, and must be total over the
-    # types the bindings actually register.
-    for module, names in (
-        (nanopynix_expr, ("EvalError", "ParseError", "TypeError", "UndefinedVarError", "ThrownError")),
-        (nanopynix_store, ("InvalidPath", "Unsupported", "BadStorePath")),
+    # types the bindings actually register. They all live in one module now:
+    # a single translator owns the nix::Error hierarchy, so the classes it
+    # dispatches to had to stop being scattered across expr/store/util.
+    for name in (
+        "Error",
+        "EvalBaseError",
+        "EvalError",
+        "ParseError",
+        "TypeError",
+        "UndefinedVarError",
+        "AssertionError",
+        "ThrownError",
+        "InvalidPath",
+        "Unsupported",
+        "BadStorePath",
+        "SysError",
+        "UsageError",
+        "UnimplementedError",
     ):
-        for name in names:
-            bound = getattr(module, name)
-            translated = translate_nix_exception(bound("boom"))
-            assert translated is not None, f"{name} has no public counterpart"
-            assert isinstance(translated, nanopynix.NixError)
+        bound = getattr(nanopynix_errors, name)
+        translated = translate_nix_exception(bound("boom"))
+        assert translated is not None, f"{name} has no public counterpart"
+        assert isinstance(translated, nanopynix.NixError)
 
     assert inproc is not None

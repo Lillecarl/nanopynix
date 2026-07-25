@@ -317,16 +317,10 @@ NB_MODULE(util, m) {
           "Parse a hash string in any format (SRI, hex, base32, base64) and return SRI form.");
 
     // ── Exception bindings ──────────────────────────────────────
-    // Register specific Nix C++ exceptions as Python types. Translators are
-    // tried last-registered-first, so a base class must be registered BEFORE
-    // its subclasses or it would shadow them (see nix_error_info.hh).
-    // nix::Error itself is deliberately NOT registered: it is the base of
-    // every type here and of the ones bound in nix_expr.cpp/nix_store.cpp,
-    // which live in different translation units with no ordering guarantee
-    // between them, so it could shadow any of them.
-    // These three are siblings, so their relative order does not matter.
-    using nanopynix::errinfo::bind_nix_error;
-    bind_nix_error<nix::SysError>(m, "SysError");
-    bind_nix_error<nix::UsageError>(m, "UsageError");
-    bind_nix_error<nix::UnimplementedError>(m, "UnimplementedError");
+    // Moved to nix_errors.cpp. They used to be spread across this file,
+    // nix_expr.cpp and nix_store.cpp, one nanobind translator per type, which
+    // made the outcome depend on the order those three modules happened to be
+    // imported in -- and forced nix::Error to be left unregistered entirely,
+    // since registering the base of every bound type could shadow all of them.
+    // One translator owning the whole hierarchy removes both problems.
 }

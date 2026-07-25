@@ -1333,10 +1333,6 @@ NB_MODULE(store, m) {
           "can apply -- see that function's docstring for why.");
 
     // ── Exception bindings ──────────────────────────────────────
-    // Siblings, all direct subclasses of nix::Error, so the base-before-
-    // subclass ordering rule (see nix_error_info.hh) does not bind here.
-    using nanopynix::errinfo::bind_nix_error;
-    bind_nix_error<nix::InvalidPath>(m, "InvalidPath");
-    bind_nix_error<nix::Unsupported>(m, "Unsupported");
-    bind_nix_error<nix::BadStorePath>(m, "BadStorePath");
+    // Moved to nix_errors.cpp, which owns every Nix exception class and the
+    // single translator that dispatches them. Nothing to register here.
 }

@@ -20,7 +20,12 @@
 /// error detail" is one concept and giving it two spellings would only mean
 /// every reader and every forwarding site has to know both.
 ///
-/// Use `bind_nix_error<T>(m, "Name")` in place of `nb::exception<T>`.
+/// The `raise()` below is the whole public surface: `nix_errors.cpp` owns the
+/// exception classes and the single translator, and calls it once per `catch`
+/// clause. It used to be paired with a `bind_nix_error<T>` helper that
+/// registered one translator per type; that is gone, because per-type
+/// translators made the result depend on module import order. See
+/// `nix_errors.cpp`'s header comment.
 
 #include <nanobind/nanobind.h>
 
@@ -149,34 +154,6 @@ inline void raise(PyObject *py_type, const nix::Error &err) {
         return;
     }
     PyErr_SetObject(py_type, exc.ptr());
-}
-
-/// Register the Python type for a Nix C++ exception, with ErrorInfo attached.
-///
-/// Drop-in replacement for `nb::exception<T>`. Two translators end up
-/// registered for `T`: the one `nb::exception<T>` installs (message only), and
-/// ours. nanobind keeps translators in an append-to-front list traversed
-/// head-first (`nanobind/src/nb_internals.h:416`), so the later registration
-/// wins and `nb::exception`'s is unreachable -- it is kept only because
-/// constructing `nb::exception<T>` is also what creates the Python type.
-///
-/// The same LIFO rule is why registration order across *types* matters, and
-/// why pairing them here is load-bearing: as long as each
-/// (nb::exception, ours) pair stays contiguous, registering bases before
-/// subclasses still results in subclasses being tried first.
-template <typename T>
-nb::object bind_nix_error(nb::module_ &m, const char *name, nb::handle base = PyExc_RuntimeError) {
-    nb::exception<T> py_type(m, name, base);
-    nb::detail::register_exception_translator(
-        [](const std::exception_ptr &p, void *payload) {
-            try {
-                std::rethrow_exception(p);
-            } catch (T &e) {
-                raise(static_cast<PyObject *>(payload), e);
-            }
-        },
-        py_type.ptr());
-    return py_type;
 }
 
 } // namespace nanopynix::errinfo

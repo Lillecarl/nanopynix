@@ -355,7 +355,13 @@ _CLASSIFIERS: list[tuple[re.Pattern[str], type[NixError], str]] = [
 # wire as a `TypeName: message` prefix. Authoritative when present: the
 # concrete C++ type is strictly better information than any message pattern.
 _NIX_EXCEPTION_TYPES: dict[str, type[NixError]] = {
-    # nix_expr.cpp
+    # The catch-all. Nix throws plain nix::Error freely from libstore and
+    # libexpr, and until nix_errors.cpp gave the hierarchy a single translator
+    # there was nothing to bind it to, so all of those arrived as a bare
+    # RuntimeError with the ErrorInfo discarded. `refine_within` can still
+    # narrow it by message, which is what makes a coarse type usable.
+    "Error": NixError,
+    # nix_errors.cpp -- all of these now live in one module
     # EvalBaseError is Nix's parent of EvalError, and it is what reaches us for
     # StackOverflowError (max-call-depth), IFDError, and RecoverableEvalError,
     # which derive from it rather than from EvalError. It maps to the same
@@ -372,12 +378,12 @@ _NIX_EXCEPTION_TYPES: dict[str, type[NixError]] = {
     "MissingArgumentError": MissingArgumentError,
     "RestrictedPathError": RestrictedPathError,
     "InfiniteRecursionError": InfiniteRecursionError,
-    # nix_store.cpp
+    # store-side
     "InvalidPath": InvalidPathError,
     "Unsupported": UnsupportedError,
     "BadStorePath": BadStorePathError,
     "BuildError": BuildError,
-    # nix_util.cpp
+    # util-side
     "SysError": NixSysError,
     "UsageError": UsageError,
     "UnimplementedError": UnimplementedError,

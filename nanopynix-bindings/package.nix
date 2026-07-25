@@ -111,7 +111,7 @@ buildPythonPackage (
 
     postInstall = ''
       _site="$out/${python.sitePackages}"
-      for mod in util store expr fetchers flake main; do
+      for mod in errors util store expr fetchers flake main; do
         _pat=""
         if [ -f "src/$mod.pat" ]; then
           _pat="-p src/$mod.pat"
@@ -123,6 +123,7 @@ buildPythonPackage (
     '';
 
     pythonImportsCheck = [
+      "nanopynix_bindings.errors"
       "nanopynix_bindings.util"
       "nanopynix_bindings.store"
       "nanopynix_bindings.expr"
