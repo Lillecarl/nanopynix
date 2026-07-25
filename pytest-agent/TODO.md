@@ -81,6 +81,19 @@ even when the GIL is never released. Ours deliberately does not touch
 `faulthandler`'s process-global `dump_traceback_later` timer, so enabling both
 does not silently disable one. The README says which to reach for.
 
+Silencing the terminal reporter is the one place where agent mode can stop
+being a good citizen without anyone noticing. It works by swapping the
+reporter's output file, and for a long time that file was `os.devnull` --
+which quietly destroyed every *other* plugin's output too, since they all
+report through the same writer. `--cov`, `--durations` and `--junit-xml` all
+produced nothing, with no error. It is a file now, and the sections written
+by plain `pytest_terminal_summary` hookimpls are printed back out. The
+selection is structural rather than a list of known plugins: a
+`wrapper=True, trylast=True` hookimpl is the innermost wrapper, so its window
+contains exactly the non-wrapper impls and none of TerminalReporter's own
+before/after writes. Any new plugin is covered without pytest-agent knowing
+it exists.
+
 Other overlaps, accepted as-is: `note()` against `record_property` (which
 only reaches junit-xml), `index.jsonl` against `--junit-xml` and
 pytest-reportlog (raw report dumps rather than a curated per-test record),

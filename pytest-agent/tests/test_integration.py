@@ -11,6 +11,7 @@ import sys
 
 import conftest
 import pytest
+from pytest_agent._runtime import MAX_TERMINAL_SUMMARY_LINES
 
 # The PYTHONPATH wiring and harness-env-var cleanup these subprocess runs
 # depend on live in conftest._clean_agent_env, which is autouse for every
@@ -384,3 +385,111 @@ def test_a_labeled_background_run_is_still_there_to_be_asked_about_afterwards(py
     # And the focused runs it outlived really are gone -- otherwise this
     # would pass with pruning switched off entirely.
     assert not (agent_dir / "runs-0002").exists()
+
+
+def test_another_plugins_end_of_run_report_is_not_swallowed(pytester: pytest.Pytester) -> None:
+    # Agent mode redirects the terminal reporter away from the terminal, which
+    # for a long time meant os.devnull -- so every plugin reporting through it
+    # produced nothing at all. Asking for a report and getting neither the
+    # report nor an error is the worst way to lose output.
+    pytester.makeconftest(
+        """
+        def pytest_terminal_summary(terminalreporter, exitstatus, config):
+            terminalreporter.write_line("PLUGIN-REPORT: 42% of something")
+        """,
+    )
+    pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
+
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent")
+    assert result.ret == pytest.ExitCode.OK
+
+    out = "\n".join(result.outlines)
+    assert "also reported by other plugins" in out
+    assert "PLUGIN-REPORT: 42% of something" in out
+    # Printed raw, without the [pytest-agent] prefix the rest of the output
+    # carries: these are somebody else's aligned tables.
+    assert "[pytest-agent] PLUGIN-REPORT" not in out
+
+    terminal_log = pytester.path / ".pytest-agent" / "runs-0001" / "terminal.txt"
+    assert "PLUGIN-REPORT: 42% of something" in terminal_log.read_text(encoding="utf-8")
+
+
+def test_durations_asked_for_on_the_command_line_actually_appear(pytester: pytest.Pytester) -> None:
+    # The builtin case, and the one an agent reaches for when a suite got
+    # slow: --durations is a plain pytest_terminal_summary in _pytest.runner,
+    # so it went the same way as every third-party report.
+    pytester.makepyfile(
+        test_sample="""
+        import time
+
+
+        def test_slowish():
+            time.sleep(0.05)
+        """,
+    )
+
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent", "--durations=3")
+    assert result.ret == pytest.ExitCode.OK
+
+    out = "\n".join(result.outlines)
+    assert "slowest 3 durations" in out
+    assert "test_slowish" in out
+
+
+def test_a_long_report_keeps_its_head_and_its_tail(pytester: pytest.Pytester) -> None:
+    # A coverage table's TOTAL is its last line and its column headings are
+    # the first, so eliding from either end alone loses the half somebody ran
+    # the report for.
+    pytester.makeconftest(
+        """
+        def pytest_terminal_summary(terminalreporter, exitstatus, config):
+            terminalreporter.write_line("REPORT-HEADER")
+            for n in range(100):
+                terminalreporter.write_line(f"row {n}")
+            terminalreporter.write_line("REPORT-TOTAL")
+        """,
+    )
+    pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
+
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent")
+    assert result.ret == pytest.ExitCode.OK
+
+    out = "\n".join(result.outlines)
+    assert "REPORT-HEADER" in out
+    assert "REPORT-TOTAL" in out
+    assert "lines elided, full text in terminal.txt" in out
+    # Genuinely bounded, not just truncated somewhere: a 102-line report must
+    # not push the failure list off the top of an agent's context.
+    assert out.count("\nrow ") < MAX_TERMINAL_SUMMARY_LINES
+
+    terminal_log = pytester.path / ".pytest-agent" / "runs-0001" / "terminal.txt"
+    text = terminal_log.read_text(encoding="utf-8")
+    assert "row 50" in text, "the elided middle is still on disk"
+
+
+def test_a_run_with_nothing_extra_to_report_stays_as_quiet_as_before(pytester: pytest.Pytester) -> None:
+    # The whole point of agent mode is a terminal that stays short. Capturing
+    # the reporter's output must not turn into printing it.
+    pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
+
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent")
+    assert result.ret == pytest.ExitCode.OK
+
+    out = "\n".join(result.outlines)
+    assert "also reported by other plugins" not in out
+    assert "test session starts" not in out
+
+
+def test_pytests_own_output_is_kept_on_disk_rather_than_destroyed(pytester: pytest.Pytester) -> None:
+    # What plain pytest would have printed is a real artifact -- the thing to
+    # read when a failure is about pytest's own reporting rather than about a
+    # test. Redirected, not discarded.
+    pytester.makepyfile(test_sample="def test_fails():\n    assert 1 == 2\n")
+
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent")
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+
+    text = (pytester.path / ".pytest-agent" / "runs-0001" / "terminal.txt").read_text(encoding="utf-8")
+    assert "test session starts" in text
+    assert "assert 1 == 2" in text
+    assert "1 failed" in text

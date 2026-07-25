@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from _pytest.config import (
@@ -16,8 +16,11 @@ from pytest_agent._notes import agent_notes as agent_notes
 from pytest_agent._notes import pop_runtime, push_runtime
 from pytest_agent._pipe_guard import find_banned_pipe_reader, zero_detail_mode
 from pytest_agent._profile import profile as profile
-from pytest_agent._runtime import RUNTIME_PLUGIN_NAME, AgentRuntime
+from pytest_agent._runtime import RUNTIME_PLUGIN_NAME, TERMINAL_LOG_NAME, AgentRuntime
 from pytest_agent._terminal import RealTerminal
+
+if TYPE_CHECKING:
+    from typing import TextIO
 
 # Set by pytest_addoption, read by pytest_configure: which harness env var (if
 # any) caused --agent's default to turn on by itself, so the startup banner
@@ -172,13 +175,16 @@ def pytest_configure(config: pytest.Config) -> None:
         except ValueError as error:
             raise pytest.UsageError(f"--agent-label: {error}") from None
 
-    _silence_terminal_reporter(config)
-
     agent_dir = cast("str", config.getoption("agent_dir"))
     top_root = Path(agent_dir)
     if not top_root.is_absolute():
         top_root = config.rootpath / top_root
     run_number, root = next_run_dir(top_root)
+
+    # After the run directory exists, because that is where the reporter's
+    # output now goes.
+    terminal_log_path = root / TERMINAL_LOG_NAME
+    terminal_log = _redirect_terminal_reporter(config, terminal_log_path)
 
     # _agent_default() (and its _autodetected_via side effect) runs
     # unconditionally at parser-setup time to compute --agent's default, even
@@ -200,6 +206,8 @@ def pytest_configure(config: pytest.Config) -> None:
         heartbeat_interval=heartbeat_interval,
         stuck_after=stuck_after,
         terminal=_REAL_TERMINAL,
+        terminal_log=terminal_log,
+        terminal_log_path=terminal_log_path,
         label=label,
         autodetected_via=autodetected_via,
     )
@@ -210,28 +218,45 @@ def pytest_configure(config: pytest.Config) -> None:
     push_runtime(runtime)
 
 
-def _silence_terminal_reporter(config: pytest.Config) -> None:
-    """Make the builtin terminal reporter print nothing, without fully
-    unregistering it.
+def _redirect_terminal_reporter(config: pytest.Config, path: Path) -> TextIO | None:
+    """Point the builtin terminal reporter at *path* instead of the terminal.
 
     Fully unregistering it (config.pluginmanager.unregister(...)) was tried
     first and broke pytest's own assertion-rewrite comparison output:
     Config.get_terminal_writer() asserts the "terminalreporter" plugin is
     still registered, and pytest_assertrepr_compare calls that internally to
-    get a highlighter for every failing comparison. Instead, the reporter
-    stays registered (so that internal lookup keeps succeeding) but its
-    output file is swapped for os.devnull, so every dot/PASSED-line/summary
-    it would normally print is silently discarded.
+    get a highlighter for every failing comparison. Instead the reporter stays
+    registered (so that internal lookup keeps succeeding) and only its output
+    file is swapped.
+
+    A file rather than os.devnull, which is what this was for a long time.
+    Sending it to devnull destroys more than pytest's own per-test reporting:
+    every plugin that reports through the terminal writer -- pytest-cov's
+    coverage table, `--durations`, `--junit-xml`'s "generated xml file" line --
+    was silently producing nothing in agent mode. Asking for a report and
+    getting no report and no error is the worst way to lose output, and it
+    made agent mode a bad citizen of the plugin API. Now nothing is destroyed:
+    it is one file read away, and the sections with no agent-mode equivalent
+    are surfaced by AgentRuntime.pytest_terminal_summary.
+
+    Not a tty, so TerminalWriter emits no colour codes and the file stays
+    plain text.
     """
     terminal_reporter = config.pluginmanager.get_plugin("terminalreporter")
     if terminal_reporter is None:
-        return
-    devnull = Path(os.devnull).open("w", encoding="utf-8")
-    terminal_reporter._tw = create_terminal_writer(config, devnull)  # type: ignore[reportPrivateUsage] -- see docstring above  # noqa: SLF001
+        return None
+    log = path.open("w", encoding="utf-8")
+    terminal_reporter._tw = create_terminal_writer(config, log)  # type: ignore[reportPrivateUsage] -- see docstring above  # noqa: SLF001
+    return log
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
     runtime = config.pluginmanager.get_plugin(RUNTIME_PLUGIN_NAME)
     if runtime is not None:
-        pop_runtime(cast("AgentRuntime", runtime))
+        agent_runtime = cast("AgentRuntime", runtime)
+        pop_runtime(agent_runtime)
         config.pluginmanager.unregister(runtime)
+        # Last: the terminal reporter writes its stats line after the
+        # terminal-summary hook, so this file is live until pytest is done
+        # with the session entirely.
+        agent_runtime.close_terminal_log()
