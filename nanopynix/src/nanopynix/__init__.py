@@ -75,6 +75,7 @@ from nanopynix.logging import LogCollector
 from nanopynix.models import (
     BuildResult,
     Derivation,
+    DerivationOutput,
     DerivationOutputs,
     FlakeRef,
     GcResult,

@@ -1,7 +1,10 @@
 nanopynix_bindings.expr.__prefix__:
     type ValueType = int | float | bool | str | None | list[ValueType] | dict[str, ValueType]
+    class EditLocation(TypedDict):
+        path: str
+        line: int
     \from collections.abc import Callable, Sequence
-    \from typing import overload
+    \from typing import TypedDict, overload
     \from nanopynix_bindings.store import Store
 
 nanopynix_bindings.expr.register_primop:
@@ -12,6 +15,9 @@ nanopynix_bindings.expr.register_primop:
         doc: str,
         callback: Callable[..., ValueType],
     ) -> None: ...
+
+nanopynix_bindings.expr.Value.edit_location:
+    def edit_location(self) -> EditLocation: ...
 
 nanopynix_bindings.expr.Value.to_python:
     def to_python(self) -> ValueType: ...

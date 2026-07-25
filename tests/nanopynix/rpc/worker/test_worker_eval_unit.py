@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from nanopynix_proto.nix.eval import OpenEvalRequest
@@ -29,6 +30,9 @@ from nanopynix.rpc.worker._worker_eval import (  # type: ignore[reportPrivateUsa
 from nanopynix.rpc.worker._worker_nix import (
     NixThreadExecutor,  # type: ignore[reportPrivateUsage] -- test verifies thread confinement
 )
+
+if TYPE_CHECKING:
+    from nanopynix_bindings.store import Store
 
 
 class _FakeBridge:
@@ -175,8 +179,12 @@ async def test_open_eval_allows_concurrent_eval_states(monkeypatch: pytest.Monke
     monkeypatch.setattr(nix_core.nanopynix_expr, "EvalState", _FakeEvalState)
 
     state = WorkerState()
-    second_handle = state.handles.allocate(LocalStore("second-store"), HandleKind.STORE)
-    first_handle = state.handles.allocate(LocalStore("first-store"), HandleKind.STORE)
+    # These strings stand in for a store only as identity markers -- the
+    # assertions below check *which* one open_eval picked, and _FakeEvalState
+    # never calls anything on them. Cast because LocalStore now names the real
+    # binding type rather than Any.
+    second_handle = state.handles.allocate(LocalStore(cast("Store", "second-store")), HandleKind.STORE)
+    first_handle = state.handles.allocate(LocalStore(cast("Store", "first-store")), HandleKind.STORE)
     state.nix_path = ["nixpkgs=/tmp/nixpkgs"]
     handler = EvalServiceHandler(state)
 

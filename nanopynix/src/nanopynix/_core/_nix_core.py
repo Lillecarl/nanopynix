@@ -12,6 +12,22 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 
+def build_mode_value(build_mode: nanopynix_store.BuildMode | int | None) -> int:
+    """Normalise the three ways a caller may name a build mode to Nix's int.
+
+    Shared because both engines accept the same three spellings and must agree
+    on what each means: the enum, the raw int Nix uses on the wire, and
+    ``None`` for "normal". Previously one copy lived on rpc's ValueProxy while
+    inproc simply typed the parameter ``Any`` and called ``int()`` on it, which
+    accepted anything with an ``__int__`` and rejected the enum's own name.
+    """
+    if build_mode is None:
+        return nanopynix_store.BuildMode.Normal.value
+    if isinstance(build_mode, int):
+        return build_mode
+    return build_mode.value
+
+
 class NixCore:
     """Pointer-level Nix operations that must run on a Nix thread.
 

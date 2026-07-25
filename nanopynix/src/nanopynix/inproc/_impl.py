@@ -27,6 +27,7 @@ from nanopynix_proto.nix.store import StoreDirs
 
 from nanopynix._core._extract import locked_flake as _locked_flake_proto
 from nanopynix._core._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
+from nanopynix._core._nix_core import build_mode_value
 from nanopynix._core._nix_executor import NIX_EVALUATOR_STACK_SIZE, NixThreadExecutor
 from nanopynix._core._primops import register_import_path_primops, to_primop_specs
 from nanopynix._wire import (
@@ -41,6 +42,8 @@ from nanopynix.logging import BusSubscription, CallbackBus, LogCollector, LogStr
 from nanopynix.models import (
     BuildResult,
     Derivation,
+    DerivationOutput,
+    DerivationOutputs,
     GcResult,
     GcRoot,
     LockedInput,
@@ -62,7 +65,7 @@ from nanopynix.settings import (
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping, Sequence
+    from collections.abc import AsyncIterator, Callable, Mapping, Sequence
     from os import PathLike
 
     from nanopynix.models import PrimOpSpec
@@ -84,7 +87,7 @@ _RAW_GC_ACTIONS = {
 }
 
 
-def _raw_gc_action(action: PublicGcAction) -> Any:
+def _raw_gc_action(action: PublicGcAction) -> nanopynix_store.GCAction:
     try:
         return _RAW_GC_ACTIONS[action]
     except KeyError as exc:
@@ -130,7 +133,16 @@ class _InprocProcessGuard:
 _process_guard = _InprocProcessGuard()
 
 
-def _print_store_path(raw_store: Any, raw_path: Any) -> str:
+def _print_store_path(raw_store: nanopynix_store.Store, raw_path: nanopynix_store.StorePath | str) -> str:
+    """Render a store path absolute, whichever of Nix's two spellings arrives.
+
+    The union is not convenience: the bindings genuinely return both. Anything
+    that goes through ``parse_store_path`` hands back a ``StorePath``, whose
+    ``str()`` is the bare ``hash-name``, while the collective queries funnel
+    through C++'s ``store_paths_to_string_list`` and hand back strings that are
+    already absolute. Normalising both here is what lets one helper serve
+    either; the prefix test below is what makes it idempotent.
+    """
     path = str(raw_path)
     store_dir = raw_store.get_store_dir().rstrip("/")
     if path == store_dir or path.startswith(f"{store_dir}/"):
@@ -138,15 +150,17 @@ def _print_store_path(raw_store: Any, raw_path: Any) -> str:
     return f"{store_dir}/{path}"
 
 
-def _print_store_paths(raw_store: Any, raw_paths: Any) -> list[str]:
+def _print_store_paths(
+    raw_store: nanopynix_store.Store, raw_paths: Sequence[nanopynix_store.StorePath | str]
+) -> list[str]:
     return [_print_store_path(raw_store, path) for path in raw_paths]
 
 
-def _parse_store_paths(raw_store: Any, paths: list[str]) -> list[Any]:
+def _parse_store_paths(raw_store: nanopynix_store.Store, paths: list[str]) -> list[nanopynix_store.StorePath]:
     return [raw_store.parse_store_path(path) for path in paths]
 
 
-def _run_with_log_context(operation_id: int, func: Any, args: tuple[Any, ...]) -> Any:
+def _run_with_log_context[T](operation_id: int, func: Callable[..., T], args: tuple[object, ...]) -> T:
     """Run one Nix call on the Nix thread, in this operation's log context.
 
     This is the single chokepoint through which every in-process Nix call
@@ -357,7 +371,7 @@ class Session:
         if not self._opened:
             raise InprocSessionClosedError("inproc Session is not open — use async with")
 
-    async def run(self, func: Any, *args: Any) -> Any:
+    async def run[T](self, func: Callable[..., T], *args: object) -> T:
         """Run one Store-only Nix operation on this session's Store pool."""
         self._check_open()
         executor = self._executor
@@ -369,7 +383,7 @@ class Session:
         finally:
             self._collector.request_finalized(operation_id)
 
-    async def _run_closing(self, func: Any, *args: Any) -> Any:
+    async def _run_closing[T](self, func: Callable[..., T], *args: object) -> T:
         executor = self._executor
         if executor is None:
             raise RuntimeError("open inproc Session has no Nix executor")
@@ -466,7 +480,7 @@ class Store:
         if local is not None:
             await self._session._run_closing(local.close)  # type: ignore[reportPrivateUsage] -- Store teardown follows Session close ordering  # noqa: SLF001
 
-    def _require_raw(self) -> Any:
+    def _require_raw(self) -> nanopynix_store.Store:
         if self._local is None:
             raise InprocSessionClosedError("Store is not open — use async with")
         return self._local.require_raw()
@@ -584,7 +598,7 @@ class Store:
         derived_paths: Sequence[str | PublicStorePath],
         /,
         *,
-        build_mode: Any = None,
+        build_mode: BuildMode | int | None = None,
         eval_store: Store | None = None,
     ) -> list[BuildResult]:
         """Build derived paths and return one result per Nix build outcome.
@@ -594,7 +608,7 @@ class Store:
         """
         if eval_store is not None and eval_store._session is not self._session:  # type: ignore[reportPrivateUsage] -- session ownership guard  # noqa: SLF001
             raise ValueError("eval_store belongs to a different inproc Session")
-        mode = BuildMode.Normal.value if build_mode is None else int(build_mode)
+        mode = build_mode_value(build_mode)
         response = await self._session.run(
             self._require_raw().store_build_paths_with_results,
             {
@@ -613,7 +627,20 @@ class Store:
         """Parse and return the ``.drv`` file at ``drv_path``."""
         raw_path = await self._session.run(self._require_raw().parse_store_path, str(drv_path))
         result = await self._session.run(self._require_raw().read_derivation, raw_path)
-        return Derivation(**result)
+        # The two nested maps are built explicitly rather than left to pydantic's
+        # dict->model coercion: the coercion works, but it is invisible to the
+        # type checker, so `Derivation(**result)` would typecheck against any
+        # nested shape at all -- including a wrong one.
+        return Derivation(
+            name=result["name"],
+            system=result["system"],
+            builder=result["builder"],
+            args=result["args"],
+            env=result["env"],
+            input_srcs=result["input_srcs"],
+            input_drvs={path: DerivationOutputs(**node) for path, node in result["input_drvs"].items()},
+            outputs={name: DerivationOutput(**output) for name, output in result["outputs"].items()},
+        )
 
     async def collect_garbage(
         self,
@@ -784,7 +811,9 @@ class Store:
         """
         return await self._session.run(self._require_raw().verify_store, check_contents, repair)
 
-    async def _public_store_paths(self, raw_paths: Any) -> list[PublicStorePath]:
+    async def _public_store_paths(
+        self, raw_paths: Sequence[nanopynix_store.StorePath | str]
+    ) -> list[PublicStorePath]:
         paths = await self._session.run(_print_store_paths, self._require_raw(), raw_paths)
         return [PublicStorePath(path) for path in paths]
 
@@ -925,7 +954,7 @@ class EvalSession:
     def has_pending_work(self) -> bool:
         return self._executor.has_pending_work()
 
-    async def run(self, func: Any, *args: Any) -> Any:
+    async def run[T](self, func: Callable[..., T], *args: object) -> T:
         """Run evaluator and Value work on this evaluator's dedicated thread."""
         operation_id = self._session._next_operation_id()  # type: ignore[reportPrivateUsage] -- Session owns operation correlation  # noqa: SLF001
         try:
@@ -933,14 +962,14 @@ class EvalSession:
         finally:
             self._session._collector.request_finalized(operation_id)  # type: ignore[reportPrivateUsage] -- Session owns the log collector  # noqa: SLF001
 
-    async def _run_closing(self, func: Any, *args: Any) -> Any:
+    async def _run_closing[T](self, func: Callable[..., T], *args: object) -> T:
         operation_id = self._session._next_operation_id()  # type: ignore[reportPrivateUsage] -- Session owns operation correlation  # noqa: SLF001
         try:
             return await self._executor.run_closing(_run_with_log_context, operation_id, func, args)
         finally:
             self._session._collector.request_finalized(operation_id)  # type: ignore[reportPrivateUsage] -- Session owns the log collector  # noqa: SLF001
 
-    def _require_raw(self) -> Any:
+    def _require_raw(self) -> nanopynix_expr.EvalState:
         if not self._active or self._local is None:
             raise InprocSessionClosedError("EvalSession is not open — use async with")
         return self._local.require_raw()
