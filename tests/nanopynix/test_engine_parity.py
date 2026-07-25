@@ -196,17 +196,48 @@ LEDGER: dict[str, str] = {
         )
     },
     # ── Value ──────────────────────────────────────────────────────
-    # The coercion family is the clearest case in the whole ledger: eight
-    # methods, one concept, two vocabularies, and `as_string` vs `coerce_str`
-    # cannot even be mapped by a naming rule.
-    "Value.as_bool:inproc-only": "DEFECT: rpc spells this coerce_bool.",
-    "Value.as_int:inproc-only": "DEFECT: rpc spells this coerce_int.",
-    "Value.as_float:inproc-only": "DEFECT: rpc spells this coerce_float.",
-    "Value.as_string:inproc-only": "DEFECT: rpc spells this coerce_str -- and abbreviates, so not even a consistent rename.",
-    "Value.coerce_bool:rpc-only": "DEFECT: inproc spells this as_bool.",
-    "Value.coerce_int:rpc-only": "DEFECT: inproc spells this as_int.",
-    "Value.coerce_float:rpc-only": "DEFECT: inproc spells this as_float.",
-    "Value.coerce_str:rpc-only": "DEFECT: inproc spells this as_string.",
+    # These eight names look like one concept spelled two ways. They are not.
+    # `tests/temp/test_coercion_semantics.py` ran both families over the same
+    # five values and they disagree on nearly every cell:
+    #
+    #             "42"                 42                  true
+    #   as_int    NixTypeError         42                  NixTypeError
+    #   coerce_int  42                 42                  NixCoercionError
+    #   as_string   "42"               NixTypeError        NixTypeError
+    #   coerce_str  "42"               "42"                "1"
+    #
+    # inproc's `as_*` are strict type assertions; `coerce_*` convert. So the
+    # counterpart of `as_int` is rpc's `force_as(NixType.INT)` (which
+    # type-checks and then forces), NOT `coerce_int`. Renaming one family to
+    # the other would put a single name on two behaviours -- strictly worse
+    # than the current asymmetry.
+    "Value.as_bool:inproc-only": (
+        "DEFECT (strict family): the strict spelling divergence -- rpc's equivalent is "
+        "force_as(NixType.BOOL), not coerce_bool. Also asymmetric on null: inproc as_bool(null) "
+        "returns False for optional-flag callers, rpc coerce_bool(null) raises."
+    ),
+    "Value.as_int:inproc-only": "DEFECT (strict family): rpc's equivalent is force_as(NixType.INT), not coerce_int.",
+    "Value.as_float:inproc-only": (
+        "DEFECT (strict family): rpc's equivalent is force_as(NixType.FLOAT), not coerce_float."
+    ),
+    "Value.as_string:inproc-only": (
+        "DEFECT (strict family): rpc's equivalent is force_as(NixType.STRING), not coerce_str."
+    ),
+    # `coerce_str` used to be rpc-only, and used to be a Python reimplementation
+    # that did not match Nix ("true" where Nix says "1", "null" where Nix says
+    # ""). It is now `builtins.toString` on both engines, delegated to
+    # EvalState::coerceToString, so it is absent from this ledger entirely --
+    # which is the point.
+    #
+    # The other three have no Nix analogue at all: Nix has no toInt/toFloat/
+    # toBool, so there is nothing to be faithful to. They stay rpc-only rather
+    # than spreading a shape that cannot be justified by Nix semantics; the
+    # open question of whether they should exist at all is tracked in TODO.md.
+    "Value.coerce_bool:rpc-only": "DEFECT (lenient, non-Nix): no Nix bool coercion exists; inproc's as_bool is strict.",
+    "Value.coerce_int:rpc-only": "DEFECT (lenient, non-Nix): no Nix int coercion exists; inproc's as_int is strict.",
+    "Value.coerce_float:rpc-only": (
+        "DEFECT (lenient, non-Nix): no Nix float coercion exists; inproc's as_float is strict."
+    ),
     # Not a rename: inproc.type is `async -> str` (a name like "string") and
     # rpc.get_type is `async -> NixType`. Porting a caller means changing how
     # the result is compared, not just what the method is called.
@@ -216,7 +247,11 @@ LEDGER: dict[str, str] = {
     "Value.json:inproc-only": "DEFECT: rpc has force_json but not the plain json convenience.",
     "Value.close:inproc-only": "DEFECT: rpc spells value teardown release() only; inproc has both close() and release().",
     "Value.get_derived_path:inproc-only": "DEFECT: extracting a DerivedPath is pure libexpr.",
-    "Value.force_as:rpc-only": "DEFECT: undocumented rpc-only coercion entry point with no inproc counterpart.",
+    "Value.force_as:rpc-only": (
+        "DEFECT: this is rpc's *strict* accessor -- the real counterpart of inproc's as_int/as_float/"
+        "as_bool/as_string, reached by NixType argument rather than by four method names. One of the "
+        "two spellings should win; see the strict-family entries above."
+    ),
     "Value.handle:rpc-only": "TRANSPORT: the worker-side value handle this proxy stands for.",
     "Value.attr:async": "DEFECT: inproc awaits, rpc returns a proxy synchronously. Callers cannot be written once against both.",
     "Value.list_get:async": "DEFECT: as Value.attr.",

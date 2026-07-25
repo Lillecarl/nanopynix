@@ -27,6 +27,26 @@ validation and clearer error messages -- a real improvement, but a
 separate, behavior-changing redesign rather than a type-error fix, so it
 wasn't bundled into this pass.
 
+# Open: coerce_int/coerce_float/coerce_bool have no Nix analogue
+
+The engine-parity ledger originally recorded inproc's `as_*` and rpc's
+`coerce_*` as one concept spelled two ways. They are not: `as_*` are strict
+type assertions, `coerce_*` convert. `tests/nanopynix/test_scalar_accessor_semantics.py`
+now pins both.
+
+Resolved: `coerce_str` is `builtins.toString` on both engines, delegated to
+`EvalState::coerceToString` rather than reimplemented, so Nix-familiar callers
+get no surprises and there is nothing to drift.
+
+Still open: `coerce_int`/`coerce_float`/`coerce_bool` are rpc-only and are
+**not** Nix operations -- Nix has no `toInt`/`toFloat`/`toBool`, so there is no
+behaviour to be faithful to. They were left as-is rather than ported to inproc,
+because spreading them would double the surface of a shape Nix does not have,
+and they sit oddly beside the now-Nix-faithful `coerce_str` (`coerce_str true`
+is `"1"`, yet `coerce_bool "true"` is `True` -- two mental models in one API).
+Decide whether they should exist at all; if they stay, they want a name that
+does not imply Nix coercion.
+
 # Tracked: pre-existing complexity/arg-count debt (ruff-strict C901/PLR09xx)
 Enabling mccabe (`C901`) and Pylint's too-many-{branches,returns,arguments,
 statements} (`PLR0911`/`PLR0912`/`PLR0913`/`PLR0915`) in `ruff-strict.toml`

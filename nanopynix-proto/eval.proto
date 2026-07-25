@@ -19,6 +19,7 @@ service EvalService {
   rpc Force(ForceRequest) returns (nix.common.ForceValue);
   rpc ForceDeep(ForceDeepRequest) returns (nix.common.DeepValue);
   rpc ForceJson(ForceJsonRequest) returns (ForceJsonResponse);
+  rpc CoerceToString(CoerceToStringRequest) returns (CoerceToStringResponse);
   rpc RealiseString(RealiseStringRequest) returns (RealiseStringResponse);
   rpc RealiseArgv(RealiseArgvRequest) returns (RealiseArgvResponse);
   rpc EditLocation(EditLocationRequest) returns (EditLocationResponse);
@@ -144,6 +145,17 @@ message ForceJsonRequest {
 }
 message ForceJsonResponse {
   string json = 1;
+}
+
+// `builtins.toString` on the worker side. Distinct from RealiseString: this
+// coerces only, it does not build or copy the store paths the result names.
+message CoerceToStringRequest {
+  int64 request_id = 1000;
+  int64 handle = 1;
+  int64 eval_handle = 100;
+}
+message CoerceToStringResponse {
+  string value = 1;
 }
 
 message RealiseStringRequest {
