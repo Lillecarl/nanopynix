@@ -405,20 +405,25 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
 
 ## Dead wire surface, left by item 6
 
-10. **The `Force` RPC has no client.** Deleting `ValueProxy.force()` left
-    `eval.proto`'s `rpc Force(ForceRequest) returns (nix.common.ForceValue)`
-    reachable only by the worker handler that answers it: `_worker_eval.py`'s
-    `force`/`_do_force`/`_force_handle`, plus `ForceRequest` and
-    `common.proto`'s `ForceValue` message and its `models.py` re-export.
-    Every remaining read goes through `AsScalar` (scalars), `ForceJson`
-    (deep), `Attr`/`ListGet`/`AttrNames`/`ListLength` (navigation), or
+10. ~~**The `Force` RPC has no client.**~~ -- DONE. Deleting
+    `ValueProxy.force()` left `eval.proto`'s
+    `rpc Force(ForceRequest) returns (nix.common.ForceValue)` reachable
+    only by the worker handler answering it. Removed: the rpc, its
+    `ForceRequest`, `common.proto`'s `ForceValue` message, the
+    `models.py` re-export, and `_worker_eval.py`'s
+    `force`/`_do_force`/`_force_handle`. Every remaining read goes
+    through `AsScalar` (scalars), `ForceJson` (deep),
+    `Attr`/`ListGet`/`AttrNames`/`ListLength` (navigation), or
     `TypeName` (`get_type`).
 
     Same shape as item 5's `ForceDeep` deletion and the first CIP's
     `daemon.proto` finding: a schema kept alive only by the code that
-    serves it. Separate commit from item 6 on purpose -- it touches the
-    proto and so the generated-module build, and nothing about the
-    Python API depends on when it happens.
+    serves it. Kept out of item 6's commit because it touches the proto
+    and so the generated-module build.
+
+    `DeepValue`/`DeepList`/`DeepAttrs` were checked at the same time and
+    are **not** dead despite `ForceDeep` being gone -- `manager.proto`
+    carries primop call args and results as `DeepValue`. Left alone.
 
 ## Verification
 

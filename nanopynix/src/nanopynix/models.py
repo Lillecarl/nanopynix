@@ -48,9 +48,6 @@ from nanopynix_proto.nix.common import (
     FlakeRef as FlakeRef,
 )
 from nanopynix_proto.nix.common import (
-    ForceValue as ForceValue,
-)
-from nanopynix_proto.nix.common import (
     Input as Input,
 )
 from nanopynix_proto.nix.common import (

@@ -105,9 +105,9 @@ def _mock_value_handle(handle: int = 1, type_str: str = "int") -> MagicMock:
 def _mock_scalar(value: Any) -> MagicMock:
     """Return a Scalar proto mock -- what the AsScalar RPC answers with.
 
-    This used to build a ``ForceValue`` wrapper for the Force RPC, which was
-    deleted along with the client's ``force()``. AsScalar returns the scalar
-    itself, so the wrapper went with it.
+    This used to build a ``ForceValue`` wrapper for the Force RPC, which is
+    gone -- the wire op went the way of the client's ``force()``. AsScalar
+    answers with the scalar itself, so the wrapper went with it.
     """
     scalar = MagicMock()
     scalar.string_value = value if isinstance(value, str) else None
@@ -131,14 +131,6 @@ def _mock_build_response(
         outputs={"out": output_path},
         results=[build_result],
     )
-
-
-def _mock_force_value_remote(handle: int = 3, type_str: str = "int") -> MagicMock:  # type: ignore[reportUnusedFunction] -- kept for future test scenarios
-    """Return a ForceValue proto mock with remote_value."""
-    fv = MagicMock()
-    fv.scalar = None
-    fv.remote_value = _mock_value_handle(handle, type_str)
-    return fv
 
 
 def _mock_type_name_response(type_str: str = "attrs") -> MagicMock:
