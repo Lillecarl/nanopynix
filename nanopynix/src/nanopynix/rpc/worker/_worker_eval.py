@@ -85,7 +85,7 @@ from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
 from nanopynix.rpc.worker._service_adapter import (
     _proto_shape,  # type: ignore[reportPrivateUsage] -- internal module registry pattern
 )
-from nanopynix.rpc.worker._worker_nix import NixThreadExecutor
+from nanopynix.rpc.worker._worker_nix import NIX_EVALUATOR_STACK_SIZE, NixThreadExecutor
 
 _NIX_TYPE_MAP: dict[str, common_pb.NixType] = {
     "thunk": common_pb.NixType.THUNK,
@@ -215,6 +215,7 @@ class EvalServiceHandler(EvalServiceBase):
             thread_name_prefix="nix-eval",
             thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
             thread_finalizer=nanopynix_expr._exit_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
+            stack_size=NIX_EVALUATOR_STACK_SIZE,
         )
         eval_state = await self._state.run_request(
             request_id=message.request_id,
