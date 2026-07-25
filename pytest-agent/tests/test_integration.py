@@ -323,3 +323,64 @@ def test_agent_allow_pipe_bypasses_the_guard(pytester: pytest.Pytester) -> None:
 
     assert pytest_proc.returncode == 0
     assert b"pytest-agent: refusing to run" not in stderr
+
+
+def test_a_labeled_background_run_is_still_there_to_be_asked_about_afterwards(pytester: pytest.Pytester) -> None:
+    # The whole point of labels, end to end: start the long suite in the
+    # background, do focused runs while it goes, then come back and ask it
+    # what failed -- without knowing how many runs happened in between, which
+    # is the one thing an agent can't know in advance and so can't encode in a
+    # run number.
+    pytester.makepyfile(
+        test_slow="""
+        import time
+
+
+        def test_fails_early():
+            raise AssertionError("the failure the long run was for")
+
+
+        def test_takes_forever():
+            time.sleep(300)
+        """,
+    )
+    pytester.makepyfile(test_quick="def test_ok():\n    assert True\n")
+    agent_dir = pytester.path / ".pytest-agent"
+    labeled = agent_dir / "runs-0001"
+    index_path = labeled / "index.jsonl"
+
+    with conftest.running_pytest(
+        pytester.path,
+        "test_slow.py",
+        "--agent-label",
+        "full-suite",
+        "--agent-heartbeat",
+        "0.2",
+    ) as background:
+        conftest.wait_until(
+            lambda: index_path.is_file() and "test_fails_early" in index_path.read_text(encoding="utf-8"),
+            "the labeled run to record its failure",
+        )
+        # Enough focused runs to push the labeled one well out of the newest
+        # N, which is what would have deleted it before anyone asked.
+        for _ in range(3):
+            focused = conftest.run_cli(["test_quick.py", "--agent-keep-runs=1"], cwd=pytester.path)
+            assert focused.returncode == 0, focused.stderr
+
+        background.send_signal(signal.SIGTERM)
+        background.communicate(timeout=conftest.WAIT_TIMEOUT)
+
+    # One more *after* the labeled run released its lock, so what keeps it
+    # alive from here is the labeled retention budget and nothing else.
+    assert not (labeled / ".lock").exists()
+    after = conftest.run_cli(["test_quick.py", "--agent-keep-runs=1"], cwd=pytester.path)
+    assert after.returncode == 0, after.stderr
+    assert labeled.is_dir(), "the labeled run was pruned before anyone could ask about it"
+
+    asked = conftest.run_cli(["last-failures", "--run", "full-suite"], cwd=pytester.path)
+    assert asked.returncode == 0, asked.stderr
+    assert "runs-0001 [full-suite]" in asked.stdout
+    assert "test_fails_early" in asked.stdout
+    # And the focused runs it outlived really are gone -- otherwise this
+    # would pass with pruning switched off entirely.
+    assert not (agent_dir / "runs-0002").exists()

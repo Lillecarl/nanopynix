@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pytest_agent._capture import nodeid_is_evident_from
 from pytest_agent._crash import normalize_message
-from pytest_agent._history import existing_run_numbers, run_is_locked
+from pytest_agent._history import existing_run_numbers, run_is_locked, run_label, run_number_of
 from pytest_agent._paths import display_path
 
 if TYPE_CHECKING:
@@ -56,8 +56,12 @@ MAX_MESSAGE_CHARS = 160
 _NO_CRASH_GROUP = "\x00no-crash"
 
 _EPILOG = """\
-`pytest-agent rerun [--run N] [pytest args...]` re-runs the tests that failed
-in a recorded run.
+`pytest-agent rerun [--run N|LABEL] [pytest args...]` re-runs the tests that
+failed in a recorded run.
+
+A run started as `pytest --agent-label nightly ...` can be queried by that
+name from then on -- `--run nightly` -- which is how to ask about a long run
+left going in the background while shorter runs come and go around it.
 
 Anything else is forwarded to pytest with --agent, so `pytest-agent -x tests/`
 is `pytest --agent -x tests/`. Only the exact words above are subcommands; a
@@ -136,10 +140,9 @@ def _build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False, parents=[where])
     common.add_argument(
         "--run",
-        type=int,
         default=None,
-        metavar="N",
-        help="Query run N instead of the most recent one.",
+        metavar="N|LABEL",
+        help="Query a run by number, or by the --agent-label it was started with, instead of the most recent one.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -194,9 +197,8 @@ def _build_parser() -> argparse.ArgumentParser:
     compare.add_argument(
         "runs",
         nargs="*",
-        type=int,
         metavar="OLD NEW",
-        help="Two run numbers (default: the two newest runs on disk).",
+        help="Two runs, each a number or a label (default: the two newest runs on disk).",
     )
 
     subparsers.add_parser("help", help="Show this message.")
@@ -262,8 +264,8 @@ def _resolve_agent_dir(explicit: str | None) -> Path:
     )
 
 
-def _resolve_run_dir(explicit_dir: str | None, run: int | None) -> Path:
-    """The run directory to read: run N if asked for, else the newest usable one.
+def _resolve_run_dir(explicit_dir: str | None, run: str | None) -> Path:
+    """The run directory to read: the one named by *run*, else the newest usable one.
 
     "Newest" is the highest-numbered run whose index.jsonl exists, rather
     than history.jsonl's last line: a run killed by ^C (or one that segfaulted)
@@ -272,12 +274,24 @@ def _resolve_run_dir(explicit_dir: str | None, run: int | None) -> Path:
     """
     agent_dir = _resolve_agent_dir(explicit_dir)
     if run is not None:
-        return _run_dir_for(agent_dir, run)
+        return _select_run_dir(agent_dir, run)
 
     usable = _usable_run_numbers(agent_dir)
     if not usable:
         raise QueryError(f"no completed runs under {display_path(agent_dir)} -- run `pytest --agent` first")
     return agent_dir / f"runs-{usable[-1]:04d}"
+
+
+def _select_run_dir(agent_dir: Path, selector: str) -> Path:
+    """The run *selector* names -- a run number, or a label.
+
+    Unambiguous by construction rather than by precedence: validate_run_label
+    refuses an all-digit label at the writing end, so "is this a number?" is
+    the whole of the decision and no run can answer to both forms.
+    """
+    if selector.isdigit():
+        return _run_dir_for(agent_dir, int(selector))
+    return _run_dir_for_label(agent_dir, selector)
 
 
 def _run_dir_for(agent_dir: Path, number: int) -> Path:
@@ -287,6 +301,56 @@ def _run_dir_for(agent_dir: Path, number: int) -> Path:
         have = ", ".join(str(present) for present in available) if available else "none"
         raise QueryError(f"run {number} not found under {display_path(agent_dir)} (runs present: {have})")
     return candidate
+
+
+def _run_dir_for_label(agent_dir: Path, label: str) -> Path:
+    """The newest run labeled exactly *label*.
+
+    Exact match, not the substring matching `show` uses for nodeids: a label
+    is a name the caller chose, and having `full` quietly answer for
+    `full-suite-2` would make the identifier less trustworthy than the run
+    number it replaces.
+
+    Nothing enforces uniqueness across runs -- two invocations can pass the
+    same --agent-label, and re-running one command with the same label is a
+    natural thing to do -- so the newest wins, and says so when there was a
+    choice to make.
+    """
+    matches = [(number, run_dir) for number, run_dir, found in _labeled_runs(agent_dir) if found == label]
+    if not matches:
+        raise QueryError(
+            f"no run labeled {label!r} under {display_path(agent_dir)} ({_known_labels(agent_dir)}) -- "
+            "labels come from `pytest --agent-label NAME`, and a pruned run takes its label with it",
+        )
+    number, run_dir = matches[-1]
+    if len(matches) > 1:
+        print(
+            f"pytest-agent: {len(matches)} runs are labeled {label!r} -- reading the newest, runs-{number:04d}",
+            file=sys.stderr,
+        )
+    return run_dir
+
+
+def _labeled_runs(agent_dir: Path) -> list[tuple[int, Path, str]]:
+    """Every labeled run directory, oldest first, with its number and label."""
+    found: list[tuple[int, Path, str]] = []
+    for number in sorted(existing_run_numbers(agent_dir)):
+        run_dir = agent_dir / f"runs-{number:04d}"
+        label = run_label(run_dir)
+        if label is not None:
+            found.append((number, run_dir, label))
+    return found
+
+
+def _known_labels(agent_dir: Path) -> str:
+    """What labels *are* on disk -- so a typo costs a re-read, not a re-run."""
+    labels = sorted({label for _, _, label in _labeled_runs(agent_dir)})
+    if not labels:
+        return "no runs on disk are labeled"
+    shown = ", ".join(repr(label) for label in labels[:MAX_LISTED_NODEIDS])
+    if len(labels) > MAX_LISTED_NODEIDS:
+        shown += f", +{len(labels) - MAX_LISTED_NODEIDS} more"
+    return f"labels on disk: {shown}"
 
 
 def _usable_run_numbers(agent_dir: Path) -> list[int]:
@@ -328,7 +392,7 @@ def _load_records(run_dir: Path) -> list[dict[str, Any]]:
     return records
 
 
-def failing_nodeids(explicit_dir: str | None, run: int | None) -> tuple[list[str], Path]:
+def failing_nodeids(explicit_dir: str | None, run: str | None) -> tuple[list[str], Path]:
     """The failing nodeids of one recorded run, and the run they came from.
 
     Public because `pytest-agent rerun` (in cli.py) turns these straight into
@@ -368,8 +432,17 @@ def _warn_if_still_running(run_dir: Path) -> None:
     )
 
 
-def _run_label(run_dir: Path) -> str:
-    return f"{run_dir.name} ({display_path(run_dir)})"
+def _run_heading(run_dir: Path) -> str:
+    """How a run is named back to the caller.
+
+    Includes the --agent-label when there is one, because the query that most
+    needs it -- `--run nightly` against an archive of twenty runs -- is also
+    the one where "did it read the run I meant?" is worth answering without
+    being asked.
+    """
+    label = run_label(run_dir)
+    named = run_dir.name if label is None else f"{run_dir.name} [{label}]"
+    return f"{named} ({display_path(run_dir)})"
 
 
 def _print_detail(run_dir: Path, record: dict[str, Any]) -> None:
@@ -388,11 +461,11 @@ def _cmd_show(args: argparse.Namespace, run_dir: Path, records: list[dict[str, A
         matches = [record for record in records if pattern in record["nodeid"]]
     if not matches:
         raise QueryError(
-            f"no test matching {pattern!r} in {_run_label(run_dir)} ({len(records)} tests recorded) -- "
+            f"no test matching {pattern!r} in {_run_heading(run_dir)} ({len(records)} tests recorded) -- "
             "`pytest-agent last-failures` lists the failing ones",
         )
     if len(matches) > 1 and not args.all:
-        print(f"{len(matches)} tests in {_run_label(run_dir)} match {pattern!r}:")
+        print(f"{len(matches)} tests in {_run_heading(run_dir)} match {pattern!r}:")
         for record in matches:
             print(f"  [{record['outcome']}] {record['nodeid']}")
         print("narrow the pattern, or pass --all to print all of them")
@@ -406,7 +479,7 @@ def _cmd_show(args: argparse.Namespace, run_dir: Path, records: list[dict[str, A
 
 def _cmd_last_failures(args: argparse.Namespace, run_dir: Path, records: list[dict[str, Any]]) -> int:
     failures = [record for record in records if record["outcome"] in FAILING_OUTCOMES]
-    print(f"{_run_label(run_dir)}: {len(failures)} failed/errored of {len(records)} recorded")
+    print(f"{_run_heading(run_dir)}: {len(failures)} failed/errored of {len(records)} recorded")
     for record in failures:
         if args.detail:
             print()
@@ -424,12 +497,11 @@ def _cmd_last_failures(args: argparse.Namespace, run_dir: Path, records: list[di
     return 0
 
 
-def _load_run(agent_dir: Path, number: int) -> RunResult:
-    run_dir = _run_dir_for(agent_dir, number)
+def _load_run(run_dir: Path) -> RunResult:
     # Last record wins for a nodeid recorded twice (a rerun plugin, or a
     # parametrization collected twice): the later outcome is the run's answer.
     by_nodeid = {str(record["nodeid"]): record for record in _load_records(run_dir)}
-    return RunResult(number=number, run_dir=run_dir, by_nodeid=by_nodeid)
+    return RunResult(number=run_number_of(run_dir) or 0, run_dir=run_dir, by_nodeid=by_nodeid)
 
 
 def _scanned_line(numbers: list[int]) -> str:
@@ -453,7 +525,7 @@ def _cmd_history(args: argparse.Namespace) -> int:
     limit = int(args.limit)
     if limit > 0:
         numbers = numbers[-limit:]
-    runs = [_load_run(agent_dir, number) for number in numbers]
+    runs = [_load_run(_run_dir_for(agent_dir, number)) for number in numbers]
 
     pattern = str(args.pattern)
     nodeids = _matching_nodeids(runs, pattern)
@@ -516,7 +588,7 @@ def _one_line(message: str) -> str:
 
 def _cmd_compare(args: argparse.Namespace) -> int:
     agent_dir = _resolve_agent_dir(args.dir)
-    old, new = _runs_to_compare(agent_dir, [int(number) for number in args.runs])
+    old, new = _runs_to_compare(agent_dir, [str(selector) for selector in args.runs])
 
     shared = [nodeid for nodeid in new.by_nodeid if nodeid in old.by_nodeid]
     newly_failing = [nodeid for nodeid in shared if new.failed(nodeid) and not old.failed(nodeid)]
@@ -539,27 +611,30 @@ def _cmd_compare(args: argparse.Namespace) -> int:
     # Counted, not listed, and last: the usual cause is one of the two runs
     # being a filtered `-k` re-run, where "these 900 tests are missing" is
     # noise above the answer.
-    for label, other, run in ((new.run_dir.name, old, new), (old.run_dir.name, new, old)):
+    for name, other, run in ((new.run_dir.name, old, new), (old.run_dir.name, new, old)):
         only = [nodeid for nodeid in run.by_nodeid if nodeid not in other.by_nodeid]
         if only:
-            print(f"only in {label}: {len(only)} tests (`pytest-agent last-failures --run {run.number}`)")
+            print(f"only in {name}: {len(only)} tests (`pytest-agent last-failures --run {run.number}`)")
     return 0
 
 
-def _runs_to_compare(agent_dir: Path, requested: list[int]) -> tuple[RunResult, RunResult]:
+def _runs_to_compare(agent_dir: Path, requested: list[str]) -> tuple[RunResult, RunResult]:
     if len(requested) == 1:
-        raise QueryError("compare takes two run numbers, or none at all (the two newest runs on disk)")
+        raise QueryError("compare takes two runs, or none at all (the two newest runs on disk)")
     if len(requested) > 2:
-        raise QueryError(f"compare takes at most two run numbers, got {len(requested)}")
+        raise QueryError(f"compare takes at most two runs, got {len(requested)}")
     if requested:
-        return _load_run(agent_dir, requested[0]), _load_run(agent_dir, requested[1])
+        return (
+            _load_run(_select_run_dir(agent_dir, requested[0])),
+            _load_run(_select_run_dir(agent_dir, requested[1])),
+        )
     numbers = _usable_run_numbers(agent_dir)
     if len(numbers) < 2:
         raise QueryError(
             f"only {len(numbers)} run(s) under {display_path(agent_dir)} -- "
             "compare needs two (run `pytest --agent` again)",
         )
-    return _load_run(agent_dir, numbers[-2]), _load_run(agent_dir, numbers[-1])
+    return _load_run(_run_dir_for(agent_dir, numbers[-2])), _load_run(_run_dir_for(agent_dir, numbers[-1]))
 
 
 def _print_changed(title: str, nodeids: list[str], run: RunResult) -> None:
@@ -680,12 +755,12 @@ def _print_group(index: int, group: FailureGroup) -> None:
 def _cmd_digest(run_dir: Path, records: list[dict[str, Any]]) -> int:
     failures = [record for record in records if record["outcome"] in FAILING_OUTCOMES]
     if not failures:
-        print(f"{_run_label(run_dir)}: no failures out of {len(records)} tests recorded")
+        print(f"{_run_heading(run_dir)}: no failures out of {len(records)} tests recorded")
         return 0
     groups = _group_failures(failures)
     plural = "" if len(groups) == 1 else "s"
     print(
-        f"{_run_label(run_dir)}: {len(failures)} failed/errored of {len(records)} recorded, "
+        f"{_run_heading(run_dir)}: {len(failures)} failed/errored of {len(records)} recorded, "
         f"{len(groups)} distinct root cause{plural}",
     )
     for index, group in enumerate(groups, start=1):

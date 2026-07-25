@@ -11,7 +11,7 @@ from _pytest.config import (
 )
 
 from pytest_agent._harness_detect import detect_agent_harness
-from pytest_agent._history import next_run_dir
+from pytest_agent._history import next_run_dir, validate_run_label
 from pytest_agent._notes import agent_notes as agent_notes
 from pytest_agent._notes import pop_runtime, push_runtime
 from pytest_agent._pipe_guard import find_banned_pipe_reader, zero_detail_mode
@@ -72,6 +72,19 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--agent-dir",
         default=os.environ.get("PYTEST_AGENT_DIR", ".pytest-agent"),
         help="Directory for agent-mode run detail, relative to rootdir (default: %(default)s).",
+    )
+    group.addoption(
+        "--agent-label",
+        default=os.environ.get("PYTEST_AGENT_LABEL") or None,
+        metavar="NAME",
+        help=(
+            "Name this run, so later queries can find it by name instead of by "
+            "number: `pytest --agent-label nightly tests` then "
+            "`pytest-agent last-failures --run nightly`. Labeled runs get their own "
+            "retention budget, so a long run started in the background survives the "
+            "focused runs done while waiting for it. Letters, digits, '.', '_' and "
+            "'-'; not all digits (that is a run number)."
+        ),
     )
     group.addoption(
         "--agent-heartbeat",
@@ -148,6 +161,17 @@ def pytest_configure(config: pytest.Config) -> None:
     if zero_detail_mode(config) is not None:
         return
 
+    # Before claiming a run directory, so a rejected label doesn't leave an
+    # empty runs-NNNN behind; and here rather than in pytest_addoption, so a
+    # --collect-only run that never records anything isn't refused over the
+    # spelling of a label it was never going to use.
+    label = cast("str | None", config.getoption("agent_label"))
+    if label is not None:
+        try:
+            validate_run_label(label)
+        except ValueError as error:
+            raise pytest.UsageError(f"--agent-label: {error}") from None
+
     _silence_terminal_reporter(config)
 
     agent_dir = cast("str", config.getoption("agent_dir"))
@@ -176,6 +200,7 @@ def pytest_configure(config: pytest.Config) -> None:
         heartbeat_interval=heartbeat_interval,
         stuck_after=stuck_after,
         terminal=_REAL_TERMINAL,
+        label=label,
         autodetected_via=autodetected_via,
     )
     config.pluginmanager.register(runtime, RUNTIME_PLUGIN_NAME)

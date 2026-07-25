@@ -7,6 +7,23 @@ complexity and argument-count suppressions in `_pipe_guard.find_banned_pipe_read
 `AgentRuntime.__init__`, and `tests/test_capture.py::_report` are accepted for
 now rather than restructured.
 
+## Run labels: one source of truth, deliberately
+
+`--agent-label` is resolved from `meta.json` and nowhere else, even though
+`summary.json` and `history.jsonl` also carry the label. Those two are written
+at `sessionfinish`, so a resolver that consulted them would fail to find
+labels on exactly the runs the archive exists to explain -- the ones killed
+mid-run -- and would not find a labeled run at all until it finished, which
+defeats the purpose of naming a long background run. The copies in the two
+end-of-run records are for reading, not resolving.
+
+Both resolving a label and pruning scan every run directory and read its
+`meta.json`: O(runs on disk) per query, bounded by `--agent-keep-runs`
+(default 20, plus the labeled budget). No index is kept, because an index is
+another file two concurrent runs would have to agree on -- the failure mode
+the `.lock` work was about. If the default keep count ever grows by an order
+of magnitude, this is the thing to measure first.
+
 ## Why notes print to the terminal
 
 `note()`/`attach()` (see `_notes.py`) are the one thing agent mode prints that

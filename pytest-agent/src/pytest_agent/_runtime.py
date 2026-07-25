@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import faulthandler
 import json
+import os
 import platform
 import signal
 import threading
@@ -11,7 +12,13 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from pytest_agent._capture import TestRecorder, nodeid_is_evident_from, nodeid_to_relpath
-from pytest_agent._history import append_run_record, git_revision, prune_old_runs, release_run_lock
+from pytest_agent._history import (
+    append_run_record,
+    git_revision,
+    prune_old_runs,
+    release_run_lock,
+    write_run_meta,
+)
 from pytest_agent._paths import display_path
 
 if TYPE_CHECKING:
@@ -60,12 +67,14 @@ class AgentRuntime:
         heartbeat_interval: float,
         stuck_after: float,
         terminal: RealTerminal | None,
+        label: str | None = None,
         autodetected_via: str | None = None,
     ) -> None:
         self.config = config
         self.root = root
         self.top_root = top_root
         self.run_number = run_number
+        self.label = label
         self.keep_runs = keep_runs
         self.heartbeat_interval = heartbeat_interval
         self.stuck_after = stuck_after
@@ -107,14 +116,37 @@ class AgentRuntime:
         self.session_started_at = time.monotonic()
         self._install_sigterm_handler()
         self.started_at_iso = datetime.now(UTC).isoformat()
+        self._write_meta()
         if self.autodetected_via is not None:
             self._print(
                 f"auto-activated: found {self.autodetected_via} in the environment "
                 "(set PYTEST_AGENT_NO_AUTODETECT=1 to disable this)",
             )
-        self._print(f"run {self.run_number}: writing full per-test detail to: {self.root.resolve()}")
+        named = f"run {self.run_number}" if self.label is None else f"run {self.run_number} [{self.label}]"
+        self._print(f"{named}: writing full per-test detail to: {self.root.resolve()}")
         self._thread = threading.Thread(target=self._watch, name="pytest-agent-watcher", daemon=True)
         self._thread.start()
+
+    def _write_meta(self) -> None:
+        """Describe this run on disk before running a single test.
+
+        Everything here is knowable at session start, and all of it is only
+        useful before the run ends: the label so `--run <label>` can find a
+        suite that is still going, the pid and args so a run found half-written
+        in the archive can be tied back to the process and command that made
+        it. What the run *did* goes in summary.json at the end.
+        """
+        write_run_meta(
+            self.root,
+            {
+                "run": self.run_number,
+                "run_dir": self.root.name,
+                "label": self.label,
+                "started_at": self.started_at_iso,
+                "pid": os.getpid(),
+                "args": list(self.config.invocation_params.args),
+            },
+        )
 
     def pytest_collection_finish(self, session: pytest.Session) -> None:
         self.total_collected = len(session.items)
@@ -257,6 +289,7 @@ class AgentRuntime:
         record = {
             "run": self.run_number,
             "run_dir": self.root.name,
+            "label": self.label,
             "hostname": platform.node(),
             "started_at": self.started_at_iso,
             "duration_s": round(duration, 3),

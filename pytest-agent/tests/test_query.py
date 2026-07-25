@@ -4,7 +4,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from pytest_agent._history import create_run_lock
+from pytest_agent._history import create_run_lock, write_run_meta
 from pytest_agent._query import run
 
 if TYPE_CHECKING:
@@ -494,7 +494,7 @@ def test_compare_with_one_run_number_says_what_it_wanted(
 ) -> None:
     del three_runs
     assert run(["compare", "2"]) == 1
-    assert "compare takes two run numbers, or none at all" in capsys.readouterr().err
+    assert "compare takes two runs, or none at all" in capsys.readouterr().err
 
 
 def test_compare_needs_two_runs_to_exist(
@@ -557,3 +557,81 @@ def test_querying_a_directory_with_no_runs_explains_itself(
     assert run(["digest"]) == 1
 
     assert "run `pytest --agent` first" in capsys.readouterr().err
+
+
+def test_a_run_can_be_queried_by_the_label_it_was_started_with(
+    project: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The point of a label: an agent that started a long suite in the
+    # background doesn't know, and shouldn't have to work out, how many
+    # focused runs happened while it waited -- so it can't name the run by
+    # number, only by the name it chose up front.
+    write_run_meta(project / ".pytest-agent" / "runs-0001", {"run": 1, "label": "full-suite"})
+
+    assert run(["last-failures", "--run", "full-suite"]) == 0
+
+    out = capsys.readouterr().out
+    # The label is echoed back: "did it read the run I meant?" is worth
+    # answering without being asked, once runs can be named two ways.
+    assert "runs-0001 [full-suite]" in out
+    assert "3 failed/errored of 4 recorded" in out
+
+
+def test_a_labeled_run_can_still_be_queried_by_number(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    write_run_meta(project / ".pytest-agent" / "runs-0001", {"run": 1, "label": "full-suite"})
+
+    assert run(["last-failures", "--run", "1"]) == 0
+
+    assert "runs-0001 [full-suite]" in capsys.readouterr().out
+
+
+def test_an_unknown_label_says_which_labels_do_exist(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # A typo'd label and a pruned one look identical from here, and the
+    # difference matters: one is fixed by re-reading, the other by re-running.
+    # Listing what is on disk settles which without another command.
+    write_run_meta(project / ".pytest-agent" / "runs-0001", {"run": 1, "label": "full-suite"})
+
+    assert run(["last-failures", "--run", "ful-suite"]) == 1
+
+    err = capsys.readouterr().err
+    assert "no run labeled 'ful-suite'" in err
+    assert "'full-suite'" in err
+
+
+def test_asking_for_a_label_when_nothing_is_labeled_says_so(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    del project
+    assert run(["last-failures", "--run", "nightly"]) == 1
+
+    err = capsys.readouterr().err
+    assert "no runs on disk are labeled" in err
+
+
+def test_the_newest_run_wins_a_label_two_runs_share(three_runs: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Nothing enforces uniqueness -- re-running one command with the same
+    # label is a natural thing to do -- so the rule is stated rather than left
+    # to whatever order the directory happens to be read in.
+    agent_dir = three_runs / ".pytest-agent"
+    write_run_meta(agent_dir / "runs-0001", {"run": 1, "label": "nightly"})
+    write_run_meta(agent_dir / "runs-0003", {"run": 3, "label": "nightly"})
+
+    assert run(["last-failures", "--run", "nightly"]) == 0
+
+    captured = capsys.readouterr()
+    assert "runs-0003 [nightly]" in captured.out
+    # Said out loud, on stderr: the answer is right, but "which one did it
+    # pick?" is a question the caller now has, and silence answers it wrong.
+    assert "2 runs are labeled 'nightly'" in captured.err
+    assert "runs-0003" in captured.err
+
+
+def test_compare_accepts_labels_on_either_side(three_runs: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    agent_dir = three_runs / ".pytest-agent"
+    write_run_meta(agent_dir / "runs-0001", {"run": 1, "label": "before"})
+    write_run_meta(agent_dir / "runs-0002", {"run": 2, "label": "after"})
+
+    assert run(["compare", "before", "after"]) == 0
+
+    out = capsys.readouterr().out
+    assert "runs-0001 -> runs-0002" in out
+    assert "1 newly failing" in out

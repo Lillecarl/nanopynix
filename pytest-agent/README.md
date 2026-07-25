@@ -58,6 +58,8 @@ overwritten:
   history.jsonl             # one line per run, appended when it finishes --
                              # duration, counts, hostname, git rev, etc.
   runs-0001/
+    meta.json                 # what this run *is*, written before the first test:
+                               # run number, --agent-label, start time, pid, argv
     index.jsonl              # one JSON record per test, appended as it finishes;
                              # failures also carry `crash` (exception type,
                              # message, file:line) and `frames` (traceback
@@ -119,8 +121,10 @@ the per-test logs, so they're safe to pipe anywhere.
 | `pytest-agent help` | The above, with flags |
 
 `show`, `last-failures` and `digest` take `--run N` to read an older run
-instead of the newest. `history` and `compare` read across runs instead, so
-they have no `--run`. All of them take `--dir PATH` to point at an agent
+instead of the newest, or `--run LABEL` to read one by name (see *Naming a
+run* below). `history` and `compare` read across runs instead, so `history`
+has no `--run` -- `compare` names its two runs positionally, and takes a label
+in either position. All of them take `--dir PATH` to point at an agent
 directory other than the nearest `.pytest-agent` at or above the current
 directory.
 
@@ -147,6 +151,47 @@ vendored `.venv` inside the project filtered out.
 Runs recorded by an older pytest-agent have no structured crash data; the
 queries still work on them and say so rather than failing.
 
+### Naming a run
+
+A run started with `--agent-label` can be asked about by that name from then
+on, instead of by a run number nobody knows in advance:
+
+```sh
+# in the background -- this one takes 10 minutes
+$ pytest --agent --agent-label full-suite tests/
+
+# meanwhile, focused runs, as many as it takes
+$ pytest --agent tests/test_parser.py
+$ pytest --agent tests/test_parser.py -k roundtrip
+
+# and afterwards, whichever run number the long one turned out to be
+$ pytest-agent last-failures --run full-suite
+runs-0261 [full-suite] (.pytest-agent/runs-0261): 4 failed/errored of 3106 recorded
+$ pytest-agent rerun --run full-suite
+```
+
+This is what makes running the slow suite in the background practical. Without
+a name, coming back to it means knowing how many runs happened while it went,
+which is exactly what a background run makes unknowable.
+
+Some details worth knowing:
+
+- **The name works while the run is still going.** `meta.json` is written
+  before the first test, not at the end. Querying an unfinished run answers
+  from what it has recorded so far and says so on stderr:
+  `runs-0261 is still running -- its records are incomplete`.
+- **Labeled runs get their own retention budget**, the same size as
+  `--agent-keep-runs`, on top of the general one. Twenty focused runs while a
+  labeled suite goes would otherwise push it out of the rotation before anyone
+  asked about it. A label is not immortality, though: label everything and the
+  labeled rotation prunes like any other.
+- **A label is never a number.** `--agent-label 42` is refused up front, so
+  `--run 42` always means run 42.
+- **Labels needn't be unique.** Re-running the same command with the same
+  label is a normal thing to do; the newest match wins, and says so on stderr
+  when there was more than one.
+- **`PYTEST_AGENT_LABEL`** does the same for a whole shell or CI job.
+
 ### Re-running the failures
 
 ```sh
@@ -163,9 +208,10 @@ it doesn't recognize goes to pytest too, so `pytest-agent rerun -x` and
 pytest's own `--lf` does the common case and needs no plugin. Reach for
 `rerun` when `--lf` can't help:
 
-- **`--run N` re-runs an older run's failures.** pytest's cache holds only the
-  last run in a rootdir, so the first `-k`-filtered or `-x` re-run overwrites
-  the list you were working through. Every run on disk keeps its own.
+- **`--run N|LABEL` re-runs an older run's failures.** pytest's cache holds
+  only the last run in a rootdir, so the first `-k`-filtered or `-x` re-run
+  overwrites the list you were working through. Every run on disk keeps its
+  own, and a labeled one can be named without counting.
 - **The ids never touch a shell.** `test_hover[in_process-local]` goes
   straight into pytest's argv; nothing has to quote the brackets.
 - **A run with no failures re-runs nothing** and says so, rather than falling
@@ -311,7 +357,8 @@ the file when the question is answered.
 | `--agent-dir` | `PYTEST_AGENT_DIR` | `.pytest-agent` | Where to write run detail (relative to rootdir) |
 | `--agent-heartbeat` | `PYTEST_AGENT_HEARTBEAT` | `10` | Seconds between progress lines |
 | `--agent-stuck-after` | `PYTEST_AGENT_STUCK_AFTER` | `300` | Dump every thread's stack after one test has run this long (0 disables) |
-| `--agent-keep-runs` | `PYTEST_AGENT_KEEP_RUNS` | `20` | Keep only the newest N `runs-*` dirs (the just-finished run is never pruned); `history.jsonl` entries are kept forever regardless |
+| `--agent-keep-runs` | `PYTEST_AGENT_KEEP_RUNS` | `20` | Keep only the newest N `runs-*` dirs (the just-finished run is never pruned); labeled runs get a second budget of the same size; `history.jsonl` entries are kept forever regardless |
+| `--agent-label` | `PYTEST_AGENT_LABEL` | *(none)* | Name this run, so later queries can find it by name instead of by number |
 | `--agent-allow-pipe` | `PYTEST_AGENT_ALLOW_PIPE` | off | Skip the piped-stdout guard below |
 | n/a | `PYTEST_AGENT_NO_AUTODETECT` | off | Disable the harness-env-var auto-activation |
 
