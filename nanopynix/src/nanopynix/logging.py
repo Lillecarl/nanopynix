@@ -133,6 +133,15 @@ class LogCollector:
         """Push a ``None`` sentinel to unblock ``stream()`` without closing."""
         self._queue.sync_q.put(None)
 
+    async def asend_sentinel(self) -> None:
+        """Async :meth:`send_sentinel`, for callers already on an event loop.
+
+        The queue is bounded, so the synchronous variant can block; from the
+        worker's shutdown handler that would stall the loop it is trying to
+        wind down.
+        """
+        await self._queue.async_q.put(None)
+
 
 class BusSubscription:
     """Handle returned by :meth:`CallbackBus.subscribe` — call ``.unsubscribe()`` to stop."""
