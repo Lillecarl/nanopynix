@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import threading
@@ -30,6 +31,12 @@ _CRASHING_OUTCOMES = frozenset({"failed", "error"})
 # something else has to stay readable. A value big enough to hit this wants
 # `attach()`, and the truncation marker says so.
 MAX_NOTE_CHARS = 2000
+
+# Bytes a single path component may take. NAME_MAX is 255 on every filesystem
+# this is likely to meet (ext4, xfs, btrfs, APFS); the slack is for the
+# longest suffix appended to a test's name -- ".stuck.txt".
+MAX_NAME_BYTES = 245
+_NAME_HASH_CHARS = 8
 
 # Where a test's attached files live: a directory beside its .log, named after
 # it. Attachments and the log can't collide (`.files` vs `.log`), and one
@@ -148,13 +155,57 @@ def _captured_sections(phases: list[Phase]) -> list[str]:
     return sections
 
 
+def _write_text(path: Path, text: str, *, make_parent: bool = False) -> str | None:
+    """Write *text* to *path*; return why not, rather than raising.
+
+    Recording one test's detail must never be able to end the session. It
+    runs inside pytest_runtest_logreport, where an exception is an
+    INTERNALERROR that abandons every test after it -- so a filesystem this
+    plugin merely happens to dislike (a name over NAME_MAX, a full disk, a
+    read-only mount) would cost the whole run rather than one log file. The
+    reason goes into the test's index.jsonl record as `capture_error`, where
+    it is visible without being fatal.
+    """
+    try:
+        if make_parent:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    except OSError as error:
+        return f"{type(error).__name__}: {error}"
+    return None
+
+
+def fit_component(name: str) -> str:
+    """Shorten *name* to something a filesystem will actually accept.
+
+    A parametrized id is only bounded by whatever the test passed to
+    ``@pytest.mark.parametrize`` -- a long string, a serialized payload -- and
+    a component over NAME_MAX makes every write for that test fail with
+    ENAMETOOLONG. Before this, one such test aborted the whole session with an
+    INTERNALERROR and no results at all, in agent mode only.
+
+    Kept: the head, which holds the test function name and the start of the
+    id, and a hash of the whole thing so two ids sharing a long prefix don't
+    collide. The nodeid is never recovered from a name like this, which
+    nodeid_is_evident_from already detects, so the queries print it alongside.
+    """
+    encoded = name.encode("utf-8")
+    if len(encoded) <= MAX_NAME_BYTES:
+        return name
+    digest = hashlib.sha256(encoded).hexdigest()[:_NAME_HASH_CHARS]
+    # errors="ignore" because a byte-wise cut can land inside a multi-byte
+    # character; dropping that partial character is the whole handling needed.
+    head = encoded[: MAX_NAME_BYTES - _NAME_HASH_CHARS - 1].decode("utf-8", errors="ignore")
+    return f"{head}~{digest}"
+
+
 def nodeid_to_relpath(nodeid: str) -> Path:
     """Map a test nodeid to a filesystem-safe relative path, mirroring the
     test file's own path as directories, e.g.
     'tests/test_foo.py::test_bar[a/b]' -> 'tests/test_foo.py/test_bar[a_b]'.
     """
     file_part, _, test_part = nodeid.partition("::")
-    test_part = sanitize_component(test_part.replace("::", "__")) or "_module_"
+    test_part = fit_component(sanitize_component(test_part.replace("::", "__")) or "_module_")
     return Path(file_part) / test_part
 
 
@@ -298,10 +349,9 @@ class TestRecorder:
         has_traceback = any(phase.report.longreprtext for phase in phases)
 
         out_dir = self.root / rel.parent
-        out_dir.mkdir(parents=True, exist_ok=True)
         log_path = out_dir / f"{rel.name}.log"
         json_path = out_dir / f"{rel.name}.json"
-        log_path.write_text("\n\n".join(sections) + "\n", encoding="utf-8")
+        capture_error = _write_text(log_path, "\n\n".join(sections) + "\n", make_parent=True)
 
         record: dict[str, Any] = {
             "nodeid": nodeid,
@@ -315,7 +365,10 @@ class TestRecorder:
         if attachments:
             record["attachments"] = attachments
         record.update(self._crash_fields(phases, outcome))
-        json_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        if capture_error is None:
+            capture_error = _write_text(json_path, json.dumps(record, indent=2) + "\n")
+        if capture_error is not None:
+            record["capture_error"] = capture_error
         self._append_index(record)
         return record
 
@@ -382,3 +435,7 @@ class TestRecorder:
 
     def records_with_outcome(self, outcomes: set[str]) -> list[dict[str, Any]]:
         return [record for record in self._records if record["outcome"] in outcomes]
+
+    def records_with_capture_error(self) -> list[dict[str, Any]]:
+        """Tests whose detail could not be written. Normally none."""
+        return [record for record in self._records if record.get("capture_error")]

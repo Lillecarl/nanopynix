@@ -63,7 +63,9 @@ overwritten:
     index.jsonl              # one JSON record per test, appended as it finishes;
                              # failures also carry `crash` (exception type,
                              # message, file:line) and `frames` (traceback
-                             # locations, each tagged first-party or not)
+                             # locations, each tagged first-party or not);
+                             # `capture_error` on the rare test whose detail
+                             # file could not be written, saying why
     notes.jsonl               # one line per note() call, appended as it happens
                              # (only when a test recorded something -- see below)
     summary.json              # the same fields as this run's history.jsonl line
