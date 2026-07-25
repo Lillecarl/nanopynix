@@ -16,7 +16,6 @@ from nanopynix_proto.nix.common import (
     CallArg,
     CallArgAttrs,
     CallArgList,
-    ForceValue,
     LogLevel,
     RemoteCallArg,
 )
@@ -37,7 +36,6 @@ from nanopynix_proto.nix.eval import (
     EvalServiceBase,
     EvalStringRequest,
     ForceJsonRequest,
-    ForceRequest,
     GetFlakeRequest,
     HasAttrRequest,
     ListGetRequest,
@@ -362,15 +360,8 @@ class _EvalProxyContext:
             _LazyValue(parent=parent, selector=selector),
         )
 
-    def attrs(self, parent: ValueProxy, keys: Sequence[str]) -> ValueAttrs:
-        return ValueAttrs(parent, keys)
-
-    def list(self, parent: ValueProxy, length: int) -> ValueList:
-        return ValueList(parent, length)
-
 
 type NixArg = ValueProxy | JsonScalar | list[NixArg] | dict[str, NixArg]
-type NixValue = ValueProxy | ValueAttrs | ValueList | JsonValue
 
 
 class ValueProxy:
@@ -471,11 +462,6 @@ class ValueProxy:
         self._state = _ResolvedValue(handle=self.handle, nix_type=resolved_type, lease=self._resolved.lease)
         return resolved_type
 
-    def _decode_force_value(self, value: ForceValue) -> JsonValue | ValueProxy:
-        if value.remote_value is not None:
-            return self._ctx.value(value.remote_value.handle, value.remote_value.type)
-        return scalar_to_python(value.scalar)
-
     async def _encode_call_arg(self, value: NixArg, *, timeout: float | None) -> CallArg:
         if isinstance(value, ValueProxy):
             if not self._ctx.owner.owns(value):
@@ -493,23 +479,6 @@ class ValueProxy:
                 ),
             )
         return CallArg(scalar=python_to_scalar(value, on_unsupported="stringify"))
-
-    # ── force ──────────────────────────────────────────────────────
-
-    async def force(self, *, timeout: float | None = None) -> NixValue:
-        """Evaluate to WHNF.  Compound types return lazy wrappers."""
-        typ = await self._ensure_type(timeout=timeout)
-        if typ == NixType.ATTRS:
-            keys = await self.attr_names(timeout=timeout)
-            return self._ctx.attrs(self, keys)
-        if typ == NixType.LIST:
-            length = await self.list_length(timeout=timeout)
-            return self._ctx.list(self, length)
-        if typ == NixType.FUNCTION:
-            return self
-        # scalar — delegate to worker
-        result = await self._ctx.proxy.force(ForceRequest(handle=self.handle))
-        return self._decode_force_value(result)
 
     async def _as_scalar(self, typ: NixType, *, timeout: float | None) -> Any:
         """Strict scalar read, type-checked by Nix in the worker.
@@ -784,7 +753,16 @@ class ValueProxy:
         return await self.call(*args, timeout=timeout)
 
     async def get_type(self, *, timeout: float | None = None) -> NixType:
-        """Resolve this value and return its Nix type."""
+        """Evaluate to WHNF and return the resulting Nix type.
+
+        This is also *the* way to force a value for its side effects (to make
+        it raise, say). ``force()`` used to sit next to this and was deleted:
+        answering "what type is this" requires forcing first -- the worker's
+        ``type_name`` handler calls ``value.force()`` before ``type_name()`` --
+        so ``force() -> NixType`` would have been this method under a second
+        name. Nix models it the same way: ``forceValue`` returns void and you
+        read ``value->type()`` afterwards.
+        """
         return await self._ensure_type(timeout=timeout)
 
     # ── release ────────────────────────────────────────────────────
@@ -820,83 +798,6 @@ class ValueProxy:
 # ════════════════════════════════════════════════════════════════════
 
 _ChildProxy = ValueProxy
-
-
-# ════════════════════════════════════════════════════════════════════
-# ValueAttrs — lazy attrset (keys accessible, values lazy)
-# ════════════════════════════════════════════════════════════════════
-
-
-class ValueAttrs:
-    """Attrset forced to WHNF — keys are available, values are still lazy.
-
-    This is a borrowing view of its parent ``ValueProxy``. Keeping the view
-    alive keeps the parent handle alive; release the parent to release it.
-    """
-
-    __slots__ = ("_keys", "_parent")
-
-    def __init__(self, parent: ValueProxy, keys: Sequence[str]) -> None:
-        self._parent = parent
-        self._keys = keys
-
-    def _check_active(self) -> None:
-        self._parent._check_active()  # type: ignore[reportPrivateUsage] -- views delegate liveness to their owning proxy  # noqa: SLF001
-
-    def keys(self) -> list[str]:
-        """Return the attrset's attribute names."""
-        return list(self._keys)
-
-    def __getitem__(self, name: str) -> ValueProxy:
-        """Return a lazy child proxy — the RPC fires on ``await .force()``."""
-        self._check_active()
-        return self._parent.attr(name)
-
-    async def force(self, name: str, *, timeout: float | None = None) -> NixValue:
-        """Force a single attribute and return its value."""
-        self._check_active()
-        return await self[name].force(timeout=timeout)
-
-
-# ════════════════════════════════════════════════════════════════════
-# ValueList — lazy list (length accessible, elements lazy)
-# ════════════════════════════════════════════════════════════════════
-
-
-class ValueList:
-    """List forced to WHNF — length is available, elements are still lazy.
-
-    This is a borrowing view of its parent ``ValueProxy``. Keeping the view
-    alive keeps the parent handle alive; release the parent to release it.
-    """
-
-    __slots__ = ("_length", "_parent")
-
-    def __init__(self, parent: ValueProxy, length: int) -> None:
-        self._parent = parent
-        self._length = length
-
-    def _check_active(self) -> None:
-        self._parent._check_active()  # type: ignore[reportPrivateUsage] -- views delegate liveness to their owning proxy  # noqa: SLF001
-
-    def _check_index(self, idx: int) -> None:
-        normalized = idx if idx >= 0 else idx + self._length
-        if normalized < 0 or normalized >= self._length:
-            raise IndexError(f"list index {idx} out of range for length {self._length}")
-
-    def __len__(self) -> int:
-        return self._length
-
-    def __getitem__(self, idx: int) -> ValueProxy:
-        self._check_active()
-        self._check_index(idx)
-        return self._parent.list_get(idx)
-
-    async def force(self, idx: int, *, timeout: float | None = None) -> NixValue:
-        """Force a single element and return its value."""
-        self._check_active()
-        self._check_index(idx)
-        return await self[idx].force(timeout=timeout)
 
 
 # ════════════════════════════════════════════════════════════════════

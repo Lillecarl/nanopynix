@@ -5,11 +5,7 @@ from __future__ import annotations
 from nanopynix.rpc.client._session import (
     NixArg as NixArg,
 )
-from nanopynix.rpc.client._session import (
-    NixValue as NixValue,
-)
 
 __all__ = [
     "NixArg",
-    "NixValue",
 ]

@@ -20,12 +20,6 @@ from nanopynix.rpc.client._session import (
     ReplSession as ReplSession,
 )
 from nanopynix.rpc.client._session import (
-    ValueAttrs as ValueAttrs,
-)
-from nanopynix.rpc.client._session import (
-    ValueList as ValueList,
-)
-from nanopynix.rpc.client._session import (
     ValueProxy as ValueProxy,
 )
 from nanopynix.rpc.client.session import LogCapture as LogCapture
@@ -34,7 +28,6 @@ from nanopynix.rpc.client.session import Session as Session
 from nanopynix.rpc.client.store import Store as Store
 from nanopynix.rpc.client.store import StoreHandle as StoreHandle
 from nanopynix.rpc.client.types import NixArg as NixArg
-from nanopynix.rpc.client.types import NixValue as NixValue
 
 __all__ = [
     "EvalSession",
@@ -42,13 +35,10 @@ __all__ = [
     "LogCapture",
     "Nix",
     "NixArg",
-    "NixValue",
     "ReplSession",
     "Session",
     "Store",
     "StoreHandle",
-    "ValueAttrs",
-    "ValueList",
     "ValueProxy",
     "WorkerDiedError",
 ]

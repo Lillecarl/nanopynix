@@ -987,16 +987,6 @@ class Value:
             raise InprocValueReleasedError("Value has been released")
         return self._local
 
-    async def force(self) -> Any:
-        """Evaluate to WHNF and convert to a plain Python value.
-
-        Unlike :meth:`nanopynix.rpc.ValueProxy.force`, compound types (attrsets,
-        lists) are also converted directly rather than returned as lazy
-        wrapper views — there is no ``ValueAttrs``/``ValueList`` equivalent
-        in the in-process API.
-        """
-        return await self._eval_session.run(_force_to_python, self._local_for(self._eval_session))
-
     async def to_python(self, *, copy_to_store: bool = False) -> Any:
         """Convert the whole value tree to plain Python data, in one C++ pass.
 
@@ -1023,13 +1013,18 @@ class Value:
         return await self._eval_session.run(self._local_for(self._eval_session).to_json, copy_to_store)
 
     async def get_type(self) -> NixType:
-        """Resolve this value and return its Nix type.
+        """Evaluate to WHNF and return the resulting Nix type.
 
         Named and typed to match rpc's. This used to be ``type() -> str``,
         returning a name like ``"string"``, so the two engines disagreed on
         both the spelling and the return type -- porting a caller meant
         changing how the result was compared, not just what it was called.
         Every real consumer was already on the rpc spelling.
+
+        This also absorbed ``force()``, which on this engine was
+        ``value.force(); value.to_python()`` -- a deep conversion wearing a
+        WHNF verb's name, and so an exact duplicate of :meth:`to_python`.
+        To force without converting, call this and ignore the answer.
         """
         name = await self._eval_session.run(self._local_for(self._eval_session).type_name)
         return NixType.from_string(name)  # type: ignore[attr-defined] -- added in models.py
@@ -1213,11 +1208,6 @@ def _attr_values(local: Any) -> dict[str, Any]:
 def _list_values(local: Any) -> list[Any]:
     """Every element of a list, in one hop onto the Nix thread."""
     return [local.list_get(index) for index in range(local.list_length())]
-
-
-def _force_to_python(value: Any) -> Any:
-    value.force()
-    return value.to_python()
 
 
 

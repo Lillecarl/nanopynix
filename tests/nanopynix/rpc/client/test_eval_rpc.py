@@ -41,7 +41,7 @@ async def test_force_closing_store_closes_dependent_eval_state(rpc_session: RpcS
         await store.close(force=True)
 
         with pytest.raises(EvalSessionClosedError, match="EvalSession has been closed"):
-            await value.force()
+            await value.get_type()
 
 
 async def test_eval_file_simple(rpc_session: RpcSessionFactory, tmp_path: Path):
@@ -69,7 +69,7 @@ async def test_eval_file_directory_loads_default_nix(rpc_session: RpcSessionFact
         session.store() as store,
         session.eval(store) as eval,
     ):
-        assert await (await eval.file(str(tmp_path))).force() == 42
+        assert await (await eval.file(str(tmp_path))).as_int() == 42
 
 
 async def test_eval_file_uses_nix_lookup_path(rpc_session: RpcSessionFactory, tmp_path: Path):
@@ -83,7 +83,7 @@ async def test_eval_file_uses_nix_lookup_path(rpc_session: RpcSessionFactory, tm
         session.store() as store,
         session.eval(store) as eval,
     ):
-        assert await (await eval.file("<example>")).force() == 42
+        assert await (await eval.file("<example>")).as_int() == 42
 
 
 async def test_eval_attr_navigation(rpc_session: RpcSessionFactory, tmp_path: Path):
@@ -119,7 +119,7 @@ async def test_eval_list(rpc_session: RpcSessionFactory, tmp_path: Path):
         assert await root.list_length() == 3
         first = root.list_get(0)
         assert await first.get_type() == NixType.INT
-        assert await first.force() == 1
+        assert await first.as_int() == 1
 
 
 async def test_eval_string(rpc_session: RpcSessionFactory):
@@ -131,7 +131,7 @@ async def test_eval_string(rpc_session: RpcSessionFactory):
     ):
         root = await eval.string("42 + 1")
         assert root.nix_type == NixType.INT
-        assert await root.force() == 43
+        assert await root.as_int() == 43
 
 
 async def test_forced_attrs_borrow_the_parent_value_handle(rpc_session: RpcSessionFactory):
@@ -148,7 +148,7 @@ async def test_forced_attrs_borrow_the_parent_value_handle(rpc_session: RpcSessi
         assert not hasattr(attrs, "release")
         await parent.release()
         with pytest.raises(ValueReleasedError, match="ValueProxy has been released"):
-            await child.force()
+            await child.get_type()
 
 
 async def test_eval_realise_command_values_preserves_string_context(
@@ -182,8 +182,8 @@ async def test_repl_session_persists_bindings(rpc_session: RpcSessionFactory, tm
         session.repl(store) as repl,
     ):
         assert await repl.line("x = 41") is None
-        assert await (await repl.string("x + 1")).force() == 42
-        assert await (await repl.file(str(nix_file))).force() == 42
+        assert await (await repl.string("x + 1")).as_int() == 42
+        assert await (await repl.file(str(nix_file))).as_int() == 42
 
 
 async def test_repl_session_scope_names_include_bindings_and_base_scope(rpc_session: RpcSessionFactory):
@@ -212,7 +212,7 @@ async def test_repl_session_file_uses_nix_lookup_path(rpc_session: RpcSessionFac
         session.repl(store) as repl,
     ):
         assert await repl.line("x = 41") is None
-        assert await (await repl.file("<example>")).force() == 42
+        assert await (await repl.file("<example>")).as_int() == 42
 
 
 async def test_repl_session_load_file_autocalls_top_level_function(rpc_session: RpcSessionFactory, tmp_path: Path):
@@ -225,9 +225,9 @@ async def test_repl_session_load_file_autocalls_top_level_function(rpc_session: 
         session.repl(store) as repl,
     ):
         loaded = await repl.load_file(str(tmp_path))
-        assert await loaded.attr("answer").force() == 42
+        assert await loaded.attr("answer").as_int() == 42
         assert await repl.add_attrs(loaded) == ["answer"]
-        assert await (await repl.string("answer")).force() == 42
+        assert await (await repl.string("answer")).as_int() == 42
 
 
 async def test_repl_session_edit_location_uses_function_source(rpc_session: RpcSessionFactory, tmp_path: Path):
@@ -256,7 +256,7 @@ async def test_repl_session_adds_attrs_to_scope(rpc_session: RpcSessionFactory):
     ):
         names = await repl.add_attrs(await repl.string("{ answer = 42; }"))
         assert names == ["answer"]
-        assert await (await repl.string("answer")).force() == 42
+        assert await (await repl.string("answer")).as_int() == 42
 
 
 async def test_eval_attr_names(rpc_session: RpcSessionFactory, tmp_path: Path):
@@ -313,7 +313,7 @@ async def test_eval_session_cleanup(rpc_session: RpcSessionFactory, tmp_path: Pa
     async with rpc_session() as session, session.store() as store:
         async with session.eval(store) as eval:
             root = await eval.file(str(nix_file))
-            await root.force()
+            await root.get_type()
         # Eval session closed — store is still available
         uri = await store.uri()
         assert isinstance(uri, str)
@@ -332,7 +332,7 @@ async def test_eval_thunk(rpc_session: RpcSessionFactory, tmp_path: Path):
         root = await eval.file(str(nix_file))
         assert root.nix_type == NixType.ATTRS
         x = root.attr("x")
-        result = await x.force()
+        result = await x.as_int()
         assert result == 3
 
 
@@ -350,7 +350,7 @@ async def test_eval_nested_navigation(rpc_session: RpcSessionFactory, tmp_path: 
         a = root.attr("a")
         b = a.attr("b")
         c = b.attr("c")
-        assert await c.force() == 99
+        assert await c.as_int() == 99
 
 
 async def test_eval_call_function(rpc_session: RpcSessionFactory):
@@ -363,7 +363,7 @@ async def test_eval_call_function(rpc_session: RpcSessionFactory):
         fn = await eval.string("x: x + 1")
         assert await fn.get_type() == NixType.FUNCTION
         result = await fn.call(41)
-        assert await result.force() == 42
+        assert await result.as_int() == 42
 
 
 async def test_eval_call_function_with_value_proxy_arg(rpc_session: RpcSessionFactory):
@@ -740,7 +740,7 @@ async def test_eval_concurrent_sessions(rpc_session: RpcSessionFactory, tmp_path
         ):
             root = await session.file(path)
             v = root.attr("val")
-            return await v.force()
+            return await v.as_int()
 
     results = await asyncio.gather(eval_one(str(f1)), eval_one(str(f2)))
     assert results == [10, 20]
@@ -766,9 +766,9 @@ async def test_eval_flake(rpc_session: RpcSessionFactory, tmp_path: Path):
         outputs = await eval.eval_flake(str(tmp_path), write_lock_file=False)
         assert outputs.nix_type == NixType.ATTRS
         greeting = outputs.attr("greeting")
-        assert await greeting.force() == "hello"
+        assert await greeting.as_string() == "hello"
         count = outputs.attr("count")
-        assert await count.force() == 42
+        assert await count.as_int() == 42
 
 
 async def test_eval_flake_to_python(rpc_session: RpcSessionFactory, tmp_path: Path):
@@ -806,7 +806,7 @@ async def test_lock_flake_and_eval_locked(rpc_session: RpcSessionFactory, tmp_pa
 
         outputs = await locked.eval()
         val = outputs.attr("val")
-        assert await val.force() == 99
+        assert await val.as_int() == 99
 
 
 async def test_locked_flake_release_invalidates_handle(rpc_session: RpcSessionFactory, tmp_path: Path):

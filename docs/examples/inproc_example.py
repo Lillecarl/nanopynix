@@ -37,15 +37,16 @@ async def main() -> None:
         print("sample path nar_size:", info.nar_size)
 
         async with session.eval(store) as eval_:
-            # --- force() converts compound values directly ------------------
+            # --- to_python() converts a whole value tree --------------------
             #
-            # There is no ValueAttrs/ValueList lazy-view split here: forcing
-            # an attrset or list returns a plain Python dict/list right away.
+            # One call flattens the tree using Nix's own toJSON rules. This
+            # used to be spelled force(), which was the same operation under
+            # a name that promised WHNF and delivered a deep conversion.
 
             v = await eval_.string('{ a = 1; b = "hello"; c = [ 1 2 3 ]; }')
-            result = await v.force()
+            result = await v.to_python()
             assert result == {"a": 1, "b": "hello", "c": [1, 2, 3]}
-            print("force() result (plain dict, not a lazy view):", result)
+            print("to_python() result:", result)
 
             # --- attr()/list_get() still navigate lazily before forcing -----
 

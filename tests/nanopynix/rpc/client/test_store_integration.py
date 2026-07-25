@@ -53,10 +53,7 @@ async def _create_derivation(eval: Any) -> StorePath:
           )
         """,
     )
-    result = await path_value.force()
-    if not isinstance(result, str):
-        raise TypeError(f"test derivation did not evaluate to a store path: {result!r}")
-    path = StorePath(result)
+    path = StorePath(await path_value.as_string())
     if not path.is_derivation:
         raise RuntimeError(f"test derivation is not a .drv path: {path}")
     return path

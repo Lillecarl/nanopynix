@@ -65,8 +65,8 @@ async def main() -> None:
 
             # Navigate into attrs.
             greeting = outputs.attr("greeting")
-            assert await greeting.force() == "hi"
-            print("greeting:", await greeting.force())
+            assert await greeting.as_string() == "hi"
+            print("greeting:", await greeting.as_string())
 
             info = outputs.attr("info")
             assert await info.get_type() == NixType.ATTRS

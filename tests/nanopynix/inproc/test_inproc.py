@@ -60,10 +60,10 @@ async def test_inproc_yaml_primops(inproc_session: InprocSessionFactory) -> None
 async def test_inproc_eval_value_navigation(inproc_session: InprocSessionFactory) -> None:
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         root = await eval.string('{ greeting = "hello"; numbers = [ 1 2 3 ]; }')
-        assert await (await root.attr("greeting")).force() == "hello"
+        assert await (await root.attr("greeting")).as_string() == "hello"
         numbers = await root.attr("numbers")
         assert await numbers.list_length() == 3
-        assert await (await numbers.list_get(1)).force() == 2
+        assert await (await numbers.list_get(1)).as_int() == 2
         assert await root.has_attr("greeting")
         assert not await root.has_attr("missing")
 
@@ -140,7 +140,7 @@ async def test_inproc_value_rejects_use_after_eval_close(inproc_session: InprocS
         value = await eval.string("1")
         await eval.close()
         with pytest.raises(inproc.InprocSessionClosedError):
-            await value.force()
+            await value.get_type()
 
 
 @pytest.mark.anyio
@@ -149,7 +149,7 @@ async def test_inproc_value_context_manager_releases_rooted_value(inproc_session
         async with await eval.string("{ answer = 42; }") as root:
             assert await (await root.attr("answer")).as_int() == 42
         with pytest.raises(inproc.InprocValueReleasedError):
-            await root.force()
+            await root.get_type()
 
 
 @pytest.mark.anyio
@@ -160,7 +160,7 @@ async def test_inproc_eval_close_releases_values_left_open(inproc_session: Inpro
         value = await eval.string("1")
         await eval.close()
         with pytest.raises(inproc.InprocSessionClosedError):
-            await value.force()
+            await value.get_type()
 
 
 @pytest.mark.anyio
@@ -356,7 +356,7 @@ async def test_inproc_eval_file(tmp_path: Path, inproc_session: InprocSessionFac
 
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         root = await eval.file(str(nix_file))
-        assert await root.force() == {"a": 1, "b": "hello"}
+        assert await root.to_python() == {"a": 1, "b": "hello"}
 
 
 @pytest.mark.anyio
@@ -474,7 +474,7 @@ async def test_inproc_value_build_and_release(
 
         await drv.release()
         with pytest.raises(inproc.InprocValueReleasedError):
-            await drv.force()
+            await drv.get_type()
 
 
 @pytest.mark.anyio
@@ -725,7 +725,7 @@ async def test_inproc_session_close_auto_closes_open_eval(inproc_session: Inproc
     await session.close()
 
     with pytest.raises(inproc.InprocSessionClosedError):
-        await value.force()
+        await value.get_type()
 
 
 @pytest.mark.anyio

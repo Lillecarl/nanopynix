@@ -18,7 +18,7 @@ from nanopynix_proto.nix.store import GcAction
 from nanopynix._wire import NO_GC_LIMIT
 
 if TYPE_CHECKING:
-    from nanopynix.models import BuildResult, Derivation, GcResult, MissingInfo, PathInfo, StorePath
+    from nanopynix.models import BuildResult, Derivation, GcResult, MissingInfo, NixType, PathInfo, StorePath
     from nanopynix.verbosity import LogLevelInput
 
 ValueT = TypeVar("ValueT", bound="AsyncValue")
@@ -32,8 +32,14 @@ class AsyncValue(Protocol):
 
     async def __aexit__(self, *args: object) -> None: ...
 
-    async def force(self) -> Any:
-        """Evaluate to weak head normal form."""
+    async def get_type(self) -> NixType:
+        """Evaluate to weak head normal form and return the resulting Nix type.
+
+        This is Nix's ``forceValue`` followed by ``value->type()``, which is
+        how Nix itself uses forcing: the verb is never the goal, knowing what
+        you have is. There is no separate ``force()`` because on both engines
+        answering this question already forces.
+        """
         ...
 
     async def to_python(self, *, copy_to_store: bool = False) -> Any:

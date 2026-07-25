@@ -48,7 +48,7 @@ async def main() -> None:
 
         doubled = await eval_.string("builtins.pyDouble 21")
         assert await doubled.as_int() == 42
-        print("pyDouble 21 =", await doubled.force())
+        print("pyDouble 21 =", await doubled.as_int())
 
         # --- built-in YAML primops ----------------------------------------
 

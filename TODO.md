@@ -286,19 +286,58 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
 
    **This surfaced an unresolved design tension, see item 9.**
 
-6. **`force_as` (8 sites), `get_type`/`type` (12), `close`, and the view
-   classes.** `force_as(INT)` is `as_int` with a worse rule: it rejects an
-   int for `FLOAT` where Nix's own `forceFloat` widens. `get_type` and
-   `type` also differ in *return* -- `NixType` enum vs a plain string.
-   `close()` duplicates `release()`. `ValueAttrs`/`ValueList` have zero
-   consumers outside their own unit tests and are the sole reason
-   `force()` diverges; `force()` should return `NixType` on both engines,
-   keeping Nix's verb.
+6. ~~**`force_as` (8 sites), `get_type`/`type` (12), `close`, and the view
+   classes.**~~ -- DONE, in two commits as required. `force_as` deleted
+   (it was `as_int` with a worse rule: it rejected an int for `FLOAT`
+   where Nix's own `forceFloat` widens), inproc's `type() -> str` folded
+   into `get_type() -> NixType`, `close()` deleted as a bare alias for
+   `release()`, `ValueAttrs`/`ValueList` deleted, and rpc `call()`'s
+   client-side `WrongNixTypeError` pre-check removed so Nix does the
+   rejecting.
 
-   Split this into at least two commits. Deleting the view classes changes
-   `force()`'s *return type* on rpc -- the largest behavioural change left
-   in this list -- and does not belong in the same commit as renaming
-   `get_type`.
+   **This item's own prescription was wrong, and the fix is the
+   opposite one.** It said `force()` "should return `NixType` on both
+   engines, keeping Nix's verb." Measured while implementing it:
+   *learning the type already forces*, on both engines --
+   `_worker_eval.py`'s `_do_type_name` calls `value.force()` before
+   `value.type_name()`, and rpc's `_ensure_type` wraps that. So
+   `force() -> NixType` would have been `get_type()` under a second
+   name: this item would have finished by creating the exact
+   duplication it exists to remove.
+
+   So `force()` is **deleted**, not retyped. It had no unique job left
+   on either engine, and was in fact a duplicate of two *different*
+   methods depending on which engine you were on:
+   - inproc's was `value.force(); value.to_python()` -- a deep
+     conversion wearing WHNF's name, i.e. exactly `to_python()`.
+   - rpc's was `_ensure_type()` plus a view wrapper, i.e. exactly
+     `get_type()` plus the classes being deleted.
+
+   To force for effect (to make something raise), call `get_type()` and
+   ignore the answer. That is also how Nix reads: `forceValue` returns
+   void and the caller inspects `value->type()` afterwards -- the verb
+   is never the goal.
+
+   `NixValue` (`ValueProxy | ValueAttrs | ValueList | JsonValue`) went
+   with them: it existed only as `force()`'s return type and had no
+   other referent once the union collapsed.
+
+   The 66 call sites were migrated by reading each one, not by pattern
+   -- deliberately, because the same source text `await v.force()`
+   needed *opposite* replacements per engine on compound values
+   (`to_python()` on inproc, `as_dict()`/`as_list()` on rpc). Retired
+   with them: the `force_attrs`/`force_list` semantic-ledger entries
+   (the divergence was entirely about what a forced compound returns, a
+   question neither engine is asked any more), `TestValueListBounds`
+   (`as_list()` returns a real Python list, so the bounds check and the
+   "no RPC for an impossible index" guarantee are Python's own), and
+   the `ValueAttrs` borrowing-view lifetime tests, rewritten to assert
+   the better contract the lazy children give: the parent is pinned
+   only until a child resolves and takes a handle of its own.
+
+   **Left dead by this and not yet removed: the `Force` RPC itself.**
+   `eval.proto`'s `rpc Force`, `ForceRequest`, and `common.proto`'s
+   `ForceValue` now have no client. See item 10.
 
 ## Deferred -- the only item with real semantic migration cost
 
@@ -363,6 +402,23 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
    Recorded in `tests/nanopynix/primops/test_ipaddress_primops.py`'s
    `test_the_callables_are_reachable_through_as_dict`, on the primop's own
    docstring, and for both engines in the semantic parity matrix.
+
+## Dead wire surface, left by item 6
+
+10. **The `Force` RPC has no client.** Deleting `ValueProxy.force()` left
+    `eval.proto`'s `rpc Force(ForceRequest) returns (nix.common.ForceValue)`
+    reachable only by the worker handler that answers it: `_worker_eval.py`'s
+    `force`/`_do_force`/`_force_handle`, plus `ForceRequest` and
+    `common.proto`'s `ForceValue` message and its `models.py` re-export.
+    Every remaining read goes through `AsScalar` (scalars), `ForceJson`
+    (deep), `Attr`/`ListGet`/`AttrNames`/`ListLength` (navigation), or
+    `TypeName` (`get_type`).
+
+    Same shape as item 5's `ForceDeep` deletion and the first CIP's
+    `daemon.proto` finding: a schema kept alive only by the code that
+    serves it. Separate commit from item 6 on purpose -- it touches the
+    proto and so the generated-module build, and nothing about the
+    Python API depends on when it happens.
 
 ## Verification
 

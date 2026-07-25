@@ -43,7 +43,7 @@ async def test_manager_rpc_primop_double(shared_nix_environment: NixTestEnvironm
         session.eval(store) as eval,
     ):
         result = await eval.string("builtins.managerDouble 21")
-        assert await result.force() == 42
+        assert await result.as_int() == 42
 
 
 async def test_manager_rpc_primop_greet(shared_nix_environment: NixTestEnvironment) -> None:
@@ -60,7 +60,7 @@ async def test_manager_rpc_primop_greet(shared_nix_environment: NixTestEnvironme
         session.eval(store) as eval,
     ):
         result = await eval.string('builtins.managerGreet "World"')
-        assert await result.force() == "Hello from manager, World!"
+        assert await result.as_string() == "Hello from manager, World!"
 
 
 async def test_manager_rpc_primop_add(shared_nix_environment: NixTestEnvironment) -> None:
@@ -77,7 +77,7 @@ async def test_manager_rpc_primop_add(shared_nix_environment: NixTestEnvironment
         session.eval(store) as eval,
     ):
         result = await eval.string("builtins.managerAdd 3 7")
-        assert await result.force() == 10
+        assert await result.as_int() == 10
 
 
 async def test_manager_rpc_primop_lambda(shared_nix_environment: NixTestEnvironment) -> None:
@@ -98,7 +98,7 @@ async def test_manager_rpc_primop_lambda(shared_nix_environment: NixTestEnvironm
         session.eval(store) as eval,
     ):
         result = await eval.string("builtins.managerTriple 7")
-        assert await result.force() == 21
+        assert await result.as_int() == 21
 
 
 def _rpc_reshape(request: dict[str, object]) -> dict[str, object]:
