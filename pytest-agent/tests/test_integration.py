@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import signal
 import subprocess
 import sys
 
@@ -83,6 +84,10 @@ def test_repeated_runs_accumulate_history_and_prune_old_run_dirs(pytester: pytes
     run_dirs = sorted(p.name for p in agent_dir.iterdir() if p.name.startswith("runs-"))
     assert run_dirs == ["runs-0002", "runs-0003"]
 
+    # A finished run releases the lock it claimed its directory with, so later
+    # runs can prune it -- the assertion above is only true because they do.
+    assert [name for name in run_dirs if (agent_dir / name / ".lock").exists()] == []
+
     history_lines = (agent_dir / "history.jsonl").read_text(encoding="utf-8").splitlines()
     history_records = [json.loads(line) for line in history_lines]
     assert [record["run"] for record in history_records] == [1, 2, 3]
@@ -94,6 +99,51 @@ def test_repeated_runs_accumulate_history_and_prune_old_run_dirs(pytester: pytes
     # history.jsonl's last line is how to find the most recent run without a
     # "latest" symlink -- no separate mutable pointer to keep race-free.
     assert history_records[-1]["run_dir"] == "runs-0003"
+
+
+def test_a_finishing_run_does_not_prune_a_run_another_process_is_still_writing(
+    pytester: pytest.Pytester,
+) -> None:
+    # Two real pytest processes against one --agent-dir, which is the only way
+    # to exercise this: run numbers are handed out at session start, so a run
+    # that starts later holds a higher number and can finish -- and prune --
+    # while an earlier, lower-numbered run is still writing. With
+    # --agent-keep-runs=1 the live run sits outside the newest N, and pruning
+    # by number alone would delete the directory out from under it.
+    # A test that finishes before the hang, so the live run has records on
+    # disk to lose -- a surviving-but-emptied directory would otherwise pass.
+    pytester.makepyfile(
+        test_hang="import time\n\n\ndef test_first():\n    assert True\n\n\ndef test_hangs():\n    time.sleep(300)\n",
+    )
+    pytester.makepyfile(test_quick="def test_ok():\n    assert True\n")
+    agent_dir = pytester.path / ".pytest-agent"
+    first_run = agent_dir / "runs-0001"
+    index_path = first_run / "index.jsonl"
+
+    with conftest.running_pytest(pytester.path, "test_hang.py", "--agent-heartbeat", "0.2") as hanging:
+        conftest.wait_until(
+            lambda: index_path.is_file() and "test_first" in index_path.read_text(encoding="utf-8"),
+            "the hanging run to record its first test",
+        )
+
+        finished = conftest.run_cli(["test_quick.py", "--agent-keep-runs=1"], cwd=pytester.path)
+        assert finished.returncode == 0, finished.stderr
+
+        assert (agent_dir / "runs-0002").is_dir()
+        assert first_run.is_dir(), "the live run's directory was pruned out from under it"
+        assert (first_run / ".lock").is_file()
+        # The directory surviving is not the point; what it holds is.
+        assert "test_first" in index_path.read_text(encoding="utf-8")
+
+        hanging.send_signal(signal.SIGTERM)
+        hanging.communicate(timeout=conftest.WAIT_TIMEOUT)
+
+    # The other half: the lock is a loan, not an exemption. Once that run
+    # ends, its directory rejoins the rotation like any other.
+    assert not (first_run / ".lock").exists()
+    reaped = conftest.run_cli(["test_quick.py", "--agent-keep-runs=1"], cwd=pytester.path)
+    assert reaped.returncode == 0, reaped.stderr
+    assert not first_run.exists()
 
 
 def test_a_real_failure_records_structured_crash_data_and_first_party_frames(pytester: pytest.Pytester) -> None:

@@ -4,6 +4,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from pytest_agent._history import create_run_lock
 from pytest_agent._query import run
 
 if TYPE_CHECKING:
@@ -524,6 +525,25 @@ def test_compare_reports_no_change_rather_than_printing_nothing(
     # Silence would read as "the command didn't work", which costs a turn to
     # rule out; "nothing changed" is the answer to the question asked.
     assert "no outcome changed between these runs" in capsys.readouterr().out
+
+
+def test_a_query_against_a_run_that_is_still_going_says_its_records_are_incomplete(
+    project: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # index.jsonl grows as tests finish, so a run in progress is
+    # indistinguishable from a finished one with fewer tests. "0 failures"
+    # from a run that has barely started is the worst answer this tool could
+    # give, and the lock that protects a live run from pruning makes it
+    # detectable.
+    create_run_lock(project / ".pytest-agent" / "runs-0001")
+
+    assert run(["last-failures"]) == 0
+
+    captured = capsys.readouterr()
+    assert "runs-0001 is still running -- its records are incomplete" in captured.err
+    # On stderr, not stdout: the answer itself stays pipeable.
+    assert "still running" not in captured.out
 
 
 def test_querying_a_directory_with_no_runs_explains_itself(

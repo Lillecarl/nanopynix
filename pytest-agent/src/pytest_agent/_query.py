@@ -25,13 +25,14 @@ import argparse
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from pytest_agent._capture import nodeid_is_evident_from
 from pytest_agent._crash import normalize_message
-from pytest_agent._history import existing_run_numbers
+from pytest_agent._history import existing_run_numbers, run_is_locked
 from pytest_agent._paths import display_path
 
 if TYPE_CHECKING:
@@ -306,6 +307,7 @@ def _load_records(run_dir: Path) -> list[dict[str, Any]]:
     index_path = run_dir / "index.jsonl"
     if not index_path.is_file():
         raise QueryError(f"{display_path(index_path)} does not exist -- that run recorded nothing")
+    _warn_if_still_running(run_dir)
     lines = index_path.read_text(encoding="utf-8").splitlines()
     populated = [number for number, line in enumerate(lines, start=1) if line.strip()]
     last_populated = populated[-1] if populated else 0
@@ -338,6 +340,32 @@ def failing_nodeids(explicit_dir: str | None, run: int | None) -> tuple[list[str
     run_dir = _resolve_run_dir(explicit_dir, run)
     records = _load_records(run_dir)
     return [str(record["nodeid"]) for record in records if record["outcome"] in FAILING_OUTCOMES], run_dir
+
+
+def _warn_if_still_running(run_dir: Path) -> None:
+    """Say so when the run being read has not finished yet.
+
+    index.jsonl is appended to as each test finishes, so a run in progress
+    reads as a complete run that happened to have fewer tests -- and "0
+    failures" from a run that is 3% done is the most confidently wrong answer
+    this tool could give. The lock that keeps a live run from being pruned
+    makes this detectable, so it gets said.
+
+    Emitted here, where every command loads its records, rather than in each
+    command: a new subcommand cannot forget it. On stderr because it is a
+    caveat about the answer rather than part of it -- these outputs get piped.
+
+    The wording names the run rather than the output because history and
+    compare read many runs at once: "what follows is partial" would be false
+    for the other six rows of a history table, and an agent that believed it
+    would throw away good data to be safe.
+    """
+    if not run_is_locked(run_dir, time.time()):
+        return
+    print(
+        f"pytest-agent: {run_dir.name} is still running -- its records are incomplete",
+        file=sys.stderr,
+    )
 
 
 def _run_label(run_dir: Path) -> str:

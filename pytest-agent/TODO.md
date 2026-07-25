@@ -29,6 +29,46 @@ than a throwaway `python -c`: the test gets the project's fixtures, its
 environment, `profile`, and a place to put its output, and answers in the
 summary. See the README section.
 
+## What we borrow from pytest, and what we deliberately don't
+
+`runs-NNNN` is a numbered-directory scheme with pruning, which is exactly what
+pytest already does for `/tmp/pytest-of-$USER`. Reusing that machinery was
+considered and rejected:
+
+- The only public way to redirect it is `--basetemp`, and `getbasetemp()`
+  does `if basetemp.exists(): rm_rf(basetemp)` unconditionally, with no lock
+  check. Pointing it at the agent directory would delete the archive at the
+  start of every session, leaving `history` and `compare` nothing to read --
+  and would relocate the user's own `tmp_path` fixtures into our directory.
+- The helpers underneath (`make_numbered_dir_with_cleanup`,
+  `create_cleanup_lock`, `LOCK_TIMEOUT`) live in `_pytest.pathlib`; `pytest`
+  re-exports none of them. Depending on them is the opposite of being a good
+  citizen of the plugin API.
+- The semantics differ. Those directories are ephemeral scratch governed by
+  `tmp_path_retention_count`/`policy` -- and `policy = "none"` sets `keep = 0`.
+  Ours is an archive with its own `--agent-keep-runs`. Coupling them means a
+  project setting `tmp_path_retention_policy = "failed"` silently loses its
+  pytest-agent history on green runs.
+
+What we *did* take is the convention: a `.lock` file in the directory a
+session is still writing to, honored by `prune_old_runs` (see
+`_history.create_run_lock`). The pruning hazard is identical -- "keep the
+newest N by number" can delete a live, lower-numbered concurrent run -- and
+`protect` only ever covered the pruning session's own directory.
+
+`--agent-stuck-after` overlaps pytest's `faulthandler_timeout` ini option,
+which was found only after the fact. It is kept because it writes to a file
+beside the test's log rather than to stderr, repeats, and is visible to the
+query commands; pytest's fires once, to stderr, but via a C timer that works
+even when the GIL is never released. Ours deliberately does not touch
+`faulthandler`'s process-global `dump_traceback_later` timer, so enabling both
+does not silently disable one. The README says which to reach for.
+
+Other overlaps, accepted as-is: `note()` against `record_property` (which
+only reaches junit-xml), `index.jsonl` against `--junit-xml` and
+pytest-reportlog (raw report dumps rather than a curated per-test record),
+and `rerun` against `--lf` (a single-slot cache rather than an archive).
+
 ## Not supported: pytest-xdist
 
 Untested and expected broken, documented in the README rather than fixed.
@@ -53,6 +93,13 @@ empty pytest-agent environment, and the pipe guard only ever inspects the
 inner process's own stdout. See `tests/test_agent_workflow.py` for the
 end-to-end path, and `tests/test_notes.py` for the note/attachment surface
 (including a test that kills its own process to prove a note outlives it).
+
+The suite sets `PYTEST_DEBUG_TEMPROOT` to a temp root of its own (see
+`tests/conftest.py`). Sharing `/tmp/pytest-of-$USER` with the surrounding
+project's suite means the two prune each other's numbered directories by
+number, and this suite has already been killed that way mid-run: 93 tests
+failed at once on a base temp directory that had been deleted out from under
+the live session.
 
 `tests/test_interrupt.py` goes further and signals a real pytest subprocess:
 SIGTERM survival and stack dumps can't be exercised in-process, since the
