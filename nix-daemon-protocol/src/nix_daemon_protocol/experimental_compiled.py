@@ -13,9 +13,11 @@ remain the source of truth and are called unchanged.
 
 from __future__ import annotations
 
+import ast
 import functools
 import types
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, get_args, get_origin
 
@@ -43,174 +45,314 @@ class CompiledCodec:
         read: Callable[[ReadContext], Awaitable[WireModel]],
         write_source: str,
         read_source: str,
+        schema: WireSchema,
     ) -> None:
         self.write = write
         self.read = read
         self.write_source = write_source
         self.read_source = read_source
+        self.schema = schema
 
 
-class _SourceEmitter:
-    """Lower wire annotations into statements in one generated coroutine."""
+@dataclass(frozen=True)
+class _Primitive:
+    method: str
 
-    def __init__(self, version: int) -> None:
+
+@dataclass(frozen=True)
+class _Integer:
+    constructor: type[WireUInt64] | None = None
+
+
+@dataclass(frozen=True)
+class _Enum:
+    enum: type[IntEnum]
+
+
+@dataclass(frozen=True)
+class _Scalar:
+    scalar: type[WireScalar]
+
+
+@dataclass(frozen=True)
+class _OptionalStorePath:
+    value: WireNode
+
+
+@dataclass(frozen=True)
+class _Sequence:
+    kind: str
+    item: WireNode
+
+
+@dataclass(frozen=True)
+class _Mapping:
+    key: WireNode
+    value: WireNode
+
+
+@dataclass(frozen=True)
+class _Model:
+    model: type[WireModel]
+
+
+@dataclass(frozen=True)
+class _WireString:
+    model: type[WireModel]
+    direct_field: str | None
+
+
+WireNode = _Primitive | _Integer | _Enum | _Scalar | _OptionalStorePath | _Sequence | _Mapping | _Model | _WireString
+
+
+@dataclass(frozen=True)
+class _Field:
+    name: str
+    value: WireNode
+    predicate: Callable[[WireModel], bool] | None
+    serialize: bool
+    deserialize: bool
+
+
+@dataclass(frozen=True)
+class WireSchema:
+    """Immutable intermediate representation of one versioned wire layout."""
+
+    model: type[WireModel]
+    version: int
+    fields: tuple[_Field, ...]
+
+
+def _wire_node(annotation: type) -> WireNode:
+    """Translate a resolved annotation to a small, backend-independent IR."""
+    from .wire_string import WireString
+
+    if annotation is int:
+        return _Integer()
+    if isinstance(annotation, type) and issubclass(annotation, WireUInt64):
+        return _Integer(annotation)
+    if annotation is str:
+        return _Primitive("string")
+    if annotation is bool:
+        return _Primitive("bool")
+    if annotation is bytes:
+        return _Primitive("bytes")
+    if isinstance(annotation, type) and issubclass(annotation, IntEnum):
+        return _Enum(annotation)
+    if isinstance(annotation, type) and issubclass(annotation, WireScalar):
+        return _Scalar(annotation)
+
+    origin = get_origin(annotation)
+    arguments = get_args(annotation)
+    if origin is types.UnionType:
+        non_none = tuple(arg for arg in arguments if arg is not type(None))
+        if len(non_none) == 1:
+            value = _wire_node(non_none[0])
+            if non_none[0].__name__ == "StorePath":
+                return _OptionalStorePath(value)
+            return value
+    if origin is list:
+        return _Sequence("list", _wire_node(arguments[0]))
+    if origin is set:
+        return _Sequence("set", _wire_node(arguments[0]))
+    if origin is dict:
+        return _Mapping(_wire_node(arguments[0]), _wire_node(arguments[1]))
+    if isinstance(annotation, type) and issubclass(annotation, WireString):
+        fields = tuple(annotation.model_fields)
+        direct_field = fields[0] if annotation.to_str is WireString.to_str and len(fields) == 1 else None
+        return _WireString(annotation, direct_field)
+    if isinstance(annotation, type) and issubclass(annotation, WireModel):
+        return _Model(annotation)
+    raise TypeError(f"No wire node for {annotation}")
+
+
+def _wire_schema(model: type[WireModel], version: int) -> WireSchema:
+    return WireSchema(
+        model=model,
+        version=version,
+        fields=tuple(
+            _Field(name, _wire_node(annotation), predicate, serialize, deserialize)
+            for name, annotation, predicate, serialize, deserialize in _wire_fields(model, version)
+        ),
+    )
+
+
+def _name(name: str, context: ast.expr_context | None = None) -> ast.Name:
+    return ast.Name(id=name, ctx=context or ast.Load())
+
+
+def _attribute(value: ast.expr, name: str, context: ast.expr_context | None = None) -> ast.Attribute:
+    return ast.Attribute(value=value, attr=name, ctx=context or ast.Load())
+
+
+def _subscript(value: str, index: int) -> ast.Subscript:
+    return ast.Subscript(value=_name(value), slice=ast.Constant(index), ctx=ast.Load())
+
+
+def _call(function: ast.expr, *args: ast.expr) -> ast.Call:
+    return ast.Call(func=function, args=list(args), keywords=[])
+
+
+def _ctx_method(method: str) -> ast.Attribute:
+    return _attribute(_attribute(_name("ctx"), "writer"), f"write_{method}")
+
+
+def _reader_method(method: str) -> ast.Attribute:
+    return _attribute(_attribute(_name("ctx"), "reader"), f"read_{method}")
+
+
+class _AstLowerer:
+    """Lower ``WireSchema`` values to direct Python AST statements."""
+
+    def __init__(self, version: int, direction: str) -> None:
         self.version = version
-        self.adapters: list[Writer | Reader] = []
+        self.direction = direction
+        self.adapters: list[Writer | Reader | type[WireUInt64] | Callable[[str], WireScalar]] = []
         self.codecs: list[CompiledCodec] = []
         self.enums: list[type[IntEnum]] = []
         self._counter = 0
 
-    def name(self, prefix: str) -> str:
+    def local(self, prefix: str) -> ast.Name:
         """Return a collision-free local variable name."""
         result = f"_{prefix}_{self._counter}"
         self._counter += 1
-        return result
+        return _name(result, ast.Store())
 
-    def write_value(self, lines: list[str], annotation: type, value: str, indent: int) -> None:
-        """Emit direct write statements for one value expression."""
-        from .wire_string import WireString
+    def _adapter(self, adapter: Writer | Reader | type[WireUInt64] | Callable[[str], WireScalar]) -> ast.Subscript:
+        index = len(self.adapters)
+        self.adapters.append(adapter)
+        return _subscript(f"{self.direction}_adapters", index)
 
-        pad = " " * indent
-        if annotation is int:
-            lines.append(f"{pad}ctx.writer.write_uint64({value})")
-            return
-        if isinstance(annotation, type) and issubclass(annotation, WireUInt64):
-            lines.append(f"{pad}ctx.writer.write_uint64({value})")
-            return
-        if annotation is str:
-            lines.append(f"{pad}ctx.writer.write_string({value})")
-            return
-        if annotation is bool:
-            lines.append(f"{pad}ctx.writer.write_bool({value})")
-            return
-        if annotation is bytes:
-            lines.append(f"{pad}ctx.writer.write_bytes({value})")
-            return
-        if isinstance(annotation, type) and issubclass(annotation, IntEnum):
-            lines.append(f"{pad}ctx.writer.write_uint64({value}.value)")
-            return
-        if isinstance(annotation, type) and issubclass(annotation, WireScalar):
-            lines.append(f"{pad}ctx.writer.write_string({value})")
-            return
+    def _codec(self, codec: CompiledCodec) -> ast.Subscript:
+        index = len(self.codecs)
+        self.codecs.append(codec)
+        return _subscript(f"{self.direction}_codecs", index)
 
-        origin = get_origin(annotation)
-        arguments = get_args(annotation)
-        if origin is types.UnionType:
-            non_none = tuple(arg for arg in arguments if arg is not type(None))
-            if len(non_none) == 1:
-                if non_none[0].__name__ == "StorePath":
-                    lines.append(f"{pad}if {value} is None:")
-                    lines.append(f'{pad}    ctx.writer.write_string("")')
-                    lines.append(f"{pad}else:")
-                    self.write_value(lines, non_none[0], value, indent + 4)
-                    return
-                self.write_value(lines, non_none[0], value, indent)
-                return
-        if origin is list or origin is set:
-            item = self.name("item")
-            lines.append(f"{pad}ctx.writer.write_uint64(len({value}))")
-            lines.append(f"{pad}for {item} in {value}:")
-            self.write_value(lines, arguments[0], item, indent + 4)
-            return
-        if origin is dict:
-            key = self.name("key")
-            item = self.name("item")
-            lines.append(f"{pad}ctx.writer.write_uint64(len({value}))")
-            lines.append(f"{pad}for {key}, {item} in {value}.items():")
-            self.write_value(lines, arguments[0], key, indent + 4)
-            self.write_value(lines, arguments[1], item, indent + 4)
-            return
-        if isinstance(annotation, type) and issubclass(annotation, WireString):
-            field_names = tuple(annotation.model_fields)
-            if annotation.to_str is WireString.to_str and len(field_names) == 1:
-                lines.append(f"{pad}ctx.writer.write_string({value}.{field_names[0]})")
+    def write_value(self, node: WireNode, value: ast.expr) -> list[ast.stmt]:
+        if isinstance(node, _Integer):
+            return [ast.Expr(_call(_ctx_method("uint64"), value))]
+        if isinstance(node, _Primitive):
+            return [ast.Expr(_call(_ctx_method(node.method), value))]
+        if isinstance(node, _Enum):
+            return [ast.Expr(_call(_ctx_method("uint64"), _attribute(value, "value")))]
+        if isinstance(node, _Scalar):
+            return [ast.Expr(_call(_ctx_method("string"), value))]
+        if isinstance(node, _OptionalStorePath):
+            return [
+                ast.If(
+                    test=ast.Compare(value, [ast.Is()], [ast.Constant(None)]),
+                    body=[ast.Expr(_call(_ctx_method("string"), ast.Constant("")))],
+                    orelse=self.write_value(node.value, value),
+                ),
+            ]
+        if isinstance(node, _Sequence):
+            item = self.local("item")
+            return [
+                ast.Expr(_call(_ctx_method("uint64"), _call(_name("len"), value))),
+                ast.For(target=item, iter=value, body=self.write_value(node.item, _name(item.id)), orelse=[]),
+            ]
+        if isinstance(node, _Mapping):
+            key = self.local("key")
+            item = self.local("item")
+            return [
+                ast.Expr(_call(_ctx_method("uint64"), _call(_name("len"), value))),
+                ast.For(
+                    target=ast.Tuple([key, item], ast.Store()),
+                    iter=_call(_attribute(value, "items")),
+                    body=[*self.write_value(node.key, _name(key.id)), *self.write_value(node.value, _name(item.id))],
+                    orelse=[],
+                ),
+            ]
+        if isinstance(node, _WireString):
+            string = _attribute(value, node.direct_field) if node.direct_field else _call(_name("str"), value)
+            return [ast.Expr(_call(_ctx_method("string"), string))]
+        if isinstance(node, _Model):
+            if _can_compile(node.model):
+                return [
+                    ast.Expr(
+                        ast.Await(
+                            _call(
+                                _attribute(self._codec(compile_codec(node.model, self.version)), "write"),
+                                value,
+                                _name("ctx"),
+                            )
+                        )
+                    )
+                ]
+            return [
+                ast.Expr(ast.Await(_call(self._adapter(_writer_for(node.model, self.version)), value, _name("ctx"))))
+            ]
+        raise TypeError(f"No writer for {node}")
+
+    def read_value(self, node: WireNode, target: ast.expr) -> list[ast.stmt]:
+        # Callers pass a Store-context target for assignment. Rebuild its Load
+        # form for uses inside the generated expression tree.
+        if not isinstance(target, ast.Name):
+            raise TypeError(f"Expected a local read target, got {ast.dump(target)}")
+        target_value = _name(target.id)
+        if isinstance(node, _Integer):
+            raw = ast.Await(_call(_reader_method("uint64")))
+            value = raw if node.constructor is None else _call(self._adapter(node.constructor), raw)
+            return [ast.Assign([target], value)]
+        if isinstance(node, _Primitive):
+            args = [_name("str")] if node.method == "string" else []
+            return [ast.Assign([target], ast.Await(_call(_reader_method(node.method), *args)))]
+        if isinstance(node, _Enum):
+            index = len(self.enums)
+            self.enums.append(node.enum)
+            return [
+                ast.Assign([target], _call(_subscript("read_enums", index), ast.Await(_call(_reader_method("uint64")))))
+            ]
+        if isinstance(node, _Scalar):
+            return [
+                ast.Assign(
+                    [target],
+                    _call(
+                        self._adapter(node.scalar.from_wire), ast.Await(_call(_reader_method("string"), _name("str")))
+                    ),
+                )
+            ]
+        if isinstance(node, _OptionalStorePath):
+            return self.read_value(node.value, target)
+        if isinstance(node, _Sequence):
+            item = self.local("item")
+            initial = ast.List([], ast.Load()) if node.kind == "list" else ast.Call(_name("set"), [], [])
+            append = "append" if node.kind == "list" else "add"
+            return [
+                ast.Assign([target], initial),
+                ast.For(
+                    target=_name("_", ast.Store()),
+                    iter=_call(_name("range"), ast.Await(_call(_reader_method("uint64")))),
+                    body=[
+                        *self.read_value(node.item, _name(item.id, ast.Store())),
+                        ast.Expr(_call(_attribute(target_value, append), _name(item.id))),
+                    ],
+                    orelse=[],
+                ),
+            ]
+        if isinstance(node, _Mapping):
+            key = self.local("key")
+            item = self.local("item")
+            return [
+                ast.Assign([target], ast.Dict([], [])),
+                ast.For(
+                    target=_name("_", ast.Store()),
+                    iter=_call(_name("range"), ast.Await(_call(_reader_method("uint64")))),
+                    body=[
+                        *self.read_value(node.key, _name(key.id, ast.Store())),
+                        *self.read_value(node.value, _name(item.id, ast.Store())),
+                        ast.Assign([ast.Subscript(target_value, _name(key.id), ast.Store())], _name(item.id)),
+                    ],
+                    orelse=[],
+                ),
+            ]
+        if isinstance(node, _Model):
+            if _can_compile(node.model):
+                call = _call(_attribute(self._codec(compile_codec(node.model, self.version)), "read"), _name("ctx"))
             else:
-                lines.append(f"{pad}ctx.writer.write_string(str({value}))")
-            return
-        if isinstance(annotation, type) and issubclass(annotation, WireModel):
-            if _can_compile(annotation):
-                codec_index = len(self.codecs)
-                self.codecs.append(compile_codec(annotation, self.version))
-                lines.append(f"{pad}await codecs[{codec_index}].write({value}, ctx)")
-                return
-            adapter_index = len(self.adapters)
-            self.adapters.append(_writer_for(annotation, self.version))
-            lines.append(f"{pad}await adapters[{adapter_index}]({value}, ctx)")
-            return
-        raise TypeError(f"No writer for {annotation}")
-
-    def read_value(self, lines: list[str], annotation: type, target: str, indent: int) -> None:
-        """Emit direct read statements assigning to *target*."""
-        pad = " " * indent
-        if annotation is int:
-            lines.append(f"{pad}{target} = await ctx.reader.read_uint64()")
-            return
-        if isinstance(annotation, type) and issubclass(annotation, WireUInt64):
-            adapter_index = len(self.adapters)
-            self.adapters.append(annotation)
-            lines.append(f"{pad}{target} = adapters[{adapter_index}](await ctx.reader.read_uint64())")
-            return
-        if annotation is str:
-            lines.append(f"{pad}{target} = await ctx.reader.read_string(str)")
-            return
-        if annotation is bool:
-            lines.append(f"{pad}{target} = await ctx.reader.read_bool()")
-            return
-        if annotation is bytes:
-            lines.append(f"{pad}{target} = await ctx.reader.read_bytes()")
-            return
-        if isinstance(annotation, type) and issubclass(annotation, IntEnum):
-            enum_index = len(self.enums)
-            self.enums.append(annotation)
-            lines.append(f"{pad}{target} = enums[{enum_index}](await ctx.reader.read_uint64())")
-            return
-        if isinstance(annotation, type) and issubclass(annotation, WireScalar):
-            adapter_index = len(self.adapters)
-            self.adapters.append(annotation.from_wire)
-            lines.append(f"{pad}{target} = adapters[{adapter_index}](await ctx.reader.read_string(str))")
-            return
-
-        origin = get_origin(annotation)
-        arguments = get_args(annotation)
-        if origin is types.UnionType:
-            non_none = tuple(arg for arg in arguments if arg is not type(None))
-            if len(non_none) == 1:
-                self.read_value(lines, non_none[0], target, indent)
-                return
-        if origin is list:
-            item = self.name("item")
-            lines.append(f"{pad}{target} = []")
-            lines.append(f"{pad}for _ in range(await ctx.reader.read_uint64()):")
-            self.read_value(lines, arguments[0], item, indent + 4)
-            lines.append(f"{pad}    {target}.append({item})")
-            return
-        if origin is set:
-            item = self.name("item")
-            lines.append(f"{pad}{target} = set()")
-            lines.append(f"{pad}for _ in range(await ctx.reader.read_uint64()):")
-            self.read_value(lines, arguments[0], item, indent + 4)
-            lines.append(f"{pad}    {target}.add({item})")
-            return
-        if origin is dict:
-            key = self.name("key")
-            item = self.name("item")
-            lines.append(f"{pad}{target} = {{}}")
-            lines.append(f"{pad}for _ in range(await ctx.reader.read_uint64()):")
-            self.read_value(lines, arguments[0], key, indent + 4)
-            self.read_value(lines, arguments[1], item, indent + 4)
-            lines.append(f"{pad}    {target}[{key}] = {item}")
-            return
-        if isinstance(annotation, type) and issubclass(annotation, WireModel):
-            if _can_compile(annotation):
-                codec_index = len(self.codecs)
-                self.codecs.append(compile_codec(annotation, self.version))
-                lines.append(f"{pad}{target} = await codecs[{codec_index}].read(ctx)")
-                return
-            adapter_index = len(self.adapters)
-            self.adapters.append(_reader_for(annotation, self.version))
-            lines.append(f"{pad}{target} = await adapters[{adapter_index}](ctx)")
-            return
-        raise TypeError(f"No reader for {annotation}")
+                call = _call(self._adapter(_reader_for(node.model, self.version)), _name("ctx"))
+            return [ast.Assign([target], ast.Await(call))]
+        raise TypeError(f"No reader for {node}")
 
 
 def _can_compile(model: type[WireModel]) -> bool:
@@ -450,68 +592,127 @@ def compile_codec(model: type[WireModel], version: int) -> CompiledCodec:
     if not _can_compile(model):
         raise TypeError(f"{model.__name__} has a custom codec and cannot be compiled")
 
-    fields = _wire_fields(model, version)
+    schema = _wire_schema(model, version)
+    fields = schema.fields
     write_predicates = tuple(
         predicate
-        for _name, _annotation, predicate, serialize, _deserialize in fields
-        if serialize and predicate is not None
+        for field in fields
+        if field.serialize and field.predicate is not None
+        for predicate in (field.predicate,)
     )
     read_predicates = tuple(
         predicate
-        for _name, _annotation, predicate, _serialize, deserialize in fields
-        if deserialize and predicate is not None
+        for field in fields
+        if field.deserialize and field.predicate is not None
+        for predicate in (field.predicate,)
     )
 
-    write_lines = ["async def write(value, ctx):"]
+    write_body: list[ast.stmt] = []
     if issubclass(model, WireRequest):
-        write_lines.append("    await request_prelude(value, ctx)")
-    write_emitter = _SourceEmitter(version)
+        write_body.append(ast.Expr(ast.Await(_call(_name("request_prelude"), _name("value"), _name("ctx")))))
+    write_emitter = _AstLowerer(version, "write")
     predicate_index = 0
-    for name, annotation, predicate, serialize, _deserialize in fields:
-        if not serialize:
+    for field in fields:
+        if not field.serialize:
             continue
-        if predicate is None:
-            write_emitter.write_value(write_lines, annotation, f"value.{name}", 4)
+        value = _attribute(_name("value"), field.name)
+        statements = write_emitter.write_value(field.value, value)
+        if field.predicate is None:
+            write_body.extend(statements)
         else:
-            write_lines.append(f"    if write_predicates[{predicate_index}](value):")
-            write_emitter.write_value(write_lines, annotation, f"value.{name}", 8)
+            write_body.append(
+                ast.If(_call(_subscript("write_predicates", predicate_index), _name("value")), statements, [])
+            )
             predicate_index += 1
 
-    read_lines = [
-        "async def read(ctx):",
-        "    with deserialization_scope(ctx, model):",
-        "        obj = model.__new__(model)",
+    read_body: list[ast.stmt] = [
+        ast.Assign([_name("obj", ast.Store())], _call(_attribute(_name("model"), "__new__"), _name("model"))),
     ]
     for name, field in model.model_fields.items():
         if field.default is not PydanticUndefined:
-            read_lines.append(f"        object.__setattr__(obj, {name!r}, defaults[{name!r}])")
+            read_body.append(
+                ast.Expr(
+                    _call(
+                        _attribute(_name("object"), "__setattr__"),
+                        _name("obj"),
+                        ast.Constant(name),
+                        ast.Subscript(_name("defaults"), ast.Constant(name), ast.Load()),
+                    )
+                )
+            )
         elif field.default_factory is not None:
-            read_lines.append(f"        object.__setattr__(obj, {name!r}, factories[{name!r}]())")
-    read_lines.extend(
-        [
-            "        object.__setattr__(obj, '__pydantic_fields_set__', set())",
-            "        object.__setattr__(obj, '__pydantic_extra__', None)",
-            "        object.__setattr__(obj, '__pydantic_private__', None)",
-        ],
+            read_body.append(
+                ast.Expr(
+                    _call(
+                        _attribute(_name("object"), "__setattr__"),
+                        _name("obj"),
+                        ast.Constant(name),
+                        _call(ast.Subscript(_name("factories"), ast.Constant(name), ast.Load())),
+                    )
+                )
+            )
+    read_body.extend(
+        ast.Expr(_call(_attribute(_name("object"), "__setattr__"), _name("obj"), ast.Constant(name), value))
+        for name, value in (
+            ("__pydantic_fields_set__", _call(_name("set"))),
+            ("__pydantic_extra__", ast.Constant(None)),
+            ("__pydantic_private__", ast.Constant(None)),
+        )
     )
-    read_emitter = _SourceEmitter(version)
+    read_emitter = _AstLowerer(version, "read")
     predicate_index = 0
-    for name, annotation, predicate, _serialize, deserialize in fields:
-        if not deserialize:
+    for field in fields:
+        if not field.deserialize:
             continue
-        if predicate is None:
-            local_name = f"_field_{name}"
-            read_emitter.read_value(read_lines, annotation, local_name, 8)
-            read_lines.append(f"        object.__setattr__(obj, {name!r}, {local_name})")
-            read_lines.append(f"        obj.__pydantic_fields_set__.add({name!r})")
+        local = _name(f"_field_{field.name}", ast.Store())
+        statements = read_emitter.read_value(field.value, local)
+        statements.extend(
+            [
+                ast.Expr(
+                    _call(
+                        _attribute(_name("object"), "__setattr__"),
+                        _name("obj"),
+                        ast.Constant(field.name),
+                        _name(local.id),
+                    )
+                ),
+                ast.Expr(
+                    _call(
+                        _attribute(_attribute(_name("obj"), "__pydantic_fields_set__"), "add"), ast.Constant(field.name)
+                    )
+                ),
+            ],
+        )
+        if field.predicate is None:
+            read_body.extend(statements)
         else:
-            local_name = f"_field_{name}"
-            read_lines.append(f"        if read_predicates[{predicate_index}](obj):")
-            read_emitter.read_value(read_lines, annotation, local_name, 12)
-            read_lines.append(f"            object.__setattr__(obj, {name!r}, {local_name})")
-            read_lines.append(f"            obj.__pydantic_fields_set__.add({name!r})")
+            read_body.append(
+                ast.If(_call(_subscript("read_predicates", predicate_index), _name("obj")), statements, [])
+            )
             predicate_index += 1
-    read_lines.append("        return obj")
+    read_body.append(ast.Return(_name("obj")))
+
+    write_function = ast.AsyncFunctionDef(
+        name="write",
+        args=ast.arguments(
+            posonlyargs=[], args=[ast.arg("value"), ast.arg("ctx")], kwonlyargs=[], kw_defaults=[], defaults=[]
+        ),
+        body=write_body or [ast.Pass()],
+        decorator_list=[],
+        type_params=[],
+    )
+    read_function = ast.AsyncFunctionDef(
+        name="read",
+        args=ast.arguments(posonlyargs=[], args=[ast.arg("ctx")], kwonlyargs=[], kw_defaults=[], defaults=[]),
+        body=[
+            ast.With(
+                items=[ast.withitem(_call(_name("deserialization_scope"), _name("ctx"), _name("model")), None)],
+                body=read_body,
+            )
+        ],
+        decorator_list=[],
+        type_params=[],
+    )
 
     defaults = {
         name: field.default for name, field in model.model_fields.items() if field.default is not PydanticUndefined
@@ -534,14 +735,8 @@ def compile_codec(model: type[WireModel], version: int) -> CompiledCodec:
         "write_codecs": tuple(write_emitter.codecs),
         "write_predicates": write_predicates,
     }
-    write_source = "\n".join(write_lines)
-    read_source = "\n".join(read_lines)
-    write_source = write_source.replace("adapters[", "write_adapters[").replace("codecs[", "write_codecs[")
-    read_source = (
-        read_source.replace("adapters[", "read_adapters[")
-        .replace("codecs[", "read_codecs[")
-        .replace("enums[", "read_enums[")
-    )
-    exec(write_source, namespace)
-    exec(read_source, namespace)
-    return CompiledCodec(namespace["write"], namespace["read"], write_source, read_source)
+    module = ast.fix_missing_locations(ast.Module(body=[write_function, read_function], type_ignores=[]))
+    write_source = ast.unparse(ast.Module(body=[write_function], type_ignores=[]))
+    read_source = ast.unparse(ast.Module(body=[read_function], type_ignores=[]))
+    exec(compile(module, "<nix-daemon-codec>", "exec"), namespace)
+    return CompiledCodec(namespace["write"], namespace["read"], write_source, read_source, schema)

@@ -88,5 +88,7 @@ async def test_compiled_codec_matches_generic_codec(value: WireModel, version: i
 def test_compiled_codec_exposes_inspectable_source() -> None:
     """The experiment remains reviewable rather than opaque generated magic."""
     codec = compile_codec(BuildResult, SUPPORTED_PROTOCOL_VERSIONS[-1])
+    assert codec.schema.model is BuildResult
+    assert codec.schema.version == SUPPORTED_PROTOCOL_VERSIONS[-1]
     assert "value.status" in codec.write_source
     assert "await ctx.reader.read_uint64()" in codec.read_source
