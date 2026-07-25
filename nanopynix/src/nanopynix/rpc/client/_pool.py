@@ -59,6 +59,13 @@ logger = logging.getLogger(__name__)
 _OOM_SCORE_ADJ_MIN = -1000
 _OOM_SCORE_ADJ_MAX = 1000
 
+_LOG_DRAIN_TIMEOUT_SECONDS = 2.0
+"""How long close() lets the log stream end by itself before cancelling it.
+
+Module-private rather than a NixSettings field: this bounds a teardown race
+against a worker that already acknowledged Shutdown, not anything a caller
+would tune. Cancelling early is safe, just noisy -- see close()."""
+
 ACTIVE_LOG_CAPTURES: ContextVar[tuple[Any, ...]] = ContextVar("nanopynix_active_log_captures", default=())
 """Task-local stack of active LogCapture instances (nanopynix.rpc.client.session).
 
@@ -241,9 +248,18 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
                     logger.debug("worker shutdown failed (expected during teardown)", exc_info=True)
         finally:
             if self._log_task is not None:
-                self._log_task.cancel()
-                with contextlib.suppress(anyio.get_cancelled_exc_class()):
-                    await self._log_task
+                # The worker ends the SubscribeLogs stream itself when it
+                # handles Shutdown, so give the task a moment to finish on its
+                # own: cancelling it instead resets a stream the worker is
+                # still serving, which it logs as a traceback on the stderr
+                # this process inherits. Cancellation stays as the fallback for
+                # a worker that died or never got the request.
+                with anyio.move_on_after(_LOG_DRAIN_TIMEOUT_SECONDS):
+                    await asyncio.shield(self._log_task)
+                if not self._log_task.done():
+                    self._log_task.cancel()
+                    with contextlib.suppress(anyio.get_cancelled_exc_class()):
+                        await self._log_task
                 self._log_task = None
             if self._stack is not None:
                 await self._stack.aclose()

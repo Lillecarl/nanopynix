@@ -13,6 +13,7 @@ import os
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
+import anyio
 import pytest
 from grpclib.exceptions import GRPCError
 from nanopynix_proto.nix.common import LogLevel
@@ -292,6 +293,34 @@ async def test_shutdown_requires_an_executor() -> None:
 
     with pytest.raises(GRPCError, match="worker executor is unavailable"):
         await handler.shutdown(ShutdownRequest(request_id=1))
+
+
+async def test_shutdown_ends_the_subscribe_logs_stream() -> None:
+    """The worker closes its own log stream, so the client never has to cancel.
+
+    Cancelling instead resets a stream whose handler is still inside its
+    ``async for``, and grpclib logs that as a "Failed to handle cancellation"
+    traceback on the worker's stderr -- which the parent process inherits.
+    Asserting on that race directly would be flaky (it lost about 4 times in
+    180 sessions); this pins the mechanism that removes it.
+    """
+    state = WorkerState()
+    state.executor = NixThreadExecutor()
+    collector = LogCollector()
+    state.collector = collector
+    handler = WorkerServiceHandler(state)
+
+    await handler.shutdown(ShutdownRequest(request_id=1))
+
+    # Terminates rather than hanging: shutdown left a sentinel behind for it.
+    with anyio.fail_after(5):
+        events = [event async for event in handler.subscribe_logs(SubscribeLogsRequest())]
+
+    # The sentinel goes in *after* shutdown finalizes its own request, so the
+    # stream still delivers that boundary before ending. Truncating it would
+    # leave the client waiting on a finalization that never arrives.
+    assert [event.request_id for event in events] == [1]
+    assert events[0].request_finalized is not None
 
 
 async def test_shutdown_tolerates_no_bridge_and_no_store_limiter() -> None:

@@ -408,6 +408,14 @@ class WorkerServiceHandler(WorkerServiceBase):
         await self._state.run_request(
             request_id=message.request_id, executor=self._state.executor, operation=lambda: None
         )
+        # End the SubscribeLogs stream from this side, before the client stops
+        # waiting on it. Without this the client's only way out is to cancel,
+        # which resets the stream under a server handler that is still inside
+        # its `async for` -- and grpclib logs that as "Failed to handle
+        # cancellation" on the worker's stderr, which the parent inherits. The
+        # events this drops were already being dropped by that cancellation.
+        if self._state.collector is not None:
+            await self._state.collector.asend_sentinel()
         if self._state.rpc_bridge is not None:
             await self._state.rpc_bridge.stop()
         if self._state.owns_executor:
