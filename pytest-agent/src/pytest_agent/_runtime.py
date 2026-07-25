@@ -44,6 +44,11 @@ MAX_STUCK_DUMPS = 5
 # the failure list above it.
 MAX_NOTE_LINES = 60
 
+# Tests named individually when their detail could not be written. A run
+# where every test hits this (a read-only agent dir) must not print one line
+# per test on top of everything else it is already failing to do.
+MAX_CAPTURE_ERRORS_SHOWN = 10
+
 # Where the builtin terminal reporter's output goes in agent mode.
 TERMINAL_LOG_NAME = "terminal.txt"
 
@@ -430,8 +435,25 @@ class AgentRuntime:
                 # one cause?" question to ask -- with a single failure the
                 # log path above is already the whole answer.
                 self._print("shared root cause? pytest-agent digest")
+        self._print_capture_errors()
         self._print_notes()
         self._print(f"full detail: {self.root.resolve()} (see index.jsonl)")
+
+    def _print_capture_errors(self) -> None:
+        """Say when a test's outcome was recorded but its detail could not be.
+
+        Rare, and silence would be the wrong kind of quiet: the run looks
+        complete, and only a later `show` on that one test reveals there is
+        nothing behind it. Named here, while the run is still on screen.
+        """
+        affected = self.recorder.records_with_capture_error()
+        if not affected:
+            return
+        self._print(f"{len(affected)} tests recorded an outcome but no detail file:")
+        for record in affected[:MAX_CAPTURE_ERRORS_SHOWN]:
+            self._print(f"  {record['nodeid']}  ({record['capture_error']})")
+        if len(affected) > MAX_CAPTURE_ERRORS_SHOWN:
+            self._print(f"  +{len(affected) - MAX_CAPTURE_ERRORS_SHOWN} more (see capture_error in index.jsonl)")
 
     def _print_interruption(self, interrupted_at: str | None) -> None:
         """Say what was running when the run was cut short, and where its stack is.

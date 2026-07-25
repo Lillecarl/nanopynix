@@ -470,7 +470,14 @@ def _print_detail(run_dir: Path, record: dict[str, Any]) -> None:
     log_path = run_dir / record["log_file"]
     print(f"=== {record['nodeid']} [{record['outcome']}] {display_path(log_path)}")
     if not log_path.is_file():
-        print(f"(no log file at {display_path(log_path)} -- it may have been pruned)")
+        # Two different absences, and guessing wrong costs a turn: a pruned
+        # log is gone for good, while a capture error means the run recorded
+        # the outcome but could not write the detail, and says why.
+        capture_error = record.get("capture_error")
+        if capture_error:
+            print(f"(no log file: writing it failed with {capture_error})")
+        else:
+            print(f"(no log file at {display_path(log_path)} -- it may have been pruned)")
         return
     print(log_path.read_text(encoding="utf-8").rstrip("\n"))
 

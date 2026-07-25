@@ -493,3 +493,40 @@ def test_pytests_own_output_is_kept_on_disk_rather_than_destroyed(pytester: pyte
     assert "test session starts" in text
     assert "assert 1 == 2" in text
     assert "1 failed" in text
+
+
+def test_a_test_with_an_enormous_parametrized_id_does_not_abort_the_run(pytester: pytest.Pytester) -> None:
+    # This used to end the session with an INTERNALERROR and no results at
+    # all -- OSError: File name too long, raised while writing the test's log
+    # -- and only under --agent. A suite that plain pytest runs fine must not
+    # be un-runnable because of the plugin watching it.
+    pytester.makepyfile(
+        test_long="""
+        import pytest
+
+
+        @pytest.mark.parametrize("payload", ["x" * 400])
+        def test_with_a_long_id(payload):
+            assert len(payload) == 400
+
+
+        def test_after_the_long_one():
+            assert True
+        """,
+    )
+
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent")
+    assert result.ret == pytest.ExitCode.OK
+
+    index_path = pytester.path / ".pytest-agent" / "runs-0001" / "index.jsonl"
+    records = [json.loads(line) for line in index_path.read_text(encoding="utf-8").splitlines()]
+    assert len(records) == 2, "the test after the long one must still have run"
+    assert all(record["outcome"] == "passed" for record in records)
+    assert all("capture_error" not in record for record in records)
+
+    long_record = next(record for record in records if "long_id" in record["nodeid"])
+    log_path = pytester.path / ".pytest-agent" / "runs-0001" / long_record["log_file"]
+    assert log_path.is_file(), "the shortened name must be a name the filesystem accepts"
+    # Every component fits, including the longest suffix the run may add.
+    assert all(len(part.encode("utf-8")) <= 255 for part in log_path.parts)
+    assert long_record["nodeid"] in log_path.read_text(encoding="utf-8")
