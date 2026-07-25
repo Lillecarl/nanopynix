@@ -74,6 +74,28 @@ async def _list_get_as_int(value: Any) -> int:
     return await (await _list_get(value, 1)).as_int()
 
 
+async def _as_dict_keys(value: Any) -> list[str]:
+    return sorted(await value.as_dict())
+
+
+async def _as_dict_values(value: Any) -> dict[str, Any]:
+    return {name: await child.to_python() for name, child in sorted((await value.as_dict()).items())}
+
+
+async def _as_list_values(value: Any) -> list[Any]:
+    return [await child.to_python() for child in await value.as_list()]
+
+
+async def _apply_via_as_dict(value: Any) -> Any:
+    """A function leaf reached through as_dict() is still callable.
+
+    ``apply`` applies its argument *to* the receiver, so this is ``f n`` --
+    both of them handles handed back by the same ``as_dict()`` call.
+    """
+    entries = await value.as_dict()
+    return await (await entries["n"].apply(entries["f"])).to_python()
+
+
 async def _attr_then_force(value: Any, name: str) -> Any:
     return await (await _attr(value, name)).to_python()
 
@@ -125,6 +147,18 @@ SUCCESS_CASES: list[Case] = [
     Case("type_of_int", "1", _type_name),
     # apply() is how a caller reaches any builtin at all, so it stands in for
     # the whole of Nix rather than for one operation.
+    # as_dict/as_list hand back live handles, so compare what they resolve to
+    # rather than the handles themselves.
+    Case("as_dict_keys", "{ b = 1; a = 2; }", _as_dict_keys),
+    Case("as_dict_values", "{ a = 1; b = 2; }", _as_dict_values),
+    Case("as_list_values", "[10 20 30]", _as_list_values),
+    Case("as_dict_empty", "{}", _as_dict_keys),
+    Case("as_list_empty", "[]", _as_list_values),
+    # The shape to_python() cannot flatten on either engine: a Nix function has
+    # no JSON form. as_dict() reads it one level at a time instead, which is
+    # what makes nanopynix's own parseNetwork result usable from Python.
+    Case("as_dict_over_a_function_valued_attrset", "{ n = 1; f = x: x; }", _as_dict_keys),
+    Case("apply_a_function_reached_through_as_dict", "{ f = x: x + 1; n = 41; }", _apply_via_as_dict),
     # force() on a scalar is the one shape the two engines already agree on.
     Case("force_int", "1 + 2", lambda v: v.force()),
     Case("force_string", '"hi"', lambda v: v.force()),
@@ -163,6 +197,8 @@ FAILURE_CASES: list[Case] = [
     # to_python() has no answer for a function, on either engine.
     Case("to_python_of_a_function", "x: x", lambda v: v.to_python()),
     Case("to_python_of_an_attrset_holding_a_function", "{ f = x: x; }", lambda v: v.to_python()),
+    # Applying something that is not a function at all.
+    Case("apply_a_non_function", "42", lambda v: v.apply("1 + 1")),
     # Navigation accessors must refuse the wrong type rather than answering.
     Case("attr_names_on_an_int", "1", _sorted_attr_names),
     Case("list_length_on_an_attrset", "{}", lambda v: v.list_length()),
@@ -190,6 +226,13 @@ SEMANTIC_LEDGER: dict[str, str] = {
         "view classes and giving force() one meaning on both engines."
     ),
     "force_list": "DEFECT: as force_attrs, with ValueList.",
+    "apply_a_non_function": (
+        "DEFECT: applying a non-function raises Nix's own NixTypeError on inproc and rpc's "
+        "client-side WrongNixTypeError -- unrelated classes, since WrongNixTypeError is an "
+        "EvalProxyError raised by the proxy before the worker is ever asked. A caller cannot "
+        "write one `except` that covers both. The proxy-side pre-check should either go, or "
+        "raise what Nix raises."
+    ),
 }
 
 

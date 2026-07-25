@@ -30,8 +30,17 @@ def _as_dict(v: JsonValue) -> dict[str, JsonValue]:
 # the right answer rather than a regression: the previous deep conversion kept
 # them as callable proxies over rpc but produced the useless *string*
 # "function" for them in-process, so the two engines disagreed about what this
-# very value converted to. A caller who wants only the data drops the callables
-# first, which is what this does.
+# very value converted to.
+#
+# So the whole attrset has no single Python form, and that is not a defect to
+# design around -- `nix eval --json` says the same. What a caller reaches for
+# instead is `as_dict()`: one level, data leaves and function leaves side by
+# side, each read or called on its own. See
+# test_the_callables_are_reachable_through_as_dict below, and the same shape
+# exercised for both engines in tests/nanopynix/test_engine_parity_semantics.py.
+#
+# This helper stays because these tests assert the *data* wholesale, which is
+# what removeAttrs is for.
 _DROP_CALLABLES = """
   let strip = a: builtins.removeAttrs a [ "address" "subnet" ];
   in x: if x ? network then x // { network = strip x.network; } else strip x
@@ -40,6 +49,33 @@ _DROP_CALLABLES = """
 
 async def _data_only(value: object) -> JsonValue:
     return await (await value.apply(_DROP_CALLABLES)).to_python()  # type: ignore[reportAttributeAccessIssue] -- ValueProxy, untyped in this test module
+
+
+@pytest.mark.anyio
+async def test_the_callables_are_reachable_through_as_dict():
+    """The shape to_python() refuses is still fully usable, one level at a time.
+
+    This is the answer to "our own primop returns something our own flagship
+    conversion rejects": nothing about the primop needs changing, because
+    as_dict() hands back the data leaves and the function leaves together and
+    lets the caller pick. No removeAttrs, no knowing which keys are functions.
+    """
+    async with (
+        Session(primops=ipaddress_primops()) as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        network = await eval.string('builtins.parseNetwork "192.168.1.0/24"')
+        entries = await network.as_dict()
+
+        # A data leaf converts on its own, even though its siblings cannot.
+        assert await entries["prefixlen"].to_python() == 24
+        assert await entries["numAddresses"].to_python() == 256
+
+        # ...and a function leaf is callable rather than an error. `apply`
+        # applies its argument to the receiver, so this is `address 5`.
+        index = await eval.string("5")
+        assert await (await index.apply(entries["address"])).to_python() == "192.168.1.5"
 
 
 @pytest.mark.anyio

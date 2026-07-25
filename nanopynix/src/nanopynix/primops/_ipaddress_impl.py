@@ -79,6 +79,13 @@ def parse_network(source: str) -> dict[str, object]:
         network address; negative indices work)
       - ``.subnet n prefixlen_diff`` — nth subnet when splitting by
         prefixlen_diff (0-indexed)
+
+    Because two of those attributes are Nix functions, the result has no JSON
+    form and ``to_python()`` refuses it whole -- the same answer ``nix eval
+    --json`` gives, and deliberately so. Read it with ``as_dict()`` instead,
+    which hands back the data leaves and the function leaves together, each
+    usable on its own. (They are functions because they have to be: a /8 has
+    16 million addresses, so ``.address`` cannot be a list.)
     """
     net = ipaddress.ip_network(source, strict=False)
     return _network_to_dict(net)
