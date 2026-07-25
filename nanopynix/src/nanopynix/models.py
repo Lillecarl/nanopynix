@@ -42,6 +42,9 @@ from nanopynix_proto.nix.common import (
     Derivation as Derivation,
 )
 from nanopynix_proto.nix.common import (
+    DerivationOutput as DerivationOutput,
+)
+from nanopynix_proto.nix.common import (
     DerivationOutputs as DerivationOutputs,
 )
 from nanopynix_proto.nix.common import (

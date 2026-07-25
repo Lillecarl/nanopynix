@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import flake as nanopynix_flake
+from nanopynix_bindings import store as nanopynix_store
 
 from nanopynix._core._nix_core import NixCore
 
@@ -21,8 +23,8 @@ if TYPE_CHECKING:
 class LocalStore:
     """One direct thread-safe store pointer shared by the Store pool."""
 
-    def __init__(self, raw: Any) -> None:
-        self.raw: Any = raw
+    def __init__(self, raw: nanopynix_store.Store) -> None:
+        self.raw: nanopynix_store.Store | None = raw
 
     def close(self) -> None:
         raw = self.raw
@@ -30,20 +32,30 @@ class LocalStore:
         if raw is not None:
             raw.close()
 
-    def require_raw(self) -> Any:
+    def require_raw(self) -> nanopynix_store.Store:
         if self.raw is None:
             raise RuntimeError("local store has been closed")
         return self.raw
 
     def __getattr__(self, name: str) -> Any:
+        """Forward anything not defined here to the binding, as ``Any``.
+
+        Load-bearing, not laziness: the RPC worker's store service reflects
+        over the binding's ``store_*`` proto entrypoints by name
+        (``_worker_store.py``'s ``_nanobind_rpc_call``), which is what keeps it
+        free of per-method code. The cost is that a typo in an attribute name
+        reaches this instead of the type checker -- so prefer
+        :meth:`require_raw`, which is typed, wherever the name is known
+        statically.
+        """
         return getattr(self.require_raw(), name)
 
 
 class LocalEvalState:
     """One direct evaluator pointer bound to a :class:`LocalStore`."""
 
-    def __init__(self, raw: Any, store: LocalStore) -> None:
-        self.raw: Any = raw
+    def __init__(self, raw: nanopynix_expr.EvalState, store: LocalStore) -> None:
+        self.raw: nanopynix_expr.EvalState | None = raw
         self.store = store
         self._values: set[LocalValue] = set()
         self._locked_flakes: set[LocalLockedFlake] = set()
@@ -55,15 +67,16 @@ class LocalEvalState:
             locked_flake.close()
         self.raw = None
 
-    def require_raw(self) -> Any:
+    def require_raw(self) -> nanopynix_expr.EvalState:
         if self.raw is None:
             raise RuntimeError("local evaluator has been closed")
         return self.raw
 
     def __getattr__(self, name: str) -> Any:
+        """Forward to the binding as ``Any`` -- see :meth:`LocalStore.__getattr__`."""
         return getattr(self.require_raw(), name)
 
-    def wrap_value(self, raw: Any) -> LocalValue:
+    def wrap_value(self, raw: nanopynix_expr.Value) -> LocalValue:
         value = LocalValue(self, raw)
         self._values.add(value)
         return value
@@ -158,9 +171,9 @@ class LocalValue:
     keeping the raw pointer private to thread-confined local code.
     """
 
-    def __init__(self, eval_state: LocalEvalState, raw: Any) -> None:
+    def __init__(self, eval_state: LocalEvalState, raw: nanopynix_expr.Value) -> None:
         self._eval_state = eval_state
-        self._raw: Any = raw
+        self._raw: nanopynix_expr.Value | None = raw
 
     def close(self) -> None:
         raw = self._raw
@@ -169,7 +182,7 @@ class LocalValue:
         if raw is not None:
             raw._release()  # type: ignore[reportPrivateUsage] -- L1 RootValue lifetime API  # noqa: SLF001
 
-    def require_raw(self) -> Any:
+    def require_raw(self) -> nanopynix_expr.Value:
         self._eval_state.require_raw()
         if self._raw is None:
             raise RuntimeError("local value has been released")
@@ -178,11 +191,14 @@ class LocalValue:
     def force(self) -> None:
         self.require_raw().force()
 
-    def to_python(self) -> Any:
+    def to_python(self) -> nanopynix_expr.ValueType:
         return self.require_raw().to_python()
 
-    def to_json(self, copy_to_store: bool = False) -> Any:
-        return self.require_raw().to_json(copy_to_store)
+    def to_json(self, copy_to_store: bool = False) -> nanopynix_expr.ValueType:
+        # Keyword, not positional: the binding declares copy_to_store
+        # keyword-only (nanopynix-bindings/src/expr.pat). The positional call
+        # this replaces went unnoticed while `raw` was typed Any.
+        return self.require_raw().to_json(copy_to_store=copy_to_store)
 
     def type_name(self) -> str:
         return self.require_raw().type_name()
@@ -205,7 +221,7 @@ class LocalValue:
     def realise_argv(self) -> list[str]:
         return self.require_raw().realise_argv()
 
-    def edit_location(self) -> dict[str, Any]:
+    def edit_location(self) -> nanopynix_expr.EditLocation:
         return self.require_raw().edit_location()
 
     def attr_get(self, name: str) -> LocalValue:
@@ -229,7 +245,7 @@ class LocalValue:
     def call(self, argument: LocalValue) -> LocalValue:
         return self._eval_state.wrap_value(self.require_raw().call(argument.require_raw()))
 
-    def build(self, build_store: LocalStore | None, build_mode: int, eval_store: LocalStore | None) -> Any:
+    def build(self, build_store: LocalStore | None, build_mode: int, eval_store: LocalStore | None) -> dict[str, object]:
         return self.require_raw().build(
             None if build_store is None else build_store.require_raw(),
             build_mode,
@@ -244,15 +260,15 @@ class LocalValue:
 class LocalLockedFlake:
     """One in-memory locked flake, confined to its owning Nix thread."""
 
-    def __init__(self, eval_state: LocalEvalState, raw: Any) -> None:
+    def __init__(self, eval_state: LocalEvalState, raw: nanopynix_flake.LockedFlake) -> None:
         self._eval_state = eval_state
-        self._raw: Any = raw
+        self._raw: nanopynix_flake.LockedFlake | None = raw
 
     def close(self) -> None:
         self._raw = None
         self._eval_state.discard_locked_flake(self)
 
-    def require_raw(self) -> Any:
+    def require_raw(self) -> nanopynix_flake.LockedFlake:
         self._eval_state.require_raw()
         if self._raw is None:
             raise RuntimeError("local locked flake has been released")

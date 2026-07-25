@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, Never, Protocol, cast
 
 import anyio
 import pydantic_core
-from nanopynix_bindings.store import BuildMode
 from nanopynix_proto.nix.common import (
     CallArg,
     CallArgAttrs,
@@ -57,6 +56,7 @@ from nanopynix_proto.nix.eval import (
 )
 
 from nanopynix._core._codec import python_to_scalar, scalar_to_python
+from nanopynix._core._nix_core import build_mode_value
 from nanopynix._wire import HandleKind
 from nanopynix.exceptions import (
     EvalSessionClosedError,
@@ -82,7 +82,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from betterproto2 import Message
-    from nanopynix_bindings.store import BuildMode as BuildModeType
+    from nanopynix_bindings.store import BuildMode
     from nanopynix_proto.nix.common import LockedFlake as LockedFlakeProto
 
     from nanopynix.rpc.client._pool import WorkerClient
@@ -604,14 +604,13 @@ class ValueProxy:
     async def build(
         self,
         *,
-        build_mode: BuildModeType | int | None = None,
+        build_mode: BuildMode | int | None = None,
         store: Store | None = None,
         timeout: float | None = None,
     ) -> dict[str, str]:
         """Build the derivation represented by this evaluated value."""
         build_store_handle = self._build_store_handle(store)
-        mode_value = self._build_mode_value(build_mode)
-        return await self._build_evaluated_value(mode_value, build_store_handle, timeout=timeout)
+        return await self._build_evaluated_value(build_mode_value(build_mode), build_store_handle, timeout=timeout)
 
     def _build_store_handle(self, store: Store | None) -> int:
         if store is None:
@@ -619,13 +618,6 @@ class ValueProxy:
         if store._session_id != self._ctx.session_id:  # type: ignore[reportPrivateUsage] -- cross-class access  # noqa: SLF001
             raise ValueError("Store belongs to a different session")
         return store.store_handle
-
-    def _build_mode_value(self, build_mode: BuildModeType | int | None) -> int:
-        if build_mode is None:
-            return BuildMode.Normal.value
-        if isinstance(build_mode, int):
-            return build_mode
-        return build_mode.value
 
     async def _build_evaluated_value(
         self,
