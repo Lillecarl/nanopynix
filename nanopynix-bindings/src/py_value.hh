@@ -67,5 +67,7 @@ struct PyValue {
     std::string repr();
 
     nix::EvalState *evalState() const;
+    /// `evalState()` but never null -- the as_* accessors cannot work without it.
+    nix::EvalState &requireEvalState() const;
     nix::Value *checkedValue() const;
 };

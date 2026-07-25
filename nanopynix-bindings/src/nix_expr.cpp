@@ -187,23 +187,69 @@ bool PyValue::is_list()     const { return checkedValue()->type() == nix::nList;
 bool PyValue::is_function() const { return checkedValue()->type() == nix::nFunction; }
 bool PyValue::is_thunk()    const { return checkedValue()->type() == nix::nThunk; }
 
-int64_t PyValue::as_int() const { return static_cast<int64_t>(checkedValue()->integer()); }
-double PyValue::as_float() const { return checkedValue()->fpoint(); }
+// The as_* accessors below MUST go through EvalState::force*, never through
+// nix::Value's raw integer()/fpoint()/boolean()/c_str().
+//
+// Those raw accessors are `getStorage<T>()` -- an unchecked read of the value's
+// union (nix/expr/value.hh:1328-1371). Reading the wrong alternative is
+// undefined behaviour, and for `c_str()` specifically it dereferences whatever
+// bits the other alternative left behind: `as_string()` on an int used to
+// segfault the interpreter outright. The numeric ones were quieter and no
+// better, returning garbage for a value of the wrong type.
+//
+// `checkedValue()` does not help -- it validates that the *root* is still
+// alive, not that the value holds what the caller is asking for.
+//
+// EvalState::force* forces a thunk first and then type-checks, raising
+// nix::TypeError (bound, and carrying its ErrorInfo via nix_error_info.hh) for
+// a mismatch. That is also why these no longer need an is-it-a-thunk dance:
+// the raw accessors were unsafe on unforced values too.
+
+nix::EvalState &PyValue::requireEvalState() const {
+    auto *es = evalState();
+    if (!es)
+        throw std::runtime_error("Nix value has no evaluator; it cannot be read");
+    return *es;
+}
+
+int64_t PyValue::as_int() const {
+    auto *v = checkedValue();
+    auto &es = requireEvalState();
+    nb::gil_scoped_release release;
+    return static_cast<int64_t>(es.forceInt(*v, nix::noPos, "while reading a Nix value as an int"));
+}
+
+double PyValue::as_float() const {
+    auto *v = checkedValue();
+    auto &es = requireEvalState();
+    nb::gil_scoped_release release;
+    return es.forceFloat(*v, nix::noPos, "while reading a Nix value as a float");
+}
+
 bool PyValue::as_bool() const {
-    auto *value = checkedValue();
-    if (value->type() == nix::nNull)
+    auto *v = checkedValue();
+    auto &es = requireEvalState();
+    nb::gil_scoped_release release;
+    es.forceValue(*v, nix::noPos);
+    // null reads as false, preserved from the original: callers use this for
+    // optional flags, where `null` and `false` mean the same thing.
+    if (v->type() == nix::nNull)
         return false;
-    return value->boolean();
+    return es.forceBool(*v, nix::noPos, "while reading a Nix value as a bool");
 }
 
 std::string PyValue::as_string() const {
     auto *v = checkedValue();
-    if (auto sv = v->c_str()) return std::string(sv);
-    if (auto *es = evalState()) {
-        nb::gil_scoped_release release;
-        return std::string(es->forceStringNoCtx(*v, nix::noPos, ""));
-    }
-    return "";
+    auto &es = requireEvalState();
+    nb::gil_scoped_release release;
+    // forceString, NOT forceStringNoCtx: the only thing being fixed here is the
+    // unchecked union read, and rejecting string context would be a second,
+    // unrelated restriction. Callers legitimately read strings that carry it --
+    // a derivation's drvPath/outPath are the common case -- and the raw c_str()
+    // this replaces never cared. Context is dropped rather than rejected, which
+    // is what a Python-side `str` can represent; use realise_string() when the
+    // referenced store paths actually need to exist.
+    return std::string(es.forceString(*v, nix::noPos, "while reading a Nix value as a string"));
 }
 
 void PyValue::force() {
