@@ -301,10 +301,12 @@ std::vector<std::string> PyValue::realise_argv() {
 nb::dict PyValue::edit_location() {
     std::optional<nix::SourcePath> source_path;
     uint32_t line = 0;
+    // Hoisted out of the block below only so the last failure branch, which
+    // runs after it, can also report through nix::EvalError.
+    auto *es = evalState();
+    if (es == nullptr) throw std::runtime_error("value has no evaluation state");
     {
         nb::gil_scoped_release release;
-        auto *es = evalState();
-        if (es == nullptr) throw std::runtime_error("value has no evaluation state");
         auto *value = checkedValue();
         if (value->type() == nix::nPath || value->type() == nix::nString) {
             nix::NixStringContext context;
@@ -315,7 +317,7 @@ nb::dict PyValue::edit_location() {
                 source_path = *path;
                 line = pos.line;
             } else {
-                throw nix::Error("selected function cannot be shown in an editor");
+                throw nix::EvalError(*es, "selected function cannot be shown in an editor");
             }
         } else {
             auto location = nix::findPackageFilename(*es, *value, "selected value");
@@ -324,10 +326,10 @@ nb::dict PyValue::edit_location() {
         }
     }
     if (!source_path)
-        throw std::runtime_error("could not determine source location");
+        throw nix::EvalError(*es, "could not determine source location");
     auto physical_path = source_path->getPhysicalPath();
     if (!physical_path)
-        throw nix::Error("cannot open '%s' in an editor because it has no physical path", *source_path);
+        throw nix::EvalError(*es, "cannot open '%s' in an editor because it has no physical path", *source_path);
     nb::dict result;
     result["path"] = physical_path->string();
     result["line"] = line;
@@ -465,10 +467,10 @@ std::string PyValue::derived_path() {
         nb::gil_scoped_release release;
         auto package_info = nix::getDerivation(*es, *v, false);
         if (!package_info)
-            throw nix::Error("selected value is not a derivation");
+            throw nix::EvalError(*es, "selected value is not a derivation");
         auto maybe_drv_path = package_info->queryDrvPath();
         if (!maybe_drv_path)
-            throw nix::Error("selected derivation has no drvPath");
+            throw nix::EvalError(*es, "selected derivation has no drvPath");
         drv_path = std::move(*maybe_drv_path);
     }
 
@@ -488,10 +490,10 @@ nb::dict PyValue::build(
         nb::gil_scoped_release release;
         auto package_info = nix::getDerivation(*es, *v, false);
         if (!package_info)
-            throw nix::Error("selected value is not a derivation");
+            throw nix::EvalError(*es, "selected value is not a derivation");
         drv_path = package_info->queryDrvPath();
         if (!drv_path)
-            throw nix::Error("selected derivation has no drvPath");
+            throw nix::EvalError(*es, "selected derivation has no drvPath");
         output_paths = package_info->queryOutputs(true, false);
     }
 
