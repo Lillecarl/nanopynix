@@ -263,14 +263,13 @@ def _is_store_path(value: object) -> bool:
 
 
 async def test_inproc_reads_a_string_carrying_store_path_context(inproc_session: InprocSessionFactory) -> None:
-    """force/to_python/as_string all accept an interpolated derivation, and agree."""
+    """as_string and to_python both accept an interpolated derivation, and agree."""
     async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
         value = await ev.string(CONTEXT_STRING_EXPR)
         attr = await value.attr("s")
-        forced = await attr.force()
-        assert _is_store_path(forced), forced
-        assert await attr.as_string() == forced
-        assert await value.to_python() == {"s": forced}
+        as_string = await attr.as_string()
+        assert _is_store_path(as_string), as_string
+        assert await value.to_python() == {"s": as_string}
 
 
 async def test_rpc_reads_a_string_carrying_store_path_context(rpc_session: RpcSessionFactory) -> None:
@@ -278,10 +277,9 @@ async def test_rpc_reads_a_string_carrying_store_path_context(rpc_session: RpcSe
     async with rpc_session() as session, session.store() as store, session.eval(store) as ev:
         value = await ev.string(CONTEXT_STRING_EXPR)
         attr = value.attr("s")
-        forced = await attr.force()
-        assert _is_store_path(forced), forced
-        assert await attr.as_string() == forced
-        assert await value.to_python() == {"s": forced}
+        as_string = await attr.as_string()
+        assert _is_store_path(as_string), as_string
+        assert await value.to_python() == {"s": as_string}
 
 
 # Flattening a whole value tree into Python data is `builtins.toJSON`'s job, and

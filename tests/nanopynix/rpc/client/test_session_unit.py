@@ -37,8 +37,6 @@ from nanopynix.rpc.client._session import (
     EvalProxy,
     EvalSession,
     ReplSession,
-    ValueAttrs,
-    ValueList,
     ValueProxy,
 )
 from nanopynix.rpc.client._session import (
@@ -75,7 +73,7 @@ def _make_eval_stub() -> MagicMock:
     stub.close_eval = AsyncMock()
     stub.begin_repl = AsyncMock()
     stub.repl_process_line = AsyncMock()
-    stub.force = AsyncMock()
+    stub.as_scalar = AsyncMock()
     stub.force_json = AsyncMock()
     stub.attr = AsyncMock()
     stub.list_get = AsyncMock()
@@ -104,18 +102,20 @@ def _mock_value_handle(handle: int = 1, type_str: str = "int") -> MagicMock:
     return vh
 
 
-def _mock_force_value_scalar(value: Any) -> MagicMock:
-    """Return a ForceValue proto mock with scalar."""
-    fv = MagicMock()
+def _mock_scalar(value: Any) -> MagicMock:
+    """Return a Scalar proto mock -- what the AsScalar RPC answers with.
+
+    This used to build a ``ForceValue`` wrapper for the Force RPC, which was
+    deleted along with the client's ``force()``. AsScalar returns the scalar
+    itself, so the wrapper went with it.
+    """
     scalar = MagicMock()
     scalar.string_value = value if isinstance(value, str) else None
     scalar.int_value = value if isinstance(value, int) and not isinstance(value, bool) else None
     scalar.float_value = value if isinstance(value, float) else None
     scalar.bool_value = value if isinstance(value, bool) else None
     scalar.null_value = MagicMock() if value is None else None
-    fv.scalar = scalar
-    fv.remote_value = None
-    return fv
+    return scalar
 
 
 def _mock_build_response(
@@ -423,11 +423,11 @@ class TestValueProxyLifecycle:
         assert vp.handle == 42
         assert vp.nix_type == NixType.INT
 
-    async def test_force_delegates_to_worker(self):
+    async def test_as_int_delegates_to_worker(self):
         w = self._worker()
-        w.eval_stub.force.return_value = _mock_force_value_scalar(99)
+        w.eval_stub.as_scalar.return_value = _mock_scalar(99)
         vp = self._proxy(w, 1, "int")
-        result = await vp.force()
+        result = await vp.as_int()
         assert result == 99
 
     # Two force_as unit tests lived here -- that it read the cached type
@@ -518,8 +518,8 @@ class TestValueProxyLifecycle:
         w.eval_stub.attr.assert_not_awaited()
 
         w.eval_stub.attr.return_value = _mock_value_handle(5, "string")
-        w.eval_stub.force.return_value = _mock_force_value_scalar("hello")
-        assert await child.force() == "hello"
+        w.eval_stub.as_scalar.return_value = _mock_scalar("hello")
+        assert await child.as_string() == "hello"
         assert child.handle == 5
         assert child.nix_type == NixType.STRING
 
@@ -657,37 +657,44 @@ class TestValueProxyLifecycle:
         vp = self._proxy(w, 1, "int", owner=self._owner(active))
 
         # Active — works
-        w.eval_stub.force.return_value = _mock_force_value_scalar(42)
-        assert await vp.force() == 42
+        w.eval_stub.as_scalar.return_value = _mock_scalar(42)
+        assert await vp.as_int() == 42
 
         # Session closed
         active[0] = False
         with pytest.raises(EvalSessionClosedError, match="EvalSession has been closed"):
-            await vp.force()
+            await vp.as_int()
 
-    async def test_release_then_force_raises_typed_error(self):
+    async def test_release_then_read_raises_typed_error(self):
         w = self._worker()
         w.eval_stub.release.return_value = MagicMock()
         vp = self._proxy(w, 1, "int")
         await vp.release()
 
         with pytest.raises(ValueReleasedError, match="has been released"):
-            await vp.force()
+            await vp.as_int()
 
-    async def test_attrs_borrow_parent_handle(self):
-        """An attrs view cannot independently release its parent's handle."""
+    async def test_unresolved_as_dict_children_die_with_their_parent(self):
+        """A lazy child cannot outlive the parent it has yet to resolve against.
+
+        This replaces a test that ``ValueAttrs`` could not independently
+        release its parent's handle. ``as_dict()`` hands back plain lazy
+        ``ValueProxy`` children instead of a view, so the property to check
+        is now the child's: until it resolves it holds only a reference to
+        the parent, and a released parent must make that a typed error
+        rather than an RPC with a dead handle.
+        """
         w = self._worker()
         w.eval_stub.attr_names.return_value = MagicMock(names=["x"])
         w.eval_stub.release.return_value = MagicMock()
         parent = self._proxy(w, 1, "attrs")
 
-        attrs = await parent.force()
+        attrs = await parent.as_dict()
+        child = attrs["x"]
 
-        assert isinstance(attrs, ValueAttrs)
-        assert not hasattr(attrs, "release")
         await parent.release()
         with pytest.raises(ValueReleasedError, match="ValueProxy has been released"):
-            _ = attrs["x"]
+            await child.as_int()
         w.eval_stub.release.assert_awaited_once()
 
     async def test_finalizer_defers_release_until_a_safe_rpc_boundary(self):
@@ -714,9 +721,9 @@ class TestValueProxyLifecycle:
     async def test_check_active_only_when_owner_has_flag(self):
         """An owner without an active flag never expires."""
         w = self._worker()
-        w.eval_stub.force.return_value = _mock_force_value_scalar(42)
+        w.eval_stub.as_scalar.return_value = _mock_scalar(42)
         vp = self._proxy(w, 1, "int")
-        assert await vp.force() == 42  # should not raise
+        assert await vp.as_int() == 42  # should not raise
 
     async def test_handle_still_accessible_after_close(self):
         """Cached properties are available even after session close."""
@@ -728,39 +735,12 @@ class TestValueProxyLifecycle:
         assert vp.nix_type == NixType.ATTRS
 
 
-class TestValueListBounds:
-    def _worker(self) -> MagicMock:
-        return _mock_worker_client()
-
-    def _list(self, worker: MagicMock, length: int = 2) -> ValueList:
-        ctx = _EvalProxyContext(EvalProxy(worker), _EvalOwner(_EvalOwnerToken()), None)
-        return ValueList(ctx.value(1, NixType.LIST), length)
-
-    async def test_getitem_rejects_out_of_range_indexes(self):
-        w = self._worker()
-        value = self._list(w, length=2)
-
-        # In-range: negative index normalised, positive index in range — both ok.
-        assert value[-1] is not None
-        assert value[0] is not None
-
-        # Out of range: positive index past end, negative index too far back.
-        with pytest.raises(IndexError, match="out of range"):
-            _ = value[2]
-        with pytest.raises(IndexError, match="out of range"):
-            _ = value[-3]
-
-        w.eval_stub.list_get.assert_not_awaited()
-
-    async def test_force_rejects_out_of_range_indexes(self):
-        w = self._worker()
-        value = self._list(w, length=2)
-
-        with pytest.raises(IndexError, match="out of range"):
-            await value.force(2)
-
-        w.eval_stub.list_get.assert_not_awaited()
-
+# `TestValueListBounds` lived here: two tests that `ValueList[i]` raised
+# `IndexError` for an out-of-range index, positive or negative, without
+# reaching the worker. `as_list()` returns a real Python list of lazy
+# proxies, so both properties are now Python's own -- the bounds check and
+# the "no RPC for an index that cannot exist" guarantee come free from the
+# list object, and there is no hand-rolled `_check_index` left to test.
 
 # ════════════════════════════════════════════════════════════════════
 # ValueProxy lazy child resolution
@@ -789,34 +769,34 @@ class TestLazyChildProxy:
         parent_proxy = parent if isinstance(parent, ValueProxy) else ctx.value(parent.handle, parent.nix_type)
         return ctx.child(parent_proxy, selector)
 
-    async def test_attrs_getitem_force_calls_attr(self):
-        """attrs["x"].force() calls eval.attr with parent handle and name."""
+    async def test_attrs_getitem_read_calls_attr(self):
+        """Reading attrs["x"] calls eval.attr with the parent handle and name."""
         w = self._worker()
         w.eval_stub.attr.return_value = _mock_value_handle(5, "int")
-        w.eval_stub.force.return_value = _mock_force_value_scalar(99)
+        w.eval_stub.as_scalar.return_value = _mock_scalar(99)
         cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), "name")
 
-        result = await cp.force()
+        result = await cp.as_int()
 
         assert w.eval_stub.attr.await_count == 1
-        assert w.eval_stub.force.await_count == 1
+        assert w.eval_stub.as_scalar.await_count == 1
         assert result == 99
 
-    async def test_list_getitem_force_calls_list_get(self):
-        """lst[0].force() calls eval.list_get with parent handle and index."""
+    async def test_list_getitem_read_calls_list_get(self):
+        """Reading lst[0] calls eval.list_get with the parent handle and index."""
         w = self._worker()
         w.eval_stub.list_get.return_value = _mock_value_handle(3, "int")
-        w.eval_stub.force.return_value = _mock_force_value_scalar(42)
+        w.eval_stub.as_scalar.return_value = _mock_scalar(42)
         cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), 0)
 
-        result = await cp.force()
+        result = await cp.as_int()
 
         assert w.eval_stub.list_get.await_count == 1
-        assert w.eval_stub.force.await_count == 1
+        assert w.eval_stub.as_scalar.await_count == 1
         assert result == 42
 
-    async def test_no_rpc_until_force(self):
-        """No RPC is made until .force() is called on the child proxy."""
+    async def test_no_rpc_until_the_child_is_read(self):
+        """No RPC is made until the child proxy is actually read."""
         w = self._worker()
         cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), "name")
         w.eval_stub.attr.assert_not_called()
@@ -850,16 +830,16 @@ class TestLazyChildProxy:
         cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), "name", owner=self._owner(active))
 
         with pytest.raises(EvalSessionClosedError, match="EvalSession has been closed"):
-            await cp.force()
+            await cp.as_int()
 
     async def test_child_proxy_timeout_override(self):
-        """Timeout override is passed through to resolve and force."""
+        """Timeout override is passed through to resolve and read."""
         w = self._worker()
         w.eval_stub.attr.return_value = _mock_value_handle(5, "int")
-        w.eval_stub.force.return_value = _mock_force_value_scalar(42)
+        w.eval_stub.as_scalar.return_value = _mock_scalar(42)
         cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), "name", timeout=30.0)
 
-        await cp.force(timeout=10.0)
+        await cp.as_int(timeout=10.0)
 
         assert w.eval_stub.attr.call_args[1]["timeout"] == DEFAULT_RPC_TIMEOUT_SECONDS  # type: ignore[reportUnknownMemberType, reportOptionalSubscript] -- mock call_args absence in stubs
 

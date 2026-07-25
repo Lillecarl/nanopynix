@@ -49,7 +49,7 @@ async def test_impure_allows_impure_builtins(
         assert await v.as_int() > 0
 
         system = await eval.string("builtins.currentSystem")
-        assert isinstance(await system.force(), str)
+        assert isinstance(await system.as_string(), str)
 
 
 async def test_current_system_binding_matches_builtin_default(
@@ -61,7 +61,7 @@ async def test_current_system_binding_matches_builtin_default(
         session.eval(store, eval_settings=NixEvalSettings(pure_eval=False)) as eval,
     ):
         system = await eval.string("builtins.currentSystem")
-        assert await system.force() == current_system()
+        assert await system.as_string() == current_system()
 
 
 @pytest.mark.anyio

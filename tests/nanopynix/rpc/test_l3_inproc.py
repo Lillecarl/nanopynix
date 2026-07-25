@@ -171,7 +171,7 @@ async def test_attrs_and_children_have_exactly_one_owner(l3_inproc: _L3Inproc) -
         child = attrs["x"]
         assert [handle for handle, _ in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)] == [parent.handle]
 
-        assert await child.force() == 1
+        assert await child.as_int() == 1
         handles = {handle for handle, _ in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)}
         assert handles == {parent.handle, child.handle}
 
@@ -188,7 +188,7 @@ async def test_lists_and_children_have_exactly_one_owner(l3_inproc: _L3Inproc) -
         child = values[0]
         assert {handle for handle, _ in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)} == {parent.handle}
 
-        assert await child.force() == 1
+        assert await child.as_int() == 1
         assert {handle for handle, _ in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)} == {
             parent.handle,
             child.handle,
@@ -235,7 +235,7 @@ async def test_as_dict_pins_the_parent_only_until_its_children_resolve(l3_inproc
         assert {item[0] for item in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)} == {handle}
 
         child = attrs["x"]
-        assert await child.force() == 1
+        assert await child.as_int() == 1
         # ...and now released, because the child carries its own handle.
         assert {item[0] for item in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)} == {child.handle}
 
@@ -258,7 +258,7 @@ async def test_as_list_pins_the_parent_only_until_its_children_resolve(l3_inproc
         assert {item[0] for item in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)} == {handle}
 
         child = values[0]
-        assert await child.force() == 1
+        assert await child.as_int() == 1
         await child.release()
         del child, values
         gc.collect()
@@ -276,7 +276,7 @@ async def test_explicit_value_release_is_idempotent_at_both_sides(l3_inproc: _L3
 
         assert handle not in {item[0] for item in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)}
         with pytest.raises(ValueReleasedError, match="ValueProxy"):
-            await value.force()
+            await value.get_type()
 
 
 async def test_failed_value_release_retries_at_the_next_rpc_boundary(l3_inproc: _L3Inproc) -> None:
@@ -348,7 +348,7 @@ async def test_locked_flake_explicit_release_removes_exact_worker_handle(
 
         assert l3_inproc.state.handles.iter_kind(HandleKind.LOCKED_FLAKE) == []
         assert {item[0] for item in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)} == {output_handle}
-        assert await outputs.attr("val").force() == 1
+        assert await outputs.attr("val").as_int() == 1
         with pytest.raises(ValueReleasedError, match="LockedFlakeHandle"):
             await locked.eval()
 

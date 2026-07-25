@@ -159,14 +159,19 @@ SUCCESS_CASES: list[Case] = [
     # what makes nanopynix's own parseNetwork result usable from Python.
     Case("as_dict_over_a_function_valued_attrset", "{ n = 1; f = x: x; }", _as_dict_keys),
     Case("apply_a_function_reached_through_as_dict", "{ f = x: x + 1; n = 41; }", _apply_via_as_dict),
-    # force() on a scalar is the one shape the two engines already agree on.
-    Case("force_int", "1 + 2", lambda v: v.force()),
-    Case("force_string", '"hi"', lambda v: v.force()),
-    Case("force_bool", "true", lambda v: v.force()),
-    Case("force_null", "null", lambda v: v.force()),
-    # ...and the two shapes they do not. See SEMANTIC_LEDGER.
-    Case("force_attrs", "{ a = 1; }", lambda v: v.force()),
-    Case("force_list", "[1 2]", lambda v: v.force()),
+    # get_type() is the forcing verb: evaluate to WHNF, answer with what that
+    # turned out to be. It replaced force() -- and with it the force_attrs /
+    # force_list ledger entries, since the disagreement was entirely about what
+    # a *forced compound* should come back as, a question neither engine is
+    # asked any more. Every type is covered here precisely because those two
+    # are where the engines used to part company.
+    Case("get_type_int", "1 + 2", lambda v: v.get_type()),
+    Case("get_type_string", '"hi"', lambda v: v.get_type()),
+    Case("get_type_bool", "true", lambda v: v.get_type()),
+    Case("get_type_null", "null", lambda v: v.get_type()),
+    Case("get_type_attrs", "{ a = 1; }", lambda v: v.get_type()),
+    Case("get_type_list", "[1 2]", lambda v: v.get_type()),
+    Case("get_type_function", "x: x", lambda v: v.get_type()),
     Case("apply_tostring_int", "42", lambda v: _apply_as_string(v, "builtins.toString")),
     Case("apply_tostring_bool", "true", lambda v: _apply_as_string(v, "builtins.toString")),
 ]
@@ -218,14 +223,6 @@ SEMANTIC_LEDGER: dict[str, str] = {
         "the engines agree, so this is *when* the error arrives, not whether."
     ),
     "list_index_out_of_range": 'DEFECT: as attr_missing, for LEDGER\'s "Value.list_get:async".',
-    "force_attrs": (
-        "DEFECT: force() means two different things. inproc's runs _force_to_python and returns a "
-        "fully converted dict -- a *deep* conversion wearing WHNF's name, and already what "
-        "to_python() is for. rpc's returns a ValueAttrs view whose values are still lazy, which is "
-        "what forcing an attrset actually does in Nix. TODO item 6 resolves this by deleting the "
-        "view classes and giving force() one meaning on both engines."
-    ),
-    "force_list": "DEFECT: as force_attrs, with ValueList.",
 }
 
 

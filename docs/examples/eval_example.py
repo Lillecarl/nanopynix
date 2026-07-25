@@ -40,7 +40,7 @@ async def main() -> None:
         assert await x.as_int() == 42
         names = await v2.attr_names()
         assert set(names) == {"inner", "z"}
-        print("attr navigation: z =", await v2.attr("z").force())
+        print("attr navigation: z =", await v2.attr("z").to_python())
 
         # --- strict accessors for type-checked scalar extraction ---------------
 
@@ -55,8 +55,8 @@ async def main() -> None:
         v4 = await eval.string("[ 1 2 3 4 5 ]")
         assert await v4.get_type() == NixType.LIST
         assert await v4.list_length() == 5
-        assert await v4.list_get(0).force() == 1
-        assert await v4.list_get(-1).force() == 5
+        assert await v4.list_get(0).as_int() == 1
+        assert await v4.list_get(-1).as_int() == 5
         print("list: length =", await v4.list_length())
 
         # --- to_python: serialize to dict/list tree (like to_python) --------
