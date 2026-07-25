@@ -125,11 +125,14 @@ def test_prune_old_runs_keeps_only_the_newest_n(tmp_path: Path) -> None:
 def test_prune_old_runs_never_deletes_below_one_even_if_keep_is_zero_or_negative(tmp_path: Path) -> None:
     for n in range(1, 4):
         (tmp_path / f"runs-{n:04d}").mkdir()
+    # The labeled budget is clamped by the same floor, so a misconfigured
+    # keep=0 still leaves a labeled run its place rather than none.
+    write_run_meta(tmp_path / "runs-0001", {"label": "kept"})
 
     prune_old_runs(tmp_path, keep=0, protect=tmp_path / "runs-0003")
 
     remaining = sorted(p.name for p in tmp_path.iterdir())
-    assert remaining == ["runs-0003"]
+    assert remaining == ["runs-0001", "runs-0003"]
 
 
 def test_prune_old_runs_always_keeps_protect_even_if_it_is_not_the_newest(tmp_path: Path) -> None:
