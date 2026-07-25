@@ -635,3 +635,42 @@ def test_compare_accepts_labels_on_either_side(three_runs: Path, capsys: pytest.
     out = capsys.readouterr().out
     assert "runs-0001 -> runs-0002" in out
     assert "1 newly failing" in out
+
+
+def test_a_label_falls_back_to_the_newest_run_under_it_that_recorded_anything(
+    three_runs: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The newest run under a label having no records is what both a run that
+    # died at startup and a run still collecting look like. Erroring would
+    # withhold an answer that is sitting right there under the same name.
+    agent_dir = three_runs / ".pytest-agent"
+    write_run_meta(agent_dir / "runs-0002", {"run": 2, "label": "nightly"})
+    empty = agent_dir / "runs-0004"
+    empty.mkdir()
+    write_run_meta(empty, {"run": 4, "label": "nightly"})
+
+    assert run(["last-failures", "--run", "nightly"]) == 0
+
+    captured = capsys.readouterr()
+    assert "runs-0002 [nightly]" in captured.out
+    # Audibly skipped, never silently: a live run of the same name is the
+    # other thing this looks like, and answering it from an older run without
+    # saying so is the confidently-wrong answer the warning machinery exists
+    # to prevent.
+    assert "runs-0004 is labeled 'nightly' but has recorded nothing yet" in captured.err
+    assert "answering from runs-0002 instead" in captured.err
+
+
+def test_a_label_whose_every_run_recorded_nothing_says_that_rather_than_guessing(
+    three_runs: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    agent_dir = three_runs / ".pytest-agent"
+    empty = agent_dir / "runs-0004"
+    empty.mkdir()
+    write_run_meta(empty, {"run": 4, "label": "nightly"})
+
+    assert run(["last-failures", "--run", "nightly"]) == 1
+
+    assert "that run recorded nothing" in capsys.readouterr().err

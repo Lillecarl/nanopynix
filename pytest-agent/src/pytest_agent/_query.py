@@ -315,6 +315,15 @@ def _run_dir_for_label(agent_dir: Path, label: str) -> Path:
     same --agent-label, and re-running one command with the same label is a
     natural thing to do -- so the newest wins, and says so when there was a
     choice to make.
+
+    "Newest" skips a labeled run that has recorded nothing, the way the
+    newest-run-overall path does, so an older run under the same name still
+    answers rather than the query failing outright. But it skips *audibly*:
+    an empty labeled run is equally what a live one looks like during
+    collection, and answering that from a week-old run of the same name --
+    silently, with no `still running` warning, because the live run was never
+    read -- would be exactly the confidently-wrong answer this tool exists to
+    avoid.
     """
     matches = [(number, run_dir) for number, run_dir, found in _labeled_runs(agent_dir) if found == label]
     if not matches:
@@ -322,10 +331,22 @@ def _run_dir_for_label(agent_dir: Path, label: str) -> Path:
             f"no run labeled {label!r} under {display_path(agent_dir)} ({_known_labels(agent_dir)}) -- "
             "labels come from `pytest --agent-label NAME`, and a pruned run takes its label with it",
         )
-    number, run_dir = matches[-1]
+    with_records = [(number, run_dir) for number, run_dir in matches if (run_dir / "index.jsonl").is_file()]
+    # Nothing under this label has recorded anything: fall through to the
+    # newest match so _load_records raises with the specific complaint
+    # ("that run recorded nothing") rather than this one guessing at why.
+    number, run_dir = (with_records or matches)[-1]
     if len(matches) > 1:
         print(
             f"pytest-agent: {len(matches)} runs are labeled {label!r} -- reading the newest, runs-{number:04d}",
+            file=sys.stderr,
+        )
+    skipped = [skipped_number for skipped_number, _ in matches if skipped_number > number]
+    if skipped:
+        newest_skipped = skipped[-1]
+        print(
+            f"pytest-agent: runs-{newest_skipped:04d} is labeled {label!r} but has recorded nothing yet "
+            f"(still collecting, or died at startup) -- answering from runs-{number:04d} instead",
             file=sys.stderr,
         )
     return run_dir
