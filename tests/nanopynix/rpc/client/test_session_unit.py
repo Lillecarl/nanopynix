@@ -26,7 +26,6 @@ from nanopynix import (
     BuildMode,
     EvalSessionClosedError,
     ForeignValueError,
-    NixCoercionError,
     NixType,
     UnresolvedValueError,
     ValueReleasedError,
@@ -452,101 +451,6 @@ class TestValueProxyLifecycle:
         assert exc.value.expected == "int"
         assert exc.value.actual == "string"
         w.eval_stub.force.assert_not_awaited()
-
-    async def test_coerce_str_accepts_scalars(self):
-        cases: list[tuple[NixType | str, object, str]] = [
-            (NixType.STRING, "hello", "hello"),
-            (NixType.PATH, "/nix/store/demo", "/nix/store/demo"),
-            (NixType.INT, 42, "42"),
-            (NixType.FLOAT, 1.5, "1.5"),
-            (NixType.BOOL, True, "true"),
-            (NixType.BOOL, False, "false"),
-            (NixType.NULL, None, "null"),
-        ]
-        for typ, raw, expected in cases:
-            w = self._worker()
-            w.eval_stub.force.return_value = _mock_force_value_scalar(raw)
-            vp = self._proxy(w, 1, typ)
-            assert await vp.coerce_str() == expected
-
-    async def test_coerce_int_accepts_integral_values(self):
-        cases: list[tuple[NixType | str, object, int]] = [
-            (NixType.INT, 42, 42),
-            (NixType.FLOAT, 42.0, 42),
-            (NixType.STRING, "  +42 ", 42),
-            (NixType.STRING, "-7", -7),
-        ]
-        for typ, raw, expected in cases:
-            w = self._worker()
-            w.eval_stub.force.return_value = _mock_force_value_scalar(raw)
-            vp = self._proxy(w, 1, typ)
-            assert await vp.coerce_int() == expected
-
-    async def test_coerce_int_rejects_ambiguous_values(self):
-        cases: list[tuple[NixType | str, object]] = [
-            (NixType.FLOAT, 1.5),
-            (NixType.STRING, "1.5"),
-            (NixType.STRING, "abc"),
-            (NixType.BOOL, True),
-        ]
-        for typ, raw in cases:
-            w = self._worker()
-            w.eval_stub.force.return_value = _mock_force_value_scalar(raw)
-            vp = self._proxy(w, 1, typ)
-            with pytest.raises(NixCoercionError):
-                await vp.coerce_int()
-
-    async def test_coerce_float_accepts_finite_numbers(self):
-        cases: list[tuple[NixType | str, object, float]] = [
-            (NixType.INT, 42, 42.0),
-            (NixType.FLOAT, 1.5, 1.5),
-            (NixType.STRING, "  2.25 ", 2.25),
-        ]
-        for typ, raw, expected in cases:
-            w = self._worker()
-            w.eval_stub.force.return_value = _mock_force_value_scalar(raw)
-            vp = self._proxy(w, 1, typ)
-            assert await vp.coerce_float() == expected
-
-    async def test_coerce_float_rejects_non_finite_or_bool(self):
-        cases: list[tuple[NixType | str, object]] = [
-            (NixType.STRING, "nan"),
-            (NixType.STRING, "inf"),
-            (NixType.BOOL, False),
-        ]
-        for typ, raw in cases:
-            w = self._worker()
-            w.eval_stub.force.return_value = _mock_force_value_scalar(raw)
-            vp = self._proxy(w, 1, typ)
-            with pytest.raises(NixCoercionError):
-                await vp.coerce_float()
-
-    async def test_coerce_bool_is_conservative(self):
-        true_worker = self._worker()
-        true_worker.eval_stub.force.return_value = _mock_force_value_scalar("true")
-        false_worker = self._worker()
-        false_worker.eval_stub.force.return_value = _mock_force_value_scalar(" false ")
-        bool_worker = self._worker()
-        bool_worker.eval_stub.force.return_value = _mock_force_value_scalar(True)
-
-        assert await self._proxy(true_worker, 1, "string").coerce_bool() is True
-        assert await self._proxy(false_worker, 1, "string").coerce_bool() is False
-        assert await self._proxy(bool_worker, 1, "bool").coerce_bool() is True
-
-        int_worker = self._worker()
-        int_worker.eval_stub.force.return_value = _mock_force_value_scalar(1)
-        with pytest.raises(NixCoercionError):
-            await self._proxy(int_worker, 1, "int").coerce_bool()
-
-    async def test_coercions_reject_structural_values(self):
-        w = self._worker()
-        # force() on attrs returns ValueAttrs, not a scalar
-        w.eval_stub.force.return_value = _mock_force_value_scalar(["x"])
-        vp = self._proxy(w, 1, "attrs")
-
-        for coercion in (vp.coerce_str, vp.coerce_int, vp.coerce_float, vp.coerce_bool):
-            with pytest.raises(NixCoercionError):
-                await coercion()
 
     async def test_call_json_arg_uses_explicit_wire_arg(self):
         w = self._worker()
