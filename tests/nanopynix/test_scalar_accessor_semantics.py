@@ -241,6 +241,77 @@ async def test_rpc_reads_a_string_carrying_store_path_context(rpc_session: RpcSe
         assert await value.force_deep() == {"s": forced}
 
 
+# Flattening a whole value tree into Python data is `builtins.toJSON`'s job, and
+# these expectations come from a real `nix eval --json` of each expression.
+#
+# The two attrset shortcuts are the load-bearing part. `__toString` wins over
+# `outPath`, and `outPath` collapses the attrset to that one string -- which is
+# what makes a *derivation* convertible at all, since `drv.out`/`drv.all`/
+# `drv.drvAttrs` point back at `drv` and a naive walk never terminates. Note the
+# rule keys off `outPath`, not off `type = "derivation"`.
+NIX_TOJSON: dict[str, object] = {
+    '{ a = 1; b = [ 1 "two" ]; }': {"a": 1, "b": [1, "two"]},
+    '{ __toString = self: "custom"; }': "custom",
+    '{ __toString = self: "custom"; outPath = "/foo"; }': "custom",
+    '{ outPath = "/foo"; a = 1; }': "/foo",
+    # No outPath, so the type tag alone changes nothing.
+    '{ type = "derivation"; a = 1; }': {"a": 1, "type": "derivation"},
+}
+
+# Nix refuses to flatten these, and so must we -- as an error, never as a
+# placeholder. The hand-rolled walk used to return the *name* of the type, so a
+# lambda quietly became the string "function".
+NIX_TOJSON_REJECTS = ["x: x", "{ f = x: x; }"]
+
+
+@pytest.mark.parametrize("expr", list(NIX_TOJSON), ids=list(NIX_TOJSON))
+async def test_inproc_deep_conversion_follows_nix_tojson(expr: str, inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
+        assert await (await ev.string(expr)).force_deep() == NIX_TOJSON[expr]
+
+
+@pytest.mark.parametrize("expr", NIX_TOJSON_REJECTS, ids=NIX_TOJSON_REJECTS)
+async def test_inproc_deep_conversion_rejects_a_function(expr: str, inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
+        with pytest.raises(NixError):
+            await (await ev.string(expr)).force_deep()
+
+
+async def test_deep_conversion_of_a_derivation_terminates(inproc_session: InprocSessionFactory) -> None:
+    """A derivation is a cyclic attrset; converting one used to take SIGSEGV.
+
+    ``drv.out`` is ``drv`` and ``drv.all`` is ``[ drv ]``, so a walk with no
+    ``outPath`` shortcut recurses until the C++ stack runs out and kills the
+    interpreter -- not an exception, a crash. Nix's own converter stops at the
+    output path, which is what this asserts.
+    """
+    async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
+        value = await ev.string(
+            'builtins.derivation { name = "deep-cyclic"; system = builtins.currentSystem; builder = "/bin/sh"; }',
+        )
+        result = await value.force_deep()
+        assert isinstance(result, str), result
+        assert result.startswith("/nix/store/"), result
+        assert result.endswith("-deep-cyclic"), result
+
+
+async def test_deep_conversion_of_a_true_cycle_raises_instead_of_crashing(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    """A cycle with no ``outPath`` to stop at must still be an error, not SIGSEGV.
+
+    Nix answers this with "stack overflow; max-call-depth exceeded". The
+    assertion is deliberately only "it raised and the process survived": the
+    exception currently arrives as a bare ``RuntimeError`` rather than a
+    ``NixError``, which is a separate error-mapping gap -- pinning the exact
+    type here would enshrine it.
+    """
+    async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
+        value = await ev.string("let x = { y = x; }; in x")
+        with pytest.raises(Exception, match="max-call-depth"):
+            await value.force_deep()
+
+
 # force_as is the generic by-NixType entry point and still covers what no
 # as_* does (attrs/list/function). Bool is omitted here only because the
 # table's null row would need a second expected exception.
