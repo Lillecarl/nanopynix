@@ -194,19 +194,18 @@ async def _collect_engine(
 
 
 async def _drv_path(eval_session: Any, expr: str) -> str:
-    """Evaluate *expr*'s ``.drvPath`` as a plain, context-free string.
+    """Evaluate *expr*'s ``.drvPath`` as a plain string.
 
-    Done as its own expression rather than by navigating the value, because
-    every route through the value API hits an engine asymmetry (all CIP3
-    findings): rpc's ValueProxy has no derived-path accessor at all while
-    inproc's Value has ``_derived_path``; ``attr()`` is sync on rpc and
-    async on inproc (item 9); and the string accessor is ``coerce_str`` on rpc
-    but ``as_string`` on inproc (item 8). ``unsafeDiscardStringContext`` is
-    needed because ``coerce_str`` refuses a string carrying store-path context.
+    Written as its own expression rather than by navigating the value because
+    ``attr()`` is still sync on rpc and async on inproc, which is the one
+    remaining asymmetry on this route -- see ``SEMANTIC_LEDGER`` in
+    :mod:`tests.nanopynix.test_engine_parity_semantics`. The rest of what this
+    docstring used to list is fixed: ``as_string`` is on both engines now, and
+    ``coerce_str``, whose refusal of store-path context is why
+    ``unsafeDiscardStringContext`` is here, no longer exists at all.
     """
     value = await eval_session.string(f"builtins.unsafeDiscardStringContext (({expr}).drvPath)")
-    to_string = getattr(value, "as_string", None) or value.coerce_str
-    return await to_string()
+    return await value.as_string()
 
 
 async def _build_status(store: Any, derived_path: str) -> dict[str, Any]:
