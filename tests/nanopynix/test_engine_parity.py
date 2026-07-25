@@ -144,18 +144,10 @@ LEDGER: dict[str, str] = {
     "Store.call:inproc-only": "TRANSPORT: runs an L1 store method on the Nix thread.",
     "Store.rpc:rpc-only": "TRANSPORT: the generated StoreService proxy -- the escape hatch to the wire itself.",
     "Store.store_handle:rpc-only": "TRANSPORT: worker-side handle used to wire a store into a remote session.",
-    # The rest are ordinary store operations with no worker in them. libstore
-    # exposes all of these in-process; nothing but effort is missing.
-    **{
-        f"Store.{name}:rpc-only": "DEFECT: a plain libstore operation the inproc engine never got. No transport reason."
-        for name in (
-            "copy_closure",
-            "ensure_path",
-            "optimise_store",
-            "store_dirs",
-            "verify_store",
-        )
-    },
+    # Nothing else. Every remaining Store operation exists on both engines,
+    # and `nanopynix.protocols.AsyncStore` declares them, so a new one added to
+    # a single engine fails conformance in tests/nanopynix/test_protocols.py
+    # before it can reach this ledger.
     # ── EvalSession ────────────────────────────────────────────────
     "EvalSession.run:inproc-only": "TRANSPORT: dispatches onto the evaluator's dedicated thread.",
     "EvalSession.has_pending_work:inproc-only": "TRANSPORT: introspects that same thread's queue.",

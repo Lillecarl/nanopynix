@@ -23,6 +23,7 @@ from nanopynix_bindings import store as nanopynix_store
 from nanopynix_bindings import util as nanopynix_util
 from nanopynix_proto.nix.common import RequestFinalized
 from nanopynix_proto.nix.store import GcAction as PublicGcAction
+from nanopynix_proto.nix.store import StoreDirs
 
 from nanopynix._core._extract import locked_flake as _locked_flake_proto
 from nanopynix._core._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
@@ -724,6 +725,64 @@ class Store:
             hash_algo,
         )
         return PublicStorePath(await self._session.run(_print_store_path, self._require_raw(), raw_path))
+
+    async def store_dirs(self) -> StoreDirs:
+        """Return this store's full set of configured directories.
+
+        Only ``store_dir`` and ``uri`` are always populated: the rest describe
+        a store with a local filesystem layout, and Nix leaves them unset for
+        stores that have none.
+        """
+        return StoreDirs(**await self._session.run(self._require_raw().get_store_dirs))
+
+    async def ensure_path(self, path: str | PublicStorePath, /) -> None:
+        """Make ``path`` valid in this store, substituting it if necessary.
+
+        A no-op when the path is already valid. When it is not and no
+        substituter can supply it, this raises rather than returning quietly.
+        """
+        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
+        await self._session.run(self._require_raw().ensure_path, raw_path)
+
+    async def copy_closure(
+        self,
+        paths: list[str | PublicStorePath],
+        /,
+        dest_store: Store,
+        *,
+        repair: bool = False,
+        check_sigs: bool = True,
+        substitute: bool = False,
+    ) -> None:
+        """Copy the closure of ``paths`` from this store to ``dest_store``.
+
+        ``dest_store`` must come from the same session: both stores are driven
+        from that session's single Nix thread, and a store from another session
+        belongs to a different one.
+        """
+        if dest_store._session is not self._session:
+            raise ValueError("dest_store belongs to a different Session")
+        raw_paths = await self._session.run(_parse_store_paths, self._require_raw(), [str(path) for path in paths])
+        await self._session.run(
+            self._require_raw().copy_closure,
+            raw_paths,
+            dest_store._require_raw(),
+            repair,
+            check_sigs,
+            substitute,
+        )
+
+    async def optimise_store(self) -> None:
+        """Reclaim disk space by hard-linking identical files in this store."""
+        await self._session.run(self._require_raw().optimise_store)
+
+    async def verify_store(self, *, check_contents: bool = False, repair: bool = False) -> bool:
+        """Check this store's consistency, returning whether errors were found.
+
+        ``True`` means Nix found something wrong -- with ``repair`` it also
+        means it tried to fix it, not that it succeeded.
+        """
+        return await self._session.run(self._require_raw().verify_store, check_contents, repair)
 
     async def _public_store_paths(self, raw_paths: Any) -> list[PublicStorePath]:
         paths = await self._session.run(_print_store_paths, self._require_raw(), raw_paths)
