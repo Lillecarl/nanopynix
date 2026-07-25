@@ -230,11 +230,11 @@ bool PyValue::as_bool() const {
     auto *v = checkedValue();
     auto &es = requireEvalState();
     nb::gil_scoped_release release;
-    es.forceValue(*v, nix::noPos);
-    // null reads as false, preserved from the original: callers use this for
-    // optional flags, where `null` and `false` mean the same thing.
-    if (v->type() == nix::nNull)
-        return false;
+    // No null -> false carve-out. This used to silently read `null` as `false`
+    // for optional-flag callers, but an as_* accessor's whole contract is that
+    // it raises when the type is wrong, and `null` is not a bool. Callers that
+    // want the lenient reading should ask is_null() first, where the intent is
+    // visible at the call site instead of hidden in the accessor.
     return es.forceBool(*v, nix::noPos, "while reading a Nix value as a bool");
 }
 

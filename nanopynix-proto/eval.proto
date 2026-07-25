@@ -19,6 +19,7 @@ service EvalService {
   rpc Force(ForceRequest) returns (nix.common.ForceValue);
   rpc ForceDeep(ForceDeepRequest) returns (nix.common.DeepValue);
   rpc ForceJson(ForceJsonRequest) returns (ForceJsonResponse);
+  rpc AsScalar(AsScalarRequest) returns (nix.common.ScalarValue);
   rpc CoerceToString(CoerceToStringRequest) returns (CoerceToStringResponse);
   rpc RealiseString(RealiseStringRequest) returns (RealiseStringResponse);
   rpc RealiseArgv(RealiseArgvRequest) returns (RealiseArgvResponse);
@@ -145,6 +146,16 @@ message ForceJsonRequest {
 }
 message ForceJsonResponse {
   string json = 1;
+}
+
+// Strict scalar read. The type check happens in the worker, via Nix's own
+// force{Int,Float,Bool,String}, so a mismatch raises the same nix::TypeError
+// an inproc caller would get rather than a separately-invented client error.
+message AsScalarRequest {
+  int64 request_id = 1000;
+  int64 handle = 1;
+  int64 eval_handle = 100;
+  nix.common.NixType nix_type = 2;
 }
 
 // `builtins.toString` on the worker side. Distinct from RealiseString: this
