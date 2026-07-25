@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import signal
+import subprocess
 import tempfile
 import uuid
 from contextlib import redirect_stderr, redirect_stdout
@@ -340,6 +341,34 @@ class PynixStoreScenario:
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(scope="session")
+def easykubenix_openapi_schema(repo_root: Path) -> str:
+    """Realise the pinned Kubernetes OpenAPI schema the easykubenix scenarios read.
+
+    ``tests/pynix/test_lsp/easykubenix/default.nix`` interpolates a ``fetchurl``
+    derivation into ``openApiSchemaPath``, and nothing on the path from there to
+    the assertion ever *builds* it -- the LSP evaluates that file and then reads
+    the resulting path straight off disk. So on any machine where the fetch has
+    not happened to occur, all nine easykubenix scenarios fail with
+    ``FileNotFoundError`` on a store path that is perfectly valid and simply
+    absent, which reads as a bug in the LSP rather than a missing fixture.
+
+    Sync on purpose: a blocking call is fine here (this is not an async
+    function), and a session-scoped async fixture would need the whole suite's
+    event loop to outlive it for no benefit.
+    """
+    entry = repo_root / "tests/pynix/test_lsp/easykubenix/default.nix"
+    result = subprocess.run(  # noqa: S603 -- fixed argv, no shell, paths from the repo itself
+        ["nix-build", "--no-out-link", str(entry), "-A", "openApiSchema"],  # noqa: S607 -- nix-build resolved from PATH, as everywhere else in this suite
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"could not realise the easykubenix OpenAPI schema (offline?):\n{result.stderr}")
+    return result.stdout.strip()
 
 
 @pytest.fixture(scope="session")

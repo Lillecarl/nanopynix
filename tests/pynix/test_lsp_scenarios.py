@@ -95,8 +95,15 @@ async def easykubenix_driver(
     request: pytest.FixtureRequest,
     lsp_server: PynixLanguageServer,
     lsp_wire: tuple[PynixLanguageServer, pytest_lsp.LanguageClient],
+    easykubenix_openapi_schema: str,
 ) -> AsyncIterator[LspDriver]:
-    """Both backends for the easykubenix scenarios below, parametrized so each scenario runs against each."""
+    """Both backends for the easykubenix scenarios below, parametrized so each scenario runs against each.
+
+    ``easykubenix_openapi_schema`` is requested for its side effect: these
+    scenarios resolve Kinds through a ``fetchurl``-ed OpenAPI document that
+    nothing else in the chain ever builds. See its docstring in ``conftest``.
+    """
+    del easykubenix_openapi_schema
     if request.param == "in_process":
         yield InProcessDriver(lsp_server)
         return
