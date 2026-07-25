@@ -18,16 +18,21 @@ def _report(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
     *,
     duration: float = 0.01,
     longreprtext: str = "",
+    longrepr: object = None,
     capstdout: str = "",
     capstderr: str = "",
 ) -> pytest.TestReport:
     # A duck-typed stand-in: TestRecorder only reads these specific
     # attributes, and pytest.TestReport has no simple public constructor.
+    # `longrepr` is always present on a real report (None when the phase
+    # produced no representation at all), so the stand-in always defines it
+    # too -- crash extraction reads it for every failing phase.
     fake = SimpleNamespace(
         nodeid=nodeid,
         when=when,
         duration=duration,
         longreprtext=longreprtext,
+        longrepr=longrepr,
         capstdout=capstdout,
         capstderr=capstderr,
         caplog="",
@@ -36,7 +41,7 @@ def _report(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
 
 
 def test_records_a_passing_test(tmp_path: Path) -> None:
-    recorder = TestRecorder(tmp_path / "agent")
+    recorder = TestRecorder(tmp_path / "agent", rootpath=tmp_path)
     recorder.start()
 
     assert recorder.add_report(_report("t.py::test_a", "setup"), "") is None
@@ -55,7 +60,7 @@ def test_records_a_passing_test(tmp_path: Path) -> None:
 
 
 def test_records_a_failing_call_as_failed(tmp_path: Path) -> None:
-    recorder = TestRecorder(tmp_path / "agent")
+    recorder = TestRecorder(tmp_path / "agent", rootpath=tmp_path)
     recorder.start()
 
     recorder.add_report(_report("t.py::test_b", "setup"), "")
@@ -69,7 +74,7 @@ def test_records_a_failing_call_as_failed(tmp_path: Path) -> None:
 
 
 def test_a_failing_setup_wins_over_a_passing_teardown(tmp_path: Path) -> None:
-    recorder = TestRecorder(tmp_path / "agent")
+    recorder = TestRecorder(tmp_path / "agent", rootpath=tmp_path)
     recorder.start()
 
     recorder.add_report(_report("t.py::test_c", "setup", longreprtext="setup exploded"), "error")

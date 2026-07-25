@@ -5,32 +5,15 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
-from pathlib import Path
 
 import conftest
 import pytest
-from pytest_agent._harness_detect import HARNESS_ENV_VARS
 
-_SRC = Path(__file__).resolve().parents[1] / "src"
-
-
-@pytest.fixture(autouse=True)
-def _agent_on_pythonpath(monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
-    # These tests spawn real `pytest` subprocesses to exercise the plugin
-    # end-to-end. `pythonpath` in pyproject.toml only affects sys.path for
-    # *this* pytest run, not for child processes, so PYTHONPATH is set
-    # explicitly for the subprocess to find pytest_agent without installing it.
-    existing = os.environ.get("PYTHONPATH", "")
-    parts = [str(_SRC), *([existing] if existing else [])]
-    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(parts))
-    # This repo's own dev environment is itself a Claude Code session, so
-    # cleared here to keep --agent's on/off state in these tests explicit
-    # rather than an accident of where they happen to run.
-    for name in HARNESS_ENV_VARS:
-        monkeypatch.delenv(name, raising=False)
+# The PYTHONPATH wiring and harness-env-var cleanup these subprocess runs
+# depend on live in conftest._clean_agent_env, which is autouse for every
+# test in this package.
 
 
 def test_agent_mode_writes_per_test_detail_and_exits_nonzero_on_failure(pytester: pytest.Pytester) -> None:
@@ -113,18 +96,101 @@ def test_repeated_runs_accumulate_history_and_prune_old_run_dirs(pytester: pytes
     assert history_records[-1]["run_dir"] == "runs-0003"
 
 
+def test_a_real_failure_records_structured_crash_data_and_first_party_frames(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(
+        helper="""
+        def explode():
+            raise FileNotFoundError("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-swagger.json")
+        """,
+    )
+    pytester.makepyfile(
+        test_sample="""
+        import helper
+
+        def test_boom():
+            helper.explode()
+        """,
+    )
+
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent", "-q")
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+
+    index_path = pytester.path / ".pytest-agent" / "runs-0001" / "index.jsonl"
+    records = [json.loads(line) for line in index_path.read_text(encoding="utf-8").splitlines()]
+    record = next(record for record in records if record["outcome"] == "failed")
+
+    assert record["crash"]["exc_type"] == "FileNotFoundError"
+    assert "swagger.json" in record["crash"]["message"]
+    assert record["crash"]["path"] == "helper.py"
+    # Both the test and the helper it called are the code under test, and
+    # pytest's own frames (site-packages) must not be mistaken for them.
+    frame_paths = [frame["path"] for frame in record["frames"] if frame["first_party"]]
+    assert frame_paths == ["test_sample.py", "helper.py"]
+
+
+def test_a_passing_run_records_no_crash_fields(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
+
+    pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent", "-q")
+
+    index_path = pytester.path / ".pytest-agent" / "runs-0001" / "index.jsonl"
+    record = json.loads(index_path.read_text(encoding="utf-8").splitlines()[0])
+    assert "crash" not in record
+    assert "frames" not in record
+
+
+def test_the_final_summary_names_each_failure_s_log_file(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(test_sample="def test_bad():\n    assert False\n")
+
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent", "-q")
+
+    # The resolved path and nothing else: it can be read straight back
+    # without being reassembled from the run number and the test file's
+    # path, and it already spells out the nodeid.
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+    printed = "\n".join(result.outlines)
+    assert "  .pytest-agent/runs-0001/test_sample.py/test_bad.log" in printed
+    assert "test_sample.py::test_bad" not in printed
+    assert (pytester.path / ".pytest-agent/runs-0001/test_sample.py/test_bad.log").is_file()
+
+
+def test_the_final_summary_adds_the_nodeid_when_the_path_lost_it(pytester: pytest.Pytester) -> None:
+    # A `/` in a parametrized id becomes `_` in the file name, so here the
+    # path alone can't be read back as a nodeid and both are printed.
+    pytester.makepyfile(
+        test_sample="import pytest\n\n@pytest.mark.parametrize('x', ['a/b'])\ndef test_p(x):\n    assert False\n",
+    )
+
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent", "-q")
+
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+    printed = "\n".join(result.outlines)
+    # Shell-quoted, because the brackets would otherwise glob (fish refuses
+    # such a path outright).
+    assert "'.pytest-agent/runs-0001/test_sample.py/test_p[a_b].log'  (test_sample.py::test_p[a/b])" in printed
+    assert (pytester.path / ".pytest-agent/runs-0001/test_sample.py/test_p[a_b].log").is_file()
+
+
+def test_the_cli_dispatches_query_subcommands_instead_of_running_pytest(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile(
+        test_sample="def test_ok():\n    assert True\n\ndef test_bad():\n    raise ValueError('nope')\n"
+    )
+    pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent", "-q")
+
+    digest = conftest.run_cli(["digest"], cwd=pytester.path)
+
+    assert digest.returncode == 0, digest.stderr
+    assert "1x  ValueError: nope" in digest.stdout
+    # No second run directory: a query must not start a pytest session.
+    assert not (pytester.path / ".pytest-agent" / "runs-0002").exists()
+
+
 def test_cli_wrapper_forces_agent_mode_on_with_no_flags(pytester: pytest.Pytester) -> None:
     pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
 
-    result = subprocess.run(
-        [sys.executable, "-c", "import sys; sys.argv = ['pytest-agent']; from pytest_agent.cli import main; main()"],
-        cwd=pytester.path,
-        capture_output=True,
-        timeout=15,
-        check=False,  # returncode asserted explicitly below
-    )
+    result = conftest.run_cli([], cwd=pytester.path)
 
-    assert result.returncode == 0
+    assert result.returncode == 0, result.stderr
     assert (pytester.path / ".pytest-agent" / "runs-0001" / "index.jsonl").exists()
 
 
@@ -147,6 +213,45 @@ def test_pipe_guard_blocks_a_run_piped_into_grep(pytester: pytest.Pytester) -> N
 
     assert pytest_proc.returncode == 2
     assert b"pytest-agent: refusing to run" in stderr
+
+
+def test_collect_only_may_be_piped_because_there_is_no_detail_to_lose(pytester: pytest.Pytester) -> None:
+    # `pytest --collect-only -q | tail -1` is how you ask "how many tests
+    # does this select". There are no failures to hide, and the interesting
+    # line is deliberately last, so the guard's rationale does not apply.
+    pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
+
+    tail = subprocess.Popen(["tail", "-n", "1"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    if tail.stdin is None:
+        raise AssertionError("expected tail's stdin to be a pipe")
+
+    pytest_proc = subprocess.Popen(
+        [sys.executable, "-m", "pytest", *conftest.agent_plugin_cli_args(), "--collect-only", "-q"],
+        cwd=pytester.path,
+        stdout=tail.stdin,
+        stderr=subprocess.PIPE,
+    )
+    tail.stdin.close()
+    _stdout, stderr = pytest_proc.communicate(timeout=10)
+    tail_out, _ = tail.communicate(timeout=10)
+
+    assert pytest_proc.returncode == 0
+    assert b"pytest-agent: refusing to run" not in stderr
+    assert b"1 test collected" in tail_out
+
+
+def test_agent_mode_leaves_a_listing_only_run_completely_alone(pytester: pytest.Pytester) -> None:
+    # Agent mode silences the terminal reporter and claims a run directory.
+    # Both are wrong for --collect-only: the listing *is* the answer, so
+    # silencing it leaves the caller with nothing, and there is no per-test
+    # detail for a run directory to hold.
+    pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
+
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent", "--collect-only", "-q")
+
+    assert result.ret == pytest.ExitCode.OK
+    assert any("1 test collected" in line for line in result.outlines)
+    assert not (pytester.path / ".pytest-agent").exists()
 
 
 def test_agent_allow_pipe_bypasses_the_guard(pytester: pytest.Pytester) -> None:

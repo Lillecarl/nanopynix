@@ -12,7 +12,8 @@ if TYPE_CHECKING:
 _RUN_DIR_RE = re.compile(r"^runs-(\d+)$")
 
 
-def _existing_run_numbers(root: Path) -> list[int]:
+def existing_run_numbers(root: Path) -> list[int]:
+    """Run numbers of the runs-NNNN directories under *root*, unsorted."""
     numbers: list[int] = []
     for entry in root.iterdir():
         if not entry.is_dir():
@@ -31,7 +32,7 @@ def next_run_dir(root: Path) -> tuple[int, Path]:
     directory.
     """
     root.mkdir(parents=True, exist_ok=True)
-    n = max(_existing_run_numbers(root), default=0) + 1
+    n = max(existing_run_numbers(root), default=0) + 1
     while True:
         candidate = root / f"runs-{n:04d}"
         try:
@@ -85,7 +86,7 @@ def prune_old_runs(top_root: Path, keep: int, protect: Path) -> None:
     run to prune everything including *protect*.
     """
     numbered = sorted(
-        ((n, top_root / f"runs-{n:04d}") for n in _existing_run_numbers(top_root)),
+        ((n, top_root / f"runs-{n:04d}") for n in existing_run_numbers(top_root)),
         key=lambda pair: pair[0],
     )
     effective_keep = max(keep, 1)
