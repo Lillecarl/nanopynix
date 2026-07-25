@@ -11,26 +11,18 @@ SIGTERM without killing the session running the test.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import signal
-import subprocess
-import sys
 import time
 from typing import TYPE_CHECKING
 
-import conftest
+from conftest import WAIT_TIMEOUT, running_pytest, wait_until
 from pytest_agent._runtime import MAX_STUCK_DUMPS
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
     from pathlib import Path
 
     import pytest
-
-# Generous: these wait on a real subprocess reaching a known state, and the
-# failure mode of waiting too long is a slow test, not a wrong one.
-WAIT_TIMEOUT = 30.0
 
 HANGING_TEST = """
 import time
@@ -45,38 +37,6 @@ def test_hangs():
 """
 
 
-@contextlib.contextmanager
-def _running_pytest(project: Path, *extra: str) -> Generator[subprocess.Popen[str]]:
-    """A `pytest --agent` subprocess in *project*, killed on the way out.
-
-    The kill matters: every test in here starts a run that would otherwise
-    sleep for five minutes, and an assertion failing before the signal is sent
-    must not leave that behind.
-    """
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "pytest", *conftest.agent_plugin_cli_args(), "--agent", *extra],
-        cwd=project,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    try:
-        yield proc
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.communicate(timeout=WAIT_TIMEOUT)
-
-
-def _wait_until(predicate: Callable[[], bool], description: str) -> None:
-    deadline = time.monotonic() + WAIT_TIMEOUT
-    while time.monotonic() < deadline:
-        if predicate():
-            return
-        time.sleep(0.05)
-    raise AssertionError(f"timed out after {WAIT_TIMEOUT}s waiting for {description}")
-
-
 def _run_dir(project: Path) -> Path:
     return project / ".pytest-agent" / "runs-0001"
 
@@ -89,8 +49,8 @@ def test_a_run_killed_by_sigterm_still_reports_what_it_was_running(pytester: pyt
     pytester.makepyfile(test_hang=HANGING_TEST)
     index_path = _run_dir(pytester.path) / "index.jsonl"
 
-    with _running_pytest(pytester.path, "--agent-heartbeat", "0.2") as proc:
-        _wait_until(
+    with running_pytest(pytester.path, "--agent-heartbeat", "0.2") as proc:
+        wait_until(
             lambda: index_path.is_file() and "test_quick" in index_path.read_text(encoding="utf-8"),
             "the first test to finish",
         )
@@ -122,8 +82,8 @@ def test_a_second_sigterm_does_not_leave_a_half_written_summary(pytester: pytest
     pytester.makepyfile(test_hang=HANGING_TEST)
     index_path = _run_dir(pytester.path) / "index.jsonl"
 
-    with _running_pytest(pytester.path, "--agent-heartbeat", "0.2") as proc:
-        _wait_until(
+    with running_pytest(pytester.path, "--agent-heartbeat", "0.2") as proc:
+        wait_until(
             lambda: index_path.is_file() and "test_quick" in index_path.read_text(encoding="utf-8"),
             "the first test to finish",
         )
@@ -160,8 +120,8 @@ def test_a_projects_own_sigterm_handler_is_not_taken_over(pytester: pytest.Pytes
     pytester.makepyfile(test_hang=HANGING_TEST)
     index_path = _run_dir(pytester.path) / "index.jsonl"
 
-    with _running_pytest(pytester.path, "--agent-heartbeat", "0.2") as proc:
-        _wait_until(
+    with running_pytest(pytester.path, "--agent-heartbeat", "0.2") as proc:
+        wait_until(
             lambda: index_path.is_file() and "test_quick" in index_path.read_text(encoding="utf-8"),
             "the first test to finish",
         )
@@ -190,8 +150,8 @@ def test_a_test_that_runs_too_long_has_its_stack_dumped_while_it_is_still_hung(
     )
     stuck_path = _run_dir(pytester.path) / "test_slow.py" / "test_slow_one.stuck.txt"
 
-    with _running_pytest(pytester.path, "--agent-heartbeat", "0.1", "--agent-stuck-after", "0.5") as proc:
-        _wait_until(stuck_path.is_file, "a stack dump for the hung test")
+    with running_pytest(pytester.path, "--agent-heartbeat", "0.1", "--agent-stuck-after", "0.5") as proc:
+        wait_until(stuck_path.is_file, "a stack dump for the hung test")
         proc.send_signal(signal.SIGTERM)
         out, _ = proc.communicate(timeout=WAIT_TIMEOUT)
 
@@ -227,8 +187,8 @@ def test_the_stack_of_a_hung_test_stops_being_dumped_after_a_few_tries(pytester:
     def dumps() -> int:
         return stuck_path.read_text(encoding="utf-8").count("=== still running after") if stuck_path.is_file() else 0
 
-    with _running_pytest(pytester.path, "--agent-heartbeat", "0.1", "--agent-stuck-after", "0.3") as proc:
-        _wait_until(lambda: dumps() >= MAX_STUCK_DUMPS, f"{MAX_STUCK_DUMPS} stack dumps")
+    with running_pytest(pytester.path, "--agent-heartbeat", "0.1", "--agent-stuck-after", "0.3") as proc:
+        wait_until(lambda: dumps() >= MAX_STUCK_DUMPS, f"{MAX_STUCK_DUMPS} stack dumps")
         # Well past when a sixth would have been written, had anything been
         # going to write one.
         time.sleep(1.0)
@@ -248,7 +208,7 @@ def test_stuck_dumps_can_be_turned_off(pytester: pytest.Pytester) -> None:
         """,
     )
 
-    with _running_pytest(pytester.path, "--agent-heartbeat", "0.1", "--agent-stuck-after", "0") as proc:
+    with running_pytest(pytester.path, "--agent-heartbeat", "0.1", "--agent-stuck-after", "0") as proc:
         out, _ = proc.communicate(timeout=WAIT_TIMEOUT)
 
     assert "still running after" not in out

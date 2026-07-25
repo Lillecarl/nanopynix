@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from pytest_agent._capture import TestRecorder, nodeid_is_evident_from, nodeid_to_relpath
-from pytest_agent._history import append_run_record, git_revision, prune_old_runs
+from pytest_agent._history import append_run_record, git_revision, prune_old_runs, release_run_lock
 from pytest_agent._paths import display_path
 
 if TYPE_CHECKING:
@@ -277,6 +277,9 @@ class AgentRuntime:
         temp_path.replace(summary_path)
         append_run_record(self.top_root / "history.jsonl", record)
         prune_old_runs(self.top_root, self.keep_runs, protect=self.root)
+        # Last, and after pruning: from here on this run is a finished archive
+        # entry like any other, and a later run may prune it in its turn.
+        release_run_lock(self.root)
 
         self._print(f"done in {duration:.1f}s -- {self._final_counts_line()}")
         self._print_interruption(interrupted_at)

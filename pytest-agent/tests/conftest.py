@@ -24,9 +24,12 @@ piped anywhere is irrelevant to it.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -35,11 +38,31 @@ from pytest_agent._entry_points import plugin_registered_via_entry_points
 from pytest_agent._harness_detect import HARNESS_ENV_VARS
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Generator, Sequence
 
 pytest_plugins = ["pytester"]
 
+# Generous: these wait on a real subprocess reaching a known state, and the
+# failure mode of waiting too long is a slow test, not a wrong one.
+WAIT_TIMEOUT = 30.0
+
 _SRC = Path(__file__).resolve().parents[1] / "src"
+
+# A temp root of our own, rather than the shared /tmp/pytest-of-$USER.
+#
+# pytest keeps the newest N numbered directories under a temp root and deletes
+# the rest at process exit, so any two suites sharing one root are pruning
+# each other's directories by number. This suite was killed mid-run exactly
+# that way while the surrounding project's suite ran alongside it: 93 tests
+# failed at once with FileNotFoundError on the base temp directory, because
+# something had removed the live session's own basetemp out from under it.
+#
+# Set at import time because getbasetemp() is lazy -- it resolves on the first
+# tmp_path use, which is inside a test, long after this module is imported.
+# setdefault so an explicit outer value still wins.
+_SELF_TEST_TEMPROOT = Path(tempfile.gettempdir()) / "pytest-agent-selftest"
+_SELF_TEST_TEMPROOT.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("PYTEST_DEBUG_TEMPROOT", str(_SELF_TEST_TEMPROOT))
 
 # Everything pytest-agent reads from the environment. Cleared for every test
 # so that inner processes start from a known-empty configuration.
@@ -100,3 +123,38 @@ def run_cli(args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
         timeout=30,
         check=False,  # callers assert on returncode themselves
     )
+
+
+@contextlib.contextmanager
+def running_pytest(project: Path, *args: str) -> Generator[subprocess.Popen[str]]:
+    """A live `pytest --agent` subprocess in *project*, killed on the way out.
+
+    For the behaviours that only exist while a run is still going: being
+    signalled, being hung, or being concurrent with another run. The kill in
+    the finally matters -- these tests start runs that would otherwise sleep
+    for minutes, and an assertion failing before the signal is sent must not
+    leave one behind.
+    """
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "pytest", *agent_plugin_cli_args(), "--agent", *args],
+        cwd=project,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        yield proc
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=WAIT_TIMEOUT)
+
+
+def wait_until(predicate: Callable[[], bool], description: str) -> None:
+    """Block until *predicate* holds, or fail the test saying what it waited for."""
+    deadline = time.monotonic() + WAIT_TIMEOUT
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"timed out after {WAIT_TIMEOUT}s waiting for {description}")

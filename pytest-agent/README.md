@@ -74,6 +74,8 @@ overwritten:
       test_bar.stuck.txt       # every thread's stack, dumped while this test was
                                # still running (only if it ran long enough --
                                # see --agent-stuck-after)
+    .lock                      # present only while this run is in progress, so a
+                               # concurrent run's pruning leaves it alone
   runs-0002/
     ...
 ```
@@ -352,6 +354,26 @@ when the interpreter gets a chance to run it, so a thread wedged inside a C
 call never sees the SIGTERM at all -- but its stack was already written while
 it hung. A second SIGTERM always kills the process outright, so an unresponsive
 run stays killable.
+
+#### Versus pytest's own `faulthandler_timeout`
+
+pytest has a built-in for the same problem, and it is worth knowing which you
+want. Setting the `faulthandler_timeout` ini option dumps every thread's stack
+once per test after N seconds (`faulthandler_exit_on_timeout`, default off,
+makes it kill the process too). It arms a C-level timer, so it fires even when
+the main thread never releases the GIL -- a case `--agent-stuck-after`'s
+Python watchdog thread cannot cover.
+
+`--agent-stuck-after` writes to `<test>.stuck.txt` beside that test's log
+rather than to raw stderr, repeats so you can distinguish a wedge from slow
+progress, and names the file on the terminal. In agent mode stderr is
+precisely the stream being kept quiet, and nothing on it reaches the per-test
+record.
+
+They compose: pytest-agent deliberately leaves `faulthandler`'s
+process-global `dump_traceback_later` timer alone, so turning on
+`faulthandler_timeout` does not disable either one. If all you want is "dump
+and die", use pytest's and set `--agent-stuck-after=0`.
 
 ### Profiling a slow test
 

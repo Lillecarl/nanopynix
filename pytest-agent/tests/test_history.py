@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pytest_agent._history import append_run_record, next_run_dir, prune_old_runs
+from pytest_agent._history import (
+    RUN_LOCK_NAME,
+    RUN_LOCK_STALE_AFTER,
+    append_run_record,
+    create_run_lock,
+    next_run_dir,
+    prune_old_runs,
+    release_run_lock,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -54,6 +64,46 @@ def test_append_run_record_writes_one_json_line_per_call(tmp_path: Path) -> None
 
     lines = history_path.read_text(encoding="utf-8").splitlines()
     assert [json.loads(line)["run"] for line in lines] == [1, 2]
+
+
+def test_a_claimed_run_directory_is_locked_until_it_is_released(tmp_path: Path) -> None:
+    _n, run_dir = next_run_dir(tmp_path)
+    assert (run_dir / RUN_LOCK_NAME).is_file()
+
+    release_run_lock(run_dir)
+    assert not (run_dir / RUN_LOCK_NAME).exists()
+    # Releasing twice is what an interrupted run may well end up doing.
+    release_run_lock(run_dir)
+
+
+def test_prune_old_runs_leaves_a_run_another_session_is_still_writing(tmp_path: Path) -> None:
+    # The hole `protect` cannot cover: it names only the pruning session's own
+    # run, so an older concurrent run sits outside the newest N while being
+    # very much alive. Deleting it destroys a session's output mid-write.
+    for n in range(1, 6):
+        (tmp_path / f"runs-{n:04d}").mkdir()
+    create_run_lock(tmp_path / "runs-0001")
+
+    prune_old_runs(tmp_path, keep=2, protect=tmp_path / "runs-0005")
+
+    remaining = sorted(p.name for p in tmp_path.iterdir())
+    assert remaining == ["runs-0001", "runs-0004", "runs-0005"]
+
+
+def test_prune_old_runs_reclaims_a_run_whose_session_died_holding_the_lock(tmp_path: Path) -> None:
+    # A SIGKILL or a segfault never releases anything. A lock believed forever
+    # would exempt that directory from pruning for good, leaking one run per
+    # hard kill -- and hard kills are a case this plugin exists to serve.
+    for n in range(1, 6):
+        (tmp_path / f"runs-{n:04d}").mkdir()
+    lock_path = create_run_lock(tmp_path / "runs-0001")
+    stale = time.time() - RUN_LOCK_STALE_AFTER - 60
+    os.utime(lock_path, (stale, stale))
+
+    prune_old_runs(tmp_path, keep=2, protect=tmp_path / "runs-0005")
+
+    remaining = sorted(p.name for p in tmp_path.iterdir())
+    assert remaining == ["runs-0004", "runs-0005"]
 
 
 def test_prune_old_runs_keeps_only_the_newest_n(tmp_path: Path) -> None:

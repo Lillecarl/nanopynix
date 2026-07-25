@@ -1,15 +1,28 @@
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import re
 import shutil
 import subprocess
+import time
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 _RUN_DIR_RE = re.compile(r"^runs-(\d+)$")
+
+# Same file name pytest uses for the same purpose, so anyone who has looked
+# inside /tmp/pytest-of-$USER recognizes it.
+RUN_LOCK_NAME = ".lock"
+
+# How long a lock is believed. Long enough that no plausible suite outlives
+# it (this repo's own is documented to run under `timeout 500`), short enough
+# that a directory orphaned by a SIGKILL rejoins the pruning rotation the same
+# day rather than accumulating one leaked run per hard kill.
+RUN_LOCK_STALE_AFTER = 60 * 60 * 12
 
 
 def existing_run_numbers(root: Path) -> list[int]:
@@ -40,7 +53,56 @@ def next_run_dir(root: Path) -> tuple[int, Path]:
         except FileExistsError:
             n += 1
             continue
+        # After mkdir, not before -- there is nothing to lock until the
+        # directory exists. The window between the two is not a race: a
+        # freshly claimed directory always holds the highest number, and
+        # prune_old_runs keeps the newest N for any N >= 1, so it survives
+        # a concurrent prune landing in the gap on age alone.
+        create_run_lock(candidate)
         return n, candidate
+
+
+def create_run_lock(run_dir: Path) -> Path:
+    """Mark *run_dir* as belonging to a session that is still running.
+
+    Borrowed from how pytest guards its own numbered temp directories, down to
+    the `.lock` name, because the hazard is the same one: pruning is "keep the
+    newest N", and a concurrent run that started earlier holds a lower number,
+    so finishing runs can delete a directory another session is still writing
+    to. `protect` in prune_old_runs only ever covered the pruning session's
+    own directory -- it cannot know about anyone else's.
+
+    Only the convention is borrowed, not the code: pytest's helpers live in
+    `_pytest.pathlib` with no public re-export, and the retention rules there
+    are for ephemeral scratch dirs rather than for an archive that `history`
+    and `compare` read back.
+    """
+    lock_path = run_dir / RUN_LOCK_NAME
+    lock_path.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    return lock_path
+
+
+def release_run_lock(run_dir: Path) -> None:
+    """Drop *run_dir*'s lock, making it prunable by later runs."""
+    with contextlib.suppress(OSError):
+        # Already gone, or on a filesystem that has since become unwritable.
+        # Either way the staleness cutoff reclaims the directory eventually.
+        (run_dir / RUN_LOCK_NAME).unlink()
+
+
+def run_is_locked(run_dir: Path, now: float) -> bool:
+    """Whether a live session still holds *run_dir*.
+
+    A lock older than the cutoff is ignored rather than believed forever: a
+    run killed with SIGKILL, or one that segfaulted, never gets to release
+    its own, and a lock nobody can clear would exempt that directory from
+    pruning for good.
+    """
+    try:
+        held_since = (run_dir / RUN_LOCK_NAME).stat().st_mtime
+    except OSError:
+        return False
+    return held_since > now - RUN_LOCK_STALE_AFTER
 
 
 def git_revision(cwd: Path) -> str | None:
@@ -84,6 +146,11 @@ def prune_old_runs(top_root: Path, keep: int, protect: Path) -> None:
     clamped to at least 1 (via `effective_keep`'s floor below) so a
     misconfigured 0 or negative value can't be combined with a concurrent
     run to prune everything including *protect*.
+
+    A directory another session is still writing to is kept regardless of its
+    number: *protect* covers only the pruning session's own run, and with a
+    small --agent-keep-runs an older concurrent run sits outside the newest N
+    while being very much alive. See create_run_lock.
     """
     numbered = sorted(
         ((n, top_root / f"runs-{n:04d}") for n in existing_run_numbers(top_root)),
@@ -92,6 +159,7 @@ def prune_old_runs(top_root: Path, keep: int, protect: Path) -> None:
     effective_keep = max(keep, 1)
     survivors = {run_dir for _, run_dir in numbered[-effective_keep:]}
     survivors.add(protect)
+    now = time.time()
     for _, run_dir in numbered:
-        if run_dir not in survivors:
+        if run_dir not in survivors and not run_is_locked(run_dir, now):
             shutil.rmtree(run_dir, ignore_errors=True)
