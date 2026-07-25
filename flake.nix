@@ -13,6 +13,15 @@
     easykubenix = {
       url = "github:Lillecarl/easykubenix";
       inputs.nixpkgs.follows = "nixpkgs";
+      # easykubenix depends on a *published* nanopynix, which drags in its own
+      # grpclib-transports. Without this, the lockfile carries two
+      # grpclib-transports nodes and ours is the one renamed to
+      # `grpclib-transports_2` -- which silently disables the local-checkout
+      # override in nix/compat.nix, because flake-compatish keys overrides by
+      # lockfile node name rather than by input name. Pointing easykubenix at
+      # this tree is also just correct: we *are* nanopynix, and testing ekn
+      # against a months-old published copy of it is not what anyone wants.
+      inputs.nanopynix.follows = "";
     };
     # numtide's fork, not nix-community/tree-sitter-nix: numtide's README
     # states it's "kept moving while upstream is stalled" and "new bug
