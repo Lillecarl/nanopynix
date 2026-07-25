@@ -27,6 +27,7 @@ from nanopynix_proto.nix.store import GcAction as PublicGcAction
 from nanopynix._core._extract import locked_flake as _locked_flake_proto
 from nanopynix._core._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
 from nanopynix._core._nix_executor import NixThreadExecutor
+from nanopynix._core._primops import register_import_path_primops, to_primop_specs
 from nanopynix._wire import DEFAULT_STORE_URI, NIX_USER_CONF_FILES_ENV, NO_GC_LIMIT
 from nanopynix.logging import BusSubscription, CallbackBus, LogCollector, LogStreamEventKind
 from nanopynix.models import (
@@ -53,6 +54,8 @@ from nanopynix.verbosity import LogLevelInput, normalize_log_level
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping, Sequence
     from os import PathLike
+
+    from nanopynix.models import PrimOpSpec
 
 
 BuildMode = nanopynix_store.BuildMode
@@ -172,6 +175,7 @@ class Session:
         experimental_features: Sequence[str] | None = None,
         verbosity: LogLevelInput | None = None,
         nix_path: str | Sequence[str] | None = None,
+        primops: Sequence[PrimOpSpec | Mapping[str, Any]] | None = None,
         store_uri: str = DEFAULT_STORE_URI,
         store_workers: int = 4,
     ) -> None:
@@ -185,6 +189,7 @@ class Session:
         self._settings = normalize_nix_settings(settings).with_experimental_features(list(experimental_features or []))
         self._verbosity = normalize_log_level(verbosity) if verbosity is not None else None
         self._nix_path = normalize_nix_path(nix_path)
+        self._primops = to_primop_specs(primops)
         self._store_uri = store_uri
         if store_workers < 1:
             raise ValueError("store_workers must be at least 1")
@@ -252,6 +257,7 @@ class Session:
             load_config=self._load_config,
             verbosity=None if self._verbosity is None else int(self._verbosity),
         )
+        register_import_path_primops(self._primops)
 
     async def close(  # noqa: C901, PLR0912 tracked complexity/arg-count debt, see TODO.md
         self,

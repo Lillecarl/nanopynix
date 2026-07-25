@@ -16,13 +16,43 @@ from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import util as nanopynix_util
 from nanopynix_proto.nix.store import GcAction
 
-from nanopynix import Derivation, GcResult, MissingInfo, StorePath, inproc
+from nanopynix import Derivation, GcResult, MissingInfo, StorePath, inproc, yaml_primops
 from nanopynix.inproc import _impl as inproc_impl
 from nanopynix.settings import NixEvalSettings, normalize_nix_path
 from tests.support.git import init_flake_repo
 
 if TYPE_CHECKING:
     from tests.support.nix_environment import InprocSessionFactory, NixTestEnvironment
+
+requires_dynamic_primops = pytest.mark.nix_capability("dynamic_primop_registration")
+
+
+@pytest.mark.anyio
+@requires_dynamic_primops
+async def test_inproc_yaml_primops(inproc_session: InprocSessionFactory) -> None:
+    """nanopynix.primops' bundled specs (yaml_primops() here) register the
+    same way for inproc.Session as they already do for rpc.Session -- see
+    inproc.Session's primops= kwarg."""
+    async with (
+        inproc_session(primops=yaml_primops()) as nix,
+        nix.store() as store,
+        nix.eval(store) as eval,
+    ):
+        parsed = await eval.string('builtins.fromYAML "apiVersion: v1\\nkind: ConfigMap\\nmetadata:\\n  name: demo\\n"')
+        assert await parsed.force_deep() == {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {"name": "demo"},
+        }
+
+        rendered = await eval.string(
+            'builtins.toYAML { apiVersion = "v1"; kind = "ConfigMap"; metadata.name = "demo"; }',
+        )
+        text = await rendered.force_json()
+        assert isinstance(text, str)
+        assert "apiVersion: v1" in text
+        assert "kind: ConfigMap" in text
+        assert "name: demo" in text
 
 
 @pytest.mark.anyio

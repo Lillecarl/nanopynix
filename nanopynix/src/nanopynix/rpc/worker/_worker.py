@@ -23,7 +23,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import faulthandler
-import importlib
 import json
 import os
 import signal
@@ -58,6 +57,7 @@ from nanopynix_proto.nix.worker import (
 )
 
 from nanopynix._core._local import LocalRuntime
+from nanopynix._core._primops import import_primop_callable as _import_callable
 from nanopynix._process_title import set_process_title, set_worker_title
 from nanopynix._wire import (
     NIX_CONFIG_ENV,
@@ -92,18 +92,6 @@ __all__ = ["main", "run_worker", "worker_service_factory"]
 _STORE_WORKERS = 4
 
 # ── Primop registration ──────────────────────────────────────────────
-
-
-def _import_callable(import_path: str) -> Callable[..., Any]:
-    module_name, sep, attr_path = import_path.partition(":")
-    if not sep or not module_name or not attr_path:
-        raise ValueError(f"invalid primop import path: {import_path!r}")
-    value: Any = importlib.import_module(module_name)
-    for attr in attr_path.split("."):
-        value = getattr(value, attr)
-    if not callable(value):
-        raise TypeError(f"primop import path is not callable: {import_path!r}")
-    return value
 
 
 def _register_primops(
