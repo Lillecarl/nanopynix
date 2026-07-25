@@ -753,6 +753,25 @@ class ValueProxy:
         resp = await self._ctx.proxy.attr_names(AttrNamesRequest(handle=self.handle))
         return resp.names
 
+    async def as_dict(self, *, timeout: float | None = None) -> dict[str, ValueProxy]:
+        """Force this value as an attrset; keys now, values still lazy.
+
+        See :meth:`nanopynix.inproc.Value.as_dict` -- same contract, same
+        reasoning. Costs exactly one round trip, the ``attr_names`` that
+        produces the keys: the proxies are lazy and make no call of their own
+        until forced.
+        """
+        names = await self.attr_names(timeout=timeout)
+        return {name: self.attr(name, timeout=timeout) for name in names}
+
+    async def as_list(self, *, timeout: float | None = None) -> list[ValueProxy]:
+        """Force this value as a list; length now, elements still lazy.
+
+        The list half of :meth:`as_dict`; one round trip, for ``list_length``.
+        """
+        length = await self.list_length(timeout=timeout)
+        return [self.list_get(index, timeout=timeout) for index in range(length)]
+
     async def has_attr(self, name: str, *, timeout: float | None = None) -> bool:
         """Force this value as an attrset and return whether ``name`` is present."""
         await self._ensure_resolved(timeout=timeout)

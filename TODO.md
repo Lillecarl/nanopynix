@@ -298,40 +298,67 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
 
 ## Deferred -- the only item with real semantic migration cost
 
-7. **`as_dict() -> dict[str, Value]` / `as_list() -> list[Value]`** (32
-   consumer sites, each needing thought rather than a regex). Keys and
-   length now, contents still lazy -- which is exactly WHNF for a compound
-   value as Nix models it, since forcing an attrset leaves its values as
-   thunks. They would subsume `attr_names`/`has_attr`/`list_length` and
-   let plain `dict`/`list` supply `len`/`in`/`.keys()`/iteration for free.
-   Deliberately *not* bundled with item 1: once those three raise, the
-   defect is closed and this is judged on ergonomics alone.
+7. ~~**`as_dict() -> dict[str, Value]` / `as_list() -> list[Value]`**~~ --
+   DONE, and promoted out of "deferred ergonomics" because it turned out to
+   be the answer to item 9 rather than a nicety.
 
-   The `as_`/`to_` split is load-bearing and should survive: `as_*` means
-   "this already *is* that, hand it over" and never converts, `to_python`
-   means "convert, with Nix's `toJSON` rules" and is lossy on purpose.
-   Renaming `as_int` to `to_int` would imply `to_int()` on `"42"` works.
+   Keys and length now, contents still lazy -- which is exactly WHNF for a
+   compound value as Nix models it, since forcing an attrset leaves its
+   values as thunks. `as_` and not `to_` for the documented reason: an
+   attrset already *is* a mapping of names to values, so this hands it over
+   rather than converting anything.
+
+   The `as_`/`to_` split stays load-bearing: `as_*` means "this already is
+   that, hand it over" and never converts, `to_python` means "convert, with
+   Nix's `toJSON` rules" and is lossy on purpose. Renaming `as_int` to
+   `to_int` would imply `to_int()` on `"42"` works.
+
+   Cost was far lower than the 32-site estimate suggested, because nothing
+   had to be migrated -- this is purely additive, and no existing caller
+   changes. Over rpc it needed **zero new wire ops**: `attr_names()` gives
+   the keys and `attr()` already returns a lazy proxy that makes no call
+   until forced, so `as_dict()` is one round trip regardless of width. On
+   inproc it is one dispatch onto the Nix thread for the whole level
+   (`_attr_values`), not one per attribute.
 
 ## Open design question, found while doing item 5
 
-9. **nanopynix's own bundled primops return attrsets that
-   `to_python()` refuses.** `builtins.parseNetwork` ships `.address n`
-   and `.subnet n d` as Nix *functions* in its result attrset -- part of
-   its documented interface -- and `parseInterface` nests one of those
-   under `.network`. Nix will not convert a function to JSON, so neither
-   will `to_python()`, and a caller who does the obvious thing gets an
-   error whose fix is a Nix expression they have to know to write
-   (`builtins.removeAttrs`, which is what
-   `tests/nanopynix/primops/test_ipaddress_primops.py` now does).
+9. ~~**nanopynix's own bundled primops return attrsets that
+   `to_python()` refuses.**~~ -- DONE, and the resolution is neither option
+   the item proposed. Both were wrong because both assumed the primop's
+   shape was the problem.
 
-   Raising is the *correct* answer for `to_python()` -- the old deep walk
-   only "worked" over rpc, and produced the useless string `"function"`
-   in-process, so the engines disagreed. The unresolved part is the primop
-   design: we shipped an interface that our own flagship conversion
-   rejects. Options, neither chosen: split the data and the accessors
-   (e.g. `.fn.address`, leaving the top level plain data), or keep the
-   shape and document it on the primop. Do not leave the `removeAttrs` in
-   the test as the only record of the problem.
+   It is not. `.address n` and `.subnet n d` *have* to be functions -- a /8
+   has 16 million addresses, so `.address` cannot be a list -- and
+   `to_python()` refusing an attrset containing a function is correct, since
+   `nix eval --json` refuses the same thing. What was actually missing was
+   any way to read a value *one level at a time*, with data leaves and
+   function leaves side by side. That is item 7's `as_dict()`, now done, and
+   it closes this without touching the primop's documented interface:
+
+       entries = await network.as_dict()
+       await entries["prefixlen"].to_python()          # 24
+       await (await five.apply(entries["address"])).to_python()
+
+   Rejected on the way, recorded so it is not re-proposed: splitting the
+   callables under a `.fn` key. It only shrinks the caller's `removeAttrs`
+   list from two names to one, invents a shape to appease a conversion that
+   is right to refuse, and changes a documented interface to do it.
+
+   Also rejected, and worth being explicit about because it looks
+   attractive: teaching `to_python()` to emit callables for function leaves.
+   That means re-introducing a hand-rolled deep traversal, which is exactly
+   the code `nix_expr.cpp:826-836` records deleting -- it was
+   "a reimplementation of `printValueAsJSON` minus every rule that makes it
+   terminate" and took SIGSEGV on any derivation, whose `out`/`all`/
+   `drvAttrs` point back at itself. `printValueAsJSON` owns the termination
+   rules (`__toString`, `outPath`, max-call-depth); a custom walk has to
+   re-own all of them. The cost is termination, not transport -- functions
+   already cross the wire fine via `attr()`/`apply()`.
+
+   Recorded in `tests/nanopynix/primops/test_ipaddress_primops.py`'s
+   `test_the_callables_are_reachable_through_as_dict`, on the primop's own
+   docstring, and for both engines in the semantic parity matrix.
 
 ## Verification
 

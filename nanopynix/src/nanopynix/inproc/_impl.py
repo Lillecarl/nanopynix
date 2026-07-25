@@ -1079,6 +1079,37 @@ class Value:
         local = await self._eval_session.run(self._local_for(self._eval_session).attr_get, name)
         return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
 
+    async def as_dict(self) -> dict[str, Value]:
+        """Force this value as an attrset; keys now, values still lazy.
+
+        This is WHNF for an attrset exactly as Nix models it -- forcing an
+        attrset gives you its keys and leaves every value a thunk -- so nothing
+        here is converted. That is also why it is ``as_`` and not ``to_``: an
+        attrset already *is* a mapping of names to values, and this hands it
+        over rather than turning it into something else.
+
+        It is the way to reach a value ``to_python()`` cannot flatten. A Nix
+        function has no JSON form, so an attrset containing one -- nanopynix's
+        own ``builtins.parseNetwork`` result, for instance -- cannot be
+        converted whole by ``to_python()`` on either engine, matching Nix. It
+        can be read one level at a time here, with the function entries
+        reachable through ``apply()``.
+
+        One dispatch onto the Nix thread rather than one per attribute.
+        """
+        children = await self._eval_session.run(_attr_values, self._local_for(self._eval_session))
+        track = self._eval_session._track_value  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
+        return {name: track(child) for name, child in children.items()}
+
+    async def as_list(self) -> list[Value]:
+        """Force this value as a list; length now, elements still lazy.
+
+        The list half of :meth:`as_dict`, with the same reasoning.
+        """
+        children = await self._eval_session.run(_list_values, self._local_for(self._eval_session))
+        track = self._eval_session._track_value  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
+        return [track(child) for child in children]
+
     async def has_attr(self, name: str) -> bool:
         """Force this value as an attrset and return whether ``name`` is present."""
         return await self._eval_session.run(self._local_for(self._eval_session).has_attr, name)
@@ -1172,6 +1203,16 @@ class Value:
 
 def _call(target: Any, args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> Any:
     return target(*args, **kwargs)
+
+
+def _attr_values(local: Any) -> dict[str, Any]:
+    """Every attribute of an attrset, in one hop onto the Nix thread."""
+    return {name: local.attr_get(name) for name in local.attr_names()}
+
+
+def _list_values(local: Any) -> list[Any]:
+    """Every element of a list, in one hop onto the Nix thread."""
+    return [local.list_get(index) for index in range(local.list_length())]
 
 
 def _force_to_python(value: Any) -> Any:
