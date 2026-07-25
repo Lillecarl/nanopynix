@@ -27,7 +27,6 @@ from nanopynix_proto.nix.worker import (
 
 from nanopynix._core._nix_executor import NixThreadExecutor
 from nanopynix._wire import HandleKind
-from nanopynix.models import NixType
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
 from nanopynix.rpc.client._session import EvalSession, ValueReleasedError
 from nanopynix.rpc.client.store import StoreHandle
@@ -168,7 +167,7 @@ async def test_attrs_and_children_have_exactly_one_owner(l3_inproc: _L3Inproc) -
         parent = await eval.string("{ x = 1; }")
         assert [handle for handle, _ in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)] == [parent.handle]
 
-        attrs = await parent.force_as(NixType.ATTRS)
+        attrs = await parent.as_dict()
         child = attrs["x"]
         assert [handle for handle, _ in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)] == [parent.handle]
 
@@ -185,7 +184,7 @@ async def test_attrs_and_children_have_exactly_one_owner(l3_inproc: _L3Inproc) -
 async def test_lists_and_children_have_exactly_one_owner(l3_inproc: _L3Inproc) -> None:
     async with l3_inproc.eval as eval:
         parent = await eval.string("[ 1 ]")
-        values = await parent.force_as(NixType.LIST)
+        values = await parent.as_list()
         child = values[0]
         assert {handle for handle, _ in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)} == {parent.handle}
 
@@ -213,19 +212,32 @@ async def test_value_finalizer_defers_then_drains_to_worker(l3_inproc: _L3Inproc
         assert handle not in {item[0] for item in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)}
 
 
-async def test_borrowing_view_keeps_parent_alive_until_the_view_is_dropped(l3_inproc: _L3Inproc) -> None:
+async def test_as_dict_pins_the_parent_only_until_its_children_resolve(l3_inproc: _L3Inproc) -> None:
+    """The parent handle lives exactly as long as something still needs it.
+
+    ``as_dict()`` hands back lazy children, and a lazy child needs the parent
+    handle to resolve against -- so dropping the parent proxy must not release
+    it. Once a child has resolved it owns a handle of its own and the parent
+    is free to go.
+
+    This replaces a test of ``ValueAttrs``'s borrowing-view semantics, which
+    pinned the parent for the whole life of the view. Releasing at resolution
+    is strictly earlier, and needs no view class to arrange it.
+    """
     async with l3_inproc.eval as eval:
         parent = await eval.string("{ x = 1; }")
         handle = parent.handle
-        attrs = await parent.force_as(NixType.ATTRS)
+        attrs = await parent.as_dict()
 
         del parent
         gc.collect()
+        # Still alive: the unresolved child has nothing else to resolve against.
         assert {item[0] for item in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)} == {handle}
 
         child = attrs["x"]
         assert await child.force() == 1
-        assert {item[0] for item in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)} == {handle, child.handle}
+        # ...and now released, because the child carries its own handle.
+        assert {item[0] for item in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)} == {child.handle}
 
         await child.release()
         del child, attrs
@@ -234,11 +246,12 @@ async def test_borrowing_view_keeps_parent_alive_until_the_view_is_dropped(l3_in
         assert handle not in {item[0] for item in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)}
 
 
-async def test_borrowing_list_keeps_parent_alive_until_the_view_is_dropped(l3_inproc: _L3Inproc) -> None:
+async def test_as_list_pins_the_parent_only_until_its_children_resolve(l3_inproc: _L3Inproc) -> None:
+    """The list half of the above."""
     async with l3_inproc.eval as eval:
         parent = await eval.string("[ 1 ]")
         handle = parent.handle
-        values = await parent.force_as(NixType.LIST)
+        values = await parent.as_list()
 
         del parent
         gc.collect()

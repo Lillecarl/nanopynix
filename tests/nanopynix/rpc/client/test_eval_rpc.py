@@ -17,8 +17,8 @@ from nanopynix import (
     EvalSessionClosedError,
     NixError,
     NixType,
+    NixTypeError,
     ValueReleasedError,
-    WrongNixTypeError,
     strip_ansi,
     yaml_primops,
 )
@@ -101,7 +101,7 @@ async def test_eval_attr_navigation(rpc_session: RpcSessionFactory, tmp_path: Pa
         assert await inner.get_type() == NixType.ATTRS
         x = inner.attr("x")
         assert await x.get_type() == NixType.INT
-        assert await x.force_as(NixType.INT) == 42
+        assert await x.as_int() == 42
 
 
 async def test_eval_list(rpc_session: RpcSessionFactory, tmp_path: Path):
@@ -142,7 +142,7 @@ async def test_forced_attrs_borrow_the_parent_value_handle(rpc_session: RpcSessi
         session.eval(store) as eval,
     ):
         parent = await eval.string("{ x = 1; }")
-        attrs = await parent.force_as(NixType.ATTRS)
+        attrs = await parent.as_dict()
         child = attrs["x"]
 
         assert not hasattr(attrs, "release")
@@ -361,7 +361,7 @@ async def test_eval_call_function(rpc_session: RpcSessionFactory):
         session.eval(store) as eval,
     ):
         fn = await eval.string("x: x + 1")
-        assert await fn.force_as(NixType.FUNCTION) is fn
+        assert await fn.get_type() == NixType.FUNCTION
         result = await fn.call(41)
         assert await result.force() == 42
 
@@ -376,7 +376,7 @@ async def test_eval_call_function_with_value_proxy_arg(rpc_session: RpcSessionFa
         fn = await eval.string("x: x.value + 1")
         arg = await eval.string('{ value = 41; ignored = abort "not forced"; }')
         result = await fn(arg)
-        assert await result.force_as(NixType.INT) == 42
+        assert await result.as_int() == 42
 
 
 async def test_eval_reused_function_can_call_separately_evaluated_value(rpc_session: RpcSessionFactory):
@@ -393,7 +393,7 @@ async def test_eval_reused_function_can_call_separately_evaluated_value(rpc_sess
         partial = await fn(left)
         result = await partial(right)
 
-        assert await result.force_as(NixType.INT) == 42
+        assert await result.as_int() == 42
 
 
 async def test_eval_call_function_with_nested_value_proxy_arg(rpc_session: RpcSessionFactory):
@@ -406,7 +406,7 @@ async def test_eval_call_function_with_nested_value_proxy_arg(rpc_session: RpcSe
         fn = await eval.string("x: (builtins.elemAt x.items 0).value + builtins.elemAt x.items 1")
         arg = await eval.string('{ value = 40; ignored = abort "not forced"; }')
         result = await fn({"items": [arg, 2]})
-        assert await result.force_as(NixType.INT) == 42
+        assert await result.as_int() == 42
 
 
 async def test_eval_callable_function_proxy(rpc_session: RpcSessionFactory):
@@ -418,7 +418,7 @@ async def test_eval_callable_function_proxy(rpc_session: RpcSessionFactory):
     ):
         fn = await eval.string("x: x.name")
         result = await fn({"name": "demo"})
-        assert await result.force_as(NixType.STRING) == "demo"
+        assert await result.as_string() == "demo"
 
 
 async def test_eval_auto_call_function_with_default_attrset_args(rpc_session: RpcSessionFactory):
@@ -431,7 +431,7 @@ async def test_eval_auto_call_function_with_default_attrset_args(rpc_session: Rp
         fn = await eval.string('{ pkgs ? {}, name ? "demo" }: { inherit name pkgs; }')
         result = await fn.auto_call()
 
-        assert await result.attr("name").force_as(NixType.STRING) == "demo"
+        assert await result.attr("name").as_string() == "demo"
         assert await result.has_attr("pkgs")
 
 
@@ -443,12 +443,14 @@ async def test_eval_call_non_function_raises(rpc_session: RpcSessionFactory):
         session.eval(store) as eval,
     ):
         value = await eval.string("42")
-        with pytest.raises(WrongNixTypeError, match="expected function"):
+        # Nix's own message, from the worker -- the proxy no longer pre-checks
+        # the type client-side, so this is the same NixTypeError inproc raises.
+        with pytest.raises(NixTypeError, match="not a function"):
             await value(1)
 
 
-async def test_eval_force_as_and_apply(rpc_session: RpcSessionFactory):
-    """force_as checks the remote type; apply() runs a Nix function on the value."""
+async def test_eval_strict_accessor_and_apply(rpc_session: RpcSessionFactory):
+    """as_* reads a value of the right type; apply() runs a Nix function on it."""
     async with (
         rpc_session() as session,
         session.store() as store,
@@ -459,9 +461,9 @@ async def test_eval_force_as_and_apply(rpc_session: RpcSessionFactory):
         text_bad = await eval.string('"forty-two"')
         attrs = await eval.string("{ x = 1; }")
 
-        assert await number.force_as(NixType.INT) == 42
-        with pytest.raises(WrongNixTypeError):
-            await text_number.force_as(NixType.INT)
+        assert await number.as_int() == 42
+        with pytest.raises(NixTypeError):
+            await text_number.as_int()
 
         # The dedicated coercion methods are gone; apply() covers them with
         # Nix's own builtins, which is where the semantics should come from.
@@ -603,7 +605,7 @@ async def test_worker_yaml_primops(rpc_session: RpcSessionFactory):
         rendered = await eval.string(
             'builtins.toYAML { apiVersion = "v1"; kind = "ConfigMap"; metadata.name = "demo"; }',
         )
-        text = await rendered.force_as(NixType.STRING)
+        text = await rendered.as_string()
         assert "apiVersion: v1" in text
         assert "kind: ConfigMap" in text
         assert "name: demo" in text
@@ -700,7 +702,7 @@ async def test_worker_yaml_stream_primops(rpc_session: RpcSessionFactory):
         rendered = await eval.string(
             'builtins.toYAML [ { apiVersion = "v1"; kind = "ConfigMap"; } { apiVersion = "v1"; kind = "Service"; } ]',
         )
-        text = await rendered.force_as(NixType.STRING)
+        text = await rendered.as_string()
         assert text.count("---") == 2
         assert "kind: ConfigMap" in text
         assert "kind: Service" in text

@@ -17,7 +17,7 @@ from nanopynix_bindings import util as nanopynix_util
 from nanopynix_proto.nix.store import GcAction
 
 import nanopynix
-from nanopynix import Derivation, GcResult, MissingInfo, StorePath, inproc, yaml_primops
+from nanopynix import Derivation, GcResult, MissingInfo, NixType, StorePath, inproc, yaml_primops
 from nanopynix.inproc import _impl as inproc_impl
 from nanopynix.settings import NixEvalSettings, normalize_nix_path
 from tests.support.git import init_flake_repo
@@ -415,7 +415,7 @@ async def test_inproc_repl_load_file_and_add_attrs(tmp_path: Path, inproc_sessio
 @pytest.mark.anyio
 async def test_inproc_value_scalar_conversions(inproc_session: InprocSessionFactory) -> None:
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
-        assert await (await eval.string("42")).type() == "int"
+        assert await (await eval.string("42")).get_type() == NixType.INT
         assert await (await eval.string("3.5")).as_float() == 3.5
         assert await (await eval.string("true")).as_bool() is True
         assert await (await eval.string('"hello"')).as_string() == "hello"
@@ -478,11 +478,11 @@ async def test_inproc_value_build_and_release(
 
 
 @pytest.mark.anyio
-async def test_inproc_value_close_is_idempotent(inproc_session: InprocSessionFactory) -> None:
+async def test_inproc_value_release_is_idempotent(inproc_session: InprocSessionFactory) -> None:
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         value = await eval.string("1")
-        await value.close()
-        await value.close()
+        await value.release()
+        await value.release()
 
 
 # ── Session lifecycle and error branches ─────────────────────────────────

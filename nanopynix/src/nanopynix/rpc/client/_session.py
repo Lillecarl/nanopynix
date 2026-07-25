@@ -7,7 +7,7 @@ import queue
 import threading
 import weakref
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Never, Protocol, cast, overload
+from typing import TYPE_CHECKING, Any, Never, Protocol, cast
 
 import anyio
 import pydantic_core
@@ -66,7 +66,6 @@ from nanopynix.exceptions import (
     StoreError,
     UnresolvedValueError,
     ValueReleasedError,
-    WrongNixTypeError,
     build_error_from_result,
 )
 from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedInput, NixType
@@ -512,45 +511,17 @@ class ValueProxy:
         result = await self._ctx.proxy.force(ForceRequest(handle=self.handle))
         return self._decode_force_value(result)
 
-    @overload
-    async def force_as(self, typ: Literal[NixType.INT], *, timeout: float | None = None) -> int: ...
-    @overload
-    async def force_as(self, typ: Literal[NixType.FLOAT], *, timeout: float | None = None) -> float: ...
-    @overload
-    async def force_as(self, typ: Literal[NixType.BOOL], *, timeout: float | None = None) -> bool: ...
-    @overload
-    async def force_as(self, typ: Literal[NixType.STRING], *, timeout: float | None = None) -> str: ...
-    @overload
-    async def force_as(self, typ: Literal[NixType.PATH], *, timeout: float | None = None) -> str: ...
-    @overload
-    async def force_as(self, typ: Literal[NixType.NULL], *, timeout: float | None = None) -> None: ...
-    @overload
-    async def force_as(self, typ: Literal[NixType.ATTRS], *, timeout: float | None = None) -> ValueAttrs: ...
-    @overload
-    async def force_as(self, typ: Literal[NixType.LIST], *, timeout: float | None = None) -> ValueList: ...
-    @overload
-    async def force_as(self, typ: Literal[NixType.FUNCTION], *, timeout: float | None = None) -> ValueProxy: ...
-    @overload
-    # Widening fallback, and it must stay last. Without it a caller holding a
-    # NixType in a variable rather than a literal cannot call force_as at all:
-    # the implementation signature is invisible to type checkers, so every such
-    # call fails to match an overload. Literals still resolve to their precise
-    # return type above; only the dynamic case lands here.
-    async def force_as(self, typ: NixType, *, timeout: float | None = None) -> NixValue: ...
-    async def force_as(self, typ: NixType, *, timeout: float | None = None) -> NixValue:
-        actual = await self._ensure_type(timeout=timeout)
-        if actual != typ:
-            raise WrongNixTypeError(expected=typ, actual=actual)
-        return await self.force(timeout=timeout)
-
     async def _as_scalar(self, typ: NixType, *, timeout: float | None) -> Any:
         """Strict scalar read, type-checked by Nix in the worker.
 
-        Not built on ``force_as``: that compares type names client-side and
-        raises ``WrongNixTypeError``, whereas inproc's ``as_*`` let Nix's own
-        ``force*`` reject and so raise ``NixTypeError``. Doing the check on the
-        worker is what makes the two engines raise the same exception, with the
-        same Nix-authored message, for the same mistake.
+        The check runs in the worker, which is what makes both engines raise
+        the same ``NixTypeError`` with the same Nix-authored message for the
+        same mistake. ``force_as`` used to sit alongside this doing the
+        opposite -- comparing type names client-side and raising
+        ``WrongNixTypeError`` -- and was deleted for it: it was the rpc
+        spelling of ``as_*`` reached by NixType argument instead of by name,
+        with worse behaviour (it rejected an int for FLOAT where Nix's
+        ``forceFloat`` widens) and no consumer outside docs examples.
         """
         await self._ensure_resolved(timeout=timeout)
         scalar = await self._ctx.proxy.as_scalar(AsScalarRequest(handle=self.handle, nix_type=typ))
@@ -789,14 +760,16 @@ class ValueProxy:
                 function before calling it. None (default) waits indefinitely.
 
         Raises:
-            WrongNixTypeError: This value is not a function.
+            NixTypeError: This value is not a function. Nix decides that in
+                the worker rather than the proxy pre-checking it here, which
+                is what makes the two engines agree: the pre-check raised
+                ``WrongNixTypeError``, an ``EvalProxyError`` unrelated to
+                ``NixTypeError``, so no single ``except`` covered both engines
+                for the same mistake.
             ForeignValueError: An argument ``ValueProxy`` belongs to a
                 different ``EvalSession``.
         """
         await self._ensure_resolved(timeout=timeout)
-        actual = await self._ensure_type(timeout=timeout)
-        if actual != NixType.FUNCTION:
-            raise WrongNixTypeError(expected=NixType.FUNCTION, actual=actual)
         call_args = [await self._encode_call_arg(arg, timeout=timeout) for arg in args]
         result = await self._ctx.proxy.call(CallRequest(handle=self.handle, args=call_args))
         return self._ctx.value(result.handle, result.type)

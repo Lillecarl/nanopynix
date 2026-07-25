@@ -37,18 +37,18 @@ async def main() -> None:
         inner = v2.attr("inner")
         assert await inner.get_type() == NixType.ATTRS
         x = inner.attr("x")
-        assert await x.force_as(NixType.INT) == 42
+        assert await x.as_int() == 42
         names = await v2.attr_names()
         assert set(names) == {"inner", "z"}
         print("attr navigation: z =", await v2.attr("z").force())
 
-        # --- force_as for type-checked scalar extraction ----------------------
+        # --- strict accessors for type-checked scalar extraction ---------------
 
         v3 = await eval.string('{ version = 4; enabled = true; name = "demo"; }')
-        assert await v3.attr("version").force_as(NixType.INT) == 4
-        assert await v3.attr("enabled").force_as(NixType.BOOL) is True
-        assert await v3.attr("name").force_as(NixType.STRING) == "demo"
-        print("force_as: all types match")
+        assert await v3.attr("version").as_int() == 4
+        assert await v3.attr("enabled").as_bool() is True
+        assert await v3.attr("name").as_string() == "demo"
+        print("strict accessors: all types match")
 
         # --- lists ------------------------------------------------------------
 

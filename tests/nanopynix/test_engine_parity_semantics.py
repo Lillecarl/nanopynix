@@ -226,13 +226,6 @@ SEMANTIC_LEDGER: dict[str, str] = {
         "view classes and giving force() one meaning on both engines."
     ),
     "force_list": "DEFECT: as force_attrs, with ValueList.",
-    "apply_a_non_function": (
-        "DEFECT: applying a non-function raises Nix's own NixTypeError on inproc and rpc's "
-        "client-side WrongNixTypeError -- unrelated classes, since WrongNixTypeError is an "
-        "EvalProxyError raised by the proxy before the worker is ever asked. A caller cannot "
-        "write one `except` that covers both. The proxy-side pre-check should either go, or "
-        "raise what Nix raises."
-    ),
 }
 
 

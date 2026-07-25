@@ -6,8 +6,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from nanopynix import NixType
-
 if TYPE_CHECKING:
     from tests.support.nix_environment import NixTestEnvironment
 
@@ -23,7 +21,7 @@ async def test_fetchtree_with_builtins_prefix(
         session.eval(store) as eval,
     ):
         value = await eval.string("builtins.typeOf builtins.fetchTree")
-        assert (await value.force_as(NixType.STRING)).rstrip("\n") == "lambda"
+        assert (await value.as_string()).rstrip("\n") == "lambda"
 
 
 @pytest.mark.anyio
@@ -37,4 +35,4 @@ async def test_fetchtree_without_builtins_prefix(
         session.eval(store) as eval,
     ):
         value = await eval.string("builtins.typeOf fetchTree")
-        assert (await value.force_as(NixType.STRING)).rstrip("\n") == "lambda"
+        assert (await value.as_string()).rstrip("\n") == "lambda"

@@ -30,7 +30,6 @@ from nanopynix import (
     NixType,
     UnresolvedValueError,
     ValueReleasedError,
-    WrongNixTypeError,
 )
 from nanopynix.models import LogEvent
 from nanopynix.rpc.client._pool import WorkerClient
@@ -431,26 +430,13 @@ class TestValueProxyLifecycle:
         result = await vp.force()
         assert result == 99
 
-    async def test_force_as_uses_cached_type(self):
-        w = self._worker()
-        w.eval_stub.force.return_value = _mock_force_value_scalar(99)
-        vp = self._proxy(w, 1, "int")
-
-        result = await vp.force_as(NixType.INT)
-
-        assert result == 99
-        w.eval_stub.force.assert_awaited_once()
-
-    async def test_force_as_wrong_type_raises_typed_error(self):
-        w = self._worker()
-        vp = self._proxy(w, 1, "string")
-
-        with pytest.raises(WrongNixTypeError) as exc:
-            await vp.force_as(NixType.INT)
-
-        assert exc.value.expected == "int"
-        assert exc.value.actual == "string"
-        w.eval_stub.force.assert_not_awaited()
+    # Two force_as unit tests lived here -- that it read the cached type
+    # rather than round-tripping, and that a wrong type raised
+    # WrongNixTypeError without touching the worker. Both described
+    # client-side type checking, which is exactly what force_as was deleted
+    # for: as_int() asks the worker, so Nix decides and both engines raise the
+    # same NixTypeError. tests/nanopynix/test_scalar_accessor_semantics.py
+    # covers the replacement against real values on both engines.
 
     async def test_call_json_arg_uses_explicit_wire_arg(self):
         w = self._worker()
@@ -461,27 +447,23 @@ class TestValueProxyLifecycle:
 
         assert result.handle == 3
 
-    async def test_call_unknown_type_resolves_type_before_call(self):
+    async def test_call_does_not_pre_check_the_type_client_side(self):
+        """Calling a non-function goes to the worker and lets Nix reject it.
+
+        There used to be a proxy-side guard here that compared the cached type
+        and raised ``WrongNixTypeError`` without ever calling. It was removed:
+        ``WrongNixTypeError`` is an ``EvalProxyError``, unrelated to the
+        ``NixTypeError`` inproc raises for the same mistake, so no single
+        ``except`` covered both engines -- and the message the guard produced
+        was ours rather than Nix's.
+        """
         w = self._worker()
-        w.eval_stub.type_name.return_value = _mock_type_name_response("function")
         w.eval_stub.call.return_value = _mock_value_handle(3, "int")
-        vp = self._proxy(w, 1, "unknown")
-
-        result = await vp({"name": "demo"})
-
-        assert result.handle == 3
-        w.eval_stub.type_name.assert_awaited_once()
-
-    async def test_call_non_function_raises_typed_error(self):
-        w = self._worker()
         vp = self._proxy(w, 1, "int")
 
-        with pytest.raises(WrongNixTypeError) as exc:
-            await vp()
+        await vp()
 
-        assert exc.value.expected == "function"
-        assert exc.value.actual == "int"
-        w.eval_stub.call.assert_not_awaited()
+        w.eval_stub.call.assert_awaited_once()
 
     async def test_call_value_proxy_arg_uses_remote_handle(self):
         w = self._worker()

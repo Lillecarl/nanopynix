@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from grpclib.exceptions import StreamTerminatedError
 
-from nanopynix import LogEvent, NixType, StoreError
+from nanopynix import LogEvent, StoreError
 from nanopynix.rpc import Nix, WorkerDiedError
 
 
@@ -50,8 +50,8 @@ async def test_session_allows_concurrent_eval_states():
         second_value = await second.line("2 + 2")
 
         assert second_value is not None
-        assert await first_value.force_as(NixType.INT) == 2
-        assert await second_value.force_as(NixType.INT) == 4
+        assert await first_value.as_int() == 2
+        assert await second_value.as_int() == 4
 
         await first.close()
         await second.close()
