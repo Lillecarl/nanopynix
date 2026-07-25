@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from anyio import Path as AsyncPath
 
-from nanopynix.exceptions import StoreError
+from nanopynix.exceptions import HashMismatchError, NixError, StoreError
 from nanopynix_helpers.fod import (
     FodSourceUpdateError,
     derivation_name_from_path,
@@ -54,13 +54,18 @@ async def build_with_fod_update(  # noqa: C901, PLR0912, PLR0913 tracked complex
     updates = 0
     while True:
         root: ValueProxy | None = None
-        build_error: StoreError | None = None
+        build_error: NixError | None = None
         outputs: dict[str, str] = {}
         async with nix.capture_logs() as logs:
             try:
                 root = await evaluate()
                 outputs = await (root.build() if build_store is None else root.build(store=build_store))
-            except StoreError as exc:
+            except (StoreError, HashMismatchError) as exc:
+                # StoreError covers build-time failures. HashMismatchError is
+                # needed separately because `builtins.fetchurl` with a wrong
+                # hash fails during *evaluation* -- Nix reports a plain
+                # EvalError, which is not a StoreError, but is still a
+                # fixed-output mismatch this function exists to repair.
                 build_error = exc
         if build_error is None:
             return outputs, updates

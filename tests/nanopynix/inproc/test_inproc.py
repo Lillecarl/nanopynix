@@ -16,6 +16,7 @@ from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import util as nanopynix_util
 from nanopynix_proto.nix.store import GcAction
 
+import nanopynix
 from nanopynix import Derivation, GcResult, MissingInfo, StorePath, inproc, yaml_primops
 from nanopynix.inproc import _impl as inproc_impl
 from nanopynix.settings import NixEvalSettings, normalize_nix_path
@@ -118,7 +119,12 @@ async def test_inproc_concurrent_eval_sessions_have_independent_pure_eval(
         await pure.open()
         await impure.open()
         try:
-            with pytest.raises(nanopynix_expr.EvalError, match="currentTime"):
+            # nanopynix.EvalError, not the raw nanobind nanopynix_expr.EvalError:
+            # inproc translates Nix binding exceptions onto the public hierarchy
+            # at its call chokepoint, so both engines raise the same type for
+            # the same failure. tests/nanopynix/rpc/client/test_pure_eval.py
+            # asserts the identical expectation for the rpc engine.
+            with pytest.raises(nanopynix.EvalError, match="currentTime"):
                 await pure.string("builtins.currentTime")
             assert await (await impure.string("builtins.currentTime")).as_int() > 0
         finally:

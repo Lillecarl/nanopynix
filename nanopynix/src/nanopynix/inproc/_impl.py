@@ -29,6 +29,7 @@ from nanopynix._core._local import LocalEvalState, LocalLockedFlake, LocalRuntim
 from nanopynix._core._nix_executor import NixThreadExecutor
 from nanopynix._core._primops import register_import_path_primops, to_primop_specs
 from nanopynix._wire import DEFAULT_STORE_URI, NIX_USER_CONF_FILES_ENV, NO_GC_LIMIT
+from nanopynix.exceptions import StoreError, build_error_from_result, translate_nix_exception
 from nanopynix.logging import BusSubscription, CallbackBus, LogCollector, LogStreamEventKind
 from nanopynix.models import (
     BuildResult,
@@ -137,10 +138,22 @@ def _parse_store_paths(raw_store: Any, paths: list[str]) -> list[Any]:
 
 
 def _run_with_log_context(operation_id: int, func: Any, args: tuple[Any, ...]) -> Any:
+    """Run one Nix call on the Nix thread, in this operation's log context.
+
+    This is the single chokepoint through which every in-process Nix call
+    passes, so it is also where boundary A is translated: the raw nanobind
+    exception is replaced by its ``nanopynix.exceptions`` equivalent, giving
+    inproc callers the same exception types the rpc engine raises.
+    """
     previous = nanopynix_util.get_logger_request_id()
     nanopynix_util.set_logger_request_id(operation_id)
     try:
         return func(*args)
+    except Exception as exc:
+        translated = translate_nix_exception(exc)
+        if translated is None:
+            raise
+        raise translated from exc
     finally:
         nanopynix_util.set_logger_request_id(previous)
 
@@ -1081,8 +1094,16 @@ class Value:
             build_mode=build_mode,
             eval_store=None if target_store is self._eval_session._store else self._eval_session._store,  # type: ignore[reportPrivateUsage] -- cross-store build source  # noqa: SLF001
         )
-        if not results or not results[0].success:
-            raise RuntimeError(results[0].error_msg if results else "build returned no result")
+        if not results:
+            raise StoreError("StoreError", f"build returned no result for {derived_path}")
+        if not results[0].success:
+            # Same structured status, same exception type as the rpc engine --
+            # see nanopynix.exceptions.build_error_from_result.
+            raise build_error_from_result(
+                status=results[0].status,
+                error_msg=results[0].error_msg,
+                drv_path=results[0].drv_path or derived_path,
+            )
         derivation = await target_store.read_derivation(derived_path)
         return {name: output.path for name, output in derivation.outputs.items() if output.path is not None}
 

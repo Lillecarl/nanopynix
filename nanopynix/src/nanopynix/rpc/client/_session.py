@@ -70,6 +70,7 @@ from nanopynix.exceptions import (
     UnresolvedValueError,
     ValueReleasedError,
     WrongNixTypeError,
+    build_error_from_result,
 )
 from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedInput, NixType
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
@@ -729,8 +730,14 @@ class ValueProxy:
             )
         result = build_response.results[0]
         if not result.success:
-            msg = result.error_msg or f"failed to build evaluated derivation {build_response.drv_path}"
-            raise StoreError("StoreError", msg)
+            # `result.status` is Nix's own failure kind (e.g. "hash-mismatch"),
+            # so the exception type is derived rather than hardcoded -- and it
+            # matches what inproc raises for the same failure.
+            raise build_error_from_result(
+                status=result.status,
+                error_msg=result.error_msg or f"failed to build evaluated derivation {build_response.drv_path}",
+                drv_path=build_response.drv_path,
+            )
         outputs = dict(build_response.outputs)
         if not outputs:
             raise StoreError("StoreError", f"derivation {build_response.drv_path} has no outputs")
