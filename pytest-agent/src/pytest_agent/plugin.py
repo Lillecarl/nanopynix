@@ -179,7 +179,23 @@ def pytest_configure(config: pytest.Config) -> None:
     top_root = Path(agent_dir)
     if not top_root.is_absolute():
         top_root = config.rootpath / top_root
-    run_number, root = next_run_dir(top_root)
+    try:
+        run_number, root = next_run_dir(top_root)
+    except OSError as error:
+        # A read-only checkout, a CI workspace mounted read-only, a
+        # .pytest-agent left behind root-owned by a container, a full disk.
+        # Agent mode is a way of watching a test run, so it must never be the
+        # reason one cannot happen: it takes itself out of the picture and
+        # leaves pytest exactly as it would have been. Loudly, on stderr,
+        # because a run that quietly stopped recording is a trap -- the next
+        # `pytest-agent last-failures` would answer from a stale run.
+        sys.stderr.write(
+            f"pytest-agent: agent mode is OFF for this run -- cannot write to "
+            f"{top_root}: {error}\n"
+            "Tests run normally, with pytest's own output. Point --agent-dir "
+            "(or PYTEST_AGENT_DIR) somewhere writable to turn it back on.\n",
+        )
+        return
 
     # After the run directory exists, because that is where the reporter's
     # output now goes.

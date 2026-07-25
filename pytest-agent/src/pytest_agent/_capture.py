@@ -239,6 +239,9 @@ class TestRecorder:
         self.collect_errors_dir = root / "collect_errors"
         self.index_path = root / "index.jsonl"
         self.notes_path = root / _NOTES_FILE
+        # Set if appending to index.jsonl ever failed, so the run can say so
+        # once at the end instead of once per test.
+        self.index_error: str | None = None
         self._pending: dict[str, list[Phase]] = {}
         self._records: list[dict[str, Any]] = []
         self._notes: dict[str, list[Note]] = {}
@@ -253,8 +256,13 @@ class TestRecorder:
         self._started_at = 0.0
 
     def start(self) -> None:
-        self.root.mkdir(parents=True, exist_ok=True)
-        self.index_path.write_text("", encoding="utf-8")
+        # Tolerant like _append_index: if the archive can't be opened, the run
+        # still runs and still reports to the terminal from memory.
+        try:
+            self.root.mkdir(parents=True, exist_ok=True)
+            self.index_path.write_text("", encoding="utf-8")
+        except OSError as error:
+            self.index_error = f"{type(error).__name__}: {error}"
         self._started_at = time.monotonic()
 
     def add_note(self, nodeid: str | None, key: str, value: object) -> Path:
@@ -429,9 +437,22 @@ class TestRecorder:
         return record
 
     def _append_index(self, record: dict[str, Any]) -> None:
+        """Append one record to index.jsonl, keeping it in memory regardless.
+
+        Tolerant for the same reason as _write_text: this runs inside
+        pytest_runtest_logreport, so raising here abandons every test after
+        it. A run whose index can't be written has lost its archive, but the
+        in-memory records still drive the closing block, so an agent watching
+        the terminal is told what failed even then. index_error is reported
+        once, by the runtime, rather than once per test.
+        """
         self._records.append(record)
-        with self.index_path.open("a", encoding="utf-8") as index_file:
-            index_file.write(json.dumps(record) + "\n")
+        try:
+            with self.index_path.open("a", encoding="utf-8") as index_file:
+                index_file.write(json.dumps(record) + "\n")
+        except OSError as error:
+            if self.index_error is None:
+                self.index_error = f"{type(error).__name__}: {error}"
 
     def records_with_outcome(self, outcomes: set[str]) -> list[dict[str, Any]]:
         return [record for record in self._records if record["outcome"] in outcomes]

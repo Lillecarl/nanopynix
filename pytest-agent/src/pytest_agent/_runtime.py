@@ -157,17 +157,20 @@ class AgentRuntime:
         in the archive can be tied back to the process and command that made
         it. What the run *did* goes in summary.json at the end.
         """
-        write_run_meta(
-            self.root,
-            {
-                "run": self.run_number,
-                "run_dir": self.root.name,
-                "label": self.label,
-                "started_at": self.started_at_iso,
-                "pid": os.getpid(),
-                "args": list(self.config.invocation_params.args),
-            },
-        )
+        # Tolerated rather than fatal: without meta.json this run cannot be
+        # found by --run <label>, which is a lesser thing to lose than the run.
+        with contextlib.suppress(OSError):
+            write_run_meta(
+                self.root,
+                {
+                    "run": self.run_number,
+                    "run_dir": self.root.name,
+                    "label": self.label,
+                    "started_at": self.started_at_iso,
+                    "pid": os.getpid(),
+                    "args": list(self.config.invocation_params.args),
+                },
+            )
 
     def pytest_collection_finish(self, session: pytest.Session) -> None:
         self.total_collected = len(session.items)
@@ -446,6 +449,9 @@ class AgentRuntime:
         complete, and only a later `show` on that one test reveals there is
         nothing behind it. Named here, while the run is still on screen.
         """
+        if self.recorder.index_error is not None:
+            self._print(f"index.jsonl could not be written: {self.recorder.index_error}")
+            self._print("  this run left no archive -- what is printed above is the whole record of it")
         affected = self.recorder.records_with_capture_error()
         if not affected:
             return

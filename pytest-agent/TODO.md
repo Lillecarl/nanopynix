@@ -99,6 +99,29 @@ only reaches junit-xml), `index.jsonl` against `--junit-xml` and
 pytest-reportlog (raw report dumps rather than a curated per-test record),
 and `rerun` against `--lf` (a single-slot cache rather than an archive).
 
+## Agent mode must never be why a run fails
+
+Everything this plugin does happens inside somebody else's test session, in
+hooks whose exceptions are fatal to it: `pytest_configure` (an INTERNALERROR
+before a single test runs) and `pytest_runtest_logreport` (an INTERNALERROR
+that abandons every test after the current one). Both were reachable through
+ordinary bad luck, and both were found by dogfooding rather than review:
+
+- a parametrized id over NAME_MAX, which pytest itself runs fine
+- a `.pytest-agent` that cannot be written -- read-only checkout, read-only
+  CI workspace, a directory left root-owned by a container, a full disk
+
+The rule the code now follows: agent mode is a way of watching a test run, so
+it degrades rather than obstructs. Unwritable at startup means agent mode
+turns itself off and pytest proceeds untouched; unwritable mid-run means the
+outcome is still recorded and the reason is reported as `capture_error` (per
+test) or `index_error` (once for the run). Always on stderr or in the closing
+block, never silently -- a run that quietly stopped recording is a trap,
+because the next `pytest-agent last-failures` answers from a stale run.
+
+Anything new that touches the filesystem from inside a hook belongs behind
+the same discipline.
+
 ## Not supported: pytest-xdist
 
 Untested and expected broken, documented in the README rather than fixed.
