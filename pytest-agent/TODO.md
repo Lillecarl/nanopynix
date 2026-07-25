@@ -7,6 +7,42 @@ complexity and argument-count suppressions in `_pipe_guard.find_banned_pipe_read
 `AgentRuntime.__init__`, and `tests/test_capture.py::_report` are accepted for
 now rather than restructured.
 
+## Why notes print to the terminal
+
+`note()`/`attach()` (see `_notes.py`) are the one thing agent mode prints that
+isn't about pass/fail, which is a deliberate exception to "nothing goes to the
+terminal that could go to a file". The reason is turns: a value only readable
+from a file costs a second turn to go and read it, and the point of a probe is
+to answer the question in the run that added it. It stays honest because a
+note is explicit -- nobody gets note output they didn't ask for -- and the
+block is capped at `MAX_NOTE_LINES` so a probe inside a parametrized loop
+can't push the failure list off the screen.
+
+Notes are appended to `notes.jsonl` as they are taken rather than buffered
+until the test finishes, because the runs worth probing are exactly the ones
+that don't finish: a segfault, an `os._exit`, a killed hang. `_capture.Note`
+is the only way one is constructed, so every value is JSON-safe (by `repr`
+if it has to be) before it reaches anything.
+
+The other half of the intent is to make a throwaway *test* cheaper to write
+than a throwaway `python -c`: the test gets the project's fixtures, its
+environment, `profile`, and a place to put its output, and answers in the
+summary. See the README section.
+
+## Not supported: pytest-xdist
+
+Untested and expected broken, documented in the README rather than fixed.
+`pytest_configure` runs in every xdist worker, so each worker claims its own
+`runs-NNNN` via `next_run_dir()`: one logical run scatters into N partial run
+directories and N `history.jsonl` entries, and every query answers from
+whichever worker won the highest number. Fixing it means recording per-worker
+(`workerinput` identifies them) and merging in the controller -- the controller
+being the only process that sees the whole run, and the one whose terminal
+output agent mode silences.
+
+Deliberately deferred: xdist isn't in this repo's dependency tree, and a
+merge protocol is a real design rather than a patch.
+
 ## Testing approach
 
 The suite is recursive -- inner `pytest` sessions via `pytest.Pytester` and
@@ -15,7 +51,15 @@ directories. No env var disables the plugin for its own tests and none is
 wanted: `conftest._clean_agent_env` (autouse) gives every inner process an
 empty pytest-agent environment, and the pipe guard only ever inspects the
 inner process's own stdout. See `tests/test_agent_workflow.py` for the
-end-to-end path.
+end-to-end path, and `tests/test_notes.py` for the note/attachment surface
+(including a test that kills its own process to prove a note outlives it).
+
+`tests/test_interrupt.py` goes further and signals a real pytest subprocess:
+SIGTERM survival and stack dumps can't be exercised in-process, since the
+session under test and the session running the test are the same process.
+Its handler-not-clobbered and kill-survival tests were each confirmed by
+mutation -- removing the `SIG_DFL` guard, and skipping the handler install --
+before being kept.
 
 ## Resolved
 
