@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any
 from grpclib.const import Status
 from grpclib.exceptions import GRPCError
 
+from nanopynix.rpc._status_details import details_for_exception
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -20,6 +22,11 @@ def convert_handler_errors(func: Callable[..., Any]) -> Callable[..., Any]:
     ``Status.UNKNOWN / "Internal Server Error"``.  This decorator preserves
     the original error message so the client can classify it via
     ``exceptions.from_response()``.
+
+    A :class:`~nanopynix.NixError`'s ``raw``/``info`` -- the ``nix::ErrorInfo``
+    the bindings recovered from C++ -- go into ``GRPCError.details``, which
+    rides the ``grpc-status-details-bin`` trailer. That only reaches the client
+    if both ends installed the codec; see :mod:`nanopynix.rpc._status_details`.
     """
 
     @functools.wraps(func)
@@ -29,7 +36,8 @@ def convert_handler_errors(func: Callable[..., Any]) -> Callable[..., Any]:
         except GRPCError:
             raise
         except Exception as exc:
-            raise GRPCError(Status.UNKNOWN, f"{type(exc).__name__}: {exc}") from exc
+            details = details_for_exception(exc)
+            raise GRPCError(Status.UNKNOWN, f"{type(exc).__name__}: {exc}", details) from exc
 
     return wrapper
 

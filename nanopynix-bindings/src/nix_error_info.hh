@@ -11,8 +11,14 @@
 /// attributes, which `nanopynix.exceptions.translate_nix_exception` reads back
 /// into `NixError.raw` / `NixError.info`:
 ///
-///   `nix_raw`  -- str, the human-readable render (what Nix's CLI prints)
-///   `nix_info` -- dict, the structured form (level/msg/pos/traces/...)
+///   `raw`  -- str, the human-readable render (what Nix's CLI prints)
+///   `info` -- dict, the structured form (level/msg/pos/traces/...)
+///
+/// Deliberately the same two names `NixError` uses. The bound classes are
+/// unrelated to the public hierarchy (they are plain `RuntimeError` subclasses
+/// with no `raw`/`info` of their own, so nothing collides), but "carries Nix
+/// error detail" is one concept and giving it two spellings would only mean
+/// every reader and every forwarding site has to know both.
 ///
 /// Use `bind_nix_error<T>(m, "Name")` in place of `nb::exception<T>`.
 
@@ -129,13 +135,13 @@ inline std::string render(const nix::ErrorInfo &ei) {
     }
 }
 
-/// Raise *py_type* for *err*, carrying its ErrorInfo as `nix_raw`/`nix_info`.
+/// Raise *py_type* for *err*, carrying its ErrorInfo as `raw`/`info`.
 inline void raise(PyObject *py_type, const nix::Error &err) {
     nb::object exc;
     try {
         exc = nb::borrow<nb::object>(py_type)(nb::str(err.what()));
-        exc.attr("nix_raw") = nb::str(render(err.info()).c_str());
-        exc.attr("nix_info") = to_dict(err.info());
+        exc.attr("raw") = nb::str(render(err.info()).c_str());
+        exc.attr("info") = to_dict(err.info());
     } catch (...) {
         // Degrade to what nb::exception<T> would have done rather than
         // replacing the caller's Nix error with an unrelated internal one.
