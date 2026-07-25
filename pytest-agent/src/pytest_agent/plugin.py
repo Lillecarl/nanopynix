@@ -12,6 +12,8 @@ from _pytest.config import (
 
 from pytest_agent._harness_detect import detect_agent_harness
 from pytest_agent._history import next_run_dir
+from pytest_agent._notes import agent_notes as agent_notes
+from pytest_agent._notes import pop_runtime, push_runtime
 from pytest_agent._pipe_guard import find_banned_pipe_reader, zero_detail_mode
 from pytest_agent._profile import profile as profile
 from pytest_agent._runtime import RUNTIME_PLUGIN_NAME, AgentRuntime
@@ -76,6 +78,18 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         type=float,
         default=float(os.environ.get("PYTEST_AGENT_HEARTBEAT", "10")),
         help="Seconds between progress lines while tests run (default: %(default)s).",
+    )
+    group.addoption(
+        "--agent-stuck-after",
+        type=float,
+        default=float(os.environ.get("PYTEST_AGENT_STUCK_AFTER", "300")),
+        help=(
+            "After a single test has run this many seconds, dump every thread's "
+            "stack to <test>.stuck.txt beside where its log will go, and print the "
+            "path (repeats up to 5 times per test; 0 disables). The default sits "
+            "below the `timeout 500 pytest` an agent typically uses, so a hung run "
+            "leaves its stack behind before the kill arrives (default: %(default)s)."
+        ),
     )
     group.addoption(
         "--agent-keep-runs",
@@ -152,6 +166,7 @@ def pytest_configure(config: pytest.Config) -> None:
 
     heartbeat_interval = cast("float", config.getoption("agent_heartbeat"))
     keep_runs = cast("int", config.getoption("agent_keep_runs"))
+    stuck_after = cast("float", config.getoption("agent_stuck_after"))
     runtime = AgentRuntime(
         config,
         root=root,
@@ -159,10 +174,15 @@ def pytest_configure(config: pytest.Config) -> None:
         run_number=run_number,
         keep_runs=keep_runs,
         heartbeat_interval=heartbeat_interval,
+        stuck_after=stuck_after,
         terminal=_REAL_TERMINAL,
         autodetected_via=autodetected_via,
     )
     config.pluginmanager.register(runtime, RUNTIME_PLUGIN_NAME)
+    # So pytest_agent.note() can find this session without a fixture to carry
+    # it -- the whole point of that entry point is being callable from inside
+    # the code under test.
+    push_runtime(runtime)
 
 
 def _silence_terminal_reporter(config: pytest.Config) -> None:
@@ -188,4 +208,5 @@ def _silence_terminal_reporter(config: pytest.Config) -> None:
 def pytest_unconfigure(config: pytest.Config) -> None:
     runtime = config.pluginmanager.get_plugin(RUNTIME_PLUGIN_NAME)
     if runtime is not None:
+        pop_runtime(cast("AgentRuntime", runtime))
         config.pluginmanager.unregister(runtime)
