@@ -444,31 +444,39 @@ static nb::list query_substitutable_paths(nix::Store &s, const std::vector<nix::
 
 // --- GC / roots / maintenance ---
 
+// The four require_*_store helpers below throw nix::Unsupported, not
+// nix::Error. Both describe the same condition, but only Unsupported is
+// registered as a Python type (nix_store.cpp's NB_MODULE), so only it arrives
+// as nanopynix.UnsupportedError carrying Nix's ErrorInfo; a bare nix::Error
+// lands outside the NixError hierarchy as a plain RuntimeError with the
+// position and trace discarded. It is also what Nix itself uses for "this
+// store cannot do that".
+
 static nix::GcStore &require_gc_store(nix::Store &s) {
     auto *store = dynamic_cast<nix::GcStore *>(&s);
     if (store == nullptr)
-        throw nix::Error("store '%s' does not support garbage collection", s.config.getHumanReadableURI());
+        throw nix::Unsupported("store '%s' does not support garbage collection", s.config.getHumanReadableURI());
     return *store;
 }
 
 static nix::LocalFSStore &require_local_fs_store(nix::Store &s) {
     auto *store = dynamic_cast<nix::LocalFSStore *>(&s);
     if (store == nullptr)
-        throw nix::Error("store '%s' does not support local filesystem roots", s.config.getHumanReadableURI());
+        throw nix::Unsupported("store '%s' does not support local filesystem roots", s.config.getHumanReadableURI());
     return *store;
 }
 
 static nix::IndirectRootStore &require_indirect_root_store(nix::Store &s) {
     auto *store = dynamic_cast<nix::IndirectRootStore *>(&s);
     if (store == nullptr)
-        throw nix::Error("store '%s' does not support indirect roots", s.config.getHumanReadableURI());
+        throw nix::Unsupported("store '%s' does not support indirect roots", s.config.getHumanReadableURI());
     return *store;
 }
 
 static nix::LogStore &require_log_store(nix::Store &s) {
     auto *store = dynamic_cast<nix::LogStore *>(&s);
     if (store == nullptr)
-        throw nix::Error("store '%s' does not support retrieving build logs", s.config.getHumanReadableURI());
+        throw nix::Unsupported("store '%s' does not support retrieving build logs", s.config.getHumanReadableURI());
     return *store;
 }
 
@@ -999,7 +1007,10 @@ static nb::dict store_copy_closure(
         const nb::dict &request,
         std::shared_ptr<nix::Store> destStore = nullptr) {
     if (!destStore) {
-        throw nix::Error("dest_store_handle is required for copy_closure");
+        // A missing argument, not a store failure -- nix::UsageError is the
+        // registered type for that, and unlike nix::Error it reaches Python
+        // inside the NixError hierarchy.
+        throw nix::UsageError("dest_store_handle is required for copy_closure");
     }
     copy_closure(
         s,

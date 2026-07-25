@@ -130,8 +130,10 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
 
 3. **Bare `RuntimeError` escapes the `NixError` hierarchy.** `attr()` on a
    non-attrs value and `list_get()` on a non-list were incidentally fixed
-   by item 1 (they raise Nix `TypeError` now). Remaining: `realise_string()`
-   on a derivation, `to_python()`'s max-call-depth cycle error, and
+   by item 1 (they raise Nix `TypeError` now), and `to_python()`'s
+   max-call-depth error is fixed below. `realise_string()` on a derivation
+   was on this list in error: measured, it succeeds and returns the store
+   path, and on a non-string it already raises `NixTypeError`. Remaining:
    `attr_get`'s own `throw std::runtime_error("attribute '...' not found")`
    -- that last one is a *different* question from wrong-type (missing key,
    not bad type) and needs a deliberate answer: `NixError` or `KeyError`?
@@ -170,7 +172,12 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
      eval-domain errors about a `Value`.
 
      *Nix throwing a bare `nix::Error` from libstore/libexpr internals* is
-     the hard half, and the stated reason for not registering it is real:
+     the hard half. Concrete measured case, still open after the above:
+     `edit_location()` on `42` reaches `nix::findPackageFilename`, which
+     throws a plain `nix::Error` ("package 'selected value' has no source
+     location information"), so it still arrives as a bare `RuntimeError`
+     -- the one branch of `edit_location` this could not fix from our
+     side. The stated reason for not registering `nix::Error` is real:
      it is the base of every bound type, and the translators live in
      different translation units with no cross-TU ordering guarantee, so
      registering it could shadow any subclass. Two ways out, neither
