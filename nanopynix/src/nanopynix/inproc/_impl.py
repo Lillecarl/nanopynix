@@ -950,14 +950,14 @@ class EvalSession:
             raise InprocSessionClosedError("EvalSession is not open — use async with")
         return self._local
 
-    async def string(self, expression: str, path: str = "<string>") -> Value:
-        """Evaluate the Nix expression ``expression``.
+    async def string(self, expr: str, path: str = "<string>") -> Value:
+        """Evaluate the Nix expression ``expr``.
 
         Args:
-            expression: Nix source to evaluate.
-            path: Source name attributed to ``expression`` in error messages.
+            expr: Nix source to evaluate.
+            path: Source name attributed to ``expr`` in error messages.
         """
-        local = await self.run(self._require_local().eval_string, expression, path)
+        local = await self.run(self._require_local().eval_string, expr, path)
         return self._track_value(local)
 
     async def file(self, path: str) -> Value:
@@ -1304,13 +1304,13 @@ class Value:
             return argument._local_for(self._eval_session)  # noqa: SLF001
         return await self._eval_session.run(self._eval_session._require_local().value_from_python, argument)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→Value coupling  # noqa: SLF001
 
-    async def build(self, *, store: Store | None = None, build_mode: Any = None) -> dict[str, str]:
+    async def build(self, *, build_mode: BuildMode | int | None = None, store: Store | None = None) -> dict[str, str]:
         """Build the derivation represented by this evaluated value.
 
         Args:
+            build_mode: A :data:`BuildMode` value, or ``None`` for normal builds.
             store: Store to build into; defaults to the store this value's
                 ``EvalSession`` was opened with.
-            build_mode: A :data:`BuildMode` value, or ``None`` for normal builds.
         """
         target_store = self._eval_session._store if store is None else store  # type: ignore[reportPrivateUsage] -- evaluator's bound store is default  # noqa: SLF001
         if target_store._session is not self._eval_session._session:  # type: ignore[reportPrivateUsage] -- session ownership guard  # noqa: SLF001

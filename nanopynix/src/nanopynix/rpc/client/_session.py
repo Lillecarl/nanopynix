@@ -673,13 +673,13 @@ class ValueProxy:
         self._check_active()
         return self._ctx.child(self, name, timeout=timeout)
 
-    def list_get(self, idx: int, *, timeout: float | None = None) -> ValueProxy:
-        """Return a lazy child proxy for list index ``idx``.
+    def list_get(self, index: int, *, timeout: float | None = None) -> ValueProxy:
+        """Return a lazy child proxy for list index ``index``.
 
         No RPC is made until the result is forced or resolved.
         """
         self._check_active()
-        return self._ctx.child(self, idx, timeout=timeout)
+        return self._ctx.child(self, index, timeout=timeout)
 
     async def list_length(self, *, timeout: float | None = None) -> int:
         """Force this value as a list and return its length."""

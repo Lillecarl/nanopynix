@@ -158,7 +158,6 @@ LEDGER: dict[str, str] = {
     "EvalSession.write_lock_file:rpc-only": "DEFECT: writing a lock file touches the filesystem, not the worker.",
     "EvalSession.get_verbosity:rpc-only": "DEFECT: inproc exposes verbosity on Session only. Same setting, two homes.",
     "EvalSession.set_verbosity:rpc-only": "DEFECT: as get_verbosity.",
-    "EvalSession.string:params": "DEFECT: the same parameter named `expression` on inproc and `expr` on rpc.",
     # ── ReplSession ────────────────────────────────────────────────
     # inproc's ReplSession is a narrow line-oriented object; rpc's also carries
     # the whole EvalSession surface. Neither shape is forced by transport.
@@ -203,9 +202,7 @@ LEDGER: dict[str, str] = {
     "Value.handle:rpc-only": "TRANSPORT: the worker-side value handle this proxy stands for.",
     "Value.attr:async": "DEFECT: inproc awaits, rpc returns a proxy synchronously. Callers cannot be written once against both.",
     "Value.list_get:async": "DEFECT: as Value.attr.",
-    "Value.list_get:params": "DEFECT: the same parameter named `index` on inproc and `idx` on rpc. Positional on both, so only a keyword caller breaks.",
     "Value.call:params": "DEFECT: an arity difference, not a rename -- inproc takes exactly one `argument`, rpc takes `*args`. A two-argument call works on one engine only.",
-    "Value.build:params": "DEFECT (cosmetic): order is reversed, (store, build_mode) vs (build_mode, store), but both are keyword-only so no call site can break. Noise for anyone reading both APIs, not a hazard.",
 }
 
 
