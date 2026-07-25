@@ -18,8 +18,9 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nanopynix_proto.nix.common import DeepAttrs, DeepValue, NixLogEvent, ResultType, ScalarValue
 from nanopynix_proto.nix.common import LogEvent as LogEventProto
+from nanopynix_proto.nix.common import NixLogEvent, ResultType
+from nanopynix_proto.nix.eval import ForceJsonResponse
 
 import nanopynix.rpc.client._pool as pool_module
 from nanopynix import (
@@ -76,7 +77,6 @@ def _make_eval_stub() -> MagicMock:
     stub.begin_repl = AsyncMock()
     stub.repl_process_line = AsyncMock()
     stub.force = AsyncMock()
-    stub.force_deep = AsyncMock()
     stub.force_json = AsyncMock()
     stub.attr = AsyncMock()
     stub.list_get = AsyncMock()
@@ -843,25 +843,22 @@ class TestLazyChildProxy:
             _ = cp.handle
         w.eval_stub.attr.assert_not_called()
 
-    async def test_child_proxy_force_deep(self):
-        """force_deep resolves child then deep-forces it."""
+    async def test_child_proxy_to_python(self):
+        """to_python resolves the child, then converts it over the ForceJson RPC.
+
+        The wire op is still ForceJson -- it transfers JSON and the client
+        decodes it -- so the stub being driven here is ``force_json`` even
+        though the caller-facing method is ``to_python``.
+        """
         w = self._worker()
         w.eval_stub.attr.return_value = _mock_value_handle(5, "attrs")
-        deep_val = DeepValue(
-            attrs=DeepAttrs(
-                entries={
-                    "a": DeepValue(scalar=ScalarValue(int_value=1)),
-                    "b": DeepValue(scalar=ScalarValue(int_value=2)),
-                },
-            ),
-        )
-        w.eval_stub.force_deep.return_value = deep_val
+        w.eval_stub.force_json.return_value = ForceJsonResponse(json='{"a": 1, "b": 2}')
         cp = self._child_proxy(w, _ResolvedValue(1, NixType.UNSPECIFIED), "name")
 
-        result = await cp.force_deep()
+        result = await cp.to_python()
 
         assert w.eval_stub.attr.await_count == 1
-        assert w.eval_stub.force_deep.await_count == 1
+        assert w.eval_stub.force_json.await_count == 1
         assert result == {"a": 1, "b": 2}
 
     async def test_child_proxy_inactive_raises(self):

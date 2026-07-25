@@ -58,5 +58,5 @@ class Eval(Command):
                 )
             except EvaluationTargetError as exc:
                 report_and_exit(exc)
-            value = await root.force_json()
+            value = await root.to_python()
             print_json(value)

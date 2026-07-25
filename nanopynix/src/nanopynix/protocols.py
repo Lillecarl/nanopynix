@@ -36,12 +36,8 @@ class AsyncValue(Protocol):
         """Evaluate to weak head normal form."""
         ...
 
-    async def force_deep(self) -> Any:
-        """Recursively evaluate the entire value tree."""
-        ...
-
-    async def force_json(self, *, copy_to_store: bool = False) -> Any:
-        """Serialize to JSON-compatible Python objects."""
+    async def to_python(self, *, copy_to_store: bool = False) -> Any:
+        """Convert the whole value tree to plain Python data, using Nix's toJSON rules."""
         ...
 
     async def realise_string(self) -> str:

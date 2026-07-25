@@ -17,7 +17,10 @@ service EvalService {
   rpc ReplScopeNames(ReplScopeNamesRequest) returns (ReplScopeNamesResponse);
   rpc ResetFileCache(ResetFileCacheRequest) returns (ResetFileCacheResponse);
   rpc Force(ForceRequest) returns (nix.common.ForceValue);
-  rpc ForceDeep(ForceDeepRequest) returns (nix.common.DeepValue);
+  // ForceJson is the only deep conversion. There used to be a ForceDeep
+  // alongside it returning a DeepValue tree; it was a second, hand-rolled
+  // walk that died on any derivation, and its one distinguishing feature --
+  // function leaves surviving as remote handles -- existed on rpc alone.
   rpc ForceJson(ForceJsonRequest) returns (ForceJsonResponse);
   rpc AsScalar(AsScalarRequest) returns (nix.common.ScalarValue);
   rpc RealiseString(RealiseStringRequest) returns (RealiseStringResponse);
@@ -126,12 +129,6 @@ message ResetFileCacheRequest {
 message ResetFileCacheResponse {}
 
 message ForceRequest {
-  int64 request_id = 1000;
-  int64 handle = 1;
-  int64 eval_handle = 100;
-}
-
-message ForceDeepRequest {
   int64 request_id = 1000;
   int64 handle = 1;
   int64 eval_handle = 100;

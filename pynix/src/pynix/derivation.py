@@ -69,10 +69,10 @@ class Show(Command):
         # has to be explicit.
         if await value.get_type() != NixType.ATTRS or not await value.has_attr("type"):
             error_exit("value is not a derivation")
-        value_type = await value.attr("type").force_json()
+        value_type = await value.attr("type").to_python()
         if value_type != "derivation":
             error_exit(f"value at attribute path is not a derivation (got {value_type!r})")
-        drv_path = await value.attr("drvPath").force_json()
+        drv_path = await value.attr("drvPath").to_python()
         if not isinstance(drv_path, str):
             error_exit("failed to get derivation path")
         return drv_path

@@ -40,7 +40,7 @@ async def test_inproc_yaml_primops(inproc_session: InprocSessionFactory) -> None
         nix.eval(store) as eval,
     ):
         parsed = await eval.string('builtins.fromYAML "apiVersion: v1\\nkind: ConfigMap\\nmetadata:\\n  name: demo\\n"')
-        assert await parsed.force_deep() == {
+        assert await parsed.to_python() == {
             "apiVersion": "v1",
             "kind": "ConfigMap",
             "metadata": {"name": "demo"},
@@ -49,7 +49,7 @@ async def test_inproc_yaml_primops(inproc_session: InprocSessionFactory) -> None
         rendered = await eval.string(
             'builtins.toYAML { apiVersion = "v1"; kind = "ConfigMap"; metadata.name = "demo"; }',
         )
-        text = await rendered.force_json()
+        text = await rendered.to_python()
         assert isinstance(text, str)
         assert "apiVersion: v1" in text
         assert "kind: ConfigMap" in text
@@ -423,14 +423,13 @@ async def test_inproc_value_scalar_conversions(inproc_session: InprocSessionFact
 
 
 @pytest.mark.anyio
-async def test_inproc_value_force_deep_and_json(inproc_session: InprocSessionFactory) -> None:
+async def test_inproc_value_to_python(inproc_session: InprocSessionFactory) -> None:
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         deep = await eval.string("{ a = { b = 1; }; }")
-        assert await deep.force_deep() == {"a": {"b": 1}}
+        assert await deep.to_python() == {"a": {"b": 1}}
 
         as_json = await eval.string('{ a = 1; b = [ "x" "y" ]; }')
-        assert await as_json.json() == {"a": 1, "b": ["x", "y"]}
-        assert await as_json.force_json() == {"a": 1, "b": ["x", "y"]}
+        assert await as_json.to_python() == {"a": 1, "b": ["x", "y"]}
 
 
 @pytest.mark.anyio

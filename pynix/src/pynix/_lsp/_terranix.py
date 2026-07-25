@@ -444,7 +444,7 @@ class TerranixDialect(Dialect):
                     if attrpath_range(source, (block_kind, resource_type, instance_name)) is None:
                         continue
                     try:
-                        value = await type_root.attr(instance_name).force_json()
+                        value = await type_root.attr(instance_name).to_python()
                     except NixError:
                         continue
                     for finding in validate(schema, value):

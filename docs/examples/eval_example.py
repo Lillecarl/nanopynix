@@ -26,10 +26,10 @@ async def main() -> None:
         v = await eval.string('{ a = 1; b = "hello"; c = true; d = [ 10 20 ]; }')
         assert await v.get_type() == NixType.ATTRS
 
-        # force_deep converts the entire value tree to nested Python dicts/lists.
-        result = await v.force_deep()
+        # to_python converts the entire value tree to nested Python dicts/lists.
+        result = await v.to_python()
         assert result == {"a": 1, "b": "hello", "c": True, "d": [10, 20]}
-        print("force_deep:", result)
+        print("to_python:", result)
 
         # --- attr navigation without full deep conversion ---------------------
 
@@ -59,13 +59,13 @@ async def main() -> None:
         assert await v4.list_get(-1).force() == 5
         print("list: length =", await v4.list_length())
 
-        # --- force_json: serialize to dict/list tree (like force_deep) --------
+        # --- to_python: serialize to dict/list tree (like to_python) --------
 
         v5 = await eval.string('{ lib = { name = "mylib"; version = "2.0"; deps = [ "a" "b" ]; }; }')
         lib = v5.attr("lib")
-        lib_json = await lib.force_json()
+        lib_json = await lib.to_python()
         assert lib_json == {"name": "mylib", "version": "2.0", "deps": ["a", "b"]}
-        print("force_json:", lib_json)
+        print("to_python:", lib_json)
 
     print("\nAll assertions passed.")
 

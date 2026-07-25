@@ -178,9 +178,6 @@ class LocalValue:
     def force(self) -> None:
         self.require_raw().force()
 
-    def force_deep(self) -> None:
-        self.require_raw().force_deep()
-
     def to_python(self) -> Any:
         return self.require_raw().to_python()
 

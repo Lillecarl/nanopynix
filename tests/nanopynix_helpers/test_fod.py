@@ -159,7 +159,7 @@ class _FakeForcedValue:
     def __init__(self, value: object) -> None:
         self._value = value
 
-    async def force_json(self) -> object:
+    async def to_python(self) -> object:
         return self._value
 
 

@@ -154,8 +154,8 @@ class EasykubenixDialect(Dialect):
         if entry is None or config_root is None:
             return None
         try:
-            api_version = await config_root.attr("kubernetes").attr("apiMappings").attr(kind).force_json()
-            schema_path = await entry.attr("openApiSchemaPath").force_json()
+            api_version = await config_root.attr("kubernetes").attr("apiMappings").attr(kind).to_python()
+            schema_path = await entry.attr("openApiSchemaPath").to_python()
         except NixError:
             return None
         if not isinstance(api_version, str) or not isinstance(schema_path, str):

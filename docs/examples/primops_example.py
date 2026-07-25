@@ -53,8 +53,8 @@ async def main() -> None:
         # --- built-in YAML primops ----------------------------------------
 
         parsed = await eval_.string('builtins.fromYAML "a: 1\\nb: [2, 3]\\n"')
-        assert await parsed.force_json() == {"a": 1, "b": [2, 3]}
-        print("fromYAML:", await parsed.force_json())
+        assert await parsed.to_python() == {"a": 1, "b": [2, 3]}
+        print("fromYAML:", await parsed.to_python())
 
         rendered = await eval_.string("builtins.toYAML { a = 1; b = [ 2 3 ]; }")
         rendered_str = await rendered.force_as(NixType.STRING)

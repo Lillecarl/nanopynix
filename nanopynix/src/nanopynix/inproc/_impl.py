@@ -988,17 +988,30 @@ class Value:
         """
         return await self._eval_session.run(_force_to_python, self._local_for(self._eval_session))
 
-    async def force_deep(self) -> Any:
-        """Recursively evaluate and convert the entire value tree to Python."""
-        return await self._eval_session.run(_force_deep_to_python, self._local_for(self._eval_session))
+    async def to_python(self, *, copy_to_store: bool = False) -> Any:
+        """Convert the whole value tree to plain Python data, in one C++ pass.
 
-    async def json(self, *, copy_to_store: bool = False) -> Any:
-        """Serialize this value to JSON-compatible Python objects. See :meth:`force_json`."""
+        This is Nix's own ``printValueAsJSON`` with ``strict=true``, so the
+        rules are Nix's rather than ours: an attrset with ``__toString``
+        becomes that string, an attrset with ``outPath`` (a derivation, for
+        instance) becomes the output path, and anything Nix will not flatten
+        -- a function -- is an error rather than a placeholder.
+
+        Converting *is* lossy, deliberately: that ``outPath`` rule is what
+        makes a derivation convertible at all, since ``drv.out`` is ``drv``.
+        Contrast the ``as_*`` accessors, which convert nothing and raise when
+        the value is not already of the type asked for.
+
+        This replaces ``to_python`` and ``json``, which were two more names
+        for the same operation.
+
+        Args:
+            copy_to_store: If True, a ``path`` value is copied into the Nix
+                store and rendered as a store path -- what string
+                interpolation of a path does. If False (default), it renders
+                as a literal filesystem path, matching ``nix eval --json``.
+        """
         return await self._eval_session.run(self._local_for(self._eval_session).to_json, copy_to_store)
-
-    async def force_json(self, *, copy_to_store: bool = False) -> Any:
-        """Serialize this value to JSON-compatible Python objects."""
-        return await self.json(copy_to_store=copy_to_store)
 
     async def type(self) -> str:
         """Resolve this value and return its Nix type name (e.g. ``"string"``)."""
@@ -1154,10 +1167,6 @@ def _force_to_python(value: Any) -> Any:
     value.force()
     return value.to_python()
 
-
-def _force_deep_to_python(value: Any) -> Any:
-    value.force_deep()
-    return value.to_python()
 
 
 __all__ = [

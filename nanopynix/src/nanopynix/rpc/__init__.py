@@ -34,7 +34,6 @@ from nanopynix.rpc.client.session import Session as Session
 from nanopynix.rpc.client.store import Store as Store
 from nanopynix.rpc.client.store import StoreHandle as StoreHandle
 from nanopynix.rpc.client.types import NixArg as NixArg
-from nanopynix.rpc.client.types import NixDeepValue as NixDeepValue
 from nanopynix.rpc.client.types import NixValue as NixValue
 
 __all__ = [
@@ -43,7 +42,6 @@ __all__ = [
     "LogCapture",
     "Nix",
     "NixArg",
-    "NixDeepValue",
     "NixValue",
     "ReplSession",
     "Session",

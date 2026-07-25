@@ -243,7 +243,7 @@ async def test_apply_accepts_an_already_evaluated_function(inproc_session: Inpro
 #
 # `forceStringNoCtx` -- the accessor Nix uses where context would be *unsound*,
 # such as an import path -- rejects exactly this. It was wired into
-# `PyValue::to_python()`, which meant force()/force_deep() raised
+# `PyValue::to_python()`, which meant force()/to_python() raised
 # "the string '/nix/store/...' is not allowed to refer to a store path" on both
 # engines while as_string() on the same value succeeded. Dropping the context is
 # the only honest option here: a Python str cannot carry one.
@@ -263,14 +263,14 @@ def _is_store_path(value: object) -> bool:
 
 
 async def test_inproc_reads_a_string_carrying_store_path_context(inproc_session: InprocSessionFactory) -> None:
-    """force/force_deep/as_string all accept an interpolated derivation, and agree."""
+    """force/to_python/as_string all accept an interpolated derivation, and agree."""
     async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
         value = await ev.string(CONTEXT_STRING_EXPR)
         attr = await value.attr("s")
         forced = await attr.force()
         assert _is_store_path(forced), forced
         assert await attr.as_string() == forced
-        assert await value.force_deep() == {"s": forced}
+        assert await value.to_python() == {"s": forced}
 
 
 async def test_rpc_reads_a_string_carrying_store_path_context(rpc_session: RpcSessionFactory) -> None:
@@ -281,7 +281,7 @@ async def test_rpc_reads_a_string_carrying_store_path_context(rpc_session: RpcSe
         forced = await attr.force()
         assert _is_store_path(forced), forced
         assert await attr.as_string() == forced
-        assert await value.force_deep() == {"s": forced}
+        assert await value.to_python() == {"s": forced}
 
 
 # Flattening a whole value tree into Python data is `builtins.toJSON`'s job, and
@@ -310,14 +310,14 @@ NIX_TOJSON_REJECTS = ["x: x", "{ f = x: x; }"]
 @pytest.mark.parametrize("expr", list(NIX_TOJSON), ids=list(NIX_TOJSON))
 async def test_inproc_deep_conversion_follows_nix_tojson(expr: str, inproc_session: InprocSessionFactory) -> None:
     async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
-        assert await (await ev.string(expr)).force_deep() == NIX_TOJSON[expr]
+        assert await (await ev.string(expr)).to_python() == NIX_TOJSON[expr]
 
 
 @pytest.mark.parametrize("expr", NIX_TOJSON_REJECTS, ids=NIX_TOJSON_REJECTS)
 async def test_inproc_deep_conversion_rejects_a_function(expr: str, inproc_session: InprocSessionFactory) -> None:
     async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
         with pytest.raises(NixError):
-            await (await ev.string(expr)).force_deep()
+            await (await ev.string(expr)).to_python()
 
 
 async def test_deep_conversion_of_a_derivation_terminates(inproc_session: InprocSessionFactory) -> None:
@@ -332,7 +332,7 @@ async def test_deep_conversion_of_a_derivation_terminates(inproc_session: Inproc
         value = await ev.string(
             'builtins.derivation { name = "deep-cyclic"; system = builtins.currentSystem; builder = "/bin/sh"; }',
         )
-        result = await value.force_deep()
+        result = await value.to_python()
         assert isinstance(result, str), result
         assert result.startswith("/nix/store/"), result
         assert result.endswith("-deep-cyclic"), result
@@ -352,7 +352,7 @@ async def test_deep_conversion_of_a_true_cycle_raises_instead_of_crashing(
     async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
         value = await ev.string("let x = { y = x; }; in x")
         with pytest.raises(Exception, match="max-call-depth"):
-            await value.force_deep()
+            await value.to_python()
 
 
 # force_as is the generic by-NixType entry point and still covers what no

@@ -137,7 +137,7 @@ async def test_manager_rpc_primop_deep_value(shared_nix_environment: NixTestEnvi
               tags = [ "x" "y" ];
             }
         """)
-        assert await result.force_json() == {
+        assert await result.to_python() == {
             "count": 2,
             "names": ["a", "b"],
             "nested": {"first": "a", "tags": ["x", "y"]},
