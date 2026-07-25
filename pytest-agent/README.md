@@ -7,6 +7,11 @@ need written to disk instead, split per test file and test name.
 This lives inside the nanopynix repo for now but has no dependency on it; it
 may get extracted into its own repo later.
 
+`SKILL.md` beside this file is the same material aimed at an agent rather than
+at a reader: what to run, in what order, and which surprises to expect. Point
+an agent harness at it (e.g. copy or symlink it into `.claude/skills/`) and
+this README stays the reference.
+
 ## Usage
 
 ```sh
