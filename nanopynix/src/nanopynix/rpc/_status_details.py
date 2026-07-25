@@ -70,12 +70,17 @@ def pack_error_details(*, raw: str, info: dict[str, Any] | None) -> dict[str, An
     Returns ``None`` when there is nothing to send, so the trailer is omitted
     entirely rather than carrying an empty object.
 
-    Oversized payloads are trimmed to :data:`MAX_DETAILS_BYTES` by dropping
-    trace frames from the tail -- the innermost frames are the ones a reader
-    wants -- and then, if still too large, the rendered ``raw``. Whatever is
-    dropped sets ``info["truncated"]``, so a reader can distinguish "no trace"
-    from "trace discarded", the same flag the C++ side already sets when it
-    caps trace count.
+    Oversized payloads are trimmed to :data:`MAX_DETAILS_BYTES`, ``raw`` first
+    and trace frames only after that. ``raw`` is the *rendered* form of what
+    ``info`` already holds structurally, so it is the redundant half; spending
+    the budget on it would mean discarding real structure to preserve a string
+    a reader can reconstruct. Trace frames then go from the tail, since the
+    innermost frames are the ones worth keeping. Whatever is dropped sets
+    ``info["truncated"]``, so a reader can distinguish "no trace" from "trace
+    discarded" -- the same flag the C++ side sets when it caps trace count.
+
+    When there is no ``info`` to protect the budget is ``raw``'s to spend, so
+    it is clipped to fit instead of dropped.
     """
     if not raw and not info:
         return None
@@ -84,16 +89,19 @@ def pack_error_details(*, raw: str, info: dict[str, Any] | None) -> dict[str, An
     if _encoded_size(payload) <= MAX_DETAILS_BYTES:
         return payload
 
-    if info is not None and isinstance(info.get("traces"), list):
+    if info is None:
+        return {"raw": _clip_raw(raw), "info": None}
+
+    # `raw` goes first: it is the rendered form of what `info` already holds,
+    # so it is the half a reader can do without.
+    payload["raw"] = ""
+    payload["info"] = {**info, "truncated": True}
+
+    if isinstance(info.get("traces"), list):
         traces = list(info["traces"])
         while traces and _encoded_size(payload) > MAX_DETAILS_BYTES:
             traces.pop()
             payload["info"] = {**info, "traces": traces, "truncated": True}
-
-    if _encoded_size(payload) > MAX_DETAILS_BYTES:
-        payload["raw"] = ""
-        if isinstance(payload["info"], dict):
-            payload["info"] = {**payload["info"], "truncated": True}
 
     # Still too large means a single hint or message is itself enormous, past
     # what the C++ per-string cap should allow. Send the type-bearing message
@@ -101,6 +109,23 @@ def pack_error_details(*, raw: str, info: dict[str, Any] | None) -> dict[str, An
     if _encoded_size(payload) > MAX_DETAILS_BYTES:
         return None
     return payload
+
+
+def _clip_raw(raw: str) -> str:
+    """Longest prefix of *raw* that fits the budget once encoded, plus a marker.
+
+    Bisected rather than sliced to a byte count because JSON escaping inflates
+    unpredictably -- one control character costs six bytes on the wire.
+    """
+    marker = "... [truncated]"
+    low, high = 0, len(raw)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if _encoded_size({"raw": raw[:mid] + marker, "info": None}) <= MAX_DETAILS_BYTES:
+            low = mid
+        else:
+            high = mid - 1
+    return raw[:low] + marker if low else ""
 
 
 def details_for_exception(exc: BaseException) -> dict[str, Any] | None:

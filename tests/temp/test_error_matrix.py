@@ -58,6 +58,10 @@ NONEXISTENT_PATH = "/nix/store/00000000000000000000000000000000-nanopynix-absent
 
 _OUT_DIR = Path(os.environ.get("NANOPYNIX_ERROR_MATRIX_OUT", ".pytest-agent/error-matrix"))
 
+# Sentinel for "key absent", distinct from a key present with value None --
+# a dropped `pos` and a `pos: None` are different findings.
+_MISSING = object()
+
 
 def _describe(exc: BaseException) -> dict[str, Any]:
     """Everything a caller could plausibly branch on, for one raised exception."""
@@ -74,24 +78,30 @@ def _describe(exc: BaseException) -> dict[str, Any]:
         "error_type": getattr(exc, "error_type", None),
         "raw_populated": bool(getattr(exc, "raw", "")),
         "info_populated": info is not None,
-        # Depth of the nix::ErrorInfo trace, so engine parity can be compared
-        # on the payload's *content*, not just on "something arrived".
-        "trace_count": _count_traces(info),
+        # The whole nix::ErrorInfo, so engine parity can be compared on the
+        # payload's *content* rather than on "something arrived". A dropped
+        # `pos`, a lost suggestion, or a mangled hint is invisible to a
+        # populated/not-populated bool and to a trace *count*.
+        "info": info,
         "message": str(exc),
     }
 
 
-def _count_traces(info: object) -> int | None:
-    """Depth of an ErrorInfo's trace list, or ``None`` if there is no info."""
-    if not isinstance(info, dict):
-        return None
-    traces: object = cast("dict[str, Any]", info).get("traces")
-    return len(cast("list[Any]", traces)) if isinstance(traces, list) else 0
+def _info_of(described: dict[str, Any]) -> dict[str, Any] | None:
+    info: object = described.get("info")
+    return cast("dict[str, Any]", info) if isinstance(info, dict) else None
 
 
-def _trace_count(described: dict[str, Any]) -> int | None:
-    count: object = described.get("trace_count")
-    return count if isinstance(count, int) else None
+def _info_diff(case: str, rpc: dict[str, Any] | None, inproc_: dict[str, Any] | None) -> str:
+    """Which ErrorInfo keys differ between the engines, and how."""
+    if rpc is None or inproc_ is None:
+        return f"{case}: rpc info={rpc is not None} inproc info={inproc_ is not None}"
+    differing = sorted(
+        key for key in set(rpc) | set(inproc_) if rpc.get(key, _MISSING) != inproc_.get(key, _MISSING)
+    )
+    return f"{case}: " + "; ".join(
+        f"{key}: rpc={rpc.get(key, _MISSING)!r} inproc={inproc_.get(key, _MISSING)!r}" for key in differing
+    )
 
 
 def _fod_expr(nixpkgs: str) -> str:
@@ -300,16 +310,19 @@ async def test_record_error_matrix(
     ]
     assert not missing_detail, f"lost nix::ErrorInfo for: {missing_detail}"
 
-    # Same failure, same detail -- not just "both non-empty". The trace is what
-    # makes the payload worth carrying, so compare its depth across engines.
-    trace_mismatches = [
-        f"{case}: rpc={_trace_count(matrix['rpc'][case])} inproc={_trace_count(matrix['inproc'][case])}"
+    # Same failure, same detail -- not just "both non-empty". Compare the whole
+    # ErrorInfo, because a dropped `pos`, a lost suggestion, or a mangled hint
+    # is invisible to a populated/not-populated bool. rpc's copy has been
+    # through the wire encoding and inproc's has not, so this is also the only
+    # place that would catch the encoding itself losing a field.
+    info_mismatches = [
+        _info_diff(case, _info_of(matrix["rpc"][case]), _info_of(matrix["inproc"][case]))
         for case in sorted(matrix["rpc"])
         if not case.startswith("build_")
         and not case.endswith("__structured_status")
-        and _trace_count(matrix["rpc"][case]) != _trace_count(matrix["inproc"][case])
+        and _info_of(matrix["rpc"][case]) != _info_of(matrix["inproc"][case])
     ]
-    assert not trace_mismatches, f"engines disagree on trace depth ({backend}): {trace_mismatches}"
+    assert not info_mismatches, f"engines disagree on ErrorInfo ({backend}): {info_mismatches}"
 
 
 def test_inproc_raises_the_public_hierarchy_not_raw_bindings() -> None:

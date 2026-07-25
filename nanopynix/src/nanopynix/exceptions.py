@@ -54,7 +54,9 @@ class NixError(RuntimeError):
     Attributes:
         error_type: the classified Nix error kind (e.g. ``"TypeError"``).
         msg: the error message string from Nix.
-        raw: the full traceback string from the worker subprocess.
+        raw: Nix's own rendering of the error -- ``showErrorInfo`` on the
+            underlying ``nix::ErrorInfo``, which is what the Nix CLI prints.
+            Produced on both engines; on rpc it rides the status trailer.
         info: ErrorInfo dict (traces, suggestions, level, etc.) or None.
     """
 
@@ -76,7 +78,7 @@ class NixError(RuntimeError):
 
     @property
     def raw_without_ansi(self) -> str:
-        """Raw traceback text with ANSI color escapes removed."""
+        """:attr:`raw` with ANSI color escapes removed."""
 
         return strip_ansi(self.raw)
 
