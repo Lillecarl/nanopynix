@@ -179,27 +179,50 @@ async def test_standard_cxx_exceptions_are_left_to_nanobind(
 
     Nix throws plain standard exceptions too -- ``std::bad_alloc``,
     nlohmann-json errors, ``std::filesystem::filesystem_error`` -- and so do
-    the bindings: ``list_get`` out of range is our own ``std::out_of_range``.
-    The translator must have no clause for them, so they propagate out of it
-    and reach nanobind's ``default_exception_translator``, which maps the
-    standard family well (``out_of_range`` -> ``IndexError``, ``bad_alloc`` ->
-    ``MemoryError``, ...).
+    the bindings, for their own precondition checks. The translator must have
+    no clause for any of them, so they propagate out of it and reach nanobind's
+    ``default_exception_translator``, which maps the standard family well
+    (``out_of_range`` -> ``IndexError``, ``bad_alloc`` -> ``MemoryError``, ...).
 
     This is the property a ``catch (...)`` in the translator would silently
     destroy, turning every one of them into a generic ``NixError``.
+
+    What this test can honestly reach is the *consequence*: a failure that is
+    not a Nix error stays out of the Nix hierarchy. ``list_get(99)`` used to be
+    the vehicle -- it was our own ``std::out_of_range`` -- but it is now
+    deliberately a ``ListIndexError``, an ``IndexError`` *and* a ``NixError``,
+    so it no longer demonstrates anything about fall-through.
+
+    Using a released value is the substitute, and it is worth being precise
+    about what it does and does not prove. ``nix_expr.cpp`` does throw
+    ``std::runtime_error("Nix value has been released")``, but inproc guards
+    the same condition in Python first, so what arrives is
+    ``InprocValueReleasedError`` and the C++ throw is never reached. The
+    assertion below is therefore about the boundary between "Nix said no" and
+    "you used the API wrong", not about the translator's decline path.
+
+    The decline path itself has no live trigger left in the public API: after
+    this change essentially everything Nix raises *is* a ``nix::Error``, and
+    our own ``std::runtime_error`` preconditions are all shadowed by
+    Python-side guards like the one above. That is a good state to be in, but
+    it does mean a regression that added ``catch (...)`` to the translator
+    would not be caught here -- only by the ``std::bad_alloc`` /
+    nlohmann-json paths, which cannot be provoked on demand. Worth revisiting
+    if this test is promoted.
     """
     async with (
         shared_nix_environment.inproc_session() as session,
         session.store() as store,
         session.eval(store) as ev,
     ):
-        value = await ev.string("[ 1 2 ]")
-        with pytest.raises(IndexError) as excinfo:
-            await value.list_get(99)
+        value = await ev.string("42")
+        await value.release()
+        with pytest.raises(RuntimeError) as excinfo:
+            await value.as_int()
 
-    # Precisely NOT a NixError -- IndexError is the point, and NixError
-    # subclasses RuntimeError, so `isinstance(..., IndexError)` alone would not
-    # catch a regression that wrapped it.
+    # NixError subclasses RuntimeError, so `pytest.raises(RuntimeError)` above
+    # would happily pass on a regression that swallowed this into the
+    # hierarchy. This is the assertion that bites.
     assert not isinstance(excinfo.value, nanopynix.NixError)
 
 
@@ -226,6 +249,76 @@ def test_interrupted_is_not_folded_into_the_error_hierarchy() -> None:
     # And no bound class shadows the name, which would make the mapping
     # ambiguous for anyone reading the module.
     assert not hasattr(nanopynix_errors, "Interrupted")
+
+
+# ════════════════════════════════════════════════════════════════════
+# 4. "Not there" is answered the same way for attrsets and lists
+# ════════════════════════════════════════════════════════════════════
+#
+# The two halves of one question, so they must not diverge: a KeyError for the
+# attrset and a NixError for the list would be the worst of both. They are
+# Python exceptions *as well as* Nix ones because nothing had to be given up to
+# make them so -- which is the test below.
+
+
+async def test_missing_attribute_is_both_a_key_error_and_a_nix_error(
+    shared_nix_environment: NixTestEnvironment,
+) -> None:
+    async with (
+        shared_nix_environment.inproc_session() as session,
+        session.store() as store,
+        session.eval(store) as ev,
+    ):
+        value = await ev.string("{ foo = 1; bar = 2; }")
+        with pytest.raises(nanopynix.MissingAttributeError) as excinfo:
+            await value.attr("fooo")
+
+    raised = excinfo.value
+    # Both hierarchies, so neither style of caller is wrong.
+    assert isinstance(raised, KeyError)
+    assert isinstance(raised, nanopynix.NixError)
+    # Machine-readable, rather than parsed out of prose by the caller.
+    assert raised.key == "fooo"
+    # The reason this is built in C++: the candidate names are the attrset's
+    # symbol table, so a bare KeyError raised from Python could not have them.
+    assert "foo" in raised.suggestions
+    # KeyError.__str__ renders repr(args[0]); left to the MRO, every message
+    # here would arrive wrapped in quotes.
+    assert not str(raised).startswith('"')
+
+
+async def test_list_index_is_both_an_index_error_and_a_nix_error(
+    shared_nix_environment: NixTestEnvironment,
+) -> None:
+    async with (
+        shared_nix_environment.inproc_session() as session,
+        session.store() as store,
+        session.eval(store) as ev,
+    ):
+        value = await ev.string("[ 1 2 ]")
+        with pytest.raises(nanopynix.ListIndexError) as excinfo:
+            await value.list_get(99)
+
+    raised = excinfo.value
+    assert isinstance(raised, IndexError)
+    assert isinstance(raised, nanopynix.NixError)
+    assert raised.index == 99
+    assert raised.info is not None
+
+
+def test_the_two_absence_errors_agree_on_shape() -> None:
+    """Consistency is the requirement; pin it rather than trusting review.
+
+    Neither may drift into being only-Pythonic or only-Nix while the other
+    stays put.
+    """
+    for cls, builtin in (
+        (nanopynix.MissingAttributeError, KeyError),
+        (nanopynix.ListIndexError, IndexError),
+    ):
+        assert issubclass(cls, builtin), f"{cls.__name__} stopped being a {builtin.__name__}"
+        assert issubclass(cls, nanopynix.EvalError), f"{cls.__name__} left the Nix hierarchy"
+        assert issubclass(cls, LookupError), f"{cls.__name__} should still be catchable as LookupError"
 
 
 # ════════════════════════════════════════════════════════════════════

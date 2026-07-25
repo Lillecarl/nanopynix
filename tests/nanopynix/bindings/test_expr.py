@@ -81,9 +81,23 @@ class TestEvalAttrs:
         assert x.as_int() == 42
 
     def test_attr_get_missing_raises(self, eval_state: nanopynix.EvalState):
+        """Nix's own wording and Nix's own "Did you mean ...?" suggestions.
+
+        This used to be ``std::runtime_error("attribute 'y' not found")`` --
+        our phrasing, and no suggestions. It is now
+        ``nanopynix::MissingAttributeError``, which says what Nix says for
+        ``{ x = 1; }.y`` and ranks candidates with the same
+        ``Suggestions::bestMatches``. Building it here rather than raising a
+        ``KeyError`` from Python is the point: the candidate names are this
+        attrset's symbol table, so C++ is the only place they exist.
+
+        Nix colourises, so the quoted name has ANSI escapes around it -- hence
+        matching on the words either side rather than on ``'y'``.
+        """
         v = eval_state.eval_string("{ x = 1; }")
-        with pytest.raises(RuntimeError, match="attribute 'y' not found"):
+        with pytest.raises(RuntimeError, match="attribute .* missing") as excinfo:
             v.attr_get("y")
+        assert "Did you mean" in str(excinfo.value)
 
     def test_attr_get_on_non_attrs_raises(self, eval_state: nanopynix.EvalState):
         """The wrong type is Nix's own TypeError, not a generic RuntimeError.
@@ -115,8 +129,23 @@ class TestEvalList:
         assert v.list_get(2).as_int() == 30
 
     def test_list_get_out_of_range_raises(self, eval_state: nanopynix.EvalState):
+        """At the *binding* layer this is a Nix error, not yet an ``IndexError``.
+
+        It used to be ``std::out_of_range``, which nanobind's default
+        translator turns into ``IndexError``. It is now
+        ``nanopynix::ListIndexError`` so that it can carry Nix's ``ErrorInfo``
+        and pair with the missing-attribute case.
+
+        Being an ``IndexError`` is a property of the *public* class,
+        ``nanopynix.ListIndexError``, which the boundary-A translation
+        produces; the bound classes deliberately have no relationship to the
+        public hierarchy (the same fact ``tests/temp/test_error_matrix.py``
+        pins for every other type). Callers get the Pythonic behaviour -- see
+        ``tests/temp/test_exception_translation.py`` -- they just do not get it
+        from ``nanopynix_bindings`` directly.
+        """
         v = eval_state.eval_string("[10 20 30]")
-        with pytest.raises(IndexError, match="out of range"):
+        with pytest.raises(RuntimeError, match="out of bounds"):
             v.list_get(3)
 
     def test_list_nested(self, eval_state: nanopynix.EvalState):

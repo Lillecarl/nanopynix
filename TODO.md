@@ -134,15 +134,32 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
    max-call-depth error is fixed below. `realise_string()` on a derivation
    was on this list in error: measured, it succeeds and returns the store
    path, and on a non-string it already raises `NixTypeError`. Remaining:
-   `attr_get`'s own `throw std::runtime_error("attribute '...' not found")`
-   -- that last one is a *different* question from wrong-type (missing key,
-   not bad type) and needs a deliberate answer: `NixError` or `KeyError`?
-   Note `list_get` out of range already raises `IndexError`
-   (`std::out_of_range`), so `KeyError` is the symmetric answer. Don't fold
-   it in silently; `test_attr_get_missing_raises` currently pins
-   `RuntimeError`, and the cycle test in
-   `test_scalar_accessor_semantics.py` deliberately matches only the
-   message with a comment saying it should tighten when this is fixed.
+   ~~`attr_get`'s "attribute not found"~~ -- DONE, together with
+   `list_get`'s out-of-range, because they are the attrset and list halves
+   of one question and answering them differently would be the worst
+   outcome. Both are now Python exceptions **and** Nix ones:
+   `MissingAttributeError(EvalError, KeyError)` and
+   `ListIndexError(EvalError, IndexError)`.
+
+   The deciding test was "can Python's exceptions carry everything Nix
+   has here?", and they can, because an exception may belong to two
+   hierarchies -- the same pattern `EvalHashMismatchError(EvalError,
+   HashMismatchError)` already uses. So `except KeyError` works on an
+   attrset as it does on a dict, `except NixError` still works, `.key` /
+   `.index` are machine-readable, and `info["suggestions"]` carries Nix's
+   own "Did you mean ...?" ranking -- computed in C++ from the attrset's
+   symbol table, which is the part a bare Python `KeyError` could not
+   have had.
+
+   One wart, fixed with an explicit `__str__`: left to the MRO,
+   `KeyError.__str__` renders `repr(args[0])`, so every message would
+   have arrived wrapped in quotes.
+
+   Deliberate asymmetry worth remembering: the *bound* classes
+   (`nanopynix_bindings.errors.ListIndexError`) are not `IndexError`s.
+   Pythonic-ness is a property of the public class that boundary-A
+   translation produces, consistent with the bound classes having no
+   relationship to the public hierarchy at all.
 
    Two *causes* behind this, both measured, both wider than the four
    symptoms above:
