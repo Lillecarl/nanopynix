@@ -356,6 +356,13 @@ _CLASSIFIERS: list[tuple[re.Pattern[str], type[NixError], str]] = [
 # concrete C++ type is strictly better information than any message pattern.
 _NIX_EXCEPTION_TYPES: dict[str, type[NixError]] = {
     # nix_expr.cpp
+    # EvalBaseError is Nix's parent of EvalError, and it is what reaches us for
+    # StackOverflowError (max-call-depth), IFDError, and RecoverableEvalError,
+    # which derive from it rather than from EvalError. It maps to the same
+    # public class deliberately: Nix's reason for the split is whether the
+    # error may be *cached*, which no Python caller can act on, so giving it a
+    # distinct public type would add surface for a distinction nobody can use.
+    "EvalBaseError": EvalError,
     "EvalError": EvalError,
     "ParseError": ParseError,
     "TypeError": NixTypeError,
