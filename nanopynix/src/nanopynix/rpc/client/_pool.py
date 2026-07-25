@@ -37,6 +37,7 @@ from nanopynix_proto.nix.worker import (
 from nanopynix._wire import DEFAULT_STORE_URI, WORKER_INIT_STATUS_OK
 from nanopynix.exceptions import from_response
 from nanopynix.logging import BusSubscription, CallbackBus
+from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC, unpack_error_details
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
 from nanopynix.rpc.worker._worker import worker_service_factory
 from nanopynix.settings import (
@@ -91,7 +92,8 @@ async def _grpc_call(coro: Any) -> Any:
     try:
         return await coro
     except GRPCError as exc:
-        raise from_response("Unknown", exc.message or str(exc)) from exc
+        raw, info = unpack_error_details(exc.details)
+        raise from_response("Unknown", exc.message or str(exc), raw=raw, info=info) from exc
     except (StreamTerminatedError, ConnectionError) as exc:
         raise WorkerDiedError(str(exc)) from exc
 
@@ -179,6 +181,12 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
                 on_process_start=self._on_worker_process_start,
                 preload=["nanopynix.rpc.worker._worker"],
                 max_concurrency=DEFAULT_WORKER_MAX_CONCURRENCY,
+                # Installs the codec on *both* ends: the channel yielded here,
+                # and -- because grpclib_transports forwards it through the
+                # forkserver process args -- the worker's own server. Both are
+                # required; grpclib drops the trailer silently if either is
+                # missing. See nanopynix.rpc._status_details.
+                status_details_codec=NIX_STATUS_DETAILS_CODEC,
             ),
         )
         self._worker_service_stub = WorkerServiceStub(self._channel)

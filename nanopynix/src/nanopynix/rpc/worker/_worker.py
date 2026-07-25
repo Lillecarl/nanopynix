@@ -67,6 +67,7 @@ from nanopynix._wire import (
 )
 from nanopynix.logging import LogCollector, LogStreamEventKind
 from nanopynix.models import PrimOpSpec
+from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
 from nanopynix.rpc.worker._handle_registry import HandleRegistry
 from nanopynix.rpc.worker._worker_eval import EvalServiceHandler, close_eval_state, find_evals_by_store
@@ -505,6 +506,7 @@ async def run_worker(
         handlers,
         tuning=tuning,
         max_concurrency=max_concurrency,
+        status_details_codec=NIX_STATUS_DETAILS_CODEC,
     )
     await _shutdown_worker(handlers)
 
@@ -524,7 +526,11 @@ def main() -> None:
 
 async def _stdio_main() -> None:
     handlers = worker_service_factory()
-    await serve_stdio(handlers, max_concurrency=DEFAULT_WORKER_MAX_CONCURRENCY)
+    await serve_stdio(
+        handlers,
+        max_concurrency=DEFAULT_WORKER_MAX_CONCURRENCY,
+        status_details_codec=NIX_STATUS_DETAILS_CODEC,
+    )
     await _shutdown_worker(handlers)
 
 

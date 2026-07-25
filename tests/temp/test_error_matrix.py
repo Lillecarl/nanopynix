@@ -1,27 +1,33 @@
-"""TEMPORARY diagnostic matrix: what error detail survives each boundary?
+"""TEMPORARY matrix: what error detail survives each boundary, on each engine?
 
-Scaffolding for CIP3 items 2-3. This does not assert desired behavior -- it
-*records* what both engines actually raise, for the same failure, against a
-local store and against a daemon store, and writes the result to
-``NANOPYNIX_ERROR_MATRIX_OUT`` (default: ``.pytest-agent/error-matrix``).
+Started as pure scaffolding for CIP3 items 2-3 -- a recording of what both
+engines *actually* raise for the same failure, against a local store and
+against a daemon store. It still writes that recording to
+``NANOPYNIX_ERROR_MATRIX_OUT`` (default: ``.pytest-agent/error-matrix``), but
+now also asserts the invariants the recording was used to establish.
 
-The point is to separate three error boundaries that the current pipeline
-conflates:
+Three boundaries, which the pipeline used to conflate:
 
-* **A** Nix C++ -> Python via nanobind. Ours. 13 exception types are bound.
-* **B** nanopynix worker -> client via gRPC. Ours. Flattens every exception to
-  ``Status.UNKNOWN`` + ``f"{type(exc).__name__}: {exc}"``, and the client then
-  discards that prefix and passes the literal ``"Unknown"``.
+* **A** Nix C++ -> Python via nanobind. Ours. The bound exception types name
+  the C++ class, and ``nix_error_info.hh`` attaches the ``nix::ErrorInfo``
+  (position, trace, suggestions) that ``e.what()`` cannot carry.
+* **B** nanopynix worker -> client via gRPC. Ours. The type name rides the
+  status message; the ``ErrorInfo`` rides the ``grpc-status-details-bin``
+  trailer. Both must be wired on both ends -- see
+  :mod:`nanopynix.rpc._status_details`.
 * **C** Nix daemon -> client via the daemon protocol. **Not ours.** Upstream
   downgrades ``HashMismatch`` to ``OutputRejected`` on the wire
   (``common-protocol.cc:153-158``) and formats FOD hashes into prose only.
+  This is why ``build_fod_hash_mismatch`` is the one cell that legitimately
+  differs between the local and daemon backends.
 
 Run with both backends -- plain ``pytest`` is local-only, so the daemon half
 silently vanishes and every cell looks identical::
 
     pytest tests/temp --nix-test-backends local,daemon
 
-Delete this directory once the pipeline carries structured types.
+Delete this directory once these assertions have a permanent home in
+``tests/nanopynix``.
 """
 
 from __future__ import annotations
@@ -30,7 +36,7 @@ import json
 import os
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import anyio
 import pytest
@@ -68,8 +74,24 @@ def _describe(exc: BaseException) -> dict[str, Any]:
         "error_type": getattr(exc, "error_type", None),
         "raw_populated": bool(getattr(exc, "raw", "")),
         "info_populated": info is not None,
+        # Depth of the nix::ErrorInfo trace, so engine parity can be compared
+        # on the payload's *content*, not just on "something arrived".
+        "trace_count": _count_traces(info),
         "message": str(exc),
     }
+
+
+def _count_traces(info: object) -> int | None:
+    """Depth of an ErrorInfo's trace list, or ``None`` if there is no info."""
+    if not isinstance(info, dict):
+        return None
+    traces: object = cast("dict[str, Any]", info).get("traces")
+    return len(cast("list[Any]", traces)) if isinstance(traces, list) else 0
+
+
+def _trace_count(described: dict[str, Any]) -> int | None:
+    count: object = described.get("trace_count")
+    return count if isinstance(count, int) else None
 
 
 def _fod_expr(nixpkgs: str) -> str:
@@ -256,41 +278,38 @@ async def test_record_error_matrix(
     #
     # Anything raised by the C++ evaluator or store carries a `nix::ErrorInfo`
     # -- position, evaluation trace, suggestions -- which C++ is the only place
-    # to have. inproc now propagates it (nix_error_info.hh -> nix_raw/nix_info
-    # -> NixError.raw/.info), so assert it rather than merely record it.
+    # to have. Both engines now propagate it -- inproc via nix_error_info.hh's
+    # raw/info attributes, rpc via those same attributes forwarded through the
+    # grpc-status-details-bin trailer -- so assert it rather than record it.
     #
     # Deliberately NOT asserted for the two `build_*` cases: those are built by
     # `build_error_from_result` out of Nix's BuildResult{status, error_msg,
     # drv_path}, which has no ErrorInfo anywhere in it on either engine or
     # either backend. Empty raw/info there is the honest answer, not a gap.
+    # rpc is asserted alongside inproc, not merely recorded, because boundary
+    # B's failure mode is *silent*: grpclib omits the status-details trailer if
+    # either end lacks the codec, with no error on either side. A missed wiring
+    # would look exactly like success everywhere except here.
     missing_detail = [
-        f"inproc/{case} (raw={described['raw_populated']} info={described['info_populated']})"
-        for case, described in matrix["inproc"].items()
+        f"{engine}/{case} (raw={described['raw_populated']} info={described['info_populated']})"
+        for engine, cases in matrix.items()
+        for case, described in cases.items()
         if not case.startswith("build_")
         and not case.endswith("__structured_status")
         and not (described["raw_populated"] and described["info_populated"])
     ]
-    assert not missing_detail, f"inproc lost nix::ErrorInfo for: {missing_detail}"
+    assert not missing_detail, f"lost nix::ErrorInfo for: {missing_detail}"
 
-    # ── OPEN: boundary B does not carry ErrorInfo yet ───────────────
-    #
-    # The rpc engine's raw/info are still empty for these same cases. The
-    # payload has nowhere to ride: grpclib's channel-level
-    # `status_details_codec` is the natural slot, but the client channel is
-    # constructed inside grpclib_transports' `open_channel()`, which does not
-    # forward that argument -- so closing this needs a decision (upstream
-    # passthrough vs. something else), not just more code here.
-    #
-    # Recorded, not asserted, so this file states the gap instead of hiding it.
-    # When boundary B lands, fold these into the parity comparison above.
-    rpc_detail_gap = sorted(
-        case
-        for case, described in matrix["rpc"].items()
+    # Same failure, same detail -- not just "both non-empty". The trace is what
+    # makes the payload worth carrying, so compare its depth across engines.
+    trace_mismatches = [
+        f"{case}: rpc={_trace_count(matrix['rpc'][case])} inproc={_trace_count(matrix['inproc'][case])}"
+        for case in sorted(matrix["rpc"])
         if not case.startswith("build_")
         and not case.endswith("__structured_status")
-        and not (described["raw_populated"] and described["info_populated"])
-    )
-    print(f"[{backend}] rpc cases still missing ErrorInfo: {rpc_detail_gap}")  # noqa: T201 -- see module docstring
+        and _trace_count(matrix["rpc"][case]) != _trace_count(matrix["inproc"][case])
+    ]
+    assert not trace_mismatches, f"engines disagree on trace depth ({backend}): {trace_mismatches}"
 
 
 def test_inproc_raises_the_public_hierarchy_not_raw_bindings() -> None:
