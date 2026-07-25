@@ -35,6 +35,7 @@ from nanopynix.models import (
     BuildResult,
     Derivation,
     GcResult,
+    GcRoot,
     LockedInput,
     LogEvent,
     MissingInfo,
@@ -638,6 +639,41 @@ class Store:
             paths=[PublicStorePath(p) for p in paths],
             bytes_freed=result["bytes_freed"],
         )
+
+    async def add_temp_root(self, path: str | PublicStorePath, /) -> None:
+        """Keep ``path`` alive against the garbage collector for this session.
+
+        The root lasts as long as this process holds the store open; it is not
+        written to disk as a symlink. Use :meth:`add_perm_root` for a root that
+        outlives the process.
+        """
+        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
+        await self._session.run(self._require_raw().add_temp_root, raw_path)
+
+    async def add_perm_root(self, path: str | PublicStorePath, gc_root: str, /) -> str:
+        """Create the symlink ``gc_root`` -> ``path`` and return its resolved path.
+
+        Nix's ``IndirectRootStore::addPermRoot`` registers the indirect root
+        itself, so this one call is all an application needs to keep a build
+        result alive across process restarts. Requires a local filesystem
+        store; a store that has no local root directory raises.
+        """
+        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
+        return await self._session.run(self._require_raw().add_perm_root, raw_path, gc_root)
+
+    async def add_indirect_root(self, path: str, /) -> None:
+        """Register ``path``, an existing user-facing symlink, as an indirect root.
+
+        This is the weak half of :meth:`add_perm_root`, which already does it
+        for the symlink it creates. Call this directly only for a symlink you
+        made yourself.
+        """
+        await self._session.run(self._require_raw().add_indirect_root, path)
+
+    async def find_roots(self, *, censor: bool = False) -> list[GcRoot]:
+        """Return the garbage collector's roots."""
+        roots = await self._session.run(self._require_raw().find_roots, censor)
+        return [GcRoot(link=root["link"], path=root["path"]) for root in roots]
 
     async def _public_store_paths(self, raw_paths: Any) -> list[PublicStorePath]:
         paths = await self._session.run(_print_store_paths, self._require_raw(), raw_paths)

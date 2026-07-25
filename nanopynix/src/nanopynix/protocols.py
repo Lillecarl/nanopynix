@@ -18,7 +18,16 @@ from nanopynix_proto.nix.store import GcAction
 from nanopynix._wire import NO_GC_LIMIT
 
 if TYPE_CHECKING:
-    from nanopynix.models import BuildResult, Derivation, GcResult, MissingInfo, NixType, PathInfo, StorePath
+    from nanopynix.models import (
+        BuildResult,
+        Derivation,
+        GcResult,
+        GcRoot,
+        MissingInfo,
+        NixType,
+        PathInfo,
+        StorePath,
+    )
     from nanopynix.verbosity import LogLevelInput
 
 ValueT = TypeVar("ValueT", bound="AsyncValue")
@@ -156,9 +165,24 @@ class AsyncStore(Protocol):
         /,
         *,
         build_mode: int = BuildMode.Normal.value,
-        eval_store: AsyncStore | None = None,
+        eval_store: Self | None = None,
     ) -> list[BuildResult]:
-        """Build derived paths, treating a plain derivation path as all outputs."""
+        """Build derived paths, treating a plain derivation path as all outputs.
+
+        ``eval_store`` is ``Self``, not ``AsyncStore``: both engines reject an
+        ``eval_store`` from a different session at runtime, so no
+        implementation can honestly accept an arbitrary store here. Typing it
+        as ``AsyncStore`` made every concrete class fail conformance, and the
+        blanket suppression that hid it disabled the whole ``AsyncStore``
+        check -- including, until this change, whether either engine had any
+        GC-root methods at all.
+
+        The cost, since ``Self`` is in an argument position: code written
+        against ``AsyncStore`` rather than a concrete store can pass ``None``
+        here but cannot thread a store through. That is a real restriction on
+        engine-agnostic callers, and it is the honest one -- such a caller has
+        no way to prove the store it holds came from the same session.
+        """
         ...
 
     async def read_derivation(self, drv_path: str | StorePath, /) -> Derivation:
@@ -175,6 +199,22 @@ class AsyncStore(Protocol):
         max_freed: int = NO_GC_LIMIT,
     ) -> GcResult:
         """Run a garbage-collection pass; see :meth:`nanopynix.store.Store.collect_garbage`."""
+        ...
+
+    async def add_temp_root(self, path: str | StorePath, /) -> None:
+        """Keep ``path`` alive against the collector for as long as this process holds the store."""
+        ...
+
+    async def add_perm_root(self, path: str | StorePath, gc_root: str, /) -> str:
+        """Create the symlink ``gc_root`` -> ``path`` and return its resolved path."""
+        ...
+
+    async def add_indirect_root(self, path: str, /) -> None:
+        """Register an existing user-facing symlink as an indirect root."""
+        ...
+
+    async def find_roots(self, *, censor: bool = False) -> list[GcRoot]:
+        """Return the garbage collector's roots."""
         ...
 
 

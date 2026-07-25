@@ -11,13 +11,10 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from nanopynix_bindings import store as nanopynix_store
 
+from tests.support.nix_markers import NIX_GC_ROOTS_BUG
+
 if TYPE_CHECKING:
     from pathlib import Path
-
-NIX_GC_ROOTS_BUG = pytest.mark.nix_version(
-    exclude=("2.31", "2.34"),
-    reason="findRoots/collectGarbage crash on nonnumeric temproots filenames; https://github.com/NixOS/nix/issues/16138",
-)
 
 
 class TestStorePath:

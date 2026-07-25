@@ -161,11 +161,15 @@ async def _collect_engine(
 ) -> dict[str, dict[str, Any]]:
     """Run every failure case on one engine, returning case -> description."""
     results: dict[str, dict[str, Any]] = {}
-    # `Any` is not laziness -- it is the finding. There is no shared static type
-    # that both engines' Session/Store satisfy, so engine-agnostic code like
-    # this cannot be typed: pyright rejects `nix.eval(store)` because
-    # inproc.Store and rpc.Store are unrelated nominal types. A real parity
-    # guarantee (CIP3 items 4/24) is what would make this annotation honest.
+    # `Any` is not laziness -- it is the finding. The *stores* do share a static
+    # type now (both satisfy `nanopynix.protocols.AsyncStore`, pinned by
+    # tests/nanopynix/test_protocols.py), but the sessions do not, so
+    # engine-agnostic code like this still cannot be typed: pyright rejects
+    # `nix.eval(store)` because inproc.Session and rpc.Session are unrelated
+    # nominal types. Note that even `AsyncStore` does not buy a caller
+    # everything -- `build_paths_with_results`'s `eval_store` is `Self`, so a
+    # store held only as the protocol type cannot be passed as one. A real
+    # parity guarantee (CIP3 items 4/24) is what would make this honest.
     session_factory: Any = environment.rpc_session if engine == "rpc" else environment.inproc_session
 
     async with session_factory() as nix, nix.store() as store:
@@ -321,6 +325,58 @@ async def test_error_detail_survives_every_boundary(
         and _info_of(matrix["rpc"][case]) != _info_of(matrix["inproc"][case])
     ]
     assert not info_mismatches, f"engines disagree on ErrorInfo ({backend}): {info_mismatches}"
+
+
+@pytest.mark.anyio
+async def test_both_engines_refuse_gc_roots_the_same_way_on_a_store_that_has_none(
+    shared_nix_environment: NixTestEnvironment,
+) -> None:
+    """Not every store can hold a root, and both engines must say so identically.
+
+    Nix splits the four root operations across three interfaces:
+    ``addTempRoot`` is on the base ``Store``, ``addPermRoot`` needs a
+    ``LocalFSStore``, ``addIndirectRoot`` an ``IndirectRootStore``, and
+    ``findRoots`` a ``GcStore`` (see ``indirect-root-store.hh``'s own table:
+    ``SSHStore`` has neither perm nor indirect roots). So three of the four
+    raise on a store like ``dummy://`` and the fourth quietly succeeds --
+    ``Store::addTempRoot``'s base implementation is a no-op, which is Nix's
+    behaviour and therefore ours.
+
+    Worth pinning because the two engines reach the same C++ by different
+    routes: inproc translates the binding exception in-process, rpc carries
+    the type name and ``ErrorInfo`` across gRPC. A drift here would show up
+    only for the minority of callers pointing at a non-local store.
+
+    ``dummy://`` touches no filesystem, so the environment is not here for
+    isolation -- it is here for its ``settings``. inproc initialises libstore
+    once per process and refuses a second ``Session`` whose settings differ, so
+    a session built with bare defaults passes alone and fails the moment any
+    other inproc test in the group has already initialised the process.
+    """
+    settings = shared_nix_environment.settings
+    matrix: dict[str, dict[str, dict[str, Any]]] = {}
+    for engine, factory in (
+        ("inproc", lambda: inproc.Session(store_uri="dummy://", load_config=False, settings=settings)),
+        ("rpc", lambda: nanopynix.rpc.Session(store_uri="dummy://", load_config=False, settings=settings)),
+    ):
+        async with factory() as nix, nix.store() as store:
+            store_any = cast("Any", store)
+            matrix[engine] = {
+                "add_temp_root": await _capture(store_any.add_temp_root(NONEXISTENT_PATH)),
+                "add_perm_root": await _capture(store_any.add_perm_root(NONEXISTENT_PATH, "/tmp/nanopynix-no-root")),
+                "add_indirect_root": await _capture(store_any.add_indirect_root("/tmp/nanopynix-no-root")),
+                "find_roots": await _capture(store_any.find_roots()),
+            }
+
+    # addTempRoot's base implementation does nothing, so there is no exception
+    # to describe -- _capture records the no-raise case with class None.
+    for engine, cases in matrix.items():
+        assert cases["add_temp_root"]["class"] is None, f"{engine} add_temp_root raised: {cases['add_temp_root']}"
+        for case in ("add_perm_root", "add_indirect_root", "find_roots"):
+            assert cases[case]["class"] == "UnsupportedError", f"{engine} {case}: {cases[case]}"
+
+    differing = [case for case in matrix["rpc"] if matrix["rpc"][case] != matrix["inproc"][case]]
+    assert not differing, f"engines disagree on unsupported-root failures: {differing}"
 
 
 def test_inproc_raises_the_public_hierarchy_not_raw_bindings() -> None:

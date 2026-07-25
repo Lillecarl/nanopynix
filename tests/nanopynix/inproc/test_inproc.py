@@ -21,6 +21,7 @@ from nanopynix import Derivation, GcResult, MissingInfo, NixType, StorePath, inp
 from nanopynix.inproc import _impl as inproc_impl
 from nanopynix.settings import NixEvalSettings, normalize_nix_path
 from tests.support.git import init_flake_repo
+from tests.support.nix_markers import NIX_GC_ROOTS_BUG
 
 if TYPE_CHECKING:
     from tests.support.nix_environment import InprocSessionFactory, NixTestEnvironment
@@ -246,6 +247,80 @@ async def test_inproc_store_collect_garbage_return_dead(inproc_session: InprocSe
         assert isinstance(result, GcResult)
         assert isinstance(result.paths, list)
         assert result.bytes_freed == 0
+
+
+# ── GC roots ────────────────────────────────────────────────────────────
+# The four root methods reached inproc late: rpc had them from the start and
+# tests/nanopynix/test_engine_parity.py carried them as rpc-only DEFECTs. What
+# is exercised here is the capability itself, not the plumbing -- an
+# application's whole reason for making a root is that the collector then
+# refuses to take the path.
+
+
+@pytest.mark.anyio
+async def test_inproc_add_perm_root_makes_a_symlink_into_the_store(
+    inproc_session: InprocSessionFactory,
+    seeded_store_path: StorePath,
+    tmp_path: Path,
+) -> None:
+    root_path = tmp_path / "inproc-gc-root"
+    async with inproc_session() as nix, nix.store() as store:
+        resolved = await store.add_perm_root(seeded_store_path, str(root_path))
+        assert resolved == str(root_path)
+        assert root_path.is_symlink()
+        assert root_path.readlink() == Path(seeded_store_path)
+        # add_perm_root already registered the indirect half; calling it
+        # directly on the same symlink is the documented low-level entry point
+        # and must stay idempotent.
+        await store.add_indirect_root(str(root_path))
+
+
+@pytest.mark.anyio
+@NIX_GC_ROOTS_BUG
+async def test_inproc_perm_root_appears_in_find_roots(
+    isolated_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+) -> None:
+    """A root you just made is a root the collector can see."""
+    source = tmp_path / "find-roots-fixture.txt"
+    source.write_text("nanopynix find_roots fixture\n", encoding="utf-8")
+    root_path = tmp_path / "inproc-find-roots-gc-root"
+    async with isolated_nix_environment.rpc_session() as rpc_nix, rpc_nix.store() as rpc_store:
+        seeded = await rpc_store.add_to_store(str(source), name="inproc-find-roots", method="flat")
+
+    async with isolated_nix_environment.inproc_session() as nix, nix.store() as store:
+        await store.add_perm_root(seeded, str(root_path))
+        roots = await store.find_roots()
+        assert [root.path for root in roots if root.link == str(root_path)] == [str(seeded)]
+
+
+@pytest.mark.anyio
+@NIX_GC_ROOTS_BUG
+async def test_inproc_temp_root_survives_a_delete_dead_pass(
+    isolated_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+) -> None:
+    """The property applications depend on: a temp root beats the collector.
+
+    Isolated, not shared: this really does delete every unrooted path in the
+    store it runs against. The control half matters as much as the assertion
+    -- an unrooted sibling seeded the same way must actually be collected, or
+    a store that simply collected nothing would pass this vacuously.
+    """
+    rooted_source = tmp_path / "temp-root-keep.txt"
+    rooted_source.write_text("nanopynix temp-root keep\n", encoding="utf-8")
+    doomed_source = tmp_path / "temp-root-drop.txt"
+    doomed_source.write_text("nanopynix temp-root drop\n", encoding="utf-8")
+
+    async with isolated_nix_environment.rpc_session() as rpc_nix, rpc_nix.store() as rpc_store:
+        kept = await rpc_store.add_to_store(str(rooted_source), name="inproc-temp-root-keep", method="flat")
+        doomed = await rpc_store.add_to_store(str(doomed_source), name="inproc-temp-root-drop", method="flat")
+
+    async with isolated_nix_environment.inproc_session() as nix, nix.store() as store:
+        await store.add_temp_root(kept)
+        await store.collect_garbage(GcAction.DELETE_DEAD)
+        assert await store.is_valid_path(kept)
+        assert not await store.is_valid_path(doomed)
 
 
 # ── Store query methods against a seeded hermetic store ─────────────────
