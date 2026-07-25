@@ -231,3 +231,49 @@ message Derivation {
   repeated string input_srcs = 7;
   map<string, DerivationOutput> outputs = 8;
 }
+
+// ── Error detail ───────────────────────────────────
+//
+// Every nix::Error carries a nix::ErrorInfo -- severity, source position,
+// the evaluation trace, "did you mean ...?" suggestions -- that e.what()
+// cannot express and that only C++ has access to. These messages are how it
+// crosses the worker RPC: packed into a google.protobuf.Any and carried on
+// google.rpc.Status.details, which is the standard gRPC channel for error
+// detail and therefore readable by any language's gRPC tooling.
+
+// A position in Nix source.
+//
+// `file` is Pos::print's rendering of the origin rather than a plain path:
+// an origin is a variant that may be a real file, but equally a string
+// («string») or stdin («stdin»), neither of which has a path to report.
+message SourcePos {
+  string file = 1;
+  uint32 line = 2;
+  uint32 column = 3;
+}
+
+// One frame of the evaluation trace -- what `--show-trace` prints.
+message ErrorTrace {
+  string hint = 1;
+  SourcePos pos = 2;
+}
+
+message NixErrorInfo {
+  // Nix's own rendering of the error, as its CLI would print it. Derived
+  // from the fields below rather than independent of them, which is why it
+  // is the first thing dropped when the payload has to be trimmed.
+  string raw = 1;
+
+  LogLevel level = 2;
+  string msg = 3;
+  SourcePos pos = 4;
+  bool is_from_expr = 5;
+  int32 status = 6;
+  repeated ErrorTrace traces = 7;
+
+  // Trace frames were dropped -- by the C++ frame cap, or to fit the
+  // status trailer's byte budget. Distinguishes "no trace" from "trace lost".
+  bool truncated = 8;
+
+  repeated string suggestions = 9;
+}

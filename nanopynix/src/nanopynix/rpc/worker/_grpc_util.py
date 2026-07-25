@@ -24,9 +24,11 @@ def convert_handler_errors(func: Callable[..., Any]) -> Callable[..., Any]:
     ``exceptions.from_response()``.
 
     A :class:`~nanopynix.NixError`'s ``raw``/``info`` -- the ``nix::ErrorInfo``
-    the bindings recovered from C++ -- go into ``GRPCError.details``, which
-    rides the ``grpc-status-details-bin`` trailer. That only reaches the client
-    if both ends installed the codec; see :mod:`nanopynix.rpc._status_details`.
+    the bindings recovered from C++ -- go into ``GRPCError.details`` as a
+    ``nix.common.NixErrorInfo``, which rides the ``grpc-status-details-bin``
+    trailer inside a standard ``google.rpc.Status``. That only reaches the
+    client if both ends installed the codec; see
+    :mod:`nanopynix.rpc._status_details`.
     """
 
     @functools.wraps(func)
