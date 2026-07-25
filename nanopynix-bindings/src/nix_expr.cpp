@@ -42,6 +42,7 @@
 
 #include <nanopynix/nix_compat_config.hh>
 
+#include "nanopynix_errors.hh"
 #include "nix_error_info.hh"
 #include "py_value.hh"
 
@@ -374,8 +375,12 @@ PyValue PyValue::list_get(size_t idx) const {
     }
     auto size = v->listSize();
     if (idx >= size)
-        throw std::out_of_range(
-            "list index " + std::to_string(idx) + " out of range for length " + std::to_string(size));
+        // Wording follows Nix's own out-of-range report (prim_elemAt: "called
+        // with index 99 on a list of size 2") rather than Python's, since the
+        // subject is a Nix list. The Python-ness is carried by the exception
+        // *class* -- ListIndexError is an IndexError as well as a NixError.
+        throw nanopynix::ListIndexError(
+            es, "index %d is out of bounds for a list of size %d", idx, size);
     auto *elem = v->listView()[idx];
     {
         nb::gil_scoped_release release;
@@ -430,7 +435,17 @@ PyValue PyValue::attr_get(const std::string &name) const {
             return PyValue(v, eval, eval_alive);
         }
     }
-    throw std::runtime_error("attribute '" + name + "' not found");
+    // Same wording and the same "Did you mean ...?" ranking Nix uses for
+    // `{ foo = 1; }.fooo`, built from this attrset's own symbol table. The
+    // candidate names exist only here, so the suggestions have to be computed
+    // here too -- Python would have to be handed every attribute name to do
+    // the same job.
+    nix::StringSet candidates;
+    for (auto &attr : *value->attrs())
+        candidates.insert(std::string(es.symbols[attr.name]));
+    nanopynix::MissingAttributeError error(es, "attribute '%s' missing", name);
+    error.with_suggestions(nix::Suggestions::bestMatches(candidates, name));
+    throw error;
 }
 
 PyValue PyValue::auto_call() {

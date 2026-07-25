@@ -48,6 +48,21 @@ from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- str
 # ════════════════════════════════════════════════════════════════════
 
 
+def _quoted_between(text: str, prefix: str, suffix: str) -> str | None:
+    """Pull the quoted name out of a Nix message, or ``None``.
+
+    Nix colourises its messages, so the quotes are usually separated from the
+    name by ANSI escapes; strip them before matching.
+    """
+    plain = strip_ansi(text)
+    start = plain.find(prefix)
+    if start < 0:
+        return None
+    start += len(prefix)
+    end = plain.find(suffix, start)
+    return plain[start:end] if end >= 0 else None
+
+
 class NixError(RuntimeError):
     """Base for all Nix-originated errors from RPC calls.
 
@@ -134,6 +149,71 @@ class RestrictedPathError(EvalError):
 
 class MissingArgumentError(EvalError):
     """Missing function argument in Nix expression."""
+
+
+class MissingAttributeError(EvalError, KeyError):
+    """An attribute is absent from a Nix attrset (``value.attr("nope")``).
+
+    Both a Nix error and a Python one, deliberately, and paired with
+    :class:`ListIndexError` -- the two are the attrset and list halves of the
+    same "you asked for something that is not there" question, so they must
+    answer it the same way. The alternative was to make both plain
+    :class:`EvalError`; that was rejected because Python's exceptions can carry
+    everything Nix has here, so there is nothing to trade away:
+
+    * ``except KeyError`` works on a Nix attrset exactly as on a ``dict``, and
+      ``except NixError`` still catches it. The MRO satisfies both.
+    * :attr:`key` names the attribute, so callers branch on a value rather than
+      parsing prose.
+    * ``info["suggestions"]`` carries Nix's own "Did you mean ...?" ranking,
+      computed from the attrset's symbol table by the same
+      ``Suggestions::bestMatches`` Nix uses for ``{ foo = 1; }.fooo``. This is
+      the part that would have been lost by raising a bare ``KeyError`` from
+      Python: the candidate names exist only on the C++ side.
+
+    ``EvalHashMismatchError`` above is the same pattern -- one failure that
+    genuinely belongs to two hierarchies.
+    """
+
+    def __init__(self, error_type: str, msg: str, *, raw: str = "", info: dict[str, Any] | None = None) -> None:
+        super().__init__(error_type, msg, raw=raw, info=info)
+        self.key = _quoted_between(msg, "attribute '", "'")
+
+    def __str__(self) -> str:
+        # Without this, the MRO reaches KeyError.__str__ first, which renders
+        # `repr(args[0])` -- so every message would arrive wrapped in quotes.
+        # That is a dict-lookup convention, not ours.
+        return f"[{self.error_type}] {self.msg}"
+
+    @property
+    def suggestions(self) -> list[str]:
+        """Nix's "Did you mean ...?" candidates, closest first; ``[]`` if none."""
+        info = self.info or {}
+        raw: object = info.get("suggestions")
+        if not isinstance(raw, list):
+            return []
+        items: list[object] = raw
+        return [str(item) for item in items]
+
+
+class ListIndexError(EvalError, IndexError):
+    """A list index is out of bounds (``value.list_get(99)``).
+
+    The list half of the pair described on :class:`MissingAttributeError`; see
+    there for why these are Python exceptions as well as Nix ones. Nix has no
+    equivalent of ``suggestions`` for an index, so the extra information here
+    is just :attr:`index`.
+    """
+
+    def __init__(self, error_type: str, msg: str, *, raw: str = "", info: dict[str, Any] | None = None) -> None:
+        super().__init__(error_type, msg, raw=raw, info=info)
+        match = re.search(r"index (\d+)", strip_ansi(msg))
+        self.index: int | None = int(match.group(1)) if match else None
+
+    def __str__(self) -> str:
+        # IndexError does not repr its argument the way KeyError does, so this
+        # is only here to keep the two halves of the pair rendering alike.
+        return f"[{self.error_type}] {self.msg}"
 
 
 class EvalHashMismatchError(EvalError, HashMismatchError):
@@ -375,6 +455,8 @@ _NIX_EXCEPTION_TYPES: dict[str, type[NixError]] = {
     "UndefinedVarError": UndefinedVarError,
     "AssertionError": NixAssertionError,
     "ThrownError": ThrownError,
+    "MissingAttributeError": MissingAttributeError,
+    "ListIndexError": ListIndexError,
     "MissingArgumentError": MissingArgumentError,
     "RestrictedPathError": RestrictedPathError,
     "InfiniteRecursionError": InfiniteRecursionError,

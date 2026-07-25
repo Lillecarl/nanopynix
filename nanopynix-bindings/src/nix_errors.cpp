@@ -51,6 +51,7 @@
 #include <nix/util/error.hh>
 #include <nix/util/signals.hh>
 
+#include "nanopynix_errors.hh"
 #include "nix_error_info.hh"
 
 namespace nb = nanobind;
@@ -79,6 +80,8 @@ struct PyErrorTypes {
     PyObject *sys_error = nullptr;
     PyObject *usage_error = nullptr;
     PyObject *unimplemented_error = nullptr;
+    PyObject *missing_attribute_error = nullptr;
+    PyObject *list_index_error = nullptr;
 };
 
 PyErrorTypes &py_types() {
@@ -129,6 +132,15 @@ NB_MODULE(errors, m) {
     t.sys_error = make_error_class<11>(m, "SysError", nb::handle(t.error));
     t.usage_error = make_error_class<12>(m, "UsageError", nb::handle(t.error));
     t.unimplemented_error = make_error_class<13>(m, "UnimplementedError", nb::handle(t.error));
+    // Both are nix::EvalError subclasses on the C++ side, and the bound
+    // classes mirror that. What makes them worth distinguishing at all is on
+    // the *public* side: nanopynix.MissingAttributeError is also a KeyError
+    // and nanopynix.ListIndexError is also an IndexError, so `except KeyError`
+    // works on a Nix attrset the way it does on a dict. Keeping the two
+    // consistent -- both Pythonic, or neither -- is the point; a KeyError for
+    // one and a NixError for the other would be the worst of both.
+    t.missing_attribute_error = make_error_class<14>(m, "MissingAttributeError", nb::handle(t.eval_error));
+    t.list_index_error = make_error_class<15>(m, "ListIndexError", nb::handle(t.eval_error));
 
     nb::detail::register_exception_translator(
         [](const std::exception_ptr &p, void * /*payload*/) {
@@ -150,6 +162,13 @@ NB_MODULE(errors, m) {
 
             // ── nix::Error subclasses, most-derived first ───────────
             // -Wexceptions rejects this list if a base precedes its subclass.
+            // nanopynix's own two, ahead of the nix::EvalError arm they derive
+            // from (see nanopynix_errors.hh).
+            catch (nanopynix::MissingAttributeError &e) {
+                nanopynix::errinfo::raise(types.missing_attribute_error, e);
+            }
+            catch (nanopynix::ListIndexError &e) { nanopynix::errinfo::raise(types.list_index_error, e); }
+
             catch (nix::ThrownError &e) { nanopynix::errinfo::raise(types.thrown_error, e); }
             catch (nix::AssertionError &e) { nanopynix::errinfo::raise(types.assertion_error, e); }
             catch (nix::TypeError &e) { nanopynix::errinfo::raise(types.type_error, e); }
