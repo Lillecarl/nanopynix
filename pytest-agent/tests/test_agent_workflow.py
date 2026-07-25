@@ -14,6 +14,7 @@ be swept into the same group.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -136,6 +137,99 @@ def test_last_failures_paths_can_be_read_back_verbatim(failed_run: Path) -> None
         )
         assert readback.returncode == 0, readback.stderr
         assert "outcome: " in readback.stdout
+
+
+def _recorded_nodeids(project: Path, run_number: int) -> set[str]:
+    index_path = project / ".pytest-agent" / f"runs-{run_number:04d}" / "index.jsonl"
+    lines = index_path.read_text(encoding="utf-8").splitlines()
+    return {json.loads(line)["nodeid"] for line in lines if line.strip()}
+
+
+def test_rerun_runs_exactly_the_recorded_failures_and_nothing_else(failed_run: Path) -> None:
+    result = conftest.run_cli(["rerun"], cwd=failed_run)
+
+    assert result.returncode != 0, "the failures were re-run, so the run must still fail"
+    assert "re-running 5 failed from .pytest-agent/runs-0001" in result.stdout
+
+    reran = _recorded_nodeids(failed_run, 2)
+    assert len(reran) == 5
+    # The passing test is not re-run: that is the whole difference between
+    # this and running the suite again.
+    assert "test_lsp_scenarios.py::test_fine" not in reran
+    # Parametrized ids go straight into pytest's argv, so the brackets that a
+    # shell would treat as a glob never need quoting by whoever calls this.
+    assert "test_lsp_scenarios.py::test_hover_on_a_kind_name[remote-daemon]" in reran
+
+
+def test_rerun_forwards_the_rest_of_its_arguments_to_pytest(failed_run: Path) -> None:
+    result = conftest.run_cli(["rerun", "-x"], cwd=failed_run)
+
+    assert result.returncode != 0
+    # -x reached pytest: it stopped at the first of the five.
+    assert len(_recorded_nodeids(failed_run, 2)) == 1
+
+
+def test_rerun_can_target_an_older_run_than_the_last_one(failed_run: Path) -> None:
+    # The thing pytest's own --lf cannot do. Its cache holds only the last run
+    # in a rootdir, so the -x re-run below overwrites the list of five -- while
+    # runs-0001 still has it, and can be re-run again from there.
+    first = conftest.run_cli(["rerun", "-x"], cwd=failed_run)
+    assert first.returncode != 0
+
+    result = conftest.run_cli(["rerun", "--run", "1"], cwd=failed_run)
+
+    assert "re-running 5 failed from .pytest-agent/runs-0001" in result.stdout
+    assert len(_recorded_nodeids(failed_run, 3)) == 5
+
+
+def test_rerun_of_a_module_that_failed_to_import_gives_pytest_a_path_it_accepts(
+    pytester: pytest.Pytester,
+) -> None:
+    # A collect error's nodeid is a file path, not a `::` id, and it goes back
+    # to pytest as a positional argument like any other. Worth pinning: a bad
+    # import is the most ordinary broken state there is, and a rerun that
+    # choked on it would fail exactly when it was most wanted.
+    pytester.makepyfile(
+        test_broken="""
+        import nonexistent_module_xyz
+
+
+        def test_a():
+            assert True
+        """,
+    )
+    run = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent", "-q")
+    assert run.ret != pytest.ExitCode.OK
+
+    result = conftest.run_cli(["rerun"], cwd=pytester.path)
+
+    assert "re-running 1 failed" in result.stdout
+    assert result.returncode != 0, "the module still doesn't import, so the re-run must fail too"
+    assert _recorded_nodeids(pytester.path, 2) == {"test_broken.py"}
+
+
+def test_rerun_with_nothing_to_do_does_not_quietly_run_the_whole_suite(pytester: pytest.Pytester) -> None:
+    # With no nodeids to pass, falling through to pytest would run everything
+    # -- turning "re-run my failures" into a full suite run of a suite that
+    # had none, which is exactly the surprise an agent cannot afford.
+    pytester.makepyfile(
+        test_all_fine="""
+        def test_one():
+            assert True
+
+
+        def test_two():
+            assert True
+        """,
+    )
+    run = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent", "-q")
+    assert run.ret == pytest.ExitCode.OK
+
+    result = conftest.run_cli(["rerun"], cwd=pytester.path)
+
+    assert result.returncode == 0, result.stderr
+    assert "nothing to re-run" in result.stdout
+    assert not (pytester.path / ".pytest-agent" / "runs-0002").exists()
 
 
 def test_queries_run_from_a_subdirectory_and_print_paths_that_work_there(failed_run: Path) -> None:
