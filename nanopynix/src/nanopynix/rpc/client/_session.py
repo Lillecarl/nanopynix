@@ -868,6 +868,7 @@ class EvalSession:
         "_owner_session",
         "_proxy",
         "_releases",
+        "_repl_begun",
         "_rpc_timeout",
         "_session_id",
         "_store",
@@ -898,6 +899,7 @@ class EvalSession:
         self._timeout = timeout
         self._rpc_timeout = rpc_timeout
         self._line_editors = tuple(line_editors)
+        self._repl_begun = False
         self._eval_settings = eval_settings
         self._fetch_settings = fetch_settings
         self._active: list[bool] = [False]
@@ -1181,12 +1183,31 @@ class ReplSession(EvalSession):
         return self
 
     async def open(self) -> None:
+        """Open the evaluator, then begin its persistent REPL scope.
+
+        Idempotent, because :meth:`EvalSession.open` is. The worker's
+        ``begin_repl`` raises on a second call rather than no-opping, so
+        without the flag a harmless double ``open()`` would surface an opaque
+        "REPL scope is already active" error from the bindings.
+        """
         await super().open()
+        if self._repl_begun:
+            return
         try:
             await self._ensure_proxy().begin_repl(BeginReplRequest())
         except BaseException:
             await self.close()
             raise
+        self._repl_begun = True
+
+    async def close(self) -> None:
+        """Close the evaluator; a later :meth:`open` begins a fresh REPL scope.
+
+        The REPL env belongs to the worker's ``EvalState``, so closing discards
+        it and reopening must call ``begin_repl`` again.
+        """
+        self._repl_begun = False
+        await super().close()
 
     async def line(self, text: str, path: str = "<string>", *, timeout: float | None = None) -> ValueProxy | None:
         """Process one Nix REPL line.

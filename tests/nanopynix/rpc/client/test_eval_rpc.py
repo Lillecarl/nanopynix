@@ -186,6 +186,23 @@ async def test_repl_session_persists_bindings(rpc_session: RpcSessionFactory, tm
         assert await (await repl.file(str(nix_file))).as_int() == 42
 
 
+async def test_repl_session_open_is_idempotent(rpc_session: RpcSessionFactory):
+    """A second open() must no-op, as it does on the EvalSession it inherits from.
+
+    The worker's ``begin_repl`` raises rather than no-opping, so a ReplSession
+    that forwards to it unconditionally turns a harmless double-open into an
+    opaque "REPL scope is already active" error from the bindings.
+    """
+    async with rpc_session() as session, session.store() as store:
+        async with session.repl(store) as repl:
+            await repl.open()
+            assert await (await repl.string("1 + 1")).as_int() == 2
+        # Reopening after close must begin a fresh scope rather than trip the
+        # already-active guard: the REPL env died with the EvalState.
+        async with session.repl(store) as repl:
+            assert await repl.line("reopened = 1") is None
+
+
 async def test_repl_session_scope_names_include_bindings_and_base_scope(rpc_session: RpcSessionFactory):
     """Completion can discover both REPL bindings and Nix's base identifiers."""
     async with (

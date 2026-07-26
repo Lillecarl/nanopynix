@@ -320,11 +320,28 @@ class Session:
             fetch_settings=fetch_settings,
         )
 
-    def repl(self, store: Store) -> ReplSession:
-        """Create this session's one permitted persistent Nix REPL.
+    def repl(
+        self,
+        store: Store,
+        *,
+        eval_settings: NixEvalSettings | None = None,
+        fetch_settings: NixFetchSettings | None = None,
+    ) -> ReplSession:
+        """Create a persistent Nix REPL scope over ``store``.
 
         Bindings entered through :meth:`ReplSession.line` remain available
         until the returned context manager exits.
+
+        Any number may be open at once, as with :meth:`eval` -- each owns its
+        own ``EvalState`` in the worker, and Nix allows one REPL scope per
+        ``EvalState``. (This previously claimed to be "this session's one
+        permitted" REPL; nothing enforced that, and
+        ``test_session_allows_concurrent_eval_states`` opens a second.)
+
+        A ``ReplSession`` is an ``EvalSession``, so it takes the same
+        construction-time settings :meth:`eval` does -- previously it took
+        none, which left a REPL's evaluator the one evaluator on this engine
+        that could not be configured.
         """
         if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID  # noqa: SLF001
             raise ValueError("Store belongs to a different session")
@@ -336,6 +353,8 @@ class Session:
             rpc_timeout=self._manager.rpc_timeout,
             line_editors=self.runtime_settings.line_editors,
             store=store,
+            eval_settings=eval_settings,
+            fetch_settings=fetch_settings,
         )
 
     def claim_eval(self, eval_session: EvalSession) -> None:

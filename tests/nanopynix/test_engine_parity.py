@@ -55,6 +55,12 @@ PAIRS: list[tuple[str, type, type]] = [
     ("LockedFlake", inproc.LockedFlake, rpc_private.LockedFlakeHandle),
 ]
 
+# Pairs whose classes subclass another pair's classes on *both* engines, mapped
+# to that base pair. See differences_for's `derived` argument for why they are
+# treated differently. test_derived_pairs_really_subclass_their_base keeps this
+# honest -- the filter is only sound while the subclass relationship holds.
+DERIVED_PAIRS: dict[str, str] = {"ReplSession": "EvalSession"}
+
 
 @dataclass(frozen=True)
 class Difference:
@@ -105,7 +111,18 @@ def _compare_member(pair: str, name: str, left: Any, right: Any) -> list[Differe
     return found
 
 
-def differences_for(pair: str, inproc_cls: type, rpc_cls: type) -> list[Difference]:
+def differences_for(pair: str, inproc_cls: type, rpc_cls: type, *, derived: bool = False) -> list[Difference]:
+    """Report every way the two engines' versions of one class disagree.
+
+    ``derived`` marks a pair whose two classes each subclass the two classes of
+    another pair in :data:`PAIRS` -- today only ``ReplSession`` over
+    ``EvalSession``. For those, differences in members neither subclass defines
+    itself are dropped, because they are the base pair's differences seen
+    through inheritance and are already reported there. Reporting them twice
+    would make the ledger count one piece of work as two. An override always
+    appears in its own class body, so a genuine subclass-level divergence is
+    never masked.
+    """
     left, right = _public_members(inproc_cls), _public_members(rpc_cls)
     found: list[Difference] = [
         Difference(pair, name, "inproc-only", "present on inproc, absent on rpc")
@@ -117,11 +134,18 @@ def differences_for(pair: str, inproc_cls: type, rpc_cls: type) -> list[Differen
     )
     for name in sorted(set(left) & set(right)):
         found.extend(_compare_member(pair, name, left[name], right[name]))
+    if derived:
+        declared_here = set(vars(inproc_cls)) | set(vars(rpc_cls))
+        found = [difference for difference in found if difference.member in declared_here]
     return found
 
 
 def observed_differences() -> list[Difference]:
-    return [difference for pair, left, right in PAIRS for difference in differences_for(pair, left, right)]
+    return [
+        difference
+        for pair, left, right in PAIRS
+        for difference in differences_for(pair, left, right, derived=pair in DERIVED_PAIRS)
+    ]
 
 
 # Every known difference, with why it exists.
@@ -137,7 +161,6 @@ LEDGER: dict[str, str] = {
     "Session.capture_logs:rpc-only": "DEFECT: log capture is engine-independent. inproc callers have no equivalent.",
     "Session.claim_eval:rpc-only": "TRANSPORT: leases a worker-side evaluator slot. Nothing to lease in-process.",
     "Session.release_eval:rpc-only": "TRANSPORT: the release half of claim_eval.",
-    "Session.repl:rpc-only": "DEFECT: inproc puts repl() on EvalSession instead -- see EvalSession.repl below. One of the two placements is wrong.",
     "Session.close:params": "DEFECT: inproc takes wait/timeout/force, rpc takes nothing. Shutdown is exactly where rpc needs those knobs most.",
     "Session.eval:params": "DEFECT: inproc accepts a separate build_store, rpc cannot. Evaluating against one store while building in another is not a transport concern.",
     # ── Store ──────────────────────────────────────────────────────
@@ -151,7 +174,6 @@ LEDGER: dict[str, str] = {
     # ── EvalSession ────────────────────────────────────────────────
     "EvalSession.run:inproc-only": "TRANSPORT: dispatches onto the evaluator's dedicated thread.",
     "EvalSession.has_pending_work:inproc-only": "TRANSPORT: introspects that same thread's queue.",
-    "EvalSession.repl:inproc-only": "DEFECT: the mirror of Session.repl above -- the two engines disagree on which object owns repl().",
     "EvalSession.get_flake:rpc-only": "DEFECT: resolving a flake ref without evaluating it is pure libexpr.",
     "EvalSession.eval_locked_flake:rpc-only": "DEFECT: inproc has lock_flake but no way to evaluate the result by handle.",
     "EvalSession.release_locked_flake:rpc-only": "TRANSPORT: frees a worker-side handle; inproc's LockedFlake is a local object.",
@@ -159,27 +181,29 @@ LEDGER: dict[str, str] = {
     "EvalSession.get_verbosity:rpc-only": "DEFECT: inproc exposes verbosity on Session only. Same setting, two homes.",
     "EvalSession.set_verbosity:rpc-only": "DEFECT: as get_verbosity.",
     # ── ReplSession ────────────────────────────────────────────────
-    # inproc's ReplSession is a narrow line-oriented object; rpc's also carries
-    # the whole EvalSession surface. Neither shape is forced by transport.
-    **{
-        f"ReplSession.{name}:rpc-only": "DEFECT: rpc's ReplSession re-exposes the EvalSession surface; inproc's does not. The two disagree on what a repl session *is*."
-        for name in (
-            "close",
-            "configure",
-            "eval_flake",
-            "eval_locked_flake",
-            "file",
-            "get_flake",
-            "get_verbosity",
-            "line_editors",
-            "lock_flake",
-            "open",
-            "release_locked_flake",
-            "set_verbosity",
-            "string",
-            "write_lock_file",
-        )
-    },
+    # Fourteen entries used to live here. inproc's ReplSession was a narrow
+    # line-oriented wrapper holding an EvalSession; rpc's subclassed one. The
+    # ledger recorded the disagreement without resolving it, because the
+    # question underneath was a definition, not a bug: what *is* a repl
+    # session?
+    #
+    # It is an interactive evaluator. Entering `x = 1` is only useful if the
+    # same object can then evaluate `x + 1`, so the repl surface and the eval
+    # surface cannot be separated -- and rpc's own docstring had said exactly
+    # that, promising bindings would stay visible to later string and file
+    # calls, while inproc's shape made it unexpressible. inproc's ReplSession now
+    # subclasses EvalSession too, which is also what the only real consumer
+    # needs: pynix's repl makes more calls to inherited EvalSession methods
+    # than to repl-specific ones.
+    #
+    # Thirteen of the fourteen were the inherited EvalSession surface and are
+    # simply gone. The fourteenth, `line_editors`, was pure client config with
+    # no transport dimension; inproc takes it as a `repl()` argument.
+    #
+    # ReplSession now contributes no entries at all: its own surface matches,
+    # and what it inherits is counted once against EvalSession (see
+    # DERIVED_PAIRS).
+    "Session.repl:params": "DEFECT: inproc accepts build_store and line_editors, rpc neither. build_store is the same root cause as Session.eval:params; line_editors is per-call on inproc but read from runtime_settings on rpc. Settings themselves now match.",
     # ── Value ──────────────────────────────────────────────────────
     # Twelve entries used to live here: the `as_*` strict family (inproc-only)
     # and a `coerce_*` family (rpc-only). Both are gone, by opposite routes.
@@ -247,6 +271,22 @@ class _Drifted:
 
 def _keys(pair: str = "Synthetic") -> set[str]:
     return {difference.key for difference in differences_for(pair, _Reference, _Drifted)}
+
+
+def test_derived_pairs_really_subclass_their_base() -> None:
+    """The inherited-difference filter is only sound while the subclassing holds.
+
+    If either engine stopped subclassing, ``differences_for`` would go on
+    dropping real divergences as "already reported on the base pair" when
+    nothing is inherited at all -- silently, and in the direction that hides
+    drift rather than inventing it.
+    """
+    by_name = {name: (inproc_cls, rpc_cls) for name, inproc_cls, rpc_cls in PAIRS}
+    for derived_name, base_name in DERIVED_PAIRS.items():
+        derived_inproc, derived_rpc = by_name[derived_name]
+        base_inproc, base_rpc = by_name[base_name]
+        assert issubclass(derived_inproc, base_inproc), f"inproc {derived_name} no longer subclasses {base_name}"
+        assert issubclass(derived_rpc, base_rpc), f"rpc {derived_name} no longer subclasses {base_name}"
 
 
 def test_harness_detects_a_member_present_on_only_one_side() -> None:
