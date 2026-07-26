@@ -28,9 +28,9 @@ if TYPE_CHECKING:
         PathInfo,
         StorePath,
     )
+    from nanopynix.settings import NixEvalSettings, NixFetchSettings
     from nanopynix.verbosity import LogLevelInput
 
-ValueT = TypeVar("ValueT", bound="AsyncValue")
 VerbosityT_co = TypeVar("VerbosityT_co", covariant=True)
 
 
@@ -69,6 +69,85 @@ class AsyncValue(Protocol):
 
     async def release(self) -> None:
         """Release the underlying worker-side handle. Idempotent."""
+        ...
+
+    # ── Typed extraction ───────────────────────────────────────────
+    # Each forces to weak head normal form and raises if the value is not of
+    # the requested type. `Self` rather than `AsyncValue` in the container
+    # returns is what keeps an engine's values homogeneous: indexing an
+    # inproc list yields an inproc Value, not "some AsyncValue".
+
+    async def as_int(self) -> int:
+        """Return this value as a Nix integer, or raise if it is not one."""
+        ...
+
+    async def as_float(self) -> float:
+        """Return this value as a Nix float, or raise if it is not one."""
+        ...
+
+    async def as_bool(self) -> bool:
+        """Return this value as a Nix boolean, or raise if it is not one."""
+        ...
+
+    async def as_string(self) -> str:
+        """Return this value as a Nix string, or raise if it is not one."""
+        ...
+
+    async def as_list(self) -> list[Self]:
+        """Return this value's elements, or raise if it is not a list."""
+        ...
+
+    async def as_dict(self) -> dict[str, Self]:
+        """Return this value's attributes, or raise if it is not an attrset."""
+        ...
+
+    # ── Structure ──────────────────────────────────────────────────
+
+    async def has_attr(self, name: str, /) -> bool:
+        """Return whether this attrset has the attribute ``name``."""
+        ...
+
+    async def attr_names(self) -> list[str]:
+        """Return this attrset's attribute names."""
+        ...
+
+    async def list_length(self) -> int:
+        """Return the number of elements in this list."""
+        ...
+
+    # ── Application and realisation ────────────────────────────────
+    #
+    # Three members of the shared surface are deliberately absent, because no
+    # signature would be true of both engines. All three are recorded in
+    # tests/nanopynix/test_engine_parity.py, and that ledger -- not this
+    # protocol -- is where the work to remove them is tracked:
+    #
+    #   attr, list_get  inproc awaits; rpc returns a proxy synchronously so a
+    #                   chain costs one round trip instead of one per link.
+    #                   (Value.attr:async, Value.list_get:async)
+    #   call            inproc takes exactly one `argument`, rpc takes `*args`.
+    #                   (Value.call:params)
+    #
+    # Declaring any of them would mean writing down a shape one engine does
+    # not have, which is worse than the gap: it would make the conformance
+    # test fail for a reason the reader cannot act on here.
+
+    async def apply(self, function: str | Self, /) -> Self:
+        """Apply ``function`` to this value, returning the unforced result."""
+        ...
+
+    async def auto_call(self) -> Self:
+        """Auto-call a function using its default arguments, as ``nix-build`` does."""
+        ...
+
+    async def build(self, *, build_mode: BuildMode | int | None = None) -> dict[str, str]:
+        """Realise this derivation, returning output name to store path.
+
+        The engines' ``store`` parameter is omitted rather than declared: each
+        accepts only its own ``Store``, and naming ``AsyncStore`` here would
+        demand both accept the other's. Callers who need a separate build
+        store reach for the concrete class.
+        """
         ...
 
 
@@ -291,22 +370,40 @@ class AsyncLockedFlake(Protocol):
         ...
 
 
-class AsyncEvalSession(Protocol):
-    """The common asynchronous evaluation and flake interface."""
+class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](Protocol):
+    """The common asynchronous evaluation and flake interface.
+
+    Generic in the value type so an engine's evaluator yields that engine's
+    values: ``inproc.EvalSession`` hands back ``inproc.Value``, not "some
+    ``AsyncValue``". The parameter defaults to :class:`AsyncValue`, so a
+    caller who does not care can still write a bare ``AsyncEvalSession``.
+    """
 
     async def __aenter__(self) -> Self: ...
 
     async def __aexit__(self, *args: object) -> None: ...
 
+    async def open(self) -> None:
+        """Create this session's evaluator. Called automatically by ``async with``."""
+        ...
+
     async def close(self) -> None:
         """Release all values exported from this session and free the evaluator."""
         ...
 
-    async def file(self, path: str, /) -> AsyncValue:
+    async def configure(
+        self,
+        eval_settings: NixEvalSettings | None = None,
+        fetch_settings: NixFetchSettings | None = None,
+    ) -> None:
+        """Apply live-mutable eval and fetch settings to the open evaluator."""
+        ...
+
+    async def file(self, path: str, /) -> ValueT:
         """Evaluate the Nix expression in the file at ``path``."""
         ...
 
-    async def string(self, expr: str, path: str = "<string>", /) -> AsyncValue:
+    async def string(self, expr: str, path: str = "<string>", /) -> ValueT:
         """Evaluate the Nix expression ``expr``."""
         ...
 
@@ -325,13 +422,25 @@ class AsyncEvalSession(Protocol):
         """Lock a flake, optionally updating inputs; see :meth:`nanopynix.rpc.EvalSession.lock_flake`."""
         ...
 
-    async def eval_flake(self, ref: str, /, *, write_lock_file: bool = True) -> AsyncValue:
+    async def eval_flake(self, ref: str, /, *, write_lock_file: bool = True) -> ValueT:
         """Lock and evaluate a flake in one step, returning its outputs."""
         ...
 
 
-class AsyncReplSession(Protocol[ValueT]):
-    """The shared persistent REPL-scope operation interface."""
+class AsyncReplSession[ValueT: AsyncValue = AsyncValue](AsyncEvalSession[ValueT], Protocol):
+    """An :class:`AsyncEvalSession` that keeps a persistent Nix lexical scope.
+
+    Extending rather than standing alone mirrors both engines, whose
+    ``ReplSession`` subclasses their ``EvalSession``. That is not incidental:
+    a binding entered with :meth:`line` is only useful if :meth:`string` and
+    :meth:`file` can then see it, so the repl surface and the eval surface
+    are one interface.
+    """
+
+    @property
+    def line_editors(self) -> tuple[str, ...]:
+        """Editor-name substrings that support Nix's ``+LINE`` argument."""
+        ...
 
     async def line(self, text: str, path: str = "<string>", /) -> ValueT | None:
         """Process one Nix REPL line. Bindings return ``None``; expressions return a value."""
@@ -347,10 +456,6 @@ class AsyncReplSession(Protocol[ValueT]):
 
     async def scope_names(self) -> list[str]:
         """Return the identifiers visible in this REPL's lexical scope."""
-        ...
-
-    async def reset_file_cache(self) -> None:
-        """Discard parsed file cache entries before reloading REPL sources."""
         ...
 
 
