@@ -158,7 +158,15 @@ def observed_differences() -> list[Difference]:
 LEDGER: dict[str, str] = {
     # ── Session ────────────────────────────────────────────────────
     "Session.run:inproc-only": "TRANSPORT: dispatches onto the session's Nix thread; rpc has no such thread to target.",
-    "Session.capture_logs:rpc-only": "DEFECT: log capture is engine-independent. inproc callers have no equivalent.",
+    # "Session.capture_logs:rpc-only" retired here. LogCapture was rpc's, in
+    # rpc.client.session, over a ContextVar in rpc.client._pool -- but nothing
+    # about recording log events depends on where Nix runs, and inproc already
+    # had every part: the bus, the operation ids, and the request_finalized
+    # events that tell wait() a capture is complete. The class moved down to
+    # nanopynix.logging and both engines return it. The one thing that had to
+    # be built was inproc's end of the ACTIVE_LOG_CAPTURES tagging contract,
+    # which lives in _next_operation_id -- the allocation point all four of
+    # inproc's dispatch paths share, as WorkerClient.invoke is rpc's.
     "Session.claim_eval:rpc-only": "TRANSPORT: leases a worker-side evaluator slot. Nothing to lease in-process.",
     "Session.release_eval:rpc-only": "TRANSPORT: the release half of claim_eval.",
     "Session.close:params": "DEFECT: inproc takes wait/timeout/force, rpc takes nothing. Shutdown is exactly where rpc needs those knobs most.",

@@ -75,7 +75,7 @@ from nanopynix.exceptions import (
     ValueReleasedError,
     WrongNixTypeError,
 )
-from nanopynix.logging import LogCollector
+from nanopynix.logging import LogCapture, LogCollector
 from nanopynix.models import (
     BuildResult,
     Derivation,

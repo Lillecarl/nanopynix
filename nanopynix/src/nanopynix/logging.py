@@ -13,9 +13,14 @@ import contextlib
 import enum
 import logging
 import threading
-from typing import TYPE_CHECKING, Any
+from contextvars import ContextVar
+from typing import TYPE_CHECKING, Any, Protocol
 
+import anyio
 import janus
+from nanopynix_proto.nix.common import LogEvent as LogEventProto
+
+from nanopynix.models import LogEvent
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -23,6 +28,19 @@ if TYPE_CHECKING:
     type LogCallback = Callable[..., None]
 
 _logger = logging.getLogger(__name__)
+
+ACTIVE_LOG_CAPTURES: ContextVar[tuple[LogCapture, ...]] = ContextVar("nanopynix_active_log_captures", default=())
+"""Task-local stack of :class:`LogCapture` instances currently recording.
+
+The dispatch contract both engines implement: whatever allocates an operation
+id tags it into every capture active in the calling task, so the capture knows
+which operations to wait for without the caller threading ids around. rpc does
+it in ``WorkerClient.invoke()``; inproc does it where it allocates the id.
+
+Task-local, so two concurrent captures in sibling tasks each see only their own
+work -- which is why this is a ``ContextVar`` and not a field on either
+session.
+"""
 
 
 class LogStreamEventKind(enum.StrEnum):
@@ -191,3 +209,109 @@ class CallbackBus:
                 callback(event)
             except Exception:
                 _logger.exception("log bus subscriber failed")
+
+
+class LogEventBus(Protocol):
+    """What a :class:`LogCapture` needs from whatever produces log events.
+
+    Just ``subscribe``. inproc's ``Session`` and rpc's ``WorkerClient`` both
+    satisfy it, which is the whole reason ``LogCapture`` can be one class: the
+    events differ only in how they got here, and by the time they reach the bus
+    they are the same :class:`~nanopynix.models.LogEvent` type either way --
+    inproc emits the model directly, rpc's arrive as the proto it subclasses.
+    """
+
+    def subscribe(self, callback: LogCallback) -> BusSubscription: ...
+
+
+class LogCapture:
+    """Async context manager that records log events while active.
+
+    Engine-independent: log capture is about nanopynix's own event bus, not
+    about where Nix is running, so both engines expose the same object from
+    ``session.capture_logs()``. It used to live in ``rpc.client.session`` and
+    was rpc-only, which the signature ledger carried as
+    "Session.capture_logs:rpc-only" -- an inproc caller had to subscribe to
+    the bus and reimplement the filtering and the request bookkeeping by hand.
+
+    Two things are recorded. :attr:`events` accumulates the Nix log events
+    themselves. Separately, every operation dispatched inside the block is
+    tagged via :data:`ACTIVE_LOG_CAPTURES`, so :meth:`wait` can block until
+    each of them has finalized -- exiting the block does that automatically,
+    which is what makes the captured list complete rather than merely
+    whatever had arrived by then.
+    """
+
+    def __init__(self, bus: LogEventBus) -> None:
+        self._bus = bus
+        self._sub: BusSubscription | None = None
+        self.events: list[LogEvent] = []
+        self._request_ids: set[int] = set()
+        self._finalized: set[int] = set()
+        self._waiters: dict[int, anyio.Event] = {}
+        self._active = False
+        self._token: object | None = None
+
+    @property
+    def request_ids(self) -> frozenset[int]:
+        """Snapshot of operation IDs started inside this capture's scope."""
+        return frozenset(self._request_ids)
+
+    def _register_request(self, request_id: int) -> None:
+        """Tag `request_id` as started inside this capture's scope.
+
+        Called only through :data:`ACTIVE_LOG_CAPTURES` by whichever engine is
+        dispatching -- an internal contract, not part of ``LogCapture``'s
+        public API (unlike ``events``/``request_ids``/``wait``/
+        ``wait_for_request``, which callers use directly).
+        """
+        if self._active:
+            self._request_ids.add(request_id)
+            self._waiters.setdefault(request_id, anyio.Event())
+
+    async def wait_for_request(self, request_id: int) -> None:
+        if request_id not in self._request_ids:
+            raise ValueError(f"request {request_id} is not registered with this log capture")
+        if request_id in self._finalized:
+            return
+        await self._waiters[request_id].wait()
+
+    async def wait(self) -> None:
+        request_ids = tuple(self._request_ids)
+        async with anyio.create_task_group() as tg:
+            for request_id in request_ids:
+                tg.start_soon(self.wait_for_request, request_id)
+
+    def _append(self, raw: object) -> None:
+        if not isinstance(raw, LogEventProto):
+            return
+        # inproc puts LogEvent (which *is* a LogEventProto subclass) on the bus
+        # and rpc puts the bare proto; from_proto normalises both to the model
+        # whose is_nix_log/is_request_finalized accessors this depends on.
+        event = LogEvent.from_proto(raw)
+        if event.is_nix_log:
+            self.events.append(event)
+        elif event.is_request_finalized:
+            self._finalized.add(event.request_id)
+            waiter = self._waiters.get(event.request_id)
+            if waiter is not None:
+                waiter.set()
+
+    async def __aenter__(self) -> LogCapture:
+        self._sub = self._bus.subscribe(self._append)
+        self._active = True
+        self._token = ACTIVE_LOG_CAPTURES.set((*ACTIVE_LOG_CAPTURES.get(), self))
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        self._active = False
+        if self._token is not None:
+            ACTIVE_LOG_CAPTURES.reset(self._token)  # type: ignore[arg-type] -- ContextVar token is opaque
+            self._token = None
+        try:
+            with anyio.CancelScope(shield=True):
+                await self.wait()
+        finally:
+            if self._sub is not None:
+                self._sub.unsubscribe()
+                self._sub = None

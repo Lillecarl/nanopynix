@@ -27,8 +27,9 @@ from nanopynix_proto.nix.common import LogLevel
 from nanopynix._core._primops import to_primop_specs
 from nanopynix._process_title import set_manager_title
 from nanopynix._wire import DEFAULT_STORE_URI
+from nanopynix.logging import LogCapture
 from nanopynix.models import LogEvent
-from nanopynix.rpc.client._pool import ACTIVE_LOG_CAPTURES, WorkerClient
+from nanopynix.rpc.client._pool import WorkerClient
 from nanopynix.rpc.client._session import EvalSession, ReplSession
 from nanopynix.rpc.client.store import Store, StoreHandle
 from nanopynix.settings import (
@@ -45,92 +46,9 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping, Sequence
     from os import PathLike
 
-    from nanopynix.logging import BusSubscription
     from nanopynix.models import PrimOpSpec
 
 logger = logging.getLogger(__name__)
-
-
-def _raw_log_event(raw: LogEventProto) -> LogEvent:
-    """Convert a proto LogEvent to a pydantic LogEvent model."""
-    return LogEvent.from_proto(raw)
-
-
-class LogCapture:
-    """Async context manager that records log events while active."""
-
-    def __init__(self, manager: WorkerClient) -> None:
-        self._manager = manager
-        self._sub: BusSubscription | None = None
-        self.events: list[LogEvent] = []
-        self._request_ids: set[int] = set()
-        self._finalized: set[int] = set()
-        self._waiters: dict[int, anyio.Event] = {}
-        self._active = False
-        self._token: object | None = None
-
-    @property
-    def request_ids(self) -> frozenset[int]:
-        """Snapshot of operation IDs started inside this capture's scope."""
-        return frozenset(self._request_ids)
-
-    def _register_request(self, request_id: int) -> None:
-        """Tag `request_id` as started inside this capture's scope.
-
-        Called only by ``rpc.client._pool.WorkerClient.invoke()`` via
-        ``ACTIVE_LOG_CAPTURES`` -- an internal dispatch hook, not part of
-        ``LogCapture``'s public API (unlike ``events``/``request_ids``/
-        ``wait``/``wait_for_request``, which callers use directly), even
-        though ``LogCapture`` itself is re-exported from ``nanopynix.rpc``.
-        """
-        if self._active:
-            self._request_ids.add(request_id)
-            self._waiters.setdefault(request_id, anyio.Event())
-
-    async def wait_for_request(self, request_id: int) -> None:
-        if request_id not in self._request_ids:
-            raise ValueError(f"request {request_id} is not registered with this log capture")
-        if request_id in self._finalized:
-            return
-        await self._waiters[request_id].wait()
-
-    async def wait(self) -> None:
-        request_ids = tuple(self._request_ids)
-        async with anyio.create_task_group() as tg:
-            for request_id in request_ids:
-                tg.start_soon(self.wait_for_request, request_id)
-
-    async def __aenter__(self) -> LogCapture:
-        def _append(raw: object) -> None:
-            if raw is None:
-                return
-            if isinstance(raw, LogEventProto):
-                event = _raw_log_event(raw)
-                if event.is_nix_log:
-                    self.events.append(event)
-                elif event.is_request_finalized:
-                    self._finalized.add(event.request_id)
-                    waiter = self._waiters.get(event.request_id)
-                    if waiter is not None:
-                        waiter.set()
-
-        self._sub = self._manager.subscribe(_append)
-        self._active = True
-        self._token = ACTIVE_LOG_CAPTURES.set((*ACTIVE_LOG_CAPTURES.get(), self))
-        return self
-
-    async def __aexit__(self, *args: object) -> None:
-        self._active = False
-        if self._token is not None:
-            ACTIVE_LOG_CAPTURES.reset(self._token)  # type: ignore[arg-type] -- ContextVar token is opaque
-            self._token = None
-        try:
-            with anyio.CancelScope(shield=True):
-                await self.wait()
-        finally:
-            if self._sub is not None:
-                self._sub.unsubscribe()
-                self._sub = None
 
 
 class Session:
@@ -250,7 +168,7 @@ class Session:
             if not isinstance(raw, LogEventProto):
                 logger.warning("nanopynix: ignored unexpected log event %r", raw)
                 continue
-            yield _raw_log_event(raw)
+            yield LogEvent.from_proto(raw)
 
     def capture_logs(self) -> LogCapture:
         """Record typed log events during an async context block."""

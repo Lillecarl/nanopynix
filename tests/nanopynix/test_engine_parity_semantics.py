@@ -581,3 +581,48 @@ async def test_both_engines_name_a_released_locked_flake_the_same_way(
     ref = f"path:{tmp_path}"
     assert await _use_a_released_locked_flake(inproc_session, ref) == "LockedFlakeReleasedError"
     assert await _use_a_released_locked_flake(rpc_session, ref) == "LockedFlakeReleasedError"
+
+
+# ── Log capture parity ───────────────────────────────────────────────
+
+
+async def _capture_a_trace(factory: Any, expression: str) -> tuple[list[str], bool]:
+    """Capture log events around an evaluation, on either engine.
+
+    Returns the recorded Nix log actions and whether every dispatched
+    operation was tagged. The second half is the part that is easy to get
+    wrong and invisible from the first: a capture that subscribes to the bus
+    but never learns which operations it started exits immediately, before the
+    work it was capturing has finalized, and still hands back a
+    plausible-looking list.
+    """
+    async with factory() as session, session.store() as store, session.eval(store) as evaluator:
+        async with session.capture_logs() as logs:
+            await (await evaluator.string(expression)).to_python()
+        return ([event.action for event in logs.events], bool(logs.request_ids))
+
+
+async def test_both_engines_capture_logs_the_same_way(
+    inproc_session: InprocSessionFactory,
+    rpc_session: RpcSessionFactory,
+) -> None:
+    """``capture_logs()`` must exist and record identically on both engines.
+
+    It was rpc-only -- LEDGER's "Session.capture_logs:rpc-only" -- with
+    ``LogCapture`` living in ``rpc.client.session`` over a ``ContextVar`` in
+    ``rpc.client._pool``, though nothing about recording log events depends on
+    where Nix runs. inproc already had the bus, the operation ids and the
+    ``request_finalized`` events; what it lacked was the class and its half of
+    the tagging contract.
+
+    ``builtins.trace`` because it emits exactly one event, at the default
+    verbosity, for a pure evaluation -- no store or build activity, so nothing
+    in the count depends on what is already in the store.
+
+    Asserting ``request_ids`` is non-empty rather than only that the block ran
+    is deliberate: without inproc's tagging hook the capture still yields and
+    still collects the event, and only this half notices.
+    """
+    expression = 'builtins.trace "nanopynix parity trace" 1'
+    assert await _capture_a_trace(inproc_session, expression) == (["msg"], True)
+    assert await _capture_a_trace(rpc_session, expression) == (["msg"], True)
