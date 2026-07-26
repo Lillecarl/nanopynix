@@ -57,20 +57,6 @@ class LocalStore:
             raise RuntimeError("local store has been closed")
         return self.raw
 
-    def __getattr__(self, name: str) -> Any:
-        """Forward anything not defined here to the binding, as ``Any``.
-
-        Transitional. Store methods are being given typed definitions on this
-        class, mirroring :class:`LocalValue`; until every one of them has one,
-        the RPC worker's store service still reflects over the binding's
-        ``store_*`` proto entrypoints by name (``_worker_store.py``'s
-        ``_nanobind_rpc_call``) for the remainder. The cost is that a typo in
-        an attribute name reaches this instead of the type checker, which is
-        why it is going away -- prefer a typed method, or :meth:`require_raw`,
-        wherever the name is known statically.
-        """
-        return getattr(self.require_raw(), name)
-
     def _store_path(self, path: str | nanopynix_store.StorePath) -> nanopynix_store.StorePath:
         """Normalise a caller-supplied path to a ``nix::StorePath``.
 
