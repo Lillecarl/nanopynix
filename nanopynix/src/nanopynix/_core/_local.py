@@ -13,9 +13,28 @@ from typing import TYPE_CHECKING, Any, cast
 from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import flake as nanopynix_flake
 from nanopynix_bindings import store as nanopynix_store
+from nanopynix_proto.nix.store import GcAction, StoreDirs
 
 from nanopynix._core._nix_core import NixCore
-from nanopynix.models import BuildResult, MissingInfo
+from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
+from nanopynix.models import (
+    BuildResult,
+    Derivation,
+    DerivationOutput,
+    DerivationOutputs,
+    GcResult,
+    GcRoot,
+    MissingInfo,
+    PathInfo,
+    StorePath,
+)
+
+_RAW_GC_ACTIONS = {
+    GcAction.RETURN_LIVE: nanopynix_store.GCAction.ReturnLive,
+    GcAction.RETURN_DEAD: nanopynix_store.GCAction.ReturnDead,
+    GcAction.DELETE_DEAD: nanopynix_store.GCAction.DeleteDead,
+    GcAction.DELETE_SPECIFIC: nanopynix_store.GCAction.DeleteSpecific,
+}
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -139,6 +158,166 @@ class LocalStore:
             check_sigs,
             substitute,
         )
+
+    # --- Identity ---------------------------------------------------------
+
+    def get_uri(self, *, with_params: bool = False) -> str:
+        return self.require_raw().get_uri(with_params=with_params)
+
+    def get_store_dir(self) -> str:
+        return self.require_raw().get_store_dir()
+
+    def get_store_dirs(self) -> StoreDirs:
+        return StoreDirs(**self.require_raw().get_store_dirs())
+
+    def parse_store_path(self, path: str) -> StorePath:
+        return StorePath(self.print_store_path(self._store_path(path)))
+
+    def follow_links_to_store_path(self, path: str) -> StorePath:
+        return StorePath(self.print_store_path(self.require_raw().follow_links_to_store_path(path)))
+
+    def query_path_from_hash_part(self, hash_part: str) -> StorePath | None:
+        raw = self.require_raw().query_path_from_hash_part(hash_part)
+        return None if raw is None else StorePath(self.print_store_path(raw))
+
+    # --- Queries ----------------------------------------------------------
+
+    def query_path_info(self, path: str | nanopynix_store.StorePath) -> PathInfo:
+        return PathInfo(**self.require_raw().query_path_info(self._store_path(path)))
+
+    def query_all_valid_paths(self) -> list[StorePath]:
+        return self._public_paths(self.require_raw().query_all_valid_paths())
+
+    def compute_fs_closure(
+        self,
+        path: str | nanopynix_store.StorePath,
+        *,
+        flip_direction: bool = False,
+        include_outputs: bool = False,
+        include_derivers: bool = False,
+    ) -> list[StorePath]:
+        return self._public_paths(
+            self.require_raw().compute_fs_closure(
+                self._store_path(path),
+                flip_direction,
+                include_outputs,
+                include_derivers,
+            ),
+        )
+
+    def query_derivation_outputs(self, path: str | nanopynix_store.StorePath) -> list[StorePath]:
+        return self._public_paths(self.require_raw().query_derivation_outputs(self._store_path(path)))
+
+    def query_valid_derivers(self, path: str | nanopynix_store.StorePath) -> list[StorePath]:
+        return self._public_paths(self.require_raw().query_valid_derivers(self._store_path(path)))
+
+    def query_referrers(self, path: str | nanopynix_store.StorePath) -> list[StorePath]:
+        return self._public_paths(self.require_raw().query_referrers(self._store_path(path)))
+
+    def query_substitutable_paths(
+        self, paths: Sequence[str | nanopynix_store.StorePath]
+    ) -> list[StorePath]:
+        return self._public_paths(
+            self.require_raw().query_substitutable_paths([self._store_path(path) for path in paths]),
+        )
+
+    def get_build_log(self, path: str | nanopynix_store.StorePath) -> str | None:
+        return self.require_raw().get_build_log(self._store_path(path))
+
+    def read_derivation(self, drv_path: str | nanopynix_store.StorePath) -> Derivation:
+        result = self.require_raw().read_derivation(self._store_path(drv_path))
+        # The two nested maps are built explicitly rather than left to pydantic's
+        # dict->model coercion: the coercion works, but it is invisible to the
+        # type checker, so `Derivation(**result)` would typecheck against any
+        # nested shape at all -- including a wrong one.
+        return Derivation(
+            name=result["name"],
+            system=result["system"],
+            builder=result["builder"],
+            args=result["args"],
+            env=result["env"],
+            input_srcs=result["input_srcs"],
+            input_drvs={path: DerivationOutputs(**node) for path, node in result["input_drvs"].items()},
+            outputs={name: DerivationOutput(**output) for name, output in result["outputs"].items()},
+        )
+
+    # --- Mutation ---------------------------------------------------------
+
+    def build_derivation(self, drv_path: str | nanopynix_store.StorePath, *, build_mode: int) -> BuildResult:
+        return BuildResult(**self.require_raw().build_derivation(self._store_path(drv_path), build_mode))
+
+    def ensure_path(self, path: str | nanopynix_store.StorePath) -> None:
+        self.require_raw().ensure_path(self._store_path(path))
+
+    def add_to_store(
+        self,
+        path: str,
+        *,
+        name: str | None = None,
+        method: str = DEFAULT_CA_METHOD,
+        hash_algo: str = DEFAULT_HASH_ALGO,
+    ) -> StorePath:
+        return StorePath(
+            self.print_store_path(self.require_raw().add_to_store(path, name, method, hash_algo)),
+        )
+
+    def compute_store_path(
+        self,
+        path: str,
+        *,
+        name: str | None = None,
+        method: str = DEFAULT_CA_METHOD,
+        hash_algo: str = DEFAULT_HASH_ALGO,
+    ) -> StorePath:
+        return StorePath(
+            self.print_store_path(self.require_raw().compute_store_path(path, name, method, hash_algo)),
+        )
+
+    def optimise_store(self) -> None:
+        self.require_raw().optimise_store()
+
+    def verify_store(self, *, check_contents: bool = False, repair: bool = False) -> bool:
+        return self.require_raw().verify_store(check_contents, repair)
+
+    # --- Garbage collection -----------------------------------------------
+
+    def add_temp_root(self, path: str | nanopynix_store.StorePath) -> None:
+        self.require_raw().add_temp_root(self._store_path(path))
+
+    def add_perm_root(self, path: str | nanopynix_store.StorePath, gc_root: str) -> str:
+        return self.require_raw().add_perm_root(self._store_path(path), gc_root)
+
+    def add_indirect_root(self, path: str) -> None:
+        """``path`` is a filesystem symlink, not a store path -- no normalisation."""
+        self.require_raw().add_indirect_root(path)
+
+    def find_roots(self, *, censor: bool = False) -> list[GcRoot]:
+        return [GcRoot(link=root["link"], path=root["path"]) for root in self.require_raw().find_roots(censor)]
+
+    def collect_garbage(
+        self,
+        action: GcAction,
+        *,
+        ignore_liveness: bool = False,
+        paths_to_delete: Sequence[str | nanopynix_store.StorePath] = (),
+        max_freed: int = NO_GC_LIMIT,
+    ) -> GcResult:
+        try:
+            raw_action = _RAW_GC_ACTIONS[action]
+        except KeyError as exc:
+            raise ValueError(f"unsupported garbage-collection action: {action!r}") from exc
+        result = self.require_raw().collect_garbage(
+            raw_action,
+            ignore_liveness,
+            [self._store_path(path) for path in paths_to_delete],
+            max_freed,
+        )
+        return GcResult(paths=self._public_paths(result["paths"]), bytes_freed=result["bytes_freed"])
+
+    def _public_paths(
+        self, raw_paths: Sequence[nanopynix_store.StorePath | str]
+    ) -> list[StorePath]:
+        return [StorePath(path) for path in self.print_store_paths(raw_paths)]
 
 
 class LocalEvalState:

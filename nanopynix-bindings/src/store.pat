@@ -34,13 +34,6 @@ nanopynix_bindings.store.__prefix__:
         status: str
         error_msg: str
 
-    class BuildPathsRequest(TypedDict):
-        derived_paths: list[str]
-        build_mode: int
-
-    class BuildPathsResponse(TypedDict):
-        results: list[BuildResult]
-
     class DerivationOutput(TypedDict):
         # A tagged union rendered flat: `type` names the variant and decides
         # which of the remaining keys are present. InputAddressed sets `path`,
@@ -98,6 +91,9 @@ nanopynix_bindings.store.Store.query_missing:
 nanopynix_bindings.store.Store.read_derivation:
     def read_derivation(self, drv_path: StorePath) -> Derivation: ...
 
+nanopynix_bindings.store.Store.build_derivation:
+    def build_derivation(self, drv_path: StorePath, build_mode: BuildMode | int = BuildMode.Normal) -> BuildResult: ...
+
 nanopynix_bindings.store.Store.collect_garbage:
     def collect_garbage(self, action: GCAction, ignore_liveness: bool = False, paths_to_delete: Sequence[StorePath] = [], max_freed: int = 18446744073709551615) -> GCResults: ...
 
@@ -107,9 +103,6 @@ nanopynix_bindings.store.Store.find_roots:
 # Derived paths, as query_missing above.
 nanopynix_bindings.store.Store.build_paths_with_results:
     def build_paths_with_results(self, paths: Sequence[str | StorePath], build_mode: BuildMode | int = BuildMode.Normal, eval_store: Store | None = None) -> list[BuildResult]: ...
-
-nanopynix_bindings.store.Store.store_build_paths_with_results:
-    def store_build_paths_with_results(self, request: BuildPathsRequest, eval_store: Store | None = None) -> BuildPathsResponse: ...
 
 # The queries below all funnel through store_paths_to_string_list(), which
 # prints each StorePath -- so they hand back plain strings, not StorePath

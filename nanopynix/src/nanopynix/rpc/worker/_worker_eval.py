@@ -81,9 +81,7 @@ from nanopynix._core._extract import locked_flake as _locked_flake
 from nanopynix._core._local import LocalLockedFlake, LocalValue
 from nanopynix._wire import HandleKind
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
-from nanopynix.rpc.worker._service_adapter import (
-    _proto_shape,  # type: ignore[reportPrivateUsage] -- internal module registry pattern
-)
+from nanopynix.rpc.worker._proto_shape import proto_shape
 from nanopynix.rpc.worker._worker_nix import NIX_EVALUATOR_STACK_SIZE, NixThreadExecutor
 
 _NIX_TYPE_MAP: dict[str, common_pb.NixType] = {
@@ -473,14 +471,14 @@ class EvalServiceHandler(EvalServiceBase):
             eval_store,
         )
         if self._state.collector is not None:
-            shaped = _proto_shape(raw)
+            shaped = proto_shape(raw)
             self._state.log(
                 "msg",
                 int(common_pb.LogLevel.DEBUG),
                 f"eval build finish drv_path={shaped.get('drv_path', '')} outputs={sorted(shaped.get('outputs', {}))}",
             )
             return BuildResponse.from_dict(shaped)
-        return BuildResponse.from_dict(_proto_shape(raw))
+        return BuildResponse.from_dict(proto_shape(raw))
 
     # ── flake methods ─────────────────────────────────────────────
 

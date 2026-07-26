@@ -84,10 +84,26 @@ async def test_empty_path_raises_instead_of_aborting(
 # The three inputs that already raised before the guard, with the exact type
 # each produced. Pinning the type is the point: if the empty-string check
 # altered any of them, the fix traded one inconsistency for another.
+#
+# "x" and "garbage" listed the generic NixError until LocalStore took over
+# path normalisation. inproc used to call the direct binding, which does not
+# absolutize, so a bare name reached parseStorePath as-is; the rpc engine went
+# through the dict funnel, which does absolutize, and got BadStorePathError.
+# Measured on both engines before the change:
+#
+#     rpc     parse_store_path("x")       -> BadStorePathError
+#     rpc     parse_store_path("garbage") -> BadStorePathError
+#     inproc  parse_store_path("x")       -> NixError
+#     inproc  parse_store_path("garbage") -> NixError
+#
+# inproc now shares one normalisation with rpc and reports the same, more
+# specific type. The entries below are updated to the converged behaviour, not
+# relaxed to accommodate a regression -- "/etc/passwd", which was already
+# absolute and so already agreed, is unchanged.
 UNCHANGED_MALFORMED_PATHS: list[tuple[str, type[Exception]]] = [
-    ("x", NixError),
+    ("x", BadStorePathError),
     ("/etc/passwd", BadStorePathError),
-    ("garbage", NixError),
+    ("garbage", BadStorePathError),
 ]
 
 
@@ -104,24 +120,27 @@ async def test_other_malformed_paths_keep_their_original_error_type(
         assert type(caught.value) is expected, f"{path!r} now raises {type(caught.value).__name__}"
 
 
-async def test_the_dict_api_rejects_an_empty_path_too(
+async def test_the_guard_lives_in_cpp_not_in_the_python_wrapper(
     inproc_session: InprocSessionFactory,
 ) -> None:
-    """The proto-shaped entry point shares the funnel, so it shares the guard.
+    """A raw-binding caller must hit the guard too, without any Python help.
 
-    ``inproc`` reaches C++ through the direct signatures and the rpc worker
-    through the dict ones. Both call ``parseStorePath``, so a guard on only one
-    of them would leave the crash reachable from the other engine.
+    This used to go through ``store_is_valid_path({"path": ""})`` -- the
+    proto-dict entry point that both engines shared. That layer is gone: both
+    engines now normalise paths in ``LocalStore._store_path``, which forwards
+    ``""`` to ``parse_store_path`` precisely so the rejection stays in C++
+    rather than moving into Python where a raw caller would bypass it.
 
-    Going through the raw object deliberately skips ``_run_with_log_context``,
-    inproc's translation chokepoint, so what surfaces here is the untranslated
-    binding error -- which is the point: the guard is in C++, not in the Python
-    wrapper that usually renames its exceptions.
+    So the target moves to the direct binding, and the guarantee is unchanged
+    and arguably stronger: reaching past every Python layer still raises
+    instead of aborting the process. Going through the raw object deliberately
+    skips ``_run_with_log_context``, inproc's translation chokepoint, so what
+    surfaces is the untranslated binding error -- which is the point.
     """
     async with inproc_session() as session, session.store() as store:
         raw = cast("Any", store._require_raw())
         with pytest.raises(BadStorePath, match="must not be empty"):
-            raw.store_is_valid_path({"path": ""})
+            raw.parse_store_path("")
 
 
 def test_the_call_table_covers_every_path_taking_method() -> None:

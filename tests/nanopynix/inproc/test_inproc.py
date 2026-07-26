@@ -18,7 +18,6 @@ from nanopynix_proto.nix.store import GcAction
 
 import nanopynix
 from nanopynix import Derivation, GcResult, MissingInfo, NixType, StorePath, inproc, yaml_primops
-from nanopynix.inproc import _impl as inproc_impl
 from nanopynix.settings import NixEvalSettings, normalize_nix_path
 from tests.support.git import init_flake_repo
 from tests.support.nix_markers import NIX_GC_ROOTS_BUG
@@ -930,9 +929,17 @@ async def test_inproc_eval_open_and_close_are_idempotent(inproc_session: InprocS
         await eval.close()
 
 
-def test_raw_gc_action_rejects_unsupported_action() -> None:
-    with pytest.raises(ValueError, match="unsupported garbage-collection action"):
-        inproc_impl._raw_gc_action(object())  # type: ignore[arg-type, reportPrivateUsage] -- exercising the unmapped-action guard
+async def test_collect_garbage_rejects_an_unsupported_action(inproc_session: InprocSessionFactory) -> None:
+    """The unmapped-GcAction guard moved from inproc into the shared LocalStore.
+
+    It used to live in ``inproc._impl._raw_gc_action`` and was exercised
+    directly. Now that both engines share ``LocalStore.collect_garbage``, the
+    guard sits there and is worth testing through the public call instead --
+    which also proves it is still reachable from a caller.
+    """
+    async with inproc_session() as session, session.store() as store:
+        with pytest.raises(ValueError, match="unsupported garbage-collection action"):
+            await store.collect_garbage(object())  # type: ignore[arg-type] -- exercising the unmapped-action guard
 
 
 # ── Pure construction-time and static-method branches ────────────────────

@@ -23,7 +23,6 @@ from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import store as nanopynix_store
 from nanopynix_bindings import util as nanopynix_util
 from nanopynix_proto.nix.common import RequestFinalized
-from nanopynix_proto.nix.store import GcAction, StoreDirs
 
 from nanopynix._core._extract import locked_flake as _locked_flake_proto
 from nanopynix._core._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
@@ -42,8 +41,6 @@ from nanopynix.logging import BusSubscription, CallbackBus, LogCollector, LogStr
 from nanopynix.models import (
     BuildResult,
     Derivation,
-    DerivationOutput,
-    DerivationOutputs,
     GcResult,
     GcRoot,
     LockedInput,
@@ -69,6 +66,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping, Sequence
     from os import PathLike
 
+    from nanopynix_proto.nix.store import GcAction, StoreDirs
+
     from nanopynix.models import PrimOpSpec
 
 
@@ -78,21 +77,6 @@ RawGCAction = nanopynix_store.GCAction
 RawStore = nanopynix_store.Store
 RawStorePath = nanopynix_store.StorePath
 RawValue = nanopynix_expr.Value
-
-
-_RAW_GC_ACTIONS = {
-    GcAction.RETURN_LIVE: RawGCAction.ReturnLive,
-    GcAction.RETURN_DEAD: RawGCAction.ReturnDead,
-    GcAction.DELETE_DEAD: RawGCAction.DeleteDead,
-    GcAction.DELETE_SPECIFIC: RawGCAction.DeleteSpecific,
-}
-
-
-def _raw_gc_action(action: GcAction) -> nanopynix_store.GCAction:
-    try:
-        return _RAW_GC_ACTIONS[action]
-    except KeyError as exc:
-        raise ValueError(f"unsupported garbage-collection action: {action!r}") from exc
 
 
 class _InprocProcessGuard:
@@ -155,10 +139,6 @@ def _print_store_paths(
     raw_store: nanopynix_store.Store, raw_paths: Sequence[nanopynix_store.StorePath | str]
 ) -> list[str]:
     return [_print_store_path(raw_store, path) for path in raw_paths]
-
-
-def _parse_store_paths(raw_store: nanopynix_store.Store, paths: list[str]) -> list[nanopynix_store.StorePath]:
-    return [raw_store.parse_store_path(path) for path in paths]
 
 
 def _run_with_log_context[T](operation_id: int, func: Callable[..., T], args: tuple[object, ...]) -> T:
@@ -523,16 +503,17 @@ class Store:
 
     async def uri(self, *, with_params: bool = False) -> str:
         """Return this store's URI, optionally including configuration parameters."""
-        return await self._session.run(self._require_raw().get_uri, with_params)
+        return await self._session.run(
+            functools.partial(self._require_local().get_uri, with_params=with_params),
+        )
 
     async def store_dir(self) -> str:
         """Return this store's logical store directory."""
-        return await self._session.run(self._require_raw().get_store_dir)
+        return await self._session.run(self._require_local().get_store_dir)
 
     async def parse_store_path(self, path: str) -> StorePath:
         """Validate and normalise ``path`` as a Nix store path."""
-        raw_path = await self._session.run(self._require_raw().parse_store_path, path)
-        return StorePath(await self._session.run(_print_store_path, self._require_raw(), raw_path))
+        return await self._session.run(self._require_local().parse_store_path, path)
 
     async def is_valid_path(self, path: str | StorePath) -> bool:
         """Return whether ``path`` is valid in this store."""
@@ -540,14 +521,11 @@ class Store:
 
     async def query_path_info(self, path: str | StorePath) -> PathInfo:
         """Return metadata for a valid store path."""
-        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
-        raw_info = await self._session.run(self._require_raw().query_path_info, raw_path)
-        return PathInfo(**raw_info)
+        return await self._session.run(self._require_local().query_path_info, str(path))
 
     async def query_all_valid_paths(self) -> list[StorePath]:
         """Return every valid path registered in this store."""
-        paths = await self._session.run(self._require_raw().query_all_valid_paths)
-        return await self._public_store_paths(paths)
+        return await self._session.run(self._require_local().query_all_valid_paths)
 
     async def compute_fs_closure(
         self,
@@ -558,56 +536,46 @@ class Store:
         include_derivers: bool = False,
     ) -> list[StorePath]:
         """Return the filesystem closure of ``path``."""
-        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
-        paths = await self._session.run(
-            self._require_raw().compute_fs_closure,
-            raw_path,
-            flip_direction,
-            include_outputs,
-            include_derivers,
+        return await self._session.run(
+            functools.partial(
+                self._require_local().compute_fs_closure,
+                str(path),
+                flip_direction=flip_direction,
+                include_outputs=include_outputs,
+                include_derivers=include_derivers,
+            ),
         )
-        return await self._public_store_paths(paths)
 
     async def query_derivation_outputs(self, path: str | StorePath) -> list[StorePath]:
         """Return output paths declared by a derivation."""
-        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
-        paths = await self._session.run(self._require_raw().query_derivation_outputs, raw_path)
-        return await self._public_store_paths(paths)
+        return await self._session.run(self._require_local().query_derivation_outputs, str(path))
 
     async def query_valid_derivers(self, path: str | StorePath) -> list[StorePath]:
         """Return valid derivations that produced ``path``."""
-        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
-        paths = await self._session.run(self._require_raw().query_valid_derivers, raw_path)
-        return await self._public_store_paths(paths)
+        return await self._session.run(self._require_local().query_valid_derivers, str(path))
 
     async def query_referrers(self, path: str | StorePath) -> list[StorePath]:
         """Return valid store paths that reference ``path``."""
-        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
-        paths = await self._session.run(self._require_raw().query_referrers, raw_path)
-        return await self._public_store_paths(paths)
+        return await self._session.run(self._require_local().query_referrers, str(path))
 
     async def follow_links_to_store_path(self, path: str) -> StorePath:
         """Resolve a path that may traverse symlinks to its containing store path."""
-        raw_path = await self._session.run(self._require_raw().follow_links_to_store_path, path)
-        return StorePath(await self._session.run(_print_store_path, self._require_raw(), raw_path))
+        return await self._session.run(self._require_local().follow_links_to_store_path, path)
 
     async def query_path_from_hash_part(self, hash_part: str) -> StorePath | None:
         """Return the valid store path whose hash component is ``hash_part``, if any."""
-        raw_path = await self._session.run(self._require_raw().query_path_from_hash_part, hash_part)
-        if raw_path is None:
-            return None
-        return StorePath(await self._session.run(_print_store_path, self._require_raw(), raw_path))
+        return await self._session.run(self._require_local().query_path_from_hash_part, hash_part)
 
     async def query_substitutable_paths(self, paths: list[str | StorePath]) -> list[StorePath]:
         """Return the subset of ``paths`` that can be substituted from a binary cache."""
-        raw_paths = await self._session.run(_parse_store_paths, self._require_raw(), [str(path) for path in paths])
-        result = await self._session.run(self._require_raw().query_substitutable_paths, raw_paths)
-        return await self._public_store_paths(result)
+        return await self._session.run(
+            self._require_local().query_substitutable_paths,
+            [str(path) for path in paths],
+        )
 
     async def get_build_log(self, path: str | StorePath) -> str | None:
         """Return the build log for ``path``, or ``None`` if no log is available."""
-        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
-        return await self._session.run(self._require_raw().get_build_log, raw_path)
+        return await self._session.run(self._require_local().get_build_log, str(path))
 
     async def query_missing(
         self,
@@ -654,22 +622,7 @@ class Store:
         /,
     ) -> Derivation:
         """Parse and return the ``.drv`` file at ``drv_path``."""
-        raw_path = await self._session.run(self._require_raw().parse_store_path, str(drv_path))
-        result = await self._session.run(self._require_raw().read_derivation, raw_path)
-        # The two nested maps are built explicitly rather than left to pydantic's
-        # dict->model coercion: the coercion works, but it is invisible to the
-        # type checker, so `Derivation(**result)` would typecheck against any
-        # nested shape at all -- including a wrong one.
-        return Derivation(
-            name=result["name"],
-            system=result["system"],
-            builder=result["builder"],
-            args=result["args"],
-            env=result["env"],
-            input_srcs=result["input_srcs"],
-            input_drvs={path: DerivationOutputs(**node) for path, node in result["input_drvs"].items()},
-            outputs={name: DerivationOutput(**output) for name, output in result["outputs"].items()},
-        )
+        return await self._session.run(self._require_local().read_derivation, str(drv_path))
 
     async def collect_garbage(
         self,
@@ -681,26 +634,14 @@ class Store:
         max_freed: int = NO_GC_LIMIT,
     ) -> GcResult:
         """Run a garbage-collection pass; see :meth:`nanopynix.store.Store.collect_garbage`."""
-        raw_paths = await self._session.run(
-            _parse_store_paths,
-            self._require_raw(),
-            [str(p) for p in paths_to_delete],
-        )
-        result = await self._session.run(
-            self._require_raw().collect_garbage,
-            _raw_gc_action(action),
-            ignore_liveness,
-            raw_paths,
-            max_freed,
-        )
-        paths = await self._session.run(
-            _print_store_paths,
-            self._require_raw(),
-            result["paths"],
-        )
-        return GcResult(
-            paths=[StorePath(p) for p in paths],
-            bytes_freed=result["bytes_freed"],
+        return await self._session.run(
+            functools.partial(
+                self._require_local().collect_garbage,
+                action,
+                ignore_liveness=ignore_liveness,
+                paths_to_delete=[str(p) for p in paths_to_delete],
+                max_freed=max_freed,
+            ),
         )
 
     async def add_temp_root(self, path: str | StorePath, /) -> None:
@@ -710,8 +651,7 @@ class Store:
         written to disk as a symlink. Use :meth:`add_perm_root` for a root that
         outlives the process.
         """
-        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
-        await self._session.run(self._require_raw().add_temp_root, raw_path)
+        await self._session.run(self._require_local().add_temp_root, str(path))
 
     async def add_perm_root(self, path: str | StorePath, gc_root: str, /) -> str:
         """Create the symlink ``gc_root`` -> ``path`` and return its resolved path.
@@ -721,8 +661,7 @@ class Store:
         result alive across process restarts. Requires a local filesystem
         store; a store that has no local root directory raises.
         """
-        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
-        return await self._session.run(self._require_raw().add_perm_root, raw_path, gc_root)
+        return await self._session.run(self._require_local().add_perm_root, str(path), gc_root)
 
     async def add_indirect_root(self, path: str, /) -> None:
         """Register ``path``, an existing user-facing symlink, as an indirect root.
@@ -731,12 +670,11 @@ class Store:
         for the symlink it creates. Call this directly only for a symlink you
         made yourself.
         """
-        await self._session.run(self._require_raw().add_indirect_root, path)
+        await self._session.run(self._require_local().add_indirect_root, path)
 
     async def find_roots(self, *, censor: bool = False) -> list[GcRoot]:
         """Return the garbage collector's roots."""
-        roots = await self._session.run(self._require_raw().find_roots, censor)
-        return [GcRoot(link=root["link"], path=root["path"]) for root in roots]
+        return await self._session.run(functools.partial(self._require_local().find_roots, censor=censor))
 
     async def compute_store_path(
         self,
@@ -751,14 +689,15 @@ class Store:
         Pure computation -- it reads ``path`` but writes nothing, so it works
         even against a store that cannot accept an add.
         """
-        raw_path = await self._session.run(
-            self._require_raw().compute_store_path,
-            path,
-            name,
-            method,
-            hash_algo,
+        return await self._session.run(
+            functools.partial(
+                self._require_local().compute_store_path,
+                path,
+                name=name,
+                method=method,
+                hash_algo=hash_algo,
+            ),
         )
-        return StorePath(await self._session.run(_print_store_path, self._require_raw(), raw_path))
 
     async def add_to_store(
         self,
@@ -773,14 +712,15 @@ class Store:
         The result is the path :meth:`compute_store_path` predicts for the same
         arguments. ``name`` defaults to the source's filename.
         """
-        raw_path = await self._session.run(
-            self._require_raw().add_to_store,
-            path,
-            name,
-            method,
-            hash_algo,
+        return await self._session.run(
+            functools.partial(
+                self._require_local().add_to_store,
+                path,
+                name=name,
+                method=method,
+                hash_algo=hash_algo,
+            ),
         )
-        return StorePath(await self._session.run(_print_store_path, self._require_raw(), raw_path))
 
     async def store_dirs(self) -> StoreDirs:
         """Return this store's full set of configured directories.
@@ -789,7 +729,7 @@ class Store:
         a store with a local filesystem layout, and Nix leaves them unset for
         stores that have none.
         """
-        return StoreDirs(**await self._session.run(self._require_raw().get_store_dirs))
+        return await self._session.run(self._require_local().get_store_dirs)
 
     async def ensure_path(self, path: str | StorePath, /) -> None:
         """Make ``path`` valid in this store, substituting it if necessary.
@@ -797,8 +737,7 @@ class Store:
         A no-op when the path is already valid. When it is not and no
         substituter can supply it, this raises rather than returning quietly.
         """
-        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
-        await self._session.run(self._require_raw().ensure_path, raw_path)
+        await self._session.run(self._require_local().ensure_path, str(path))
 
     async def copy_closure(
         self,
@@ -831,7 +770,7 @@ class Store:
 
     async def optimise_store(self) -> None:
         """Reclaim disk space by hard-linking identical files in this store."""
-        await self._session.run(self._require_raw().optimise_store)
+        await self._session.run(self._require_local().optimise_store)
 
     async def verify_store(self, *, check_contents: bool = False, repair: bool = False) -> bool:
         """Check this store's consistency, returning whether errors were found.
@@ -839,7 +778,11 @@ class Store:
         ``True`` means Nix found something wrong -- with ``repair`` it also
         means it tried to fix it, not that it succeeded.
         """
-        return await self._session.run(self._require_raw().verify_store, check_contents, repair)
+        return await self._session.run(
+            functools.partial(
+                self._require_local().verify_store, check_contents=check_contents, repair=repair
+            ),
+        )
 
     async def _public_store_paths(
         self, raw_paths: Sequence[nanopynix_store.StorePath | str]
