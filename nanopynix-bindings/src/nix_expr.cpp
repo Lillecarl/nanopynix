@@ -586,10 +586,23 @@ void PyEvalState::begin_repl() {
 #endif
     repl_env->up = &state->baseEnv;
     repl_displ = 0;
+    // The one place the size is named. Every bounds check reads it back from
+    // here rather than repeating the literal -- see `repl_env_capacity`.
+    repl_env_capacity = repl_env_size;
 }
 
 bool PyEvalState::repl_active() const {
     return repl_env != nullptr;
+}
+
+void PyEvalState::repl_bind(nix::Symbol symbol, nix::Value &value) {
+    if (repl_displ >= repl_env_capacity)
+        throw std::runtime_error("REPL environment is full");
+    if (auto oldVar = repl_static_env->find(symbol); oldVar != repl_static_env->vars.end())
+        repl_static_env->vars.erase(oldVar);
+    repl_static_env->vars.emplace_back(symbol, repl_displ);
+    repl_static_env->sort();
+    repl_env->values[repl_displ++] = &value;
 }
 
 PyValue PyEvalState::repl_eval_string(const std::string &expr, const std::string &path) {
@@ -651,18 +664,6 @@ std::optional<PyValue> PyEvalState::repl_process_line(const std::string &line, c
     nb::gil_scoped_release release;
     auto basePath = state->rootPath(nix::CanonPath(path));
 
-    auto add_binding = [&](nix::Symbol symbol, nix::Expr *expr) {
-        if (repl_displ >= 32768)
-            throw std::runtime_error("REPL environment is full");
-        nix::Value &value(*state->allocValue());
-        value.mkThunk(repl_env, expr);
-        if (auto oldVar = repl_static_env->find(symbol); oldVar != repl_static_env->vars.end())
-            repl_static_env->vars.erase(oldVar);
-        repl_static_env->vars.emplace_back(symbol, repl_displ);
-        repl_static_env->sort();
-        repl_env->values[repl_displ++] = &value;
-    };
-
 #if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
     // Nix 2.31 has no parseReplBindings(). Preserve the core REPL contract
     // with simple identifier assignments; newer Nix versions use its full
@@ -699,7 +700,9 @@ std::optional<PyValue> PyEvalState::repl_process_line(const std::string &line, c
             expression = trim(expression.substr(0, expression.size() - 1));
         if (is_identifier(name) && !expression.empty()) {
             auto *parsedExpr = state->parseExprFromString(std::string(expression), basePath, repl_static_env);
-            add_binding(state->symbols.create(name), parsedExpr);
+            nix::Value &value(*state->allocValue());
+            value.mkThunk(repl_env, parsedExpr);
+            repl_bind(state->symbols.create(name), value);
             return std::nullopt;
         }
     }
@@ -728,15 +731,9 @@ std::optional<PyValue> PyEvalState::repl_process_line(const std::string &line, c
         ? bindings->buildInheritFromEnv(*state, *repl_env)
         : nullptr;
     for (auto &[symbol, def] : *bindings->attrs) {
-        if (repl_displ >= 32768)
-            throw std::runtime_error("REPL environment is full");
         nix::Value &value(*state->allocValue());
         value.mkThunk(def.chooseByKind(repl_env, repl_env, inheritEnv), def.e);
-        if (auto oldVar = repl_static_env->find(symbol); oldVar != repl_static_env->vars.end())
-            repl_static_env->vars.erase(oldVar);
-        repl_static_env->vars.emplace_back(symbol, repl_displ);
-        repl_static_env->sort();
-        repl_env->values[repl_displ++] = &value;
+        repl_bind(symbol, value);
     }
     return std::nullopt;
 #endif
@@ -750,7 +747,15 @@ std::vector<std::string> PyEvalState::repl_add_attrs(PyValue attrs) {
     auto *value = attrs.checkedValue();
     state->forceAttrs(*value, nix::noPos, "while evaluating an attribute set to be merged in the REPL scope");
     auto *bindings = value->attrs();
-    if (repl_displ + bindings->size() >= 32768)
+    // `>`, not `>=`: this fills displacements `repl_displ` through
+    // `repl_displ + size - 1`, so the last one is in range exactly when
+    // `repl_displ + size <= capacity`. Written with `>=` it rejected a batch
+    // that would have filled the env precisely to the end -- conservative
+    // rather than unsafe, but one short of `repl_bind`'s single-binding check,
+    // which this is the batch form of. Not routed through `repl_bind` itself:
+    // that shadows per binding, while this sorts and deduplicates once at the
+    // end, which is a different operation and a much cheaper one.
+    if (repl_displ + bindings->size() > repl_env_capacity)
         throw std::runtime_error("REPL environment is full");
 
     std::vector<std::string> names;

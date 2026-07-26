@@ -33,6 +33,17 @@ struct PyEvalState {
     std::shared_ptr<nix::StaticEnv> repl_static_env;
     nix::Env *repl_env = nullptr;
     size_t repl_displ = 0;
+    /// How many bindings `repl_env` has room for, remembered from the
+    /// `allocEnv` call in `begin_repl` that made it.
+    ///
+    /// Every bounds check reads this rather than a constant of its own.
+    /// `nix::Env::values` is a flexible array with no length, so a guard that
+    /// disagrees with the allocation does not fail -- it writes past the end.
+    /// Three of the four sites used to spell 32768 literally while the
+    /// allocation used a `constexpr` scoped inside `begin_repl`, which is
+    /// exactly the drift this removes: there is now one value, and the guards
+    /// read the one that was passed to `allocEnv`.
+    size_t repl_env_capacity = 0;
 
     using EvalSettingsConfigurator = std::function<void(nix::EvalSettings &)>;
 
@@ -96,6 +107,15 @@ struct PyEvalState {
     PyValue value_from_python(nanobind::object obj);
 
 private:
+    /// Bind `value` to `symbol` at the next free displacement in the REPL env,
+    /// shadowing any existing binding of that name.
+    ///
+    /// Callers must have checked that the REPL scope is active -- this reads
+    /// `repl_env` and `repl_static_env` without guarding them, because both of
+    /// its call sites are in `repl_process_line`, which refuses at entry.
+    /// Throws `std::runtime_error` when the env is full.
+    void repl_bind(nix::Symbol symbol, nix::Value &value);
+
     void init(const std::vector<std::string> &searchPath,
               const SettingsMap &evalSettingsOverrides,
               const SettingsMap &fetchSettingsOverrides) {
