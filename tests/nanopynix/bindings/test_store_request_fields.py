@@ -8,9 +8,15 @@ from a bug in the caller's own code. It also applied to *optional* fields, so a
 hand-built dict could not omit ``include_derivers`` or ``censor`` even though
 both have defaults.
 
-These tests pin both halves: required fields raise ``UsageError`` naming the
-field, and optional fields fall back to exactly the default the direct API
-declares. The second half is what keeps the two APIs from drifting into
+A field that is *present but of the wrong type* was the same defect wearing a
+different hat: ``nb::cast``'s failure is a bare ``std::bad_cast``, which arrives
+as ``RuntimeError('std::bad_cast')`` -- again naming neither the field nor the
+operation, and again not a nanopynix error type.
+
+These tests pin all three: required fields raise ``UsageError`` naming the
+field, wrong-typed fields raise ``UsageError`` naming the field and both the
+expected and actual type, and optional fields fall back to exactly the default
+the direct API declares. The last is what keeps the two APIs from drifting into
 disagreeing about what "unset" means.
 """
 
@@ -72,6 +78,51 @@ def test_missing_required_field_is_not_a_bare_key_error(store: Any) -> None:
 
     assert not isinstance(excinfo.value, KeyError)
     assert isinstance(excinfo.value, nanopynix_errors.Error)
+
+
+# (method, a request whose field is present but wrong-typed, the field, what it should be)
+WRONG_TYPED_FIELDS: list[tuple[str, dict[str, Any], str, str]] = [
+    ("store_query_referrers", {"path": 42}, "path", "string"),
+    ("store_query_path_from_hash_part", {"hash_part": None}, "hash_part", "string"),
+    ("store_find_roots", {"censor": "yes"}, "censor", "bool"),
+    ("store_verify_store", {"check_contents": False, "repair": []}, "repair", "bool"),
+    ("store_collect_garbage", {"action": []}, "action", "integer"),
+    ("store_collect_garbage", {"action": 0, "max_freed": "lots"}, "max_freed", "integer"),
+    ("store_get_uri", {"with_params": []}, "with_params", "bool"),
+    ("store_query_substitutable_paths", {"paths": "not-a-list"}, "paths", "list of strings"),
+    ("store_query_missing", {"derived_paths": 7}, "derived_paths", "list of strings"),
+]
+
+
+@pytest.mark.parametrize(("method", "request_dict", "field", "expected"), WRONG_TYPED_FIELDS)
+def test_wrong_typed_field_raises_usage_error(
+    store: Any, method: str, request_dict: dict[str, Any], field: str, expected: str
+) -> None:
+    """A present-but-wrong-typed field says what was wanted and what arrived.
+
+    Both required and optional fields are covered: an optional field's fallback
+    only applies when the key is absent, so a wrong-typed value still has to be
+    cast, and that cast is what used to escape as ``std::bad_cast``.
+    """
+    with pytest.raises(nanopynix_errors.UsageError) as excinfo:
+        getattr(store, method)(request_dict)
+
+    message = str(excinfo.value)
+    for fragment in (field, method, expected):
+        assert fragment in message, f"{method} did not report {fragment!r}: {message}"
+
+
+def test_wrong_typed_field_is_not_a_bare_runtime_error(store: Any) -> None:
+    """Guard the specific regression: RuntimeError('std::bad_cast') is not a nanopynix error.
+
+    This is the type-mismatch twin of the missing-field case above, and it
+    leaked in exactly the same way -- past any ``except nanopynix.Error``.
+    """
+    with pytest.raises(nanopynix_errors.UsageError) as excinfo:
+        store.store_query_referrers({"path": 42})
+
+    assert isinstance(excinfo.value, nanopynix_errors.Error)
+    assert "bad_cast" not in str(excinfo.value)
 
 
 # (method, request omitting the optional field, equivalent direct-API call)
