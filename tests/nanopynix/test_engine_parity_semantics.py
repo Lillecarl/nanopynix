@@ -504,13 +504,48 @@ def test_every_failure_case_is_asserted_to_actually_fail() -> None:
 # see it: the classes have different *names*, so a name-based comparison never
 # put them side by side.
 #
-# Four things have a lifetime; three are covered below. The fourth, a closed
-# `Session`, is not, because rpc does not guard it at all -- inproc's
-# `Session.run` raises `SessionClosedError`, while rpc's `Session` tracks no
-# open/closed state, so `session.store()` after `close()` hands back a Store
-# that fails later and differently. That is a missing *guard*, not a
-# mismatched exception class, so unifying the classes did not fix it and no
-# test here pretends otherwise. Recorded in TODO.md rather than left silent.
+# Four things have a lifetime and all four are covered. The `Session` came
+# last, and separately, because it was not a mismatched class but a missing
+# guard: rpc tracked no open/closed state, so work dispatched after `close()`
+# failed as whatever transport error the dead channel produced. Both engines
+# now refuse it at their dispatch chokepoint -- `inproc.Session.run`'s
+# `_check_open`, `WorkerClient.invoke`'s -- rather than at `store()`/`eval()`/
+# `repl()`, which on either engine hand back an object whose first piece of
+# work is what fails.
+
+
+async def _use_a_closed_session(factory: Any) -> str:
+    """Ask a closed session to do work of its own.
+
+    ``get_verbosity`` because it is the shortest path to each engine's dispatch
+    chokepoint: inproc's routes through ``Session.run``, rpc's through
+    ``WorkerClient.invoke``, which is where both guards live.
+    """
+    async with factory() as session:
+        pass
+    try:
+        await session.get_verbosity()
+    except Exception as exc:
+        return type(exc).__name__
+    return "no exception"
+
+
+async def _use_a_store_that_outlived_its_session(factory: Any) -> str:
+    """Use a store facade whose session has since closed.
+
+    The shape a caller actually gets into, and a different answer from the one
+    above: closing a session closes the stores it handed out, so the honest
+    complaint is about the store and not the session. rpc left them open until
+    the session learned to close them, and reported "session is not open" here.
+    """
+    async with factory() as session:
+        store = session.store()
+        await store.open()
+    try:
+        await store.uri()
+    except Exception as exc:
+        return type(exc).__name__
+    return "no exception"
 
 
 async def _use_a_closed_store(factory: Any) -> str:
@@ -546,6 +581,24 @@ async def _use_a_released_locked_flake(factory: Any, ref: str) -> str:
         except Exception as exc:
             return type(exc).__name__
         return "no exception"
+
+
+async def test_both_engines_name_a_closed_session_the_same_way(
+    inproc_session: InprocSessionFactory,
+    rpc_session: RpcSessionFactory,
+) -> None:
+    """rpc had no guard here at all; the failure was whatever the dead channel gave."""
+    assert await _use_a_closed_session(inproc_session) == "SessionClosedError"
+    assert await _use_a_closed_session(rpc_session) == "SessionClosedError"
+
+
+async def test_both_engines_name_a_store_outliving_its_session_the_same_way(
+    inproc_session: InprocSessionFactory,
+    rpc_session: RpcSessionFactory,
+) -> None:
+    """A closed session leaves closed stores behind, not merely unusable ones."""
+    assert await _use_a_store_that_outlived_its_session(inproc_session) == "StoreClosedError"
+    assert await _use_a_store_that_outlived_its_session(rpc_session) == "StoreClosedError"
 
 
 async def test_both_engines_name_a_closed_store_the_same_way(

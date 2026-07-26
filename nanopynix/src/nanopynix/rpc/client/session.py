@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -120,6 +121,13 @@ class Session:
         )
         self._session_id = uuid.uuid4().hex
         self._evals: set[EvalSession] = set()
+        # Weak, unlike _evals: an evaluator leases a worker-side slot the
+        # session must give back, so it is owned; a store is just a facade the
+        # caller may drop without closing, and holding it alive to close it
+        # later would be the leak rather than the fix. inproc keeps a strong set
+        # and discards on Store.close, which needs the store to be closed to
+        # stop accumulating; this does not.
+        self._stores: weakref.WeakSet[Store] = weakref.WeakSet()
 
     def store(self, uri: str | None = None) -> Store:
         """Create an ergonomic Store facade for store operations.
@@ -137,7 +145,7 @@ class Session:
         handle adds its URI to the worker's process title.
         """
         selected_uri = self._store_uri if uri is None else uri
-        return Store(
+        store = Store(
             StoreHandle(
                 self._manager,
                 selected_uri,
@@ -145,6 +153,8 @@ class Session:
                 self._manager.rpc_timeout,
             ),
         )
+        self._stores.add(store)
+        return store
 
     async def open(self) -> None:
         """Spawn the worker subprocess."""
@@ -163,9 +173,17 @@ class Session:
         deserved -- and, before the teardown was shielded, said it while
         leaving the worker running.
         """
+        # Evaluators first, then the stores they were bound to, then the worker
+        # -- inproc's order, for the same reason: a store cannot be closed while
+        # an evaluator holds it. Closing the stores at all is new here. They
+        # used to be left open, so a facade outliving its session reported
+        # "session is not open" rather than the truth, which is that its store
+        # is closed.
         with anyio.fail_after(_GRACEFUL_CLOSE_TIMEOUT_SECONDS):
             for eval_session in tuple(self._evals):
                 await eval_session.close()
+            for store in tuple(self._stores):
+                await store.close()
             await self._manager.close()
 
     async def __aenter__(self) -> Session:

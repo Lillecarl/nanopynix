@@ -43,7 +43,7 @@ from nanopynix_proto.nix.store import (
 from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
-from nanopynix.exceptions import StoreClosedError
+from nanopynix.exceptions import SessionClosedError, StoreClosedError
 from nanopynix.models import BuildResult, Derivation, GcResult, MissingInfo, StorePath
 from nanopynix.rpc.client._pool import WorkerDiedError
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
@@ -102,9 +102,12 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
                 CloseStoreRequest(store_handle=self._store_handle, force=force),
                 timeout=self._rpc_timeout,
             )
-        except WorkerDiedError:
+        except (WorkerDiedError, SessionClosedError):
             # The remote handle disappeared with its worker, so no close RPC
-            # remains possible or necessary.
+            # remains possible or necessary. SessionClosedError is the orderly
+            # version of the same thing -- the session closed first, taking the
+            # worker with it -- and it only became reachable here once
+            # WorkerClient.invoke started reporting a closed session as such.
             pass
         finally:
             self._active = False
@@ -150,7 +153,9 @@ class Store:
     response messages.
     """
 
-    __slots__ = ("_rpc",)
+    # __weakref__ so the owning Session can hold these in a WeakSet: it closes
+    # the stores it handed out, but must not be the reason one stays alive.
+    __slots__ = ("__weakref__", "_rpc")
 
     def __init__(self, rpc: StoreHandle) -> None:
         self._rpc = rpc
