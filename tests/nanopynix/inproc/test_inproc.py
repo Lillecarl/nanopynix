@@ -180,11 +180,11 @@ async def test_inproc_eval_state_can_be_closed_and_reopened(inproc_session: Inpr
     async with inproc_session() as nix, nix.store() as store:
         first = nix.eval(store)
         await first.open()
-        local = first._local  # type: ignore[reportPrivateUsage] -- verifies the L2 evaluator pointer is released on close
+        local = first._core  # type: ignore[reportPrivateUsage] -- verifies the L2 evaluator pointer is released on close
         await first.close()
 
         if local is None:
-            raise AssertionError("EvalSession did not retain its LocalEvalState")
+            raise AssertionError("EvalSession did not retain its CoreEvalState")
         with pytest.raises(RuntimeError, match="local evaluator has been closed"):
             local.require_raw()
 
@@ -453,7 +453,7 @@ async def test_inproc_store_dirs_agrees_with_rpc_and_with_store_dir(
         dirs = await inproc_store.store_dirs()
         assert dirs == await rpc_store.store_dirs()
         assert dirs.store_dir == await inproc_store.store_dir()
-        # The test environment is a LocalStore, so the filesystem-layout fields
+        # The test environment is a local store, so the filesystem-layout fields
         # Nix leaves unset for other store types are populated here.
         assert dirs.state_dir is not None
         assert dirs.real_store_dir is not None
@@ -768,7 +768,7 @@ async def test_inproc_value_build_and_release(
             }
         """)
         outputs = await drv.build()
-        # Nix reports the logical StorePath. The fixture's LocalStore maps it
+        # Nix reports the logical StorePath. The fixture's local store maps it
         # beneath its private root rather than the host's /nix/store mount.
         out_path = AnyioPath(shared_nix_environment.root / "nix" / "store" / Path(outputs["out"]).name)
         assert await out_path.read_text() == "built-via-inproc\n"
@@ -930,10 +930,10 @@ async def test_inproc_eval_open_and_close_are_idempotent(inproc_session: InprocS
 
 
 async def test_collect_garbage_rejects_an_unsupported_action(inproc_session: InprocSessionFactory) -> None:
-    """The unmapped-GcAction guard moved from inproc into the shared LocalStore.
+    """The unmapped-GcAction guard moved from inproc into the shared CoreStore.
 
     It used to live in ``inproc._impl._raw_gc_action`` and was exercised
-    directly. Now that both engines share ``LocalStore.collect_garbage``, the
+    directly. Now that both engines share ``CoreStore.collect_garbage``, the
     guard sits there and is worth testing through the public call instead --
     which also proves it is still reachable from a caller.
     """

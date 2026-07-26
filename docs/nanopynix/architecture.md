@@ -10,8 +10,8 @@ same shape:
   **this process**. No subprocess, no serialization. See {doc}`api/inproc`.
 
 Both wrap the same thread-confined, synchronous L1 bindings underneath
-(`nanopynix._local`) — a worker and an in-process session evaluate Nix the
-same way internally. What differs is the process boundary around that core,
+(`nanopynix._core._objects`) — a worker and an in-process session evaluate
+Nix the same way internally. What differs is the process boundary around that core,
 which shows up as a handful of concrete constraints.
 
 ## What's the same

@@ -449,9 +449,9 @@ async def test_inproc_parallel_batch_builds_use_multiple_store_workers(
                         *(_sleep_derivations(evaluator, count=5, seconds=seconds) for evaluator in evaluators),
                     )
                     for group in values:
-                        # noqa/PERF401 below: the body awaits, so the comprehension
-                        # ruff wants would be an *async* generator, which extend()
-                        # cannot consume.
+                        # PERF401 is suppressed below: the body awaits, so the
+                        # comprehension ruff wants would be an *async*
+                        # generator, which extend() cannot consume.
                         derived_path_groups.append(  # noqa: PERF401 -- see comment above
                             [await (await value.attr("drvPath")).as_string() for value in group]
                         )
@@ -489,7 +489,7 @@ async def test_inproc_parallel_batch_builds_use_multiple_store_workers(
 @pytest.mark.nix_known_issue(
     exclude=("2.34", "2.35"),
     sanitizer="tsan",
-    reason="LocalStore crashes under TSAN in released Nix; fixed on Nix master",
+    reason="nix::LocalStore crashes under TSAN in released Nix; fixed on Nix master",
 )
 async def test_inproc_mixed_evaluation_build_and_store_workloads(
     store_path_recorder: StorePathRecorder,

@@ -85,7 +85,7 @@ async def test_empty_path_raises_instead_of_aborting(
 # each produced. Pinning the type is the point: if the empty-string check
 # altered any of them, the fix traded one inconsistency for another.
 #
-# "x" and "garbage" listed the generic NixError until LocalStore took over
+# "x" and "garbage" listed the generic NixError until CoreStore took over
 # path normalisation. inproc used to call the direct binding, which does not
 # absolutize, so a bare name reached parseStorePath as-is; the rpc engine went
 # through the dict funnel, which does absolutize, and got BadStorePathError.
@@ -127,7 +127,7 @@ async def test_the_guard_lives_in_cpp_not_in_the_python_wrapper(
 
     This used to go through ``store_is_valid_path({"path": ""})`` -- the
     proto-dict entry point that both engines shared. That layer is gone: both
-    engines now normalise paths in ``LocalStore._store_path``, which forwards
+    engines now normalise paths in ``CoreStore._store_path``, which forwards
     ``""`` to ``parse_store_path`` precisely so the rejection stays in C++
     rather than moving into Python where a raw caller would bypass it.
 

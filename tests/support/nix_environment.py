@@ -1,4 +1,4 @@
-"""Hermetic LocalStore and native-daemon fixtures for integration tests."""
+"""Hermetic local-store and native-daemon fixtures for integration tests."""
 
 from __future__ import annotations
 

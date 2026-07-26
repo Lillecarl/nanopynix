@@ -1,9 +1,21 @@
-"""Transport-neutral local Nix resources.
+"""Transport-neutral Nix resources shared by both engines.
 
-These objects own direct L1 bindings and are intentionally synchronous. The
-public ``inproc`` API may share a ``LocalStore`` across Store-pool threads, but
-each ``LocalEvalState`` and its values remain confined to one evaluator thread.
-The RPC worker places the same objects behind opaque remote handles.
+These objects own L1 bindings and are intentionally synchronous. The public
+``inproc`` API may share a ``CoreStore`` across Store-pool threads, but each
+``CoreEvalState`` and its values remain confined to one evaluator thread. The
+RPC worker places the same objects behind opaque remote handles.
+
+``Core`` and not ``Local``, which is what these were called until this module
+was renamed from ``_local.py``. ``nix::LocalStore`` is a *specific* Nix store
+implementation -- ``nix_store.cpp``'s ``store_get_store_dirs_direct`` does a
+``dynamic_cast<nix::LocalStore *>`` precisely because an arbitrary
+``nix::Store`` may not be one. ``CoreStore`` wraps whatever store it is
+handed, including a ``unix://`` daemon store (which the ``daemon`` test
+backend uses throughout), so the old name asserted a vtable guarantee this
+layer does not make and has never exposed. ``Core`` instead names the thing
+that is actually true of them: they are the ``_core`` layer both engines
+build on, below the process boundary that distinguishes ``inproc`` from
+``rpc``.
 """
 
 from __future__ import annotations
@@ -40,7 +52,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 
-class LocalStore:
+class CoreStore:
     """One direct thread-safe store pointer shared by the Store pool."""
 
     def __init__(self, raw: nanopynix_store.Store) -> None:
@@ -118,7 +130,7 @@ class LocalStore:
         derived_paths: Sequence[str | nanopynix_store.StorePath],
         *,
         build_mode: int,
-        eval_store: LocalStore | None = None,
+        eval_store: CoreStore | None = None,
     ) -> list[BuildResult]:
         """Build ``derived_paths`` and return one result per Nix build outcome."""
         results = self.require_raw().build_paths_with_results(
@@ -131,7 +143,7 @@ class LocalStore:
     def copy_closure(
         self,
         paths: Sequence[str | nanopynix_store.StorePath],
-        dest_store: LocalStore,
+        dest_store: CoreStore,
         *,
         repair: bool = False,
         check_sigs: bool = True,
@@ -306,14 +318,14 @@ class LocalStore:
         return [StorePath(path) for path in self.print_store_paths(raw_paths)]
 
 
-class LocalEvalState:
-    """One direct evaluator pointer bound to a :class:`LocalStore`."""
+class CoreEvalState:
+    """One direct evaluator pointer bound to a :class:`CoreStore`."""
 
-    def __init__(self, raw: nanopynix_expr.EvalState, store: LocalStore) -> None:
+    def __init__(self, raw: nanopynix_expr.EvalState, store: CoreStore) -> None:
         self.raw: nanopynix_expr.EvalState | None = raw
         self.store = store
-        self._values: set[LocalValue] = set()
-        self._locked_flakes: set[LocalLockedFlake] = set()
+        self._values: set[CoreValue] = set()
+        self._locked_flakes: set[CoreLockedFlake] = set()
 
     def close(self) -> None:
         for value in tuple(self._values):
@@ -328,40 +340,46 @@ class LocalEvalState:
         return self.raw
 
     def __getattr__(self, name: str) -> Any:
-        """Forward to the binding as ``Any`` -- see :meth:`LocalStore.__getattr__`."""
+        """Forward any unlisted name to the L1 binding, untyped.
+
+        The equivalent on ``CoreStore`` is gone -- every store call it used to
+        absorb now has a typed method -- and this one is on the same path. It
+        is what pyright cannot check about the evaluator, so it is worth
+        keeping visible rather than quietly relying on.
+        """
         return getattr(self.require_raw(), name)
 
-    def wrap_value(self, raw: nanopynix_expr.Value) -> LocalValue:
-        value = LocalValue(self, raw)
+    def wrap_value(self, raw: nanopynix_expr.Value) -> CoreValue:
+        value = CoreValue(self, raw)
         self._values.add(value)
         return value
 
-    def discard_value(self, value: LocalValue) -> None:
+    def discard_value(self, value: CoreValue) -> None:
         self._values.discard(value)
 
-    def eval_string(self, expression: str, path: str) -> LocalValue:
+    def eval_string(self, expression: str, path: str) -> CoreValue:
         return self.wrap_value(self.require_raw().eval_string(expression, path))
 
-    def eval_file(self, path: str) -> LocalValue:
+    def eval_file(self, path: str) -> CoreValue:
         return self.wrap_value(self.require_raw().eval_file(path))
 
-    def repl_eval_file(self, path: str) -> LocalValue:
+    def repl_eval_file(self, path: str) -> CoreValue:
         return self.wrap_value(self.require_raw().repl_eval_file(path))
 
-    def repl_eval_string(self, expression: str, path: str) -> LocalValue:
+    def repl_eval_string(self, expression: str, path: str) -> CoreValue:
         return self.wrap_value(self.require_raw().repl_eval_string(expression, path))
 
-    def repl_load_file(self, path: str) -> LocalValue:
+    def repl_load_file(self, path: str) -> CoreValue:
         return self.wrap_value(self.require_raw().repl_load_file(path))
 
-    def repl_process_line(self, line: str, path: str) -> LocalValue | None:
+    def repl_process_line(self, line: str, path: str) -> CoreValue | None:
         raw = self.require_raw().repl_process_line(line, path)
         return None if raw is None else self.wrap_value(raw)
 
-    def repl_add_attrs(self, value: LocalValue) -> list[str]:
+    def repl_add_attrs(self, value: CoreValue) -> list[str]:
         return self.require_raw().repl_add_attrs(value.require_raw())
 
-    def value_from_python(self, value: Any) -> LocalValue:
+    def value_from_python(self, value: Any) -> CoreValue:
         return self.wrap_value(self.require_raw().value_from_python(_unwrap_local_values(value)))
 
     def lock_flake(
@@ -371,7 +389,7 @@ class LocalEvalState:
         update_inputs: bool | list[str],
         write_lock_file: bool,
         flake_settings: Mapping[str, str] | None = None,
-    ) -> LocalLockedFlake:
+    ) -> CoreLockedFlake:
         raw = nanopynix_flake.lock_flake(
             self.require_raw(),
             nanopynix_flake.parse_flake_ref(ref),
@@ -379,11 +397,11 @@ class LocalEvalState:
             write_lock_file=write_lock_file,
             flake_settings=dict(flake_settings) if flake_settings else {},
         )
-        locked_flake = LocalLockedFlake(self, raw)
+        locked_flake = CoreLockedFlake(self, raw)
         self._locked_flakes.add(locked_flake)
         return locked_flake
 
-    def call_locked_flake(self, locked_flake: LocalLockedFlake) -> LocalValue:
+    def call_locked_flake(self, locked_flake: CoreLockedFlake) -> CoreValue:
         return self.wrap_value(nanopynix_flake.call_flake(self.require_raw(), locked_flake.require_raw()))
 
     def eval_flake(
@@ -392,7 +410,7 @@ class LocalEvalState:
         *,
         write_lock_file: bool,
         flake_settings: Mapping[str, str] | None = None,
-    ) -> LocalValue:
+    ) -> CoreValue:
         return self.wrap_value(
             nanopynix_flake.eval_flake(
                 self.require_raw(),
@@ -414,11 +432,11 @@ class LocalEvalState:
         for name, value in (fetch_settings or {}).items():
             raw.set_fetch_setting(name, value)
 
-    def discard_locked_flake(self, locked_flake: LocalLockedFlake) -> None:
+    def discard_locked_flake(self, locked_flake: CoreLockedFlake) -> None:
         self._locked_flakes.discard(locked_flake)
 
 
-class LocalValue:
+class CoreValue:
     """One rooted L1 value, confined to its owning Nix thread.
 
     ``nanopynix_expr.Value`` contains Nix's ``RootValue``. This wrapper gives
@@ -426,7 +444,7 @@ class LocalValue:
     keeping the raw pointer private to thread-confined local code.
     """
 
-    def __init__(self, eval_state: LocalEvalState, raw: nanopynix_expr.Value) -> None:
+    def __init__(self, eval_state: CoreEvalState, raw: nanopynix_expr.Value) -> None:
         self._eval_state = eval_state
         self._raw: nanopynix_expr.Value | None = raw
 
@@ -479,7 +497,7 @@ class LocalValue:
     def edit_location(self) -> nanopynix_expr.EditLocation:
         return self.require_raw().edit_location()
 
-    def attr_get(self, name: str) -> LocalValue:
+    def attr_get(self, name: str) -> CoreValue:
         return self._eval_state.wrap_value(self.require_raw().attr_get(name))
 
     def has_attr(self, name: str) -> bool:
@@ -488,19 +506,19 @@ class LocalValue:
     def attr_names(self) -> list[str]:
         return self.require_raw().attr_names()
 
-    def list_get(self, index: int) -> LocalValue:
+    def list_get(self, index: int) -> CoreValue:
         return self._eval_state.wrap_value(self.require_raw().list_get(index))
 
     def list_length(self) -> int:
         return self.require_raw().list_length()
 
-    def auto_call(self) -> LocalValue:
+    def auto_call(self) -> CoreValue:
         return self._eval_state.wrap_value(self.require_raw().auto_call())
 
-    def call(self, argument: LocalValue) -> LocalValue:
+    def call(self, argument: CoreValue) -> CoreValue:
         return self._eval_state.wrap_value(self.require_raw().call(argument.require_raw()))
 
-    def build(self, build_store: LocalStore | None, build_mode: int, eval_store: LocalStore | None) -> dict[str, object]:
+    def build(self, build_store: CoreStore | None, build_mode: int, eval_store: CoreStore | None) -> dict[str, object]:
         return self.require_raw().build(
             None if build_store is None else build_store.require_raw(),
             build_mode,
@@ -512,10 +530,10 @@ class LocalValue:
         return self.require_raw().derived_path()
 
 
-class LocalLockedFlake:
+class CoreLockedFlake:
     """One in-memory locked flake, confined to its owning Nix thread."""
 
-    def __init__(self, eval_state: LocalEvalState, raw: nanopynix_flake.LockedFlake) -> None:
+    def __init__(self, eval_state: CoreEvalState, raw: nanopynix_flake.LockedFlake) -> None:
         self._eval_state = eval_state
         self._raw: nanopynix_flake.LockedFlake | None = raw
 
@@ -534,7 +552,7 @@ class LocalLockedFlake:
 
 
 def _unwrap_local_values(value: Any) -> Any:
-    if isinstance(value, LocalValue):
+    if isinstance(value, CoreValue):
         return value.require_raw()
     if isinstance(value, list):
         items = cast("list[Any]", value)
@@ -548,7 +566,7 @@ def _unwrap_local_values(value: Any) -> Any:
     return value
 
 
-class LocalRuntime:
+class CoreRuntime:
     """Common synchronous Nix runtime used by L2 and L3 on the Nix thread."""
 
     def __init__(self) -> None:
@@ -567,18 +585,18 @@ class LocalRuntime:
             verbosity=verbosity,
         )
 
-    def open_store(self, uri: str) -> LocalStore:
-        return LocalStore(self._core.open_store(uri))
+    def open_store(self, uri: str) -> CoreStore:
+        return CoreStore(self._core.open_store(uri))
 
     def open_eval_state(
         self,
-        store: LocalStore,
+        store: CoreStore,
         nix_path: Sequence[str],
-        build_store: LocalStore | None = None,
+        build_store: CoreStore | None = None,
         eval_settings: Mapping[str, str] | None = None,
         fetch_settings: Mapping[str, str] | None = None,
-    ) -> LocalEvalState:
-        return LocalEvalState(
+    ) -> CoreEvalState:
+        return CoreEvalState(
             self._core.open_eval_state(
                 store.require_raw(),
                 nix_path,

@@ -78,7 +78,7 @@ from nanopynix_proto.nix.eval import (
 from nanopynix._core._codec import python_to_scalar
 from nanopynix._core._extract import flake_ref_attrs as _flake_ref_attrs
 from nanopynix._core._extract import locked_flake as _locked_flake
-from nanopynix._core._local import LocalLockedFlake, LocalValue
+from nanopynix._core._objects import CoreLockedFlake, CoreValue
 from nanopynix._wire import HandleKind
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
 from nanopynix.rpc.worker._proto_shape import proto_shape
@@ -101,7 +101,7 @@ _NIX_TYPE_MAP: dict[str, common_pb.NixType] = {
 
 _FORCE_SCALAR_TYPES = frozenset({"null", "int", "float", "bool", "string", "path"})
 
-# The strict scalar reads AsScalar can serve, and the LocalValue accessor for
+# The strict scalar reads AsScalar can serve, and the CoreValue accessor for
 # each. Deliberately runs Nix's own force* rather than comparing type names
 # here: a mismatch then raises the same nix::TypeError, with the same message,
 # that an inproc caller gets, instead of a separately-invented client error.
@@ -443,7 +443,7 @@ class EvalServiceHandler(EvalServiceBase):
         result = fn
         for arg in message.args:
             argument = self._call_arg_to_python(arg, es)
-            value = argument if isinstance(argument, LocalValue) else es.value_from_python(argument)
+            value = argument if isinstance(argument, CoreValue) else es.value_from_python(argument)
             result = result.call(value)
         return self._export(result, message.eval_handle)
 
@@ -521,7 +521,7 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._run(message, self._do_call_locked_flake)
 
     def _do_call_locked_flake(self, message: CallLockedFlakeRequest) -> common_pb.ValueHandle:
-        lf: LocalLockedFlake = self._state.handles.get_typed(message.handle, HandleKind.LOCKED_FLAKE)
+        lf: CoreLockedFlake = self._state.handles.get_typed(message.handle, HandleKind.LOCKED_FLAKE)
         es = self._get_es(message.eval_handle)
         return self._export(es.call_locked_flake(lf), message.eval_handle)
 
@@ -529,7 +529,7 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._run(message, self._do_write_lock_file)
 
     def _do_write_lock_file(self, message: WriteLockFileRequest) -> WriteLockFileResponse:
-        lf: LocalLockedFlake = self._state.handles.get_typed(message.handle, HandleKind.LOCKED_FLAKE)
+        lf: CoreLockedFlake = self._state.handles.get_typed(message.handle, HandleKind.LOCKED_FLAKE)
         lf.write_lock_file()
         return WriteLockFileResponse()
 
@@ -538,7 +538,7 @@ class EvalServiceHandler(EvalServiceBase):
 
     def _do_release_locked_flake(self, message: ReleaseLockedFlakeRequest) -> ReleaseLockedFlakeResponse:
         try:
-            locked_flake: LocalLockedFlake = self._state.handles.get_typed(message.handle, HandleKind.LOCKED_FLAKE)
+            locked_flake: CoreLockedFlake = self._state.handles.get_typed(message.handle, HandleKind.LOCKED_FLAKE)
         except KeyError:
             return ReleaseLockedFlakeResponse()
         locked_flake.close()

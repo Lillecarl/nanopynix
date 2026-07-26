@@ -68,7 +68,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from types import CoroutineType
 
-    from nanopynix._core._local import LocalStore
+    from nanopynix._core._objects import CoreStore
 
 
 def _widen_paths(paths: Sequence[str]) -> list[str]:
@@ -125,11 +125,11 @@ def _store_op[S: _StoreDispatch, **P, R](
 
 @wrap_service_handlers
 class StoreServiceHandler(StoreServiceBase):
-    """gRPC handler backed by the shared, typed :class:`LocalStore`.
+    """gRPC handler backed by the shared, typed :class:`CoreStore`.
 
     One method per RPC, the shape ``_worker_eval.py`` already used. There is
     no reflective forwarder and no proto-dict marshalling step: the request
-    message is read directly and handed to the same ``LocalStore`` method the
+    message is read directly and handed to the same ``CoreStore`` method the
     inproc engine calls, so the two engines cannot disagree about what an
     operation means.
 
@@ -140,8 +140,8 @@ class StoreServiceHandler(StoreServiceBase):
     def __init__(self, state: Any) -> None:
         self._state = state
 
-    def _resolve(self, store_handle: int) -> LocalStore:
-        store: LocalStore = self._state.handles.get_typed(store_handle, HandleKind.STORE)
+    def _resolve(self, store_handle: int) -> CoreStore:
+        store: CoreStore = self._state.handles.get_typed(store_handle, HandleKind.STORE)
         return store
 
     async def _run(self, message: Any, operation: Any) -> Any:
