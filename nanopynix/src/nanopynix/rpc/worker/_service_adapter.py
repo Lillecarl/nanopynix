@@ -115,6 +115,12 @@ def _install_generated_service_methods(
         raise TypeError(f"{cls.__name__} does not match {service_base.__name__}: {'; '.join(details)}")
 
     for method_name in sorted(expected):
+        if method_name in cls.__dict__:
+            # Hand-written handler in the class body wins. This is the migration
+            # affordance for replacing generated dict forwarders with typed
+            # per-RPC methods one at a time: without it __init_subclass__ runs
+            # after the class body and would silently overwrite them.
+            continue
         method = getattr(service_base, method_name)
         response_type: type[Message] = get_type_hints(method)["return"]  # type: ignore[reportArgumentType] -- method is Any from getattr on service_base
         setattr(
