@@ -255,12 +255,22 @@ def test_harness_detects_a_member_present_on_only_one_side() -> None:
 
 
 def test_harness_detects_a_renamed_parameter() -> None:
-    """`index` vs `idx` is a real divergence in Value.list_get today."""
+    """A renamed parameter is a silent break for keyword callers.
+
+    ``Value.list_get`` spelled this ``index`` on one engine and ``idx`` on the
+    other until it was unified; the synthetic pair keeps the detector honest
+    now that no real divergence of this shape remains.
+    """
     assert "Synthetic.renamed_param:params" in _keys()
 
 
 def test_harness_detects_reordered_parameters() -> None:
-    """Value.build reverses (store, build_mode) -- silent breakage for positional callers."""
+    """Reordered parameters are silent breakage for positional callers.
+
+    ``Value.build`` took ``(store, build_mode)`` in opposite orders across the
+    engines until it was unified; the synthetic pair below is what keeps this
+    detector covered now that the real instance is gone.
+    """
     assert "Synthetic.reordered:params" in _keys()
 
 
