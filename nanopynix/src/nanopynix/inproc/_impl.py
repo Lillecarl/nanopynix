@@ -1141,7 +1141,7 @@ class ReplSession(EvalSession):
 
     async def add_attrs(self, value: Value) -> list[str]:
         """Add all attributes from ``value`` to this REPL's lexical scope."""
-        local_value = value._local_for(self)  # type: ignore[reportPrivateUsage] -- same-evaluator guard  # noqa: SLF001
+        local_value = await value._resolve_for(self)  # type: ignore[reportPrivateUsage] -- same-evaluator guard  # noqa: SLF001
         return await self.run(self._require_core().repl_add_attrs, local_value)
 
     async def scope_names(self) -> list[str]:
@@ -1214,14 +1214,38 @@ class LockedFlake:
 
 
 class Value:
-    """Async façade over a thread-confined :class:`CoreValue`."""
+    """Async façade over a thread-confined :class:`CoreValue`.
 
-    def __init__(self, eval_session: EvalSession, local: CoreValue) -> None:
+    A value is in one of two states. A *resolved* value holds a rooted
+    ``CoreValue``. A *lazy* value holds only a parent and one selector -- an
+    attribute name or a list index -- and no Nix work has been done for it at
+    all; the selection happens the first time something forces it.
+
+    That is rpc's ``ValueProxy`` shape, adopted here so that navigating a
+    value tree reads the same on both engines. It used to be inproc's alone
+    that made ``attr``/``list_get`` coroutines, which the signature ledger
+    carried as ``Value.attr:async`` and ``Value.list_get:async``: chained
+    selection had to be spelled ``(await (await v.attr("a")).attr("b"))`` on
+    one engine and ``v.attr("a").attr("b")`` on the other, so a caller could
+    not be written once. Deferring also means a branch nobody reads is never
+    evaluated, which is the property that makes the rpc spelling worth
+    matching rather than the other way round.
+    """
+
+    def __init__(
+        self,
+        eval_session: EvalSession,
+        local: CoreValue | None = None,
+        *,
+        pending: tuple[Value, str | int] | None = None,
+    ) -> None:
         self._eval_session = eval_session
         self._core: CoreValue | None = local
+        self._pending = pending
+        self._released = False
 
     async def __aenter__(self) -> Value:
-        self._local_for(self._eval_session)
+        self._check_active()
         return self
 
     async def __aexit__(self, *args: object) -> None:
@@ -1234,19 +1258,59 @@ class Value:
         have both with ``release`` a one-line alias, and two names for one
         operation on one engine is the kind of thing that makes an API look
         like it has two concepts.
+
+        Releasing a value that was never forced costs no hop onto the Nix
+        thread -- there is nothing rooted yet to release -- but it still marks
+        the value released, so forcing it afterwards raises rather than
+        quietly performing the selection.
         """
         local = self._core
         self._core = None
+        self._pending = None
+        self._released = True
         if local is not None:
             await self._eval_session.run(local.close)
 
-    def _local_for(self, eval_session: EvalSession) -> CoreValue:
+    def _check_active(self) -> None:
+        """Reject use of a released value, without requiring it to be resolved."""
         self._eval_session._require_core()  # type: ignore[reportPrivateUsage] -- liveness check before pointer use  # noqa: SLF001
+        if self._released:
+            raise InprocValueReleasedError("Value has been released")
+
+    async def _resolve(self) -> CoreValue:
+        """Perform the deferred selection, if any, and return the rooted value.
+
+        Parent-first, one hop per link, mirroring rpc's
+        ``ValueProxy._ensure_resolved``. Collapsing a whole chain into a single
+        dispatch onto the Nix thread would be faster and is deliberately not
+        done: a selection that raises partway would leave the links before it
+        rooted with no ``Value`` to release them, and a cross-engine test that
+        only compares the final result cannot see that leak.
+        """
+        self._check_active()
+        pending = self._pending
+        if pending is not None:
+            parent, selector = pending
+            parent_local = await parent._resolve()  # noqa: SLF001 -- lazy chains walk their own parents
+            select = parent_local.attr_get if isinstance(selector, str) else parent_local.list_get
+            self._core = await self._eval_session.run(select, selector)  # type: ignore[arg-type] -- selector type matches the accessor picked above
+            self._pending = None
+        local = self._core
+        if local is None:
+            raise InprocValueReleasedError("Value has been released")
+        return local
+
+    async def _resolve_for(self, eval_session: EvalSession) -> CoreValue:
+        """Force this value on behalf of ``eval_session``, rejecting a foreign one.
+
+        The async replacement for a synchronous ``_local_for``: a caller can
+        now be handed a value that has never touched Nix, so reaching its
+        rooted ``CoreValue`` is no longer something that can happen without a
+        hop.
+        """
         if eval_session is not self._eval_session:
             raise ValueError("Value belongs to a different inproc EvalSession")
-        if self._core is None:
-            raise InprocValueReleasedError("Value has been released")
-        return self._core
+        return await self._resolve()
 
     async def to_python(self, *, copy_to_store: bool = False) -> Any:
         """Convert the whole value tree to plain Python data, in one C++ pass.
@@ -1271,7 +1335,7 @@ class Value:
                 interpolation of a path does. If False (default), it renders
                 as a literal filesystem path, matching ``nix eval --json``.
         """
-        return await self._eval_session.run(self._local_for(self._eval_session).to_json, copy_to_store)
+        return await self._eval_session.run((await self._resolve()).to_json, copy_to_store)
 
     async def get_type(self) -> NixType:
         """Evaluate to WHNF and return the resulting Nix type.
@@ -1287,24 +1351,24 @@ class Value:
         WHNF verb's name, and so an exact duplicate of :meth:`to_python`.
         To force without converting, call this and ignore the answer.
         """
-        name = await self._eval_session.run(self._local_for(self._eval_session).type_name)
+        name = await self._eval_session.run((await self._resolve()).type_name)
         return NixType.from_string(name)  # type: ignore[attr-defined] -- added in models.py
 
     async def as_int(self) -> int:
         """Force this value and return it as ``int``. Raises if not an int."""
-        return await self._eval_session.run(self._local_for(self._eval_session).as_int)
+        return await self._eval_session.run((await self._resolve()).as_int)
 
     async def as_float(self) -> float:
         """Force this value and return it as ``float``. Raises if not a float."""
-        return await self._eval_session.run(self._local_for(self._eval_session).as_float)
+        return await self._eval_session.run((await self._resolve()).as_float)
 
     async def as_bool(self) -> bool:
         """Force this value and return it as ``bool``. Raises if not a bool."""
-        return await self._eval_session.run(self._local_for(self._eval_session).as_bool)
+        return await self._eval_session.run((await self._resolve()).as_bool)
 
     async def as_string(self) -> str:
         """Force this value and return it as ``str``. Raises if not a string."""
-        return await self._eval_session.run(self._local_for(self._eval_session).as_string)
+        return await self._eval_session.run((await self._resolve()).as_string)
 
     async def apply(self, function: str | Value) -> Value:
         """Apply a Nix function to this value and return the result.
@@ -1334,21 +1398,34 @@ class Value:
 
     async def realise_string(self) -> str:
         """Coerce this value to a string and realise its Nix string context."""
-        return await self._eval_session.run(self._local_for(self._eval_session).realise_string)
+        return await self._eval_session.run((await self._resolve()).realise_string)
 
     async def realise_argv(self) -> list[str]:
         """Coerce a Nix list to argv and realise all of its string contexts."""
-        return await self._eval_session.run(self._local_for(self._eval_session).realise_argv)
+        return await self._eval_session.run((await self._resolve()).realise_argv)
 
     async def edit_location(self) -> tuple[str, int]:
         """Return the physical file path and line Nix would open for this value."""
-        location = await self._eval_session.run(self._local_for(self._eval_session).edit_location)
+        location = await self._eval_session.run((await self._resolve()).edit_location)
         return location["path"], location["line"]
 
-    async def attr(self, name: str) -> Value:
-        """Force this value as an attrset and return attribute ``name``."""
-        local = await self._eval_session.run(self._local_for(self._eval_session).attr_get, name)
-        return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
+    def attr(self, name: str) -> Value:
+        """Select attribute ``name``, deferring the Nix work until forced.
+
+        Synchronous and lazy, matching rpc: ``value.attr("a").attr("b")``
+        builds a chain without touching Nix, and nothing is evaluated until
+        something forces the result. See :class:`Value` for why this shape and
+        not the coroutine this used to be.
+
+        Deferring the *work* is not deferring the *liveness check*: selecting
+        off a released value, or off one whose session has closed, is refused
+        here rather than at the eventual force. rpc's ``ValueProxy.attr`` does
+        the same, and it has to -- a chain built on a dead parent can never
+        resolve, so reporting it at construction is both earlier and the only
+        way the two engines agree on where the error comes from.
+        """
+        self._check_active()
+        return Value(self._eval_session, pending=(self, name))
 
     async def as_dict(self) -> dict[str, Value]:
         """Force this value as an attrset; keys now, values still lazy.
@@ -1368,7 +1445,7 @@ class Value:
 
         One dispatch onto the Nix thread rather than one per attribute.
         """
-        children = await self._eval_session.run(_attr_values, self._local_for(self._eval_session))
+        children = await self._eval_session.run(_attr_values, await self._resolve())
         track = self._eval_session._track_value  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
         return {name: track(child) for name, child in children.items()}
 
@@ -1377,47 +1454,64 @@ class Value:
 
         The list half of :meth:`as_dict`, with the same reasoning.
         """
-        children = await self._eval_session.run(_list_values, self._local_for(self._eval_session))
+        children = await self._eval_session.run(_list_values, await self._resolve())
         track = self._eval_session._track_value  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
         return [track(child) for child in children]
 
     async def has_attr(self, name: str) -> bool:
         """Force this value as an attrset and return whether ``name`` is present."""
-        return await self._eval_session.run(self._local_for(self._eval_session).has_attr, name)
+        return await self._eval_session.run((await self._resolve()).has_attr, name)
 
-    async def list_get(self, index: int) -> Value:
-        """Force this value as a list and return element ``index``."""
-        local = await self._eval_session.run(self._local_for(self._eval_session).list_get, index)
-        return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
+    def list_get(self, index: int) -> Value:
+        """Select element ``index``, deferring the Nix work until forced.
+
+        The list half of :meth:`attr`, with the same reasoning, liveness
+        check included.
+        """
+        self._check_active()
+        return Value(self._eval_session, pending=(self, index))
 
     async def attr_names(self) -> list[str]:
         """Force this value as an attrset and return its attribute names."""
-        return await self._eval_session.run(self._local_for(self._eval_session).attr_names)
+        return await self._eval_session.run((await self._resolve()).attr_names)
 
     async def list_length(self) -> int:
         """Force this value as a list and return its length."""
-        return await self._eval_session.run(self._local_for(self._eval_session).list_length)
+        return await self._eval_session.run((await self._resolve()).list_length)
 
-    async def call(self, argument: Value | Any) -> Value:
-        """Call this value as a Nix function with a single ``argument``.
+    async def call(self, *args: Value | Any) -> Value:
+        """Call this value as a Nix function with ``args``.
+
+        Nix functions are curried, so more than one argument is more than one
+        application: ``f(a, b)`` is ``f a b``. This used to take exactly one
+        ``argument``, which the signature ledger carried as
+        ``Value.call:params`` -- a two-argument call worked on rpc only.
 
         Args:
-            argument: A ``Value`` from the same ``EvalSession``, or a plain
-                Python value to convert to a Nix value.
+            *args: Each argument may be a ``Value`` from the same
+                ``EvalSession``, or a plain Python value to convert to a Nix
+                value.
+
+        Raises:
+            TypeError: No arguments were given; Nix has no nullary
+                application.
         """
-        local = self._local_for(self._eval_session)
-        argument_core = await self._argument_core(argument)
-        result = await self._eval_session.run(local.call, argument_core)
+        local = await self._resolve()
+        arguments = [await self._argument_core(argument) for argument in args]
+        result = await self._eval_session.run(local.call, *arguments)
         return self._eval_session._track_value(result)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
+
+    async def __call__(self, *args: Value | Any) -> Value:
+        return await self.call(*args)
 
     async def auto_call(self) -> Value:
         """Apply Nix top-level auto-call semantics to a function value."""
-        result = await self._eval_session.run(self._local_for(self._eval_session).auto_call)
+        result = await self._eval_session.run((await self._resolve()).auto_call)
         return self._eval_session._track_value(result)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
 
     async def _argument_core(self, argument: Value | Any) -> CoreValue:
         if isinstance(argument, Value):
-            return argument._local_for(self._eval_session)  # noqa: SLF001
+            return await argument._resolve_for(self._eval_session)  # noqa: SLF001 -- same-evaluator guard, and the argument may itself be unforced
         return await self._eval_session.run(self._eval_session._require_core().value_from_python, argument)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→Value coupling  # noqa: SLF001
 
     async def build(self, *, build_mode: BuildMode | int | None = None, store: Store | None = None) -> dict[str, str]:
@@ -1436,7 +1530,7 @@ class Value:
         # than through a method of its own: build() is the only caller, and a
         # public accessor for the intermediate would be inproc-only surface
         # with nothing on the other engine to match it.
-        derived_path = await self._eval_session.run(self._local_for(self._eval_session).derived_path)
+        derived_path = await self._eval_session.run((await self._resolve()).derived_path)
         results = await target_store.build_paths_with_results(
             [derived_path],
             build_mode=build_mode,

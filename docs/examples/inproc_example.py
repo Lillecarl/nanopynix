@@ -51,8 +51,8 @@ async def main() -> None:
             # --- attr()/list_get() still navigate lazily before forcing -----
 
             v2 = await eval_.string("{ inner = { x = 42; }; z = 99; }")
-            inner = await v2.attr("inner")
-            x = await inner.attr("x")
+            inner = v2.attr("inner")
+            x = inner.attr("x")
             assert await x.as_int() == 42
             print("attr navigation: x =", await x.as_int())
 

@@ -121,22 +121,33 @@ class AsyncValue(Protocol):
         """Return the number of elements in this list."""
         ...
 
+    # ── Selection ──────────────────────────────────────────────────
+    #
+    # `def`, not `async def`, on a protocol whose every other member is a
+    # coroutine: selecting a child does no Nix work on either engine now, it
+    # only records which child was asked for. The hop is deferred to whatever
+    # forces the result, not absent. That is what makes `v.attr("a").attr("b")`
+    # a legal chain rather than a stack of nested awaits.
+    #
+    # These three were the last members of the shared surface this protocol
+    # could not describe, because inproc awaited `attr`/`list_get` and took a
+    # single `call` argument. tests/nanopynix/test_engine_parity.py's ledger
+    # carried them as Value.attr:async, Value.list_get:async and
+    # Value.call:params.
+
+    def attr(self, name: str, /) -> Self:
+        """Select attribute ``name``, without forcing anything yet."""
+        ...
+
+    def list_get(self, index: int, /) -> Self:
+        """Select element ``index``, without forcing anything yet."""
+        ...
+
     # ── Application and realisation ────────────────────────────────
-    #
-    # Three members of the shared surface are deliberately absent, because no
-    # signature would be true of both engines. All three are recorded in
-    # tests/nanopynix/test_engine_parity.py, and that ledger -- not this
-    # protocol -- is where the work to remove them is tracked:
-    #
-    #   attr, list_get  inproc awaits; rpc returns a proxy synchronously so a
-    #                   chain costs one round trip instead of one per link.
-    #                   (Value.attr:async, Value.list_get:async)
-    #   call            inproc takes exactly one `argument`, rpc takes `*args`.
-    #                   (Value.call:params)
-    #
-    # Declaring any of them would mean writing down a shape one engine does
-    # not have, which is worse than the gap: it would make the conformance
-    # test fail for a reason the reader cannot act on here.
+
+    async def call(self, *args: Any) -> Self:
+        """Call this value as a curried Nix function with ``args``."""
+        ...
 
     async def apply(self, function: str | Self, /) -> Self:
         """Apply ``function`` to this value, returning the unforced result."""

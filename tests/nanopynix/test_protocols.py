@@ -103,9 +103,6 @@ def test_protocol_static_conformance() -> None:
 # in tests/nanopynix/test_engine_parity.py, which is where the work to remove
 # it is tracked; this table only records that the protocol is knowingly silent.
 UNDECLARED: dict[str, str] = {
-    "AsyncValue.attr": "inproc awaits, rpc returns a proxy synchronously -- see Value.attr:async.",
-    "AsyncValue.list_get": "as AsyncValue.attr -- see Value.list_get:async.",
-    "AsyncValue.call": "inproc takes one `argument`, rpc takes `*args` -- see Value.call:params.",
 }
 
 # (protocol name, protocol, inproc class, rpc class)

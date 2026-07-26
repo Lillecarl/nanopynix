@@ -532,8 +532,42 @@ class CoreValue:
     def auto_call(self) -> CoreValue:
         return self._eval_state.wrap_value(self.require_raw().auto_call())
 
-    def call(self, argument: CoreValue) -> CoreValue:
-        return self._eval_state.wrap_value(self.require_raw().call(argument.require_raw()))
+    def call(self, *arguments: CoreValue) -> CoreValue:
+        """Apply this value as a Nix function to each argument in turn.
+
+        Nix functions are curried -- ``f a b`` is ``(f a) b`` -- so more than
+        one argument means more than one application, and the partial results
+        in between are rooted values no caller ever sees. They are released
+        here, including on the way out of a failure, because nothing else
+        holds a reference to them.
+
+        Shared rather than per-engine: inproc took exactly one ``argument``,
+        which the signature ledger carried as ``Value.call:params``, and the
+        RPC worker ran this loop inline in ``_do_call``. That copy leaked one
+        rooted value per extra argument, and given no arguments at all it
+        handed back a second handle onto the *same* rooted value, so releasing
+        either handle freed it under the other.
+
+        Raises:
+            TypeError: No arguments were given. Nix has no nullary
+                application, so there is nothing for ``f()`` to mean.
+        """
+        if not arguments:
+            raise TypeError("call() needs at least one argument; Nix has no nullary application")
+        result = self.require_raw()
+        owned = False  # `result` is still the caller's value until the first application
+        try:
+            for argument in arguments:
+                applied = result.call(argument.require_raw())
+                if owned:
+                    result._release()  # type: ignore[reportPrivateUsage] -- L1 RootValue lifetime API  # noqa: SLF001
+                result = applied
+                owned = True
+        except BaseException:
+            if owned:
+                result._release()  # type: ignore[reportPrivateUsage] -- L1 RootValue lifetime API  # noqa: SLF001
+            raise
+        return self._eval_state.wrap_value(result)
 
     def build(self, build_store: CoreStore | None, build_mode: int, eval_store: CoreStore | None) -> dict[str, object]:
         return self.require_raw().build(

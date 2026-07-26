@@ -222,9 +222,14 @@ LEDGER: dict[str, str] = {
     # the odd one out rather than by adding its twin to the other engine.
     "Value.nix_type:rpc-only": "TRANSPORT: a sync property peeking at the type already known locally, no round trip. In-process there is no round trip to avoid, so `type` is always cheap and a separate peek would mean nothing.",
     "Value.handle:rpc-only": "TRANSPORT: the worker-side value handle this proxy stands for.",
-    "Value.attr:async": "DEFECT: inproc awaits, rpc returns a proxy synchronously. Callers cannot be written once against both.",
-    "Value.list_get:async": "DEFECT: as Value.attr.",
-    "Value.call:params": "DEFECT: an arity difference, not a rename -- inproc takes exactly one `argument`, rpc takes `*args`. A two-argument call works on one engine only.",
+    # Three more retired here, the last of the Value cluster. `attr` and
+    # `list_get` were "Value.attr:async"/"Value.list_get:async": inproc awaited
+    # them, rpc returned a lazy child synchronously, so chained selection had
+    # to be spelled two ways. inproc adopted rpc's shape rather than the
+    # reverse -- deferring is the property worth having, and rpc could not give
+    # it up without turning every `a.attr("x").attr("y")` into nested awaits.
+    # "Value.call:params" was an arity difference; both now take `*args` and
+    # share one curried implementation on CoreValue.
 }
 
 

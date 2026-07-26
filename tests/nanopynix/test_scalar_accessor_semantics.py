@@ -266,7 +266,7 @@ async def test_inproc_reads_a_string_carrying_store_path_context(inproc_session:
     """as_string and to_python both accept an interpolated derivation, and agree."""
     async with inproc_session() as session, session.store() as store, session.eval(store) as ev:
         value = await ev.string(CONTEXT_STRING_EXPR)
-        attr = await value.attr("s")
+        attr = value.attr("s")
         as_string = await attr.as_string()
         assert _is_store_path(as_string), as_string
         assert await value.to_python() == {"s": as_string}

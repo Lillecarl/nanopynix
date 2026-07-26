@@ -221,10 +221,13 @@ async def test_inproc_parallel_values_navigate_force_and_release() -> None:
                         for evaluator in evaluators
                     ),
                 )
-                nested = await asyncio.gather(*(value.attr("nested") for value in values))
-                children = await asyncio.gather(*(value.attr("value") for value in nested))
-                list_values = await asyncio.gather(*(value.attr("list") for value in values))
-                elements = await asyncio.gather(*(value.list_get(0) for value in list_values))
+                # Selection is lazy, so these build chains without dispatching
+                # anything; the `as_int()` gathers below are what force them,
+                # concurrently and one evaluator thread each.
+                nested = [value.attr("nested") for value in values]
+                children = [value.attr("value") for value in nested]
+                list_values = [value.attr("list") for value in values]
+                elements = [value.list_get(0) for value in list_values]
                 assert await asyncio.gather(*(value.as_int() for value in children)) == [index] * 4
                 assert await asyncio.gather(*(value.as_int() for value in elements)) == [index] * 4
                 await asyncio.gather(
@@ -242,7 +245,7 @@ async def test_inproc_evaluator_keeps_one_thread_for_its_entire_lifetime() -> No
         try:
             first_thread = await evaluator.run(threading.get_ident)
             value = await evaluator.string("{ answer = 6 * 7; }")
-            answer = await value.attr("answer")
+            answer = value.attr("answer")
             assert await answer.as_int() == 42
             assert await evaluator.run(threading.get_ident) == first_thread
             await asyncio.gather(value.release(), answer.release())
@@ -350,7 +353,7 @@ async def test_inproc_independent_builds_overlap_without_cpu_pressure(
                         second_seconds.call(uuid.uuid4().hex),
                     )
                     first_path, second_path = [
-                        await (await value.attr("drvPath")).as_string() for value in (first, second)
+                        await value.attr("drvPath").as_string() for value in (first, second)
                     ]
                     drv_paths.extend([first_path, second_path])
                     async with _measuring_build_dispatch(nix) as starts:
@@ -402,7 +405,7 @@ async def test_inproc_one_evaluator_extracts_and_builds_fifty_derivations(
                         # .drvPath is byte-identical to the DerivedPath string
                         # build() uses internally: a plain derivation selects all
                         # outputs.
-                        drv_paths.extend([await (await value.attr("drvPath")).as_string() for value in values])
+                        drv_paths.extend([await value.attr("drvPath").as_string() for value in values])
                         async with _measuring_build_dispatch(nix) as starts:
                             results = await store.build_paths_with_results(drv_paths)
                         assert len(results) == 50
@@ -453,7 +456,7 @@ async def test_inproc_parallel_batch_builds_use_multiple_store_workers(
                         # comprehension ruff wants would be an *async*
                         # generator, which extend() cannot consume.
                         derived_path_groups.append(  # noqa: PERF401 -- see comment above
-                            [await (await value.attr("drvPath")).as_string() for value in group]
+                            [await value.attr("drvPath").as_string() for value in group]
                         )
                     async with _measuring_build_dispatch(nix) as starts:
                         outputs = await asyncio.gather(
@@ -515,7 +518,7 @@ async def test_inproc_mixed_evaluation_build_and_store_workloads(
                     selected = paths[: min(4, len(paths))]
                     for values in build_values:
                         # As above: an awaiting comprehension is an async generator.
-                        build_paths.append([await (await value.attr("drvPath")).as_string() for value in values])  # noqa: PERF401 -- see comment above
+                        build_paths.append([await value.attr("drvPath").as_string() for value in values])  # noqa: PERF401 -- see comment above
                     build_tasks = [store.build_paths_with_results(paths) for paths in build_paths]
                     evaluation_tasks = [
                         evaluator.string("builtins.foldl' (a: b: a + b) 0 (builtins.genList (x: x) 10000)")

@@ -721,6 +721,8 @@ class ValueProxy:
                 function before calling it. None (default) waits indefinitely.
 
         Raises:
+            TypeError: No arguments were given; Nix has no nullary
+                application.
             NixTypeError: This value is not a function. Nix decides that in
                 the worker rather than the proxy pre-checking it here, which
                 is what makes the two engines agree: the pre-check raised
@@ -730,6 +732,12 @@ class ValueProxy:
             ForeignValueError: An argument ``ValueProxy`` belongs to a
                 different ``EvalSession``.
         """
+        # Refused here rather than in the worker so that both engines raise the
+        # same Python TypeError. CoreValue.call guards this too and is the real
+        # rule; letting it fire worker-side instead would send the failure back
+        # through the wire's exception mapping and arrive as NixTypeError.
+        if not args:
+            raise TypeError("call() needs at least one argument; Nix has no nullary application")
         await self._ensure_resolved(timeout=timeout)
         call_args = [await self._encode_call_arg(arg, timeout=timeout) for arg in args]
         result = await self._ctx.proxy.call(CallRequest(handle=self.handle, args=call_args))
@@ -832,12 +840,12 @@ class LockedFlakeHandle:
         lock can be evaluated before it is written to disk.
         """
         self._check_active()
-        return await self._session._eval_locked_flake(self, timeout=timeout)  # type: ignore[reportPrivateUsage] -- this handle is the public door onto its session's private by-handle call  # noqa: SLF001 -- same
+        return await self._session._eval_locked_flake(self, timeout=timeout)  # type: ignore[reportPrivateUsage] -- LockedFlakeHandle is its session's public door onto this private by-handle call  # noqa: SLF001 -- same reason
 
     async def write_lock_file(self, *, timeout: float | None = None) -> None:
         """Persist this locked flake's lock file to disk."""
         self._check_active()
-        await self._session._write_lock_file(self, timeout=timeout)  # type: ignore[reportPrivateUsage] -- as above  # noqa: SLF001 -- same
+        await self._session._write_lock_file(self, timeout=timeout)  # type: ignore[reportPrivateUsage] -- LockedFlakeHandle is its session's public door onto this private by-handle call  # noqa: SLF001 -- same reason
 
     async def release(self, *, timeout: float | None = None) -> None:
         """Release the worker-side handle for this locked flake. Idempotent."""
