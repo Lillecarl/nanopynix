@@ -22,6 +22,14 @@ disagree are the ones that normalise an argument or classify an error;
 ``get_store_dir`` and its kind cannot, and listing them would make this file
 look more protective than it is.
 
+Which is why ``PATH_ROWS`` exists. Both divergences above were found on one
+operation each, and the fix was shared for all of them -- so pinning two
+operations pins the fix but not the surface. Every read-only operation that
+takes a store path now gets probed with the same six inputs, from unparseable
+through well-formed-but-absent to really-there, and the whole row is compared
+at once. Measured when it was added: all twelve rows agree, and the row form is
+what makes that cheap to keep true.
+
 An outcome is a returned value or an exception **type name**, never a message:
 Nix colourises, ``BuildResult.error_msg`` carries ANSI escapes, and the two
 transports wrap differently. The type is what a caller branches on.
@@ -41,7 +49,7 @@ sufficient alone.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -67,6 +75,11 @@ DERIVED_PATH_SUFFIXES: list[str] = ["", "^out", "^out,dev", "^*"]
 # process rather than raise), a bare name, a bare word, and an absolute path
 # outside the store. All four must land on the same type on both engines.
 MALFORMED_PATHS: list[str] = ["", "x", "garbage", "/etc/passwd"]
+
+# A hash part is not a path and does not go through path normalisation, so it
+# gets its own inputs: too short, wrong length by one, and a well-formed one
+# that matches nothing.
+HASH_PARTS: list[str] = ["", "x", "a" * 33, "z" * 32]
 
 
 # ── Operations ───────────────────────────────────────────────────────
@@ -99,6 +112,11 @@ async def _build_paths_with_results(store: Any, suffix: str) -> list[tuple[str, 
     return [(str(r.drv_path), str(r.status)) for r in results]
 
 
+def _hash_part(seeded: StorePath) -> str:
+    """The 32-character hash component of a store path, without its name."""
+    return _relative(seeded).split("-", 1)[0]
+
+
 def _relative(seeded: StorePath) -> str:
     """The seeded path with its store directory stripped off.
 
@@ -119,6 +137,62 @@ class StoreCase:
 
     name: str
     operation: Callable[[Any, StorePath], Awaitable[Any]]
+
+
+@dataclass(frozen=True)
+class PathRow:
+    """One operation, probed with every input in ``_row_inputs``.
+
+    A row rather than one case per input, for two reasons. It is the shape the
+    question actually has -- "does this operation classify the same way as the
+    other engine, across the range from unparseable to present" -- and it is
+    one session per operation instead of one per cell, which is what makes
+    covering the whole surface affordable rather than a minute of process
+    spawning.
+    """
+
+    name: str
+    operation: Callable[[Any, str], Awaitable[Any]]
+
+
+# Every read-only operation that takes a store path. Read-only is the whole
+# admission criterion: these run against the suite's shared store, twice per
+# case, so an operation that changed it would make the second engine's answer
+# depend on the first's. That excludes `ensure_path` (substitutes, so also
+# slow and network-shaped), the three root-creating calls, and the three
+# store-wide ones (`collect_garbage`, `optimise_store`, `verify_store`).
+#
+# `add_temp_root` is here despite writing something, because what it writes is
+# a root that lives and dies with the session holding it -- nothing a later
+# case can observe. It earns its place by normalising its argument, which is
+# the property under test.
+#
+# Eleven of the twelve normalise through `CoreStore._store_path`.
+# `follow_links_to_store_path` is the one that does not, by design: its argument
+# is an arbitrary filesystem path that Nix resolves and then locates in the
+# store, so it never sees a `StorePath`. Measured, not assumed -- collapsing
+# `_store_path` turns the other eleven rows red and leaves that one green.
+PATH_ROWS: list[PathRow] = [
+    PathRow("is_valid_path", lambda store, path: store.is_valid_path(path)),
+    PathRow("parse_store_path", lambda store, path: store.parse_store_path(path)),
+    PathRow("query_path_info", lambda store, path: store.query_path_info(path)),
+    PathRow("read_derivation", lambda store, path: store.read_derivation(path)),
+    PathRow("compute_fs_closure", lambda store, path: store.compute_fs_closure(path)),
+    PathRow("query_referrers", lambda store, path: store.query_referrers(path)),
+    PathRow("query_valid_derivers", lambda store, path: store.query_valid_derivers(path)),
+    PathRow("query_derivation_outputs", lambda store, path: store.query_derivation_outputs(path)),
+    PathRow("query_substitutable_paths", lambda store, path: store.query_substitutable_paths([path])),
+    PathRow("get_build_log", lambda store, path: store.get_build_log(path)),
+    PathRow("add_temp_root", lambda store, path: store.add_temp_root(path)),
+    PathRow("follow_links_to_store_path", lambda store, path: store.follow_links_to_store_path(path)),
+]
+
+# The one operation whose argument is not a path. Same row mechanism, different
+# inputs, so it is a row of its own rather than an exception inside the table
+# above.
+HASH_PART_ROWS: list[PathRow] = [
+    PathRow("query_path_from_hash_part", lambda store, part: store.query_path_from_hash_part(part)),
+]
 
 
 SUCCESS_CASES: list[StoreCase] = [
@@ -183,6 +257,58 @@ async def _run(factory: Any, case: StoreCase, seeded: StorePath) -> Outcome:
             return ("raise", type(exc).__name__)
 
 
+def _malformed_label(path: str) -> str:
+    return f"malformed {path!r}"
+
+
+def _row_inputs(seeded: StorePath) -> dict[str, str]:
+    """The inputs every path row is probed with, worst-formed first.
+
+    Three bands, and the row is only interesting because it spans all of them:
+    inputs that cannot be parsed at all, one that parses cleanly but names
+    nothing, and one that is really in the store. An engine can agree with the
+    other on the first band and still disagree on the third.
+    """
+    return {
+        **{_malformed_label(path): path for path in MALFORMED_PATHS},
+        "relative": _relative(seeded),
+        "absent": _ABSENT,
+        "present": str(seeded),
+    }
+
+
+# Which labels make up each band. The distinctness gate compares bands rather
+# than individual cells, so the grouping has to be stated somewhere; keeping it
+# next to _row_inputs is what lets a test assert the two agree on the labels
+# they name, which is also what catches a new malformed spelling colliding with
+# a band's own label and silently deleting a probe.
+_BANDS: dict[str, tuple[str, ...]] = {
+    "unparseable": tuple(_malformed_label(path) for path in MALFORMED_PATHS),
+    "absent": ("absent",),
+    # The relative spelling belongs here rather than in a band of its own: it
+    # resolves to the seeded path, so a correct engine answers it exactly as it
+    # answers the absolute one.
+    "present": ("relative", "present"),
+}
+
+
+async def _run_row(factory: Any, row: PathRow, inputs: dict[str, str]) -> dict[str, Outcome]:
+    """Every input through one operation, in one session.
+
+    Outcomes are the real objects, not their reprs, so a ``PathInfo`` is
+    compared field by field the way the single-case tables compare their
+    values.
+    """
+    outcomes: dict[str, Outcome] = {}
+    async with factory() as session, session.store() as store:
+        for label, value in inputs.items():
+            try:
+                outcomes[label] = ("value", await row.operation(store, value))
+            except Exception as exc:  # the exception type *is* the measurement
+                outcomes[label] = ("raise", type(exc).__name__)
+    return outcomes
+
+
 @pytest.mark.parametrize("case", SUCCESS_CASES, ids=lambda case: case.name)
 async def test_engines_agree_on_success(
     case: StoreCase,
@@ -211,6 +337,95 @@ async def test_engines_agree_on_failure(
 
     assert inproc_outcome[0] == "raise", f"inproc did not raise: {inproc_outcome!r}"
     assert inproc_outcome == rpc_outcome
+
+
+@pytest.mark.parametrize("row", PATH_ROWS, ids=lambda row: row.name)
+async def test_engines_agree_across_a_whole_input_row(
+    row: PathRow,
+    seeded_store_path: StorePath,
+    inproc_session: InprocSessionFactory,
+    rpc_session: RpcSessionFactory,
+) -> None:
+    """One operation, six inputs, both engines -- every cell must match.
+
+    The comparison is per label rather than dict-to-dict so a failure names the
+    input that disagreed instead of printing two six-entry dicts side by side.
+    """
+    inputs = _row_inputs(seeded_store_path)
+    inproc_row = await _run_row(inproc_session, row, inputs)
+    rpc_row = await _run_row(rpc_session, row, inputs)
+
+    for label in inputs:
+        assert inproc_row[label] == rpc_row[label], (
+            f"{row.name} disagrees on {label}: inproc={inproc_row[label]!r} rpc={rpc_row[label]!r}"
+        )
+
+
+@pytest.mark.parametrize("row", PATH_ROWS, ids=lambda row: row.name)
+async def test_every_row_tells_its_inputs_apart(
+    row: PathRow,
+    seeded_store_path: StorePath,
+    inproc_session: InprocSessionFactory,
+) -> None:
+    """A row that answers everything the same way proves nothing about anything.
+
+    The teeth for the blind spot the module docstring names: the comparison
+    above holds two engines against each other, so a change that degraded both
+    -- normalisation rejecting every input, or an error handler swallowing
+    every failure into one class -- would still read as agreement. Measured:
+    collapsing ``CoreStore._store_path`` onto one input turns eleven of the
+    twelve rows red here while leaving the parity comparison above green.
+
+    Two named bands, not "any two cells differ". The weaker phrasing is
+    satisfied by two malformed spellings failing differently, which says
+    nothing about whether the operation can tell a real path from garbage --
+    and it is what a comparison over all three bands collapses to anyway, since
+    the absent band holds one label and so can only equal a band that is
+    uniform. So the assertion is specifically that the present band and the
+    unparseable band answer differently.
+
+    Not "present must succeed": ``read_derivation`` raises on the seeded path,
+    which is a regular file and not a derivation. That is a different failure
+    from rejecting garbage, and telling those two apart is exactly the property
+    being asserted.
+
+    One engine is enough. This is about the operation's own behaviour, not
+    about the two agreeing, and the test above already covers the agreeing.
+    """
+    outcomes = await _run_row(inproc_session, row, _row_inputs(seeded_store_path))
+
+    empty = outcomes[_malformed_label("")]
+    assert empty[0] == "raise", f"{row.name} accepted an empty path: {empty!r}"
+    bands = {band: frozenset(repr(outcomes[label]) for label in labels) for band, labels in _BANDS.items()}
+    assert bands["present"] != bands["unparseable"], (
+        f"{row.name} cannot tell a real store path from garbage: {bands!r}"
+    )
+
+
+@pytest.mark.parametrize("row", HASH_PART_ROWS, ids=lambda row: row.name)
+async def test_engines_agree_across_a_hash_part_row(
+    row: PathRow,
+    seeded_store_path: StorePath,
+    inproc_session: InprocSessionFactory,
+    rpc_session: RpcSessionFactory,
+) -> None:
+    """The hash-part half of the row comparison, including a real hash part.
+
+    The seeded path's own hash part is what makes this more than a table of
+    rejections: it is the one input that must resolve back to the path it came
+    from, on both engines.
+    """
+    inputs = {**{f"malformed {part!r}": part for part in HASH_PARTS}, "present": _hash_part(seeded_store_path)}
+    inproc_row = await _run_row(inproc_session, row, inputs)
+    rpc_row = await _run_row(rpc_session, row, inputs)
+
+    for label in inputs:
+        assert inproc_row[label] == rpc_row[label], (
+            f"{row.name} disagrees on {label}: inproc={inproc_row[label]!r} rpc={rpc_row[label]!r}"
+        )
+    assert inproc_row["present"] == ("value", seeded_store_path), (
+        f"a real hash part must resolve to its own path, got {inproc_row['present']!r}"
+    )
 
 
 async def test_an_unmapped_gc_action_is_a_ValueError_on_both_engines(  # noqa: N802 -- ValueError is a type name, not a word
@@ -282,6 +497,23 @@ def test_both_case_tables_are_populated() -> None:
     """An empty table passes every parametrized test by having no cases at all."""
     assert SUCCESS_CASES
     assert FAILURE_CASES
+
+
+def test_every_row_input_keeps_its_own_label() -> None:
+    """A collision would delete a probe and leave every row still passing.
+
+    ``_row_inputs`` is a dict keyed by label, so two inputs rendering to one
+    label means one of them is simply never run -- and the rows would go on
+    agreeing about the five that remain. This pins the count, and pins that
+    ``_BANDS`` names exactly the labels that exist, which is the same failure
+    seen from the other side: a malformed spelling equal to ``"present"`` would
+    both swallow a probe and quietly move a cell into the wrong band.
+    """
+    inputs = _row_inputs(cast("Any", f"/nix/store/{_HASH_PART}-nanopynix-label-probe"))
+
+    assert len(inputs) == len(MALFORMED_PATHS) + 3, f"a row input lost its label: {sorted(inputs)}"
+    banded = {label for labels in _BANDS.values() for label in labels}
+    assert banded == set(inputs), f"bands and inputs disagree: {banded ^ set(inputs)}"
 
 
 def test_case_names_are_unique() -> None:
