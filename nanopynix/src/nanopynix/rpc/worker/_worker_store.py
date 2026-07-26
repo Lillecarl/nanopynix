@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import functools
+from typing import TYPE_CHECKING, Any, Concatenate, Protocol
 
 from nanopynix_bindings import store as nanopynix_store
+from nanopynix_proto.nix.common import BuildResultList, MissingInfo
 from nanopynix_proto.nix.store import (
+    BuildPathsWithResultsRequest,
     CopyClosureRequest,
     CopyClosureResponse,
     IsValidPathRequest,
     IsValidPathResponse,
+    QueryMissingRequest,
     StoreServiceBase,
 )
 
@@ -17,16 +21,55 @@ from nanopynix._wire import HandleKind
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
 from nanopynix.rpc.worker._service_adapter import (
     GeneratedServiceAdapterMixin,
-    HandleArgSpec,
     proto_request_to_dict,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from types import CoroutineType
+
     from nanopynix._core._local import LocalStore
 
 
 def _store_binding_method_names() -> set[str]:
     return {name for name in dir(nanopynix_store.Store) if name.startswith("store_")}
+
+
+class _StoreDispatch(Protocol):
+    """What :func:`_store_op` needs from the handler it decorates."""
+
+    async def _run(self, message: Any, operation: Any) -> Any: ...
+
+
+def _store_op[S: _StoreDispatch, **P, R](
+    handler: Callable[Concatenate[S, P], R],
+) -> Callable[Concatenate[S, P], CoroutineType[Any, Any, R]]:
+    """Turn a synchronous store handler into its async gRPC entry point.
+
+    Store work runs on the worker's bounded thread pool via
+    ``anyio.to_thread.run_sync``, which takes a *sync* callable -- so each RPC
+    would otherwise need two methods, an ``async def`` that dispatches and a
+    ``_do_`` that does the work (the shape ``_worker_eval.py`` still uses).
+    This collapses the pair: write the sync body, get the dispatch for free.
+
+    ``Concatenate``/``ParamSpec`` rather than ``Callable[[S, M], R]`` because
+    the latter erases the parameter *name*, and the generated
+    ``StoreServiceBase`` declares its ``message`` argument keyword-capable --
+    an override that lost the name would not be a valid override.
+    """
+
+    @functools.wraps(handler)
+    async def entrypoint(self: S, *args: P.args, **kwargs: P.kwargs) -> R:
+        message = args[0] if args else next(iter(kwargs.values()))
+        # pyright: ignore is on the next line rather than a rename because
+        # _run must stay private: wrap_service_handlers treats every public
+        # async method on the handler as an RPC entry point.
+        return await self._run(  # type: ignore[reportPrivateUsage] -- _StoreDispatch declares _run as this protocol's whole contract
+            message,
+            functools.partial(handler, self),
+        )
+
+    return entrypoint
 
 
 @wrap_service_handlers
@@ -37,11 +80,10 @@ class StoreServiceHandler(
     binding_method_names=_store_binding_method_names(),
     method_prefix="store_",
     nix_executor_attr="_state.store_limiter",
-    extra_handle_args={
-        # store_copy_closure's entry is gone: copy_closure has a typed handler
-        # below and no longer goes through the generated dict forwarder.
-        "store_build_paths_with_results": (HandleArgSpec("eval_store_handle", "eval_store", HandleKind.STORE),),
-    },
+    # extra_handle_args is gone: its only two entries were copy_closure and
+    # build_paths_with_results, the two RPCs that pass a second live Store.
+    # Both now have typed handlers below, which resolve that handle directly
+    # instead of declaring it for the generic forwarder to inject.
 ):
     """gRPC handler backed by proto-shaped nanobind store methods.
 
@@ -78,17 +120,28 @@ class StoreServiceHandler(
     # --- Typed handlers -------------------------------------------------
     # These replace the generated dict forwarders one RPC at a time; see
     # _install_generated_service_methods, which skips any name defined here.
+    # Each is written synchronously and made async by @_store_op.
 
-    async def is_valid_path(self, message: IsValidPathRequest) -> IsValidPathResponse:
-        return await self._run(message, self._do_is_valid_path)
-
-    def _do_is_valid_path(self, message: IsValidPathRequest) -> IsValidPathResponse:
+    @_store_op
+    def is_valid_path(self, message: IsValidPathRequest) -> IsValidPathResponse:
         return IsValidPathResponse(valid=self._resolve(message.store_handle).is_valid_path(message.path))
 
-    async def copy_closure(self, message: CopyClosureRequest) -> CopyClosureResponse:
-        return await self._run(message, self._do_copy_closure)
+    @_store_op
+    def query_missing(self, message: QueryMissingRequest) -> MissingInfo:
+        return self._resolve(message.store_handle).query_missing(list(message.derived_paths))
 
-    def _do_copy_closure(self, message: CopyClosureRequest) -> CopyClosureResponse:
+    @_store_op
+    def build_paths_with_results(self, message: BuildPathsWithResultsRequest) -> BuildResultList:
+        return BuildResultList(
+            results=self._resolve(message.store_handle).build_paths_with_results(
+                list(message.derived_paths),
+                build_mode=message.build_mode,
+                eval_store=self._resolve(message.eval_store_handle) if message.eval_store_handle else None,
+            ),
+        )
+
+    @_store_op
+    def copy_closure(self, message: CopyClosureRequest) -> CopyClosureResponse:
         if not message.dest_store_handle:
             # A missing argument, not a store failure: a copy with no
             # destination is meaningless, and the proto documents the field as
@@ -105,17 +158,7 @@ class StoreServiceHandler(
 
     def _nanobind_rpc_call(self, binding_method_name: str, message: Any) -> Any:
         request = proto_request_to_dict(message)
-        store_handle = request.pop("store_handle", 0)
-        store = self._get_store(store_handle)
+        store = self._get_store(request.pop("store_handle", 0))
         if hasattr(store, binding_method_name):
-            method = getattr(store, binding_method_name)
-            # GeneratedServiceAdapterMixin's extension-point helper is meant to be
-            # called from subclass overrides of _nanobind_rpc_call defined in other
-            # files -- same intentional cross-file mixin pattern _service_adapter.py's
-            # own header comment already documents for _nanobind_rpc_call itself.
-            extra_kwargs = self._resolve_extra_binding_args(  # pyright: ignore[reportPrivateUsage]
-                binding_method_name,
-                request,
-            )
-            return method(request, **extra_kwargs)
+            return getattr(store, binding_method_name)(request)
         raise RuntimeError(f"missing checked nanobind store method: {binding_method_name}")

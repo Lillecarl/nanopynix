@@ -15,6 +15,7 @@ from nanopynix_bindings import flake as nanopynix_flake
 from nanopynix_bindings import store as nanopynix_store
 
 from nanopynix._core._nix_core import NixCore
+from nanopynix.models import BuildResult, MissingInfo
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -96,6 +97,31 @@ class LocalStore:
 
     def is_valid_path(self, path: str | nanopynix_store.StorePath) -> bool:
         return self.require_raw().is_valid_path(self._store_path(path))
+
+    def query_missing(self, derived_paths: Sequence[str | nanopynix_store.StorePath]) -> MissingInfo:
+        """Return which of ``derived_paths`` still need building or substituting.
+
+        Derived paths, not store paths: a plain ``.drv`` means all of that
+        derivation's outputs, and Nix's ``^`` separator selects specific ones.
+        Both spellings are parsed in C++ by ``parse_derived_paths``.
+        """
+        result = self.require_raw().query_missing([str(path) for path in derived_paths])
+        return MissingInfo(**result)
+
+    def build_paths_with_results(
+        self,
+        derived_paths: Sequence[str | nanopynix_store.StorePath],
+        *,
+        build_mode: int,
+        eval_store: LocalStore | None = None,
+    ) -> list[BuildResult]:
+        """Build ``derived_paths`` and return one result per Nix build outcome."""
+        results = self.require_raw().build_paths_with_results(
+            [str(path) for path in derived_paths],
+            build_mode,
+            None if eval_store is None else eval_store.require_raw(),
+        )
+        return [BuildResult(**result) for result in results]
 
     def copy_closure(
         self,
