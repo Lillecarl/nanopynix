@@ -35,7 +35,7 @@ from nanopynix_proto.nix.worker import (
 )
 
 from nanopynix._wire import DEFAULT_STORE_URI, WORKER_INIT_STATUS_OK
-from nanopynix.exceptions import from_response
+from nanopynix.exceptions import SessionClosedError, from_response
 from nanopynix.logging import ACTIVE_LOG_CAPTURES, BusSubscription, CallbackBus
 from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC, unpack_error_details
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
@@ -297,6 +297,14 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
                 with contextlib.suppress(anyio.get_cancelled_exc_class()):
                     await self._log_task
             self._log_task = None
+        # Back to exactly the state __init__ left, so a closed client is
+        # indistinguishable from one that was never opened and both refuse work
+        # the same way -- see invoke(). inproc's Session says the same thing
+        # with one `_opened` flag; here the stubs *are* the flag.
+        self._channel = None
+        self._worker_service_stub = None
+        self._store_service_stub = None
+        self._eval_service_stub = None
         stack, self._stack = self._stack, None
         if stack is None:
             return
@@ -315,7 +323,12 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
     async def invoke(self, method: Callable[..., Any], request: Any, *, timeout: float) -> Any:  # noqa: ASYNC109 -- timeout passed to grpclib stub method which accepts a timeout parameter
         """Assign a worker-local operation ID and dispatch one unary RPC."""
         if self._channel is None:
-            raise WorkerDiedError("Worker not started")
+            # Backstop rather than the guard that normally fires: every caller
+            # reaches a stub property first (`self.worker_stub.shutdown` is
+            # evaluated before invoke runs), and those refuse a closed session
+            # with this same class. This catches a method captured while the
+            # session was open and called after it closed.
+            raise SessionClosedError("rpc Session is not open — use async with")
         request_id = self._next_request_id
         self._next_request_id += 1
         request.request_id = request_id
@@ -411,23 +424,35 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         self._verbosity = response.verbosity
         return response.verbosity
 
+    # The three stub properties are where a closed session is actually refused:
+    # every dispatch names one, so together they are rpc's counterpart of
+    # inproc's `Session.run` calling `_check_open`. They used to raise
+    # WorkerDiedError("Worker not started"), which was wrong twice over --
+    # nothing died, and the case it really covered ("never opened") had no way
+    # to also mean "closed", because close() left the stubs in place. close()
+    # now clears them, so both situations arrive as one class, as inproc has
+    # always had it. A worker that genuinely dies mid-session still surfaces as
+    # WorkerDiedError, from _grpc_call.
+    #
+    # Neither engine guards store()/eval()/repl() themselves: they hand back an
+    # object, and the object's first piece of work is what fails.
     @property
     def worker_stub(self) -> WorkerServiceStub:
         stub = self._worker_service_stub
         if stub is None:
-            raise WorkerDiedError("Worker not started")
+            raise SessionClosedError("rpc Session is not open — use async with")
         return stub
 
     @property
     def store_stub(self) -> StoreServiceStub:
         stub = self._store_service_stub
         if stub is None:
-            raise WorkerDiedError("Worker not started")
+            raise SessionClosedError("rpc Session is not open — use async with")
         return stub
 
     @property
     def eval_stub(self) -> EvalServiceStub:
         stub = self._eval_service_stub
         if stub is None:
-            raise WorkerDiedError("Worker not started")
+            raise SessionClosedError("rpc Session is not open — use async with")
         return stub
