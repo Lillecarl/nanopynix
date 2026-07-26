@@ -471,7 +471,7 @@ class TestValueProxyLifecycle:
 
         There used to be a proxy-side guard here that compared the cached type
         and raised ``WrongNixTypeError`` without ever calling. It was removed:
-        ``WrongNixTypeError`` is an ``EvalProxyError``, unrelated to the
+        ``WrongNixTypeError`` is an ``ObjectMisuseError``, unrelated to the
         ``NixTypeError`` inproc raises for the same mistake, so no single
         ``except`` covered both engines -- and the message the guard produced
         was ours rather than Nix's.

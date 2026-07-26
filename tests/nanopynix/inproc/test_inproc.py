@@ -151,7 +151,7 @@ async def test_inproc_value_rejects_use_after_eval_close(inproc_session: InprocS
         await eval.open()
         value = await eval.string("1")
         await eval.close()
-        with pytest.raises(inproc.InprocSessionClosedError):
+        with pytest.raises(nanopynix.EvalSessionClosedError):
             await value.get_type()
 
 
@@ -160,7 +160,7 @@ async def test_inproc_value_context_manager_releases_rooted_value(inproc_session
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         async with await eval.string("{ answer = 42; }") as root:
             assert await root.attr("answer").as_int() == 42
-        with pytest.raises(inproc.InprocValueReleasedError):
+        with pytest.raises(nanopynix.ValueReleasedError):
             await root.get_type()
 
 
@@ -171,7 +171,7 @@ async def test_inproc_eval_close_releases_values_left_open(inproc_session: Inpro
         await eval.open()
         value = await eval.string("1")
         await eval.close()
-        with pytest.raises(inproc.InprocSessionClosedError):
+        with pytest.raises(nanopynix.EvalSessionClosedError):
             await value.get_type()
 
 
@@ -202,7 +202,7 @@ async def test_inproc_store_cannot_close_while_its_eval_state_is_open(inproc_ses
         with pytest.raises(RuntimeError, match="close the EvalSession first"):
             await store.close()
         await store.close(force=True)
-        with pytest.raises(inproc.InprocSessionClosedError):
+        with pytest.raises(nanopynix.EvalSessionClosedError):
             await eval.string("1")
 
 
@@ -221,7 +221,7 @@ async def test_inproc_locked_flake_facade(tmp_path: Path, inproc_session: Inproc
         await locked.write_lock_file()
         assert (tmp_path / "flake.lock").exists()
         await locked.release()
-        with pytest.raises(inproc.InprocLockedFlakeReleasedError):
+        with pytest.raises(nanopynix.LockedFlakeReleasedError):
             await locked.eval()
 
 
@@ -774,7 +774,7 @@ async def test_inproc_value_build_and_release(
         assert await out_path.read_text() == "built-via-inproc\n"
 
         await drv.release()
-        with pytest.raises(inproc.InprocValueReleasedError):
+        with pytest.raises(nanopynix.ValueReleasedError):
             await drv.get_type()
 
 
@@ -801,9 +801,9 @@ async def test_inproc_selection_on_a_released_value_raises_at_selection(
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         value = await eval.string("{ a = 1; }")
         await value.release()
-        with pytest.raises(inproc.InprocValueReleasedError):
+        with pytest.raises(nanopynix.ValueReleasedError):
             value.attr("a")
-        with pytest.raises(inproc.InprocValueReleasedError):
+        with pytest.raises(nanopynix.ValueReleasedError):
             value.list_get(0)
 
 
@@ -936,7 +936,7 @@ async def test_inproc_session_subscribe_receives_a_request_finalized_event(
 async def test_inproc_store_not_open_raises(inproc_session: InprocSessionFactory) -> None:
     async with inproc_session() as nix:
         store = nix.store()
-        with pytest.raises(inproc.InprocSessionClosedError):
+        with pytest.raises(nanopynix.StoreClosedError):
             await store.uri()
 
 
@@ -1014,7 +1014,7 @@ async def test_inproc_store_open_is_idempotent(inproc_session: InprocSessionFact
 @pytest.mark.anyio
 async def test_inproc_session_run_before_open_raises() -> None:
     session = inproc.Session(load_config=False)
-    with pytest.raises(inproc.InprocSessionClosedError):
+    with pytest.raises(nanopynix.SessionClosedError):
         await session.run(lambda: None)
 
 
@@ -1030,7 +1030,7 @@ async def test_inproc_eval_rejects_store_from_different_session(inproc_session: 
 async def test_inproc_eval_open_requires_open_store(inproc_session: InprocSessionFactory) -> None:
     async with inproc_session() as nix:
         store = nix.store()
-        with pytest.raises(inproc.InprocSessionClosedError):
+        with pytest.raises(nanopynix.StoreClosedError):
             await nix.eval(store).open()
 
 
@@ -1063,7 +1063,7 @@ async def test_inproc_repl_requires_open_repl(inproc_session: InprocSessionFacto
     """
     async with inproc_session() as nix, nix.store() as store:
         repl = nix.repl(store)
-        with pytest.raises(inproc.InprocSessionClosedError):
+        with pytest.raises(nanopynix.EvalSessionClosedError):
             await repl.line("answer = 42")
 
 
@@ -1079,7 +1079,7 @@ async def test_inproc_session_close_auto_closes_open_eval(inproc_session: Inproc
 
     await session.close()
 
-    with pytest.raises(inproc.InprocSessionClosedError):
+    with pytest.raises(nanopynix.EvalSessionClosedError):
         await value.get_type()
 
 
@@ -1097,7 +1097,7 @@ async def test_inproc_eval_close_releases_leftover_locked_flakes(
         await eval.close()
 
         assert locked not in eval._locked_flakes  # type: ignore[reportPrivateUsage] -- verifying close() drained the leftover locked flake
-        with pytest.raises(inproc.InprocSessionClosedError):
+        with pytest.raises(nanopynix.EvalSessionClosedError):
             await locked.eval()
 
 

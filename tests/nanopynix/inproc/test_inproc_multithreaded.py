@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from nanopynix_bindings import util as nanopynix_util
 
-from nanopynix import NixSettings, inproc
+from nanopynix import EvalSessionClosedError, NixSettings, inproc
 
 pytestmark = pytest.mark.concurrency
 
@@ -321,7 +321,7 @@ async def test_inproc_forced_store_close_invalidates_dependent_evaluator() -> No
         await evaluator.open()
         value = await evaluator.string("42")
         await store.close(force=True)
-        with pytest.raises(inproc.InprocSessionClosedError, match="EvalSession is not open"):
+        with pytest.raises(EvalSessionClosedError, match="EvalSession is not open"):
             await value.as_int()
 
 
