@@ -50,6 +50,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_GRACEFUL_CLOSE_TIMEOUT_SECONDS = 60.0
+"""How long close() gives the polite half of shutdown before giving up on it.
+
+Generous on purpose: everything inside it is already individually bounded (each
+evaluator's close goes out at ``rpc_timeout``, the Shutdown RPC at
+``shutdown_timeout``), so reaching this means something is wrong rather than
+merely slow. It is not a caller-facing knob -- see the ``Session.close:params``
+entry in tests/nanopynix/test_engine_parity.py for why rpc's close takes no
+parameters where inproc's takes three."""
+
 
 class Session:
     """Session runtime — manages a single subprocess worker.
@@ -141,14 +151,22 @@ class Session:
         await self._manager.open()
 
     async def close(self) -> None:
-        """Shut down the worker."""
-        try:
-            with anyio.fail_after(60):
-                for eval_session in tuple(self._evals):
-                    await eval_session.close()
-                await self._manager.close()
-        except TimeoutError:
-            logger.warning("nanopynix: timed out closing worker")
+        """Shut down the worker.
+
+        Raises :class:`TimeoutError` if the graceful phase -- closing each
+        evaluator, then asking the worker to shut itself down -- runs past
+        :data:`_GRACEFUL_CLOSE_TIMEOUT_SECONDS`. The worker process is gone
+        either way: ``WorkerClient.close`` shields its own teardown from this
+        deadline, so a timeout here means "shutdown was not clean", not
+        "shutdown did not happen". This used to swallow the ``TimeoutError``
+        and log a warning, which said the same thing far more quietly than it
+        deserved -- and, before the teardown was shielded, said it while
+        leaving the worker running.
+        """
+        with anyio.fail_after(_GRACEFUL_CLOSE_TIMEOUT_SECONDS):
+            for eval_session in tuple(self._evals):
+                await eval_session.close()
+            await self._manager.close()
 
     async def __aenter__(self) -> Session:
         await self.open()
