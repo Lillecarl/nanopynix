@@ -455,9 +455,31 @@ static nix::DerivedPath derived_path_for_build_input(const nix::StorePath &path)
     return nix::DerivedPath::Opaque{path};
 }
 
-static nix::DerivedPaths request_derived_paths(
-        nix::Store &s, const nb::dict &request, const char *key, const char *op) {
-    auto raw = request_cast<std::vector<std::string>>(request_field(request, key, op), key, op);
+// Accept either spelling Python has for a store path: the plain string a
+// caller typed, or a StorePath the bindings previously handed back. Only the
+// string form can carry a ^ output selector, but making callers stringify
+// first would break every existing direct-API caller to gain nothing.
+static std::vector<std::string> derived_path_strings(const nb::sequence &paths, const char *op) {
+    std::vector<std::string> raw;
+    for (nb::handle item : paths) {
+        if (nb::isinstance<nix::StorePath>(item)) {
+            raw.push_back(std::string(nb::cast<nix::StorePath>(item).to_string()));
+            continue;
+        }
+        if (!nb::isinstance<nb::str>(item))
+            throw nix::UsageError("%s: derived paths must be str or StorePath", op);
+        raw.push_back(nb::cast<std::string>(item));
+    }
+    return raw;
+}
+
+// The one place a caller-supplied derived path becomes a nix::DerivedPath.
+// Shared by the direct bindings and (until it goes) the proto-dict funnel, so
+// the two cannot drift -- they did, and the ^ selector below is what they
+// drifted over: the dict path honoured it and the direct path rejected it as
+// an illegal character in a store path name.
+static nix::DerivedPaths parse_derived_paths(
+        nix::Store &s, std::vector<std::string> raw, const char *op) {
     nix::DerivedPaths paths;
     paths.reserve(raw.size());
     for (auto &path : raw) {
@@ -472,6 +494,12 @@ static nix::DerivedPaths request_derived_paths(
             paths.push_back(derived_path_for_build_input(s.parseStorePath(path)));
     }
     return paths;
+}
+
+static nix::DerivedPaths request_derived_paths(
+        nix::Store &s, const nb::dict &request, const char *key, const char *op) {
+    return parse_derived_paths(
+        s, request_cast<std::vector<std::string>>(request_field(request, key, op), key, op), op);
 }
 
 static nb::dict query_missing(nix::Store &s, const nix::DerivedPaths &paths) {
@@ -489,10 +517,11 @@ static nb::dict query_missing(nix::Store &s, const nix::DerivedPaths &paths) {
     return d;
 }
 
-static nb::dict query_missing_store_paths(nix::Store &s, const std::vector<nix::StorePath> &paths) {
-    nix::DerivedPaths derived_paths;
-    for (auto &path : paths) derived_paths.push_back(derived_path_for_build_input(path));
-    return query_missing(s, derived_paths);
+// The direct binding. Takes derived paths, like nix::Store::queryMissing
+// itself does -- the StorePath-only variant this replaces could not express
+// an output selector, which is exactly how inproc and rpc came to disagree.
+static nb::dict query_missing_paths(nix::Store &s, const nb::sequence &paths) {
+    return query_missing(s, parse_derived_paths(s, derived_path_strings(paths, "query_missing"), "query_missing"));
 }
 
 // --- Collective queries ---
@@ -675,23 +704,6 @@ static nb::dict collect_garbage(
 
 // --- Build ---
 
-static nb::list build_paths_with_results(
-        nix::Store &s,
-        const std::vector<nix::StorePath> &paths,
-        nix::BuildMode buildMode = nix::bmNormal,
-        std::shared_ptr<nix::Store> evalStore = nullptr) {
-    nix::DerivedPaths dps;
-    for (auto &p : paths) dps.push_back(derived_path_for_build_input(p));
-    std::vector<nix::KeyedBuildResult> results;
-    {
-        nb::gil_scoped_release release;
-        results = s.buildPathsWithResults(dps, buildMode, evalStore);
-    }
-    nb::list out;
-    for (auto &kbr : results) out.append(build_result_from_kbr(kbr, s));
-    return out;
-}
-
 static nb::list build_derived_paths_with_results(
         nix::Store &s,
         const nix::DerivedPaths &paths,
@@ -705,6 +717,21 @@ static nb::list build_derived_paths_with_results(
     nb::list out;
     for (auto &kbr : results) out.append(build_result_from_kbr(kbr, s));
     return out;
+}
+
+// The direct binding. Takes derived paths for the same reason
+// query_missing_paths does: the StorePath-only variant it replaces silently
+// dropped the ^ output selector its own Python docstring advertised.
+static nb::list build_paths_with_results(
+        nix::Store &s,
+        const nb::sequence &paths,
+        nix::BuildMode buildMode = nix::bmNormal,
+        std::shared_ptr<nix::Store> evalStore = nullptr) {
+    return build_derived_paths_with_results(
+        s,
+        parse_derived_paths(s, derived_path_strings(paths, "build_paths_with_results"), "build_paths_with_results"),
+        buildMode,
+        evalStore);
 }
 
 static void build_paths(
@@ -1222,7 +1249,7 @@ static void bind_store(nb::module_ &m) {
              "path"_a, "flip_direction"_a = false, "include_outputs"_a = false, "include_derivers"_a = false)
         .def("copy_closure", &copy_closure,
              "paths"_a, "dest_store"_a, "repair"_a = false, "check_sigs"_a = true, "substitute"_a = false)
-        .def("query_missing", &query_missing_store_paths, "paths"_a)
+        .def("query_missing", &query_missing_paths, "paths"_a)
         // Derivations
         .def("query_derivation_outputs", &query_derivation_outputs, "path"_a)
         .def("query_valid_derivers", &query_valid_derivers, "path"_a)

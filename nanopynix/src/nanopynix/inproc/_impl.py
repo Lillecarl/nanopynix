@@ -614,14 +614,15 @@ class Store:
         derived_paths: list[str | StorePath],
         /,
     ) -> MissingInfo:
-        """Return which of ``derived_paths`` still need to be built or substituted."""
-        raw_paths = await self._session.run(
-            _parse_store_paths,
-            self._require_raw(),
+        """Return which of ``derived_paths`` still need to be built or substituted.
+
+        A plain derivation path means all outputs. A ``^`` separator opts into
+        Nix's explicit canonical DerivedPath output-selection syntax.
+        """
+        return await self._session.run(
+            self._require_local().query_missing,
             [str(p) for p in derived_paths],
         )
-        result = await self._session.run(self._require_raw().query_missing, raw_paths)
-        return MissingInfo(**result)
 
     async def build_paths_with_results(
         self,
@@ -638,16 +639,14 @@ class Store:
         """
         if eval_store is not None and eval_store._session is not self._session:  # type: ignore[reportPrivateUsage] -- session ownership guard  # noqa: SLF001
             raise ValueError("eval_store belongs to a different inproc Session")
-        mode = build_mode_value(build_mode)
-        response = await self._session.run(
-            self._require_raw().store_build_paths_with_results,
-            {
-                "derived_paths": [str(path) for path in derived_paths],
-                "build_mode": mode,
-            },
-            None if eval_store is None else eval_store._require_raw(),  # noqa: SLF001
+        return await self._session.run(
+            functools.partial(
+                self._require_local().build_paths_with_results,
+                [str(path) for path in derived_paths],
+                build_mode=build_mode_value(build_mode),
+                eval_store=None if eval_store is None else eval_store._require_local(),  # noqa: SLF001 -- same-session sibling Store, guarded above
+            ),
         )
-        return [BuildResult(**result) for result in response["results"]]
 
     async def read_derivation(
         self,
