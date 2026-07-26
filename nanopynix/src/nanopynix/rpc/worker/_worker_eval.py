@@ -15,7 +15,6 @@ from typing import Any
 
 import pydantic_core
 from nanopynix_bindings import expr as nanopynix_expr
-from nanopynix_bindings import flake as nanopynix_flake
 from nanopynix_proto.nix import common as common_pb
 from nanopynix_proto.nix.eval import (
     AsScalarRequest,
@@ -76,7 +75,6 @@ from nanopynix_proto.nix.eval import (
 )
 
 from nanopynix._core._codec import python_to_scalar
-from nanopynix._core._extract import flake_ref_attrs as _flake_ref_attrs
 from nanopynix._core._extract import locked_flake as _locked_flake
 from nanopynix._core._objects import CoreLockedFlake, CoreValue
 from nanopynix._wire import HandleKind
@@ -576,9 +574,7 @@ class EvalServiceHandler(EvalServiceBase):
         return await self._run(message, self._do_get_flake)
 
     def _do_get_flake(self, message: GetFlakeRequest) -> common_pb.FlakeRef:
-        ref = nanopynix_flake.parse_flake_ref(message.ref)
-        fr = nanopynix_flake.get_flake(self._get_es(message.eval_handle).require_raw(), ref)
-        return common_pb.FlakeRef(attrs=_flake_ref_attrs(fr))
+        return self._get_es(message.eval_handle).get_flake(message.ref)
 
     async def release(self, message: ReleaseRequest) -> ReleaseResponse:
         return await self._run(message, self._do_release)

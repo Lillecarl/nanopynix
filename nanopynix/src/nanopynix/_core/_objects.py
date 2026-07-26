@@ -27,6 +27,7 @@ from nanopynix_bindings import flake as nanopynix_flake
 from nanopynix_bindings import store as nanopynix_store
 from nanopynix_proto.nix.store import GcAction, StoreDirs
 
+from nanopynix._core._extract import flake_ref_attrs
 from nanopynix._core._nix_core import NixCore
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
 from nanopynix.models import (
@@ -34,6 +35,7 @@ from nanopynix.models import (
     Derivation,
     DerivationOutput,
     DerivationOutputs,
+    FlakeRef,
     GcResult,
     GcRoot,
     MissingInfo,
@@ -403,6 +405,21 @@ class CoreEvalState:
 
     def call_locked_flake(self, locked_flake: CoreLockedFlake) -> CoreValue:
         return self.wrap_value(nanopynix_flake.call_flake(self.require_raw(), locked_flake.require_raw()))
+
+    def get_flake(self, ref: str) -> FlakeRef:
+        """Resolve a flake reference without evaluating its outputs.
+
+        Shared rather than left in the RPC worker, where the three steps below
+        used to live inline: this is pure libexpr and a registry lookup, so
+        there was nothing about it that belonged to a transport. inproc had no
+        equivalent at all, which the signature ledger carried as
+        "EvalSession.get_flake:rpc-only".
+        """
+        resolved = nanopynix_flake.get_flake(
+            self.require_raw(),
+            nanopynix_flake.parse_flake_ref(ref),
+        )
+        return FlakeRef(attrs=flake_ref_attrs(resolved))
 
     def eval_flake(
         self,
