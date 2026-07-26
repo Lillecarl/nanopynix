@@ -28,6 +28,9 @@ from nanopynix.inproc._impl import (
     RawStore as RawStore,
 )
 from nanopynix.inproc._impl import (
+    RawStorePath as RawStorePath,
+)
+from nanopynix.inproc._impl import (
     RawValue as RawValue,
 )
 from nanopynix.inproc._impl import (
@@ -38,9 +41,6 @@ from nanopynix.inproc._impl import (
 )
 from nanopynix.inproc._impl import (
     Store as Store,
-)
-from nanopynix.inproc._impl import (
-    StorePath as StorePath,
 )
 from nanopynix.inproc._impl import (
     Value as Value,
