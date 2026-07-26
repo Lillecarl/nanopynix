@@ -173,10 +173,7 @@ LEDGER: dict[str, str] = {
     # ── EvalSession ────────────────────────────────────────────────
     "EvalSession.run:inproc-only": "TRANSPORT: dispatches onto the evaluator's dedicated thread.",
     "EvalSession.has_pending_work:inproc-only": "TRANSPORT: introspects that same thread's queue.",
-    "EvalSession.get_flake:rpc-only": "DEFECT: resolving a flake ref without evaluating it is pure libexpr.",
-    "EvalSession.eval_locked_flake:rpc-only": "DEFECT: inproc has lock_flake but no way to evaluate the result by handle.",
     "EvalSession.release_locked_flake:rpc-only": "TRANSPORT: frees a worker-side handle; inproc's LockedFlake is a local object.",
-    "EvalSession.write_lock_file:rpc-only": "DEFECT: writing a lock file touches the filesystem, not the worker.",
     # get_verbosity/set_verbosity were here as rpc-only. inproc's EvalSession
     # has them now, delegating to its Session: verbosity is process-wide, so
     # this is one setting reachable from two places rather than two settings.

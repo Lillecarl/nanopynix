@@ -27,6 +27,7 @@ import pytest
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
+    from pathlib import Path
 
     from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
 
@@ -357,6 +358,37 @@ async def test_both_engines_evaluate_against_one_store_and_build_into_another(
     """
     assert await _evaluates_with_a_separate_build_store(inproc_session) == "reached the evaluator"
     assert await _evaluates_with_a_separate_build_store(rpc_session) == "reached the evaluator"
+
+
+async def _resolved_flake_ref(factory: Any, ref: str) -> dict[str, Any]:
+    """Resolve a flake ref through the evaluator, without evaluating outputs."""
+    async with (
+        factory() as session,
+        session.store() as store,
+        session.eval(store) as evaluator,
+    ):
+        resolved = await evaluator.get_flake(ref)
+        return {name: value.to_dict() for name, value in sorted(resolved.attrs.items())}
+
+
+async def test_both_engines_resolve_a_flake_ref_without_evaluating_it(
+    inproc_session: InprocSessionFactory,
+    rpc_session: RpcSessionFactory,
+    tmp_path: Path,
+) -> None:
+    """``get_flake`` must resolve identically on both engines.
+
+    It was rpc-only, though it is pure libexpr plus a registry lookup -- the
+    worker held the whole implementation inline (parse the ref, call
+    ``nanopynix_flake.get_flake``, extract the attrs) rather than in the
+    ``CoreEvalState`` both engines share. Moving those three steps down is what
+    let inproc have it, and is why this asserts the *resolved attrs* rather
+    than merely that neither engine raised: the extraction is the part that
+    could have diverged.
+    """
+    (tmp_path / "flake.nix").write_text("{ outputs = _: { probe = 1; }; }\n")
+    ref = f"path:{tmp_path}"
+    assert await _resolved_flake_ref(inproc_session, ref) == await _resolved_flake_ref(rpc_session, ref)
 
 
 async def test_both_engines_take_line_editors_per_repl(

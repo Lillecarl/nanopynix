@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from nanopynix.models import (
         BuildResult,
         Derivation,
+        FlakeRef,
         GcResult,
         GcRoot,
         MissingInfo,
@@ -451,6 +452,10 @@ class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](AsyncVerbosityController
 
     async def eval_flake(self, ref: str, /, *, write_lock_file: bool = True) -> ValueT:
         """Lock and evaluate a flake in one step, returning its outputs."""
+        ...
+
+    async def get_flake(self, ref: str, /) -> FlakeRef:
+        """Parse and resolve a flake reference without evaluating its outputs."""
         ...
 
 

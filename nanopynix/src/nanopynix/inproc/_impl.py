@@ -41,6 +41,7 @@ from nanopynix.logging import BusSubscription, CallbackBus, LogCollector, LogStr
 from nanopynix.models import (
     BuildResult,
     Derivation,
+    FlakeRef,
     GcResult,
     GcRoot,
     LockedInput,
@@ -1043,6 +1044,10 @@ class EvalSession:
             ),
         )
         return self._track_value(local)
+
+    async def get_flake(self, ref: str) -> FlakeRef:
+        """Parse and resolve a flake reference without evaluating its outputs."""
+        return await self.run(self._require_core().get_flake, ref)
 
     async def reset_file_cache(self) -> None:
         """Discard parsed file cache entries before re-evaluating source files."""

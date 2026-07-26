@@ -826,14 +826,18 @@ class LockedFlakeHandle:
             raise ValueReleasedError("LockedFlakeHandle has been released")
 
     async def eval(self, *, timeout: float | None = None) -> ValueProxy:
-        """Evaluate this locked flake's outputs. See :meth:`EvalSession.eval_locked_flake`."""
+        """Evaluate this locked flake's outputs, calling its ``outputs`` function.
+
+        Uses the in-memory lock from a prior ``lock_flake()``, so an updated
+        lock can be evaluated before it is written to disk.
+        """
         self._check_active()
-        return await self._session.eval_locked_flake(self, timeout=timeout)
+        return await self._session._eval_locked_flake(self, timeout=timeout)  # type: ignore[reportPrivateUsage] -- this handle is the public door onto its session's private by-handle call  # noqa: SLF001 -- same
 
     async def write_lock_file(self, *, timeout: float | None = None) -> None:
-        """Persist this locked flake's lock file to disk. See :meth:`EvalSession.write_lock_file`."""
+        """Persist this locked flake's lock file to disk."""
         self._check_active()
-        await self._session.write_lock_file(self, timeout=timeout)
+        await self._session._write_lock_file(self, timeout=timeout)  # type: ignore[reportPrivateUsage] -- as above  # noqa: SLF001 -- same
 
     async def release(self, *, timeout: float | None = None) -> None:
         """Release the worker-side handle for this locked flake. Idempotent."""
@@ -1110,24 +1114,28 @@ class EvalSession:
             raise ForeignValueError("cannot use a LockedFlakeHandle from another EvalSession")
         return locked.handle
 
-    async def eval_locked_flake(self, locked: LockedFlakeHandle, *, timeout: float | None = None) -> ValueProxy:
-        """Evaluate a previously locked flake by handle.
+    async def _eval_locked_flake(self, locked: LockedFlakeHandle, *, timeout: float | None = None) -> ValueProxy:
+        """Evaluate a previously locked flake by handle. Backs ``LockedFlakeHandle.eval``.
 
-        Calls the flake's ``outputs`` function using the in-memory
-        ``LockedFlake`` from a prior ``lock_flake()`` call.  This allows
-        evaluating with an updated lock that hasn't been written to disk yet.
+        Private: ``LockedFlakeHandle.eval()`` is the door, and it is the door
+        on both engines -- ``inproc.LockedFlake`` has the same method and no
+        session-level twin, because in-process there is no handle to pass. The
+        public pair here was duplicate surface, and the signature ledger
+        counted it as a DEFECT for exactly that reason.
         """
         result = await self._ensure_proxy().call_locked_flake(
             CallLockedFlakeRequest(handle=self._locked_flake_id(locked)),
         )
         return self._proxy_context().value(result.handle, result.type)
 
-    async def write_lock_file(self, locked: LockedFlakeHandle, *, timeout: float | None = None) -> None:
-        """Write a locked flake's lock file to disk.
+    async def _write_lock_file(self, locked: LockedFlakeHandle, *, timeout: float | None = None) -> None:
+        """Write a locked flake's lock file to disk. Backs ``LockedFlakeHandle.write_lock_file``.
 
         Persists the in-memory lock from a prior ``lock_flake(write_lock_file=False)``
         call.  The lock file is written to the flake's own directory — for a
         temp flake this is the temp directory, never a real path.
+
+        Private for the same reason as :meth:`_eval_locked_flake`.
         """
         await self._ensure_proxy().write_lock_file(WriteLockFileRequest(handle=self._locked_flake_id(locked)))
 
@@ -1150,7 +1158,7 @@ class EvalSession:
         ``.attr()``, ``.to_python()``, etc.
 
         For more control (e.g. updating locks in memory before evaluating),
-        use ``lock_flake()`` + ``eval_locked_flake()`` instead.
+        use ``lock_flake()`` + ``locked.eval()`` instead.
         """
         handle = await self._ensure_proxy().eval_flake(
             EvalFlakeRequest(
