@@ -11,9 +11,9 @@ from nanopynix_proto.nix.eval import OpenEvalRequest
 
 import nanopynix._core._nix_core as nix_core  # type: ignore[reportPrivateUsage] -- test patches direct-pointer core boundary
 import nanopynix.rpc.worker._worker as worker  # type: ignore[reportPrivateUsage] -- test imports private module
-from nanopynix._core._local import (  # type: ignore[reportPrivateUsage] -- test constructs worker's local runtime
-    LocalEvalState,
-    LocalStore,
+from nanopynix._core._objects import (  # type: ignore[reportPrivateUsage] -- test constructs worker's local runtime
+    CoreEvalState,
+    CoreStore,
 )
 from nanopynix._wire import HandleKind
 from nanopynix.rpc.worker._handle_registry import (
@@ -63,7 +63,7 @@ class _FakeEvalState:
 
 class _FakeStore:
     # with_params mirrors the real binding, which declares it keyword-capable
-    # ("with_params"_a): LocalStore.get_uri forwards it by name, so a fake that
+    # ("with_params"_a): CoreStore.get_uri forwards it by name, so a fake that
     # takes no argument no longer stands in for one.
     def get_uri(self, *, with_params: bool = False) -> str:
         _ = with_params
@@ -186,17 +186,17 @@ async def test_open_eval_allows_concurrent_eval_states(monkeypatch: pytest.Monke
     state = WorkerState()
     # These strings stand in for a store only as identity markers -- the
     # assertions below check *which* one open_eval picked, and _FakeEvalState
-    # never calls anything on them. Cast because LocalStore now names the real
+    # never calls anything on them. Cast because CoreStore now names the real
     # binding type rather than Any.
-    second_handle = state.handles.allocate(LocalStore(cast("Store", "second-store")), HandleKind.STORE)
-    first_handle = state.handles.allocate(LocalStore(cast("Store", "first-store")), HandleKind.STORE)
+    second_handle = state.handles.allocate(CoreStore(cast("Store", "second-store")), HandleKind.STORE)
+    first_handle = state.handles.allocate(CoreStore(cast("Store", "first-store")), HandleKind.STORE)
     state.nix_path = ["nixpkgs=/tmp/nixpkgs"]
     handler = EvalServiceHandler(state)
 
     response = await handler.open_eval(OpenEvalRequest(store_handle=second_handle, request_id=1))
     selected = handler._get_es(response.eval_handle)  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
 
-    assert isinstance(selected, LocalEvalState)
+    assert isinstance(selected, CoreEvalState)
     assert isinstance(selected.raw, _FakeEvalState)
     assert selected.raw.store == "second-store"
     assert selected.raw.nix_path == ["nixpkgs=/tmp/nixpkgs"]

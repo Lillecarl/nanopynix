@@ -25,9 +25,9 @@ from nanopynix_bindings import util as nanopynix_util
 from nanopynix_proto.nix.common import LogLevel, RequestFinalized
 
 from nanopynix._core._extract import locked_flake as _locked_flake_proto
-from nanopynix._core._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
 from nanopynix._core._nix_core import build_mode_value
 from nanopynix._core._nix_executor import NIX_EVALUATOR_STACK_SIZE, NixThreadExecutor
+from nanopynix._core._objects import CoreEvalState, CoreLockedFlake, CoreRuntime, CoreStore, CoreValue
 from nanopynix._core._primops import register_import_path_primops, to_primop_specs
 from nanopynix._wire import (
     DEFAULT_CA_METHOD,
@@ -212,7 +212,7 @@ class Session:
             raise ValueError("store_workers must be at least 1")
         self._store_workers = store_workers
         self._collector = LogCollector()
-        self._runtime = LocalRuntime()
+        self._runtime = CoreRuntime()
         # Creation is deliberately lazy: merely importing nanopynix.inproc
         # must not start a Nix thread in an L3 manager process.
         self._executor: NixThreadExecutor | None = None
@@ -471,7 +471,7 @@ class Store:
     def __init__(self, session: Session, uri: str) -> None:
         self._session = session
         self._uri = uri
-        self._local: LocalStore | None = None
+        self._core: CoreStore | None = None
 
     async def __aenter__(self) -> Store:
         await self.open()
@@ -482,8 +482,8 @@ class Store:
 
     async def open(self) -> None:
         """Open the underlying store."""
-        if self._local is None:
-            self._local = await self._session.run(self._session._runtime.open_store, self._uri)  # type: ignore[reportPrivateUsage] -- session owns local runtime  # noqa: SLF001
+        if self._core is None:
+            self._core = await self._session.run(self._session._runtime.open_store, self._uri)  # type: ignore[reportPrivateUsage] -- session owns local runtime  # noqa: SLF001
 
     async def close(self, *, force: bool = False) -> None:
         """Close the underlying store, optionally closing its evaluator first."""
@@ -493,47 +493,47 @@ class Store:
                 raise RuntimeError("cannot close a store while its EvalState is open; close the EvalSession first")
             for eval_session in evals:
                 await eval_session.close()
-        local = self._local
-        self._local = None
+        local = self._core
+        self._core = None
         self._session._stores.discard(self)  # type: ignore[reportPrivateUsage] -- session owns store lifetime tracking  # noqa: SLF001
         if local is not None:
             await self._session._run_closing(local.close)  # type: ignore[reportPrivateUsage] -- Store teardown follows Session close ordering  # noqa: SLF001
 
     def _require_raw(self) -> nanopynix_store.Store:
-        if self._local is None:
+        if self._core is None:
             raise InprocSessionClosedError("Store is not open — use async with")
-        return self._local.require_raw()
+        return self._core.require_raw()
 
-    def _require_local(self) -> LocalStore:
-        if self._local is None:
+    def _require_core(self) -> CoreStore:
+        if self._core is None:
             raise InprocSessionClosedError("Store is not open — use async with")
-        return self._local
+        return self._core
 
     async def uri(self, *, with_params: bool = False) -> str:
         """Return this store's URI, optionally including configuration parameters."""
         return await self._session.run(
-            functools.partial(self._require_local().get_uri, with_params=with_params),
+            functools.partial(self._require_core().get_uri, with_params=with_params),
         )
 
     async def store_dir(self) -> str:
         """Return this store's logical store directory."""
-        return await self._session.run(self._require_local().get_store_dir)
+        return await self._session.run(self._require_core().get_store_dir)
 
     async def parse_store_path(self, path: str) -> StorePath:
         """Validate and normalise ``path`` as a Nix store path."""
-        return await self._session.run(self._require_local().parse_store_path, path)
+        return await self._session.run(self._require_core().parse_store_path, path)
 
     async def is_valid_path(self, path: str | StorePath) -> bool:
         """Return whether ``path`` is valid in this store."""
-        return await self._session.run(self._require_local().is_valid_path, str(path))
+        return await self._session.run(self._require_core().is_valid_path, str(path))
 
     async def query_path_info(self, path: str | StorePath) -> PathInfo:
         """Return metadata for a valid store path."""
-        return await self._session.run(self._require_local().query_path_info, str(path))
+        return await self._session.run(self._require_core().query_path_info, str(path))
 
     async def query_all_valid_paths(self) -> list[StorePath]:
         """Return every valid path registered in this store."""
-        return await self._session.run(self._require_local().query_all_valid_paths)
+        return await self._session.run(self._require_core().query_all_valid_paths)
 
     async def compute_fs_closure(
         self,
@@ -546,7 +546,7 @@ class Store:
         """Return the filesystem closure of ``path``."""
         return await self._session.run(
             functools.partial(
-                self._require_local().compute_fs_closure,
+                self._require_core().compute_fs_closure,
                 str(path),
                 flip_direction=flip_direction,
                 include_outputs=include_outputs,
@@ -556,34 +556,34 @@ class Store:
 
     async def query_derivation_outputs(self, path: str | StorePath) -> list[StorePath]:
         """Return output paths declared by a derivation."""
-        return await self._session.run(self._require_local().query_derivation_outputs, str(path))
+        return await self._session.run(self._require_core().query_derivation_outputs, str(path))
 
     async def query_valid_derivers(self, path: str | StorePath) -> list[StorePath]:
         """Return valid derivations that produced ``path``."""
-        return await self._session.run(self._require_local().query_valid_derivers, str(path))
+        return await self._session.run(self._require_core().query_valid_derivers, str(path))
 
     async def query_referrers(self, path: str | StorePath) -> list[StorePath]:
         """Return valid store paths that reference ``path``."""
-        return await self._session.run(self._require_local().query_referrers, str(path))
+        return await self._session.run(self._require_core().query_referrers, str(path))
 
     async def follow_links_to_store_path(self, path: str) -> StorePath:
         """Resolve a path that may traverse symlinks to its containing store path."""
-        return await self._session.run(self._require_local().follow_links_to_store_path, path)
+        return await self._session.run(self._require_core().follow_links_to_store_path, path)
 
     async def query_path_from_hash_part(self, hash_part: str) -> StorePath | None:
         """Return the valid store path whose hash component is ``hash_part``, if any."""
-        return await self._session.run(self._require_local().query_path_from_hash_part, hash_part)
+        return await self._session.run(self._require_core().query_path_from_hash_part, hash_part)
 
     async def query_substitutable_paths(self, paths: list[str | StorePath]) -> list[StorePath]:
         """Return the subset of ``paths`` that can be substituted from a binary cache."""
         return await self._session.run(
-            self._require_local().query_substitutable_paths,
+            self._require_core().query_substitutable_paths,
             [str(path) for path in paths],
         )
 
     async def get_build_log(self, path: str | StorePath) -> str | None:
         """Return the build log for ``path``, or ``None`` if no log is available."""
-        return await self._session.run(self._require_local().get_build_log, str(path))
+        return await self._session.run(self._require_core().get_build_log, str(path))
 
     async def query_missing(
         self,
@@ -596,7 +596,7 @@ class Store:
         Nix's explicit canonical DerivedPath output-selection syntax.
         """
         return await self._session.run(
-            self._require_local().query_missing,
+            self._require_core().query_missing,
             [str(p) for p in derived_paths],
         )
 
@@ -617,10 +617,10 @@ class Store:
             raise ValueError("eval_store belongs to a different inproc Session")
         return await self._session.run(
             functools.partial(
-                self._require_local().build_paths_with_results,
+                self._require_core().build_paths_with_results,
                 [str(path) for path in derived_paths],
                 build_mode=build_mode_value(build_mode),
-                eval_store=None if eval_store is None else eval_store._require_local(),  # noqa: SLF001 -- same-session sibling Store, guarded above
+                eval_store=None if eval_store is None else eval_store._require_core(),  # noqa: SLF001 -- same-session sibling Store, guarded above
             ),
         )
 
@@ -630,7 +630,7 @@ class Store:
         /,
     ) -> Derivation:
         """Parse and return the ``.drv`` file at ``drv_path``."""
-        return await self._session.run(self._require_local().read_derivation, str(drv_path))
+        return await self._session.run(self._require_core().read_derivation, str(drv_path))
 
     async def collect_garbage(
         self,
@@ -644,7 +644,7 @@ class Store:
         """Run a garbage-collection pass; see :meth:`nanopynix.store.Store.collect_garbage`."""
         return await self._session.run(
             functools.partial(
-                self._require_local().collect_garbage,
+                self._require_core().collect_garbage,
                 action,
                 ignore_liveness=ignore_liveness,
                 paths_to_delete=[str(p) for p in paths_to_delete],
@@ -659,7 +659,7 @@ class Store:
         written to disk as a symlink. Use :meth:`add_perm_root` for a root that
         outlives the process.
         """
-        await self._session.run(self._require_local().add_temp_root, str(path))
+        await self._session.run(self._require_core().add_temp_root, str(path))
 
     async def add_perm_root(self, path: str | StorePath, gc_root: str, /) -> str:
         """Create the symlink ``gc_root`` -> ``path`` and return its resolved path.
@@ -669,7 +669,7 @@ class Store:
         result alive across process restarts. Requires a local filesystem
         store; a store that has no local root directory raises.
         """
-        return await self._session.run(self._require_local().add_perm_root, str(path), gc_root)
+        return await self._session.run(self._require_core().add_perm_root, str(path), gc_root)
 
     async def add_indirect_root(self, path: str, /) -> None:
         """Register ``path``, an existing user-facing symlink, as an indirect root.
@@ -678,11 +678,11 @@ class Store:
         for the symlink it creates. Call this directly only for a symlink you
         made yourself.
         """
-        await self._session.run(self._require_local().add_indirect_root, path)
+        await self._session.run(self._require_core().add_indirect_root, path)
 
     async def find_roots(self, *, censor: bool = False) -> list[GcRoot]:
         """Return the garbage collector's roots."""
-        return await self._session.run(functools.partial(self._require_local().find_roots, censor=censor))
+        return await self._session.run(functools.partial(self._require_core().find_roots, censor=censor))
 
     async def compute_store_path(
         self,
@@ -699,7 +699,7 @@ class Store:
         """
         return await self._session.run(
             functools.partial(
-                self._require_local().compute_store_path,
+                self._require_core().compute_store_path,
                 path,
                 name=name,
                 method=method,
@@ -722,7 +722,7 @@ class Store:
         """
         return await self._session.run(
             functools.partial(
-                self._require_local().add_to_store,
+                self._require_core().add_to_store,
                 path,
                 name=name,
                 method=method,
@@ -737,7 +737,7 @@ class Store:
         a store with a local filesystem layout, and Nix leaves them unset for
         stores that have none.
         """
-        return await self._session.run(self._require_local().get_store_dirs)
+        return await self._session.run(self._require_core().get_store_dirs)
 
     async def ensure_path(self, path: str | StorePath, /) -> None:
         """Make ``path`` valid in this store, substituting it if necessary.
@@ -745,7 +745,7 @@ class Store:
         A no-op when the path is already valid. When it is not and no
         substituter can supply it, this raises rather than returning quietly.
         """
-        await self._session.run(self._require_local().ensure_path, str(path))
+        await self._session.run(self._require_core().ensure_path, str(path))
 
     async def copy_closure(
         self,
@@ -767,9 +767,9 @@ class Store:
             raise ValueError("dest_store belongs to a different Session")
         await self._session.run(
             functools.partial(
-                self._require_local().copy_closure,
+                self._require_core().copy_closure,
                 [str(path) for path in paths],
-                dest_store._require_local(),
+                dest_store._require_core(),
                 repair=repair,
                 check_sigs=check_sigs,
                 substitute=substitute,
@@ -778,7 +778,7 @@ class Store:
 
     async def optimise_store(self) -> None:
         """Reclaim disk space by hard-linking identical files in this store."""
-        await self._session.run(self._require_local().optimise_store)
+        await self._session.run(self._require_core().optimise_store)
 
     async def verify_store(self, *, check_contents: bool = False, repair: bool = False) -> bool:
         """Check this store's consistency, returning whether errors were found.
@@ -788,7 +788,7 @@ class Store:
         """
         return await self._session.run(
             functools.partial(
-                self._require_local().verify_store, check_contents=check_contents, repair=repair
+                self._require_core().verify_store, check_contents=check_contents, repair=repair
             ),
         )
 
@@ -826,7 +826,7 @@ class EvalSession:
         self._build_store = build_store
         self._eval_settings = eval_settings
         self._fetch_settings = fetch_settings
-        self._local: LocalEvalState | None = None
+        self._core: CoreEvalState | None = None
         self._active = False
         self._locked_flakes: set[LockedFlake] = set()
         self._executor = NixThreadExecutor(
@@ -863,11 +863,11 @@ class EvalSession:
         rendered_eval.pop(NIX_PATH_SETTING_KEY, None)  # applied via nix_path/searchPath, not the generic settings map
         rendered_fetch = self._fetch_settings.to_worker_settings() if self._fetch_settings is not None else {}
         try:
-            self._local = await self.run(
+            self._core = await self.run(
                 self._session._runtime.open_eval_state,  # type: ignore[reportPrivateUsage] -- Session owns local runtime  # noqa: SLF001
-                self._store._require_local(),  # type: ignore[reportPrivateUsage] -- cross-class Store→EvalSession coupling  # noqa: SLF001
+                self._store._require_core(),  # type: ignore[reportPrivateUsage] -- cross-class Store→EvalSession coupling  # noqa: SLF001
                 nix_path,
-                None if self._build_store is None else self._build_store._require_local(),  # type: ignore[reportPrivateUsage] -- cross-class Store→EvalSession coupling  # noqa: SLF001
+                None if self._build_store is None else self._build_store._require_core(),  # type: ignore[reportPrivateUsage] -- cross-class Store→EvalSession coupling  # noqa: SLF001
                 rendered_eval,
                 rendered_fetch,
             )
@@ -901,7 +901,7 @@ class EvalSession:
         rendered_eval = eval_settings.to_worker_settings() if eval_settings is not None else {}
         rendered_eval.pop(NIX_PATH_SETTING_KEY, None)
         rendered_fetch = fetch_settings.to_worker_settings() if fetch_settings is not None else {}
-        await self.run(self._require_local().configure, rendered_eval, rendered_fetch)
+        await self.run(self._require_core().configure, rendered_eval, rendered_fetch)
 
     async def close(self) -> None:
         """Release all values and locked flakes, then destroy this evaluator."""
@@ -909,8 +909,8 @@ class EvalSession:
             return
         for locked_flake in tuple(self._locked_flakes):
             await locked_flake.release()
-        local = self._local
-        self._local = None
+        local = self._core
+        self._core = None
         self._active = False
         self._session._evals.discard(self)  # type: ignore[reportPrivateUsage] -- Session owns evaluator lifetime tracking  # noqa: SLF001
         try:
@@ -951,14 +951,14 @@ class EvalSession:
             self._session._collector.request_finalized(operation_id)  # type: ignore[reportPrivateUsage] -- Session owns the log collector  # noqa: SLF001
 
     def _require_raw(self) -> nanopynix_expr.EvalState:
-        if not self._active or self._local is None:
+        if not self._active or self._core is None:
             raise InprocSessionClosedError("EvalSession is not open — use async with")
-        return self._local.require_raw()
+        return self._core.require_raw()
 
-    def _require_local(self) -> LocalEvalState:
-        if not self._active or self._local is None:
+    def _require_core(self) -> CoreEvalState:
+        if not self._active or self._core is None:
             raise InprocSessionClosedError("EvalSession is not open — use async with")
-        return self._local
+        return self._core
 
     async def get_verbosity(self) -> LogLevel:
         """Return the current Nix log verbosity.
@@ -973,7 +973,7 @@ class EvalSession:
         is what ``test_engine_parity``'s "EvalSession.get_verbosity:rpc-only"
         recorded, and nothing about process isolation forced the split.
         """
-        self._require_local()
+        self._require_core()
         return await self._session.get_verbosity()
 
     async def set_verbosity(self, verbosity: LogLevelInput) -> LogLevel:
@@ -982,7 +982,7 @@ class EvalSession:
         Process-wide, as :meth:`get_verbosity` — this is not scoped to the
         evaluator it is called on.
         """
-        self._require_local()
+        self._require_core()
         return await self._session.set_verbosity(verbosity)
 
     async def string(self, expr: str, path: str = "<string>") -> Value:
@@ -992,15 +992,15 @@ class EvalSession:
             expr: Nix source to evaluate.
             path: Source name attributed to ``expr`` in error messages.
         """
-        local = await self.run(self._require_local().eval_string, expr, path)
+        local = await self.run(self._require_core().eval_string, expr, path)
         return self._track_value(local)
 
     async def file(self, path: str) -> Value:
         """Evaluate the Nix expression in the file at ``path``."""
-        local = await self.run(self._require_local().eval_file, path)
+        local = await self.run(self._require_core().eval_file, path)
         return self._track_value(local)
 
-    def _track_value(self, local: LocalValue) -> Value:
+    def _track_value(self, local: CoreValue) -> Value:
         return Value(self, local)
 
     async def lock_flake(
@@ -1014,7 +1014,7 @@ class EvalSession:
         """Lock a flake, optionally retaining the lock only in memory."""
         local = await self.run(
             partial(
-                self._require_local().lock_flake,
+                self._require_core().lock_flake,
                 ref,
                 update_inputs=update_inputs,
                 write_lock_file=write_lock_file,
@@ -1036,7 +1036,7 @@ class EvalSession:
         """Lock and evaluate a flake in one step."""
         local = await self.run(
             partial(
-                self._require_local().eval_flake,
+                self._require_core().eval_flake,
                 ref,
                 write_lock_file=write_lock_file,
                 flake_settings=flake_settings.to_worker_settings() if flake_settings is not None else None,
@@ -1126,18 +1126,18 @@ class ReplSession(EvalSession):
         A binding such as ``x = 1`` returns ``None``. An expression returns a
         session-bound :class:`Value`.
         """
-        local = await self.run(self._require_local().repl_process_line, text, path)
+        local = await self.run(self._require_core().repl_process_line, text, path)
         return None if local is None else self._track_value(local)
 
     async def load_file(self, path: str) -> Value:
         """Load a Nix expression file as ``nix repl :load`` does."""
-        local = await self.run(self._require_local().repl_load_file, path)
+        local = await self.run(self._require_core().repl_load_file, path)
         return self._track_value(local)
 
     async def add_attrs(self, value: Value) -> list[str]:
         """Add all attributes from ``value`` to this REPL's lexical scope."""
         local_value = value._local_for(self)  # type: ignore[reportPrivateUsage] -- same-evaluator guard  # noqa: SLF001
-        return await self.run(self._require_local().repl_add_attrs, local_value)
+        return await self.run(self._require_core().repl_add_attrs, local_value)
 
     async def scope_names(self) -> list[str]:
         """Return the identifiers visible in this REPL's lexical scope."""
@@ -1156,12 +1156,12 @@ class ReplSession(EvalSession):
         detector cannot see -- both engines have ``string`` with an identical
         signature.
         """
-        local = await self.run(self._require_local().repl_eval_string, expr, path)
+        local = await self.run(self._require_core().repl_eval_string, expr, path)
         return self._track_value(local)
 
     async def file(self, path: str) -> Value:
         """Evaluate the file at ``path`` in this REPL's scope; see :meth:`string`."""
-        local = await self.run(self._require_local().repl_eval_file, path)
+        local = await self.run(self._require_core().repl_eval_file, path)
         return self._track_value(local)
 
 
@@ -1171,24 +1171,24 @@ class LockedFlake:
     def __init__(
         self,
         eval_session: EvalSession,
-        local: LocalLockedFlake,
+        local: CoreLockedFlake,
         description: str,
         inputs: dict[str, LockedInput],
     ) -> None:
         self._eval_session = eval_session
-        self._local: LocalLockedFlake | None = local
+        self._core: CoreLockedFlake | None = local
         self.description = description
         self.inputs = inputs
 
-    def _local_for(self) -> LocalLockedFlake:
-        self._eval_session._require_local()  # type: ignore[reportPrivateUsage] -- parent owns local evaluator lifetime  # noqa: SLF001
-        if self._local is None:
+    def _local_for(self) -> CoreLockedFlake:
+        self._eval_session._require_core()  # type: ignore[reportPrivateUsage] -- parent owns local evaluator lifetime  # noqa: SLF001
+        if self._core is None:
             raise InprocLockedFlakeReleasedError("LockedFlake has been released")
-        return self._local
+        return self._core
 
     async def eval(self) -> Value:
         """Evaluate this locked flake's outputs."""
-        evaluator = self._eval_session._require_local()  # type: ignore[reportPrivateUsage] -- parent owns the local evaluator  # noqa: SLF001
+        evaluator = self._eval_session._require_core()  # type: ignore[reportPrivateUsage] -- parent owns the local evaluator  # noqa: SLF001
         local = await self._eval_session.run(
             evaluator.call_locked_flake,
             self._local_for(),
@@ -1201,19 +1201,19 @@ class LockedFlake:
 
     async def release(self) -> None:
         """Release the underlying handle for this locked flake. Idempotent."""
-        local = self._local
-        self._local = None
+        local = self._core
+        self._core = None
         self._eval_session._locked_flakes.discard(self)  # type: ignore[reportPrivateUsage] -- evaluator owns facade lifetime tracking  # noqa: SLF001
         if local is not None:
             await self._eval_session._run_closing(local.close)  # type: ignore[reportPrivateUsage] -- flake teardown follows evaluator close ordering  # noqa: SLF001
 
 
 class Value:
-    """Async façade over a thread-confined :class:`LocalValue`."""
+    """Async façade over a thread-confined :class:`CoreValue`."""
 
-    def __init__(self, eval_session: EvalSession, local: LocalValue) -> None:
+    def __init__(self, eval_session: EvalSession, local: CoreValue) -> None:
         self._eval_session = eval_session
-        self._local: LocalValue | None = local
+        self._core: CoreValue | None = local
 
     async def __aenter__(self) -> Value:
         self._local_for(self._eval_session)
@@ -1230,18 +1230,18 @@ class Value:
         operation on one engine is the kind of thing that makes an API look
         like it has two concepts.
         """
-        local = self._local
-        self._local = None
+        local = self._core
+        self._core = None
         if local is not None:
             await self._eval_session.run(local.close)
 
-    def _local_for(self, eval_session: EvalSession) -> LocalValue:
-        self._eval_session._require_local()  # type: ignore[reportPrivateUsage] -- liveness check before pointer use  # noqa: SLF001
+    def _local_for(self, eval_session: EvalSession) -> CoreValue:
+        self._eval_session._require_core()  # type: ignore[reportPrivateUsage] -- liveness check before pointer use  # noqa: SLF001
         if eval_session is not self._eval_session:
             raise ValueError("Value belongs to a different inproc EvalSession")
-        if self._local is None:
+        if self._core is None:
             raise InprocValueReleasedError("Value has been released")
-        return self._local
+        return self._core
 
     async def to_python(self, *, copy_to_store: bool = False) -> Any:
         """Convert the whole value tree to plain Python data, in one C++ pass.
@@ -1401,8 +1401,8 @@ class Value:
                 Python value to convert to a Nix value.
         """
         local = self._local_for(self._eval_session)
-        argument_local = await self._argument_local(argument)
-        result = await self._eval_session.run(local.call, argument_local)
+        argument_core = await self._argument_core(argument)
+        result = await self._eval_session.run(local.call, argument_core)
         return self._eval_session._track_value(result)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
 
     async def auto_call(self) -> Value:
@@ -1410,10 +1410,10 @@ class Value:
         result = await self._eval_session.run(self._local_for(self._eval_session).auto_call)
         return self._eval_session._track_value(result)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
 
-    async def _argument_local(self, argument: Value | Any) -> LocalValue:
+    async def _argument_core(self, argument: Value | Any) -> CoreValue:
         if isinstance(argument, Value):
             return argument._local_for(self._eval_session)  # noqa: SLF001
-        return await self._eval_session.run(self._eval_session._require_local().value_from_python, argument)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→Value coupling  # noqa: SLF001
+        return await self._eval_session.run(self._eval_session._require_core().value_from_python, argument)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→Value coupling  # noqa: SLF001
 
     async def build(self, *, build_mode: BuildMode | int | None = None, store: Store | None = None) -> dict[str, str]:
         """Build the derivation represented by this evaluated value.

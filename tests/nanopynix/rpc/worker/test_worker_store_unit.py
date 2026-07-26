@@ -26,11 +26,11 @@ async def test_store_handler_runs_independent_calls_on_multiple_store_threads() 
     peak_active = 0
 
     class SlowStore:
-        """Stands in for LocalStore, whose typed methods the handler now calls.
+        """Stands in for CoreStore, whose typed methods the handler now calls.
 
         It used to implement ``store_get_uri(request_dict)`` -- the proto-dict
         entrypoint the handler reached reflectively. That layer is gone; the
-        handler calls the same ``LocalStore.get_uri`` the inproc engine does,
+        handler calls the same ``CoreStore.get_uri`` the inproc engine does,
         so the fake matches that signature instead.
         """
 

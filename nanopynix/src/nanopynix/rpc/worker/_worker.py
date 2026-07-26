@@ -56,7 +56,7 @@ from nanopynix_proto.nix.worker import (
     WorkerServiceBase,
 )
 
-from nanopynix._core._local import LocalRuntime
+from nanopynix._core._objects import CoreRuntime
 from nanopynix._core._primops import import_primop_callable as _import_callable
 from nanopynix._process_title import set_process_title, set_worker_title
 from nanopynix._wire import (
@@ -159,7 +159,7 @@ class WorkerState:
         self.collector: LogCollector | None = None
         self.log_task: asyncio.Task[None] | None = None
         self.handles: HandleRegistry = HandleRegistry()
-        self.runtime = LocalRuntime()
+        self.runtime = CoreRuntime()
         self.executor: NixThreadExecutor | None = None
         self.store_limiter: anyio.CapacityLimiter | None = None
         self.owns_executor = True

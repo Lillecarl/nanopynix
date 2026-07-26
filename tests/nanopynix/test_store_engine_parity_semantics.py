@@ -14,7 +14,7 @@ were both found by hand-probing rather than by any gate:
 :mod:`tests.nanopynix.test_engine_parity` could see neither: both engines had
 the same method names and the same parameter lists throughout. Both are fixed
 -- path normalisation and derived-path parsing now live in the shared
-``LocalStore``, which both engines call -- and this file is what keeps them
+``CoreStore``, which both engines call -- and this file is what keeps them
 fixed.
 
 Scope is deliberate rather than exhaustive. The store operations that *can*
@@ -30,7 +30,7 @@ What this file *cannot* catch, stated so it is not mistaken for cover: every
 assertion here compares the two engines against each other, so a regression
 that moves both of them equally still reads as agreement. Normalisation is now
 shared, which makes that the likely shape of the next one. Measured: deleting
-the absolutization from ``LocalStore._store_path`` turns the two relative-path
+the absolutization from ``CoreStore._store_path`` turns the two relative-path
 cases below red and leaves the malformed ones green, because both engines
 degrade together. ``tests/nanopynix/bindings/test_store_empty_path.py`` is what
 pins those to an absolute expected type -- the same experiment turns *it* red
@@ -102,7 +102,7 @@ async def _build_paths_with_results(store: Any, suffix: str) -> list[tuple[str, 
 def _relative(seeded: StorePath) -> str:
     """The seeded path with its store directory stripped off.
 
-    ``LocalStore._store_path`` resolves this against the store directory. rpc
+    ``CoreStore._store_path`` resolves this against the store directory. rpc
     always did (its C++ funnel called ``store_path_from_string``); inproc never
     did (its direct binding deliberately does not absolutize). Both go through
     the one shared implementation now.
@@ -220,7 +220,7 @@ async def test_an_unmapped_gc_action_is_a_ValueError_on_both_engines(  # noqa: N
     """The one store divergence the wire forces, asserted at the level that agrees.
 
     Every other case here compares exception *type names*. This one cannot:
-    inproc rejects an unmapped ``GcAction`` in the shared ``LocalStore`` and
+    inproc rejects an unmapped ``GcAction`` in the shared ``CoreStore`` and
     raises ``ValueError``, while rpc never reaches the shared layer -- a proto
     enum field cannot carry an arbitrary object, so pydantic rejects it during
     request construction and raises its own ``ValidationError``.
