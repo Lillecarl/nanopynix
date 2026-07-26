@@ -9,6 +9,11 @@ entrypoint, not part of this surface.
 
 from __future__ import annotations
 
+# Re-exported from its real home rather than from rpc.client.session: log
+# capture is engine-independent and inproc.Session.capture_logs() returns
+# this same class. Kept here so `from nanopynix.rpc import LogCapture`
+# still resolves.
+from nanopynix.logging import LogCapture as LogCapture
 from nanopynix.rpc.client._pool import WorkerDiedError as WorkerDiedError
 from nanopynix.rpc.client._session import (
     EvalSession as EvalSession,
@@ -22,7 +27,6 @@ from nanopynix.rpc.client._session import (
 from nanopynix.rpc.client._session import (
     ValueProxy as ValueProxy,
 )
-from nanopynix.rpc.client.session import LogCapture as LogCapture
 from nanopynix.rpc.client.session import Nix as Nix
 from nanopynix.rpc.client.session import Session as Session
 from nanopynix.rpc.client.store import Store as Store

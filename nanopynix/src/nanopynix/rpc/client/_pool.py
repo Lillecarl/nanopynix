@@ -15,7 +15,6 @@ import asyncio
 import contextlib
 import logging
 import math
-from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -36,7 +35,7 @@ from nanopynix_proto.nix.worker import (
 
 from nanopynix._wire import DEFAULT_STORE_URI, WORKER_INIT_STATUS_OK
 from nanopynix.exceptions import from_response
-from nanopynix.logging import BusSubscription, CallbackBus
+from nanopynix.logging import ACTIVE_LOG_CAPTURES, BusSubscription, CallbackBus
 from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC, unpack_error_details
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
 from nanopynix.rpc.worker._worker import worker_service_factory
@@ -65,15 +64,6 @@ _LOG_DRAIN_TIMEOUT_SECONDS = 2.0
 Module-private rather than a NixSettings field: this bounds a teardown race
 against a worker that already acknowledged Shutdown, not anything a caller
 would tune. Cancelling early is safe, just noisy -- see close()."""
-
-ACTIVE_LOG_CAPTURES: ContextVar[tuple[Any, ...]] = ContextVar("nanopynix_active_log_captures", default=())
-"""Task-local stack of active LogCapture instances (nanopynix.rpc.client.session).
-
-Shared, cross-module dispatch contract: WorkerClient.invoke() tags each
-request into every capture active in the calling task; kept unprefixed
-(package-internal, not module-private) rather than paying a
-reportPrivateUsage suppression tax at the one import site that needs it."""
-
 
 # ════════════════════════════════════════════════════════════════════
 # Exceptions
@@ -277,7 +267,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         self._next_request_id += 1
         request.request_id = request_id
         for capture in ACTIVE_LOG_CAPTURES.get():
-            capture._register_request(request_id)  # type: ignore[reportPrivateUsage] -- WorkerClient.invoke() drives LogCapture's request-tagging  # noqa: SLF001
+            capture._register_request(request_id)  # type: ignore[reportPrivateUsage] -- the ACTIVE_LOG_CAPTURES dispatch contract; inproc does the same  # noqa: SLF001
         return await _grpc_call(method(request, timeout=timeout))
 
     # ── log access ─────────────────────────────────────────────────

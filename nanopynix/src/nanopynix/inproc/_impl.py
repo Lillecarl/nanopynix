@@ -46,7 +46,14 @@ from nanopynix.exceptions import (
     build_error_from_result,
     translate_nix_exception,
 )
-from nanopynix.logging import BusSubscription, CallbackBus, LogCollector, LogStreamEventKind
+from nanopynix.logging import (
+    ACTIVE_LOG_CAPTURES,
+    BusSubscription,
+    CallbackBus,
+    LogCapture,
+    LogCollector,
+    LogStreamEventKind,
+)
 from nanopynix.models import (
     BuildResult,
     Derivation,
@@ -373,7 +380,20 @@ class Session:
             self._collector.request_finalized(operation_id)
 
     def _next_operation_id(self) -> int:
-        return next(self._operation_ids)
+        """Allocate the next operation id and tag it into any active capture.
+
+        The tagging lives here rather than at each dispatch site because this
+        is the single allocation point: ``Session.run``/``_run_closing`` and
+        ``EvalSession.run``/``_run_closing`` all come through it, and an
+        evaluator operation that went untagged would leave
+        ``LogCapture.wait()`` returning before the work it was capturing had
+        finalized. rpc's one chokepoint is ``WorkerClient.invoke()``; this is
+        inproc's.
+        """
+        operation_id = next(self._operation_ids)
+        for capture in ACTIVE_LOG_CAPTURES.get():
+            capture._register_request(operation_id)  # type: ignore[reportPrivateUsage] -- the ACTIVE_LOG_CAPTURES dispatch contract; rpc does the same  # noqa: SLF001
+        return operation_id
 
     def store(self, uri: str | None = None) -> Store:
         """Return a direct-pointer store context manager."""
@@ -461,6 +481,19 @@ class Session:
     def subscribe(self, callback: Any) -> BusSubscription:
         """Subscribe a callback to live log events. Call ``.unsubscribe()`` to stop."""
         return self._log_bus.subscribe(callback)
+
+    def capture_logs(self) -> LogCapture:
+        """Record typed log events during an async context block.
+
+        The same :class:`~nanopynix.logging.LogCapture` rpc returns, over the
+        same bus this session's :meth:`subscribe` uses. It was rpc-only, which
+        the signature ledger carried as "Session.capture_logs:rpc-only" --
+        nothing about capturing log events depends on where Nix runs, and
+        inproc already had every part it needs: the bus, the operation ids,
+        and the ``request_finalized`` events that let ``wait()`` know when a
+        capture is complete.
+        """
+        return LogCapture(self)
 
 
 class Store:
