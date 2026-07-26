@@ -200,13 +200,16 @@ async def _collect_engine(
 async def _drv_path(eval_session: Any, expr: str) -> str:
     """Evaluate *expr*'s ``.drvPath`` as a plain string.
 
-    Written as its own expression rather than by navigating the value because
-    ``attr()`` is still sync on rpc and async on inproc, which is the one
-    remaining asymmetry on this route -- see ``SEMANTIC_LEDGER`` in
-    :mod:`tests.nanopynix.test_engine_parity_semantics`. The rest of what this
-    docstring used to list is fixed: ``as_string`` is on both engines now, and
-    ``coerce_str``, whose refusal of store-path context is why
-    ``unsafeDiscardStringContext`` is here, no longer exists at all.
+    Written as its own expression rather than by navigating the value, which is
+    now a preference rather than a necessity: the reasons it used to give are
+    all gone. ``attr()`` is sync on both engines, so it is no longer the "one
+    remaining asymmetry on this route" -- and ``SEMANTIC_LEDGER`` in
+    :mod:`tests.nanopynix.test_engine_parity_semantics`, which this pointed at
+    for it, is empty. ``as_string`` is on both engines, and ``coerce_str``,
+    whose refusal of store-path context is why ``unsafeDiscardStringContext``
+    is here, no longer exists at all. Asking Nix for the path in one expression
+    keeps this helper independent of the navigation API either way, which is
+    what a fixture for an error-detail test wants.
     """
     value = await eval_session.string(f"builtins.unsafeDiscardStringContext (({expr}).drvPath)")
     return await value.as_string()
