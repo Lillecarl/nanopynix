@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from nanopynix_proto.nix.eval import OpenEvalRequest
@@ -33,6 +33,26 @@ from nanopynix.rpc.worker._worker_nix import (
 
 if TYPE_CHECKING:
     from nanopynix_bindings.store import Store
+
+
+def _handler_with_inline_dispatch(handles: HandleRegistry) -> tuple[EvalServiceHandler, int]:
+    """A handler whose RPCs run their body inline, plus an evaluator handle.
+
+    The handlers are ``@worker_op``-decorated sync bodies, so an entry point is
+    the only way in -- there is no separately addressable ``_do_`` method any
+    more. These two tests are about handle ownership rather than dispatch, so
+    the state stands in for ``WorkerState`` with a ``run_request`` that just
+    calls the operation, and the evaluator handle exists only because
+    ``_run`` looks up an executor before dispatching.
+    """
+
+    async def run_request(*, request_id: int, executor: object, operation: Any, args: tuple[Any, ...]) -> Any:
+        _ = (request_id, executor)
+        return operation(*args)
+
+    eval_handle = handles.allocate(SimpleNamespace(executor=None), HandleKind.EVAL)
+    handler = EvalServiceHandler(SimpleNamespace(handles=handles, run_request=run_request))
+    return handler, eval_handle
 
 
 class _FakeBridge:
@@ -163,7 +183,7 @@ async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.Mo
     )
 
     try:
-        response = await handler.init(message)
+        response = await handler.init(cast("Any", message))
     finally:
         state.executor.shutdown()
 
@@ -251,7 +271,7 @@ async def test_open_eval_forwards_the_build_store_handle(
     close_eval_state(state, without_build.eval_handle)
 
 
-def test_releasing_remote_value_closes_local_value() -> None:
+async def test_releasing_remote_value_closes_local_value() -> None:
     class Value:
         def __init__(self) -> None:
             self.closed = False
@@ -262,16 +282,16 @@ def test_releasing_remote_value_closes_local_value() -> None:
     handles = HandleRegistry()
     value = Value()
     handle = handles.allocate(value, HandleKind.VALUE)
-    handler = EvalServiceHandler(SimpleNamespace(handles=handles))
+    handler, eval_handle = _handler_with_inline_dispatch(handles)
 
-    handler._do_release(SimpleNamespace(handle=handle))  # type: ignore[reportPrivateUsage] -- test verifies worker release ownership
+    await handler.release(cast("Any", SimpleNamespace(handle=handle, eval_handle=eval_handle, request_id=1)))
 
     assert value.closed
     with pytest.raises(KeyError):
         handles.get_typed(handle, HandleKind.VALUE)
 
 
-def test_releasing_locked_flake_closes_local_resource() -> None:
+async def test_releasing_locked_flake_closes_local_resource() -> None:
     class LockedFlake:
         def __init__(self) -> None:
             self.closed = False
@@ -282,9 +302,11 @@ def test_releasing_locked_flake_closes_local_resource() -> None:
     handles = HandleRegistry()
     locked_flake = LockedFlake()
     handle = handles.allocate(locked_flake, HandleKind.LOCKED_FLAKE)
-    handler = EvalServiceHandler(SimpleNamespace(handles=handles))
+    handler, eval_handle = _handler_with_inline_dispatch(handles)
 
-    handler._do_release_locked_flake(SimpleNamespace(handle=handle))  # type: ignore[reportPrivateUsage] -- test verifies worker release ownership
+    await handler.release_locked_flake(
+        cast("Any", SimpleNamespace(handle=handle, eval_handle=eval_handle, request_id=1)),
+    )
 
     assert locked_flake.closed
     with pytest.raises(KeyError):

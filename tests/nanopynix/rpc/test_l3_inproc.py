@@ -136,11 +136,13 @@ async def l3_inproc(isolated_nix_environment: NixTestEnvironment) -> AsyncIterat
         worker = _InprocWorkerClient(eval_stub, worker_stub)
         manager = _InprocManager(worker)
         session = EvalSession(cast("Any", worker), store_handle=store.store_handle)
-        worker_handler = cast("WorkerServiceHandler", handlers[0])  # type: ignore[reportUnknownVariableType] -- service decorator has no static type information
-        state = worker_handler._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType] -- test intentionally observes the decorated in-process worker
-        worker_state = cast("WorkerState", state)
+        worker_handler = cast("WorkerServiceHandler", handlers[0])
+        # wrap_service_handlers is generic in the class it decorates, so this is
+        # a real WorkerServiceHandler with a real WorkerState -- it used to come
+        # back as Unknown and needed a second cast to say so.
+        worker_state = worker_handler._state  # type: ignore[reportPrivateUsage] -- test intentionally observes the in-process worker's state
         try:
-            yield _L3Inproc(  # type: ignore[reportUnknownArgumentType] -- decorated handler state is runtime-typed above
+            yield _L3Inproc(
                 session,
                 manager,
                 worker_state,

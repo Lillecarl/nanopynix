@@ -78,7 +78,7 @@ from nanopynix._core._codec import python_to_scalar
 from nanopynix._core._extract import locked_flake as _locked_flake
 from nanopynix._core._objects import CoreLockedFlake, CoreValue
 from nanopynix._wire import HandleKind
-from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
+from nanopynix.rpc.worker._grpc_util import worker_op, wrap_service_handlers
 from nanopynix.rpc.worker._proto_shape import proto_shape
 from nanopynix.rpc.worker._worker_nix import NIX_EVALUATOR_STACK_SIZE, NixThreadExecutor
 
@@ -166,11 +166,13 @@ def close_eval_state(state: Any, eval_handle: int) -> None:
 class EvalServiceHandler(EvalServiceBase):
     """gRPC handler for all eval/flake operations.
 
-    Every method (other than ``OpenEval``, which allocates the handle)
-    follows the same dispatch pattern::
-
-        async def method(self, message):
-            return await self._get_executor(message.eval_handle).run(self._do_method, message)
+    Every method is written as a synchronous body and made an async gRPC entry
+    point by :func:`~nanopynix.rpc.worker._grpc_util.worker_op`, which is also
+    what ``_worker_store.py``'s handlers use. The two exceptions carry their own
+    reason: ``open_eval`` allocates the handle the others dispatch on, so it has
+    no evaluator thread to run on yet, and ``close_eval`` runs on the worker's
+    shared executor rather than the evaluator's own, which is the thing it is
+    shutting down.
 
     Each open evaluator owns a dedicated ``NixThreadExecutor``
     (``EvalEntry.executor``), so N concurrently open evaluators run on N
@@ -237,13 +239,15 @@ class EvalServiceHandler(EvalServiceBase):
         eval_handle = self._state.handles.allocate(entry, HandleKind.EVAL)
         return OpenEvalResponse(eval_handle=eval_handle)
 
-    async def configure_eval(self, message: ConfigureEvalRequest) -> ConfigureEvalResponse:
-        return await self._run(message, self._do_configure_eval)
-
-    def _do_configure_eval(self, message: ConfigureEvalRequest) -> ConfigureEvalResponse:
+    @worker_op
+    def configure_eval(self, message: ConfigureEvalRequest) -> ConfigureEvalResponse:
         self._get_es(message.eval_handle).configure(dict(message.eval_settings), dict(message.fetch_settings))
         return ConfigureEvalResponse()
 
+    # The one handler still written as a pair, because it is the one that
+    # cannot run where the others do: `_run`'s default executor is the
+    # evaluator's own thread, and this shuts that evaluator down. It runs on the
+    # worker's shared executor instead, which `worker_op` has no way to say.
     async def close_eval(self, message: CloseEvalRequest) -> CloseEvalResponse:
         if self._state.executor is None:
             raise RuntimeError("worker executor is unavailable")
@@ -287,24 +291,18 @@ class EvalServiceHandler(EvalServiceBase):
 
     # ── eval methods ──────────────────────────────────────────────
 
-    async def eval_file(self, message: EvalFileRequest) -> common_pb.ValueHandle:
-        return await self._run(message, self._do_eval_file)
-
-    def _do_eval_file(self, message: EvalFileRequest) -> common_pb.ValueHandle:
+    @worker_op
+    def eval_file(self, message: EvalFileRequest) -> common_pb.ValueHandle:
         es = self._get_es(message.eval_handle)
         value = es.repl_eval_file(message.path) if es.repl_active() else es.eval_file(message.path)
         return self._export(value, message.eval_handle)
 
-    async def repl_load_file(self, message: ReplLoadFileRequest) -> common_pb.ValueHandle:
-        return await self._run(message, self._do_repl_load_file)
-
-    def _do_repl_load_file(self, message: ReplLoadFileRequest) -> common_pb.ValueHandle:
+    @worker_op
+    def repl_load_file(self, message: ReplLoadFileRequest) -> common_pb.ValueHandle:
         return self._export(self._get_es(message.eval_handle).repl_load_file(message.path), message.eval_handle)
 
-    async def eval_string(self, message: EvalStringRequest) -> common_pb.ValueHandle:
-        return await self._run(message, self._do_eval_string)
-
-    def _do_eval_string(self, message: EvalStringRequest) -> common_pb.ValueHandle:
+    @worker_op
+    def eval_string(self, message: EvalStringRequest) -> common_pb.ValueHandle:
         es = self._get_es(message.eval_handle)
         value = (
             es.repl_eval_string(message.expr, message.source_name)
@@ -316,48 +314,36 @@ class EvalServiceHandler(EvalServiceBase):
         )
         return self._export(value, message.eval_handle)
 
-    async def begin_repl(self, message: BeginReplRequest) -> BeginReplResponse:
-        return await self._run(message, self._do_begin_repl)
-
-    def _do_begin_repl(self, message: BeginReplRequest) -> BeginReplResponse:
+    @worker_op
+    def begin_repl(self, message: BeginReplRequest) -> BeginReplResponse:
         self._get_es(message.eval_handle).begin_repl()
         return BeginReplResponse()
 
-    async def repl_process_line(self, message: ReplProcessLineRequest) -> ReplProcessLineResponse:
-        return await self._run(message, self._do_repl_process_line)
-
-    def _do_repl_process_line(self, message: ReplProcessLineRequest) -> ReplProcessLineResponse:
+    @worker_op
+    def repl_process_line(self, message: ReplProcessLineRequest) -> ReplProcessLineResponse:
         value = self._get_es(message.eval_handle).repl_process_line(message.line, message.source_name)
         if value is None:
             return ReplProcessLineResponse(is_binding=True)
         return ReplProcessLineResponse(is_binding=False, value=self._export(value, message.eval_handle))
 
-    async def repl_add_attrs(self, message: ReplAddAttrsRequest) -> ReplAddAttrsResponse:
-        return await self._run(message, self._do_repl_add_attrs)
-
-    def _do_repl_add_attrs(self, message: ReplAddAttrsRequest) -> ReplAddAttrsResponse:
+    @worker_op
+    def repl_add_attrs(self, message: ReplAddAttrsRequest) -> ReplAddAttrsResponse:
         es = self._get_es(message.eval_handle)
         return ReplAddAttrsResponse(names=es.repl_add_attrs(self._resolve(message.handle)))
 
-    async def repl_scope_names(self, message: ReplScopeNamesRequest) -> ReplScopeNamesResponse:
-        return await self._run(message, self._do_repl_scope_names)
-
-    def _do_repl_scope_names(self, message: ReplScopeNamesRequest) -> ReplScopeNamesResponse:
+    @worker_op
+    def repl_scope_names(self, message: ReplScopeNamesRequest) -> ReplScopeNamesResponse:
         return ReplScopeNamesResponse(names=self._get_es(message.eval_handle).repl_scope_names())
 
-    async def reset_file_cache(self, message: ResetFileCacheRequest) -> ResetFileCacheResponse:
-        return await self._run(message, self._do_reset_file_cache)
-
-    def _do_reset_file_cache(self, message: ResetFileCacheRequest) -> ResetFileCacheResponse:
+    @worker_op
+    def reset_file_cache(self, message: ResetFileCacheRequest) -> ResetFileCacheResponse:
         self._get_es(message.eval_handle).reset_file_cache()
         return ResetFileCacheResponse()
 
     # Named for the wire op, not the client method: the RPC is ForceJson and
     # really does transfer JSON. ValueProxy.to_python() decodes it.
-    async def force_json(self, message: ForceJsonRequest) -> ForceJsonResponse:
-        return await self._run(message, self._do_force_json)
-
-    def _do_force_json(self, message: ForceJsonRequest) -> ForceJsonResponse:
+    @worker_op
+    def force_json(self, message: ForceJsonRequest) -> ForceJsonResponse:
         value = self._resolve(message.handle)
         # pydantic_core's Rust JSON encoder instead of stdlib json.dumps --
         # the tree is already known-valid JSON-compatible data straight out
@@ -366,45 +352,33 @@ class EvalServiceHandler(EvalServiceBase):
         json_bytes = pydantic_core.to_json(value.to_json(copy_to_store=message.copy_to_store))
         return ForceJsonResponse(json=json_bytes.decode("utf-8"))
 
-    async def as_scalar(self, message: AsScalarRequest) -> common_pb.ScalarValue:
-        return await self._run(message, self._do_as_scalar)
-
-    def _do_as_scalar(self, message: AsScalarRequest) -> common_pb.ScalarValue:
+    @worker_op
+    def as_scalar(self, message: AsScalarRequest) -> common_pb.ScalarValue:
         accessor = _AS_SCALAR_ACCESSORS.get(message.nix_type)
         if accessor is None:
             raise ValueError(f"AsScalar does not support {message.nix_type!r}")
         value = getattr(self._resolve(message.handle), accessor)()
         return python_to_scalar(value)
 
-    async def realise_string(self, message: RealiseStringRequest) -> RealiseStringResponse:
-        return await self._run(message, self._do_realise_string)
-
-    def _do_realise_string(self, message: RealiseStringRequest) -> RealiseStringResponse:
+    @worker_op
+    def realise_string(self, message: RealiseStringRequest) -> RealiseStringResponse:
         return RealiseStringResponse(value=self._resolve(message.handle).realise_string())
 
-    async def realise_argv(self, message: RealiseArgvRequest) -> RealiseArgvResponse:
-        return await self._run(message, self._do_realise_argv)
-
-    def _do_realise_argv(self, message: RealiseArgvRequest) -> RealiseArgvResponse:
+    @worker_op
+    def realise_argv(self, message: RealiseArgvRequest) -> RealiseArgvResponse:
         return RealiseArgvResponse(argv=self._resolve(message.handle).realise_argv())
 
-    async def edit_location(self, message: EditLocationRequest) -> EditLocationResponse:
-        return await self._run(message, self._do_edit_location)
-
-    def _do_edit_location(self, message: EditLocationRequest) -> EditLocationResponse:
+    @worker_op
+    def edit_location(self, message: EditLocationRequest) -> EditLocationResponse:
         location = self._resolve(message.handle).edit_location()
         return EditLocationResponse(path=location["path"], line=location["line"])
 
-    async def attr(self, message: AttrRequest) -> common_pb.ValueHandle:
-        return await self._run(message, self._do_attr)
-
-    def _do_attr(self, message: AttrRequest) -> common_pb.ValueHandle:
+    @worker_op
+    def attr(self, message: AttrRequest) -> common_pb.ValueHandle:
         return self._export(self._resolve(message.handle).attr_get(message.name), message.eval_handle)
 
-    async def list_get(self, message: ListGetRequest) -> common_pb.ValueHandle:
-        return await self._run(message, self._do_list_get)
-
-    def _do_list_get(self, message: ListGetRequest) -> common_pb.ValueHandle:
+    @worker_op
+    def list_get(self, message: ListGetRequest) -> common_pb.ValueHandle:
         pv = self._resolve(message.handle)
         idx = message.index
         if idx < 0:
@@ -413,44 +387,32 @@ class EvalServiceHandler(EvalServiceBase):
             raise IndexError(f"list index out of range: {message.index}")
         return self._export(pv.list_get(idx), message.eval_handle)
 
-    async def list_length(self, message: ListLengthRequest) -> ListLengthResponse:
-        return await self._run(message, self._do_list_length)
-
-    def _do_list_length(self, message: ListLengthRequest) -> ListLengthResponse:
+    @worker_op
+    def list_length(self, message: ListLengthRequest) -> ListLengthResponse:
         return ListLengthResponse(length=self._resolve(message.handle).list_length())
 
-    async def attr_names(self, message: AttrNamesRequest) -> AttrNamesResponse:
-        return await self._run(message, self._do_attr_names)
-
-    def _do_attr_names(self, message: AttrNamesRequest) -> AttrNamesResponse:
+    @worker_op
+    def attr_names(self, message: AttrNamesRequest) -> AttrNamesResponse:
         return AttrNamesResponse(names=self._resolve(message.handle).attr_names())
 
-    async def has_attr(self, message: HasAttrRequest) -> HasAttrResponse:
-        return await self._run(message, self._do_has_attr)
-
-    def _do_has_attr(self, message: HasAttrRequest) -> HasAttrResponse:
+    @worker_op
+    def has_attr(self, message: HasAttrRequest) -> HasAttrResponse:
         return HasAttrResponse(has=self._resolve(message.handle).has_attr(message.name))
 
-    async def type_name(self, message: TypeNameRequest) -> TypeNameResponse:
-        return await self._run(message, self._do_type_name)
-
-    def _do_type_name(self, message: TypeNameRequest) -> TypeNameResponse:
+    @worker_op
+    def type_name(self, message: TypeNameRequest) -> TypeNameResponse:
         value = self._resolve(message.handle)
         value.force()
         type_name = value.type_name()
         nix_type = _NIX_TYPE_MAP.get(type_name, common_pb.NixType.UNSPECIFIED)
         return TypeNameResponse(type=nix_type)
 
-    async def auto_call(self, message: AutoCallRequest) -> common_pb.ValueHandle:
-        return await self._run(message, self._do_auto_call)
-
-    def _do_auto_call(self, message: AutoCallRequest) -> common_pb.ValueHandle:
+    @worker_op
+    def auto_call(self, message: AutoCallRequest) -> common_pb.ValueHandle:
         return self._export(self._resolve(message.handle).auto_call(), message.eval_handle)
 
-    async def call(self, message: CallRequest) -> common_pb.ValueHandle:
-        return await self._run(message, self._do_call)
-
-    def _do_call(self, message: CallRequest) -> common_pb.ValueHandle:
+    @worker_op
+    def call(self, message: CallRequest) -> common_pb.ValueHandle:
         es = self._get_es(message.eval_handle)
         fn = self._resolve(message.handle)
         arguments: list[CoreValue] = []
@@ -462,10 +424,8 @@ class EvalServiceHandler(EvalServiceBase):
         # cleanup instead of a second implementation.
         return self._export(fn.call(*arguments), message.eval_handle)
 
-    async def build(self, message: BuildRequest) -> BuildResponse:
-        return await self._run(message, self._do_build)
-
-    def _do_build(self, message: BuildRequest) -> BuildResponse:
+    @worker_op
+    def build(self, message: BuildRequest) -> BuildResponse:
         entry = self._get_entry(message.eval_handle)
         value = self._resolve(message.handle)
         build_store = self._get_store(message.build_store_handle) if message.build_store_handle else None
@@ -497,10 +457,8 @@ class EvalServiceHandler(EvalServiceBase):
 
     # ── flake methods ─────────────────────────────────────────────
 
-    async def lock_flake(self, message: LockFlakeRequest) -> common_pb.LockedFlake:
-        return await self._run(message, self._do_lock_flake)
-
-    def _do_lock_flake(self, message: LockFlakeRequest) -> common_pb.LockedFlake:
+    @worker_op
+    def lock_flake(self, message: LockFlakeRequest) -> common_pb.LockedFlake:
         if self._state.collector is not None:
             self._state.log("msg", int(common_pb.LogLevel.INFO), f"lock_flake: parsing ref '{message.ref}'")
         es = self._get_es(message.eval_handle)
@@ -532,26 +490,20 @@ class EvalServiceHandler(EvalServiceBase):
         lf_pb.handle = handle
         return lf_pb
 
-    async def call_locked_flake(self, message: CallLockedFlakeRequest) -> common_pb.ValueHandle:
-        return await self._run(message, self._do_call_locked_flake)
-
-    def _do_call_locked_flake(self, message: CallLockedFlakeRequest) -> common_pb.ValueHandle:
+    @worker_op
+    def call_locked_flake(self, message: CallLockedFlakeRequest) -> common_pb.ValueHandle:
         lf: CoreLockedFlake = self._state.handles.get_typed(message.handle, HandleKind.LOCKED_FLAKE)
         es = self._get_es(message.eval_handle)
         return self._export(es.call_locked_flake(lf), message.eval_handle)
 
-    async def write_lock_file(self, message: WriteLockFileRequest) -> WriteLockFileResponse:
-        return await self._run(message, self._do_write_lock_file)
-
-    def _do_write_lock_file(self, message: WriteLockFileRequest) -> WriteLockFileResponse:
+    @worker_op
+    def write_lock_file(self, message: WriteLockFileRequest) -> WriteLockFileResponse:
         lf: CoreLockedFlake = self._state.handles.get_typed(message.handle, HandleKind.LOCKED_FLAKE)
         lf.write_lock_file()
         return WriteLockFileResponse()
 
-    async def release_locked_flake(self, message: ReleaseLockedFlakeRequest) -> ReleaseLockedFlakeResponse:
-        return await self._run(message, self._do_release_locked_flake)
-
-    def _do_release_locked_flake(self, message: ReleaseLockedFlakeRequest) -> ReleaseLockedFlakeResponse:
+    @worker_op
+    def release_locked_flake(self, message: ReleaseLockedFlakeRequest) -> ReleaseLockedFlakeResponse:
         try:
             locked_flake: CoreLockedFlake = self._state.handles.get_typed(message.handle, HandleKind.LOCKED_FLAKE)
         except KeyError:
@@ -560,10 +512,8 @@ class EvalServiceHandler(EvalServiceBase):
         self._state.handles.release(message.handle)
         return ReleaseLockedFlakeResponse()
 
-    async def eval_flake(self, message: EvalFlakeRequest) -> common_pb.ValueHandle:
-        return await self._run(message, self._do_eval_flake)
-
-    def _do_eval_flake(self, message: EvalFlakeRequest) -> common_pb.ValueHandle:
+    @worker_op
+    def eval_flake(self, message: EvalFlakeRequest) -> common_pb.ValueHandle:
         es = self._get_es(message.eval_handle)
         value = es.eval_flake(
             message.ref,
@@ -572,16 +522,12 @@ class EvalServiceHandler(EvalServiceBase):
         )
         return self._export(value, message.eval_handle)
 
-    async def get_flake(self, message: GetFlakeRequest) -> common_pb.FlakeRef:
-        return await self._run(message, self._do_get_flake)
-
-    def _do_get_flake(self, message: GetFlakeRequest) -> common_pb.FlakeRef:
+    @worker_op
+    def get_flake(self, message: GetFlakeRequest) -> common_pb.FlakeRef:
         return self._get_es(message.eval_handle).get_flake(message.ref)
 
-    async def release(self, message: ReleaseRequest) -> ReleaseResponse:
-        return await self._run(message, self._do_release)
-
-    def _do_release(self, message: ReleaseRequest) -> ReleaseResponse:
+    @worker_op
+    def release(self, message: ReleaseRequest) -> ReleaseResponse:
         try:
             value = self._resolve(message.handle)
         except KeyError:
@@ -590,9 +536,7 @@ class EvalServiceHandler(EvalServiceBase):
         self._state.handles.release(message.handle)
         return ReleaseResponse()
 
-    async def release_all(self, message: ReleaseAllRequest) -> ReleaseAllResponse:
-        return await self._run(message, self._do_release_all)
-
-    def _do_release_all(self, message: ReleaseAllRequest) -> ReleaseAllResponse:
+    @worker_op
+    def release_all(self, message: ReleaseAllRequest) -> ReleaseAllResponse:
         release_eval_resources(self._state, message.eval_handle)
         return ReleaseAllResponse()
