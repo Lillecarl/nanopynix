@@ -320,32 +320,60 @@ static nb::object request_field(const nb::dict &request, const char *key, const 
     return nb::borrow<nb::object>(request[nb::str(key)]);
 }
 
+// What a field of each type is called in an error message. Deriving this from
+// the C++ type keeps the description at the one place that knows it, instead of
+// repeating a string at every call site where it could drift from the cast.
+template <typename T> struct request_type_name;
+template <> struct request_type_name<std::string> { static constexpr const char *value = "a string"; };
+template <> struct request_type_name<bool> { static constexpr const char *value = "a bool"; };
+template <> struct request_type_name<uint64_t> { static constexpr const char *value = "an integer"; };
+template <> struct request_type_name<int> { static constexpr const char *value = "an integer"; };
+template <> struct request_type_name<std::vector<std::string>> {
+    static constexpr const char *value = "a list of strings";
+};
+
+// A field that is present but of the wrong type is as much a usage error as an
+// absent one, and gets the same treatment. nb::cast's own failure is a bare
+// std::bad_cast, which reaches Python as RuntimeError('std::bad_cast') -- it
+// names neither the field nor the operation, and is not one of nanopynix's
+// error types, so a caller catching those misses it entirely.
+template <typename T>
+static T request_cast(const nb::object &value, const char *key, const char *op) {
+    try {
+        return nb::cast<T>(value);
+    } catch (const nb::cast_error &) {  // NOLINT(bugprone-empty-catch) -- rethrown below with context
+    } catch (const nb::python_error &) {  // NOLINT(bugprone-empty-catch) -- ditto; e.g. a failing __index__
+    }
+    throw nix::UsageError("%s: request field '%s' must be %s, got %s", op, key,
+                          request_type_name<T>::value, Py_TYPE(value.ptr())->tp_name);
+}
+
 static std::string request_string(const nb::dict &request, const char *key, const char *op) {
-    return nb::cast<std::string>(request_field(request, key, op));
+    return request_cast<std::string>(request_field(request, key, op), key, op);
 }
 
 static std::string request_string(const nb::dict &request, const char *key, const char *op, const char *fallback) {
     if (!request.contains(nb::str(key)))
         return fallback;
-    return nb::cast<std::string>(request[nb::str(key)]);
+    return request_cast<std::string>(request[nb::str(key)], key, op);
 }
 
 static bool request_bool(const nb::dict &request, const char *key, const char *op, bool fallback) {
     if (!request.contains(nb::str(key)))
         return fallback;
-    return nb::cast<bool>(request[nb::str(key)]);
+    return request_cast<bool>(request[nb::str(key)], key, op);
 }
 
 static uint64_t request_uint64(const nb::dict &request, const char *key, const char *op, uint64_t fallback) {
     if (!request.contains(nb::str(key)))
         return fallback;
-    return nb::cast<uint64_t>(request[nb::str(key)]);
+    return request_cast<uint64_t>(request[nb::str(key)], key, op);
 }
 
 static int request_int(const nb::dict &request, const char *key, const char *op, int fallback) {
     if (!request.contains(nb::str(key)))
         return fallback;
-    return nb::cast<int>(request[nb::str(key)]);
+    return request_cast<int>(request[nb::str(key)], key, op);
 }
 
 static std::optional<std::string> request_optional_string(const nb::dict &request, const char *key, const char *op) {
@@ -354,7 +382,7 @@ static std::optional<std::string> request_optional_string(const nb::dict &reques
     auto value = request[nb::str(key)];
     if (value.is_none())
         return std::nullopt;
-    return nb::cast<std::string>(value);
+    return request_cast<std::string>(value, key, op);
 }
 
 static nix::StorePath request_store_path(nix::Store &s, const nb::dict &request, const char *key, const char *op) {
@@ -367,7 +395,7 @@ static std::vector<nix::StorePath> request_store_paths(
         nix::Store &s, const nb::dict &request, const char *key, const char *op, bool required) {
     if (!required && !request.contains(nb::str(key)))
         return {};
-    std::vector<std::string> raw = nb::cast<std::vector<std::string>>(request_field(request, key, op));
+    auto raw = request_cast<std::vector<std::string>>(request_field(request, key, op), key, op);
     std::vector<nix::StorePath> paths;
     paths.reserve(raw.size());
     for (auto &path : raw) {
@@ -415,7 +443,7 @@ static nix::DerivedPath derived_path_for_build_input(const nix::StorePath &path)
 
 static nix::DerivedPaths request_derived_paths(
         nix::Store &s, const nb::dict &request, const char *key, const char *op) {
-    std::vector<std::string> raw = nb::cast<std::vector<std::string>>(request_field(request, key, op));
+    auto raw = request_cast<std::vector<std::string>>(request_field(request, key, op), key, op);
     nix::DerivedPaths paths;
     paths.reserve(raw.size());
     for (auto &path : raw) {
@@ -1019,7 +1047,8 @@ static nb::dict store_find_roots(nix::Store &s, const nb::dict &request) {
 static nb::dict store_collect_garbage(nix::Store &s, const nb::dict &request) {
     return collect_garbage(
         s,
-        gc_action_from_int(nb::cast<int>(request_field(request, "action", "store_collect_garbage"))),
+        gc_action_from_int(request_cast<int>(
+            request_field(request, "action", "store_collect_garbage"), "action", "store_collect_garbage")),
         request_bool(request, "ignore_liveness", "store_collect_garbage", false),
         request_store_paths(s, request, "paths_to_delete", "store_collect_garbage", false),
         request_uint64(request, "max_freed", "store_collect_garbage", std::numeric_limits<uint64_t>::max()));
