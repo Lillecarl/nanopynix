@@ -304,6 +304,77 @@ def test_a_differing_exception_type_is_not_equal() -> None:
     assert ("raise", "NixTypeError") != ("value", None)
 
 
+# ── Evaluator construction parity ────────────────────────────────────
+#
+# Not expressible as a Case: these are about the arguments an evaluator can be
+# *built* with, before any expression runs. They retire two LEDGER DEFECTs
+# ("Session.eval:params" and the build_store half of "Session.repl:params").
+
+
+async def _evaluates_with_a_separate_build_store(factory: Any) -> str:
+    """Open an evaluator against one store while building into another."""
+    async with (
+        factory() as session,
+        session.store() as store,
+        session.store() as build_store,
+        session.eval(store, build_store=build_store) as evaluator,
+    ):
+        return await (await evaluator.string('"reached the evaluator"')).as_string()
+
+
+async def _repl_honours_a_per_call_line_editor(factory: Any) -> tuple[str, ...]:
+    async with (
+        factory() as session,
+        session.store() as store,
+        session.repl(store, line_editors=("nanopynix-parity-probe",)) as repl,
+    ):
+        return tuple(repl.line_editors)
+
+
+async def test_both_engines_evaluate_against_one_store_and_build_into_another(
+    inproc_session: InprocSessionFactory,
+    rpc_session: RpcSessionFactory,
+) -> None:
+    """``eval(store, build_store=...)`` must be accepted and usable on both.
+
+    rpc could not express this at all: ``OpenEvalRequest`` carried no
+    ``build_store_handle`` and ``_worker_eval.open_eval`` passed a hardcoded
+    ``None`` into ``open_eval_state``, whose third parameter is the build
+    store. inproc has always taken the pair. Nothing about a subprocess
+    boundary required the asymmetry -- ``store.proto`` already ships an
+    optional ``eval_store_handle`` for ``BuildPathsWithResults``, so the wire
+    encoding was a solved problem sitting one file away.
+
+    What this asserts is exactly "accepted and usable", and no more. Both
+    stores here come from the same session and resolve to the same underlying
+    Nix store, so evaluation would succeed even if the handle were dropped --
+    measured: reverting the worker to its hardcoded ``None`` leaves this test
+    green. The plumbing witnesses are
+    ``test_worker_eval_unit.test_open_eval_forwards_the_build_store_handle``
+    and ``test_session_unit.test_open_eval_carries_the_build_store_handle``,
+    one per side of the wire; both go red under that same experiment. Stated
+    here so this test is not mistaken for the gate it is not.
+    """
+    assert await _evaluates_with_a_separate_build_store(inproc_session) == "reached the evaluator"
+    assert await _evaluates_with_a_separate_build_store(rpc_session) == "reached the evaluator"
+
+
+async def test_both_engines_take_line_editors_per_repl(
+    inproc_session: InprocSessionFactory,
+    rpc_session: RpcSessionFactory,
+) -> None:
+    """``repl(line_editors=...)`` is per-call on both engines.
+
+    rpc read it only from ``Session.runtime_settings``, so two REPLs in one
+    worker could not use different editors -- a caller wanting that had to open
+    a second worker. It describes one interactive front-end, which is what
+    inproc's per-call argument already said.
+    """
+    probe = ("nanopynix-parity-probe",)
+    assert await _repl_honours_a_per_call_line_editor(inproc_session) == probe
+    assert await _repl_honours_a_per_call_line_editor(rpc_session) == probe
+
+
 def test_semantic_ledger_names_only_real_cases() -> None:
     """A ledger entry for a case that no longer exists documents nothing."""
     known = {case.name for case in SUCCESS_CASES + FAILURE_CASES}

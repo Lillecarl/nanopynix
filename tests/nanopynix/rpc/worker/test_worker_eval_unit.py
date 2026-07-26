@@ -214,6 +214,43 @@ async def test_open_eval_allows_concurrent_eval_states(monkeypatch: pytest.Monke
     close_eval_state(state, second_response.eval_handle)
 
 
+@pytest.mark.anyio
+async def test_open_eval_forwards_the_build_store_handle(
+    monkeypatch: pytest.MonkeyPatch,
+    init_expr: object,
+) -> None:
+    """A build_store_handle must reach ``open_eval_state``'s third parameter.
+
+    This is the plumbing witness for ``OpenEvalRequest.build_store_handle``.
+    The cross-engine test in ``test_engine_parity_semantics`` cannot be it:
+    both stores there come from the same session and resolve to the same
+    underlying Nix store, so evaluation succeeds whether or not the handle is
+    forwarded. Measured -- with the forwarding reverted to the hardcoded
+    ``None`` it replaced, that test still passes and this one fails.
+    """
+    del init_expr  # as above: real GC init before a real NixThreadExecutor
+    monkeypatch.setattr(nix_core.nanopynix_expr, "EvalState", _FakeEvalState)
+
+    state = WorkerState()
+    eval_store = state.handles.allocate(CoreStore(cast("Store", "eval-store")), HandleKind.STORE)
+    build_store = state.handles.allocate(CoreStore(cast("Store", "build-store")), HandleKind.STORE)
+    handler = EvalServiceHandler(state)
+
+    with_build = await handler.open_eval(
+        OpenEvalRequest(store_handle=eval_store, build_store_handle=build_store, request_id=1),
+    )
+    selected = handler._get_es(with_build.eval_handle)  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
+    assert selected.raw.store == "eval-store"
+    assert selected.raw.build_store == "build-store", "the build store did not reach the evaluator"
+
+    # 0 is the wire's "none", as for every other optional handle.
+    without_build = await handler.open_eval(OpenEvalRequest(store_handle=eval_store, request_id=2))
+    assert handler._get_es(without_build.eval_handle).raw.build_store is None  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
+
+    close_eval_state(state, with_build.eval_handle)
+    close_eval_state(state, without_build.eval_handle)
+
+
 def test_releasing_remote_value_closes_local_value() -> None:
     class Value:
         def __init__(self) -> None:

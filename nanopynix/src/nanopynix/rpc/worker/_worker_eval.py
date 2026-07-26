@@ -208,6 +208,15 @@ class EvalServiceHandler(EvalServiceBase):
 
     async def open_eval(self, message: OpenEvalRequest) -> OpenEvalResponse:
         store = self._state.handles.get_typed(message.store_handle, HandleKind.STORE)
+        # 0 means "none", as everywhere else an optional handle crosses the
+        # wire (see _worker_store's eval_store_handle). This used to be a
+        # hardcoded None, which is why rpc's Session.eval could not accept the
+        # build_store inproc has always taken.
+        build_store = (
+            self._state.handles.get_typed(message.build_store_handle, HandleKind.STORE)
+            if message.build_store_handle
+            else None
+        )
         executor = NixThreadExecutor(
             thread_name_prefix="nix-eval",
             thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
@@ -218,7 +227,13 @@ class EvalServiceHandler(EvalServiceBase):
             request_id=message.request_id,
             executor=executor,
             operation=self._state.runtime.open_eval_state,
-            args=(store, self._state.nix_path, None, dict(message.eval_settings), dict(message.fetch_settings)),
+            args=(
+                store,
+                self._state.nix_path,
+                build_store,
+                dict(message.eval_settings),
+                dict(message.fetch_settings),
+            ),
         )
         entry = EvalEntry(eval_state=eval_state, executor=executor, store_handle=message.store_handle)
         eval_handle = self._state.handles.allocate(entry, HandleKind.EVAL)

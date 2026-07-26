@@ -52,6 +52,11 @@ message OpenEvalRequest {
   int64 store_handle = 1;
   map<string, string> eval_settings = 2;
   map<string, string> fetch_settings = 3;
+  // 0 means "no separate build store", matching
+  // BuildPathsWithResultsRequest.eval_store_handle in store.proto. Nix lets an
+  // evaluator read from one store and build into another; inproc has always
+  // accepted that pair, and the worker used to hardcode None here.
+  int64 build_store_handle = 4;
 }
 message OpenEvalResponse {
   int64 eval_handle = 1;
