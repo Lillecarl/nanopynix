@@ -60,10 +60,10 @@ async def test_inproc_yaml_primops(inproc_session: InprocSessionFactory) -> None
 async def test_inproc_eval_value_navigation(inproc_session: InprocSessionFactory) -> None:
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         root = await eval.string('{ greeting = "hello"; numbers = [ 1 2 3 ]; }')
-        assert await (await root.attr("greeting")).as_string() == "hello"
-        numbers = await root.attr("numbers")
+        assert await root.attr("greeting").as_string() == "hello"
+        numbers = root.attr("numbers")
         assert await numbers.list_length() == 3
-        assert await (await numbers.list_get(1)).as_int() == 2
+        assert await numbers.list_get(1).as_int() == 2
         assert await root.has_attr("greeting")
         assert not await root.has_attr("missing")
 
@@ -159,7 +159,7 @@ async def test_inproc_value_rejects_use_after_eval_close(inproc_session: InprocS
 async def test_inproc_value_context_manager_releases_rooted_value(inproc_session: InprocSessionFactory) -> None:
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         async with await eval.string("{ answer = 42; }") as root:
-            assert await (await root.attr("answer")).as_int() == 42
+            assert await root.attr("answer").as_int() == 42
         with pytest.raises(inproc.InprocValueReleasedError):
             await root.get_type()
 
@@ -216,7 +216,7 @@ async def test_inproc_locked_flake_facade(tmp_path: Path, inproc_session: Inproc
         assert isinstance(locked.description, str)
 
         outputs = await locked.eval()
-        assert await (await outputs.attr("value")).as_int() == 42
+        assert await outputs.attr("value").as_int() == 42
 
         await locked.write_lock_file()
         assert (tmp_path / "flake.lock").exists()
@@ -667,8 +667,8 @@ async def test_inproc_eval_flake(tmp_path: Path, inproc_session: InprocSessionFa
 
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         outputs = await eval.eval_flake(str(tmp_path), write_lock_file=False)
-        assert await (await outputs.attr("greeting")).as_string() == "hello"
-        assert await (await outputs.attr("count")).as_int() == 42
+        assert await outputs.attr("greeting").as_string() == "hello"
+        assert await outputs.attr("count").as_int() == 42
         assert not (tmp_path / "flake.lock").exists()
 
 
@@ -784,6 +784,27 @@ async def test_inproc_value_release_is_idempotent(inproc_session: InprocSessionF
         value = await eval.string("1")
         await value.release()
         await value.release()
+
+
+@pytest.mark.anyio
+async def test_inproc_selection_on_a_released_value_raises_at_selection(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    """Selection defers the Nix work, not the liveness check.
+
+    ``attr``/``list_get`` are synchronous and lazy, so a released value would
+    otherwise hand back a chain that can only fail much later, at whatever
+    forces it. rpc's ``ValueProxy.attr`` checks up front; this asserts inproc
+    does too, and that it is the selection itself that raises rather than a
+    subsequent await.
+    """
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
+        value = await eval.string("{ a = 1; }")
+        await value.release()
+        with pytest.raises(inproc.InprocValueReleasedError):
+            value.attr("a")
+        with pytest.raises(inproc.InprocValueReleasedError):
+            value.list_get(0)
 
 
 # ── Session lifecycle and error branches ─────────────────────────────────
@@ -1118,7 +1139,7 @@ async def test_inproc_value_rejects_use_from_different_eval_session(inproc_sessi
         eval2 = nix.eval(store)
 
         with pytest.raises(ValueError, match="different inproc EvalSession"):
-            value._local_for(eval2)  # type: ignore[reportPrivateUsage] -- exercising the cross-EvalSession guard
+            await value._resolve_for(eval2)  # type: ignore[reportPrivateUsage] -- exercising the cross-EvalSession guard
 
         await eval1.close()
 

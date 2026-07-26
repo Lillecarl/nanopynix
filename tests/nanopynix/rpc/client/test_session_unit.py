@@ -480,7 +480,10 @@ class TestValueProxyLifecycle:
         w.eval_stub.call.return_value = _mock_value_handle(3, "int")
         vp = self._proxy(w, 1, "int")
 
-        await vp()
+        # An argument, because a nullary call is refused before dispatch on
+        # both engines -- Nix has no `f ()`. Passing one is what makes this
+        # test about the *type* pre-check it is named for.
+        await vp(1)
 
         w.eval_stub.call.assert_awaited_once()
 

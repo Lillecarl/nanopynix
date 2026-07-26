@@ -453,12 +453,14 @@ class EvalServiceHandler(EvalServiceBase):
     def _do_call(self, message: CallRequest) -> common_pb.ValueHandle:
         es = self._get_es(message.eval_handle)
         fn = self._resolve(message.handle)
-        result = fn
+        arguments: list[CoreValue] = []
         for arg in message.args:
-            argument = self._call_arg_to_python(arg, es)
-            value = argument if isinstance(argument, CoreValue) else es.value_from_python(argument)
-            result = result.call(value)
-        return self._export(result, message.eval_handle)
+            decoded = self._call_arg_to_python(arg, es)
+            arguments.append(decoded if isinstance(decoded, CoreValue) else es.value_from_python(decoded))
+        # The currying loop this replaces lived here; it is CoreValue.call's
+        # now, so inproc gets the same semantics and the same intermediate
+        # cleanup instead of a second implementation.
+        return self._export(fn.call(*arguments), message.eval_handle)
 
     async def build(self, message: BuildRequest) -> BuildResponse:
         return await self._run(message, self._do_build)

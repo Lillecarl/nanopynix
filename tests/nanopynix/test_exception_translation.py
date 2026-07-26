@@ -303,7 +303,8 @@ async def test_missing_attribute_is_both_a_key_error_and_a_nix_error(
     ):
         value = await ev.string("{ foo = 1; bar = 2; }")
         with pytest.raises(nanopynix.MissingAttributeError) as excinfo:
-            await value.attr("fooo")
+            # Selection is lazy on both engines; forcing is what raises.
+            await value.attr("fooo").get_type()
 
     raised = excinfo.value
     # Both hierarchies, so neither style of caller is wrong.
@@ -329,7 +330,7 @@ async def test_list_index_is_both_an_index_error_and_a_nix_error(
     ):
         value = await ev.string("[ 1 2 ]")
         with pytest.raises(nanopynix.ListIndexError) as excinfo:
-            await value.list_get(99)
+            await value.list_get(99).get_type()
 
     raised = excinfo.value
     assert isinstance(raised, IndexError)

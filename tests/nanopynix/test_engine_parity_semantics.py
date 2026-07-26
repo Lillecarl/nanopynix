@@ -12,10 +12,12 @@ differently. The type is what a caller branches on, so the type is what has to
 agree.
 
 Where the engines cannot be driven by the same call at all, the adapter that
-bridges them carries the name of its ledger entry -- see ``_attr`` and
-``_type_name``. That coupling is the point: retiring a ``DEFECT`` from
-``LEDGER`` should also delete an adapter here, so the two files cannot drift
-into disagreeing about which divergences still exist.
+bridges them carries the name of its ledger entry -- see ``_type_name``. That
+coupling is the point: retiring a ``DEFECT`` from ``LEDGER`` should also
+delete an adapter here, so the two files cannot drift into disagreeing about
+which divergences still exist. ``_attr`` and ``_list_get`` are gone for
+exactly that reason: selection is now lazy and synchronous on both engines,
+so the cases below call ``value.attr(...)`` directly.
 """
 
 from __future__ import annotations
@@ -39,18 +41,6 @@ if TYPE_CHECKING:
 # visible so it is obvious what unifying the API would delete.
 
 
-async def _attr(value: Any, name: str) -> Any:
-    """LEDGER "Value.attr:async" -- inproc awaits, rpc returns a proxy."""
-    result = value.attr(name)
-    return await result if hasattr(result, "__await__") else result
-
-
-async def _list_get(value: Any, index: int) -> Any:
-    """LEDGER "Value.list_get:async" -- as ``_attr``."""
-    result = value.list_get(index)
-    return await result if hasattr(result, "__await__") else result
-
-
 async def _type_name(value: Any) -> str:
     """LEDGER "Value.type:inproc-only" / "Value.get_type:rpc-only".
 
@@ -68,11 +58,11 @@ async def _sorted_attr_names(value: Any) -> list[str]:
 
 
 async def _attr_as_int(value: Any) -> int:
-    return await (await _attr(value, "a")).as_int()
+    return await value.attr("a").as_int()
 
 
 async def _list_get_as_int(value: Any) -> int:
-    return await (await _list_get(value, 1)).as_int()
+    return await value.list_get(1).as_int()
 
 
 async def _as_dict_keys(value: Any) -> list[str]:
@@ -97,12 +87,53 @@ async def _apply_via_as_dict(value: Any) -> Any:
     return await (await entries["n"].apply(entries["f"])).to_python()
 
 
+async def _selection_defers(select: Any, selector: Any) -> str:
+    """Selecting something absent must not raise until something forces it.
+
+    Both engines defer now, so both reach the marker; one that resolved
+    eagerly would raise instead and the comparison below would catch it. The
+    forced half of this pair is in FAILURE_CASES, where both raise.
+
+    The second selection is what makes this sensitive to *how* an engine
+    defers rather than only to whether it raises: chaining off the first
+    result is possible only if that result is a value. An engine whose
+    selection returned a coroutine would fail here with ``AttributeError``
+    instead of reaching the marker.
+    """
+    child = select(selector)
+    child.attr("also-absent")
+    return "deferred"
+
+
 async def _attr_then_force(value: Any, name: str) -> Any:
-    return await (await _attr(value, name)).to_python()
+    return await value.attr(name).to_python()
 
 
 async def _list_get_then_force(value: Any, index: int) -> Any:
-    return await (await _list_get(value, index)).to_python()
+    return await value.list_get(index).to_python()
+
+
+async def _curried_call(value: Any, *args: Any) -> Any:
+    """Call a Nix function with several arguments in one ``call()``.
+
+    Retires LEDGER's "Value.call:params". inproc took exactly one ``argument``
+    until both engines moved onto ``CoreValue.call(*arguments)``, so this case
+    raised ``TypeError`` on one engine and answered on the other.
+    """
+    return await (await value.call(*args)).to_python()
+
+
+async def _nullary_call(value: Any) -> Any:
+    """``f()`` must be refused identically. Nix has no nullary application."""
+    return await value.call()
+
+
+async def _chained_selection(value: Any) -> Any:
+    """Two selections, one expression, no await between them.
+
+    The shape LEDGER's "Value.attr:async" made impossible to write once.
+    """
+    return await value.attr("a").attr("b").list_get(1).to_python()
 
 
 async def _apply_as_string(value: Any, function: str) -> str:
@@ -173,6 +204,13 @@ SUCCESS_CASES: list[Case] = [
     Case("get_type_attrs", "{ a = 1; }", lambda v: v.get_type()),
     Case("get_type_list", "[1 2]", lambda v: v.get_type()),
     Case("get_type_function", "x: x", lambda v: v.get_type()),
+    # Selection is lazy on both engines, so an absent one is not an error yet.
+    Case("attr_missing_is_deferred", "{ x = 1; }", lambda v: _selection_defers(v.attr, "nope")),
+    Case("list_index_out_of_range_is_deferred", "[1 2 3]", lambda v: _selection_defers(v.list_get, 99)),
+    Case("chained_selection", "{ a = { b = [10 20]; }; }", _chained_selection),
+    Case("call_one_argument", "x: x + 1", lambda v: _curried_call(v, 41)),
+    Case("call_two_arguments", "x: y: x + y", lambda v: _curried_call(v, 40, 2)),
+    Case("call_three_arguments", "x: y: z: x + y + z", lambda v: _curried_call(v, 1, 2, 3)),
     Case("apply_tostring_int", "42", lambda v: _apply_as_string(v, "builtins.toString")),
     Case("apply_tostring_bool", "true", lambda v: _apply_as_string(v, "builtins.toString")),
 ]
@@ -188,12 +226,9 @@ FAILURE_CASES: list[Case] = [
     Case("missing_attr_in_nix", "{ a = 1; }.nonexistent", lambda v: v.to_python()),
     Case("infinite_recursion", "let x = x; in x", lambda v: v.to_python()),
     Case("runaway_recursion", "let f = n: f (n + 1); in f 0", lambda v: v.to_python()),
-    # The absence pair: both must be Nix errors *and* Python ones, identically
-    # on both engines.
-    Case("attr_missing", "{ x = 1; }", lambda v: _attr(v, "nope")),
-    Case("list_index_out_of_range", "[1 2 3]", lambda v: _list_get(v, 99)),
-    # The same two, forced. These *do* agree, which is what identifies the
-    # pair above as a laziness difference rather than a missing error.
+    # The absence pair, forced: both must be Nix errors *and* Python ones,
+    # identically on both engines. Their unforced halves live in SUCCESS_CASES
+    # and assert the opposite -- that neither engine raises before forcing.
     Case("attr_missing_forced", "{ x = 1; }", lambda v: _attr_then_force(v, "nope")),
     Case("list_index_out_of_range_forced", "[1 2 3]", lambda v: _list_get_then_force(v, 99)),
     # Strict accessors on the wrong type.
@@ -205,6 +240,9 @@ FAILURE_CASES: list[Case] = [
     Case("to_python_of_an_attrset_holding_a_function", "{ f = x: x; }", lambda v: v.to_python()),
     # Applying something that is not a function at all.
     Case("apply_a_non_function", "42", lambda v: v.apply("1 + 1")),
+    Case("call_with_no_arguments", "x: x", _nullary_call),
+    Case("call_a_non_function", "42", lambda v: _curried_call(v, 1)),
+    Case("call_too_many_arguments", "x: x", lambda v: _curried_call(v, 1, 2)),
     # Navigation accessors must refuse the wrong type rather than answering.
     Case("attr_names_on_an_int", "1", _sorted_attr_names),
     Case("list_length_on_an_attrset", "{}", lambda v: v.list_length()),
@@ -216,15 +254,12 @@ FAILURE_CASES: list[Case] = [
 # as test_engine_parity.py's LEDGER: an entry is a defect that is counted, not
 # an exemption granted. The test below asserts these still disagree, so an
 # entry cannot outlive the divergence it documents.
-SEMANTIC_LEDGER: dict[str, str] = {
-    "attr_missing": (
-        "DEFECT, the behavioural cost of LEDGER's \"Value.attr:async\": inproc's attr() awaits and "
-        "so raises MissingAttributeError here, while rpc's is sync and hands back an unresolved "
-        "proxy, deferring the error to whatever forces it. See attr_missing_forced -- once forced "
-        "the engines agree, so this is *when* the error arrives, not whether."
-    ),
-    "list_index_out_of_range": 'DEFECT: as attr_missing, for LEDGER\'s "Value.list_get:async".',
-}
+# Empty, and the guard below is kept anyway: it is the mechanism for the next
+# entry, and an empty dict is the state this file exists to reach. Its last two
+# entries were "attr_missing" and "list_index_out_of_range", the behavioural
+# cost of LEDGER's "Value.attr:async" -- inproc raised on selection while rpc
+# deferred to the force. Both defer now, so both cases moved to SUCCESS_CASES.
+SEMANTIC_LEDGER: dict[str, str] = {}
 
 
 # ── Running one case on one engine ───────────────────────────────────
@@ -250,7 +285,14 @@ async def test_engines_agree_on_success(
     inproc_session: InprocSessionFactory,
     rpc_session: RpcSessionFactory,
 ) -> None:
-    """The same expression and operation must return the same Python value."""
+    """The same expression and operation must return the same Python value.
+
+    Both halves are asserted, and the "did it succeed" half is not redundant:
+    the two engines share more code than they used to, so a break in the
+    shared layer makes *both* raise and equality alone would read that as
+    agreement. The failure half below has always had the mirror of this
+    assertion; this side was missing it.
+    """
     inproc_outcome = await _run(inproc_session, case)
     rpc_outcome = await _run(rpc_session, case)
     if case.name in SEMANTIC_LEDGER:
@@ -259,6 +301,7 @@ async def test_engines_agree_on_success(
             f"({inproc_outcome!r}) -- delete the entry"
         )
         return
+    assert inproc_outcome[0] == "value", f"inproc raised: {inproc_outcome!r}"
     assert inproc_outcome == rpc_outcome
 
 
