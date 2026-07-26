@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from betterproto2 import Casing, OutputFormat
 from nanopynix_bindings import store as nanopynix_store
 from nanopynix_proto.nix.store import StoreServiceBase
 
 from nanopynix._wire import HandleKind
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
-from nanopynix.rpc.worker._service_adapter import GeneratedServiceAdapterMixin, HandleArgSpec
+from nanopynix.rpc.worker._service_adapter import (
+    GeneratedServiceAdapterMixin,
+    HandleArgSpec,
+    proto_request_to_dict,
+)
 
 
 def _store_binding_method_names() -> set[str]:
@@ -44,7 +47,7 @@ class StoreServiceHandler(
         return self._state.handles.get_typed(store_handle, HandleKind.STORE)
 
     def _nanobind_rpc_call(self, binding_method_name: str, message: Any) -> Any:
-        request = message.to_dict(casing=Casing.SNAKE, include_default_values=True, output_format=OutputFormat.PYTHON)
+        request = proto_request_to_dict(message)
         store_handle = request.pop("store_handle", 0)
         store = self._get_store(store_handle)
         if hasattr(store, binding_method_name):

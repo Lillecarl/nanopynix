@@ -8,15 +8,16 @@
 
 from __future__ import annotations
 
+import dataclasses
+import functools
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, cast, get_type_hints
 
 import anyio
+from betterproto2 import Casing, Message, OutputFormat
 
 if TYPE_CHECKING:
-    from betterproto2 import Message
-
     from nanopynix._wire import HandleKind
 
 
@@ -185,6 +186,52 @@ def _resolve_attr(obj: Any, attr_path: str) -> Any:
     for part in attr_path.split("."):
         obj = getattr(obj, part)
     return obj
+
+
+@functools.cache
+def _proto_field_names(message_type: type) -> tuple[str, ...]:
+    """The declared proto field names of a generated message class.
+
+    Cached per class: a generated message's field list is fixed at import time,
+    and this runs on every request.
+    """
+    return tuple(field.name for field in dataclasses.fields(message_type))
+
+
+def _holds_a_message(value: object) -> bool:
+    return isinstance(value, Message) or (
+        isinstance(value, list) and any(isinstance(item, Message) for item in cast("list[Any]", value))
+    )
+
+
+def proto_request_to_dict(message: Message) -> dict[str, Any]:
+    """A request message as the plain snake_case dict the nanobind API takes.
+
+    Equivalent to ``message.to_dict(casing=SNAKE, include_default_values=True,
+    output_format=PYTHON)``, but ~300x cheaper for the messages that matter.
+    betterproto2's ``to_dict`` calls ``typing.get_type_hints`` on the message
+    class *per call* and never caches it: ~380us, against a ~3us nanobind store
+    call. Marshalling the request outweighed the Nix work it was marshalling
+    for by two orders of magnitude.
+
+    The shortcut is that a generated message is a dataclass whose attribute
+    names are already the snake_case proto field names and whose values are
+    already Python-native, so for a message of scalars, lists of scalars and
+    enums -- which is every request the store service takes -- reading the
+    fields *is* the conversion.
+
+    It stops being equivalent as soon as a field holds another message:
+    ``to_dict`` recurses and yields a nested dict, while reading the field
+    yields the ``Message`` itself, which would reach C++ as an opaque object
+    and fail there instead of here. The eval service has such fields, so rather
+    than leave that to a naming convention this defers to ``to_dict`` whenever
+    it sees one. The result is a fast path that cannot be wrong -- only, on
+    those messages, no faster than before.
+    """
+    values = {name: getattr(message, name) for name in _proto_field_names(type(message))}
+    if any(_holds_a_message(value) for value in values.values()):
+        return message.to_dict(casing=Casing.SNAKE, include_default_values=True, output_format=OutputFormat.PYTHON)
+    return values
 
 
 def _proto_shape(value: object) -> Any:
