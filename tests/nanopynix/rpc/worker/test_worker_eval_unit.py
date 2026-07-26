@@ -62,7 +62,11 @@ class _FakeEvalState:
 
 
 class _FakeStore:
-    def get_uri(self) -> str:
+    # with_params mirrors the real binding, which declares it keyword-capable
+    # ("with_params"_a): LocalStore.get_uri forwards it by name, so a fake that
+    # takes no argument no longer stands in for one.
+    def get_uri(self, *, with_params: bool = False) -> str:
+        _ = with_params
         return "local"
 
     def get_store_dir(self) -> str:
@@ -105,7 +109,8 @@ def test_worker_title_lists_open_store_uris(monkeypatch: pytest.MonkeyPatch) -> 
         def __init__(self, uri: str) -> None:
             self.uri = uri
 
-        def get_uri(self) -> str:
+        def get_uri(self, *, with_params: bool = False) -> str:
+            _ = with_params
             return self.uri
 
         def get_store_dir(self) -> str:

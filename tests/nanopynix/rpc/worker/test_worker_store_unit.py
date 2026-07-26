@@ -26,14 +26,23 @@ async def test_store_handler_runs_independent_calls_on_multiple_store_threads() 
     peak_active = 0
 
     class SlowStore:
-        def store_get_uri(self, _request: dict[str, Any]) -> dict[str, str]:
+        """Stands in for LocalStore, whose typed methods the handler now calls.
+
+        It used to implement ``store_get_uri(request_dict)`` -- the proto-dict
+        entrypoint the handler reached reflectively. That layer is gone; the
+        handler calls the same ``LocalStore.get_uri`` the inproc engine does,
+        so the fake matches that signature instead.
+        """
+
+        def get_uri(self, *, with_params: bool = False) -> str:
             nonlocal active, peak_active
+            _ = with_params
             with active_lock:
                 active += 1
                 peak_active = max(peak_active, active)
             try:
                 barrier.wait()
-                return {"uri": "fake://store"}
+                return "fake://store"
             finally:
                 with active_lock:
                     active -= 1

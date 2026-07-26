@@ -288,137 +288,6 @@ static void process_connection(std::shared_ptr<nix::Store> store, int fd, bool t
         trusted ? nix::TrustedFlag::Trusted : nix::TrustedFlag::NotTrusted,
         recursive ? nix::daemon::RecursiveFlag::Recursive : nix::daemon::RecursiveFlag::NotRecursive);
 }
-
-// ---------------------------------------------------------------------------
-// Request-field accessors for the dict-shaped store entrypoints.
-//
-// These used to index the dict directly. nb::dict's operator[] raises a bare
-// Python KeyError naming only the key -- not the operation that rejected it,
-// and not one of nanopynix's error types, so it arrives at a caller
-// indistinguishable from a bug in their own code. Every one of the 27 dict
-// entrypoints behaved that way, including for fields that are optional.
-//
-// Two rules now:
-//   * A field with no default is required. Absent means nix::UsageError naming
-//     both the field and the operation -- the same type, and for the same
-//     reason, as the copy_closure check further down: a missing argument is a
-//     usage error, not a store failure, and UsageError is the registered type
-//     that reaches Python as a nanopynix exception.
-//   * A field with a default may be omitted. The defaults passed at the call
-//     sites below are exactly those the direct API declares in its .def()
-//     bindings, so the two APIs cannot drift into disagreeing about what
-//     "unset" means.
-//
-// The proto senders always populate every field, so nothing in the worker path
-// changes; this is about a hand-built dict, which is the shape the in-process
-// engine would use.
-// ---------------------------------------------------------------------------
-
-static nb::object request_field(const nb::dict &request, const char *key, const char *op) {
-    if (!request.contains(nb::str(key)))
-        throw nix::UsageError("%s: request is missing required field '%s'", op, key);
-    return nb::borrow<nb::object>(request[nb::str(key)]);
-}
-
-// What a field of each type is called in an error message. Deriving this from
-// the C++ type keeps the description at the one place that knows it, instead of
-// repeating a string at every call site where it could drift from the cast.
-template <typename T> struct request_type_name;
-template <> struct request_type_name<std::string> { static constexpr const char *value = "a string"; };
-template <> struct request_type_name<bool> { static constexpr const char *value = "a bool"; };
-template <> struct request_type_name<uint64_t> { static constexpr const char *value = "an integer"; };
-template <> struct request_type_name<int> { static constexpr const char *value = "an integer"; };
-template <> struct request_type_name<std::vector<std::string>> {
-    static constexpr const char *value = "a list of strings";
-};
-
-// A field that is present but of the wrong type is as much a usage error as an
-// absent one, and gets the same treatment. nb::cast's own failure is a bare
-// std::bad_cast, which reaches Python as RuntimeError('std::bad_cast') -- it
-// names neither the field nor the operation, and is not one of nanopynix's
-// error types, so a caller catching those misses it entirely.
-template <typename T>
-static T request_cast(const nb::object &value, const char *key, const char *op) {
-    try {
-        return nb::cast<T>(value);
-    } catch (const nb::cast_error &) {  // NOLINT(bugprone-empty-catch) -- rethrown below with context
-    } catch (const nb::python_error &) {  // NOLINT(bugprone-empty-catch) -- ditto; e.g. a failing __index__
-    }
-    throw nix::UsageError("%s: request field '%s' must be %s, got %s", op, key,
-                          request_type_name<T>::value, Py_TYPE(value.ptr())->tp_name);
-}
-
-static std::string request_string(const nb::dict &request, const char *key, const char *op) {
-    return request_cast<std::string>(request_field(request, key, op), key, op);
-}
-
-static std::string request_string(const nb::dict &request, const char *key, const char *op, const char *fallback) {
-    if (!request.contains(nb::str(key)))
-        return fallback;
-    return request_cast<std::string>(request[nb::str(key)], key, op);
-}
-
-static bool request_bool(const nb::dict &request, const char *key, const char *op, bool fallback) {
-    if (!request.contains(nb::str(key)))
-        return fallback;
-    return request_cast<bool>(request[nb::str(key)], key, op);
-}
-
-static uint64_t request_uint64(const nb::dict &request, const char *key, const char *op, uint64_t fallback) {
-    if (!request.contains(nb::str(key)))
-        return fallback;
-    return request_cast<uint64_t>(request[nb::str(key)], key, op);
-}
-
-static int request_int(const nb::dict &request, const char *key, const char *op, int fallback) {
-    if (!request.contains(nb::str(key)))
-        return fallback;
-    return request_cast<int>(request[nb::str(key)], key, op);
-}
-
-static std::optional<std::string> request_optional_string(const nb::dict &request, const char *key, const char *op) {
-    if (!request.contains(nb::str(key)))
-        return std::nullopt;
-    auto value = request[nb::str(key)];
-    if (value.is_none())
-        return std::nullopt;
-    return request_cast<std::string>(value, key, op);
-}
-
-// Absolutize a caller-supplied path and parse it, rejecting the empty string.
-//
-// nix::StoreDirConfig::parseStorePath() runs the path through canonPath(),
-// which asserts it is non-empty -- and nix wraps __assert_fail, so a violation
-// is abort(), not a C++ exception. Nothing downstream can catch it: the whole
-// process dies with SIGABRT, taking an in-process caller's session with it.
-// Every other malformed path ("x", "/etc/passwd", "garbage") raises
-// BadStorePath and arrives in Python as BadStorePathError, so the empty string
-// -- trivially reachable from an unset variable or a blank config field -- is
-// rejected here with the same error rather than being singled out for a crash.
-static nix::StorePath store_path_from_string(nix::Store &s, std::string path, const char *op) {
-    if (path.empty())
-        throw nix::BadStorePath("%s: store path must not be empty", op);
-    if (path[0] != '/') path = s.config.storeDir_ + "/" + path;
-    return s.parseStorePath(path);
-}
-
-static nix::StorePath request_store_path(nix::Store &s, const nb::dict &request, const char *key, const char *op) {
-    return store_path_from_string(s, request_string(request, key, op), op);
-}
-
-static std::vector<nix::StorePath> request_store_paths(
-        nix::Store &s, const nb::dict &request, const char *key, const char *op, bool required) {
-    if (!required && !request.contains(nb::str(key)))
-        return {};
-    auto raw = request_cast<std::vector<std::string>>(request_field(request, key, op), key, op);
-    std::vector<nix::StorePath> paths;
-    paths.reserve(raw.size());
-    for (auto &path : raw) {
-        paths.push_back(store_path_from_string(s, path, op));
-    }
-    return paths;
-}
-
 // --- PathInfo ---
 
 static nb::dict query_path_info(nix::Store &s, const nix::StorePath &path) {
@@ -494,12 +363,6 @@ static nix::DerivedPaths parse_derived_paths(
             paths.push_back(derived_path_for_build_input(s.parseStorePath(path)));
     }
     return paths;
-}
-
-static nix::DerivedPaths request_derived_paths(
-        nix::Store &s, const nb::dict &request, const char *key, const char *op) {
-    return parse_derived_paths(
-        s, request_cast<std::vector<std::string>>(request_field(request, key, op), key, op), op);
 }
 
 static nb::dict query_missing(nix::Store &s, const nix::DerivedPaths &paths) {
@@ -852,18 +715,6 @@ static std::string store_uri(nix::Store &s, bool with_params) {
     return with_params ? s.config.getReference().render() : s.config.getHumanReadableURI();
 }
 
-static nb::dict store_get_uri(nix::Store &s, const nb::dict &request) {
-    nb::dict d;
-    d["uri"] = store_uri(s, request_bool(request, "with_params", "store_get_uri", false));
-    return d;
-}
-
-static nb::dict store_get_store_dir(nix::Store &s, const nb::dict &) {
-    nb::dict d;
-    d["dir"] = std::string(s.config.storeDir_);
-    return d;
-}
-
 static nb::dict store_dirs_to_dict(nix::Store &s) {
     nb::dict d;
     d["store_dir"] = std::string(s.config.storeDir_);
@@ -891,232 +742,8 @@ static nb::dict store_dirs_to_dict(nix::Store &s) {
     return d;
 }
 
-static nb::dict store_get_store_dirs(nix::Store &s, const nb::dict &) {
-    return store_dirs_to_dict(s);
-}
-
 static nb::dict store_get_store_dirs_direct(nix::Store &s) {
     return store_dirs_to_dict(s);
-}
-
-static nb::dict store_is_valid_path(nix::Store &s, const nb::dict &request) {
-    auto path = request_store_path(s, request, "path", "store_is_valid_path");
-    bool valid;
-    {
-        nb::gil_scoped_release release;
-        valid = s.isValidPath(path);
-    }
-    nb::dict d;
-    d["valid"] = valid;
-    return d;
-}
-
-static nb::dict store_parse_store_path(nix::Store &s, const nb::dict &request) {
-    nb::dict d;
-    d["path"] = store_path_to_string(s, request_store_path(s, request, "path", "store_parse_store_path"));
-    return d;
-}
-
-static nb::dict store_query_path_info(nix::Store &s, const nb::dict &request) {
-    return query_path_info(s, request_store_path(s, request, "path", "store_query_path_info"));
-}
-
-static nb::dict store_query_path_from_hash_part(
-        nix::Store &s, const nb::dict &request) {
-    auto hash_part = request_string(request, "hash_part", "store_query_path_from_hash_part");
-    std::optional<nix::StorePath> path;
-    {
-        nb::gil_scoped_release release;
-        path = s.queryPathFromHashPart(hash_part);
-    }
-    nb::dict d;
-    if (path) d["path"] = store_path_to_string(s, *path);
-    else d["path"] = nb::none();
-    return d;
-}
-
-static nb::dict store_compute_fs_closure(
-        nix::Store &s, const nb::dict &request) {
-    nb::dict d;
-    d["paths"] = compute_fs_closure(
-        s,
-        request_store_path(s, request, "path", "store_compute_fs_closure"),
-        request_bool(request, "flip_direction", "store_compute_fs_closure", false),
-        request_bool(request, "include_outputs", "store_compute_fs_closure", false),
-        request_bool(request, "include_derivers", "store_compute_fs_closure", false));
-    return d;
-}
-
-static nb::dict store_query_missing(nix::Store &s, const nb::dict &request) {
-    return query_missing(s, request_derived_paths(s, request, "derived_paths", "store_query_missing"));
-}
-
-static nb::dict store_query_derivation_outputs(
-        nix::Store &s, const nb::dict &request) {
-    nb::dict d;
-    d["paths"] = query_derivation_outputs(s, request_store_path(s, request, "path", "store_query_derivation_outputs"));
-    return d;
-}
-
-static nb::dict store_query_valid_derivers(
-        nix::Store &s, const nb::dict &request) {
-    nb::dict d;
-    d["paths"] = query_valid_derivers(s, request_store_path(s, request, "path", "store_query_valid_derivers"));
-    return d;
-}
-
-static nb::dict store_query_all_valid_paths(nix::Store &s, const nb::dict &) {
-    nb::dict d;
-    d["paths"] = query_all_valid_paths(s);
-    return d;
-}
-
-static nb::dict store_query_referrers(nix::Store &s, const nb::dict &request) {
-    nb::dict d;
-    d["paths"] = query_referrers(s, request_store_path(s, request, "path", "store_query_referrers"));
-    return d;
-}
-
-static nb::dict store_query_substitutable_paths(
-        nix::Store &s, const nb::dict &request) {
-    nb::dict d;
-    d["paths"] = query_substitutable_paths(s, request_store_paths(s, request, "paths", "store_query_substitutable_paths", true));
-    return d;
-}
-
-static nb::dict store_build_paths_with_results(
-        nix::Store &s,
-        const nb::dict &request,
-        std::shared_ptr<nix::Store> evalStore = nullptr) {
-    auto build_mode = static_cast<nix::BuildMode>(request_int(request, "build_mode", "store_build_paths_with_results", nix::bmNormal));
-    nb::dict d;
-    d["results"] = build_derived_paths_with_results(
-        s,
-        request_derived_paths(s, request, "derived_paths", "store_build_paths_with_results"),
-        build_mode,
-        evalStore);
-    return d;
-}
-
-static nb::dict store_read_derivation(nix::Store &s, const nb::dict &request) {
-    return read_derivation(s, request_store_path(s, request, "path", "store_read_derivation"));
-}
-
-static nb::dict store_build_derivation(nix::Store &s, const nb::dict &request) {
-    return build_derivation(
-        s,
-        request_store_path(s, request, "path", "store_build_derivation"),
-        static_cast<nix::BuildMode>(request_int(request, "build_mode", "store_build_derivation", nix::bmNormal)));
-}
-
-static nb::dict store_follow_links_to_store_path(
-        nix::Store &s, const nb::dict &request) {
-    auto input_path = request_string(request, "path", "store_follow_links_to_store_path");
-    std::optional<nix::StorePath> path;
-    {
-        nb::gil_scoped_release release;
-        path.emplace(s.followLinksToStorePath(input_path));
-    }
-    nb::dict d;
-    d["path"] = store_path_to_string(s, *path);
-    return d;
-}
-
-static nb::dict store_add_temp_root(nix::Store &s, const nb::dict &request) {
-    auto path = request_store_path(s, request, "path", "store_add_temp_root");
-    {
-        nb::gil_scoped_release release;
-        s.addTempRoot(path);
-    }
-    return nb::dict();
-}
-
-static nb::dict store_find_roots(nix::Store &s, const nb::dict &request) {
-    nb::dict d;
-    d["roots"] = find_roots(s, request_bool(request, "censor", "store_find_roots", true));
-    return d;
-}
-
-static nb::dict store_collect_garbage(nix::Store &s, const nb::dict &request) {
-    return collect_garbage(
-        s,
-        gc_action_from_int(request_cast<int>(
-            request_field(request, "action", "store_collect_garbage"), "action", "store_collect_garbage")),
-        request_bool(request, "ignore_liveness", "store_collect_garbage", false),
-        request_store_paths(s, request, "paths_to_delete", "store_collect_garbage", false),
-        request_uint64(request, "max_freed", "store_collect_garbage", std::numeric_limits<uint64_t>::max()));
-}
-
-static nb::dict store_add_perm_root(nix::Store &s, const nb::dict &request) {
-    auto store_path = request_store_path(s, request, "store_path", "store_add_perm_root");
-    auto gc_root = request_string(request, "gc_root", "store_add_perm_root");
-    std::filesystem::path root;
-    {
-        nb::gil_scoped_release release;
-        root = require_local_fs_store(s).addPermRoot(store_path, gc_root);
-    }
-    nb::dict d;
-    d["path"] = root.string();
-    return d;
-}
-
-static nb::dict store_add_indirect_root(nix::Store &s, const nb::dict &request) {
-    auto path = request_string(request, "path", "store_add_indirect_root");
-    {
-        nb::gil_scoped_release release;
-        require_indirect_root_store(s).addIndirectRoot(path);
-    }
-    return nb::dict();
-}
-
-static nb::dict store_ensure_path(nix::Store &s, const nb::dict &request) {
-    auto path = request_store_path(s, request, "path", "store_ensure_path");
-    {
-        nb::gil_scoped_release release;
-        s.ensurePath(path);
-    }
-    return nb::dict();
-}
-
-static nb::dict store_copy_closure(
-        nix::Store &s,
-        const nb::dict &request,
-        std::shared_ptr<nix::Store> destStore = nullptr) {
-    if (!destStore) {
-        // A missing argument, not a store failure -- nix::UsageError is the
-        // registered type for that, and unlike nix::Error it reaches Python
-        // inside the NixError hierarchy.
-        throw nix::UsageError("dest_store_handle is required for copy_closure");
-    }
-    copy_closure(
-        s,
-        request_store_paths(s, request, "paths", "store_copy_closure", true),
-        destStore,
-        request_bool(request, "repair", "store_copy_closure", false),
-        request_bool(request, "check_sigs", "store_copy_closure", true),
-        request_bool(request, "substitute", "store_copy_closure", false));
-    return nb::dict();
-}
-
-static nb::dict store_optimise_store(nix::Store &s, const nb::dict &) {
-    {
-        nb::gil_scoped_release release;
-        s.optimiseStore();
-    }
-    return nb::dict();
-}
-
-static nb::dict store_verify_store(nix::Store &s, const nb::dict &request) {
-    auto check_contents = request_bool(request, "check_contents", "store_verify_store", false);
-    auto repair = request_bool(request, "repair", "store_verify_store", false);
-    size_t errors;
-    {
-        nb::gil_scoped_release release;
-        errors = s.verifyStore(check_contents, repair ? nix::Repair : nix::NoRepair);
-    }
-    nb::dict d;
-    d["errors"] = errors;
-    return d;
 }
 
 static std::optional<std::string> get_build_log(nix::Store &s, const nix::StorePath &path) {
@@ -1124,16 +751,6 @@ static std::optional<std::string> get_build_log(nix::Store &s, const nix::StoreP
         nb::gil_scoped_release release;
         return require_log_store(s).getBuildLog(path);
     }
-}
-
-static nb::dict store_get_build_log(nix::Store &s, const nb::dict &request) {
-    auto log = get_build_log(s, request_store_path(s, request, "path", "store_get_build_log"));
-    nb::dict d;
-    if (log)
-        d["log"] = *log;
-    else
-        d["log"] = nb::none();
-    return d;
 }
 
 static nix::StorePath add_to_store(
@@ -1174,30 +791,6 @@ static nix::StorePath compute_store_path(
 
 // The proto-shaped pair are adapters over the native ones above: unpack the
 // request, hand back a printed path. They carry no store logic of their own.
-static nb::dict store_add_to_store(nix::Store &s, const nb::dict &request) {
-    auto path = add_to_store(
-        s,
-        request_string(request, "path", "store_add_to_store"),
-        request_optional_string(request, "name", "store_add_to_store"),
-        request_string(request, "method", "store_add_to_store", "nar"),
-        request_string(request, "hash_algo", "store_add_to_store", "sha256"));
-    nb::dict d;
-    d["path"] = store_path_to_string(s, path);
-    return d;
-}
-
-static nb::dict store_compute_store_path(nix::Store &s, const nb::dict &request) {
-    auto path = compute_store_path(
-        s,
-        request_string(request, "path", "store_compute_store_path"),
-        request_optional_string(request, "name", "store_compute_store_path"),
-        request_string(request, "method", "store_compute_store_path", "nar"),
-        request_string(request, "hash_algo", "store_compute_store_path", "sha256"));
-    nb::dict d;
-    d["path"] = store_path_to_string(s, path);
-    return d;
-}
-
 // =========================================================================
 // Store bindings
 // =========================================================================
@@ -1214,10 +807,12 @@ static void bind_store(nb::module_ &m) {
              "with_params"_a = false)
         .def("is_valid_path", [](nix::Store &s, const nix::StorePath &p) { return s.isValidPath(p); },
              nb::call_guard<nb::gil_scoped_release>(), "path"_a)
-        // Unlike request_store_path()'s funnel this deliberately does not
-        // absolutize a relative path -- the direct API has always required an
-        // absolute one -- but it needs the same empty-string guard, since
-        // parseStorePath() aborts the process rather than throwing on it.
+        // Deliberately does not absolutize a relative path: absolutization
+        // now lives in LocalStore._store_path(), which both engines share, so
+        // that the two cannot diverge over it the way they used to. The
+        // empty-string guard stays here, as the last line of defence for a
+        // raw-binding caller -- parseStorePath() aborts the process on "",
+        // it does not throw.
         .def("parse_store_path",
              [](nix::Store &s, const std::string &p) {
                  if (p.empty())
@@ -1311,44 +906,7 @@ static void bind_store(nb::module_ &m) {
             "check_contents"_a = false,
             "repair"_a = false)
         // Proto-shaped StoreService RPC entrypoints
-        .def("store_get_uri", &store_get_uri, "request"_a)
-        .def("store_get_store_dir", &store_get_store_dir, "request"_a)
-        .def("store_get_store_dirs", &store_get_store_dirs, "request"_a)
-        .def("store_is_valid_path", &store_is_valid_path, "request"_a)
-        .def("store_parse_store_path", &store_parse_store_path, "request"_a)
-        .def("store_query_path_info", &store_query_path_info, "request"_a)
-        .def("store_query_path_from_hash_part", &store_query_path_from_hash_part, "request"_a)
-        .def("store_compute_fs_closure", &store_compute_fs_closure, "request"_a)
-        .def("store_query_missing", &store_query_missing, "request"_a)
-        .def("store_query_derivation_outputs", &store_query_derivation_outputs, "request"_a)
-        .def("store_query_valid_derivers", &store_query_valid_derivers, "request"_a)
-        .def("store_query_all_valid_paths", &store_query_all_valid_paths, "request"_a)
-        .def("store_query_referrers", &store_query_referrers, "request"_a)
-        .def("store_query_substitutable_paths", &store_query_substitutable_paths, "request"_a)
-        .def(
-            "store_build_paths_with_results",
-            &store_build_paths_with_results,
-            "request"_a,
-            "eval_store"_a = nullptr)
-        .def("store_read_derivation", &store_read_derivation, "request"_a)
-        .def("store_build_derivation", &store_build_derivation, "request"_a)
-        .def("store_follow_links_to_store_path", &store_follow_links_to_store_path, "request"_a)
-        .def("store_add_temp_root", &store_add_temp_root, "request"_a)
-        .def("store_find_roots", &store_find_roots, "request"_a)
-        .def("store_collect_garbage", &store_collect_garbage, "request"_a)
-        .def("store_add_perm_root", &store_add_perm_root, "request"_a)
-        .def("store_add_indirect_root", &store_add_indirect_root, "request"_a)
-        .def("store_ensure_path", &store_ensure_path, "request"_a)
-        .def(
-            "store_copy_closure",
-            &store_copy_closure,
-            "request"_a,
-            "dest_store"_a = nullptr)
-        .def("store_optimise_store", &store_optimise_store, "request"_a)
-        .def("store_verify_store", &store_verify_store, "request"_a)
-        .def("store_get_build_log", &store_get_build_log, "request"_a)
-        .def("store_add_to_store", &store_add_to_store, "request"_a)
-        .def("store_compute_store_path", &store_compute_store_path, "request"_a);
+;
 }
 
 // =========================================================================

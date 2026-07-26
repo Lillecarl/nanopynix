@@ -6,7 +6,7 @@ import asyncio
 import runpy
 import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from nanopynix_bindings.store import open_store
@@ -46,14 +46,11 @@ def _seed_isolated_store(root: Path) -> str:
     try:
         seed_file = root.parent / "example-seed.txt"
         seed_file.write_text("nanopynix doc-example fixture\n", encoding="utf-8")
-        add_to_store = store.store_add_to_store  # type: ignore[reportUnknownMemberType] -- nanopynix_bindings' store.pyi declares this as bare `dict`, not dict[str, Any]
-        added = cast(
-            "dict[str, Any]",
-            add_to_store({"path": str(seed_file), "name": "example-seed", "method": "flat", "hash_algo": "sha256"}),
+        added = store.add_to_store(
+            str(seed_file), name="example-seed", method="flat", hash_algo="sha256"
         )
         gc_root = root.parent / "example-gcroot"
-        add_perm_root = store.store_add_perm_root  # type: ignore[reportUnknownMemberType] -- same stub gap as above
-        add_perm_root({"store_path": added["path"], "gc_root": str(gc_root)})
+        store.add_perm_root(added, str(gc_root))
     finally:
         store.close()
     return store_uri

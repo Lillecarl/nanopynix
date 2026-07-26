@@ -5,34 +5,81 @@ from __future__ import annotations
 import functools
 from typing import TYPE_CHECKING, Any, Concatenate, Protocol
 
-from nanopynix_bindings import store as nanopynix_store
-from nanopynix_proto.nix.common import BuildResultList, MissingInfo
+from nanopynix_proto.nix.common import BuildResult, BuildResultList, Derivation, MissingInfo, PathInfo
 from nanopynix_proto.nix.store import (
+    AddIndirectRootRequest,
+    AddIndirectRootResponse,
+    AddPermRootRequest,
+    AddPermRootResponse,
+    AddTempRootRequest,
+    AddTempRootResponse,
+    AddToStoreRequest,
+    AddToStoreResponse,
+    BuildDerivationRequest,
     BuildPathsWithResultsRequest,
+    CollectGarbageRequest,
+    CollectGarbageResponse,
+    ComputeFsClosureRequest,
+    ComputeStorePathRequest,
+    ComputeStorePathResponse,
     CopyClosureRequest,
     CopyClosureResponse,
+    EnsurePathRequest,
+    EnsurePathResponse,
+    FindRootsRequest,
+    FindRootsResponse,
+    FollowLinksToStorePathRequest,
+    FollowLinksToStorePathResponse,
+    GcRoot,
+    GetBuildLogRequest,
+    GetBuildLogResponse,
+    GetStoreDirRequest,
+    GetStoreDirResponse,
+    GetStoreDirsRequest,
+    GetUriRequest,
+    GetUriResponse,
     IsValidPathRequest,
     IsValidPathResponse,
+    OptimiseStoreRequest,
+    OptimiseStoreResponse,
+    ParseStorePathRequest,
+    ParseStorePathResponse,
+    PathsResponse,
+    QueryAllValidPathsRequest,
+    QueryDerivationOutputsRequest,
     QueryMissingRequest,
+    QueryPathFromHashPartRequest,
+    QueryPathFromHashPartResponse,
+    QueryPathInfoRequest,
+    QueryReferrersRequest,
+    QuerySubstitutablePathsRequest,
+    QueryValidDeriversRequest,
+    ReadDerivationRequest,
+    StoreDirs,
     StoreServiceBase,
+    VerifyStoreRequest,
+    VerifyStoreResponse,
 )
 
 from nanopynix._wire import HandleKind
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
-from nanopynix.rpc.worker._service_adapter import (
-    GeneratedServiceAdapterMixin,
-    proto_request_to_dict,
-)
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from types import CoroutineType
 
     from nanopynix._core._local import LocalStore
 
 
-def _store_binding_method_names() -> set[str]:
-    return {name for name in dir(nanopynix_store.Store) if name.startswith("store_")}
+def _widen_paths(paths: Sequence[str]) -> list[str]:
+    """Re-type a ``list[StorePath]`` as the ``list[str]`` the proto declares.
+
+    ``StorePath`` subclasses ``str``, so this is a no-op at runtime -- but
+    ``list`` is invariant, so ``list[StorePath]`` is not a ``list[str]`` and
+    the assignment needs a widening step. ``Sequence`` is covariant, which is
+    what lets the parameter accept either.
+    """
+    return list(paths)
 
 
 class _StoreDispatch(Protocol):
@@ -60,7 +107,11 @@ def _store_op[S: _StoreDispatch, **P, R](
 
     @functools.wraps(handler)
     async def entrypoint(self: S, *args: P.args, **kwargs: P.kwargs) -> R:
-        message = args[0] if args else next(iter(kwargs.values()))
+        # "message" by name, not "the first kwarg": StoreServiceBase declares
+        # the argument keyword-capable, so a caller may pass it either way, and
+        # picking whichever key happens to come first would silently take the
+        # wrong object the moment a second keyword exists.
+        message = args[0] if args else kwargs["message"]
         # pyright: ignore is on the next line rather than a rename because
         # _run must stay private: wrap_service_handlers treats every public
         # async method on the handler as an RPC entry point.
@@ -73,29 +124,21 @@ def _store_op[S: _StoreDispatch, **P, R](
 
 
 @wrap_service_handlers
-class StoreServiceHandler(
-    GeneratedServiceAdapterMixin,
-    StoreServiceBase,
-    rpc_service_base=StoreServiceBase,
-    binding_method_names=_store_binding_method_names(),
-    method_prefix="store_",
-    nix_executor_attr="_state.store_limiter",
-    # extra_handle_args is gone: its only two entries were copy_closure and
-    # build_paths_with_results, the two RPCs that pass a second live Store.
-    # Both now have typed handlers below, which resolve that handle directly
-    # instead of declaring it for the generic forwarder to inject.
-):
-    """gRPC handler backed by proto-shaped nanobind store methods.
+class StoreServiceHandler(StoreServiceBase):
+    """gRPC handler backed by the shared, typed :class:`LocalStore`.
 
-    Store operations dispatch to the worker's bounded Store executor, keeping
-    the event loop free while allowing independent Store calls to overlap.
+    One method per RPC, the shape ``_worker_eval.py`` already used. There is
+    no reflective forwarder and no proto-dict marshalling step: the request
+    message is read directly and handed to the same ``LocalStore`` method the
+    inproc engine calls, so the two engines cannot disagree about what an
+    operation means.
+
+    Store operations dispatch to the worker's bounded Store pool, keeping the
+    event loop free while allowing independent Store calls to overlap.
     """
 
     def __init__(self, state: Any) -> None:
         self._state = state
-
-    def _get_store(self, store_handle: int) -> Any:
-        return self._state.handles.get_typed(store_handle, HandleKind.STORE)
 
     def _resolve(self, store_handle: int) -> LocalStore:
         store: LocalStore = self._state.handles.get_typed(store_handle, HandleKind.STORE)
@@ -117,10 +160,7 @@ class StoreServiceHandler(
             args=(message,),
         )
 
-    # --- Typed handlers -------------------------------------------------
-    # These replace the generated dict forwarders one RPC at a time; see
-    # _install_generated_service_methods, which skips any name defined here.
-    # Each is written synchronously and made async by @_store_op.
+    # Each handler is written synchronously and made async by @_store_op.
 
     @_store_op
     def is_valid_path(self, message: IsValidPathRequest) -> IsValidPathResponse:
@@ -156,9 +196,170 @@ class StoreServiceHandler(
         )
         return CopyClosureResponse()
 
-    def _nanobind_rpc_call(self, binding_method_name: str, message: Any) -> Any:
-        request = proto_request_to_dict(message)
-        store = self._get_store(request.pop("store_handle", 0))
-        if hasattr(store, binding_method_name):
-            return getattr(store, binding_method_name)(request)
-        raise RuntimeError(f"missing checked nanobind store method: {binding_method_name}")
+    # --- Identity ---------------------------------------------------------
+
+    @_store_op
+    def get_uri(self, message: GetUriRequest) -> GetUriResponse:
+        return GetUriResponse(uri=self._resolve(message.store_handle).get_uri(with_params=message.with_params))
+
+    @_store_op
+    def get_store_dir(self, message: GetStoreDirRequest) -> GetStoreDirResponse:
+        return GetStoreDirResponse(dir=self._resolve(message.store_handle).get_store_dir())
+
+    @_store_op
+    def get_store_dirs(self, message: GetStoreDirsRequest) -> StoreDirs:
+        return self._resolve(message.store_handle).get_store_dirs()
+
+    @_store_op
+    def parse_store_path(self, message: ParseStorePathRequest) -> ParseStorePathResponse:
+        return ParseStorePathResponse(path=self._resolve(message.store_handle).parse_store_path(message.path))
+
+    @_store_op
+    def follow_links_to_store_path(
+        self, message: FollowLinksToStorePathRequest
+    ) -> FollowLinksToStorePathResponse:
+        return FollowLinksToStorePathResponse(
+            path=self._resolve(message.store_handle).follow_links_to_store_path(message.path),
+        )
+
+    @_store_op
+    def query_path_from_hash_part(
+        self, message: QueryPathFromHashPartRequest
+    ) -> QueryPathFromHashPartResponse:
+        return QueryPathFromHashPartResponse(
+            path=self._resolve(message.store_handle).query_path_from_hash_part(message.hash_part),
+        )
+
+    # --- Queries ----------------------------------------------------------
+
+    @_store_op
+    def query_path_info(self, message: QueryPathInfoRequest) -> PathInfo:
+        return self._resolve(message.store_handle).query_path_info(message.path)
+
+    @_store_op
+    def query_all_valid_paths(self, message: QueryAllValidPathsRequest) -> PathsResponse:
+        return PathsResponse(paths=_widen_paths(self._resolve(message.store_handle).query_all_valid_paths()))
+
+    @_store_op
+    def compute_fs_closure(self, message: ComputeFsClosureRequest) -> PathsResponse:
+        return PathsResponse(
+            paths=_widen_paths(
+                self._resolve(message.store_handle).compute_fs_closure(
+                    message.path,
+                    flip_direction=message.flip_direction,
+                    include_outputs=message.include_outputs,
+                    include_derivers=message.include_derivers,
+                ),
+            ),
+        )
+
+    @_store_op
+    def query_derivation_outputs(self, message: QueryDerivationOutputsRequest) -> PathsResponse:
+        return PathsResponse(paths=_widen_paths(self._resolve(message.store_handle).query_derivation_outputs(message.path)))
+
+    @_store_op
+    def query_valid_derivers(self, message: QueryValidDeriversRequest) -> PathsResponse:
+        return PathsResponse(paths=_widen_paths(self._resolve(message.store_handle).query_valid_derivers(message.path)))
+
+    @_store_op
+    def query_referrers(self, message: QueryReferrersRequest) -> PathsResponse:
+        return PathsResponse(paths=_widen_paths(self._resolve(message.store_handle).query_referrers(message.path)))
+
+    @_store_op
+    def query_substitutable_paths(self, message: QuerySubstitutablePathsRequest) -> PathsResponse:
+        return PathsResponse(
+            paths=_widen_paths(self._resolve(message.store_handle).query_substitutable_paths(list(message.paths))),
+        )
+
+    @_store_op
+    def get_build_log(self, message: GetBuildLogRequest) -> GetBuildLogResponse:
+        return GetBuildLogResponse(log=self._resolve(message.store_handle).get_build_log(message.path))
+
+    @_store_op
+    def read_derivation(self, message: ReadDerivationRequest) -> Derivation:
+        return self._resolve(message.store_handle).read_derivation(message.path)
+
+    # --- Mutation ---------------------------------------------------------
+
+    @_store_op
+    def build_derivation(self, message: BuildDerivationRequest) -> BuildResult:
+        return self._resolve(message.store_handle).build_derivation(
+            message.path, build_mode=message.build_mode
+        )
+
+    @_store_op
+    def ensure_path(self, message: EnsurePathRequest) -> EnsurePathResponse:
+        self._resolve(message.store_handle).ensure_path(message.path)
+        return EnsurePathResponse()
+
+    @_store_op
+    def add_to_store(self, message: AddToStoreRequest) -> AddToStoreResponse:
+        return AddToStoreResponse(
+            path=self._resolve(message.store_handle).add_to_store(
+                message.path,
+                name=message.name,
+                method=message.method,
+                hash_algo=message.hash_algo,
+            ),
+        )
+
+    @_store_op
+    def compute_store_path(self, message: ComputeStorePathRequest) -> ComputeStorePathResponse:
+        return ComputeStorePathResponse(
+            path=self._resolve(message.store_handle).compute_store_path(
+                message.path,
+                name=message.name,
+                method=message.method,
+                hash_algo=message.hash_algo,
+            ),
+        )
+
+    @_store_op
+    def optimise_store(self, message: OptimiseStoreRequest) -> OptimiseStoreResponse:
+        self._resolve(message.store_handle).optimise_store()
+        return OptimiseStoreResponse()
+
+    @_store_op
+    def verify_store(self, message: VerifyStoreRequest) -> VerifyStoreResponse:
+        return VerifyStoreResponse(
+            errors=self._resolve(message.store_handle).verify_store(
+                check_contents=message.check_contents, repair=message.repair
+            ),
+        )
+
+    # --- Garbage collection -----------------------------------------------
+
+    @_store_op
+    def add_temp_root(self, message: AddTempRootRequest) -> AddTempRootResponse:
+        self._resolve(message.store_handle).add_temp_root(message.path)
+        return AddTempRootResponse()
+
+    @_store_op
+    def add_perm_root(self, message: AddPermRootRequest) -> AddPermRootResponse:
+        return AddPermRootResponse(
+            path=self._resolve(message.store_handle).add_perm_root(message.store_path, message.gc_root),
+        )
+
+    @_store_op
+    def add_indirect_root(self, message: AddIndirectRootRequest) -> AddIndirectRootResponse:
+        self._resolve(message.store_handle).add_indirect_root(message.path)
+        return AddIndirectRootResponse()
+
+    @_store_op
+    def find_roots(self, message: FindRootsRequest) -> FindRootsResponse:
+        return FindRootsResponse(
+            roots=[
+                GcRoot(link=root.link, path=root.path)
+                for root in self._resolve(message.store_handle).find_roots(censor=message.censor)
+            ],
+        )
+
+    @_store_op
+    def collect_garbage(self, message: CollectGarbageRequest) -> CollectGarbageResponse:
+        result = self._resolve(message.store_handle).collect_garbage(
+            message.action,
+            ignore_liveness=message.ignore_liveness,
+            paths_to_delete=list(message.paths_to_delete),
+            max_freed=message.max_freed,
+        )
+        return CollectGarbageResponse(paths=_widen_paths(result.paths), bytes_freed=result.bytes_freed)
