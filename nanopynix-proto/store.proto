@@ -20,7 +20,6 @@ service StoreService {
   rpc QueryReferrers(QueryReferrersRequest) returns (PathsResponse);
   rpc QuerySubstitutablePaths(QuerySubstitutablePathsRequest) returns (PathsResponse);
   rpc BuildPathsWithResults(BuildPathsWithResultsRequest) returns (nix.common.BuildResultList);
-  rpc BuildForHumans(BuildPathsWithResultsRequest) returns (nix.common.BuildResultList);
   rpc ReadDerivation(ReadDerivationRequest) returns (nix.common.Derivation);
   rpc BuildDerivation(BuildDerivationRequest) returns (nix.common.BuildResult);
   rpc FollowLinksToStorePath(FollowLinksToStorePathRequest) returns (FollowLinksToStorePathResponse);

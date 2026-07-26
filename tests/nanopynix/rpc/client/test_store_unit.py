@@ -73,7 +73,6 @@ def _make_stub_mock() -> MagicMock:
     stub.query_referrers = AsyncMock()
     stub.query_substitutable_paths = AsyncMock()
     stub.build_paths_with_results = AsyncMock()
-    stub.build_for_humans = AsyncMock()
     stub.read_derivation = AsyncMock()
     stub.build_derivation = AsyncMock()
     stub.follow_links_to_store_path = AsyncMock()
@@ -504,14 +503,6 @@ class TestBuild:
         )
         assert len(result.results) == 1
         assert result.results[0].success is True
-
-    async def test_build_for_humans(self, store: Store, pool: MagicMock):
-        pool.store_stub.build_for_humans.return_value = _mock_build_result_list(
-            [_mock_build_result(drv_path="/nix/store/aaa.drv", success=True, status="substituted")],
-        )
-        result = await store.build_for_humans(BuildPathsWithResultsRequest(derived_paths=["/nix/store/aaa.drv"]))
-        assert len(result.results) == 1
-        assert result.results[0].status == "substituted"
 
     async def test_read_derivation(self, store: Store, pool: MagicMock):
         pool.store_stub.read_derivation.return_value = _mock_derivation(name="foo", system="x86_64-linux")

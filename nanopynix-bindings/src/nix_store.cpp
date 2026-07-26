@@ -707,42 +707,6 @@ static nb::list build_derived_paths_with_results(
     return out;
 }
 
-static nb::list build_for_humans(
-        nix::Store &s,
-        const std::vector<nix::StorePath> &paths,
-        nix::BuildMode buildMode = nix::bmNormal,
-        std::shared_ptr<nix::Store> evalStore = nullptr) {
-    nix::DerivedPaths dps;
-    for (auto &p : paths) dps.push_back(derived_path_for_build_input(p));
-
-    std::vector<nix::KeyedBuildResult> results;
-    try {
-        nb::gil_scoped_release release;
-        results = s.buildPathsWithResults(dps, buildMode, evalStore);
-    } catch (nix::Error &e) {
-        nix::logger->logEI(nix::lvlError, e.info());
-        e.addTrace({}, "while building paths for build_for_humans");
-        throw;
-    }
-    nb::list out;
-    for (auto &kbr : results) out.append(build_result_from_kbr(kbr, s));
-    return out;
-}
-
-static nb::list build_derived_paths_for_humans(
-        nix::Store &s,
-        const nix::DerivedPaths &paths,
-        nix::BuildMode buildMode = nix::bmNormal,
-        std::shared_ptr<nix::Store> evalStore = nullptr) {
-    try {
-        return build_derived_paths_with_results(s, paths, buildMode, evalStore);
-    } catch (nix::Error &e) {
-        nix::logger->logEI(nix::lvlError, e.info());
-        e.addTrace({}, "while building paths for build_for_humans");
-        throw;
-    }
-}
-
 static void build_paths(
         nix::Store &s,
         const std::vector<nix::StorePath> &paths,
@@ -1007,20 +971,6 @@ static nb::dict store_build_paths_with_results(
     return d;
 }
 
-static nb::dict store_build_for_humans(
-        nix::Store &s,
-        const nb::dict &request,
-        std::shared_ptr<nix::Store> evalStore = nullptr) {
-    auto build_mode = static_cast<nix::BuildMode>(request_int(request, "build_mode", "store_build_for_humans", nix::bmNormal));
-    nb::dict d;
-    d["results"] = build_derived_paths_for_humans(
-        s,
-        request_derived_paths(s, request, "derived_paths", "store_build_for_humans"),
-        build_mode,
-        evalStore);
-    return d;
-}
-
 static nb::dict store_read_derivation(nix::Store &s, const nb::dict &request) {
     return read_derivation(s, request_store_path(s, request, "path", "store_read_derivation"));
 }
@@ -1260,12 +1210,6 @@ static void bind_store(nb::module_ &m) {
             "paths"_a,
             "build_mode"_a = nix::bmNormal,
             "eval_store"_a = nullptr)
-        .def(
-            "build_for_humans",
-            &build_for_humans,
-            "paths"_a,
-            "build_mode"_a = nix::bmNormal,
-            "eval_store"_a = nullptr)
         .def("read_derivation", &read_derivation, "drv_path"_a)
         .def("build_derivation", &build_derivation, "drv_path"_a, "build_mode"_a)
         // Path info
@@ -1357,11 +1301,6 @@ static void bind_store(nb::module_ &m) {
         .def(
             "store_build_paths_with_results",
             &store_build_paths_with_results,
-            "request"_a,
-            "eval_store"_a = nullptr)
-        .def(
-            "store_build_for_humans",
-            &store_build_for_humans,
             "request"_a,
             "eval_store"_a = nullptr)
         .def("store_read_derivation", &store_read_derivation, "request"_a)

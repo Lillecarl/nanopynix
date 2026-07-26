@@ -31,7 +31,6 @@ class StoreServiceHandler(
     extra_handle_args={
         "store_copy_closure": (HandleArgSpec("dest_store_handle", "dest_store", HandleKind.STORE, required=True),),
         "store_build_paths_with_results": (HandleArgSpec("eval_store_handle", "eval_store", HandleKind.STORE),),
-        "store_build_for_humans": (HandleArgSpec("eval_store_handle", "eval_store", HandleKind.STORE),),
     },
 ):
     """gRPC handler backed by proto-shaped nanobind store methods.
