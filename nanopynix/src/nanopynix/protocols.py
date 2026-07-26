@@ -13,6 +13,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar
 
 from nanopynix_bindings.store import BuildMode
+
+# LogLevel is a runtime import, unlike the type-only names below:
+# AsyncEvalSession parameterises AsyncVerbosityController with it, and a base
+# class expression is evaluated when the module loads.
+from nanopynix_proto.nix.common import LogLevel
 from nanopynix_proto.nix.store import GcAction, StoreDirs
 
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
@@ -370,13 +375,35 @@ class AsyncLockedFlake(Protocol):
         ...
 
 
-class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](Protocol):
+class AsyncVerbosityController(Protocol[VerbosityT_co]):
+    """A resource that reads and updates the process-wide Nix verbosity.
+
+    Defined here, above its first user, rather than at the end of the module:
+    :class:`AsyncEvalSession` extends it.
+    """
+
+    async def get_verbosity(self) -> VerbosityT_co:
+        """Return the current Nix log verbosity."""
+        ...
+
+    async def set_verbosity(self, verbosity: LogLevelInput) -> VerbosityT_co:
+        """Set the Nix log verbosity and return the resulting level."""
+        ...
+
+
+class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](AsyncVerbosityController[LogLevel], Protocol):
     """The common asynchronous evaluation and flake interface.
 
     Generic in the value type so an engine's evaluator yields that engine's
     values: ``inproc.EvalSession`` hands back ``inproc.Value``, not "some
     ``AsyncValue``". The parameter defaults to :class:`AsyncValue`, so a
     caller who does not care can still write a bare ``AsyncEvalSession``.
+
+    Extends :class:`AsyncVerbosityController` rather than redeclaring
+    ``get_verbosity``/``set_verbosity``: verbosity is process-wide, so an
+    evaluator is one of several doors onto a single setting, not the owner of
+    its own. A REPL is why the door is here at all -- ``pynix``'s
+    ``:verbosity`` command holds a repl session and nothing else.
     """
 
     async def __aenter__(self) -> Self: ...
@@ -456,18 +483,6 @@ class AsyncReplSession[ValueT: AsyncValue = AsyncValue](AsyncEvalSession[ValueT]
 
     async def scope_names(self) -> list[str]:
         """Return the identifiers visible in this REPL's lexical scope."""
-        ...
-
-
-class AsyncVerbosityController(Protocol[VerbosityT_co]):
-    """A resource that reads and updates the process-wide Nix verbosity."""
-
-    async def get_verbosity(self) -> VerbosityT_co:
-        """Return the current Nix log verbosity."""
-        ...
-
-    async def set_verbosity(self, verbosity: LogLevelInput) -> VerbosityT_co:
-        """Set the Nix log verbosity and return the resulting level."""
         ...
 
 

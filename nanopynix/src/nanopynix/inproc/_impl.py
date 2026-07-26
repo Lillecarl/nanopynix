@@ -22,7 +22,7 @@ import anyio
 from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_bindings import store as nanopynix_store
 from nanopynix_bindings import util as nanopynix_util
-from nanopynix_proto.nix.common import RequestFinalized
+from nanopynix_proto.nix.common import LogLevel, RequestFinalized
 
 from nanopynix._core._extract import locked_flake as _locked_flake_proto
 from nanopynix._core._local import LocalEvalState, LocalLockedFlake, LocalRuntime, LocalStore, LocalValue
@@ -433,14 +433,22 @@ class Session:
         if build_store is not None and build_store._session is not self:  # type: ignore[reportPrivateUsage] -- identity ownership boundary  # noqa: SLF001
             raise ValueError("build_store belongs to a different inproc Session")
 
-    async def get_verbosity(self) -> int:
-        """Return the current Nix log verbosity."""
-        return await self.run(self._runtime.get_verbosity)
+    async def get_verbosity(self) -> LogLevel:
+        """Return the current Nix log verbosity.
 
-    async def set_verbosity(self, verbosity: LogLevelInput) -> int:
+        ``LogLevel`` rather than the bare ``int`` this used to return, matching
+        rpc. It is an ``IntEnum``, so this is a widening and not a break --
+        comparisons, arithmetic and ``int()`` all behave as before, and
+        ``.name`` starts working. Callers written against rpc used ``.name``
+        already; ``pynix``'s ``:verbosity`` command is one, and it would have
+        raised ``AttributeError`` the moment it was pointed at inproc.
+        """
+        return LogLevel(await self.run(self._runtime.get_verbosity))
+
+    async def set_verbosity(self, verbosity: LogLevelInput) -> LogLevel:
         """Set the Nix log verbosity and return the resulting level."""
         level = normalize_log_level(verbosity)
-        return await self.run(self._runtime.set_verbosity, int(level))
+        return LogLevel(await self.run(self._runtime.set_verbosity, int(level)))
 
     async def log_stream(self) -> AsyncIterator[LogEvent]:
         """Async iterator over log events from this process's Nix logger."""
@@ -951,6 +959,31 @@ class EvalSession:
         if not self._active or self._local is None:
             raise InprocSessionClosedError("EvalSession is not open — use async with")
         return self._local
+
+    async def get_verbosity(self) -> LogLevel:
+        """Return the current Nix log verbosity.
+
+        Verbosity is process-wide, not per-evaluator — this reads the same
+        setting :meth:`Session.get_verbosity` does, and reaching it from here
+        is a convenience for code that holds an evaluator rather than the
+        session that made it. A REPL is the motivating case: ``pynix``'s
+        ``:verbosity`` command has only its :class:`ReplSession` to hand.
+
+        rpc's ``EvalSession`` has always had this pair; inproc's not having it
+        is what ``test_engine_parity``'s "EvalSession.get_verbosity:rpc-only"
+        recorded, and nothing about process isolation forced the split.
+        """
+        self._require_local()
+        return await self._session.get_verbosity()
+
+    async def set_verbosity(self, verbosity: LogLevelInput) -> LogLevel:
+        """Set the Nix log verbosity and return the resulting level.
+
+        Process-wide, as :meth:`get_verbosity` — this is not scoped to the
+        evaluator it is called on.
+        """
+        self._require_local()
+        return await self._session.set_verbosity(verbosity)
 
     async def string(self, expr: str, path: str = "<string>") -> Value:
         """Evaluate the Nix expression ``expr``.

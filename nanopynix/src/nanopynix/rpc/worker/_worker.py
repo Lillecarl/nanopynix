@@ -271,7 +271,12 @@ class WorkerServiceHandler(WorkerServiceBase):
         self._state.runtime.initialize(
             settings=settings,
             load_config=message.load_config,
-            verbosity=int(LogLevel.NOTICE) if message.verbosity is None else int(message.verbosity),
+            # None means "leave Nix's own default alone", which is what inproc
+            # has always done. This used to force NOTICE, so the two engines
+            # answered 2 and 3 to the same get_verbosity() call on an
+            # otherwise identical session -- a difference in log volume that
+            # nothing about running in a subprocess required.
+            verbosity=None if message.verbosity is None else int(message.verbosity),
         )
         self._state.nix_path = list(message.nix_path)
 
