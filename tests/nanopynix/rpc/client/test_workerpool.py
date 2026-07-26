@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import Any
+from typing import Any, cast
 
 import anyio
 import pytest
 from grpclib.exceptions import StreamTerminatedError
 
-from nanopynix import LogEvent, StoreError
+from nanopynix import LogEvent, StoreClosedError, StoreError
 from nanopynix.rpc import Nix, WorkerDiedError
 from nanopynix.rpc.client import session as session_module
 
@@ -201,16 +201,92 @@ async def test_close_reports_its_own_deadline_and_still_stops_the_worker(monkeyp
     Both halves are asserted, because they failed together and could be fixed
     separately: the ``TimeoutError`` must reach the caller, and the process
     must be gone regardless.
+
+    The open store is load-bearing. The deadline covers handing worker-side
+    resources back and nothing else, so with none to hand back there is no
+    checkpoint inside it and an expired scope has no cancellation to deliver --
+    correctly, since there is then nothing that could have been late.
     """
     monkeypatch.setattr(session_module, "_GRACEFUL_CLOSE_TIMEOUT_SECONDS", 0.0)
     nix = Nix()
     await nix.open()
+    store = nix.store()
+    await store.open()
     proc = nix._manager._worker_proc  # type: ignore[reportPrivateUsage] -- intentional test of internal transport state
     assert proc is not None
 
     with pytest.raises(TimeoutError):
         await nix.close()
 
+    assert not proc.is_alive()
+
+
+class _FailingEval:
+    """Stands in for an evaluator whose close fails.
+
+    Registered directly in ``Session._evals`` because the point is what
+    ``Session.close`` does with a failure, not how one arises: any of
+    ``EvalSession.close``'s RPC, handle-release, or unregister steps can raise,
+    and they all reach ``close`` the same way.
+    """
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    async def close(self) -> None:
+        raise RuntimeError(self._name)
+
+
+async def test_one_failing_evaluator_does_not_abandon_the_rest_of_the_close():
+    """A raising evaluator is reported, not allowed to strand everything after it.
+
+    ``close`` used to await each evaluator, then each store, then the worker, in
+    one unguarded run -- so the first failure skipped every remaining resource
+    *and* the worker, leaving a live Nix store connection nothing in this
+    process still had a reference to. Reported as a clean-looking exception, at
+    that: the caller saw the evaluator's error and had no reason to suspect a
+    subprocess had outlived it.
+
+    All three consequences are asserted separately, since they are three
+    separate fixes: the error reaches the caller, the worker is gone anyway,
+    and the store the failure skipped past still got closed. The worker comes
+    first deliberately -- it is the one that outlives the process if nobody
+    checks.
+    """
+    nix = Nix()
+    await nix.open()
+    store = nix.store()
+    await store.open()
+    proc = nix._manager._worker_proc  # type: ignore[reportPrivateUsage] -- intentional test of internal transport state
+    assert proc is not None
+    nix._evals.add(cast("Any", _FailingEval("evaluator close failed")))  # type: ignore[reportPrivateUsage] -- injecting a failure into the registry close() walks
+
+    with pytest.raises(RuntimeError, match="evaluator close failed"):
+        await nix.close()
+
+    assert not proc.is_alive()
+    with pytest.raises(StoreClosedError):
+        await store.uri()
+
+
+async def test_close_reports_every_failure_it_collected():
+    """Two failures arrive as a group, not as whichever one happened first.
+
+    ``inproc.Session.close`` has always reported them this way; matching it is
+    the point. A single failure still arrives on its own -- see the test above
+    -- because wrapping one exception in a group only makes it harder to catch.
+    """
+    nix = Nix()
+    await nix.open()
+    proc = nix._manager._worker_proc  # type: ignore[reportPrivateUsage] -- intentional test of internal transport state
+    assert proc is not None
+    for name in ("first failure", "second failure"):
+        nix._evals.add(cast("Any", _FailingEval(name)))  # type: ignore[reportPrivateUsage] -- injecting a failure into the registry close() walks
+
+    with pytest.raises(BaseExceptionGroup) as excinfo:
+        await nix.close()
+
+    assert sorted(str(exc) for exc in excinfo.value.exceptions) == ["first failure", "second failure"]
     assert not proc.is_alive()
 
 
