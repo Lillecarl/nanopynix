@@ -178,8 +178,11 @@ LEDGER: dict[str, str] = {
     "EvalSession.eval_locked_flake:rpc-only": "DEFECT: inproc has lock_flake but no way to evaluate the result by handle.",
     "EvalSession.release_locked_flake:rpc-only": "TRANSPORT: frees a worker-side handle; inproc's LockedFlake is a local object.",
     "EvalSession.write_lock_file:rpc-only": "DEFECT: writing a lock file touches the filesystem, not the worker.",
-    "EvalSession.get_verbosity:rpc-only": "DEFECT: inproc exposes verbosity on Session only. Same setting, two homes.",
-    "EvalSession.set_verbosity:rpc-only": "DEFECT: as get_verbosity.",
+    # get_verbosity/set_verbosity were here as rpc-only. inproc's EvalSession
+    # has them now, delegating to its Session: verbosity is process-wide, so
+    # this is one setting reachable from two places rather than two settings.
+    # rpc has always been shaped that way, and a REPL is why -- pynix's
+    # :verbosity command holds a ReplSession and nothing else.
     # ── ReplSession ────────────────────────────────────────────────
     # Fourteen entries used to live here. inproc's ReplSession was a narrow
     # line-oriented wrapper holding an EvalSession; rpc's subclassed one. The
