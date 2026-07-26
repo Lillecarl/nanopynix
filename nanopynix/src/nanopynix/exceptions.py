@@ -592,9 +592,17 @@ def split_type_prefix(message: str) -> tuple[str | None, str]:
 # ════════════════════════════════════════════════════════════════════
 
 # Nix's BuildResult::Failure::Status vocabulary -> exception class. These
-# strings are produced by `build_failure_status_str` in
-# `nanopynix-bindings/src/nix_store.cpp` and travel verbatim in
+# strings are produced by `nanopynix::build_result::failure_status_str` in
+# `nanopynix-bindings/src/build_result_util.hh` and travel verbatim in
 # `BuildResult.status`, so both engines can map them identically.
+#
+# One producer, deliberately: the header exists because `nix_expr.cpp` and
+# `nix_store.cpp` used to render a BuildResult each with their own copy of this
+# vocabulary. Two copies free to drift meant the eval route and the store route
+# could name the same failure differently, and this table would then hand
+# callers two different exception classes for it depending on which route
+# reported it. Names not in this table fall back to plain `BuildError`, so a
+# drift would have degraded quietly rather than raised.
 _BUILD_STATUS_EXCEPTIONS: dict[str, type[BuildError]] = {
     "permanent-failure": PermanentBuildError,
     "input-rejected": InputRejectedError,

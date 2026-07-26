@@ -40,6 +40,7 @@
 #include <nix/util/posix-source-accessor.hh>
 #endif
 
+#include "build_result_util.hh"
 #include "nix_error_info.hh"
 #include "py_store_impl.hh"
 
@@ -88,117 +89,6 @@ static nb::list string_set_to_list(const nix::StringSet &values) {
     for (auto &value : values) result.append(value);
     return result;
 }
-
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-#define NANOPYNIX_NIX_HAS_KEYED_BUILD_RESULTS 0
-#else
-#define NANOPYNIX_NIX_HAS_KEYED_BUILD_RESULTS 1
-#endif
-
-#if NANOPYNIX_NIX_HAS_KEYED_BUILD_RESULTS
-static std::string build_success_status_str(nix::BuildResult::Success::Status s) {
-    using enum nix::BuildResult::Success::Status;
-    switch (s) {
-        case Built:                  return "built";
-        case Substituted:            return "substituted";
-        case AlreadyValid:           return "already-valid";
-        case ResolvesToAlreadyValid: return "resolves-to-already-valid";
-    }
-    return "unknown";
-}
-
-static std::string build_failure_status_str(nix::BuildResult::Failure::Status s) {
-    using enum nix::BuildResult::Failure::Status;
-    switch (s) {
-        case PermanentFailure:  return "permanent-failure";
-        case InputRejected:     return "input-rejected";
-        case OutputRejected:    return "output-rejected";
-        case TransientFailure:  return "transient-failure";
-        case CachedFailure:     return "cached-failure";
-        case TimedOut:          return "timed-out";
-        case MiscFailure:       return "misc-failure";
-        case DependencyFailed:  return "dependency-failed";
-        case LogLimitExceeded:  return "log-limit-exceeded";
-        case NotDeterministic:  return "not-deterministic";
-        case NoSubstituters:    return "no-substituters";
-        case HashMismatch:      return "hash-mismatch";
-    }
-    return "unknown";
-}
-
-static nb::dict build_result_to_dict(const std::string &drv_path, bool success,
-                                      const std::string &status, const std::string &error_msg) {
-    nb::dict d;
-    d["drv_path"] = drv_path;
-    d["success"] = success;
-    d["status"] = status;
-    d["error_msg"] = error_msg;
-    return d;
-}
-
-static nb::dict build_result_from_kbr(const nix::KeyedBuildResult &kbr,
-                                       const nix::StoreDirConfig &store) {
-    auto path = kbr.path.to_string(store);
-    if (auto *success = kbr.tryGetSuccess())
-        return build_result_to_dict(path, true, build_success_status_str(success->status), "");
-    if (auto *failure = kbr.tryGetFailure())
-        return build_result_to_dict(path, false, build_failure_status_str(failure->status), failure->msg());
-    return build_result_to_dict(path, false, "unknown", "");
-}
-
-static nb::dict build_result_from_br(const nix::BuildResult &br) {
-    if (auto *success = br.tryGetSuccess())
-        return build_result_to_dict("", true, build_success_status_str(success->status), "");
-    if (auto *failure = br.tryGetFailure())
-        return build_result_to_dict("", false, build_failure_status_str(failure->status), failure->msg());
-    return build_result_to_dict("", false, "unknown", "");
-}
-#else
-static nb::dict build_result_to_dict(const std::string &drv_path, bool success,
-                                      const std::string &status, const std::string &error_msg) {
-    nb::dict d;
-    d["drv_path"] = drv_path;
-    d["success"] = success;
-    d["status"] = status;
-    d["error_msg"] = error_msg;
-    return d;
-}
-
-static std::string build_status_str(nix::BuildResult::Status s) {
-    using enum nix::BuildResult::Status;
-    switch (s) {
-        case Built: return "built";
-        case Substituted: return "substituted";
-        case AlreadyValid: return "already-valid";
-        case ResolvesToAlreadyValid: return "resolves-to-already-valid";
-        case PermanentFailure: return "permanent-failure";
-        case InputRejected: return "input-rejected";
-        case OutputRejected: return "output-rejected";
-        case TransientFailure: return "transient-failure";
-        case CachedFailure: return "cached-failure";
-        case TimedOut: return "timed-out";
-        case MiscFailure: return "misc-failure";
-        case DependencyFailed: return "dependency-failed";
-        case LogLimitExceeded: return "log-limit-exceeded";
-        case NotDeterministic: return "not-deterministic";
-        case NoSubstituters: return "no-substituters";
-    }
-    return "unknown";
-}
-
-static nb::dict build_result_from_kbr(const nix::KeyedBuildResult &kbr,
-                                       const nix::StoreDirConfig &store) {
-    auto result = static_cast<nix::BuildResult>(kbr);
-    return build_result_to_dict(kbr.path.to_string(store), result.success(),
-                                build_status_str(result.status), result.errorMsg);
-}
-
-static nb::dict build_result_from_br(const nix::BuildResult &br) {
-    auto result = br;
-    return build_result_to_dict("", result.success(), build_status_str(result.status), result.errorMsg);
-}
-#endif
-#undef NANOPYNIX_NIX_HAS_KEYED_BUILD_RESULTS
 
 static nb::dict path_info_to_dict(nix::Store &s, const nix::ValidPathInfo &info) {
     nb::dict d;
@@ -578,7 +468,7 @@ static nb::list build_derived_paths_with_results(
         results = s.buildPathsWithResults(paths, buildMode, evalStore);
     }
     nb::list out;
-    for (auto &kbr : results) out.append(build_result_from_kbr(kbr, s));
+    for (auto &kbr : results) out.append(nanopynix::build_result::from_kbr(kbr, s));
     return out;
 }
 
@@ -708,7 +598,7 @@ static nb::dict build_derivation(nix::Store &s, const nix::StorePath &drvPath,
         result = s.buildDerivation(
             drvPath, static_cast<const nix::BasicDerivation &>(drv), buildMode);
     }
-    return build_result_from_br(result);
+    return nanopynix::build_result::from_br(result);
 }
 
 static std::string store_uri(nix::Store &s, bool with_params) {
