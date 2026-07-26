@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import anyio
+import anyio.to_thread
 from grpclib.exceptions import GRPCError, StreamTerminatedError
 from grpclib_transports.multiprocessing import multiprocessing_worker_with_backchannel
 from nanopynix_proto.nix.common import PrimOpSpec as PrimOpSpecPB
@@ -64,6 +65,19 @@ _LOG_DRAIN_TIMEOUT_SECONDS = 2.0
 Module-private rather than a NixSettings field: this bounds a teardown race
 against a worker that already acknowledged Shutdown, not anything a caller
 would tune. Cancelling early is safe, just noisy -- see close()."""
+
+_WORKER_TEARDOWN_TIMEOUT_SECONDS = 10.0
+"""How long close() lets the exit stack tear the worker down before killing it.
+
+grpclib_transports' teardown is ``await channel.aclose()`` then
+``await _stop_process(proc)``, in that order, so a channel that never finishes
+closing keeps the terminate/kill from ever running. This bounds the first half
+so the second is always reachable; see close()'s teardown block. Module-private
+for the same reason as _LOG_DRAIN_TIMEOUT_SECONDS -- it bounds a teardown
+pathology, not anything a caller would tune."""
+
+_WORKER_JOIN_TIMEOUT_SECONDS = 5.0
+"""How long _stop_worker_process waits for a terminate before escalating to kill."""
 
 # ════════════════════════════════════════════════════════════════════
 # Exceptions
@@ -150,6 +164,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         self.rpc_timeout = rpc_timeout
         self._shutdown_timeout = shutdown_timeout
         self._worker_pid: int | None = None
+        self._worker_proc: Any = None
         self._channel = None
         self._worker_service_stub: WorkerServiceStub | None = None
         self._store_service_stub: StoreServiceStub | None = None
@@ -222,7 +237,18 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
             raise RuntimeError(f"Worker init failed: {init_response.status}")
 
     async def close(self) -> None:
-        """Shut down the worker."""
+        """Ask the worker to shut down, then make sure it is gone.
+
+        The polite half -- the ``Shutdown`` RPC -- is interruptible and may
+        fail; the teardown half is not, and runs under a shield. A caller's
+        deadline (``Session.close`` has one) or an outright cancellation can
+        cut the request short, but it cannot leave a worker process behind:
+        that would be a live Nix store connection nothing in this process
+        remembers, reported as a clean shutdown.
+
+        Everything inside the shield is separately bounded, so the shield
+        cannot become a hang of its own.
+        """
         try:
             if self._worker_service_stub is not None:
                 try:
@@ -233,29 +259,56 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
                     StreamTerminatedError,
                     ConnectionError,
                     WorkerDiedError,
-                    anyio.get_cancelled_exc_class(),
                 ):
+                    # A worker that will not answer Shutdown is still going to
+                    # be stopped below, so none of these is worth raising.
+                    # Cancellation used to be caught here too and it is not any
+                    # more: swallowing it left the enclosing scope with nothing
+                    # to notice, so Session.close's deadline expired without
+                    # ever producing a TimeoutError. The teardown is shielded,
+                    # so letting it through costs nothing and is the only way
+                    # the caller hears about it.
                     logger.debug("worker shutdown failed (expected during teardown)", exc_info=True)
         finally:
-            if self._log_task is not None:
-                # The worker ends the SubscribeLogs stream itself when it
-                # handles Shutdown, so give the task a moment to finish on its
-                # own: cancelling it instead resets a stream the worker is
-                # still serving, which it logs as a traceback on the stderr
-                # this process inherits. Cancellation stays as the fallback for
-                # a worker that died or never got the request.
-                with anyio.move_on_after(_LOG_DRAIN_TIMEOUT_SECONDS):
-                    await asyncio.shield(self._log_task)
-                if not self._log_task.done():
-                    self._log_task.cancel()
-                    with contextlib.suppress(anyio.get_cancelled_exc_class()):
-                        await self._log_task
-                self._log_task = None
-            if self._stack is not None:
-                await self._stack.aclose()
-                self._stack = None
+            # One shield over the whole teardown, not just the part that stops
+            # the process. Every await below is a place an outer cancellation
+            # would otherwise re-fire and skip the rest -- and the rest is what
+            # stops the worker. Bounded throughout, so shielding cannot turn
+            # into a hang: at most _LOG_DRAIN_TIMEOUT_SECONDS +
+            # _WORKER_TEARDOWN_TIMEOUT_SECONDS + two joins.
+            with anyio.CancelScope(shield=True):
+                await self._teardown()
 
         self._log_bus.emit(None)
+
+    async def _teardown(self) -> None:
+        """Drain the log stream and dispose of the worker. Runs shielded."""
+        if self._log_task is not None:
+            # The worker ends the SubscribeLogs stream itself when it handles
+            # Shutdown, so give the task a moment to finish on its own:
+            # cancelling it instead resets a stream the worker is still
+            # serving, which it logs as a traceback on the stderr this process
+            # inherits. Cancellation stays as the fallback for a worker that
+            # died or never got the request.
+            with anyio.move_on_after(_LOG_DRAIN_TIMEOUT_SECONDS):
+                await asyncio.shield(self._log_task)
+            if not self._log_task.done():
+                self._log_task.cancel()
+                with contextlib.suppress(anyio.get_cancelled_exc_class()):
+                    await self._log_task
+            self._log_task = None
+        stack, self._stack = self._stack, None
+        if stack is None:
+            return
+        # grpclib_transports' teardown closes the channel first and stops the
+        # process second. Bounding the first half is what keeps the second
+        # reachable; _stop_worker_process then finishes the job whichever way
+        # the exit stack went, including having raised.
+        try:
+            with anyio.move_on_after(_WORKER_TEARDOWN_TIMEOUT_SECONDS):
+                await stack.aclose()
+        finally:
+            await self._stop_worker_process()
 
     # ── operation dispatch ─────────────────────────────────────────
 
@@ -306,8 +359,32 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
             logger.debug("worker log stream ended", exc_info=True)
 
     def _on_worker_process_start(self, proc: Any) -> None:
+        # The process object, not just its pid: close()'s teardown needs to be
+        # able to stop it directly if the exit stack that normally owns that
+        # job does not get there. See _stop_worker_process.
         self._worker_pid = proc.pid
+        self._worker_proc = proc
         self._set_worker_oom_score_adj(self._worker_oom_score_adj)
+
+    async def _stop_worker_process(self) -> None:
+        """Terminate, then kill, the worker if it is somehow still running.
+
+        A no-op on every normal close: the exit stack has already stopped the
+        process by the time this runs. It exists for the case where it did not
+        -- see close()'s teardown block for how that happens -- because a
+        surviving worker holds a Nix store connection, and nothing else in this
+        process would ever come back for it.
+        """
+        proc = self._worker_proc
+        self._worker_proc = None
+        if proc is None or not proc.is_alive():
+            return
+        logger.warning("nanopynix: worker %s outlived its teardown; stopping it", proc.pid)
+        proc.terminate()
+        await anyio.to_thread.run_sync(proc.join, _WORKER_JOIN_TIMEOUT_SECONDS)
+        if proc.is_alive():
+            proc.kill()
+            await anyio.to_thread.run_sync(proc.join, _WORKER_JOIN_TIMEOUT_SECONDS)
 
     def _set_worker_oom_score_adj(self, value: int | None) -> None:
         if value is None:

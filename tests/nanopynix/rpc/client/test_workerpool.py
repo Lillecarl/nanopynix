@@ -6,11 +6,13 @@ import asyncio
 import contextlib
 from typing import Any
 
+import anyio
 import pytest
 from grpclib.exceptions import StreamTerminatedError
 
 from nanopynix import LogEvent, StoreError
 from nanopynix.rpc import Nix, WorkerDiedError
+from nanopynix.rpc.client import session as session_module
 
 
 async def test_single_worker_basics():
@@ -159,6 +161,57 @@ async def test_idle_timeout_resets_with_activity():
         for _ in range(3):
             uri = await store.uri()
             assert isinstance(uri, str)
+
+
+async def test_a_cancelled_close_still_stops_the_worker_process():
+    """Teardown outlives a cancellation, so a timed-out close cannot leak a worker.
+
+    ``Session.close`` runs its polite half under a deadline, and
+    ``grpclib_transports`` tears the worker down by closing the channel *then*
+    stopping the process, both unshielded. A cancellation arriving between the
+    two therefore used to skip the stop entirely -- and the old ``close``
+    swallowed the ``TimeoutError``, so the caller was told shutdown succeeded
+    while a Nix-holding subprocess kept running.
+
+    An expired scope around ``close()`` is the same cancellation from the same
+    direction, delivered at the first checkpoint rather than after sixty
+    seconds. Removing the shield in ``WorkerClient.close`` turns this red.
+    """
+    nix = Nix()
+    await nix.open()
+    proc = nix._manager._worker_proc  # type: ignore[reportPrivateUsage] -- intentional test of internal transport state
+    assert proc is not None
+    assert proc.is_alive()
+
+    with anyio.move_on_after(0):
+        await nix.close()
+
+    assert not proc.is_alive()
+
+
+async def test_close_reports_its_own_deadline_and_still_stops_the_worker(monkeypatch: pytest.MonkeyPatch):
+    """``Session.close``'s deadline is reported, not logged and discarded.
+
+    The same failure as above reached from inside: ``close`` runs the polite
+    half under ``_GRACEFUL_CLOSE_TIMEOUT_SECONDS``, and expiring it used to be
+    caught and turned into ``logger.warning``. A caller had no way to learn
+    that shutdown had not completed cleanly -- and, since the expiry also cut
+    the teardown short, no way to learn that a worker was still running.
+
+    Both halves are asserted, because they failed together and could be fixed
+    separately: the ``TimeoutError`` must reach the caller, and the process
+    must be gone regardless.
+    """
+    monkeypatch.setattr(session_module, "_GRACEFUL_CLOSE_TIMEOUT_SECONDS", 0.0)
+    nix = Nix()
+    await nix.open()
+    proc = nix._manager._worker_proc  # type: ignore[reportPrivateUsage] -- intentional test of internal transport state
+    assert proc is not None
+
+    with pytest.raises(TimeoutError):
+        await nix.close()
+
+    assert not proc.is_alive()
 
 
 async def _collect(nix: Nix, events: list[LogEvent]) -> None:
