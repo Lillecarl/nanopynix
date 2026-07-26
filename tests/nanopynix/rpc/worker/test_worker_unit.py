@@ -266,6 +266,11 @@ async def test_subscribe_logs_yields_nix_and_finalized_events() -> None:
 
     assert len(events) == 2
     assert events[0].request_id == 1
+    # `nix_log` is an optional proto field, so it gets the same presence check
+    # the finalized branch below already had. It was missing here only because
+    # `wrap_service_handlers` erased the handler's type and pyright could not
+    # see the access at all.
+    assert events[0].nix_log is not None
     assert events[0].nix_log.action == "msg"
     assert events[1].request_id == 1
     assert events[1].request_finalized is not None
