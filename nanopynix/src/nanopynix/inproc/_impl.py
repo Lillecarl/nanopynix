@@ -9,6 +9,7 @@ evaluator thread-affinity requirements.
 from __future__ import annotations
 
 import asyncio
+import functools
 import itertools
 import math
 import os
@@ -535,8 +536,7 @@ class Store:
 
     async def is_valid_path(self, path: str | StorePath) -> bool:
         """Return whether ``path`` is valid in this store."""
-        raw_path = await self._session.run(self._require_raw().parse_store_path, str(path))
-        return await self._session.run(self._require_raw().is_valid_path, raw_path)
+        return await self._session.run(self._require_local().is_valid_path, str(path))
 
     async def query_path_info(self, path: str | StorePath) -> PathInfo:
         """Return metadata for a valid store path."""
@@ -819,14 +819,15 @@ class Store:
         """
         if dest_store._session is not self._session:
             raise ValueError("dest_store belongs to a different Session")
-        raw_paths = await self._session.run(_parse_store_paths, self._require_raw(), [str(path) for path in paths])
         await self._session.run(
-            self._require_raw().copy_closure,
-            raw_paths,
-            dest_store._require_raw(),
-            repair,
-            check_sigs,
-            substitute,
+            functools.partial(
+                self._require_local().copy_closure,
+                [str(path) for path in paths],
+                dest_store._require_local(),
+                repair=repair,
+                check_sigs=check_sigs,
+                substitute=substitute,
+            ),
         )
 
     async def optimise_store(self) -> None:

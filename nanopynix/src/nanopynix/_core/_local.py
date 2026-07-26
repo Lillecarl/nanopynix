@@ -40,15 +40,79 @@ class LocalStore:
     def __getattr__(self, name: str) -> Any:
         """Forward anything not defined here to the binding, as ``Any``.
 
-        Load-bearing, not laziness: the RPC worker's store service reflects
-        over the binding's ``store_*`` proto entrypoints by name
-        (``_worker_store.py``'s ``_nanobind_rpc_call``), which is what keeps it
-        free of per-method code. The cost is that a typo in an attribute name
-        reaches this instead of the type checker -- so prefer
-        :meth:`require_raw`, which is typed, wherever the name is known
-        statically.
+        Transitional. Store methods are being given typed definitions on this
+        class, mirroring :class:`LocalValue`; until every one of them has one,
+        the RPC worker's store service still reflects over the binding's
+        ``store_*`` proto entrypoints by name (``_worker_store.py``'s
+        ``_nanobind_rpc_call``) for the remainder. The cost is that a typo in
+        an attribute name reaches this instead of the type checker, which is
+        why it is going away -- prefer a typed method, or :meth:`require_raw`,
+        wherever the name is known statically.
         """
         return getattr(self.require_raw(), name)
+
+    def _store_path(self, path: str | nanopynix_store.StorePath) -> nanopynix_store.StorePath:
+        """Normalise a caller-supplied path to a ``nix::StorePath``.
+
+        This is the Python home of what ``nix_store.cpp``'s
+        ``store_path_from_string()`` did for the proto-dict entrypoints, so
+        that both engines share one implementation instead of inproc using the
+        direct binding (no absolutization) and rpc using the dict funnel
+        (absolutization). A relative path is resolved against the store
+        directory, matching what the rpc engine has always accepted.
+
+        The empty string is deliberately *not* rejected here: it is forwarded
+        to ``parse_store_path``, whose C++ guard raises ``BadStorePath`` rather
+        than letting ``canonPath``'s assertion abort the process. Keeping the
+        rejection there means both engines keep reporting it exactly as they
+        do today, and the guard stays reachable for raw-binding callers too.
+        """
+        if isinstance(path, nanopynix_store.StorePath):
+            return path
+        raw = self.require_raw()
+        if path and not path.startswith("/"):
+            path = f"{raw.get_store_dir()}/{path}"
+        return raw.parse_store_path(path)
+
+    def print_store_path(self, path: nanopynix_store.StorePath | str) -> str:
+        """Render a store path absolute, whichever of Nix's two spellings arrives.
+
+        The union is not convenience: the bindings genuinely return both.
+        Anything that goes through ``parse_store_path`` hands back a
+        ``StorePath``, whose ``str()`` is the bare ``hash-name``, while the
+        collective queries funnel through C++'s ``store_paths_to_string_list``
+        and hand back strings that are already absolute. Normalising both here
+        is what lets one helper serve either; the prefix test is what makes it
+        idempotent.
+        """
+        text = str(path)
+        store_dir = self.require_raw().get_store_dir().rstrip("/")
+        if text == store_dir or text.startswith(f"{store_dir}/"):
+            return text
+        return f"{store_dir}/{text}"
+
+    def print_store_paths(self, paths: Sequence[nanopynix_store.StorePath | str]) -> list[str]:
+        return [self.print_store_path(path) for path in paths]
+
+    def is_valid_path(self, path: str | nanopynix_store.StorePath) -> bool:
+        return self.require_raw().is_valid_path(self._store_path(path))
+
+    def copy_closure(
+        self,
+        paths: Sequence[str | nanopynix_store.StorePath],
+        dest_store: LocalStore,
+        *,
+        repair: bool = False,
+        check_sigs: bool = True,
+        substitute: bool = False,
+    ) -> None:
+        self.require_raw().copy_closure(
+            [self._store_path(path) for path in paths],
+            dest_store.require_raw(),
+            repair,
+            check_sigs,
+            substitute,
+        )
 
 
 class LocalEvalState:
