@@ -282,6 +282,7 @@ class Session:
         self,
         store: Store,
         *,
+        build_store: Store | None = None,
         eval_settings: NixEvalSettings | None = None,
         fetch_settings: NixFetchSettings | None = None,
     ) -> EvalSession:
@@ -296,6 +297,8 @@ class Session:
         Args:
             store: Open Store to use for this eval state. If it belongs to
                    a different session, raises ValueError.
+            build_store: Optional second store to build into while evaluating
+                   against ``store``. Same guard as ``store``.
             eval_settings: Construction-time evaluator settings for this
                    ``EvalSession`` alone (e.g. ``pure_eval``, ``nix_path``).
             fetch_settings: Construction-time fetcher settings for this
@@ -307,8 +310,7 @@ class Session:
         thread in the worker. Store operations remain available and may run
         concurrently alongside them.
         """
-        if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID  # noqa: SLF001
-            raise ValueError("Store belongs to a different session")
+        self._require_own_stores(store, build_store)
         return EvalSession(
             self._manager,
             self,
@@ -316,6 +318,7 @@ class Session:
             session_id=self._session_id,
             rpc_timeout=self._manager.rpc_timeout,
             store=store,
+            build_store=build_store,
             eval_settings=eval_settings,
             fetch_settings=fetch_settings,
         )
@@ -324,8 +327,10 @@ class Session:
         self,
         store: Store,
         *,
+        build_store: Store | None = None,
         eval_settings: NixEvalSettings | None = None,
         fetch_settings: NixFetchSettings | None = None,
+        line_editors: Sequence[str] | None = None,
     ) -> ReplSession:
         """Create a persistent Nix REPL scope over ``store``.
 
@@ -342,20 +347,36 @@ class Session:
         construction-time settings :meth:`eval` does -- previously it took
         none, which left a REPL's evaluator the one evaluator on this engine
         that could not be configured.
+
+        ``line_editors`` is per-call, as on ``inproc``, and falls back to this
+        session's ``runtime_settings`` when omitted. It used to be readable
+        only from ``runtime_settings``, so a caller wanting two REPLs with
+        different editors had to open two workers.
         """
-        if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID  # noqa: SLF001
-            raise ValueError("Store belongs to a different session")
+        self._require_own_stores(store, build_store)
         return ReplSession(
             self._manager,
             self,
             store.store_handle,
             session_id=self._session_id,
             rpc_timeout=self._manager.rpc_timeout,
-            line_editors=self.runtime_settings.line_editors,
+            line_editors=self.runtime_settings.line_editors if line_editors is None else line_editors,
             store=store,
+            build_store=build_store,
             eval_settings=eval_settings,
             fetch_settings=fetch_settings,
         )
+
+    def _require_own_stores(self, store: Store, build_store: Store | None) -> None:
+        """Reject stores opened by a different Session before an evaluator binds them.
+
+        Mirrors ``inproc.Session._require_own_stores`` -- same check, same two
+        messages, so a cross-session mix-up reads the same on either engine.
+        """
+        if store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID  # noqa: SLF001
+            raise ValueError("Store belongs to a different session")
+        if build_store is not None and build_store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID  # noqa: SLF001
+            raise ValueError("build_store belongs to a different session")
 
     def claim_eval(self, eval_session: EvalSession) -> None:
         self._evals.add(eval_session)

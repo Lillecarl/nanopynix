@@ -860,6 +860,7 @@ class EvalSession:
 
     __slots__ = (
         "_active",
+        "_build_store",
         "_ctx",
         "_eval_settings",
         "_fetch_settings",
@@ -887,6 +888,7 @@ class EvalSession:
         rpc_timeout: float = DEFAULT_RPC_TIMEOUT_SECONDS,
         line_editors: Sequence[str] = DEFAULT_LINE_EDITORS,
         store: Store | None = None,
+        build_store: Store | None = None,
         eval_settings: NixEvalSettings | None = None,
         fetch_settings: NixFetchSettings | None = None,
     ) -> None:
@@ -894,6 +896,7 @@ class EvalSession:
         self._owner_session = owner_session
         self._store = store
         self._store_handle = store_handle
+        self._build_store = build_store
         self._session_id = session_id
         self._proxy: EvalProxy | None = None
         self._timeout = timeout
@@ -929,6 +932,8 @@ class EvalSession:
             response = await proxy.open_eval(
                 OpenEvalRequest(
                     store_handle=self._store_handle,
+                    # 0 is the wire's "none" for an optional handle
+                    build_store_handle=0 if self._build_store is None else self._build_store.store_handle,
                     eval_settings=rendered_eval,
                     fetch_settings=rendered_fetch,
                 ),

@@ -267,6 +267,34 @@ class TestEvalSessionLifecycle:
         request = pool.eval_stub.open_eval.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
         assert request.store_handle == 99
 
+    async def test_open_eval_carries_the_build_store_handle(self):
+        """``Session.eval(store, build_store=...)`` must put the handle on the wire.
+
+        The client half of the ``build_store`` unification -- its worker half
+        is ``test_worker_eval_unit.test_open_eval_forwards_the_build_store_handle``.
+        Neither is redundant: this one would still pass if the worker dropped
+        the field on the floor, and that one would still pass if the client
+        never set it.
+        """
+        pool = _mock_pool()
+        rpc = StoreHandle(_mock_pool(), "mock", "session-id")
+        rpc._active = True  # type: ignore[reportPrivateUsage] -- test injects internal store state
+        rpc._store_handle = 456  # type: ignore[reportPrivateUsage] -- test injects store handle directly for mock setup
+
+        session = EvalSession(pool, store_handle=99, build_store=Store(rpc))
+        await session.open()
+        request = pool.eval_stub.open_eval.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
+        assert request.store_handle == 99
+        assert request.build_store_handle == 456
+
+    async def test_open_eval_sends_zero_when_no_build_store(self):
+        """0 is the wire's "none", as for every other optional handle."""
+        pool = _mock_pool()
+        session = EvalSession(pool, store_handle=99)
+        await session.open()
+        request = pool.eval_stub.open_eval.call_args.args[0]  # type: ignore[reportUnknownMemberType, reportOptionalMemberAccess] -- mock call_args absence in stubs
+        assert request.build_store_handle == 0
+
     @pytest.mark.concurrency
     async def test_eval_proxy_serializes_concurrent_operations(self):
         """One EvalState never receives overlapping RPCs from its proxies."""

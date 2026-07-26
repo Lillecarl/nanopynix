@@ -162,7 +162,6 @@ LEDGER: dict[str, str] = {
     "Session.claim_eval:rpc-only": "TRANSPORT: leases a worker-side evaluator slot. Nothing to lease in-process.",
     "Session.release_eval:rpc-only": "TRANSPORT: the release half of claim_eval.",
     "Session.close:params": "DEFECT: inproc takes wait/timeout/force, rpc takes nothing. Shutdown is exactly where rpc needs those knobs most.",
-    "Session.eval:params": "DEFECT: inproc accepts a separate build_store, rpc cannot. Evaluating against one store while building in another is not a transport concern.",
     # ── Store ──────────────────────────────────────────────────────
     "Store.call:inproc-only": "TRANSPORT: runs an L1 store method on the Nix thread.",
     "Store.rpc:rpc-only": "TRANSPORT: the generated StoreService proxy -- the escape hatch to the wire itself.",
@@ -206,7 +205,6 @@ LEDGER: dict[str, str] = {
     # ReplSession now contributes no entries at all: its own surface matches,
     # and what it inherits is counted once against EvalSession (see
     # DERIVED_PAIRS).
-    "Session.repl:params": "DEFECT: inproc accepts build_store and line_editors, rpc neither. build_store is the same root cause as Session.eval:params; line_editors is per-call on inproc but read from runtime_settings on rpc. Settings themselves now match.",
     # ── Value ──────────────────────────────────────────────────────
     # Twelve entries used to live here: the `as_*` strict family (inproc-only)
     # and a `coerce_*` family (rpc-only). Both are gone, by opposite routes.
