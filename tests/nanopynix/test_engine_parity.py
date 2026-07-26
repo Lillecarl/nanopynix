@@ -23,9 +23,17 @@ an unlisted difference fails as new drift, and a listed difference that has
 stopped occurring fails so the entry gets deleted rather than accumulating
 into a rubber stamp.
 
-The ledger is deliberately *not* a list of things that are fine. Most entries
-are marked DEFECT: they record work to do, and they are here so the drift is
-counted instead of rediscovered.
+The ledger is deliberately *not* a list of things that are fine. Entries marked
+DEFECT record work to do, and are here so the drift is counted instead of
+rediscovered. There are none left: every remaining entry is TRANSPORT, and the
+retirement comments between them say what happened to the rest.
+
+That is a floor to hold, not a finish line. This file compares *names* --
+members, and parameter lists -- so it is blind to two classes with different
+names for the same thing (which is how the object-lifetime exceptions diverged
+unnoticed) and to two identical signatures that behave differently.
+:mod:`tests.nanopynix.test_engine_parity_semantics` is the other half, and the
+one that grows from here.
 """
 
 from __future__ import annotations
@@ -169,7 +177,22 @@ LEDGER: dict[str, str] = {
     # inproc's dispatch paths share, as WorkerClient.invoke is rpc's.
     "Session.claim_eval:rpc-only": "TRANSPORT: leases a worker-side evaluator slot. Nothing to lease in-process.",
     "Session.release_eval:rpc-only": "TRANSPORT: the release half of claim_eval.",
-    "Session.close:params": "DEFECT: inproc takes wait/timeout/force, rpc takes nothing. Shutdown is exactly where rpc needs those knobs most.",
+    # Recorded as a DEFECT until it was looked at properly. All three
+    # parameters follow from one fact -- inproc's Nix work runs on threads in
+    # this process, and a thread cannot be killed -- so closing has to wait for
+    # that work (`wait`), bound the wait (`timeout`), and be able to drop what
+    # has not started yet (`force`), with `resume()` behind them so a close that
+    # gives up leaves the session usable. rpc's work runs in a subprocess that
+    # gets terminated and then killed; there is no wait phase, so none of the
+    # three has anything to refer to. This is TIMEOUT_PARAM's note read in the
+    # other direction: there it is an inproc call that has no timeout to mean,
+    # here it is an rpc close.
+    #
+    # `force` is the one worth spelling out, because a plausible rpc reading
+    # exists and is wrong: "kill the worker now" abandons work that has already
+    # started, where inproc's force only drops work that has not. Same word,
+    # more destructive act -- worse than not having it.
+    "Session.close:params": "TRANSPORT: inproc must drain threads it cannot kill; rpc terminates a process. wait/timeout/force bound a wait phase rpc does not have.",
     # ── Store ──────────────────────────────────────────────────────
     "Store.call:inproc-only": "TRANSPORT: runs an L1 store method on the Nix thread.",
     "Store.rpc:rpc-only": "TRANSPORT: the generated StoreService proxy -- the escape hatch to the wire itself.",
