@@ -1,8 +1,11 @@
 """Generate docs/pynix/reference.md from pynix's live ``clypi`` command tree.
 
 Regenerated on every Sphinx build (see ``docs/conf.py``'s ``setup()``), so the
-rendered CLI reference can never drift from the actual commands, arguments,
-and help text. Run standalone with::
+*rendered* site can never drift from the actual commands, arguments, and help
+text. The checked-in ``reference.md`` is a different matter -- it only refreshes
+when someone runs the generator and commits the result, and it had silently
+drifted 252 lines behind before ``tests/pynix/test_docs_reference.py`` started
+gating it. Run standalone with::
 
     python docs/_generate_pynix_reference.py
 """
@@ -95,8 +98,13 @@ def _render_command(cmd: type[Command], path: list[str]) -> list[str]:
     return lines
 
 
-def generate() -> None:
-    """Regenerate ``docs/pynix/reference.md`` from the live pynix command tree."""
+def render() -> str:
+    """Render the whole reference from the live pynix command tree.
+
+    Split out from :func:`generate` so a test can compare it against the
+    checked-in file without writing anything -- see
+    ``tests/pynix/test_docs_reference.py``.
+    """
     lines = [
         "# CLI reference",
         "",
@@ -106,8 +114,13 @@ def generate() -> None:
         "",
     ]
     lines += _render_command(Pynix, [])
+    return "\n".join(lines) + "\n"
+
+
+def generate() -> None:
+    """Regenerate ``docs/pynix/reference.md`` from the live pynix command tree."""
     _OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    _OUTPUT.write_text("\n".join(lines) + "\n")
+    _OUTPUT.write_text(render())
 
 
 if __name__ == "__main__":

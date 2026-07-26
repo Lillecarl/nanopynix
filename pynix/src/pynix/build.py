@@ -27,7 +27,6 @@ logger = structlog.get_logger("pynix.build")
 
 _DEFAULT_SUBSTITUTERS = "https://cache.nixos.org/"
 _DEFAULT_TRUSTED_PUBLIC_KEYS = "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
-_DEFAULT_VERBOSITY = "notice"
 
 
 class Build(Command):
@@ -40,8 +39,12 @@ class Build(Command):
     eval_store: str | None = arg(None, help="Store URI to evaluate with. Defaults to --store.")
     substituters: str = arg(_DEFAULT_SUBSTITUTERS, help="Space-separated substituter URLs.")
     trusted_public_keys: str = arg(_DEFAULT_TRUSTED_PUBLIC_KEYS, help="Space-separated substituter public keys.")
-    verbosity: str = arg(
-        _DEFAULT_VERBOSITY,
+    # None, not a literal level: nanopynix leaves Nix's own compiled-in default
+    # (info) alone when no verbosity is named, and pynix has no reason to
+    # disagree with the library it dogfoods. This used to force notice, so
+    # `pynix build` was quieter than every other consumer of the same session.
+    verbosity: str | None = arg(
+        None,
         help="Nix log verbosity: error, warn, notice, info, talkative, chatty, debug, vomit, or 0-7.",
     )
     print_build_logs: bool = arg(False, help="Print build log lines to stderr.")

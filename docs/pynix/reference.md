@@ -19,7 +19,7 @@ Build a Nix derivation value
 | `--eval-store` | `str or None` | Store URI to evaluate with. Defaults to --store. (default: `None`) |
 | `--substituters` | `str` | Space-separated substituter URLs. (default: `'https://cache.nixos.org/'`) |
 | `--trusted-public-keys` | `str` | Space-separated substituter public keys. (default: `'cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY='`) |
-| `--verbosity` | `str` | Nix log verbosity: error, warn, notice, info, talkative, chatty, debug, vomit, or 0-7. (default: `'notice'`) |
+| `--verbosity` | `str or None` | Nix log verbosity: error, warn, notice, info, talkative, chatty, debug, vomit, or 0-7. (default: `None`) |
 | `--print-build-logs` | `bool` | Print build log lines to stderr. (default: `False`) |
 | `--update-fod` | `bool` | Update plain fixed-output hash literals after a hash mismatch. (default: `False`) |
 | `--dry-run` | `bool` | Show --update-fod changes without writing or rebuilding. (default: `False`) |
