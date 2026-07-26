@@ -44,7 +44,7 @@ from nanopynix.settings import (
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+    from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
     from os import PathLike
 
     from nanopynix.models import PrimOpSpec
@@ -52,14 +52,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _GRACEFUL_CLOSE_TIMEOUT_SECONDS = 60.0
-"""How long close() gives the polite half of shutdown before giving up on it.
+"""How long close() spends handing worker-side resources back before giving up.
 
-Generous on purpose: everything inside it is already individually bounded (each
-evaluator's close goes out at ``rpc_timeout``, the Shutdown RPC at
-``shutdown_timeout``), so reaching this means something is wrong rather than
-merely slow. It is not a caller-facing knob -- see the ``Session.close:params``
-entry in tests/nanopynix/test_engine_parity.py for why rpc's close takes no
-parameters where inproc's takes three."""
+A backstop, and deliberately shorter than what it bounds: each handle-drop RPC
+inside it goes out at ``rpc_timeout``, 300 seconds by default, so a single
+wedged evaluator or store can blow this budget on its own. That is the intent
+-- dropping a handle is a bookkeeping call that takes milliseconds when the
+worker is answering at all, so a minute of it means the worker is not coming
+back and close() should stop asking. The worker still dies either way: it is
+stopped outside this deadline, in a ``finally``, by a ``WorkerClient.close``
+that shields its own teardown.
+
+Not a caller-facing knob -- see the ``Session.close:params`` entry in
+tests/nanopynix/test_engine_parity.py for why rpc's close takes no parameters
+where inproc's takes three."""
 
 
 class Session:
@@ -163,28 +169,62 @@ class Session:
     async def close(self) -> None:
         """Shut down the worker.
 
-        Raises :class:`TimeoutError` if the graceful phase -- closing each
-        evaluator, then asking the worker to shut itself down -- runs past
-        :data:`_GRACEFUL_CLOSE_TIMEOUT_SECONDS`. The worker process is gone
-        either way: ``WorkerClient.close`` shields its own teardown from this
-        deadline, so a timeout here means "shutdown was not clean", not
-        "shutdown did not happen". This used to swallow the ``TimeoutError``
-        and log a warning, which said the same thing far more quietly than it
-        deserved -- and, before the teardown was shielded, said it while
-        leaving the worker running.
+        Every resource this session handed out gets a chance to close, whatever
+        the ones before it did. Failures are collected and raised together --
+        one on its own, more as a :exc:`BaseExceptionGroup` -- exactly as
+        ``inproc.Session.close`` reports them, and for the reason it does: the
+        first evaluator to fail must not be the reason the rest, and the worker
+        behind them, are left as they are.
+
+        Raises :class:`TimeoutError` instead if handing those resources back
+        runs past :data:`_GRACEFUL_CLOSE_TIMEOUT_SECONDS`.
+
+        The worker process is gone in all three cases. It is stopped in a
+        ``finally``, outside the deadline, by a ``WorkerClient.close`` that
+        shields its own teardown -- so every failure here means "shutdown was
+        not clean", never "shutdown did not happen".
         """
-        # Evaluators first, then the stores they were bound to, then the worker
-        # -- inproc's order, for the same reason: a store cannot be closed while
-        # an evaluator holds it. Closing the stores at all is new here. They
-        # used to be left open, so a facade outliving its session reported
-        # "session is not open" rather than the truth, which is that its store
-        # is closed.
-        with anyio.fail_after(_GRACEFUL_CLOSE_TIMEOUT_SECONDS):
-            for eval_session in tuple(self._evals):
-                await eval_session.close()
-            for store in tuple(self._stores):
-                await store.close()
+        errors: list[BaseException] = []
+
+        async def close_resource(operation: Awaitable[None]) -> None:
+            try:
+                await operation
+            except Exception as exc:
+                errors.append(exc)
+
+        try:
+            # Evaluators first, then the stores they were bound to -- inproc's
+            # order, for the same reason: a store cannot be closed while an
+            # evaluator holds it. Closing the stores at all is new here. They
+            # used to be left open, so a facade outliving its session reported
+            # "session is not open" rather than the truth, which is that its
+            # store is closed.
+            with anyio.fail_after(_GRACEFUL_CLOSE_TIMEOUT_SECONDS):
+                for eval_session in tuple(self._evals):
+                    await close_resource(eval_session.close())
+                for store in tuple(self._stores):
+                    await close_resource(store.close())
+        finally:
+            # Unconditional, and outside the deadline. Both matter: a raising
+            # evaluator used to abandon the close here, and the worker it left
+            # running was a live Nix store connection nothing in this process
+            # remembered. `_manager.close()` is bounded on its own -- the
+            # Shutdown RPC at ``shutdown_timeout``, the teardown internally --
+            # so it needs no deadline from here, and putting it under this one
+            # would only mean an expired scope cancelling the polite half of a
+            # shutdown that is about to happen the impolite way instead.
             await self._manager.close()
+
+        # Cancellation is not collected, unlike inproc, which catches
+        # BaseException here. Wrapping it would strip its meaning: the scope it
+        # belongs to would never see it, so `fail_after` above could not turn
+        # its own expiry into a TimeoutError -- the bug this file already had
+        # once, in WorkerClient.close. Letting it through costs nothing, since
+        # the worker is stopped in the finally either way.
+        if len(errors) == 1:
+            raise errors[0]
+        if errors:
+            raise BaseExceptionGroup("errors closing rpc Session", errors)
 
     async def __aenter__(self) -> Session:
         await self.open()
