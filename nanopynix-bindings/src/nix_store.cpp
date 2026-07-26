@@ -385,10 +385,25 @@ static std::optional<std::string> request_optional_string(const nb::dict &reques
     return request_cast<std::string>(value, key, op);
 }
 
-static nix::StorePath request_store_path(nix::Store &s, const nb::dict &request, const char *key, const char *op) {
-    auto path = request_string(request, key, op);
-    if (!path.empty() && path[0] != '/') path = s.config.storeDir_ + "/" + path;
+// Absolutize a caller-supplied path and parse it, rejecting the empty string.
+//
+// nix::StoreDirConfig::parseStorePath() runs the path through canonPath(),
+// which asserts it is non-empty -- and nix wraps __assert_fail, so a violation
+// is abort(), not a C++ exception. Nothing downstream can catch it: the whole
+// process dies with SIGABRT, taking an in-process caller's session with it.
+// Every other malformed path ("x", "/etc/passwd", "garbage") raises
+// BadStorePath and arrives in Python as BadStorePathError, so the empty string
+// -- trivially reachable from an unset variable or a blank config field -- is
+// rejected here with the same error rather than being singled out for a crash.
+static nix::StorePath store_path_from_string(nix::Store &s, std::string path, const char *op) {
+    if (path.empty())
+        throw nix::BadStorePath("%s: store path must not be empty", op);
+    if (path[0] != '/') path = s.config.storeDir_ + "/" + path;
     return s.parseStorePath(path);
+}
+
+static nix::StorePath request_store_path(nix::Store &s, const nb::dict &request, const char *key, const char *op) {
+    return store_path_from_string(s, request_string(request, key, op), op);
 }
 
 static std::vector<nix::StorePath> request_store_paths(
@@ -399,8 +414,7 @@ static std::vector<nix::StorePath> request_store_paths(
     std::vector<nix::StorePath> paths;
     paths.reserve(raw.size());
     for (auto &path : raw) {
-        if (!path.empty() && path[0] != '/') path = s.config.storeDir_ + "/" + path;
-        paths.push_back(s.parseStorePath(path));
+        paths.push_back(store_path_from_string(s, path, op));
     }
     return paths;
 }
@@ -447,7 +461,9 @@ static nix::DerivedPaths request_derived_paths(
     nix::DerivedPaths paths;
     paths.reserve(raw.size());
     for (auto &path : raw) {
-        if (!path.empty() && path[0] != '/') path = s.config.storeDir_ + "/" + path;
+        if (path.empty())
+            throw nix::BadStorePath("%s: store path must not be empty", op);
+        if (path[0] != '/') path = s.config.storeDir_ + "/" + path;
         // A plain derivation path has historically meant all of its outputs.
         // A ^ separator opts into Nix's canonical DerivedPath representation.
         if (path.contains('^'))
@@ -1221,7 +1237,16 @@ static void bind_store(nb::module_ &m) {
              "with_params"_a = false)
         .def("is_valid_path", [](nix::Store &s, const nix::StorePath &p) { return s.isValidPath(p); },
              nb::call_guard<nb::gil_scoped_release>(), "path"_a)
-        .def("parse_store_path", [](nix::Store &s, const std::string &p) { return s.parseStorePath(p); },
+        // Unlike request_store_path()'s funnel this deliberately does not
+        // absolutize a relative path -- the direct API has always required an
+        // absolute one -- but it needs the same empty-string guard, since
+        // parseStorePath() aborts the process rather than throwing on it.
+        .def("parse_store_path",
+             [](nix::Store &s, const std::string &p) {
+                 if (p.empty())
+                     throw nix::BadStorePath("parse_store_path: store path must not be empty");
+                 return s.parseStorePath(p);
+             },
              nb::call_guard<nb::gil_scoped_release>(), "path"_a)
         .def("follow_links_to_store_path",
              [](nix::Store &s, const std::string &p) { return s.followLinksToStorePath(p); },
