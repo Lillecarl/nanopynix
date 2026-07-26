@@ -229,7 +229,7 @@ async def test_standard_cxx_exceptions_are_left_to_nanobind(
     about what it does and does not prove. ``nix_expr.cpp`` does throw
     ``std::runtime_error("Nix value has been released")``, but inproc guards
     the same condition in Python first, so what arrives is
-    ``InprocValueReleasedError`` and the C++ throw is never reached. The
+    ``ValueReleasedError`` and the C++ throw is never reached. The
     assertion below is therefore about the boundary between "Nix said no" and
     "you used the API wrong", not about the translator's decline path.
 

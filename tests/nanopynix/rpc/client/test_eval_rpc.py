@@ -15,6 +15,7 @@ from anyio import Path as AnyioPath
 
 from nanopynix import (
     EvalSessionClosedError,
+    LockedFlakeReleasedError,
     NixError,
     NixType,
     NixTypeError,
@@ -839,7 +840,10 @@ async def test_locked_flake_release_invalidates_handle(rpc_session: RpcSessionFa
         await locked.release()
         await locked.release()
 
-        with pytest.raises(ValueReleasedError, match="LockedFlakeHandle"):
+        # Its own class, not the value one: a locked flake is not a value,
+        # and a caller releasing values in a loop should not have that
+        # `except` swallow a flake handle it never meant to touch.
+        with pytest.raises(LockedFlakeReleasedError, match="LockedFlakeHandle"):
             await locked.eval()
 
 

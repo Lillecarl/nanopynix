@@ -469,6 +469,28 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
    were duplicated in three conftests; they now live once in
    `tests/conftest.py`.
 
+# Tracked: rpc's `Session` has no closed guard
+
+Found while unifying the object-lifetime exceptions. Four kinds of nanopynix
+object have a lifetime, and both engines now raise the same class for three of
+them (`StoreClosedError`, `EvalSessionClosedError`, `ValueReleasedError` /
+`LockedFlakeReleasedError`). The fourth, the `Session` itself, is guarded on
+inproc only: `inproc.Session.run` raises `SessionClosedError` when the session
+was never opened or has closed, while `rpc.Session` tracks no open/closed
+state at all -- `session.store()` after `close()` hands back a `Store` whose
+`open()` fails later, differently, and against a dead worker.
+
+Left out of the exception unification deliberately: that change was about
+which *class* a guard raises, and this is a guard that does not exist. Adding
+it means picking rpc's chokepoint (`WorkerClient.invoke`, or the `store()` /
+`eval()` / `repl()` constructors, which do no RPC of their own) and deciding
+whether "never opened" and "closed again" are the same error, which inproc
+currently says they are. `SessionClosedError` already exists for it.
+
+The gap is noted in `tests/nanopynix/test_engine_parity_semantics.py`'s
+object-lifetime section, which covers the other three, so it is visible next
+to the tests that would grow a fourth.
+
 # Tracked: pre-existing complexity/arg-count debt (ruff-strict C901/PLR09xx)
 Enabling mccabe (`C901`) and Pylint's too-many-{branches,returns,arguments,
 statements} (`PLR0911`/`PLR0912`/`PLR0913`/`PLR0915`) in `ruff-strict.toml`

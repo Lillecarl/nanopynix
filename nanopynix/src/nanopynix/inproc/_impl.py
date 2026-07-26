@@ -36,7 +36,16 @@ from nanopynix._wire import (
     NIX_USER_CONF_FILES_ENV,
     NO_GC_LIMIT,
 )
-from nanopynix.exceptions import StoreError, build_error_from_result, translate_nix_exception
+from nanopynix.exceptions import (
+    EvalSessionClosedError,
+    LockedFlakeReleasedError,
+    SessionClosedError,
+    StoreClosedError,
+    StoreError,
+    ValueReleasedError,
+    build_error_from_result,
+    translate_nix_exception,
+)
 from nanopynix.logging import BusSubscription, CallbackBus, LogCollector, LogStreamEventKind
 from nanopynix.models import (
     BuildResult,
@@ -161,18 +170,6 @@ def _run_with_log_context[T](operation_id: int, func: Callable[..., T], args: tu
         raise translated from exc
     finally:
         nanopynix_util.set_logger_request_id(previous)
-
-
-class InprocSessionClosedError(RuntimeError):
-    """Raised when an in-process session resource is used after close."""
-
-
-class InprocValueReleasedError(RuntimeError):
-    """Raised when an in-process value is used after its explicit release."""
-
-
-class InprocLockedFlakeReleasedError(RuntimeError):
-    """Raised when an in-process locked flake is used after release."""
 
 
 class Session:
@@ -351,7 +348,7 @@ class Session:
 
     def _check_open(self) -> None:
         if not self._opened:
-            raise InprocSessionClosedError("inproc Session is not open — use async with")
+            raise SessionClosedError("inproc Session is not open — use async with")
 
     async def run[T](self, func: Callable[..., T], *args: object) -> T:
         """Run one Store-only Nix operation on this session's Store pool."""
@@ -502,12 +499,12 @@ class Store:
 
     def _require_raw(self) -> nanopynix_store.Store:
         if self._core is None:
-            raise InprocSessionClosedError("Store is not open — use async with")
+            raise StoreClosedError("Store is not open — use async with")
         return self._core.require_raw()
 
     def _require_core(self) -> CoreStore:
         if self._core is None:
-            raise InprocSessionClosedError("Store is not open — use async with")
+            raise StoreClosedError("Store is not open — use async with")
         return self._core
 
     async def uri(self, *, with_params: bool = False) -> str:
@@ -953,12 +950,12 @@ class EvalSession:
 
     def _require_raw(self) -> nanopynix_expr.EvalState:
         if not self._active or self._core is None:
-            raise InprocSessionClosedError("EvalSession is not open — use async with")
+            raise EvalSessionClosedError("EvalSession is not open — use async with")
         return self._core.require_raw()
 
     def _require_core(self) -> CoreEvalState:
         if not self._active or self._core is None:
-            raise InprocSessionClosedError("EvalSession is not open — use async with")
+            raise EvalSessionClosedError("EvalSession is not open — use async with")
         return self._core
 
     async def get_verbosity(self) -> LogLevel:
@@ -1188,7 +1185,7 @@ class LockedFlake:
     def _local_for(self) -> CoreLockedFlake:
         self._eval_session._require_core()  # type: ignore[reportPrivateUsage] -- parent owns local evaluator lifetime  # noqa: SLF001
         if self._core is None:
-            raise InprocLockedFlakeReleasedError("LockedFlake has been released")
+            raise LockedFlakeReleasedError("LockedFlake has been released")
         return self._core
 
     async def eval(self) -> Value:
@@ -1275,7 +1272,7 @@ class Value:
         """Reject use of a released value, without requiring it to be resolved."""
         self._eval_session._require_core()  # type: ignore[reportPrivateUsage] -- liveness check before pointer use  # noqa: SLF001
         if self._released:
-            raise InprocValueReleasedError("Value has been released")
+            raise ValueReleasedError("Value has been released")
 
     async def _resolve(self) -> CoreValue:
         """Perform the deferred selection, if any, and return the rooted value.
@@ -1297,7 +1294,7 @@ class Value:
             self._pending = None
         local = self._core
         if local is None:
-            raise InprocValueReleasedError("Value has been released")
+            raise ValueReleasedError("Value has been released")
         return local
 
     async def _resolve_for(self, eval_session: EvalSession) -> CoreValue:
@@ -1569,9 +1566,6 @@ def _list_values(local: Any) -> list[Any]:
 __all__ = [
     "BuildMode",
     "EvalSession",
-    "InprocLockedFlakeReleasedError",
-    "InprocSessionClosedError",
-    "InprocValueReleasedError",
     "LockedFlake",
     "RawEvalState",
     "RawGCAction",

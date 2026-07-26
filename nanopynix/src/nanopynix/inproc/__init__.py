@@ -7,15 +7,6 @@ from nanopynix.inproc._impl import (
     EvalSession as EvalSession,
 )
 from nanopynix.inproc._impl import (
-    InprocLockedFlakeReleasedError as InprocLockedFlakeReleasedError,
-)
-from nanopynix.inproc._impl import (
-    InprocSessionClosedError as InprocSessionClosedError,
-)
-from nanopynix.inproc._impl import (
-    InprocValueReleasedError as InprocValueReleasedError,
-)
-from nanopynix.inproc._impl import (
     LockedFlake as LockedFlake,
 )
 from nanopynix.inproc._impl import (

@@ -43,6 +43,7 @@ from nanopynix_proto.nix.store import (
 from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
+from nanopynix.exceptions import StoreClosedError
 from nanopynix.models import BuildResult, Derivation, GcResult, MissingInfo, StorePath
 from nanopynix.rpc.client._pool import WorkerDiedError
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
@@ -124,7 +125,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
 
     def _check_active(self) -> None:
         if not self._active:
-            raise RuntimeError("StoreHandle is closed — use 'async with session.store() as store:'")
+            raise StoreClosedError("StoreHandle is closed — use 'async with session.store() as store:'")
 
     @property
     def store_handle(self) -> int:

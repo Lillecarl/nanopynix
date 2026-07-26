@@ -27,6 +27,7 @@ from nanopynix_proto.nix.worker import (
 
 from nanopynix._core._nix_executor import NixThreadExecutor
 from nanopynix._wire import HandleKind
+from nanopynix.exceptions import LockedFlakeReleasedError
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
 from nanopynix.rpc.client._session import EvalSession, ValueReleasedError
 from nanopynix.rpc.client.store import StoreHandle
@@ -349,7 +350,9 @@ async def test_locked_flake_explicit_release_removes_exact_worker_handle(
         assert l3_inproc.state.handles.iter_kind(HandleKind.LOCKED_FLAKE) == []
         assert {item[0] for item in l3_inproc.state.handles.iter_kind(HandleKind.VALUE)} == {output_handle}
         assert await outputs.attr("val").as_int() == 1
-        with pytest.raises(ValueReleasedError, match="LockedFlakeHandle"):
+        # A locked flake is not a Nix value, so it gets its own class rather
+        # than borrowing the value one -- see LockedFlakeReleasedError.
+        with pytest.raises(LockedFlakeReleasedError, match="LockedFlakeHandle"):
             await locked.eval()
 
 

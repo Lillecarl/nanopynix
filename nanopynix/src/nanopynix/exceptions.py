@@ -350,23 +350,64 @@ class NoSubstitutersError(BuildError):
     """No substituter could supply the path and it could not be built."""
 
 
-class EvalProxyError(RuntimeError):
-    """Base for master-side eval proxy misuse errors."""
+class ObjectMisuseError(RuntimeError):
+    """Base for misusing a nanopynix object, as opposed to an error Nix raised.
+
+    Named for the object rather than for a transport: this was
+    ``EvalProxyError``, "master-side eval proxy misuse", which described only
+    rpc and only the evaluator. The same misuses exist on inproc, where there
+    is no proxy and no master, and on stores, which are not evaluator objects
+    at all. Every situation below is one a caller reached without Nix being
+    consulted, so :class:`NixError` is not the right family for any of them.
+    """
 
 
-class EvalSessionClosedError(EvalProxyError):
-    """A proxy or eval session was used after its owning session closed."""
+class ObjectLifetimeError(ObjectMisuseError):
+    """A nanopynix object was used after it was closed or released.
+
+    The one ``except`` clause for "the thing I am holding is gone", whichever
+    kind of thing it is and whichever engine produced it. Its subclasses split
+    by *what* died, not by transport: both engines raise the same class for
+    the same situation.
+
+    Worth a base of its own rather than leaving callers to catch
+    :class:`ObjectMisuseError`, which also covers a value of the wrong Nix
+    type -- a live object answering a question it cannot answer, which is not
+    the same problem and rarely wants the same handling.
+    """
 
 
-class ValueReleasedError(EvalProxyError):
-    """A proxy wrapper was used after its remote value handle was released."""
+class SessionClosedError(ObjectLifetimeError):
+    """A session was used after it closed, or before it was opened."""
 
 
-class UnresolvedValueError(EvalProxyError):
-    """A lazy child proxy was inspected before it had a remote handle."""
+class StoreClosedError(ObjectLifetimeError):
+    """A store was used after it closed, or before it was opened."""
 
 
-class WrongNixTypeError(EvalProxyError, TypeError):
+class EvalSessionClosedError(ObjectLifetimeError):
+    """An evaluator, or a value belonging to one, was used after it closed."""
+
+
+class ValueReleasedError(ObjectLifetimeError):
+    """A value was used after its explicit release."""
+
+
+class LockedFlakeReleasedError(ObjectLifetimeError):
+    """A locked flake was used after its explicit release.
+
+    Distinct from :class:`ValueReleasedError`, which rpc used to raise here: a
+    locked flake is not a Nix value, and a caller releasing values in a loop
+    should not have that ``except`` silently swallow a flake handle it never
+    meant to touch. inproc drew the distinction first.
+    """
+
+
+class UnresolvedValueError(ObjectMisuseError):
+    """A lazy child value was inspected before it had a handle."""
+
+
+class WrongNixTypeError(ObjectMisuseError, TypeError):
     """A Nix value had a different type than the operation requires."""
 
     def __init__(self, *, expected: NixType | str, actual: NixType | str) -> None:
@@ -375,8 +416,8 @@ class WrongNixTypeError(EvalProxyError, TypeError):
         super().__init__(f"Nix value is {self.actual}, expected {self.expected}")
 
 
-class ForeignValueError(EvalProxyError, ValueError):
-    """A value proxy from another eval session was used where a local value is required."""
+class ForeignValueError(ObjectMisuseError, ValueError):
+    """A value from another eval session was used where a local value is required."""
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -635,13 +676,13 @@ __all__ = [
     "DependencyFailedError",
     "EvalError",
     "EvalHashMismatchError",
-    "EvalProxyError",
     "EvalSessionClosedError",
     "ForeignValueError",
     "HashMismatchError",
     "InfiniteRecursionError",
     "InputRejectedError",
     "InvalidPathError",
+    "LockedFlakeReleasedError",
     "LogLimitExceededError",
     "MiscBuildError",
     "MissingArgumentError",
@@ -651,10 +692,14 @@ __all__ = [
     "NixTypeError",
     "NoSubstitutersError",
     "NotDeterministicError",
+    "ObjectLifetimeError",
+    "ObjectMisuseError",
     "OutputRejectedError",
     "ParseError",
     "PermanentBuildError",
     "RestrictedPathError",
+    "SessionClosedError",
+    "StoreClosedError",
     "StoreError",
     "ThrownError",
     "TransientBuildError",

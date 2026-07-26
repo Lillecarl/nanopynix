@@ -141,6 +141,28 @@ async def _apply_as_string(value: Any, function: str) -> str:
     return await (await value.apply(function)).as_string()
 
 
+async def _select_after_release(value: Any) -> Any:
+    """Select off a value that has been released.
+
+    A *lifetime* failure rather than a Nix one -- Nix is never consulted, so
+    it belongs to ``ObjectLifetimeError`` and not ``NixError``. inproc used to
+    raise its own ``InprocValueReleasedError``, which no ``except`` written
+    against rpc could catch; both raise ``ValueReleasedError`` now.
+
+    Selection specifically, because it is the operation that got lazy: the
+    check has to fire here rather than at whatever eventually forces the
+    chain.
+    """
+    await value.release()
+    return value.attr("a")
+
+
+async def _force_after_release(value: Any) -> Any:
+    """The forced half of :func:`_select_after_release`, on the value itself."""
+    await value.release()
+    return await value.get_type()
+
+
 # ── The cases ────────────────────────────────────────────────────────
 
 
@@ -243,6 +265,10 @@ FAILURE_CASES: list[Case] = [
     Case("call_with_no_arguments", "x: x", _nullary_call),
     Case("call_a_non_function", "42", lambda v: _curried_call(v, 1)),
     Case("call_too_many_arguments", "x: x", lambda v: _curried_call(v, 1, 2)),
+    # Lifetime, not Nix: the object is gone, so the failure is nanopynix's own
+    # and must still arrive as one class on both engines.
+    Case("select_after_release", "{ a = 1; }", _select_after_release),
+    Case("force_after_release", "{ a = 1; }", _force_after_release),
     # Navigation accessors must refuse the wrong type rather than answering.
     Case("attr_names_on_an_int", "1", _sorted_attr_names),
     Case("list_length_on_an_attrset", "{}", lambda v: v.list_length()),
@@ -465,3 +491,93 @@ def test_every_failure_case_is_asserted_to_actually_fail() -> None:
     go on passing while measuring nothing.
     """
     assert FAILURE_CASES, "the failure half of the matrix must not be empty"
+
+
+# ── Object lifetime parity ───────────────────────────────────────────
+#
+# Not expressible as a Case: a Case is handed a value, and three of the four
+# things with a lifetime are not values. These are failures nanopynix raises
+# on its own, without consulting Nix, so they are ObjectLifetimeError rather
+# than NixError -- and until this, inproc raised its own InprocSessionClosedError
+# /InprocValueReleasedError/InprocLockedFlakeReleasedError, none of which an
+# `except` written against the rpc engine could catch. Neither ledger could
+# see it: the classes have different *names*, so a name-based comparison never
+# put them side by side.
+#
+# Four things have a lifetime; three are covered below. The fourth, a closed
+# `Session`, is not, because rpc does not guard it at all -- inproc's
+# `Session.run` raises `SessionClosedError`, while rpc's `Session` tracks no
+# open/closed state, so `session.store()` after `close()` hands back a Store
+# that fails later and differently. That is a missing *guard*, not a
+# mismatched exception class, so unifying the classes did not fix it and no
+# test here pretends otherwise. Recorded in TODO.md rather than left silent.
+
+
+async def _use_a_closed_store(factory: Any) -> str:
+    async with factory() as session:
+        store = session.store()
+        await store.open()
+        await store.close()
+        try:
+            await store.uri()
+        except Exception as exc:
+            return type(exc).__name__
+        return "no exception"
+
+
+async def _use_a_closed_evaluator(factory: Any) -> str:
+    async with factory() as session, session.store() as store:
+        evaluator = session.eval(store)
+        await evaluator.open()
+        await evaluator.close()
+        try:
+            await evaluator.string("1")
+        except Exception as exc:
+            return type(exc).__name__
+        return "no exception"
+
+
+async def _use_a_released_locked_flake(factory: Any, ref: str) -> str:
+    async with factory() as session, session.store() as store, session.eval(store) as evaluator:
+        locked = await evaluator.lock_flake(ref, write_lock_file=False)
+        await locked.release()
+        try:
+            await locked.eval()
+        except Exception as exc:
+            return type(exc).__name__
+        return "no exception"
+
+
+async def test_both_engines_name_a_closed_store_the_same_way(
+    inproc_session: InprocSessionFactory,
+    rpc_session: RpcSessionFactory,
+) -> None:
+    """rpc raised a bare ``RuntimeError`` here, which nothing could catch precisely."""
+    assert await _use_a_closed_store(inproc_session) == "StoreClosedError"
+    assert await _use_a_closed_store(rpc_session) == "StoreClosedError"
+
+
+async def test_both_engines_name_a_closed_evaluator_the_same_way(
+    inproc_session: InprocSessionFactory,
+    rpc_session: RpcSessionFactory,
+) -> None:
+    assert await _use_a_closed_evaluator(inproc_session) == "EvalSessionClosedError"
+    assert await _use_a_closed_evaluator(rpc_session) == "EvalSessionClosedError"
+
+
+async def test_both_engines_name_a_released_locked_flake_the_same_way(
+    inproc_session: InprocSessionFactory,
+    rpc_session: RpcSessionFactory,
+    tmp_path: Path,
+) -> None:
+    """A locked flake is not a value, so it does not raise ``ValueReleasedError``.
+
+    rpc did, reusing the value class for a flake handle; a caller releasing
+    values in a loop would have had that ``except`` swallow a flake handle it
+    never meant to touch. inproc drew the distinction first and it is the one
+    kept.
+    """
+    (tmp_path / "flake.nix").write_text("{ outputs = _: { probe = 1; }; }\n")
+    ref = f"path:{tmp_path}"
+    assert await _use_a_released_locked_flake(inproc_session, ref) == "LockedFlakeReleasedError"
+    assert await _use_a_released_locked_flake(rpc_session, ref) == "LockedFlakeReleasedError"

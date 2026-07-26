@@ -61,6 +61,7 @@ from nanopynix._wire import HandleKind
 from nanopynix.exceptions import (
     EvalSessionClosedError,
     ForeignValueError,
+    LockedFlakeReleasedError,
     StoreError,
     UnresolvedValueError,
     ValueReleasedError,
@@ -726,7 +727,7 @@ class ValueProxy:
             NixTypeError: This value is not a function. Nix decides that in
                 the worker rather than the proxy pre-checking it here, which
                 is what makes the two engines agree: the pre-check raised
-                ``WrongNixTypeError``, an ``EvalProxyError`` unrelated to
+                ``WrongNixTypeError``, an ``ObjectMisuseError`` unrelated to
                 ``NixTypeError``, so no single ``except`` covered both engines
                 for the same mistake.
             ForeignValueError: An argument ``ValueProxy`` belongs to a
@@ -831,7 +832,7 @@ class LockedFlakeHandle:
 
     def _check_active(self) -> None:
         if self._released:
-            raise ValueReleasedError("LockedFlakeHandle has been released")
+            raise LockedFlakeReleasedError("LockedFlakeHandle has been released")
 
     async def eval(self, *, timeout: float | None = None) -> ValueProxy:
         """Evaluate this locked flake's outputs, calling its ``outputs`` function.
