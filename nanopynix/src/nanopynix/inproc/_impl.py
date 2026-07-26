@@ -54,6 +54,7 @@ from nanopynix.models import (
 )
 from nanopynix.models import StorePath as PublicStorePath
 from nanopynix.settings import (
+    DEFAULT_LINE_EDITORS,
     NIX_PATH_SETTING_KEY,
     NixEvalSettings,
     NixFetchSettings,
@@ -416,11 +417,41 @@ class Session:
         each :class:`EvalSession` owns an independent Nix evaluator, so
         concurrently open sessions may use different settings.
         """
+        self._require_own_stores(store, build_store)
+        return EvalSession(self, store, build_store, eval_settings=eval_settings, fetch_settings=fetch_settings)
+
+    def repl(
+        self,
+        store: Store,
+        *,
+        build_store: Store | None = None,
+        eval_settings: NixEvalSettings | None = None,
+        fetch_settings: NixFetchSettings | None = None,
+        line_editors: Sequence[str] = DEFAULT_LINE_EDITORS,
+    ) -> ReplSession:
+        """Return an evaluator that keeps a persistent Nix REPL scope.
+
+        A :class:`ReplSession` is an :class:`EvalSession`, so it accepts the
+        same settings and owns its own dedicated Nix thread. ``line_editors``
+        is per-session rather than per-:class:`Session` because it describes
+        one interactive front-end, and nothing else in this class consumes it.
+        """
+        self._require_own_stores(store, build_store)
+        return ReplSession(
+            self,
+            store,
+            build_store,
+            eval_settings=eval_settings,
+            fetch_settings=fetch_settings,
+            line_editors=line_editors,
+        )
+
+    def _require_own_stores(self, store: Store, build_store: Store | None) -> None:
+        """Reject stores opened by a different Session before an evaluator binds them."""
         if store._session is not self:  # type: ignore[reportPrivateUsage] -- identity ownership boundary  # noqa: SLF001
             raise ValueError("Store belongs to a different inproc Session")
         if build_store is not None and build_store._session is not self:  # type: ignore[reportPrivateUsage] -- identity ownership boundary  # noqa: SLF001
             raise ValueError("build_store belongs to a different inproc Session")
-        return EvalSession(self, store, build_store, eval_settings=eval_settings, fetch_settings=fetch_settings)
 
     async def get_verbosity(self) -> int:
         """Return the current Nix log verbosity."""
@@ -997,12 +1028,6 @@ class EvalSession:
     def _track_value(self, local: LocalValue) -> Value:
         return Value(self, local)
 
-    async def repl(self) -> ReplSession:
-        """Begin a persistent Nix REPL scope over this evaluator."""
-        raw = self._require_raw()
-        await self.run(raw.begin_repl)
-        return ReplSession(self)
-
     async def lock_flake(
         self,
         ref: str,
@@ -1049,11 +1074,76 @@ class EvalSession:
         await self.run(self._require_raw().reset_file_cache)
 
 
-class ReplSession:
-    """Persistent REPL scope backed by its parent direct ``EvalState``."""
+class ReplSession(EvalSession):
+    """An :class:`EvalSession` with a persistent Nix lexical scope.
 
-    def __init__(self, eval_session: EvalSession) -> None:
-        self._eval_session = eval_session
+    Bindings submitted with :meth:`line` are available to later calls to
+    :meth:`string` and :meth:`file` until this session closes.
+
+    Subclassing is what makes that sentence true. A REPL is an interactive
+    evaluator, so entering ``x = 1`` is only useful if the same object can
+    then evaluate ``x + 1``; a REPL that can accept bindings but not evaluate
+    against them is not a REPL. This mirrors rpc's ``ReplSession``, which has
+    always been shaped this way -- the two engines previously disagreed about
+    what a repl session *is*, and this is the side that matches the CLI it
+    exists to serve.
+    """
+
+    def __init__(  # noqa: PLR0913 -- EvalSession's five parameters plus line_editors; narrowing either would drop a capability
+        self,
+        session: Session,
+        store: Store,
+        build_store: Store | None = None,
+        *,
+        eval_settings: NixEvalSettings | None = None,
+        fetch_settings: NixFetchSettings | None = None,
+        line_editors: Sequence[str] = DEFAULT_LINE_EDITORS,
+    ) -> None:
+        super().__init__(
+            session,
+            store,
+            build_store,
+            eval_settings=eval_settings,
+            fetch_settings=fetch_settings,
+        )
+        self._line_editors = tuple(line_editors)
+        self._repl_begun = False
+
+    @property
+    def line_editors(self) -> tuple[str, ...]:
+        """Editor-name substrings that support Nix's ``+LINE`` argument."""
+        return self._line_editors
+
+    async def __aenter__(self) -> ReplSession:
+        await self.open()
+        return self
+
+    async def open(self) -> None:
+        """Open the evaluator, then begin its persistent REPL scope.
+
+        Idempotent, because :meth:`EvalSession.open` is. C++'s ``begin_repl``
+        raises on a second call rather than no-opping, so without the flag a
+        harmless double ``open()`` would surface an opaque "REPL scope is
+        already active" RuntimeError from the bindings.
+        """
+        await super().open()
+        if self._repl_begun:
+            return
+        try:
+            await self.run(self._require_raw().begin_repl)
+        except BaseException:
+            await self.close()
+            raise
+        self._repl_begun = True
+
+    async def close(self) -> None:
+        """Close the evaluator; a later :meth:`open` begins a fresh REPL scope.
+
+        The REPL env belongs to the ``EvalState``, so closing discards it and
+        reopening must call ``begin_repl`` again.
+        """
+        self._repl_begun = False
+        await super().close()
 
     async def line(self, text: str, path: str = "<string>") -> Value | None:
         """Process one Nix REPL line.
@@ -1061,26 +1151,43 @@ class ReplSession:
         A binding such as ``x = 1`` returns ``None``. An expression returns a
         session-bound :class:`Value`.
         """
-        local = await self._eval_session.run(self._eval_session._require_local().repl_process_line, text, path)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling  # noqa: SLF001
-        return None if local is None else self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
+        local = await self.run(self._require_local().repl_process_line, text, path)
+        return None if local is None else self._track_value(local)
 
     async def load_file(self, path: str) -> Value:
         """Load a Nix expression file as ``nix repl :load`` does."""
-        local = await self._eval_session.run(self._eval_session._require_local().repl_load_file, path)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling  # noqa: SLF001
-        return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
+        local = await self.run(self._require_local().repl_load_file, path)
+        return self._track_value(local)
 
     async def add_attrs(self, value: Value) -> list[str]:
         """Add all attributes from ``value`` to this REPL's lexical scope."""
-        local_value = value._local_for(self._eval_session)  # type: ignore[reportPrivateUsage] -- same-evaluator guard  # noqa: SLF001
-        return await self._eval_session.run(self._eval_session._require_local().repl_add_attrs, local_value)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling  # noqa: SLF001
+        local_value = value._local_for(self)  # type: ignore[reportPrivateUsage] -- same-evaluator guard  # noqa: SLF001
+        return await self.run(self._require_local().repl_add_attrs, local_value)
 
     async def scope_names(self) -> list[str]:
         """Return the identifiers visible in this REPL's lexical scope."""
-        return await self._eval_session.run(self._eval_session._require_raw().repl_scope_names)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling  # noqa: SLF001
+        return await self.run(self._require_raw().repl_scope_names)
 
-    async def reset_file_cache(self) -> None:
-        """Discard parsed file cache entries before reloading REPL sources."""
-        await self._eval_session.run(self._eval_session._require_raw().reset_file_cache)  # type: ignore[reportPrivateUsage] -- cross-class EvalSession→ReplSession coupling  # noqa: SLF001
+    async def string(self, expr: str, path: str = "<string>") -> Value:
+        """Evaluate ``expr`` in this REPL's scope rather than the base scope.
+
+        Nix keeps the REPL's bindings in a separate env whose parent is
+        ``baseEnv``, and C++ exposes one entrypoint per env -- ``eval_string``
+        sees only the base scope, ``repl_eval_string`` sees the REPL's. Without
+        this override, ``line("x = 1")`` followed by ``string("x")`` raises
+        UndefinedVarError, which is the opposite of what a REPL is for. The
+        worker has always dispatched this way (on ``repl_active()``); inproc
+        never did, so this was a silent semantic divergence that the parity
+        detector cannot see -- both engines have ``string`` with an identical
+        signature.
+        """
+        local = await self.run(self._require_local().repl_eval_string, expr, path)
+        return self._track_value(local)
+
+    async def file(self, path: str) -> Value:
+        """Evaluate the file at ``path`` in this REPL's scope; see :meth:`string`."""
+        local = await self.run(self._require_local().repl_eval_file, path)
+        return self._track_value(local)
 
 
 class LockedFlake:

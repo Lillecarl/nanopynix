@@ -79,9 +79,13 @@ async def test_inproc_value_autocall_and_realise_argv(inproc_session: InprocSess
 
 
 @pytest.mark.anyio
-async def test_inproc_repl_supports_shared_protocol_operations(inproc_session: InprocSessionFactory) -> None:
-    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
-        repl = await eval.repl()
+async def test_inproc_repl_supports_shared_protocol_operations(
+    tmp_path: Path, inproc_session: InprocSessionFactory
+) -> None:
+    nix_file = tmp_path / "uses-binding.nix"
+    nix_file.write_text("answer + 1")
+
+    async with inproc_session() as nix, nix.store() as store, nix.repl(store) as repl:
         assert await repl.line("answer = 42") is None
         value = await repl.line("answer")
         if value is None:
@@ -89,6 +93,14 @@ async def test_inproc_repl_supports_shared_protocol_operations(inproc_session: I
         assert await value.as_int() == 42
         assert "answer" in await repl.scope_names()
         await repl.reset_file_cache()
+        # A ReplSession is an EvalSession, and the binding entered above is in
+        # scope for the evaluator methods -- the whole point of the subclassing
+        # and the one thing a delegating wrapper could not express. rpc has
+        # asserted this since it was written (test_repl_session_persists_bindings
+        # in tests/nanopynix/rpc/client/test_eval_rpc.py); inproc evaluated in
+        # the base scope instead and raised UndefinedVarError.
+        assert await (await repl.string("answer + 1")).as_int() == 43
+        assert await (await repl.file(str(nix_file))).as_int() == 43
 
 
 @pytest.mark.anyio
@@ -690,8 +702,7 @@ async def test_inproc_repl_load_file_and_add_attrs(tmp_path: Path, inproc_sessio
     nix_file = tmp_path / "scope.nix"
     nix_file.write_text("{ answer = 42; }")
 
-    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
-        repl = await eval.repl()
+    async with inproc_session() as nix, nix.store() as store, nix.repl(store) as repl:
         loaded = await repl.load_file(str(nix_file))
         assert await repl.add_attrs(loaded) == ["answer"]
         value = await repl.line("answer")
@@ -996,11 +1007,36 @@ async def test_inproc_eval_open_requires_open_store(inproc_session: InprocSessio
 
 
 @pytest.mark.anyio
-async def test_inproc_eval_repl_requires_open_eval(inproc_session: InprocSessionFactory) -> None:
+async def test_inproc_repl_open_is_idempotent(inproc_session: InprocSessionFactory) -> None:
+    """A second open() must no-op, as it does on the EvalSession it inherits from.
+
+    C++'s ``begin_repl`` raises rather than no-opping, so a ReplSession that
+    forwards to it unconditionally turns a harmless double-open into an opaque
+    "REPL scope is already active" RuntimeError from the bindings.
+    """
     async with inproc_session() as nix, nix.store() as store:
-        eval = nix.eval(store)
+        async with nix.repl(store) as repl:
+            await repl.open()
+            assert await (await repl.string("1 + 1")).as_int() == 2
+        # Reopening after close must begin a fresh scope rather than trip the
+        # already-active guard: the REPL env died with the EvalState.
+        async with nix.repl(store) as repl:
+            assert await repl.line("reopened = 1") is None
+
+
+@pytest.mark.anyio
+async def test_inproc_repl_requires_open_repl(inproc_session: InprocSessionFactory) -> None:
+    """Using a ReplSession before it is opened raises rather than silently working.
+
+    ``nix.repl(store)`` is a plain constructor like ``nix.eval(store)``, so
+    the evaluator does not exist until ``open()``. Previously this was checked
+    against ``eval.repl()``, which no longer exists -- repl is now a session
+    kind rather than a mode you switch an existing evaluator into.
+    """
+    async with inproc_session() as nix, nix.store() as store:
+        repl = nix.repl(store)
         with pytest.raises(inproc.InprocSessionClosedError):
-            await eval.repl()
+            await repl.line("answer = 42")
 
 
 @pytest.mark.anyio
