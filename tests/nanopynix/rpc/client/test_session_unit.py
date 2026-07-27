@@ -18,8 +18,7 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nanopynix_proto.nix.common import LogEvent as LogEventProto
-from nanopynix_proto.nix.common import NixLogEvent, ResultType
+from nanopynix_proto.nix.common import LogEvent as LogEventProto, NixLogEvent, ResultType
 from nanopynix_proto.nix.eval import ForceJsonResponse
 
 import nanopynix.rpc.client._pool as pool_module
@@ -38,17 +37,9 @@ from nanopynix.rpc.client._session import (
     EvalSession,
     ReplSession,
     ValueProxy,
-)
-from nanopynix.rpc.client._session import (
     _EvalOwner as _EvalOwner,
-)
-from nanopynix.rpc.client._session import (
     _EvalOwnerToken as _EvalOwnerToken,
-)
-from nanopynix.rpc.client._session import (
     _EvalProxyContext as _EvalProxyContext,
-)
-from nanopynix.rpc.client._session import (
     _ResolvedValue as _ResolvedValue,
 )
 from nanopynix.rpc.client.session import Session

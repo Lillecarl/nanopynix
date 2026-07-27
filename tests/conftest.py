@@ -13,8 +13,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import anyio
 import pytest
-from nanopynix_bindings import expr as nanopynix_expr
-from nanopynix_bindings import util as nanopynix_util
+from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
 
 import nanopynix
 

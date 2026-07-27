@@ -9,8 +9,7 @@ import pytest
 
 from pytest_agent._entry_points import PLUGIN_MODULE, plugin_registered_via_entry_points
 from pytest_agent._paths import display_path
-from pytest_agent._query import SUBCOMMANDS, QueryError, failing_nodeids
-from pytest_agent._query import run as run_query
+from pytest_agent._query import SUBCOMMANDS, QueryError, failing_nodeids, run as run_query
 
 # Not in SUBCOMMANDS: those are the read-only queries, and this one is the
 # opposite -- it reads the archive only to decide what pytest should run next.

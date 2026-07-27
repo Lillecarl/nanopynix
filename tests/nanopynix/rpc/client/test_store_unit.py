@@ -49,8 +49,7 @@ from nanopynix_proto.nix.store import (
 )
 
 import nanopynix
-from nanopynix.rpc.client.store import Store as PublicStore
-from nanopynix.rpc.client.store import StoreHandle as Store
+from nanopynix.rpc.client.store import Store as PublicStore, StoreHandle as Store
 
 
 def _make_stub_mock() -> MagicMock:

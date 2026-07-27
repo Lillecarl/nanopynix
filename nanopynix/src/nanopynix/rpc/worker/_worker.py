@@ -36,8 +36,7 @@ import anyio.to_thread
 from grpclib_transports.multiprocessing import serve_multiprocessing_endpoint
 from grpclib_transports.protocol import DEFAULT_TUNING
 from grpclib_transports.stdio import serve_stdio
-from nanopynix_bindings import expr as nanopynix_expr
-from nanopynix_bindings import util as nanopynix_util
+from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
 from nanopynix_proto.nix.common import LogEvent, LogLevel, NixLogEvent, RequestFinalized
 from nanopynix_proto.nix.worker import (
     CloseStoreRequest,
@@ -72,8 +71,8 @@ from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
 from nanopynix.rpc.worker._handle_registry import HandleRegistry
 from nanopynix.rpc.worker._worker_eval import EvalServiceHandler, close_eval_state, find_evals_by_store
 from nanopynix.rpc.worker._worker_nix import NixThreadExecutor
-from nanopynix.rpc.worker._worker_primop import ThreadedRpcPrimopBridge
 from nanopynix.rpc.worker._worker_primop import (
+    ThreadedRpcPrimopBridge,
     rpc_primop_callback_factory as rpc_primop_callback_factory,  # type: ignore[reportPrivateUsage] -- internal module, required for primop callback factory
 )
 from nanopynix.rpc.worker._worker_store import StoreServiceHandler

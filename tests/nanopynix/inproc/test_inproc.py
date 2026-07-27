@@ -12,8 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from anyio import Path as AnyioPath
-from nanopynix_bindings import expr as nanopynix_expr
-from nanopynix_bindings import util as nanopynix_util
+from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
 from nanopynix_proto.nix.store import GcAction
 
 import nanopynix

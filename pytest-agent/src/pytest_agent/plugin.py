@@ -12,8 +12,7 @@ from _pytest.config import (
 
 from pytest_agent._harness_detect import detect_agent_harness
 from pytest_agent._history import next_run_dir, validate_run_label
-from pytest_agent._notes import agent_notes as agent_notes
-from pytest_agent._notes import pop_runtime, push_runtime
+from pytest_agent._notes import agent_notes as agent_notes, pop_runtime, push_runtime
 from pytest_agent._pipe_guard import find_banned_pipe_reader, zero_detail_mode
 from pytest_agent._profile import profile as profile
 from pytest_agent._runtime import RUNTIME_PLUGIN_NAME, TERMINAL_LOG_NAME, AgentRuntime

@@ -32,14 +32,20 @@ from nanopynix.rpc.client import _session as rpc_private
 from nanopynix.rpc.client.store import Store as RpcStoreImpl
 
 if TYPE_CHECKING:
-    from nanopynix.inproc import EvalSession as InprocEvalSession
-    from nanopynix.inproc import LockedFlake, Value
-    from nanopynix.inproc import ReplSession as InprocReplSession
-    from nanopynix.inproc import Session as InprocSession
-    from nanopynix.inproc import Store as InprocStore
-    from nanopynix.rpc.client._session import EvalSession as RpcEvalSession
-    from nanopynix.rpc.client._session import LockedFlakeHandle, ValueProxy
-    from nanopynix.rpc.client._session import ReplSession as RpcReplSession
+    from nanopynix.inproc import (
+        EvalSession as InprocEvalSession,
+        LockedFlake,
+        ReplSession as InprocReplSession,
+        Session as InprocSession,
+        Store as InprocStore,
+        Value,
+    )
+    from nanopynix.rpc.client._session import (
+        EvalSession as RpcEvalSession,
+        LockedFlakeHandle,
+        ReplSession as RpcReplSession,
+        ValueProxy,
+    )
     from nanopynix.rpc.client.session import Session as RpcSession
     from nanopynix.rpc.client.store import Store as RpcStore
 

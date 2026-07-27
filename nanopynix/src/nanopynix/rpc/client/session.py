@@ -22,8 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import anyio
-from nanopynix_proto.nix.common import LogEvent as LogEventProto
-from nanopynix_proto.nix.common import LogLevel
+from nanopynix_proto.nix.common import LogEvent as LogEventProto, LogLevel
 
 from nanopynix._core._primops import to_primop_specs
 from nanopynix._process_title import set_manager_title

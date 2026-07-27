@@ -5,6 +5,7 @@ Note: plain `pytest` invocations default to `--nix-test-backends local` only (in
 - direnv exec . pyright
 - direnv exec . ruff check --fix
 - direnv exec . ruff check --config ruff-strict.toml --fix
+- nix build --file . pkgs.nixVersions.nix_2_34.src --no-link --print-out-paths # download the sourcecode of a Nix package and print it's location.
 
 # Version control
 

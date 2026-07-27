@@ -252,6 +252,7 @@ ignorelist = ["eval"]
 "pytest-agent/**" = ["S101", "S108", "S603", "S607", "PLR2004", "T20"]
 
 [lint.isort]
+combine-as-imports = true
 known-first-party = [
   "nanopynix",
   "nanopynix_expr",

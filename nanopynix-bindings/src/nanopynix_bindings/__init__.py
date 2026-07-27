@@ -7,10 +7,12 @@ from __future__ import annotations
 # should be importable before it. The translator owns the whole nix::Error
 # hierarchy on its own, so unlike the per-type translators it replaced, this
 # ordering is belt-and-braces rather than load-bearing correctness.
-from . import errors as errors
-from . import expr as expr
-from . import fetchers as fetchers
-from . import flake as flake
-from . import main as main
-from . import store as store
-from . import util as util
+from . import (
+    errors as errors,
+    expr as expr,
+    fetchers as fetchers,
+    flake as flake,
+    main as main,
+    store as store,
+    util as util,
+)
