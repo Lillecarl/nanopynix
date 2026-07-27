@@ -2,6 +2,14 @@
 Note: plain `pytest` invocations default to `--nix-test-backends local` only (in-process, single-store) -- the daemon backend is exercised separately by CI's `test-daemon-*` matrix jobs and by the TSan workflows (which explicitly pass `--nix-test-backends local,daemon`). Pass `--nix-test-backends local,daemon` yourself if you need to reproduce a daemon-specific failure locally.
 - direnv exec . timeout 500 pytest tests
 - direnv exec . timeout 500 pytest tests --cov --cov-report=term-missing --cov-report= # coverage report, including the multiprocessing-forkserver Nix worker subprocess (see tests/_subprocess_startup/sitecustomize.py, put on PYTHONPATH by tests/support/beartype_hook.py)
+
+The table this prints is ~88 lines, so agent mode does not put it on the
+terminal: you get `[pytest-agent] coverage: NN%` for the headline number, and
+the table itself in `.pytest-agent/runs-NNNN/reports.txt` (the path is in the
+line above it). Read that file for the per-file rows and `Missing` columns --
+do not conclude anything about coverage from the terminal alone, and do not
+re-run with a different reporter to get around it. `--agent-max-summary-lines=0`
+prints it inline if you genuinely want it there.
 - direnv exec . pyright
 - direnv exec . ruff check --fix
 - direnv exec . ruff check --config ruff-strict.toml --fix # currently reports zero; it is a gate, not a backlog, so any finding is yours

@@ -5,6 +5,7 @@ import faulthandler
 import json
 import os
 import platform
+import re
 import signal
 import threading
 import time
@@ -57,17 +58,55 @@ MAX_CAPTURE_ERRORS_SHOWN = 10
 # Where the builtin terminal reporter's output goes in agent mode.
 TERMINAL_LOG_NAME = "terminal.txt"
 
-# Terminal lines an end-of-run report from another plugin may take before it
-# is elided. Head and tail are both kept: a coverage table's TOTAL is on the
-# last line and its header on the first, and cutting either end loses the
-# half somebody was reading for.
-_SUMMARY_HEAD_LINES = 20
-_SUMMARY_TAIL_LINES = 15
-# Derived, not chosen: eliding replaces the dropped lines with one "... N lines
-# elided ..." line, so below head + tail + 2 it costs more terminal than it
-# saves. Three independent constants could be set so that eliding a report
-# makes it longer.
-MAX_TERMINAL_SUMMARY_LINES = _SUMMARY_HEAD_LINES + _SUMMARY_TAIL_LINES + 2
+# ...and where the end-of-run reports other plugins wrote through it are saved
+# a second time, on their own. A coverage table is an artifact somebody wants
+# to read whole; terminal.txt is a transcript it happens to appear in.
+REPORTS_LOG_NAME = "reports.txt"
+
+# Terminal lines an end-of-run report from another plugin may take inline,
+# unless --agent-max-summary-lines says otherwise. Past this it is replaced by
+# a pointer to reports.txt rather than shown in part.
+#
+# Showing part of it was the previous behaviour and it is the thing being
+# fixed, not the bound. A `pytest --cov --cov-report=term-missing` run of the
+# suite this package was written for produces 88 lines; head-20/tail-15 left
+# the reader with column headings, TOTAL, and none of the rows in between --
+# which is what a coverage table *is*. That is the right shape for a traceback,
+# whose ends carry it, and the wrong one for a table, whose value is spread
+# evenly across its middle. A fragment of a table is worse than a pointer to
+# the whole one: it reads as the whole one. (An agent did read it that way, and
+# reported most of this codebase as uncovered.)
+#
+# So the choice past the bound is binary, and the number only decides which
+# reports are short enough to be worth reading in passing. 40 is about half a
+# screen: `--durations=25` and `--junit-xml`'s one-liner fit, a coverage table
+# of any real project does not.
+DEFAULT_MAX_TERMINAL_SUMMARY_LINES = 40
+
+# The `TOTAL   1234   56   96%` row coverage's own terminal reporter writes,
+# and the `Total coverage: 96.85%` line pytest-cov adds under --cov-fail-under.
+# Read out of the text rather than off pytest-cov's plugin object on purpose:
+# nothing else here knows a plugin by name, `cov_controller` is private and has
+# moved between releases, and pytest-agent does not depend on pytest-cov at all
+# -- so a format change costs the extra line, while an attribute rename would
+# have cost an AttributeError at the end of somebody's run.
+_COVERAGE_TOTAL_PATTERNS = (
+    # First percentage after TOTAL, not the last: Cover is the only percent
+    # column, and anchoring at end-of-line would miss a table whose TOTAL row
+    # carries a Missing column too.
+    re.compile(r"^TOTAL\b.*?(\d+(?:\.\d+)?%)"),
+    re.compile(r"[Tt]otal coverage:\s*(\d+(?:\.\d+)?%)"),
+)
+
+
+def coverage_total(lines: list[str]) -> str | None:
+    """The overall percentage a coverage report ends on, if one is in ``lines``."""
+    for pattern in _COVERAGE_TOTAL_PATTERNS:
+        for line in reversed(lines):
+            found = pattern.search(line)
+            if found is not None:
+                return found.group(1)
+    return None
 
 
 class AgentRuntime:
@@ -92,6 +131,7 @@ class AgentRuntime:
         keep_runs: int,
         heartbeat_interval: float,
         stuck_after: float,
+        max_summary_lines: int = DEFAULT_MAX_TERMINAL_SUMMARY_LINES,
         terminal: RealTerminal | None,
         terminal_log: TextIO | None = None,
         terminal_log_path: Path | None = None,
@@ -106,6 +146,7 @@ class AgentRuntime:
         self.keep_runs = keep_runs
         self.heartbeat_interval = heartbeat_interval
         self.stuck_after = stuck_after
+        self.max_summary_lines = max_summary_lines
         self.terminal = terminal
         self.terminal_log = terminal_log
         self.terminal_log_path = terminal_log_path
@@ -227,23 +268,63 @@ class AgentRuntime:
         if not lines:
             return
 
-        self._print(f"also reported by other plugins ({display_path(self.root / TERMINAL_LOG_NAME)}):")
-        shown = lines
-        elided = 0
-        if len(lines) > MAX_TERMINAL_SUMMARY_LINES:
-            shown = lines[:_SUMMARY_HEAD_LINES]
-            elided = len(lines) - _SUMMARY_HEAD_LINES - _SUMMARY_TAIL_LINES
+        log_path = self._write_reports_file(lines)
+        self._print(f"also reported by other plugins ({log_path}):")
+        self._write_report_lines(lines, log_path)
+        total = coverage_total(lines)
+        if total is not None:
+            # Last line of the run, prefixed and on its own. The percentage is
+            # the reason `--cov` was passed, so it is the one part of the
+            # report that should not need the file -- and with the table held
+            # back above, it otherwise would.
+            self._print(f"coverage: {total}")
+
+    def _write_report_lines(self, lines: list[str], log_path: str) -> None:
         if self.terminal is None:
             return
+        budget = self.max_summary_lines
+        # The first line is kept even when the rest is not: a report's own
+        # banner ("==== tests coverage ====") is what says which report is
+        # waiting in the file, and a bare count would not.
+        shown = lines if budget <= 0 or len(lines) <= budget else lines[:1]
         for line in shown:
             # Written raw, without the [pytest-agent] prefix the rest of this
             # output carries: these are somebody else's aligned tables, and a
             # prefix on every row makes a coverage report unreadable.
             self.terminal.write_line(line)
-        if elided:
-            self.terminal.write_line(f"... {elided} lines elided, full text in {TERMINAL_LOG_NAME} ...")
-            for line in lines[-_SUMMARY_TAIL_LINES:]:
-                self.terminal.write_line(line)
+        if len(shown) == len(lines):
+            return
+        # The path is repeated here, resolved, rather than left to the pointer
+        # line above: this marker is what somebody stops on when the content
+        # they came for is missing, and a filename mentioned once further up
+        # reads as a footnote about some other file.
+        self.terminal.write_line(
+            f"... {len(lines) - len(shown)} more report lines not shown; full text in {log_path} "
+            f"(--agent-max-summary-lines=0 prints them here) ...",
+        )
+
+    def _write_reports_file(self, lines: list[str]) -> str:
+        """Save the other-plugins block on its own, and say where it went.
+
+        ``terminal.txt`` has all of this already, but it is the raw pytest
+        stream -- session header, tracebacks, short summary -- with the report
+        somewhere inside it. A pointer into a file you then have to search
+        through is a pointer that gets skipped: in the case this was written
+        for, it was printed with the right path and not followed, and the
+        truncated terminal copy was believed instead. This file is *only* the
+        report, so following the pointer needs no judgement about which part
+        of it was meant.
+        """
+        path = self.root / REPORTS_LOG_NAME
+        try:
+            path.write_text("\n".join([*lines, ""]), encoding="utf-8")
+        except OSError:
+            # Same reasoning as everywhere else agent mode writes: it must
+            # never be the reason a run is worse off. terminal.txt is written
+            # by the redirect, on a handle opened at session start, so it can
+            # still be there when this write fails.
+            return display_path(self.root / TERMINAL_LOG_NAME)
+        return display_path(path)
 
     def close_terminal_log(self) -> None:
         """Close the redirected terminal-reporter output.

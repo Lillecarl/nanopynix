@@ -286,9 +286,9 @@ before being kept.
 
 ## Resolved
 
-Friction observed while an agent used pytest-agent heavily for a debugging /
-audit session (CIP3 error-pipeline work). All four items are now fixed; kept
-here as the record of *why* these behaviors exist.
+Friction observed while an agent used pytest-agent heavily for debugging /
+audit sessions (items 1-4 from the CIP3 error-pipeline work). All are now
+fixed; kept here as the record of *why* these behaviors exist.
 
 ### 1. Pipe guard fired on `--collect-only`, where there was no detail to lose
 
@@ -348,3 +348,67 @@ doesn't count as your code.
 Runs written before this landed have no `crash`/`frames` (up to
 `--agent-keep-runs` of them survive an upgrade); the queries degrade to
 "no crash info recorded" rather than failing.
+
+### 5. `--cov`'s table was cut down to its column headings
+
+Reported as "fix pytest --cov". The bound on another plugin's end-of-run
+report was 37 lines split head-20/tail-15, and a `pytest --cov
+--cov-report=term-missing` run of the suite this package was written for
+produces 88 -- so what reached the terminal was the column headings, `TOTAL`,
+and none of the rows between them. That is the same number `--cov-report=`
+alone gives, at 35 lines' cost. An agent read that output and concluded from
+it that most of the codebase had no coverage at all.
+
+Removing the bound was considered and rejected. It is tempting to reach for
+the once-printed-list argument above -- these reports print once too -- but
+that argument turns on *addressability*, not on repetition: an elided nodeid
+cannot be fed back to `pytest-agent show`, while a coverage row is one file
+read away and is not input to anything. A monorepo's table would bury the
+failure list, which is the thing agent mode exists to keep readable.
+
+What was actually wrong was the *shape*. Head-and-tail is right for a
+traceback, whose ends carry it, and wrong for a table, whose value is spread
+evenly across its middle. And a fragment of a table is worse than no table:
+it reads as the whole one, which is exactly how it misled. So past the bound
+the choice is now binary -- the report's own first line (so the pointer says
+which report is waiting) and a marker naming the count, the resolved path, and
+the flag that would have printed it inline. Nothing in between.
+
+That makes the number a preference rather than a compromise, so it is one:
+`--agent-max-summary-lines` / `PYTEST_AGENT_MAX_SUMMARY_LINES`, `0` for no
+bound, default 40 -- about half a screen, which fits `--durations=25` and a
+junit path and does not fit a real coverage table.
+
+Two more things came out of the same report, both about the pointer rather
+than the bound:
+
+**`reports.txt`.** The pointer used to lead to `terminal.txt`, which does hold
+every line -- but as part of the whole pytest transcript: session header,
+tracebacks, short summary, the table somewhere inside. That is a file you have
+to search, and searching is where a reader picks the wrong half. The
+other-plugins block is now saved on its own as well, and that is what the
+pointer names. `terminal.txt` is unchanged; it is a transcript, and this is an
+artifact that happens to appear in one.
+
+**`coverage: NN%`.** When one of the reports is a coverage report, the overall
+percentage is reprinted as a prefixed line of its own -- the last line of the
+run, next in the reader's eye to the pass/fail counts. It is the number the run
+was for, and with the table now behind a pointer it is the one part that should
+not need the file.
+
+Deliberately scraped out of the report text (`coverage_total`) rather than read
+off pytest-cov's plugin object. Nothing else in this package knows a plugin by
+name; `cov_controller` is private and has moved between releases; and there is
+no pytest-cov dependency to import. A format change then costs one missing
+line, where an attribute rename would have cost an `AttributeError` at the end
+of somebody's run. The unit test pins the shapes it must survive, including the
+negatives -- another plugin's `TOTAL DURATION 4.1s` is not a coverage figure --
+and an end-to-end test against the real plugin pins that the format is still
+what the unit test claims.
+
+Not done, and wanted: the percentage in `summary.json` / `history.jsonl`, so
+`pytest-agent history` could answer "when did coverage drop". It is not a
+one-liner -- `pytest_sessionfinish` writes those files and prunes before
+`pytest_terminal_summary` runs, which is why the report block prints after
+`full detail:`, so the number does not exist yet at write time. It needs the
+record write to move or to be amended.

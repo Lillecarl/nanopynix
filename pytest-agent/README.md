@@ -77,6 +77,9 @@ overwritten:
     terminal.txt              # what plain pytest would have printed to the
                                # terminal, verbatim -- agent mode redirects the
                                # builtin reporter here rather than discarding it
+    reports.txt               # just the end-of-run reports other plugins wrote
+                               # through it (a --cov table, --durations), lifted
+                               # back out of that transcript on their own
     collect_errors/          # one log per module that failed to import/collect
     tests/test_foo.py/
       test_bar.log            # nodeid, outcome, duration, notes, traceback,
@@ -368,6 +371,7 @@ the file when the question is answered.
 | `--agent-heartbeat` | `PYTEST_AGENT_HEARTBEAT` | `10` | Seconds between progress lines (0 prints none) |
 | `--agent-stuck-after` | `PYTEST_AGENT_STUCK_AFTER` | `300` | Dump every thread's stack after one test has run this long (0 disables) |
 | `--agent-keep-runs` | `PYTEST_AGENT_KEEP_RUNS` | `20` | Keep only the newest N `runs-*` dirs (the just-finished run is never pruned); labeled runs get a second budget of the same size; `history.jsonl` entries are kept forever regardless |
+| `--agent-max-summary-lines` | `PYTEST_AGENT_MAX_SUMMARY_LINES` | `40` | Terminal lines another plugin's end-of-run report (a `--cov` table) may take inline; past that it is pointed at rather than shown in part. 0 for no bound. Full text is in `reports.txt` regardless |
 | `--agent-label` | `PYTEST_AGENT_LABEL` | *(none)* | Name this run, so later queries can find it by name instead of by number |
 | `--agent-allow-pipe` | `PYTEST_AGENT_ALLOW_PIPE` | off | Skip the piped-stdout guard below |
 | n/a | `PYTEST_AGENT_NO_AUTODETECT` | off | Disable the harness-env-var auto-activation |
@@ -443,20 +447,36 @@ so anything a plugin prints at the end of a run is picked back up and printed:
 $ pytest --agent --cov=mypkg --cov-report=term-missing
 [pytest-agent] done in 41.2s -- 311 passed, 0 failed, ...
 [pytest-agent] full detail: /repo/.pytest-agent/runs-0262 (see index.jsonl)
-[pytest-agent] also reported by other plugins (.pytest-agent/runs-0262/terminal.txt):
+[pytest-agent] also reported by other plugins (.pytest-agent/runs-0262/reports.txt):
 ================================ tests coverage ================================
-Name                       Stmts   Miss  Cover   Missing
---------------------------------------------------------
-mypkg/parser.py              184      6    97%   88-93
---------------------------------------------------------
-TOTAL                        184      6    97%
+... 87 more report lines not shown; full text in .pytest-agent/runs-0262/reports.txt (--agent-max-summary-lines=0 prints them here) ...
+[pytest-agent] coverage: 91%
 ```
+
+Three things are going on there:
+
+- **The reports are saved as `reports.txt`** in the run directory, on their
+  own rather than only as part of the `terminal.txt` transcript, so the pointer
+  leads to a file that needs no searching.
+- **A report longer than `--agent-max-summary-lines` (40) is not printed in
+  part**, only pointed at -- its own first line survives so you can tell which
+  report is waiting. Half a coverage table is worse than a pointer to all of
+  it, because it reads as all of it. Short reports (`--durations`,
+  `--junit-xml`'s path, a small table) print inline as before, and `0` prints
+  everything inline.
+- **A coverage percentage gets a prefixed line of its own.** It is the number
+  the run was for, and getting it off the last row of a table means reading the
+  table.
 
 This covers `--durations`, `--junit-xml`'s "generated xml file" line, and any
 third-party plugin's `pytest_terminal_summary` -- pytest-agent needs no
-knowledge of them. Long reports are elided in the middle, keeping the head and
-the tail (a coverage table's `TOTAL` is its last line), with the full text in
-`terminal.txt`.
+knowledge of them. The percentage is the one exception, and even that is
+scraped from the report text rather than read off pytest-cov's plugin object,
+so there is no dependency and no private attribute to go stale.
+
+The bound is settable as `PYTEST_AGENT_MAX_SUMMARY_LINES` too, and `0` turns it
+off. Raising it is the right move if you want a table inline; it exists to stop
+a long report burying the failure list above it, not to keep anything from you.
 
 Nothing pytest itself would have printed is destroyed either; it is all in
 `terminal.txt`, which is the file to read when a problem is about pytest's own

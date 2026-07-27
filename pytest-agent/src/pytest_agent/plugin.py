@@ -15,7 +15,12 @@ from pytest_agent._history import next_run_dir, validate_run_label
 from pytest_agent._notes import agent_notes as agent_notes, pop_runtime, push_runtime
 from pytest_agent._pipe_guard import find_banned_pipe_reader, zero_detail_mode
 from pytest_agent._profile import profile as profile
-from pytest_agent._runtime import RUNTIME_PLUGIN_NAME, TERMINAL_LOG_NAME, AgentRuntime
+from pytest_agent._runtime import (
+    DEFAULT_MAX_TERMINAL_SUMMARY_LINES,
+    RUNTIME_PLUGIN_NAME,
+    TERMINAL_LOG_NAME,
+    AgentRuntime,
+)
 from pytest_agent._terminal import RealTerminal
 
 if TYPE_CHECKING:
@@ -118,6 +123,19 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         ),
     )
     group.addoption(
+        "--agent-max-summary-lines",
+        type=int,
+        default=int(os.environ.get("PYTEST_AGENT_MAX_SUMMARY_LINES", str(DEFAULT_MAX_TERMINAL_SUMMARY_LINES))),
+        metavar="N",
+        help=(
+            "Terminal lines an end-of-run report from another plugin (a `--cov` "
+            "table, `--durations`) may take inline. A longer one is pointed at "
+            "rather than shown in part, since half a table reads like a whole "
+            "one; the full text is in the run's reports.txt either way, and 0 "
+            "prints every report inline (default: %(default)s)."
+        ),
+    )
+    group.addoption(
         "--agent-allow-pipe",
         action="store_true",
         default=_env_flag("PYTEST_AGENT_ALLOW_PIPE"),
@@ -212,6 +230,7 @@ def pytest_configure(config: pytest.Config) -> None:
     heartbeat_interval = cast("float", config.getoption("agent_heartbeat"))
     keep_runs = cast("int", config.getoption("agent_keep_runs"))
     stuck_after = cast("float", config.getoption("agent_stuck_after"))
+    max_summary_lines = cast("int", config.getoption("agent_max_summary_lines"))
     runtime = AgentRuntime(
         config,
         root=root,
@@ -220,6 +239,7 @@ def pytest_configure(config: pytest.Config) -> None:
         keep_runs=keep_runs,
         heartbeat_interval=heartbeat_interval,
         stuck_after=stuck_after,
+        max_summary_lines=max_summary_lines,
         terminal=_REAL_TERMINAL,
         terminal_log=terminal_log,
         terminal_log_path=terminal_log_path,
