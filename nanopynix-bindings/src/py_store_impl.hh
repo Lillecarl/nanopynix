@@ -22,6 +22,18 @@ namespace nb = nanobind;
  * if so, calls it. Otherwise falls back to a sensible C++ default.
  */
 struct PyStoreImpl : public nix::Store {
+    /**
+     * Keeps the config alive for as long as the store.
+     *
+     * `nix::Store` stores its config as a bare `const Config &`
+     * (`store-api.hh:301`, bound in `Store::Store`), so it does not own it --
+     * every concrete Nix store holds the owning ref itself, e.g. `LocalStore`
+     * and `UDSRemoteStore`. Without this member the only owner was the
+     * constructor's by-value argument, so the PyStoreConfig was freed as soon
+     * as the constructor returned and `Store::config` dangled for the rest of
+     * the store's life.
+     */
+    nix::ref<const nix::StoreConfig> owned_config;
     nb::object py_store;
     std::shared_ptr<nix::Store> underlying;  // optional fallthrough store
 

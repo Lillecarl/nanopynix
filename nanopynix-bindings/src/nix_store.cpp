@@ -851,7 +851,31 @@ NB_MODULE(store, m) {
         "decide whether its peer is trusted.");
     m.def("register_store_implementation", &register_python_store,
           "name"_a, "doc"_a, "schemes"_a, "factory"_a,
-          "Register a Python-backed store implementation.");
+          "Register a Python-backed store implementation.\n"
+          "\n"
+          "`factory.open_store()` is called once per `open_store('<scheme>://...')` "
+          "and returns the object that backs the store. Registration is global to "
+          "the process and cannot be undone, so a name or scheme can only be "
+          "claimed once.\n"
+          "\n"
+          "The returned object implements as much or as little as it likes; each "
+          "method is looked up by name and skipped if absent. Recognised methods "
+          "include `is_valid_path_uncached(path) -> bool`, "
+          "`query_path_info(path) -> dict | None` and "
+          "`query_path_from_hash_part(hash_part) -> str | None`, where `path` and "
+          "`hash_part` arrive as base names.\n"
+          "\n"
+          "`query_path_info` returns `None` for 'not valid', or a dict in the same "
+          "shape `Store.query_path_info` produces -- so a store can echo one back "
+          "unchanged. Absent optionals may be omitted or spelled `None`, and store "
+          "paths in `path`/`references`/`deriver` may be written either as full "
+          "`/nix/store/...` paths or as bare base names; the base-name spelling is "
+          "what the store was handed, so echoing the input is valid. Raising "
+          "propagates the exception to the caller rather than falling back.\n"
+          "\n"
+          "Setting `underlying_store` to another `Store` makes every method the "
+          "object does not implement delegate to it, which is how you override one "
+          "operation and inherit the rest.");
 
     bind_store_path(m);
     bind_store(m);
