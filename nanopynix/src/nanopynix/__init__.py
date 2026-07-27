@@ -8,7 +8,12 @@ from nanopynix_bindings.expr import EvalState, PrimopError, Value, eval_file, in
 from nanopynix_bindings.fetchers import input_from_attrs, input_from_url
 from nanopynix_bindings.flake import get_flake, lock_flake, parse_flake_ref
 from nanopynix_bindings.main import init_nix as _init_nix_raw, init_plugins
-from nanopynix_bindings.store import BuildMode, open_store, process_connection
+from nanopynix_bindings.store import (
+    BuildMode as BuildMode,
+    open_store as open_store,
+    process_connection as process_connection,
+    register_store_implementation as register_store_implementation,
+)
 from nanopynix_bindings.util import (
     build_info,  # type: ignore[reportUnknownVariableType] -- C++ extension without type stubs
     current_system,
@@ -121,6 +126,7 @@ from nanopynix.settings import (
     list_flake_settings_metadata,
     list_settings_metadata,
 )
+from nanopynix.store_impl import DISPATCHABLE_METHODS as DISPATCHABLE_METHODS, StoreImpl as StoreImpl
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
 
@@ -164,6 +170,7 @@ def _enable_default_experimental_features() -> None:
 
 
 __all__ = [
+    "DISPATCHABLE_METHODS",
     "AsyncEvalSession",
     "AsyncLockedFlake",
     "AsyncReplSession",
@@ -219,6 +226,7 @@ __all__ = [
     "SettingsDrift",
     "StoreClosedError",
     "StoreError",
+    "StoreImpl",
     "StorePath",
     "ThrownError",
     "TransientBuildError",
@@ -263,6 +271,7 @@ __all__ = [
     "parse_flake_ref",
     "process_connection",
     "register_primop",
+    "register_store_implementation",
     "remove_logger",
     "rpc",
     "set_manager_title",

@@ -32,6 +32,12 @@ missing, so ``open_store`` raised ``std::bad_cast`` and every ``if
 (underlying)`` fallthrough in ``py_store_impl.cpp`` -- roughly half the file --
 was unreachable. ``TestUnderlyingStoreFallthrough`` covers it.
 
+Two further groups here are about the shape of the interface rather than that
+first set of bugs. ``TestStoreImplIsRequired`` covers the move from ``hasattr``
+probing to ``nanopynix.StoreImpl`` override detection, and
+``TestQueriesNoLongerAnswerForThePythonStore`` covers three queries that used to
+invent an answer instead of asking the store or deferring to Nix.
+
 Registration is process-global and cannot be undone, so each store here gets a
 unique scheme; otherwise re-registering under a parametrized run would raise.
 """
@@ -70,11 +76,23 @@ FULL_INFO = {
 }
 
 
-def open_python_store(query_path_info: Callable[[str], Any]) -> Any:
-    """Register a one-off Python store whose query_path_info is ``query_path_info``."""
+def register_and_open(python_store_cls: type[Any]) -> Any:
+    """Register ``python_store_cls`` under a fresh scheme and open it."""
     scheme = f"pytest-pystore-{next(_scheme_counter)}"
 
-    class PythonStore:
+    class Factory:
+        @staticmethod
+        def open_store() -> object:
+            return python_store_cls()
+
+    nanopynix_store.register_store_implementation(scheme, scheme, [scheme], Factory())
+    return nanopynix.open_store(f"{scheme}://example")
+
+
+def open_python_store(query_path_info: Callable[[str], Any]) -> Any:
+    """Register a one-off Python store whose query_path_info is ``query_path_info``."""
+
+    class PythonStore(nanopynix.StoreImpl):
         def is_valid_path_uncached(self, path: str) -> bool:
             return True
 
@@ -84,13 +102,7 @@ def open_python_store(query_path_info: Callable[[str], Any]) -> Any:
         def query_path_from_hash_part(self, hash_part: str) -> None:
             return None
 
-    class Factory:
-        @staticmethod
-        def open_store() -> object:
-            return PythonStore()
-
-    nanopynix_store.register_store_implementation(scheme, scheme, [scheme], Factory())
-    return nanopynix.open_store(f"{scheme}://example")
+    return register_and_open(PythonStore)
 
 
 def test_the_store_config_outlives_the_constructor() -> None:
@@ -212,9 +224,8 @@ def test_query_path_from_hash_part_reaches_the_python_store(returned: str) -> No
     It has never had a test that returned anything but ``None``, which is why
     the dead ``std::string`` caster went unnoticed here too.
     """
-    scheme = f"pytest-pystore-hash-{next(_scheme_counter)}"
 
-    class PythonStore:
+    class PythonStore(nanopynix.StoreImpl):
         def is_valid_path_uncached(self, path: str) -> bool:
             return True
 
@@ -224,13 +235,7 @@ def test_query_path_from_hash_part_reaches_the_python_store(returned: str) -> No
         def query_path_from_hash_part(self, hash_part: str) -> str:
             return returned
 
-    class Factory:
-        @staticmethod
-        def open_store() -> object:
-            return PythonStore()
-
-    nanopynix_store.register_store_implementation(scheme, scheme, [scheme], Factory())
-    store = nanopynix.open_store(f"{scheme}://example")
+    store = register_and_open(PythonStore)
 
     found = store.query_path_from_hash_part("00000000000000000000000000000000")
 
@@ -281,29 +286,13 @@ class TestUnderlyingStoreFallthrough:
     the attribute, so the whole branch was dead in a way nothing detected.
     """
 
-    @staticmethod
-    def _open_delegating_store(real: Any, **overrides: Any) -> Any:
-        scheme = f"pytest-pystore-under-{next(_scheme_counter)}"
-
-        class PythonStore:
-            underlying_store = real
-
-        for attribute, value in overrides.items():
-            setattr(PythonStore, attribute, value)
-
-        class Factory:
-            @staticmethod
-            def open_store() -> object:
-                return PythonStore()
-
-        nanopynix_store.register_store_implementation(scheme, scheme, [scheme], Factory())
-        return nanopynix.open_store(f"{scheme}://example")
-
     def test_opening_a_store_with_an_underlying_store_works_at_all(self, store: Any) -> None:
         """The whole feature used to die here, before any method was called."""
-        delegating = self._open_delegating_store(store)
 
-        assert isinstance(delegating, nanopynix_store.Store)
+        class Delegating(nanopynix.StoreImpl):
+            underlying_store = store
+
+        assert isinstance(register_and_open(Delegating), nanopynix_store.Store)
 
     def test_unimplemented_methods_reach_the_underlying_store(
         self, store: Any, store_seeded_path: Any
@@ -314,7 +303,11 @@ class TestUnderlyingStoreFallthrough:
         ``query_path_info`` would raise "is not valid" if the fallthrough were
         skipped rather than taken, so neither can pass by accident.
         """
-        delegating = self._open_delegating_store(store)
+
+        class Delegating(nanopynix.StoreImpl):
+            underlying_store = store
+
+        delegating = register_and_open(Delegating)
 
         assert delegating.is_valid_path(store_seeded_path) is True
         assert delegating.query_path_info(store_seeded_path)["nar_size"] == (
@@ -330,9 +323,133 @@ class TestUnderlyingStoreFallthrough:
         here can only have come from the Python method.
         """
 
-        def always_invalid(_self: Any, _path: Any) -> bool:
-            return False
+        class Delegating(nanopynix.StoreImpl):
+            underlying_store = store
 
-        delegating = self._open_delegating_store(store, is_valid_path_uncached=always_invalid)
+            def is_valid_path_uncached(self, path: str) -> bool:
+                return False
 
-        assert delegating.is_valid_path(store_seeded_path) is False
+        assert register_and_open(Delegating).is_valid_path(store_seeded_path) is False
+
+    def test_underlying_store_may_be_set_per_instance(self, store: Any, store_seeded_path: Any) -> None:
+        """Setting it in ``__init__`` is the realistic pattern, so it must type-check.
+
+        Every other test here assigns at class level, which is what let
+        ``underlying_store`` sit annotated as a ``ClassVar`` -- an annotation
+        that makes ``self.underlying_store = ...`` an error for exactly the
+        usage the docs recommend. Runtime never cared; pyright would have, on
+        the first real store anybody wrote.
+        """
+
+        class Delegating(nanopynix.StoreImpl):
+            def __init__(self) -> None:
+                self.underlying_store = store
+
+        assert register_and_open(Delegating).is_valid_path(store_seeded_path) is True
+
+    def test_the_deferring_queries_still_delegate(self, store: Any, store_seeded_path: Any) -> None:
+        """The three formerly-lying queries kept their delegation.
+
+        They were fixed by replacing their invented answers with ``nix::Store``'s,
+        which was nearly done by deleting them outright -- but each one also
+        carried the ``underlying`` branch, and ``nix::Store`` knows nothing about
+        ``underlying``. Deleting them would have silently dropped delegation, so
+        this pins it: an enumerating store must still enumerate through the
+        Python one.
+        """
+
+        class Delegating(nanopynix.StoreImpl):
+            underlying_store = store
+
+        delegating = register_and_open(Delegating)
+
+        assert store_seeded_path.to_string() in [
+            p.split("/")[-1] for p in delegating.query_all_valid_paths()
+        ]
+
+
+class TestStoreImplIsRequired:
+    """Detection is by override, not by ``hasattr``.
+
+    The old probe could not tell an implementation from a typo: misspell
+    ``query_path_info`` and the store silently answered from the fallback. It
+    also ran on every single call. ``StoreImpl`` records what a subclass really
+    replaced, once, when the class is defined.
+    """
+
+    def test_a_duck_typed_store_is_rejected_with_a_useful_message(self) -> None:
+        """The one place dropping duck typing is visible, so the error must teach."""
+
+        class NotAStoreImpl:
+            def is_valid_path_uncached(self, path: str) -> bool:
+                return True
+
+        with pytest.raises(TypeError, match=r"must subclass nanopynix\.StoreImpl"):
+            register_and_open(NotAStoreImpl)
+
+    def test_only_overridden_methods_are_recorded(self) -> None:
+        """A method left alone is not an implementation, and a typo is not either."""
+
+        class Partial(nanopynix.StoreImpl):
+            def is_valid_path_uncached(self, path: str) -> bool:
+                return True
+
+        assert Partial._nanopynix_store_overrides == frozenset({"is_valid_path_uncached"})
+
+    def test_an_unimplemented_method_is_not_dispatched_to(self) -> None:
+        """``StoreImpl.query_path_info`` raising must not reach the caller.
+
+        A subclass that does not override it has not implemented it, so the
+        trampoline must skip it rather than call the base and surface
+        ``NotImplementedError``.
+        """
+
+        class Partial(nanopynix.StoreImpl):
+            def is_valid_path_uncached(self, path: str) -> bool:
+                return True
+
+        store = register_and_open(Partial)
+
+        with pytest.raises(Exception, match="is not valid"):
+            store.query_path_info(nanopynix_store.StorePath(BOGUS))
+
+
+class TestQueriesNoLongerAnswerForThePythonStore:
+    """Three queries used to invent an answer instead of asking or deferring.
+
+    They are a different defect class from the rest of this file: not "a Python
+    store cannot return data" but "a Python store returns data that is wrong",
+    and wrong in the most dangerous direction -- claiming paths exist or are
+    substitutable when the store says otherwise.
+    """
+
+    @staticmethod
+    def _nothing_is_valid() -> Any:
+        class NothingValid(nanopynix.StoreImpl):
+            def is_valid_path_uncached(self, path: str) -> bool:
+                return False
+
+            def query_path_info(self, path: str) -> None:
+                return None
+
+        return register_and_open(NothingValid)
+
+    def test_substitutable_paths_does_not_claim_everything_is_substitutable(self) -> None:
+        """Used to return its argument verbatim, contradicting the store itself."""
+        store = self._nothing_is_valid()
+        path = nanopynix_store.StorePath(BOGUS)
+
+        assert store.is_valid_path(path) is False
+        assert list(store.query_substitutable_paths([path])) == []
+
+    def test_all_valid_paths_reports_unsupported_rather_than_an_empty_store(self) -> None:
+        """"Empty" and "cannot enumerate" are different answers.
+
+        Returning ``[]`` made them indistinguishable to a caller. ``nix::Store``
+        declares this ``unsupported`` (``store-api.hh:404`` on 2.34), which is
+        the honest answer for a store with no way to enumerate itself.
+        """
+        store = self._nothing_is_valid()
+
+        with pytest.raises(Exception, match="not supported"):
+            store.query_all_valid_paths()

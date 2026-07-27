@@ -1,4 +1,10 @@
-"""Tests for nanopynix_store.register_store_implementation."""
+"""Tests for nanopynix_store.register_store_implementation.
+
+Every store here subclasses :class:`nanopynix.StoreImpl`, which is now required:
+the trampoline decides what a store implements by asking which methods the
+subclass replaced, not by probing with ``hasattr``. See
+``test_python_store_path_info.py`` for the interface itself.
+"""
 
 from __future__ import annotations
 
@@ -12,11 +18,11 @@ class TestRegisterStore:
     def test_register_and_open(self):
         """Register a minimal store implementation and open it."""
 
-        class MinimalStore:
-            def is_valid_path_uncached(self, path_str: str) -> bool:
+        class MinimalStore(nanopynix.StoreImpl):
+            def is_valid_path_uncached(self, path: str) -> bool:
                 return True
 
-            def query_path_info(self, path_str: str) -> None:
+            def query_path_info(self, path: str) -> None:
                 return None
 
             def query_path_from_hash_part(self, hash_part: str) -> None:
@@ -68,14 +74,14 @@ class TestRegisterStore:
         class Factory:
             @staticmethod
             def open_store() -> object:
-                class S:
-                    def is_valid_path_uncached(self, p: str) -> bool:
+                class S(nanopynix.StoreImpl):
+                    def is_valid_path_uncached(self, path: str) -> bool:
                         return True
 
-                    def query_path_info(self, p: str) -> None:
+                    def query_path_info(self, path: str) -> None:
                         return None
 
-                    def query_path_from_hash_part(self, h: str) -> None:
+                    def query_path_from_hash_part(self, hash_part: str) -> None:
                         return None
 
                 return S()
@@ -97,14 +103,14 @@ class TestRegisterStore:
 
         class Factory:
             def open_store(self) -> object:
-                class S:
-                    def is_valid_path_uncached(self, p: str) -> bool:
+                class S(nanopynix.StoreImpl):
+                    def is_valid_path_uncached(self, path: str) -> bool:
                         return False
 
-                    def query_path_info(self, p: str) -> None:
+                    def query_path_info(self, path: str) -> None:
                         return None
 
-                    def query_path_from_hash_part(self, h: str) -> None:
+                    def query_path_from_hash_part(self, hash_part: str) -> None:
                         return None
 
                 return S()
@@ -125,19 +131,19 @@ class TestRegisterStore:
 
         class Factory:
             def open_store(self) -> object:
-                class S:
+                class S(nanopynix.StoreImpl):
                     def __init__(self) -> None:
                         self.valid: set[str] = {
                             "00000000000000000000000000000001-yes",
                         }
 
-                    def is_valid_path_uncached(self, p: str) -> bool:
-                        return p in self.valid
+                    def is_valid_path_uncached(self, path: str) -> bool:
+                        return path in self.valid
 
-                    def query_path_info(self, p: str) -> None:
+                    def query_path_info(self, path: str) -> None:
                         return None
 
-                    def query_path_from_hash_part(self, h: str) -> None:
+                    def query_path_from_hash_part(self, hash_part: str) -> None:
                         return None
 
                 return S()
