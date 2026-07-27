@@ -39,7 +39,7 @@ probing to ``nanopynix.StoreImpl`` override detection.
 invent an answer instead of asking the store or deferring to Nix.
 
 ``TestTheWholeDispatchableInterface`` covers the widening from three operations
-to twelve, and is deliberately written against the *list* rather than against
+to fourteen, and is deliberately written against the *list* rather than against
 individual methods. The failure it exists to catch is not a wrong answer but a
 dead one: a name that appears on both sides and is never wired up in between
 looks implemented, type-checks, and does nothing. So it asserts that the two
@@ -518,6 +518,14 @@ INVOCATIONS: dict[str, Callable[[Any], Any]] = {
     "ensure_path": lambda s: s.ensure_path(nanopynix_store.StorePath(BOGUS)),
     "optimise_store": lambda s: s.optimise_store(),
     "verify_store": lambda s: s.verify_store(False, False),
+    # The bound `Store` takes one path here and the dispatched virtual takes a
+    # set -- Nix declares both overloads and only the set one is virtual.
+    "compute_fs_closure": lambda s: s.compute_fs_closure(
+        nanopynix_store.StorePath(BOGUS), False, False, False
+    ),
+    # `^*` rather than a bare path: a DerivedPath is a sum type, and a bare
+    # `.drv` parses as "fetch this file" instead of "build it".
+    "query_missing": lambda s: s.query_missing([f"/nix/store/{BOGUS}.drv^*"]),
 }
 
 
@@ -532,6 +540,9 @@ class RecordingStore(nanopynix.StoreImpl):
     """
 
     calls: ClassVar[list[str]] = []
+    # What `query_missing` was handed, kept so a test can check the derived-path
+    # spelling survives the trip rather than only that the call arrived.
+    query_missing_targets: ClassVar[list[str]] = []
 
     def _record(self, name: str) -> None:
         RecordingStore.calls.append(name)
@@ -580,6 +591,27 @@ class RecordingStore(nanopynix.StoreImpl):
     def verify_store(self, check_contents: bool, repair: bool) -> bool:
         self._record("verify_store")
         return True
+
+    def compute_fs_closure(
+        self,
+        paths: Iterable[str],
+        flip_direction: bool,
+        include_outputs: bool,
+        include_derivers: bool,
+    ) -> Iterable[str]:
+        self._record("compute_fs_closure")
+        return [*paths, "44444444444444444444444444444444-dep"]
+
+    def query_missing(self, targets: Iterable[str]) -> dict[str, Any]:
+        self._record("query_missing")
+        RecordingStore.query_missing_targets = list(targets)
+        return {
+            "will_build": ["55555555555555555555555555555555-build.drv"],
+            "will_substitute": ["66666666666666666666666666666666-sub"],
+            "unknown": [],
+            "download_size": 1234,
+            "nar_size": 5678,
+        }
 
 
 class TestTheWholeDispatchableInterface:
@@ -630,13 +662,21 @@ class TestTheWholeDispatchableInterface:
         dispatch pass on someone else's call. Collected rather than asserted in
         the loop so a failure names every operation that never arrived, which is
         what a wiring mistake looks like: a whole group missing, not one.
+
+        A raise is swallowed for that same reason, and only here. An operation
+        whose dispatch is dead does not necessarily return quietly -- it falls
+        through to ``nix::Store``, and several of those fail on a store with no
+        real backing. Letting the exception out would end the sweep at the first
+        casualty and report it as an error rather than as a list, which is what
+        this test exists not to do. Whether an operation *answers* is asserted
+        by its own test just below; the only claim here is that it arrived.
         """
         store = register_and_open(RecordingStore)
 
         never_dispatched: list[str] = []
         for name, invoke in INVOCATIONS.items():
             RecordingStore.calls = []
-            invoke(store)
+            outcome(lambda i=invoke: i(store))
             if name not in RecordingStore.calls:
                 never_dispatched.append(name)
 
@@ -666,6 +706,68 @@ class TestTheWholeDispatchableInterface:
         assert store.query_all_valid_paths() == [f"/nix/store/{BOGUS}"]
         assert store.query_substitutable_paths([path]) == [f"/nix/store/{BOGUS}"]
         assert store.verify_store(False, False) is True
+
+    def test_the_closure_the_python_store_computed_is_the_one_returned(self) -> None:
+        """``compute_fs_closure`` is the only operation with an out-param to fill.
+
+        Nix passes a set in and expects it added to rather than replaced, so
+        this checks both halves arrive: the path the caller asked about, which
+        the store echoed from its argument, and the one the store contributed.
+        """
+        RecordingStore.calls = []
+        store = register_and_open(RecordingStore)
+
+        closure = store.compute_fs_closure(nanopynix_store.StorePath(BOGUS), False, False, False)
+
+        assert sorted(closure) == [
+            f"/nix/store/{BOGUS}",
+            "/nix/store/44444444444444444444444444444444-dep",
+        ]
+
+    def test_query_missing_round_trips_a_whole_reply(self) -> None:
+        """The only operation answering with a dict rather than paths or a scalar.
+
+        Both directions matter and neither is exercised elsewhere: the targets
+        must reach Python as Nix's own ``^`` derived-path spelling -- lowering
+        them to plain store paths would silently turn "build this" into "fetch
+        this" -- and all five reply fields must come back, since a field the
+        reader forgets is invisible rather than fatal. That is precisely how
+        ``deriver``, ``ultimate`` and ``sigs`` were lost from ``query_path_info``.
+        """
+        RecordingStore.calls = []
+        RecordingStore.query_missing_targets = []
+        store = register_and_open(RecordingStore)
+
+        missing = store.query_missing([f"/nix/store/{BOGUS}.drv^*"])
+
+        assert RecordingStore.query_missing_targets == [f"/nix/store/{BOGUS}.drv^*"]
+        assert missing["will_build"] == ["/nix/store/55555555555555555555555555555555-build.drv"]
+        assert missing["will_substitute"] == ["/nix/store/66666666666666666666666666666666-sub"]
+        assert missing["unknown"] == []
+        assert missing["download_size"] == 1234
+        assert missing["nar_size"] == 5678
+
+    def test_a_partial_query_missing_reply_keeps_nix_s_defaults(self) -> None:
+        """A store that only knows some fields should not have to invent the rest.
+
+        The alternative -- requiring all five -- would push stores into making
+        up a ``download_size``, which is the invented-answer problem this whole
+        interface was reworked to avoid.
+        """
+
+        class KnowsOnlyWhatItWillBuild(nanopynix.StoreImpl):
+            def query_missing(self, targets: Iterable[str]) -> dict[str, Any]:
+                return {"will_build": [f"{BOGUS}.drv"]}
+
+        missing = register_and_open(KnowsOnlyWhatItWillBuild).query_missing(
+            [f"/nix/store/{BOGUS}.drv^*"]
+        )
+
+        assert missing["will_build"] == [f"/nix/store/{BOGUS}.drv"]
+        assert missing["will_substitute"] == []
+        assert missing["unknown"] == []
+        assert missing["download_size"] == 0
+        assert missing["nar_size"] == 0
 
     def test_any_iterable_is_an_acceptable_answer(self) -> None:
         """A set and a generator are both natural ways to answer these queries.
@@ -753,6 +855,8 @@ DELEGATION_CHECKS: dict[str, Callable[[Any, Any], Any]] = {
     "ensure_path": lambda s, p: s.ensure_path(p),
     # The only one that does not take the path -- it verifies the whole store.
     "verify_store": lambda s, _p: s.verify_store(False, False),
+    "compute_fs_closure": lambda s, p: sorted(s.compute_fs_closure(p, False, False, False)),
+    "query_missing": lambda s, p: s.query_missing([f"/nix/store/{p.to_string()}"]),
 }
 
 # `optimise_store` is the one operation left out, and on purpose: delegating it
