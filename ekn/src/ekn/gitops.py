@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, no_type_check
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from nanopynix._typechecking import BEARTYPING
+from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Sequence
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     # `load_raw_manifest` from this module at the top level, so making this
     # import real too would be a genuine circular import, not merely an
     # unresolved forward reference. The three functions below that reference
-    # these names are `@no_type_check`-exempted from beartype instead.
+    # these names are `@no_runtime_type_check`-exempted from beartype instead.
     from ekn.eval import GitOpsManifestsResult, GitOpsTargetEntry
 
 
@@ -47,7 +47,7 @@ def load_raw_manifest(path: str) -> Manifest:
     return data
 
 
-@no_type_check  # GitOpsTargetEntry is TYPE_CHECKING-only (see import above); beartype can't resolve the forward reference
+@no_runtime_type_check  # GitOpsTargetEntry is TYPE_CHECKING-only (see import above); beartype can't resolve the forward reference
 def resolved_targets(gitops_targets: dict[str, GitOpsTargetEntry]) -> dict[GitOpsTarget, list[Manifest]]:
     """Turn `kubernetes.gitOpsTargets` (already joined by the Nix module) into
     `{GitOpsTarget: [manifest, ...]}`.
@@ -172,7 +172,7 @@ def flatten_manifests(  # noqa: C901 tracked complexity/arg-count debt, see TODO
     return files
 
 
-@no_type_check  # GitOpsManifestsResult is TYPE_CHECKING-only (see import above); beartype can't resolve the forward reference
+@no_runtime_type_check  # GitOpsManifestsResult is TYPE_CHECKING-only (see import above); beartype can't resolve the forward reference
 def branches(result: GitOpsManifestsResult) -> tuple[str, str | None]:
     """Read the instance-wide `(deployBranch, sourceBranch)` pair.
 
@@ -187,7 +187,7 @@ def branches(result: GitOpsManifestsResult) -> tuple[str, str | None]:
     return branch_config.deploy_branch, branch_config.source_branch
 
 
-@no_type_check  # GitOpsManifestsResult is TYPE_CHECKING-only (see import above); beartype can't resolve the forward reference
+@no_runtime_type_check  # GitOpsManifestsResult is TYPE_CHECKING-only (see import above); beartype can't resolve the forward reference
 def file_groups(result: GitOpsManifestsResult) -> list[tuple[str, str]]:
     """Merge every GitOps target's rendered objects into one file list.
 

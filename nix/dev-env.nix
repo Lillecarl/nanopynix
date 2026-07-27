@@ -5,7 +5,6 @@
   grpclib-transports,
   clypi,
   kr8s,
-  pytest-beartype,
   tree-sitter-nix,
   renderEditablePyproject,
 }:
@@ -15,12 +14,7 @@ let
     root = toString (../nanopynix + "/src");
     inherit python;
     pythonPackages = python.pkgs // {
-      inherit
-        nanopynix-bindings
-        nanopynix-proto
-        grpclib-transports
-        pytest-beartype
-        ;
+      inherit nanopynix-bindings nanopynix-proto grpclib-transports;
     };
   });
 

@@ -20,14 +20,14 @@ build on, below the process boundary that distinguishes ``inproc`` from
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast, no_type_check
+from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix_bindings import expr as nanopynix_expr, flake as nanopynix_flake, store as nanopynix_store
 from nanopynix_proto.nix.store import GcAction, StoreDirs
 
 from nanopynix._core._extract import flake_ref_attrs
 from nanopynix._core._nix_core import NixCore
-from nanopynix._typechecking import BEARTYPING
+from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
 from nanopynix.models import (
     BuildResult,
@@ -304,7 +304,7 @@ class CoreStore:
     def find_roots(self, *, censor: bool = False) -> list[GcRoot]:
         return [GcRoot(link=root["link"], path=root["path"]) for root in self.require_raw().find_roots(censor)]
 
-    @no_type_check  # action validates its own membership in _RAW_GC_ACTIONS at
+    @no_runtime_type_check  # action validates its own membership in _RAW_GC_ACTIONS at
     # runtime for untyped callers (see the KeyError guard below); beartype's
     # parameter check would otherwise intercept before that guard runs and
     # raise its own exception type instead of the documented ValueError.
@@ -493,9 +493,18 @@ class CoreValue:
     def force(self) -> None:
         self.require_raw().force()
 
+    # `ValueType` and `EditLocation` below exist only in the generated stub --
+    # they are declared in nanopynix-bindings/src/expr.pat's `__prefix__`, not
+    # exported by the compiled module. pyright resolves them from the .pyi and
+    # checks these signatures normally; beartype evaluates annotations for real
+    # at decoration time and gets AttributeError, which makes it skip the whole
+    # method. Exempting them says so, rather than weakening the annotation to
+    # something beartype happens to be able to import.
+    @no_runtime_type_check
     def to_python(self) -> nanopynix_expr.ValueType:
         return self.require_raw().to_python()
 
+    @no_runtime_type_check
     def to_json(self, copy_to_store: bool = False) -> nanopynix_expr.ValueType:
         # Keyword, not positional: the binding declares copy_to_store
         # keyword-only (nanopynix-bindings/src/expr.pat). The positional call
@@ -523,6 +532,7 @@ class CoreValue:
     def realise_argv(self) -> list[str]:
         return self.require_raw().realise_argv()
 
+    @no_runtime_type_check  # stub-only return type; see to_python above
     def edit_location(self) -> nanopynix_expr.EditLocation:
         return self.require_raw().edit_location()
 

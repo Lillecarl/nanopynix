@@ -7,6 +7,12 @@ flake. These "dumb coverage" tests pin those branches down directly with
 small fakes instead of contriving a real flake to expose them.
 """
 
+# ruff: noqa: ASYNC109
+# The doubles below subclass real ValueProxy/EvalSession/ReplSession
+# classes, whose async methods take a `timeout` keyword; an override has
+# to keep it. Same exemption, same reason as
+# nanopynix/rpc/client/_session.py, where the real signatures live.
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -26,7 +32,7 @@ from nanopynix.rpc import ValueProxy
 
 
 class _FakeFlakeValue(ValueProxy):
-    """Duck-types the subset of ValueProxy that _build_tree relies on."""
+    """The subset of ValueProxy that _build_tree relies on."""
 
     def __init__(
         self,
@@ -41,21 +47,25 @@ class _FakeFlakeValue(ValueProxy):
         self._items = items or []
         self._raise_on_get_type = raise_on_get_type
 
-    async def get_type(self) -> NixType:
+    # Each method takes and ignores `timeout` so its signature matches
+    # ValueProxy's: this double subclasses the real class (so beartype's
+    # isinstance checks accept it), and a subclass that drops an argument its
+    # caller passes is not standing in for anything.
+    async def get_type(self, *, timeout: float | None = None) -> NixType:
         if self._raise_on_get_type:
             raise RuntimeError("evaluation failed")
         return self._type
 
-    async def attr_names(self) -> list[str]:
+    async def attr_names(self, *, timeout: float | None = None) -> list[str]:
         return list(self._attrs)
 
-    def attr(self, name: str) -> _FakeFlakeValue:
+    def attr(self, name: str, *, timeout: float | None = None) -> _FakeFlakeValue:
         return self._attrs[name]
 
-    async def list_length(self) -> int:
+    async def list_length(self, *, timeout: float | None = None) -> int:
         return len(self._items)
 
-    def list_get(self, index: int) -> _FakeFlakeValue:
+    def list_get(self, index: int, *, timeout: float | None = None) -> _FakeFlakeValue:
         return self._items[index]
 
 

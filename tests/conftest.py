@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import atexit
-import contextlib
 import functools
 import importlib
 import inspect
@@ -12,13 +11,13 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
-# A plain `import tests.support.beartype_hook` statement here would be an
-# ordinary import, which makes it fair game for ruff's isort to alphabetize
-# alongside the imports below -- and `nanopynix` sorts before
-# `tests.support.beartype_hook`, which is exactly backwards: nanopynix's own
-# import cascade must not run before this hook installs, see the module's
-# docstring. Routing the side effect through a function call instead of an
-# import statement keeps it outside anything isort will ever reorder.
+# Installs beartype's import hook and arranges the same for subprocesses; must
+# run before `import nanopynix` below. A plain `import tests.support.
+# beartype_hook` statement would be fair game for ruff's isort, which sorts
+# `nanopynix` ahead of it -- exactly backwards. Routing the side effect
+# through a function call keeps it outside anything isort will reorder.
+# `-p` in pytest.ini would be earlier still but cannot resolve the name that
+# early; see the hook's module docstring.
 importlib.import_module("tests.support.beartype_hook")
 
 import anyio  # noqa: E402 -- see hook install above
@@ -27,6 +26,7 @@ from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util  #
 
 import nanopynix  # noqa: E402 -- see hook install above
 from nanopynix.settings import DEFAULT_EXPERIMENTAL_FEATURES  # noqa: E402 -- see hook install above
+from tests.support.subprocess_output import run_process  # noqa: E402 -- see hook install above
 
 pytest_plugins = (
     "tests.support.lsp_environment",
@@ -57,9 +57,6 @@ def _with_test_timeout(func: Callable[..., Awaitable[None]]) -> Callable[..., Aw
     return wrapper
 
 
-_COVERAGE_SITECUSTOMIZE_DIR = str(Path(__file__).resolve().parent / "_coverage_subprocess")
-
-
 def pytest_addoption(parser: pytest.Parser):
     parser.addoption(
         "--run-temp-store-builds",
@@ -75,28 +72,12 @@ def pytest_addoption(parser: pytest.Parser):
     )
 
 
-def _enable_subprocess_coverage() -> None:
-    """Let the multiprocessing-forkserver Nix worker report coverage too.
-
-    pytest-cov sets COVERAGE_PROCESS_START when --cov is active, but that env
-    var only takes effect in a subprocess whose interpreter imports a
-    `sitecustomize` module. nanopynix's worker is forked from a forkserver
-    helper process that is itself freshly exec'd, so it needs that shim
-    discoverable via PYTHONPATH before it starts.
-    """
-    existing = os.environ.get("PYTHONPATH", "")
-    parts = [_COVERAGE_SITECUSTOMIZE_DIR, *([existing] if existing else [])]
-    os.environ["PYTHONPATH"] = os.pathsep.join(parts)
-
-
 @pytest.hookimpl(trylast=True)
 def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
         "markers",
         "live_gc: test performs destructive live Nix garbage collection",
     )
-    if os.environ.get("COVERAGE_PROCESS_START"):
-        _enable_subprocess_coverage()
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:  # noqa: ARG001 -- hookspec signature requires config arg
@@ -363,16 +344,7 @@ async def nixpkgs_path(repo_root: Path) -> str:
     Shared for the same reason as ``repo_root``: it used to be copy-pasted per
     suite, which meant every copy paid the evaluation separately.
     """
-    process = await anyio.open_process(
-        ["nix", "eval", "--impure", "--raw", "--file", str(repo_root), "pkgs.path"],
-    )
-    async with process:
-        stdout = b""
-        if process.stdout is not None:
-            with contextlib.suppress(anyio.EndOfStream):
-                while True:
-                    stdout += await process.stdout.receive()
-        await process.wait()
-    if process.returncode != 0:
-        raise RuntimeError(f"nix eval of pkgs.path exited {process.returncode}")
-    return stdout.decode().strip()
+    result = await run_process(["nix", "eval", "--impure", "--raw", "--file", str(repo_root), "pkgs.path"])
+    if result.returncode != 0:
+        raise RuntimeError(f"nix eval of pkgs.path {result.describe()}")
+    return result.stdout.strip()

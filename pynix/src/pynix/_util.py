@@ -4,14 +4,14 @@ import functools
 import json
 import sys
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, NoReturn, TextIO, cast, no_type_check
+from typing import TYPE_CHECKING, Any, NoReturn, TextIO, cast
 
 import anyio
 import structlog
 from rich.console import Console
 
 import nanopynix
-from nanopynix._typechecking import BEARTYPING
+from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 
 if TYPE_CHECKING or BEARTYPING:
     import os
@@ -55,7 +55,7 @@ def report_and_exit(exc: EvaluationTargetError) -> NoReturn:
     raise SystemExit(1) from exc
 
 
-@no_type_check  # file is duck-typed against TextIO -- under prompt_toolkit's
+@no_runtime_type_check  # file is duck-typed against TextIO -- under prompt_toolkit's
 # patch_stdout(), sys.stdout is swapped for a StdoutProxy that implements the
 # file-like write interface without being a real TextIO instance.
 def configure_logging(*, file: TextIO | None = None) -> None:
@@ -69,7 +69,7 @@ def configure_logging(*, file: TextIO | None = None) -> None:
 
 
 @asynccontextmanager
-@no_type_check  # log_file is duck-typed against TextIO -- see configure_logging above.
+@no_runtime_type_check  # log_file is duck-typed against TextIO -- see configure_logging above.
 async def forward_nix_logs(
     session: Any,
     *,

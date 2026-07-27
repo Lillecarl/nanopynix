@@ -6,11 +6,35 @@ Protocols deliberately describe only behaviour common to both transports.
 See :mod:`nanopynix.store` and :mod:`nanopynix.inproc` for the two
 implementations, checked against these protocols in
 ``tests/nanopynix/test_protocols.py``.
+
+Every protocol here is ``@runtime_checkable``. That is not for callers to reach
+for ``isinstance`` in place of static typing -- it stays a structural check on
+member *names*, so it says nothing about signatures and is no substitute for
+what pyright already verifies. It is here because a protocol beartype cannot
+pass to ``isinstance`` is one beartype refuses to decorate *at all*: annotate a
+parameter with a non-runtime-checkable protocol and the entire surrounding
+function goes unchecked, silently, with only a warning on stderr to say so.
+Measured before this was added: 20 of the methods below, plus every function
+elsewhere annotated with one of them, were skipped outright.
+
+The runtime cost is bounded by where these names are actually annotated. Inside
+this repository that is only the stub methods below, whose bodies are ``...``
+and never run; the check therefore fires for consumers who annotate with these
+types, and for nobody else. Note the asymmetry ``@runtime_checkable`` inherits
+from :mod:`typing`: ``AsyncReplSession`` has a non-method member
+(``line_editors``), so ``isinstance`` works against it but ``issubclass`` does
+not.
+
+Protocols rather than ABCs, deliberately. The two engines share no construction
+or lifetime mechanics, so there is no base worth inheriting, and structural
+typing lets an implementation outside this repository conform without importing
+anything from it. An ABC would trade that away for a nominal check that the
+conformance tests already make statically.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar, runtime_checkable
 
 from nanopynix_bindings.store import BuildMode
 
@@ -41,6 +65,7 @@ if TYPE_CHECKING or BEARTYPING:
 VerbosityT_co = TypeVar("VerbosityT_co", covariant=True)
 
 
+@runtime_checkable
 class AsyncValue(Protocol):
     """The common asynchronous value lifecycle and forcing interface."""
 
@@ -169,6 +194,7 @@ class AsyncValue(Protocol):
         ...
 
 
+@runtime_checkable
 class AsyncStore(Protocol):
     """The common asynchronous Store lifecycle and path-query interface."""
 
@@ -379,6 +405,7 @@ class AsyncStore(Protocol):
         ...
 
 
+@runtime_checkable
 class AsyncLockedFlake(Protocol):
     """The common lifecycle for an in-memory flake lock."""
 
@@ -395,6 +422,7 @@ class AsyncLockedFlake(Protocol):
         ...
 
 
+@runtime_checkable
 class AsyncVerbosityController(Protocol[VerbosityT_co]):
     """A resource that reads and updates the process-wide Nix verbosity.
 
@@ -411,6 +439,7 @@ class AsyncVerbosityController(Protocol[VerbosityT_co]):
         ...
 
 
+@runtime_checkable
 class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](AsyncVerbosityController[LogLevel], Protocol):
     """The common asynchronous evaluation and flake interface.
 
@@ -478,6 +507,7 @@ class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](AsyncVerbosityController
         ...
 
 
+@runtime_checkable
 class AsyncReplSession[ValueT: AsyncValue = AsyncValue](AsyncEvalSession[ValueT], Protocol):
     """An :class:`AsyncEvalSession` that keeps a persistent Nix lexical scope.
 

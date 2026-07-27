@@ -1,5 +1,11 @@
 """Tests for the interactive pynix REPL loop."""
 
+# ruff: noqa: ASYNC109
+# The doubles below subclass real ValueProxy/EvalSession/ReplSession
+# classes, whose async methods take a `timeout` keyword; an override has
+# to keep it. Same exemption, same reason as
+# nanopynix/rpc/client/_session.py, where the real signatures live.
+
 # pyright: reportPrivateUsage=false
 # Tests intentionally access private symbols from pynix.repl
 
@@ -11,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from nanopynix_bindings.store import BuildMode
 from nanopynix_proto.nix.common import LogLevel
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
@@ -38,7 +45,10 @@ from pynix.repl import (  # type: ignore[reportPrivateUsage] -- tests intentiona
 from pynix.target import EvaluationTarget
 
 from nanopynix.exceptions import NixError
-from nanopynix.rpc import ReplSession, ValueProxy
+from nanopynix.models import NixType
+from nanopynix.rpc import ReplSession, Store, ValueProxy
+from nanopynix.settings import NixFlakeSettings
+from nanopynix.verbosity import LogLevelInput, normalize_log_level
 from pynix import Pynix
 
 if TYPE_CHECKING:
@@ -83,61 +93,77 @@ def test_repl_history_uses_xdg_state_home(monkeypatch: Any, tmp_path: Path) -> N
     assert list(_repl_history().load_history_strings()) == ["pkgs.hello"]
 
 
+# Every double below subclasses the real class it stands in for, so that
+# beartype's isinstance checks on annotated parameters accept it. That makes
+# each one a genuine subtype rather than a lookalike, which is why the
+# signatures match exactly -- including the `timeout` keyword they all accept
+# and ignore, having no RPC to time out.
 class _Value(ValueProxy):
     def __init__(self) -> None:
         pass
 
-    async def to_python(self) -> object:
+    async def to_python(self, *, copy_to_store: bool = False, timeout: float | None = None) -> Any:
         return {"answer": 42}
 
 
-class _RunValue:
+class _RunValue(ValueProxy):
     def __init__(self, attrs: dict[str, object], outputs: dict[str, str]) -> None:
         self._attrs = attrs
         self._outputs = outputs
 
-    async def has_attr(self, name: str) -> bool:
+    async def has_attr(self, name: str, *, timeout: float | None = None) -> bool:
         return name in self._attrs
 
-    def attr(self, name: str) -> _RunValue:
+    def attr(self, name: str, *, timeout: float | None = None) -> _RunValue:
         value = self._attrs[name]
         return value if isinstance(value, _RunValue) else _RunValue({"value": value}, {})
 
-    async def to_python(self) -> object:
+    async def to_python(self, *, copy_to_store: bool = False, timeout: float | None = None) -> Any:
         return self._attrs["value"]
 
-    async def build(self) -> dict[str, str]:
+    async def build(
+        self,
+        *,
+        build_mode: BuildMode | int | None = None,
+        store: Store | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, str]:
         return self._outputs
 
 
-class _CommandValue:
+class _CommandValue(ValueProxy):
     def __init__(self, *, argv: list[str] | None = None, command: str | None = None) -> None:
         self._argv = argv
         self._command = command
 
-    async def realise_argv(self) -> list[str]:
+    async def realise_argv(self, *, timeout: float | None = None) -> list[str]:
         if self._argv is None:
             raise AssertionError("unexpected :exec value")
         return self._argv
 
-    async def realise_string(self) -> str:
+    async def realise_string(self, *, timeout: float | None = None) -> str:
         if self._command is None:
             raise AssertionError("unexpected :shell value")
         return self._command
 
 
-class _EditValue:
-    async def edit_location(self) -> tuple[str, int]:
+class _EditValue(ValueProxy):
+    def __init__(self) -> None:
+        pass
+
+    async def edit_location(self, *, timeout: float | None = None) -> tuple[str, int]:
         return "/tmp/source.nix", 42
 
 
-class _TypeStub:
-    name = "INT"
+class _TypedValue(ValueProxy):
+    def __init__(self) -> None:
+        pass
 
-
-class _TypedValue:
-    async def get_type(self) -> _TypeStub:
-        return _TypeStub()
+    # Returns the real NixType rather than a stub with a `.name` attribute:
+    # subclassing ValueProxy means honouring its return type, and the code
+    # under test only reads `.name`, which the enum member already has.
+    async def get_type(self, *, timeout: float | None = None) -> NixType:
+        return NixType.INT
 
 
 class _Repl(ReplSession):
@@ -150,46 +176,61 @@ class _Repl(ReplSession):
         self.verbosity = LogLevel.NOTICE
         self.raise_on_line: str | None = None
 
-    async def line(self, text: str) -> _Value | None:
+    async def line(self, text: str, path: str = "<string>", *, timeout: float | None = None) -> _Value | None:
         if text == self.raise_on_line:
             raise NixError("ThrownError", "boom failed")
         self.lines.append(text)
         return None if text == "answer = 42" else _Value()
 
-    async def load_file(self, path: str) -> _Value:
+    async def load_file(self, path: str, *, timeout: float | None = None) -> _Value:
         self.loaded_files.append(path)
         return _Value()
 
-    async def eval_flake(self, ref: str) -> _Value:
+    async def eval_flake(
+        self,
+        ref: str,
+        *,
+        write_lock_file: bool = True,
+        flake_settings: NixFlakeSettings | None = None,
+        timeout: float | None = None,
+    ) -> _Value:
         self.loaded_flakes.append(ref)
         return _Value()
 
-    async def add_attrs(self, _value: object) -> list[str]:
+    async def add_attrs(self, value: ValueProxy, *, timeout: float | None = None) -> list[str]:
         return ["answer"]
 
-    async def reset_file_cache(self) -> None:
+    async def reset_file_cache(self, *, timeout: float | None = None) -> None:
         self.file_cache_resets += 1
 
     async def get_verbosity(self) -> LogLevel:
         return self.verbosity
 
-    async def set_verbosity(self, verbosity: LogLevel) -> LogLevel:
-        self.verbosity = verbosity
-        return verbosity
+    # LogLevelInput, not LogLevel: a parameter type may only widen in an
+    # override, and the real session accepts the whole input union.
+    async def set_verbosity(self, verbosity: LogLevelInput) -> LogLevel:
+        self.verbosity = normalize_log_level(verbosity)
+        return self.verbosity
 
-    async def string(self, _expr: str) -> _Value | _RunValue | _CommandValue | _EditValue | _TypedValue:
+    async def string(
+        self,
+        expr: str,
+        path: str = "<string>",
+        *,
+        timeout: float | None = None,
+    ) -> _Value | _RunValue | _CommandValue | _EditValue | _TypedValue:
         return self.value
 
 
-class _CompletionValue:
+class _CompletionValue(ValueProxy):
     def __init__(self, names: list[str]) -> None:
         self._names = names
         self.released = False
 
-    async def attr_names(self) -> list[str]:
+    async def attr_names(self, *, timeout: float | None = None) -> list[str]:
         return self._names
 
-    async def release(self) -> None:
+    async def release(self, *, timeout: float | None = None) -> None:
         self.released = True
 
 
@@ -197,13 +238,19 @@ class _CompletionRepl(ReplSession):
     def __init__(self) -> None:
         self.value = _CompletionValue(["hello", "hello-unfree", "world"])
 
-    async def scope_names(self) -> list[str]:
+    async def scope_names(self, *, timeout: float | None = None) -> list[str]:
         return ["answer", "builtins", "pkgs"]
 
-    async def string(self, expression: str) -> _CompletionValue:
-        if expression == "badexpr":
+    async def string(
+        self,
+        expr: str,
+        path: str = "<string>",
+        *,
+        timeout: float | None = None,
+    ) -> _CompletionValue:
+        if expr == "badexpr":
             raise NixError("EvalError", "badexpr is undefined")
-        assert expression == "pkgs"
+        assert expr == "pkgs"
         return self.value
 
 

@@ -16,7 +16,7 @@ import os
 import threading
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, no_type_check
+from typing import TYPE_CHECKING, Any
 
 import anyio
 from nanopynix_bindings import expr as nanopynix_expr, store as nanopynix_store, util as nanopynix_util
@@ -27,7 +27,7 @@ from nanopynix._core._nix_core import build_mode_value
 from nanopynix._core._nix_executor import NIX_EVALUATOR_STACK_SIZE, NixThreadExecutor
 from nanopynix._core._objects import CoreEvalState, CoreLockedFlake, CoreRuntime, CoreStore, CoreValue
 from nanopynix._core._primops import register_import_path_primops, to_primop_specs
-from nanopynix._typechecking import BEARTYPING
+from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import (
     DEFAULT_CA_METHOD,
     DEFAULT_HASH_ALGO,
@@ -187,7 +187,7 @@ class Session:
     owns one separate Nix thread.
     """
 
-    @no_type_check  # nix_conf validates its own type at runtime for untyped
+    @no_runtime_type_check  # nix_conf validates its own type at runtime for untyped
     # callers (see the isinstance guard below); beartype's parameter check
     # would otherwise intercept before that guard runs and raise its own
     # exception type instead of the documented TypeError.
@@ -666,7 +666,7 @@ class Store:
         """Parse and return the ``.drv`` file at ``drv_path``."""
         return await self._session.run(self._require_core().read_derivation, str(drv_path))
 
-    @no_type_check  # action validates its own membership in the shared
+    @no_runtime_type_check  # action validates its own membership in the shared
     # CoreStore.collect_garbage's _RAW_GC_ACTIONS at runtime for untyped
     # callers; beartype's parameter check would otherwise intercept before
     # that guard runs and raise its own exception type instead of ValueError.

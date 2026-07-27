@@ -14,7 +14,7 @@ import enum
 import logging
 import threading
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import anyio
 import janus
@@ -212,6 +212,9 @@ class CallbackBus:
                 _logger.exception("log bus subscriber failed")
 
 
+# See EvalSettingsTarget in _core/_nix_core.py for why: without this beartype
+# skips `LogCapture.__init__` entirely rather than checking its one parameter.
+@runtime_checkable
 class LogEventBus(Protocol):
     """What a :class:`LogCapture` needs from whatever produces log events.
 

@@ -6,7 +6,7 @@ import json
 import os
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast, no_type_check
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import yaml
 from nanopynix_bindings import (
@@ -18,7 +18,7 @@ from nanopynix_bindings import (
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from nanopynix._typechecking import BEARTYPING
+from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Iterator, Mapping, Sequence
@@ -350,7 +350,7 @@ class NanopynixSettings(BaseSettings):
     line_editors: list[str] = Field(default_factory=lambda: list(DEFAULT_LINE_EDITORS))
 
 
-@no_type_check  # settings validates its own type at runtime for untyped
+@no_runtime_type_check  # settings validates its own type at runtime for untyped
 # callers (see the isinstance guards below); beartype's parameter check would
 # otherwise intercept before those guards run and raise its own exception
 # type instead of the documented TypeError.

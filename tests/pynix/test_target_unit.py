@@ -9,6 +9,12 @@ still worth pinning even though it's unreachable through the public
 validate()-first call path).
 """
 
+# ruff: noqa: ASYNC109
+# The doubles below subclass real ValueProxy/EvalSession/ReplSession
+# classes, whose async methods take a `timeout` keyword; an override has
+# to keep it. Same exemption, same reason as
+# nanopynix/rpc/client/_session.py, where the real signatures live.
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,23 +24,29 @@ import pytest
 from pynix.target import EvaluationTarget, EvaluationTargetError, evaluate_target, select_attr
 
 from nanopynix.rpc import EvalSession, ValueProxy
+from nanopynix.settings import NixFlakeSettings
 
 
+# These doubles subclass the real classes rather than duck-typing them, so
+# that beartype's `isinstance` checks on annotated parameters accept them.
+# Subclassing means their signatures have to *match*, hence the `timeout`
+# keyword each one accepts and ignores: a double that quietly dropped an
+# argument its caller passes would not be standing in for anything.
 class _FakeValue(ValueProxy):
     def __init__(self, attrs: dict[str, _FakeValue] | None = None, *, auto_called: bool = False) -> None:
         self._attrs = attrs or {}
         self.auto_called = auto_called
 
-    async def has_attr(self, name: str) -> bool:
+    async def has_attr(self, name: str, *, timeout: float | None = None) -> bool:
         return name in self._attrs
 
-    async def attr_names(self) -> list[str]:
+    async def attr_names(self, *, timeout: float | None = None) -> list[str]:
         return list(self._attrs)
 
-    def attr(self, name: str) -> _FakeValue:
+    def attr(self, name: str, *, timeout: float | None = None) -> _FakeValue:
         return self._attrs[name]
 
-    async def auto_call(self) -> _FakeValue:
+    async def auto_call(self, *, timeout: float | None = None) -> _FakeValue:
         return _FakeValue(self._attrs, auto_called=True)
 
 
@@ -42,12 +54,19 @@ class _FakeSession(EvalSession):
     def __init__(self, file_value: _FakeValue | None = None) -> None:
         self._file_value = file_value
 
-    async def file(self, _path: str) -> _FakeValue:
+    async def file(self, path: str, *, timeout: float | None = None) -> _FakeValue:
         if self._file_value is None:
             raise AssertionError("file() not expected")
         return self._file_value
 
-    async def eval_flake(self, _ref: str) -> _FakeValue:
+    async def eval_flake(
+        self,
+        ref: str,
+        *,
+        write_lock_file: bool = True,
+        flake_settings: NixFlakeSettings | None = None,
+        timeout: float | None = None,
+    ) -> _FakeValue:
         raise AssertionError("eval_flake() not expected")
 
 

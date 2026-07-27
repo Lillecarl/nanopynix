@@ -114,7 +114,7 @@ class _FakeStore(nanopynix_store.Store):
     # with_params mirrors the real binding, which declares it keyword-capable
     # ("with_params"_a): CoreStore.get_uri forwards it by name, so a fake that
     # takes no argument no longer stands in for one.
-    def get_uri(self, *, with_params: bool = False) -> str:
+    def get_uri(self, with_params: bool = False) -> str:  # positional-or-keyword, as the binding declares it
         _ = with_params
         return "local"
 
@@ -158,7 +158,7 @@ def test_worker_title_lists_open_store_uris(monkeypatch: pytest.MonkeyPatch) -> 
         def __init__(self, uri: str) -> None:
             self.uri = uri
 
-        def get_uri(self, *, with_params: bool = False) -> str:
+        def get_uri(self, with_params: bool = False) -> str:  # positional-or-keyword, as the binding declares it
             _ = with_params
             return self.uri
 

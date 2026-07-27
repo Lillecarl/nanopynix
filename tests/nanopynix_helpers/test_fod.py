@@ -1,6 +1,14 @@
 """Tests for fixed-output derivation source updates."""
 
+# ruff: noqa: ASYNC109
+# The doubles below subclass real ValueProxy/EvalSession/ReplSession
+# classes, whose async methods take a `timeout` keyword; an override has
+# to keep it. Same exemption, same reason as
+# nanopynix/rpc/client/_session.py, where the real signatures live.
+
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 from nanopynix_helpers.fod import (
@@ -157,24 +165,28 @@ def test_derivation_name_from_path_handles_missing_and_malformed_paths() -> None
     assert derivation_name_from_path("/nix/store/abc123hash-real-name.drv") == "real-name"
 
 
-class _FakeForcedValue:
+# Both doubles subclass ValueProxy rather than duck-typing it, so beartype's
+# isinstance checks on annotated parameters accept them -- which also means
+# their signatures have to match the base's, hence the keyword arguments each
+# one accepts and ignores.
+class _FakeForcedValue(ValueProxy):
     def __init__(self, value: object) -> None:
         self._value = value
 
-    async def to_python(self) -> object:
+    async def to_python(self, *, copy_to_store: bool = False, timeout: float | None = None) -> Any:
         return self._value
 
 
 class _FakeEvalValue(ValueProxy):
-    """Duck-types the subset of ValueProxy that evaluated_derivation_path needs."""
+    """The subset of ValueProxy that evaluated_derivation_path needs."""
 
     def __init__(self, attrs: dict[str, object] | None = None) -> None:
         self._attrs = attrs or {}
 
-    async def has_attr(self, name: str) -> bool:
+    async def has_attr(self, name: str, *, timeout: float | None = None) -> bool:
         return name in self._attrs
 
-    def attr(self, name: str) -> _FakeForcedValue:
+    def attr(self, name: str, *, timeout: float | None = None) -> _FakeForcedValue:
         return _FakeForcedValue(self._attrs[name])
 
 
