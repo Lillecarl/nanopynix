@@ -6,8 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from clypi import arg
-from nanopynix_helpers import EvaluationTargetError as EvaluationTargetError
-from nanopynix_helpers import select_attr as select_attr
+from nanopynix_helpers import EvaluationTargetError as EvaluationTargetError, select_attr as select_attr
 
 if TYPE_CHECKING:
     from pathlib import Path

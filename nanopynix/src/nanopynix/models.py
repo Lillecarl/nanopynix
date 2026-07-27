@@ -19,77 +19,29 @@ from typing import Any
 from nanopynix_proto.nix.common import (
     # Types with extension subclasses — imported as private for subclassing
     BuildResult as BuildResult,
-)
-from nanopynix_proto.nix.common import (
     CallArg as CallArg,
-)
-from nanopynix_proto.nix.common import (
     CallArgAttrs as CallArgAttrs,
-)
-from nanopynix_proto.nix.common import (
     CallArgList as CallArgList,
-)
-from nanopynix_proto.nix.common import (
     DeepAttrs as DeepAttrs,
-)
-from nanopynix_proto.nix.common import (
     DeepList as DeepList,
-)
-from nanopynix_proto.nix.common import (
     DeepValue as DeepValue,
-)
-from nanopynix_proto.nix.common import (
     Derivation as Derivation,
-)
-from nanopynix_proto.nix.common import (
     DerivationOutput as DerivationOutput,
-)
-from nanopynix_proto.nix.common import (
     DerivationOutputs as DerivationOutputs,
-)
-from nanopynix_proto.nix.common import (
     FlakeRef as FlakeRef,
-)
-from nanopynix_proto.nix.common import (
     Input as Input,
-)
-from nanopynix_proto.nix.common import (
     LockedFlake as LockedFlake,
-)
-from nanopynix_proto.nix.common import (
     LockedInput as LockedInput,
-)
-from nanopynix_proto.nix.common import (
     LogEvent as _LogEventProto,
-)
-from nanopynix_proto.nix.common import (
     MissingInfo as MissingInfo,
-)
-from nanopynix_proto.nix.common import (
     NixLogEvent as NixLogEvent,
-)
-from nanopynix_proto.nix.common import (
     NixType as NixType,
-)
-from nanopynix_proto.nix.common import (
     NullValue as NullValue,
-)
-from nanopynix_proto.nix.common import (
     PathInfo as PathInfo,
-)
-from nanopynix_proto.nix.common import (
     PrimOpSpec as PrimOpSpec,
-)
-from nanopynix_proto.nix.common import (
     RemoteCallArg as RemoteCallArg,
-)
-from nanopynix_proto.nix.common import (
     ResultType as ResultType,
-)
-from nanopynix_proto.nix.common import (
     ScalarValue as ScalarValue,
-)
-from nanopynix_proto.nix.common import (
     ValueHandle as ValueHandle,
 )
 from nanopynix_proto.nix.store import (

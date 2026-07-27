@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from nanopynix_bindings import expr as nanopynix_expr
-from nanopynix_bindings import store as nanopynix_store
-from nanopynix_bindings import util as nanopynix_util
+from nanopynix_bindings import expr as nanopynix_expr, store as nanopynix_store, util as nanopynix_util
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence

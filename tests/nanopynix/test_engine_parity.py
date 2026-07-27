@@ -43,9 +43,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from nanopynix import inproc
-from nanopynix.rpc.client import _session as rpc_private
-from nanopynix.rpc.client import session as rpc_session
-from nanopynix.rpc.client import store as rpc_store
+from nanopynix.rpc.client import _session as rpc_private, session as rpc_session, store as rpc_store
 
 # Every rpc call can outlive its worker -- the process can die, or wedge, with
 # the caller holding a socket. An in-process call has no such failure mode, so

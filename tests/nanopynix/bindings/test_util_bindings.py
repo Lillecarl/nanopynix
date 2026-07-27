@@ -5,8 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from nanopynix_bindings import store as nanopynix_store
-from nanopynix_bindings import util as nanopynix_util
+from nanopynix_bindings import store as nanopynix_store, util as nanopynix_util
 
 import nanopynix
 

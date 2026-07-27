@@ -22,6 +22,7 @@ ignorelist = ["eval"]
 ] # tests intentionally inspect private implementation state
 
 [lint.isort]
+combine-as-imports = true
 known-first-party = [
   "nanopynix",
   "nanopynix_expr",

@@ -8,9 +8,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from nanopynix_bindings import fetchers as nanopynix_fetchers  # L1 Input
-from nanopynix_bindings import flake as nanopynix_flake  # L1 FlakeRef, LockedFlake, parse_flake_ref
-from nanopynix_bindings import store as nanopynix_store  # L1 StorePath, Store, PathInfo, BuildResult, MissingInfo
+from nanopynix_bindings import (
+    fetchers as nanopynix_fetchers,  # L1 Input
+    flake as nanopynix_flake,  # L1 FlakeRef, LockedFlake, parse_flake_ref
+    store as nanopynix_store,  # L1 StorePath, Store, PathInfo, BuildResult, MissingInfo
+)
 
 from nanopynix._core._extract import (
     _attrs_map,  # pyright: ignore[reportPrivateUsage]

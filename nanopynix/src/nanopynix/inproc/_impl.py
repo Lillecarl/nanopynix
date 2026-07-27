@@ -19,9 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import anyio
-from nanopynix_bindings import expr as nanopynix_expr
-from nanopynix_bindings import store as nanopynix_store
-from nanopynix_bindings import util as nanopynix_util
+from nanopynix_bindings import expr as nanopynix_expr, store as nanopynix_store, util as nanopynix_util
 from nanopynix_proto.nix.common import LogLevel, RequestFinalized
 
 from nanopynix._core._extract import locked_flake as _locked_flake_proto

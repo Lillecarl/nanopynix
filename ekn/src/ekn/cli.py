@@ -44,9 +44,12 @@ from ekn.git import (
     rollback_branches,
     try_jj_status,
 )
-from ekn.gitops import GitOpsTargetError, flatten_manifests
-from ekn.gitops import branches as gitops_branches
-from ekn.gitops import file_groups as gitops_file_groups
+from ekn.gitops import (
+    GitOpsTargetError,
+    branches as gitops_branches,
+    file_groups as gitops_file_groups,
+    flatten_manifests,
+)
 from ekn.sops import ensure_age_identities, maybe_decrypt
 from ekn.validation import EphemeralControlPlane, exec_capture, prepare_validation_objects
 from nanopynix import NixError

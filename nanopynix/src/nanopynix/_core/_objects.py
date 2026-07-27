@@ -22,9 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from nanopynix_bindings import expr as nanopynix_expr
-from nanopynix_bindings import flake as nanopynix_flake
-from nanopynix_bindings import store as nanopynix_store
+from nanopynix_bindings import expr as nanopynix_expr, flake as nanopynix_flake, store as nanopynix_store
 from nanopynix_proto.nix.store import GcAction, StoreDirs
 
 from nanopynix._core._extract import flake_ref_attrs

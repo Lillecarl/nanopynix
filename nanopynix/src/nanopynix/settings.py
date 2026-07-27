@@ -9,10 +9,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import yaml
-from nanopynix_bindings import expr as nanopynix_expr
-from nanopynix_bindings import fetchers as nanopynix_fetchers
-from nanopynix_bindings import flake as nanopynix_flake
-from nanopynix_bindings import util as nanopynix_util
+from nanopynix_bindings import (
+    expr as nanopynix_expr,
+    fetchers as nanopynix_fetchers,
+    flake as nanopynix_flake,
+    util as nanopynix_util,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
