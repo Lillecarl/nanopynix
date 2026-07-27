@@ -16,10 +16,30 @@
 namespace nb = nanobind;
 
 /**
+ * Which operations a Python store implements, resolved once at open time.
+ *
+ * Mirrors `nanopynix.store_impl.DISPATCHABLE_METHODS`; the two must be kept in
+ * step, and adding a name there means nothing until this file grows a call site
+ * for it.
+ */
+struct PyStoreMethods {
+    bool is_valid_path_uncached = false;
+    bool query_path_info = false;
+    bool query_path_from_hash_part = false;
+
+    /** Throws `nix::Error` if `py_store` is not a `nanopynix.StoreImpl`. */
+    static PyStoreMethods resolve(const nb::object & py_store);
+};
+
+/**
  * C++ trampoline that delegates Store virtual methods to a Python object.
  *
- * Every method checks whether the Python object has a corresponding method;
- * if so, calls it. Otherwise falls back to a sensible C++ default.
+ * An operation the Python store implements is dispatched to it. Anything else
+ * falls through to `underlying` when one is set, and otherwise to
+ * `nix::Store`'s own behaviour -- which is why this class overrides far fewer
+ * virtuals than it once did. Overriding a query in order to answer it with a
+ * guess is worse than not overriding it: `nix::Store` derives most answers from
+ * `queryPathInfo`, which routes straight back into the Python store.
  */
 struct PyStoreImpl : public nix::Store {
     /**
@@ -35,6 +55,7 @@ struct PyStoreImpl : public nix::Store {
      */
     nix::ref<const nix::StoreConfig> owned_config;
     nb::object py_store;
+    PyStoreMethods methods;
     std::shared_ptr<nix::Store> underlying;  // optional fallthrough store
 
     PyStoreImpl(nix::ref<const nix::StoreConfig> config, nb::object py_store,
@@ -91,8 +112,11 @@ struct PyStoreImpl : public nix::Store {
 
     // --- optionally overridable ---
     void narFromPath(const nix::StorePath & path, nix::Sink & sink) override;
-    nix::StorePathSet queryAllValidPaths() override;
     void queryReferrers(const nix::StorePath & path, nix::StorePathSet & referrers) override;
+    // These three delegate to `underlying` and otherwise defer to nix::Store.
+    // They are overridden *only* for the delegation: each used to invent an
+    // answer instead, and each invented answer was wrong. See the .cpp.
+    nix::StorePathSet queryAllValidPaths() override;
     nix::StorePathSet querySubstitutablePaths(const nix::StorePathSet & paths) override;
     nix::StorePathSet queryValidPaths(const nix::StorePathSet & paths, nix::SubstituteFlag maybeSubstitute) override;
     std::optional<std::string> getVersion() override;

@@ -24,8 +24,36 @@
 
 namespace nb = nanobind;
 
-static bool py_has_method(nb::object obj, const char *method) {
-    return nb::hasattr(obj, method) && nb::isinstance<nb::callable>(obj.attr(method));
+// The attribute `nanopynix.store_impl.StoreImpl.__init_subclass__` writes, and
+// the only thing this file knows about the Python class hierarchy. Reading one
+// well-known name keeps the dependency one-way: the bindings never import
+// `nanopynix`.
+static constexpr const char *OVERRIDES_ATTRIBUTE = "_nanopynix_store_overrides";
+
+// Which operations the Python store actually implements.
+//
+// This used to be a per-call `hasattr` probe, which could not tell an
+// implementation from a typo: misspell `query_path_info` and the store silently
+// answered from the fallback instead of raising. `StoreImpl` records what a
+// subclass really replaced, so the answer is exact -- and it is resolved once
+// here rather than costing two attribute lookups under the GIL on every single
+// store operation.
+PyStoreMethods PyStoreMethods::resolve(const nb::object &py_store) {
+    if (!nb::hasattr(py_store, OVERRIDES_ATTRIBUTE))
+        throw nb::type_error(
+            ("a Python store must subclass nanopynix.StoreImpl; open_store() returned an "
+             "instance of '" + std::string(Py_TYPE(py_store.ptr())->tp_name) + "', which does not")
+                .c_str());
+
+    auto overrides = py_store.attr(OVERRIDES_ATTRIBUTE);
+    auto implements = [&](const char *name) {
+        return nb::cast<bool>(overrides.attr("__contains__")(nb::str(name)));
+    };
+    return PyStoreMethods{
+        .is_valid_path_uncached = implements("is_valid_path_uncached"),
+        .query_path_info = implements("query_path_info"),
+        .query_path_from_hash_part = implements("query_path_from_hash_part"),
+    };
 }
 
 // A dict entry that is present and not None.
@@ -64,7 +92,8 @@ PyStoreImpl::PyStoreImpl(nix::ref<const nix::StoreConfig> config, nb::object py_
                          std::shared_ptr<nix::Store> underlying)
     : Store(*config)
     , owned_config(config)
-    , py_store(std::move(py_store))
+    , py_store(py_store)
+    , methods(PyStoreMethods::resolve(py_store))
     , underlying(std::move(underlying))
 {
     clearPathInfoCache();
@@ -77,7 +106,7 @@ void PyStoreImpl::anchor() {}
 
 bool PyStoreImpl::isValidPathUncached(const nix::StorePath & path) {
     nb::gil_scoped_acquire gil;
-    if (py_has_method(py_store, "is_valid_path_uncached"))
+    if (methods.is_valid_path_uncached)
         return nb::cast<bool>(py_store.attr("is_valid_path_uncached")(
             nb::str(std::string(path.to_string()).c_str())));
     if (underlying) return underlying->isValidPath(path);
@@ -98,7 +127,7 @@ void PyStoreImpl::queryPathInfoUncached(
     // answer as though it were its own.
     try {
         nb::gil_scoped_acquire gil;
-        if (py_has_method(py_store, "query_path_info")) {
+        if (methods.query_path_info) {
             auto result = py_store.attr("query_path_info")(
                 nb::str(std::string(path.to_string()).c_str()));
             if (result.is_none()) { callback(nullptr); return; }
@@ -166,7 +195,7 @@ void PyStoreImpl::queryRealisationUncached(
 
 std::optional<nix::StorePath> PyStoreImpl::queryPathFromHashPart(const std::string & hashPart) {
     nb::gil_scoped_acquire gil;
-    if (py_has_method(py_store, "query_path_from_hash_part")) {
+    if (methods.query_path_from_hash_part) {
         auto result = py_store.attr("query_path_from_hash_part")(nb::str(hashPart.c_str()));
         // Same two accepted spellings as the path fields of query_path_info.
         if (!result.is_none()) return store_path_from_py(*this, nb::borrow<nb::object>(result));
@@ -216,23 +245,38 @@ void PyStoreImpl::narFromPath(const nix::StorePath & path, nix::Sink & sink) {
     unsupported("narFromPath");
 }
 
-nix::StorePathSet PyStoreImpl::queryAllValidPaths() {
-    if (underlying) return underlying->queryAllValidPaths();
-    return {};
-}
-
 void PyStoreImpl::queryReferrers(const nix::StorePath & path, nix::StorePathSet & referrers) {
     if (underlying) { underlying->queryReferrers(path, referrers); return; }
 }
 
+// The three below exist only to delegate to `underlying`. Each used to invent
+// an answer when there was no underlying store, and each invented answer was
+// wrong; deferring to `nix::Store` is both correct and less code. They cannot
+// simply be deleted, because deleting them would drop the delegation too --
+// `nix::Store` knows nothing about `underlying`.
+
+nix::StorePathSet PyStoreImpl::queryAllValidPaths() {
+    if (underlying) return underlying->queryAllValidPaths();
+    // Was `{}`, i.e. "this store is empty" -- indistinguishable to a caller
+    // from a store that really is empty. The base reports `unsupported`, which
+    // is the honest answer for a store with no way to enumerate itself.
+    return nix::Store::queryAllValidPaths();
+}
+
 nix::StorePathSet PyStoreImpl::querySubstitutablePaths(const nix::StorePathSet & paths) {
     if (underlying) return underlying->querySubstitutablePaths(paths);
-    return paths;
+    // Was `paths`, i.e. "everything you asked about has a substitute" -- so a
+    // store reporting nothing valid still reported every path substitutable.
+    // The base consults this store's substituters (2.34+) or returns {} (2.31).
+    return nix::Store::querySubstitutablePaths(paths);
 }
 
 nix::StorePathSet PyStoreImpl::queryValidPaths(const nix::StorePathSet & paths, nix::SubstituteFlag f) {
     if (underlying) return underlying->queryValidPaths(paths, f);
-    return paths;
+    // Was `paths`, i.e. "every path you asked about is already valid". The base
+    // filters by calling queryPathInfo per path, which dispatches back into the
+    // Python store -- the answer it should have been giving all along.
+    return nix::Store::queryValidPaths(paths, f);
 }
 
 std::optional<std::string> PyStoreImpl::getVersion() {
