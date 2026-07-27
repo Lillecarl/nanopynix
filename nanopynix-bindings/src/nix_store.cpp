@@ -217,6 +217,20 @@ static nb::list compute_fs_closure(nix::Store &s, const nix::StorePath &path,
 
 // --- MissingInfo ---
 
+// The inbound half of the DerivedPath boundary: what a caller-supplied store
+// path with no ^ selector means. `build_result_util.hh`'s `derived_path_parts`
+// is the outbound half, and the two are inverses -- a bare `.drv` becomes
+// Built{All} and comes back as (`.drv`, `["*"]`), which re-parses to Built{All}
+// again, so the round trip is a fixed point rather than two rules that can
+// disagree. `tests/nanopynix/test_store_engine_parity_semantics.py` pins that.
+//
+// This is byte-for-byte `StorePathWithOutputs::toDerivedPath()`
+// (`path-with-outputs.cc:15-31`) and is deliberately *not* routed through it:
+// that type's own header calls it "a deprecated old type just for use by the
+// old CLI [...] In new code don't use it; you want `DerivedPath` instead"
+// (`path-with-outputs.hh:11-17`, identical on 2.31, 2.34 and 2.35). Reusing it
+// would trade ten lines of duplication for a dependency Nix tells new code not
+// to take, and would mean materialising a `StringSet` we do not have.
 static nix::DerivedPath derived_path_for_build_input(const nix::StorePath &path) {
     if (path.isDerivation()) {
         return nix::DerivedPath::Built{

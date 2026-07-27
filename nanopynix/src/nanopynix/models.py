@@ -89,6 +89,68 @@ class StorePath(str):
         return self.name.endswith(".drv")
 
 
+class DerivedPath(str):
+    """A derived-path string in Nix's ``^`` notation, with its parts named.
+
+    Nix's ``DerivedPath`` is a sum type and this string is its serialization:
+    ``<drv>^out``, ``<drv>^*``, or a bare store path. Every nanopynix entry
+    point that builds or queries something accepts this spelling -- ``build``,
+    ``build_paths_with_results``, ``query_missing`` -- so this is a name for
+    syntax the API already takes, not a new concept.
+
+    It splits and nothing more. In particular it does not decide what a string
+    with *no* selector means, which is why :attr:`outputs` reports ``None``
+    rather than ``[]`` for that case::
+
+        DerivedPath("/nix/store/h-x.drv").outputs      # None -- nothing selected
+        DerivedPath("/nix/store/h-x.drv^*").outputs    # ["*"] -- every output
+        DerivedPath("/nix/store/h-x.drv^dev,out").outputs  # ["dev", "out"]
+
+    The distinction matters because a bare ``.drv`` is *not* an opaque fetch to
+    nanopynix: the worker reads it as "build every output"
+    (``nix_store.cpp``'s ``derived_path_for_build_input``), while a bare
+    non-derivation path is opaque. That interpretation needs Nix's store
+    config, so it lives in the worker and deliberately is not duplicated here;
+    ``None`` says "the string did not say" instead of guessing. It is also
+    what keeps this readable next to :attr:`BuildResult.outputs`, where ``[]``
+    is a real answer meaning ``DerivedPath::Opaque``.
+    """
+
+    __slots__ = ()
+
+    SEPARATOR = "^"
+
+    def __new__(cls, value: str) -> DerivedPath:
+        if isinstance(value, cls):
+            return value
+        return super().__new__(cls, value)
+
+    @property
+    def drv_path(self) -> StorePath:
+        """The store path before the selector, or the whole string if there is none.
+
+        Splits on the *last* ``^``, as Nix's own ``parseWith``
+        (``derived-path.cc``) does. With ``dynamic-derivations`` that leaves a
+        head which is itself derived (``a.drv^out^bin`` → ``a.drv^out``) and so
+        is not a store path; Nix has the same shape there, and reporting the
+        head verbatim is the only answer that does not lose it.
+        """
+        return StorePath(self.rpartition(self.SEPARATOR)[0] or self)
+
+    @property
+    def outputs(self) -> list[str] | None:
+        """The selected outputs, or ``None`` when the string carries no selector.
+
+        ``["*"]`` for ``^*``. Names are returned in the order written, not
+        sorted -- Nix canonicalises them, and reordering here would hide
+        whether a round trip actually reached ``DerivedPath::parse``.
+        """
+        head, separator, tail = self.rpartition(self.SEPARATOR)
+        if not separator or not head:
+            return None
+        return tail.split(",") if tail else []
+
+
 @dataclass(frozen=True)
 class GcResult:
     """Result of a garbage collection operation."""

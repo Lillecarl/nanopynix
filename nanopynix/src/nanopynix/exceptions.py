@@ -271,7 +271,11 @@ class BuildError(StoreError):
         status: Nix's own failure-status string (e.g. ``"hash-mismatch"``),
             verbatim from ``BuildResult.status``. Authoritative; prefer it over
             parsing :attr:`msg`.
-        drv_path: the derivation that failed, when Nix reported one.
+        drv_path: the derivation that failed, when Nix reported one -- a store
+            path. It used to be the ``^`` DerivedPath spelling Nix keys build
+            results by, so a bare ``.drv`` arrived here as ``<drv>^*``, which
+            no store-path accessor could read; ``BuildResult`` now carries the
+            selector in its own field instead.
     """
 
     def __init__(  # noqa: PLR0913 -- mirrors NixError.__init__ plus the two build-specific fields; all keyword-only

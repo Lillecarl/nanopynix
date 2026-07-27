@@ -68,10 +68,18 @@ message PathInfo {
 }
 
 message BuildResult {
+  // The derivation, as a store path -- not the `^` DerivedPath spelling this
+  // used to carry. The one exception is a dynamic derivation, where Nix's own
+  // serialization of a derivation that must itself be built is `<drv>^<out>`.
   string drv_path = 1;
   bool success = 2;
   string status = 3;
   string error_msg = 4;
+  // Which outputs the request selected: empty = a DerivedPath::Opaque ("fetch
+  // this path"), ["*"] = every output, otherwise the named ones in Nix's
+  // sorted order. Empty and ["*"] are different requests, which is why this is
+  // a field rather than something a caller re-derives from drv_path.
+  repeated string outputs = 5;
 }
 
 message BuildResultList {

@@ -99,17 +99,21 @@ async def _query_missing(store: Any, suffix: str) -> dict[str, list[str]]:
     }
 
 
-async def _build_paths_with_results(store: Any, suffix: str) -> list[tuple[str, str]]:
-    """Project to the echoed drv_path and status, dropping error_msg.
+async def _build_paths_with_results(store: Any, suffix: str) -> list[tuple[str, list[str], str]]:
+    """Project to the echoed drv_path, outputs and status, dropping error_msg.
 
-    The echoed ``drv_path`` is the load-bearing part: Nix hands back the
-    *canonical* DerivedPath, so a bare ``.drv`` comes back as ``drv^*`` and
-    ``^out,dev`` comes back sorted as ``^dev,out``. That round trip is only
-    possible if the argument actually reached ``DerivedPath::parse``, which
-    makes it a far stronger witness than "it did not raise".
+    The echoed derived path is the load-bearing part: Nix hands back the
+    *canonical* DerivedPath, so a bare ``.drv`` comes back selecting every
+    output and ``^out,dev`` comes back sorted as ``dev, out``. That round trip
+    is only possible if the argument actually reached ``DerivedPath::parse``,
+    which makes it a far stronger witness than "it did not raise".
+
+    It used to be observed as a ``^`` suffix on ``drv_path``, because that is
+    what the field carried. It now carries a store path and ``outputs`` carries
+    the selector, so the same evidence is read from the field that means it.
     """
     results = await store.build_paths_with_results([await _drv_argument(store, suffix)])
-    return [(str(r.drv_path), str(r.status)) for r in results]
+    return [(str(r.drv_path), [str(o) for o in r.outputs], str(r.status)) for r in results]
 
 
 def _hash_part(seeded: StorePath) -> str:
@@ -469,22 +473,52 @@ async def test_the_selector_actually_reaches_nix(
 ) -> None:
     """Different selectors must produce different results, or the projection is blind.
 
-    ``_build_paths_with_results`` keeps only ``drv_path`` and ``status``. If a
-    future change made that projection constant -- or made Nix echo the input
-    back unparsed -- every selector case would still compare equal across the
-    engines and the parametrization would be decorative. Nix canonicalises, so
-    a bare ``.drv`` returns ``^*`` and ``^out,dev`` returns ``^dev,out``;
-    observing that reordering is what proves the string went through
-    ``DerivedPath::parse`` rather than being passed along verbatim.
+    ``_build_paths_with_results`` keeps only ``drv_path``, ``outputs`` and
+    ``status``. If a future change made that projection constant -- or made Nix
+    echo the input back unparsed -- every selector case would still compare
+    equal across the engines and the parametrization would be decorative. Nix
+    canonicalises, so a bare ``.drv`` selects every output and ``^out,dev``
+    comes back sorted as ``dev, out``; observing that reordering is what proves
+    the string went through ``DerivedPath::parse`` rather than being passed
+    along verbatim.
     """
     async with inproc_session() as session, session.store() as store:
         outcomes = {suffix: await _build_paths_with_results(store, suffix) for suffix in DERIVED_PATH_SUFFIXES}
 
-    assert outcomes["^out,dev"][0][0].endswith("^dev,out"), (
+    assert outcomes["^out,dev"][0][1] == ["dev", "out"], (
         f"expected Nix to canonicalise ^out,dev, got {outcomes['^out,dev']!r}"
     )
-    assert outcomes[""][0][0].endswith("^*"), f"expected a bare .drv to canonicalise to ^*, got {outcomes['']!r}"
+    assert outcomes[""][0][1] == ["*"], f"expected a bare .drv to select every output, got {outcomes['']!r}"
     assert outcomes["^out"] != outcomes["^out,dev"], "the projection cannot tell two selectors apart"
+    # The field is now what its name says. Before this change it was the `^`
+    # DerivedPath spelling, which no store-path accessor could read.
+    for suffix, results in outcomes.items():
+        assert results[0][0].endswith(".drv"), f"{suffix or 'no selector'}: drv_path is not a store path: {results!r}"
+
+
+async def test_a_bare_drv_round_trips_through_its_own_reply(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    """Feeding a reply's ``drv_path`` back in must ask for the same build.
+
+    Inbound (``derived_path_for_build_input``) and outbound
+    (``derived_path_parts``) are the two halves of the same boundary, in a
+    C++ header and a C++ source file with nothing tying them together. This is
+    the property that makes them inverses: a bare ``.drv`` is read as "build
+    every output" and reported as ``outputs == ["*"]``, and sending the
+    reported ``drv_path`` -- which is bare again -- must land on that same
+    request rather than on an opaque fetch. Two rules that could disagree
+    instead compose into a fixed point.
+    """
+    async with inproc_session() as session, session.store() as store:
+        first = await _build_paths_with_results(store, "")
+        second = [
+            (str(r.drv_path), [str(o) for o in r.outputs], str(r.status))
+            for r in await store.build_paths_with_results([first[0][0]])
+        ]
+
+    assert first[0][1] == ["*"]
+    assert second == first
 
 
 def test_the_malformed_table_covers_the_paths_that_used_to_diverge() -> None:

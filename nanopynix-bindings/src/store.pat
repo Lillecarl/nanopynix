@@ -30,7 +30,10 @@ nanopynix_bindings.store.__prefix__:
         nar_size: int
 
     class BuildResult(TypedDict):
+        # `drv_path` is a store path; `outputs` says what was asked of it --
+        # [] for an opaque fetch, ["*"] for every output, else named outputs.
         drv_path: str
+        outputs: list[str]
         success: bool
         status: str
         error_msg: str
