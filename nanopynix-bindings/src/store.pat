@@ -20,6 +20,7 @@ nanopynix_bindings.store.__prefix__:
         deriver: str | None
         ca: str | None
         ultimate: bool
+        sigs: list[str]
 
     class MissingPaths(TypedDict):
         will_build: list[str]
@@ -46,8 +47,12 @@ nanopynix_bindings.store.__prefix__:
         hash_algo: NotRequired[str]
 
     class DerivationOutputs(TypedDict):
+        # `dynamic_outputs` is a *tree*: Nix's DerivedPathMap nests one level
+        # per level of dynamic derivation, so a child is another whole node and
+        # not just an output name. Spelled recursively as a string annotation
+        # because a TypedDict cannot refer to itself by name before it is bound.
         outputs: list[str]
-        dynamic_outputs: dict[str, str]
+        dynamic_outputs: dict[str, "DerivationOutputs"]
 
     class Derivation(TypedDict):
         name: str
@@ -58,6 +63,9 @@ nanopynix_bindings.store.__prefix__:
         builder: str
         args: list[str]
         env: dict[str, str]
+        # Nix's `__json` payload for a `__structuredAttrs = true` derivation.
+        # None otherwise. Never present in `env` -- Nix moves it out.
+        structured_attrs: str | None
 
     class GCResults(TypedDict):
         paths: list[str]

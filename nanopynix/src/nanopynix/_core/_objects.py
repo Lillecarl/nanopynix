@@ -52,6 +52,21 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 
+def _derivation_outputs(node: Mapping[str, Any]) -> DerivationOutputs:
+    """Rebuild one node of Nix's ``DerivedPathMap`` tree, children included.
+
+    ``dynamic_outputs`` nests once per level of dynamic derivation, so this
+    recurses rather than passing the raw dict to ``DerivationOutputs(**node)``.
+    Written out for the same reason ``read_derivation`` builds its other two
+    maps by hand: pydantic would coerce the nested dicts happily, and invisibly
+    to the type checker, against any shape at all.
+    """
+    return DerivationOutputs(
+        outputs=list(node["outputs"]),
+        dynamic_outputs={name: _derivation_outputs(child) for name, child in node["dynamic_outputs"].items()},
+    )
+
+
 class CoreStore:
     """One direct thread-safe store pointer shared by the Store pool."""
 
@@ -233,8 +248,9 @@ class CoreStore:
             args=result["args"],
             env=result["env"],
             input_srcs=result["input_srcs"],
-            input_drvs={path: DerivationOutputs(**node) for path, node in result["input_drvs"].items()},
+            input_drvs={path: _derivation_outputs(node) for path, node in result["input_drvs"].items()},
             outputs={name: DerivationOutput(**output) for name, output in result["outputs"].items()},
+            structured_attrs=result["structured_attrs"],
         )
 
     # --- Mutation ---------------------------------------------------------

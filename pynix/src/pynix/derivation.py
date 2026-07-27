@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path  # noqa: TC003 -- clypi evaluates annotations at runtime, Path must be importable
 from typing import TYPE_CHECKING, Any, override
 
@@ -78,20 +79,31 @@ class Show(Command):
         return drv_path
 
     @staticmethod
-    def _derivation_to_dict(derivation: Any) -> dict[str, object]:
+    def _input_drv_to_dict(node: Any) -> dict[str, object]:
+        """One ``inputDrvs`` node, children included.
+
+        ``dynamic_outputs`` used to be a flat ``dict[str, str]``, so a plain
+        ``dict(...)`` was enough to make it JSON-serializable. It is a tree of
+        nodes now -- matching Nix's own `nix derivation show` output, which
+        nests ``dynamicOutputs`` the same way -- so it has to recurse or the
+        dump raises on a dynamic derivation.
+        """
         return {
+            "dynamicOutputs": {
+                name: Show._input_drv_to_dict(child) for name, child in node.dynamic_outputs.items()
+            },
+            "outputs": list(node.outputs),
+        }
+
+    @staticmethod
+    def _derivation_to_dict(derivation: Any) -> dict[str, object]:
+        result: dict[str, object] = {
             "name": derivation.name,
             "system": derivation.system,
             "builder": derivation.builder,
             "args": list(derivation.args),
             "env": dict(derivation.env),
-            "inputDrvs": {
-                k: {
-                    "dynamicOutputs": dict(v.dynamic_outputs),
-                    "outputs": list(v.outputs),
-                }
-                for k, v in derivation.input_drvs.items()
-            },
+            "inputDrvs": {k: Show._input_drv_to_dict(v) for k, v in derivation.input_drvs.items()},
             "inputSrcs": list(derivation.input_srcs),
             "outputs": {
                 k: {
@@ -108,6 +120,14 @@ class Show(Command):
                 for k, v in derivation.outputs.items()
             },
         }
+        # Key name, shape and omission all follow Nix's own `nix derivation
+        # show` (`derivations.cc`'s toJSON: `res["structuredAttrs"] =
+        # d.structuredAttrs->structuredAttrs`, guarded by the optional) -- the
+        # decoded object rather than the raw payload, and absent entirely for a
+        # derivation that does not use structured attrs.
+        if derivation.structured_attrs is not None:
+            result["structuredAttrs"] = json.loads(derivation.structured_attrs)
+        return result
 
 
 class Derivation(Command):

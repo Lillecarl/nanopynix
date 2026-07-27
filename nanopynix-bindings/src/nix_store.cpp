@@ -118,6 +118,20 @@ static nb::dict path_info_to_dict(nix::Store &s, const nix::ValidPathInfo &info)
         d["ca"] = nb::none();
 
     d["ultimate"] = info.ultimate;
+
+    // Narinfo signatures. Nix changed the field's element type -- 2.31 stores
+    // plain strings, 2.34+ stores parsed `nix::Signature` with `toStrings` to
+    // render them back. The guard is spelled 2.32 because that is the constant
+    // this file already has and it is correct for every version actually built
+    // (2.31, 2.34, 2.35); the exact release that changed it was not measured.
+    nb::list sigs;
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+    for (auto &sig : info.sigs) sigs.append(sig);
+#else
+    for (auto &sig : nix::Signature::toStrings(info.sigs)) sigs.append(sig);
+#endif
+    d["sigs"] = sigs;
+
     return d;
 }
 
@@ -513,6 +527,28 @@ static void copy_closure(
         substitute ? nix::Substitute : nix::NoSubstitute);
 }
 
+// One node of `Derivation::inputDrvs`, which is a `DerivedPathMap` -- a *tree*
+// of `{V value; Map childMap;}`, nesting once per level of dynamic derivation.
+//
+// This used to be flattened in place with `dynamic_outputs[name] =
+// *child.value.begin()`, which kept only the first output of each child and
+// never looked at `child.childMap` at all, so anything deeper than one level
+// was dropped without a trace. Templated on the node type because the map's
+// value type differs across the supported Nix versions.
+template<typename Node>
+static nb::dict derived_path_node_to_dict(const Node &node) {
+    nb::dict entry;
+    nb::list outs;
+    for (auto &output : node.value) outs.append(output);
+    entry["outputs"] = outs;
+
+    nb::dict dynamic_outputs;
+    for (auto &[outputName, child] : node.childMap)
+        dynamic_outputs[outputName.c_str()] = derived_path_node_to_dict(child);
+    entry["dynamic_outputs"] = dynamic_outputs;
+    return entry;
+}
+
 static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
     nix::Derivation drv;
     {
@@ -560,19 +596,8 @@ static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
 
     // input_drvs: map<drvPath, DerivationOutputs>
     nb::dict input_drvs;
-    for (auto &[path, node] : drv.inputDrvs.map) {
-        nb::dict entry;
-        nb::list outs;
-        for (auto &o : node.value) outs.append(o);
-        entry["outputs"] = outs;
-        nb::dict dynamic_outputs;
-        for (auto &[outputName, child] : node.childMap) {
-            if (!child.value.empty())
-                dynamic_outputs[outputName.c_str()] = *child.value.begin();
-        }
-        entry["dynamic_outputs"] = dynamic_outputs;
-        input_drvs[s.printStorePath(path).c_str()] = entry;
-    }
+    for (auto &[path, node] : drv.inputDrvs.map)
+        input_drvs[s.printStorePath(path).c_str()] = derived_path_node_to_dict(node);
     d["input_drvs"] = input_drvs;
 
     d["system"] = drv.platform;
@@ -585,6 +610,21 @@ static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
     nb::dict env;
     for (auto &[k, v] : drv.env) env[k.c_str()] = v;
     d["env"] = env;
+
+    // Structured attributes are NOT recoverable from `env`. Nix's ATerm parser
+    // routes the `__json` attribute into `drv.structuredAttrs` and deliberately
+    // does not insert it into `env` (see `derivations.cc`'s parse loop, and
+    // `StructuredAttrs::tryExtract`, which erases the key). Reading only `env`
+    // therefore dropped every attribute of a `__structuredAttrs = true`
+    // derivation -- the common case in modern nixpkgs -- with nothing to
+    // indicate anything was missing.
+    //
+    // `unparse()` is Nix's own serialiser for the field and returns the
+    // `{"__json", payload}` pair, so this hands back exactly the bytes Nix read.
+    if (drv.structuredAttrs)
+        d["structured_attrs"] = drv.structuredAttrs->unparse().second;
+    else
+        d["structured_attrs"] = nb::none();
 
     return d;
 }
