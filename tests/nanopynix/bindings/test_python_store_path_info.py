@@ -39,7 +39,7 @@ probing to ``nanopynix.StoreImpl`` override detection.
 invent an answer instead of asking the store or deferring to Nix.
 
 ``TestTheWholeDispatchableInterface`` covers the widening from three operations
-to fourteen, and is deliberately written against the *list* rather than against
+to fifteen, and is deliberately written against the *list* rather than against
 individual methods. The failure it exists to catch is not a wrong answer but a
 dead one: a name that appears on both sides and is never wired up in between
 looks implemented, type-checks, and does nothing. So it asserts that the two
@@ -59,7 +59,7 @@ unique scheme; otherwise re-registering under a parametrized run would raise.
 from __future__ import annotations
 
 import itertools
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import pytest
 from nanopynix_bindings import store as nanopynix_store
@@ -526,7 +526,46 @@ INVOCATIONS: dict[str, Callable[[Any], Any]] = {
     # `^*` rather than a bare path: a DerivedPath is a sum type, and a bare
     # `.drv` parses as "fetch this file" instead of "build it".
     "query_missing": lambda s: s.query_missing([f"/nix/store/{BOGUS}.drv^*"]),
+    "read_derivation": lambda s: s.read_derivation(nanopynix_store.StorePath(f"{BOGUS}.drv")),
 }
+
+# Operations the interface advertises everywhere but only *dispatches* on some
+# builds, and the `build_info()` capability that says which.
+#
+# There is exactly one, and it is not a soft spot in the interface: keeping
+# `read_derivation` in `DISPATCHABLE_METHODS` on every version is what makes a
+# 2.31 store's override visible at all -- `__init_subclass__` only records names
+# that list contains. The gate belongs here rather than as a skip on the whole
+# sweep, so that the other fourteen operations stay covered on 2.31.
+CAPABILITY_GATED: dict[str, str] = {"read_derivation": "store_impl_read_derivation"}
+
+
+def _dispatch_is_available(name: str) -> bool:
+    capability = CAPABILITY_GATED.get(name)
+    if capability is None:
+        return True
+    info: Any = nanopynix.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- build_info from C++ extension has no stubs
+    return cast("dict[str, bool]", info["capabilities"])[capability]
+
+
+# A derivation in Nix's own ATerm spelling, which is what a Python store returns
+# from `read_derivation`.
+#
+# `__json` is deliberately present in the env list: Nix's parser routes it *out*
+# of `env` and into `structuredAttrs`, so a reply that still carries it in `env`
+# would prove the text was never parsed. That makes this string double as
+# evidence that the value went through `parseDerivation` rather than through any
+# reconstruction of our own.
+RECORDED_DRV_OUT = "11111111111111111111111111111111-bogus-out"
+RECORDED_DRV_ATERM = (
+    "Derive("
+    f'[("out","/nix/store/{RECORDED_DRV_OUT}","","")],'
+    "[],[],"
+    '"x86_64-linux","/bin/sh",["-c","true"],'
+    '[("__json","{\\"hardening\\":{\\"format\\":false}}"),'
+    f'("builder","/bin/sh"),("out","/nix/store/{RECORDED_DRV_OUT}")]'
+    ")"
+)
 
 
 class RecordingStore(nanopynix.StoreImpl):
@@ -613,6 +652,10 @@ class RecordingStore(nanopynix.StoreImpl):
             "nar_size": 5678,
         }
 
+    def read_derivation(self, path: str) -> str:
+        self._record("read_derivation")
+        return RECORDED_DRV_ATERM
+
 
 class TestTheWholeDispatchableInterface:
     """Every operation the interface advertises must actually be dispatched.
@@ -670,11 +713,18 @@ class TestTheWholeDispatchableInterface:
         casualty and report it as an error rather than as a list, which is what
         this test exists not to do. Whether an operation *answers* is asserted
         by its own test just below; the only claim here is that it arrived.
+
+        Operations in ``CAPABILITY_GATED`` are passed over on a build that
+        cannot dispatch them, rather than skipping the sweep: "this Nix has no
+        hook for it" and "the hook is wired to nothing" are different claims,
+        and only the second is a defect.
         """
         store = register_and_open(RecordingStore)
 
         never_dispatched: list[str] = []
         for name, invoke in INVOCATIONS.items():
+            if not _dispatch_is_available(name):
+                continue
             RecordingStore.calls = []
             outcome(lambda i=invoke: i(store))
             if name not in RecordingStore.calls:
@@ -827,6 +877,130 @@ class TestTheWholeDispatchableInterface:
         assert register_and_open(SaysNo).query_path_from_hash_part(hash_part) is None
 
 
+class TestReadDerivationIsServedByNixSOwnParser:
+    """The one operation answered with a serialization instead of a rendering.
+
+    Every other method here returns the same dict/list shape ``nix_store.cpp``
+    renders outward. ``read_derivation`` returns the ``.drv``'s ATerm text and
+    lets ``parseDerivation`` read it, because rebuilding a ``nix::Derivation``
+    from a dict would mean reimplementing five ``DerivationOutput`` variants, a
+    ``DerivedPathMap`` tree and ``structuredAttrs`` -- each of which changed
+    shape across the supported Nix versions.
+
+    It is also an addition rather than a relaxation: before this, a Python store
+    could not serve derivations *at all*. ``nix::Store::readDerivation`` does not
+    route through ``query_path_info``; it reads through a store accessor, which
+    a store with no ``underlying_store`` answers with an empty one.
+    :meth:`test_a_store_that_does_not_implement_it_still_cannot_serve_one` pins
+    that, so the claim stays measured rather than remembered.
+    """
+
+    def test_the_reply_is_parsed_rather_than_copied(self) -> None:
+        """``__json`` moving out of ``env`` is the proof Nix's parser ran.
+
+        Nix's ATerm reader lifts ``__json`` into ``structuredAttrs`` and erases
+        it from ``env``. No plausible pass-through does that, so its absence
+        from ``env`` distinguishes "parsed" from "handed back", which asserting
+        on ``builder`` or ``system`` alone would not.
+        """
+        if not _dispatch_is_available("read_derivation"):
+            pytest.skip("this Nix cannot dispatch read_derivation")
+        RecordingStore.calls = []
+        store = register_and_open(RecordingStore)
+
+        drv = store.read_derivation(nanopynix_store.StorePath(f"{BOGUS}.drv"))
+
+        assert drv["structured_attrs"] == '{"hardening":{"format":false}}'
+        assert "__json" not in drv["env"]
+        assert drv["outputs"]["out"]["path"] == f"/nix/store/{RECORDED_DRV_OUT}"
+        assert drv["builder"] == "/bin/sh"
+        # From `Derivation::nameFromPath`, not from anything the store said --
+        # the ATerm carries no name of its own.
+        assert drv["name"] == "bogus"
+
+    def test_a_malformed_reply_fails_naming_the_path(self) -> None:
+        """A store returning nonsense must produce Nix's own parse error.
+
+        The alternative -- a cast failure, or a silently empty derivation -- is
+        the class of defect this whole file exists for. The path has to appear
+        because that is the only thing telling a caller *which* store object was
+        unreadable.
+        """
+        if not _dispatch_is_available("read_derivation"):
+            pytest.skip("this Nix cannot dispatch read_derivation")
+
+        class ReturnsGarbage(nanopynix.StoreImpl):
+            def read_derivation(self, path: str) -> str:
+                return "not an ATerm"
+
+        store = register_and_open(ReturnsGarbage)
+
+        with pytest.raises(Exception, match=f"{BOGUS}.drv"):
+            store.read_derivation(nanopynix_store.StorePath(f"{BOGUS}.drv"))
+
+    def test_a_store_that_does_not_implement_it_still_cannot_serve_one(self) -> None:
+        """The behaviour this addition exists to change, pinned as it was.
+
+        Serving derivations was never possible through ``query_path_info``: a
+        store that answers every other query, including reporting the path
+        valid, still fails here. This is the measurement behind the claim in
+        ``store_impl.py``, kept as a test so the docstring cannot quietly go
+        stale -- and it holds on every supported version, since it depends on
+        the accessor rather than on the virtual.
+        """
+
+        class AnswersEverythingButDerivations(nanopynix.StoreImpl):
+            def is_valid_path_uncached(self, path: str) -> bool:
+                return True
+
+            def query_path_info(self, path: str) -> dict[str, Any]:
+                return dict(FULL_INFO)
+
+        store = register_and_open(AnswersEverythingButDerivations)
+        path = nanopynix_store.StorePath(f"{BOGUS}.drv")
+
+        assert store.is_valid_path(path) is True
+        with pytest.raises(Exception, match=BOGUS):
+            store.read_derivation(path)
+
+    def test_a_store_that_does_not_implement_it_answers_as_its_underlying_one(
+        self, store: Any, store_seeded_path: Any
+    ) -> None:
+        """A store that implements nothing must still serve derivations.
+
+        This is the reachability claim, not a claim about the ``underlying->``
+        line: deleting that line leaves this green, because ``getFSAccessor``
+        delegates too, so ``nix::Store``'s own reader reaches the same bytes by
+        a longer route. Measured by mutation rather than assumed, and recorded
+        again in :data:`DELEGATION_INDISTINGUISHABLE_FROM_BASE`.
+
+        What it does pin is the difference from
+        :meth:`test_a_store_that_does_not_implement_it_still_cannot_serve_one`
+        just above -- with an ``underlying_store`` a derivation is readable, and
+        without one it is not -- and it compares messages rather than exception
+        types, since on a path that is not a derivation both sides raise
+        ``Error`` and only the message says which failure it was.
+        """
+        if not _dispatch_is_available("read_derivation"):
+            pytest.skip("this Nix cannot dispatch read_derivation")
+
+        class Delegating(nanopynix.StoreImpl):
+            underlying_store = store
+
+        delegating = register_and_open(Delegating)
+
+        # `match` on both rather than only comparing the two: without it, a
+        # future where each side independently reported the same unhelpful "not
+        # a valid store path" would still read as agreement. Both must be the
+        # *parse* failure, which is only reachable if the bytes were read.
+        with pytest.raises(Exception, match="error parsing derivation") as delegated:
+            delegating.read_derivation(store_seeded_path)
+        with pytest.raises(Exception, match="error parsing derivation") as direct:
+            store.read_derivation(store_seeded_path)
+
+        assert str(delegated.value) == str(direct.value)
+
+
 def outcome(call: Callable[[], Any]) -> tuple[str, Any]:
     """What ``call`` did, as a comparable value -- a result or a failure kind."""
     try:
@@ -857,6 +1031,13 @@ DELEGATION_CHECKS: dict[str, Callable[[Any, Any], Any]] = {
     "verify_store": lambda s, _p: s.verify_store(False, False),
     "compute_fs_closure": lambda s, p: sorted(s.compute_fs_closure(p, False, False, False)),
     "query_missing": lambda s, p: s.query_missing([f"/nix/store/{p.to_string()}"]),
+    # Deliberately the seeded path, which is valid but not a derivation, so the
+    # two sides fail in *different* ways when delegation is missing: the real
+    # store reads the file and fails parsing it, while a `PyStoreImpl` that
+    # dropped its `underlying->` line has an empty accessor and raises
+    # `InvalidPath` instead. A nonexistent `.drv` would raise `InvalidPath` on
+    # both and pin nothing.
+    "read_derivation": lambda s, p: s.read_derivation(p),
 }
 
 # `optimise_store` is the one operation left out, and on purpose: delegating it
@@ -867,22 +1048,31 @@ DELEGATION_UNCHECKED = {"optimise_store"}
 # What this test does *not* pin, measured rather than guessed by running the
 # same checks against a store with no `underlying_store` at all.
 #
-# For these four, `nix::Store`'s own answer already matches a real store's for a
-# freshly added path: nothing derives it, nothing substitutes it, nothing roots
-# it, and there is nothing to verify. So deleting their `underlying->` line
+# For the first four, `nix::Store`'s own answer already matches a real store's
+# for a freshly added path: nothing derives it, nothing substitutes it, nothing
+# roots it, and there is nothing to verify. So deleting their `underlying->` line
 # outright would not change the result, and this test would stay green.
+#
+# `read_derivation` is vacuous for a different and more interesting reason,
+# measured the same way: deleting `underlying->readDerivation` changes nothing
+# observable, because `getFSAccessor` delegates as well, so `nix::Store`'s own
+# reader reaches the same bytes by a longer route. The line stays -- every other
+# override here keeps its delegation and going through the accessor is the
+# indirect path -- but no test can distinguish it, and claiming otherwise would
+# be worse than saying so.
 #
 # It does still catch the more likely mistake, a delegation pointed at the wrong
 # method -- verified by mutation: swapping `underlying->queryValidDerivers` for
 # `underlying->queryValidPaths`, which has the same signature and compiles
-# cleanly, fails here and names `query_valid_derivers` alone. Making the other
-# four non-vacuous would take a built derivation, a substituter and a GC root,
-# which is a different and much heavier fixture than this file's.
+# cleanly, fails here and names `query_valid_derivers` alone. Making the others
+# non-vacuous would take a built derivation, a substituter and a GC root, which
+# is a different and much heavier fixture than this file's.
 DELEGATION_INDISTINGUISHABLE_FROM_BASE = {
     "query_valid_derivers",
     "query_substitutable_paths",
     "add_temp_root",
     "verify_store",
+    "read_derivation",
 }
 
 
@@ -896,7 +1086,7 @@ class TestEveryOperationDelegates:
     ``queryValidDerivers`` for ``queryValidPaths``, which have the same
     signature) would compile, run, and go unnoticed.
 
-    See :data:`DELEGATION_INDISTINGUISHABLE_FROM_BASE` for the four operations
+    See :data:`DELEGATION_INDISTINGUISHABLE_FROM_BASE` for the five operations
     this cannot fully pin, and why.
     """
 
@@ -916,6 +1106,8 @@ class TestEveryOperationDelegates:
         exception type for the same reason -- an operation that raises on both
         is still delegating, whereas one that raises only when wrapped is not.
         """
+        if not _dispatch_is_available(name):
+            pytest.skip(f"this Nix cannot dispatch {name}, so there is no delegation branch")
 
         class Delegating(nanopynix.StoreImpl):
             underlying_store = store
