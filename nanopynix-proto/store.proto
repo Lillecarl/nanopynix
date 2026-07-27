@@ -21,7 +21,6 @@ service StoreService {
   rpc QuerySubstitutablePaths(QuerySubstitutablePathsRequest) returns (PathsResponse);
   rpc BuildPathsWithResults(BuildPathsWithResultsRequest) returns (nix.common.BuildResultList);
   rpc ReadDerivation(ReadDerivationRequest) returns (nix.common.Derivation);
-  rpc BuildDerivation(BuildDerivationRequest) returns (nix.common.BuildResult);
   rpc FollowLinksToStorePath(FollowLinksToStorePathRequest) returns (FollowLinksToStorePathResponse);
   rpc AddTempRoot(AddTempRootRequest) returns (AddTempRootResponse);
   rpc FindRoots(FindRootsRequest) returns (FindRootsResponse);
@@ -162,13 +161,6 @@ message BuildPathsWithResultsRequest {
 message ReadDerivationRequest {
   int64 request_id = 1000;
   string path = 1;
-  int64 store_handle = 100;
-}
-
-message BuildDerivationRequest {
-  int64 request_id = 1000;
-  string path = 1;
-  int32 build_mode = 2;
   int64 store_handle = 100;
 }
 

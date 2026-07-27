@@ -80,14 +80,6 @@ inline nb::dict from_kbr(const nix::KeyedBuildResult &kbr, const nix::StoreDirCo
     auto result = static_cast<nix::BuildResult>(kbr);
     return to_dict(kbr.path.to_string(store), result.success(), status_str(result.status), result.errorMsg);
 }
-
-inline nb::dict from_br(const nix::BuildResult &br) {
-    // The copy is deliberate and carried over verbatim: `success()` is not
-    // const on this Nix, and this branch is not the one that gets compiled
-    // here, so the compiler cannot catch a "simplification" of it.
-    auto result = br;
-    return to_dict("", result.success(), status_str(result.status), result.errorMsg);
-}
 #else
 inline std::string success_status_str(nix::BuildResult::Success::Status s) {
     using enum nix::BuildResult::Success::Status;
@@ -126,14 +118,6 @@ inline nb::dict from_kbr(const nix::KeyedBuildResult &kbr, const nix::StoreDirCo
     if (auto *failure = kbr.tryGetFailure())
         return to_dict(path, false, failure_status_str(failure->status), failure->msg());
     return to_dict(path, false, "unknown", "");
-}
-
-inline nb::dict from_br(const nix::BuildResult &br) {
-    if (auto *success = br.tryGetSuccess())
-        return to_dict("", true, success_status_str(success->status), "");
-    if (auto *failure = br.tryGetFailure())
-        return to_dict("", false, failure_status_str(failure->status), failure->msg());
-    return to_dict("", false, "unknown", "");
 }
 #endif
 

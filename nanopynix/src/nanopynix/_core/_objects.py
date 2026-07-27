@@ -243,9 +243,6 @@ class CoreStore:
 
     # --- Mutation ---------------------------------------------------------
 
-    def build_derivation(self, drv_path: str | nanopynix_store.StorePath, *, build_mode: int) -> BuildResult:
-        return BuildResult(**self.require_raw().build_derivation(self._store_path(drv_path), build_mode))
-
     def ensure_path(self, path: str | nanopynix_store.StorePath) -> None:
         self.require_raw().ensure_path(self._store_path(path))
 
