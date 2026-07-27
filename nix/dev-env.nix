@@ -1,77 +1,58 @@
 {
   python,
-  nanopynix-bindings,
-  nanopynix-proto,
-  grpclib-transports,
-  clypi,
-  kr8s,
-  tree-sitter-nix,
   renderEditablePyproject,
 }:
 let
-  nanopynix = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
-    projectRoot = ../nanopynix;
-    root = toString (../nanopynix + "/src");
-    inherit python;
-    pythonPackages = python.pkgs // {
-      inherit nanopynix-bindings nanopynix-proto grpclib-transports;
-    };
-  });
+  # The one place in this repo where an explicit `python.pkgs // { ... }` is
+  # right rather than an accident.
+  #
+  # Everywhere else the interpreter's own package set already holds our
+  # packages, so a splice would only be a second, divergent copy of that
+  # list. Here the job is the opposite: *shadow* each built package with its
+  # editable build, so that a cross-reference between two of our projects
+  # resolves to the editable copy on both sides.
+  #
+  # That matters because `mkPythonEditablePackage` eagerly resolves every
+  # declared `[project.optional-dependencies]` name for the editable
+  # install's metadata, whatever `extras` says -- so pynix's `ekn` extra is
+  # looked up regardless. Against the plain set it would find the *built*
+  # ekn and quietly pin the dev shell to a store copy, defeating the point of
+  # ekn and pynix sharing one venv: ekn's source can cross-import pynix's
+  # modules and vice versa, which a real application-to-application
+  # dependency cannot do without a derivation cycle (see pynix/package.nix's
+  # `ekn` argument, which bundles the built one for non-dev use).
+  #
+  # One set, referenced by every project below, rather than the four
+  # hand-maintained ones this replaced -- a name missing from one of those
+  # was not an error, just a silent fallback to the built package.
+  pythonPackages = python.pkgs // {
+    inherit
+      nanopynix
+      nanopynix-helpers
+      pynix
+      ekn
+      pytest-agent
+      ;
+  };
 
-  nanopynix-helpers = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
-    projectRoot = ../nanopynix-helpers;
-    root = toString (../nanopynix-helpers + "/src");
-    inherit python;
-    pythonPackages = python.pkgs // {
-      inherit nanopynix tree-sitter-nix;
-    };
-  });
+  editable =
+    name:
+    {
+      extras ? [ ],
+    }:
+    python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
+      projectRoot = ../. + "/${name}";
+      # `toString`'d absolute path into this checkout, not a store copy -- see
+      # the note on pythonEnv below for why that is load-bearing.
+      root = toString (../. + "/${name}/src");
+      inherit python pythonPackages extras;
+    });
 
-  pynix = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
-    projectRoot = ../pynix;
-    root = toString (../pynix + "/src");
-    inherit python;
-    # `extras` only controls which extras are *installed*; mkPythonEditablePackage
-    # still eagerly resolves every declared [project.optional-dependencies]
-    # group's package names against pythonPackages regardless (to build the
-    # editable install's metadata) -- so `ekn` (pynix's `ekn` extra) has to
-    # be resolvable here even though it isn't listed in `extras` below.
-    extras = [ "test" ];
-    pythonPackages = python.pkgs // {
-      inherit
-        nanopynix
-        nanopynix-helpers
-        clypi
-        tree-sitter-nix
-        ekn
-        ;
-    };
-  });
-
-  # Editable, in the same shared venv as pynix -- lets ekn's source freely
-  # cross-import pynix's modules (and vice versa) during interactive dev,
-  # which a real buildPythonApplication-to-buildPythonApplication dependency
-  # can't do without a Nix derivation cycle (see pynix/package.nix's `ekn`
-  # arg, which bundles the *built* ekn instead).
-  ekn = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
-    projectRoot = ../ekn;
-    root = toString (../ekn + "/src");
-    inherit python;
-    pythonPackages = python.pkgs // {
-      inherit
-        nanopynix
-        nanopynix-helpers
-        clypi
-        kr8s
-        ;
-    };
-  });
-
-  pytest-agent = python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
-    projectRoot = ../pytest-agent;
-    root = toString (../pytest-agent + "/src");
-    inherit python;
-  });
+  nanopynix = editable "nanopynix" { };
+  nanopynix-helpers = editable "nanopynix-helpers" { };
+  ekn = editable "ekn" { };
+  pynix = editable "pynix" { extras = [ "test" ]; };
+  pytest-agent = editable "pytest-agent" { };
 in
 {
   inherit
@@ -92,8 +73,14 @@ in
   # devShell/direnv setup without rebuilding on every edit. Does not include
   # nanopynix's own devtools (pyright/ruff/...) -- see nix/shell.nix for the
   # full interactive nanopynix dev shell.
+  #
+  # Each project contributes `.dependencies` as well as itself, and that is
+  # not redundant: `withPackages` keeps only importable modules, so an
+  # application is dropped from the environment *together with everything it
+  # propagates*. Listing only the packages is how the test runner lost
+  # `kr8s`.
   pythonEnv = python.withPackages (
-    pp:
+    _pp:
     nanopynix.dependencies
     ++ nanopynix-helpers.dependencies
     ++ pynix.dependencies

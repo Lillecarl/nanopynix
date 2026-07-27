@@ -3,10 +3,6 @@
   buildPythonApplication,
   cacert,
   installShellFiles,
-  nanopynix,
-  nanopynix-helpers,
-  clypi,
-  kr8s,
   python,
   renderPyproject,
 }:
@@ -14,14 +10,6 @@ let
   attrs = renderPyproject {
     projectRoot = toString ./.;
     inherit python;
-    pythonPackages = python.pkgs // {
-      inherit
-        nanopynix
-        nanopynix-helpers
-        clypi
-        kr8s
-        ;
-    };
   };
 in
 buildPythonApplication (

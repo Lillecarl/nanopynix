@@ -14,9 +14,6 @@ let
   attrs = renderPyproject {
     projectRoot = toString ./.;
     inherit python;
-    pythonPackages = python.pkgs // {
-      inherit betterproto2;
-    };
   };
 
   # googleapis-common-protos ships the canonical `google/rpc/status.proto`

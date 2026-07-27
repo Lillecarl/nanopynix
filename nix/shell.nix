@@ -8,11 +8,6 @@
   taplo,
   treefmt,
   actionlint,
-  nanopynix-bindings,
-  nanopynix-proto,
-  grpclib-transports,
-  clypi,
-  kr8s,
   renderEditablePyproject,
   sphinx,
   myst-parser,
@@ -20,7 +15,6 @@
   cachix,
   statix,
   tofuCoreSchemaTool,
-  tree-sitter-nix,
   gdb,
 }:
 let
@@ -28,17 +22,11 @@ let
   # than its combined `pythonEnv`) so this shell's own extra docs deps
   # (sphinx/myst-parser/furo) land in the *same* python.withPackages env --
   # two separate envs on PATH would collide on bin/python3 et al.
+  # Only the two arguments dev-env.nix actually takes: every Python package
+  # it needs now resolves through `python.pkgs`, which is the point of having
+  # one package set.
   devEnv = import ./dev-env.nix {
-    inherit
-      python
-      nanopynix-bindings
-      nanopynix-proto
-      grpclib-transports
-      clypi
-      kr8s
-      tree-sitter-nix
-      renderEditablePyproject
-      ;
+    inherit python renderEditablePyproject;
   };
 
   pythonEnv = python.withPackages (
