@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from nanopynix.rpc import Session
 from nanopynix.settings import (
+    DEFAULT_EXPERIMENTAL_FEATURES,
     DEFAULT_LINE_EDITORS,
     NanopynixSettings,
     NixEvalSettings,
@@ -28,7 +29,7 @@ def test_nix_settings_render_python_field_names() -> None:
     settings = NixSettings(max_jobs=4, keep_going=True, substituters=["https://cache.nixos.org/"])
 
     assert settings.to_worker_settings() == {
-        "experimental-features": "flakes nix-command",
+        "experimental-features": " ".join(DEFAULT_EXPERIMENTAL_FEATURES),
         "keep-going": "true",
         "max-jobs": "4",
         "substituters": "https://cache.nixos.org/",
@@ -142,10 +143,30 @@ def test_optional_settings_drift_is_not_checked_by_default() -> None:
     assert set(drift) == {"global"}
 
 
-def test_session_defaults_to_flakes_and_nix_command() -> None:
+def test_default_experimental_features_are_the_ones_we_intend() -> None:
+    """The one place the default list's *contents* are pinned.
+
+    The two tests that render it reference ``DEFAULT_EXPERIMENTAL_FEATURES``
+    rather than a literal, so they keep testing what they are about (name
+    rendering, and that Session takes its default from NixSettings) instead of
+    failing every time the list changes. That leaves nothing asserting *which*
+    features are on by default, which is a real decision -- nanopynix enables
+    more than Nix's own defaults on purpose -- so it is pinned here, once.
+    """
+    assert DEFAULT_EXPERIMENTAL_FEATURES == (
+        "flakes",
+        "nix-command",
+        "ca-derivations",
+        "dynamic-derivations",
+        "recursive-nix",
+    )
+
+
+def test_session_defaults_to_the_default_experimental_features() -> None:
     session = Session()
 
-    assert session._manager._settings["experimental-features"] == "flakes nix-command"  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
+    expected = " ".join(DEFAULT_EXPERIMENTAL_FEATURES)
+    assert session._manager._settings["experimental-features"] == expected  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
     assert session._manager._nix_conf is None  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
     assert session._manager._load_config  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
 
