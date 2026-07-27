@@ -60,7 +60,13 @@ def install() -> None:
     """
     os.environ[ENV_VAR] = "1"
 
-    from beartype import BeartypeConf
-    from beartype.claw import beartype_packages
+    # Deferred deliberately, and this is the one place in the repo where that
+    # is not a code smell: importing beartype is what arms the hook, and the
+    # environment variable above has to be set before any instrumented module
+    # observes it. A top-level import here would also make `sitecustomize`
+    # pull beartype into every subprocess the suite spawns, instrumented or
+    # not, at interpreter startup.
+    from beartype import BeartypeConf  # noqa: PLC0415 -- must follow the env var above
+    from beartype.claw import beartype_packages  # noqa: PLC0415 -- must follow the env var above
 
     beartype_packages(PACKAGES, conf=BeartypeConf(claw_is_pep526=False))
