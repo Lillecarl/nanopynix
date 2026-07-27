@@ -45,9 +45,10 @@ from typing import TYPE_CHECKING
 import anyio
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from nanopynix._typechecking import BEARTYPING
 from pynix._lsp._terranix_schema import SchemaBlock
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Mapping
 
 

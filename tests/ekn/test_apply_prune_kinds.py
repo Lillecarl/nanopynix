@@ -5,12 +5,11 @@ from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock
 
 from ekn.apply import apply_and_prune
+from kr8s._api import Api
 from kr8s.asyncio.objects import APIObject, get_class
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
-    from ekn.apply import Api
 
 
 def _fake_configmap(name: str, namespace: str = "ns") -> APIObject:
@@ -33,7 +32,7 @@ def _fake_configmap(name: str, namespace: str = "ns") -> APIObject:
     return obj
 
 
-class _FakeApi:
+class _FakeApi(Api):
     """Minimal stand-in for kr8s's Api -- only implements the one bit of
     surface `apply_and_prune`'s prune loop touches (`async_get`), since
     `objects=[]` in these tests means `apply_and_prune`'s barrier/apply loop
@@ -56,7 +55,7 @@ async def test_prune_kinds_is_scanned_even_when_absent_from_the_current_apply() 
 
     await apply_and_prune(
         [],
-        api=api,  # pyright: ignore[reportArgumentType] -- minimal test double, see _FakeApi's docstring
+        api=api,
         discriminator="disc",
         prune=True,
         prune_kinds={"ConfigMap"},
@@ -72,7 +71,7 @@ async def test_prune_kinds_none_preserves_current_behavior_of_scanning_nothing_e
 
     await apply_and_prune(
         [],
-        api=api,  # pyright: ignore[reportArgumentType] -- minimal test double, see _FakeApi's docstring
+        api=api,
         discriminator="disc",
         prune=True,
         prune_kinds=None,

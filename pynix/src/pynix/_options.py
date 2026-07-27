@@ -38,7 +38,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
-if TYPE_CHECKING:
+from nanopynix._typechecking import BEARTYPING
+
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Mapping
 
     from nanopynix.rpc import EvalSession, ValueProxy

@@ -53,10 +53,11 @@ from ekn.gitops import (
 from ekn.sops import ensure_age_identities, maybe_decrypt
 from ekn.validation import EphemeralControlPlane, exec_capture, prepare_validation_objects
 from nanopynix import NixError
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.models import JsonValue
 from nanopynix.primops import from_yaml11_stream, from_yaml_stream, to_yaml
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Callable
 
 _log = structlog.get_logger()

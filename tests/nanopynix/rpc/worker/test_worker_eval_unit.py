@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import threading
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
+import nanopynix_bindings.store as nanopynix_store
 import pytest
 from nanopynix_proto.nix.eval import OpenEvalRequest
+from nanopynix_proto.nix.worker import InitRequest
 
 import nanopynix._core._nix_core as nix_core  # type: ignore[reportPrivateUsage] -- test patches direct-pointer core boundary
 import nanopynix.rpc.worker._worker as worker  # type: ignore[reportPrivateUsage] -- test imports private module
@@ -24,15 +26,13 @@ from nanopynix.rpc.worker._worker import (  # type: ignore[reportPrivateUsage] -
     WorkerState,
 )
 from nanopynix.rpc.worker._worker_eval import (  # type: ignore[reportPrivateUsage] -- test imports private module
+    EvalEntry,
     EvalServiceHandler,
     close_eval_state,
 )
 from nanopynix.rpc.worker._worker_nix import (
     NixThreadExecutor,  # type: ignore[reportPrivateUsage] -- test verifies thread confinement
 )
-
-if TYPE_CHECKING:
-    from nanopynix_bindings.store import Store
 
 
 def _handler_with_inline_dispatch(handles: HandleRegistry) -> tuple[EvalServiceHandler, int]:
@@ -50,7 +50,12 @@ def _handler_with_inline_dispatch(handles: HandleRegistry) -> tuple[EvalServiceH
         _ = (request_id, executor)
         return operation(*args)
 
-    eval_handle = handles.allocate(SimpleNamespace(executor=None), HandleKind.EVAL)
+    # NixThreadExecutor spawns its worker thread lazily on first submitted
+    # task, so constructing one here without ever running work on it is safe.
+    eval_handle = handles.allocate(
+        EvalEntry(eval_state=None, executor=NixThreadExecutor(), store_handle=0),  # type: ignore[arg-type] -- eval_state is never touched by these tests
+        HandleKind.EVAL,
+    )
     handler = EvalServiceHandler(SimpleNamespace(handles=handles, run_request=run_request))
     return handler, eval_handle
 
@@ -65,7 +70,7 @@ class _FakeBridge:
         return None
 
 
-class _FakeEvalState:
+class _FakeEvalState(nix_core.nanopynix_expr.EvalState):
     def __init__(
         self,
         store: object,
@@ -81,7 +86,31 @@ class _FakeEvalState:
         self.fetch_settings = fetch_settings
 
 
-class _FakeStore:
+class _StoreId(nanopynix_store.Store):
+    """A store stand-in that is only ever compared by an identity string.
+
+    ``_FakeEvalState`` never calls anything on the store it is given -- it
+    just stashes it and the assertions below check *which* one open_eval
+    picked -- so equality against the identity string is all that matters.
+    """
+
+    def __init__(self, ident: str) -> None:
+        self._ident = ident
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, str) and other == self._ident
+
+    def __hash__(self) -> int:
+        return hash(self._ident)
+
+    def __repr__(self) -> str:
+        return self._ident
+
+
+class _FakeStore(nanopynix_store.Store):
+    def __init__(self) -> None:
+        pass
+
     # with_params mirrors the real binding, which declares it keyword-capable
     # ("with_params"_a): CoreStore.get_uri forwards it by name, so a fake that
     # takes no argument no longer stands in for one.
@@ -125,7 +154,7 @@ def test_worker_title_lists_open_store_uris(monkeypatch: pytest.MonkeyPatch) -> 
     closed: list[str] = []
     monkeypatch.setattr(worker, "set_process_title", lambda title, **_kwargs: titles.append(title))  # type: ignore[reportUnknownLambdaType, reportUnknownArgumentType] -- lambda receives Any from setattr
 
-    class Store:
+    class Store(nanopynix_store.Store):
         def __init__(self, uri: str) -> None:
             self.uri = uri
 
@@ -171,7 +200,7 @@ async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.Mo
     state.executor = NixThreadExecutor()
     state.rpc_bridge = _FakeBridge()  # type: ignore[assignment] -- only presence and start()/stop() matter to the initialization path
     handler = WorkerServiceHandler(state)
-    message = SimpleNamespace(
+    message = InitRequest(
         settings={"sandbox": "false"},
         nix_conf=None,
         experimental_features=["flakes"],
@@ -183,7 +212,7 @@ async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.Mo
     )
 
     try:
-        response = await handler.init(cast("Any", message))
+        response = await handler.init(message)
     finally:
         state.executor.shutdown()
 
@@ -208,8 +237,8 @@ async def test_open_eval_allows_concurrent_eval_states(monkeypatch: pytest.Monke
     # assertions below check *which* one open_eval picked, and _FakeEvalState
     # never calls anything on them. Cast because CoreStore now names the real
     # binding type rather than Any.
-    second_handle = state.handles.allocate(CoreStore(cast("Store", "second-store")), HandleKind.STORE)
-    first_handle = state.handles.allocate(CoreStore(cast("Store", "first-store")), HandleKind.STORE)
+    second_handle = state.handles.allocate(CoreStore(_StoreId("second-store")), HandleKind.STORE)
+    first_handle = state.handles.allocate(CoreStore(_StoreId("first-store")), HandleKind.STORE)
     state.nix_path = ["nixpkgs=/tmp/nixpkgs"]
     handler = EvalServiceHandler(state)
 
@@ -252,8 +281,8 @@ async def test_open_eval_forwards_the_build_store_handle(
     monkeypatch.setattr(nix_core.nanopynix_expr, "EvalState", _FakeEvalState)
 
     state = WorkerState()
-    eval_store = state.handles.allocate(CoreStore(cast("Store", "eval-store")), HandleKind.STORE)
-    build_store = state.handles.allocate(CoreStore(cast("Store", "build-store")), HandleKind.STORE)
+    eval_store = state.handles.allocate(CoreStore(_StoreId("eval-store")), HandleKind.STORE)
+    build_store = state.handles.allocate(CoreStore(_StoreId("build-store")), HandleKind.STORE)
     handler = EvalServiceHandler(state)
 
     with_build = await handler.open_eval(

@@ -29,6 +29,7 @@ from nanopynix._core._nix_executor import NixThreadExecutor
 from nanopynix._wire import HandleKind
 from nanopynix.exceptions import LockedFlakeReleasedError
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
+from nanopynix.rpc.client._pool import WorkerClient
 from nanopynix.rpc.client._session import EvalSession, ValueReleasedError
 from nanopynix.rpc.client.store import StoreHandle
 from nanopynix.rpc.worker._worker import WorkerServiceHandler, WorkerState, worker_service_factory
@@ -44,13 +45,32 @@ pytestmark = pytest.mark.l3_inproc
 
 
 @dataclass
-class _InprocWorkerClient:
-    """Minimal worker-client shape used by the public L3 EvalSession."""
+class _InprocWorkerClient(WorkerClient):
+    """Minimal worker-client shape used by the public L3 EvalSession.
 
-    eval_stub: Any
-    worker_stub: Any
+    ``eval_stub``/``worker_stub`` are read-only properties on ``WorkerClient``
+    backed by private attributes -- the dataclass fields here use different
+    names and define their own properties rather than colliding with those.
+    """
+
+    _fake_eval_stub: Any
+    _fake_worker_stub: Any
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _next_request_id: int = 3
+
+    @property
+    def eval_stub(self) -> Any:
+        return self._fake_eval_stub
+
+    @eval_stub.setter
+    def eval_stub(self, value: Any) -> None:
+        # A couple of tests reassign this to inject a transport failure
+        # (_FailFirstRpc) after construction.
+        self._fake_eval_stub = value
+
+    @property
+    def worker_stub(self) -> Any:
+        return self._fake_worker_stub
 
     async def invoke(self, method: Any, request: Any, *, timeout: float) -> Any:  # noqa: ASYNC109 -- mock implementing WorkerClient.invoke interface
         del timeout
@@ -60,11 +80,14 @@ class _InprocWorkerClient:
             return await method(request)
 
 
-class _InprocManager:
+class _InprocManager(WorkerClient):
     def __init__(self, worker: _InprocWorkerClient) -> None:
         self._worker = worker
-        self.worker_stub = worker.worker_stub
         self.reserve_count = 0
+
+    @property
+    def worker_stub(self) -> Any:
+        return self._worker.worker_stub
 
     async def reserve(self, *, timeout: float | None = None) -> _InprocWorkerClient:  # noqa: ASYNC109 -- threading timeout through to grpclib, not asyncio.timeout
         del timeout

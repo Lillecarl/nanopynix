@@ -22,11 +22,12 @@ from pydantic import BaseModel, Field, StringConstraints
 
 from ekn.gitops import load_raw_manifest
 from nanopynix import NixError, NixEvalSettings, NixSettings
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.models import JsonValue, LogEvent
 from nanopynix.primops import yaml_primops
 from nanopynix.rpc import Session
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncGenerator, Generator
 
     from nanopynix.rpc import EvalSession, ValueProxy

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from anyio import Path as AsyncPath
 
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import HashMismatchError, NixError, StoreError
 from nanopynix_helpers.fod import (
     FodSourceUpdateError,
@@ -17,7 +18,7 @@ from nanopynix_helpers.fod import (
     replace_fod_hash,
 )
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Awaitable, Callable
     from pathlib import Path
 

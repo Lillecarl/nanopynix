@@ -16,6 +16,21 @@ from typing import Any
 import pydantic_core
 from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_proto.nix import common as common_pb
+from nanopynix_proto.nix.common import (
+    # Bare (unaliased) names for RPC-handler return-type annotations, as
+    # opposed to the common_pb.X spelling used for runtime value access
+    # elsewhere in this file: convert_handler_errors (_grpc_util.py) rebinds
+    # each @worker_op entry point via functools.wraps, which copies these
+    # PEP 563 deferred-string annotations onto a wrapper function whose own
+    # __globals__ is _grpc_util's, not this module's. beartype resolves a
+    # bare forward ref against the original defining module fine, but a
+    # dotted one like "common_pb.ValueHandle" makes it try to import
+    # "common_pb" as a real top-level module, which does not exist.
+    FlakeRef,
+    LockedFlake,
+    ScalarValue,
+    ValueHandle,
+)
 from nanopynix_proto.nix.eval import (
     AsScalarRequest,
     AttrNamesRequest,
@@ -290,17 +305,17 @@ class EvalServiceHandler(EvalServiceBase):
     # ── eval methods ──────────────────────────────────────────────
 
     @worker_op
-    def eval_file(self, message: EvalFileRequest) -> common_pb.ValueHandle:
+    def eval_file(self, message: EvalFileRequest) -> ValueHandle:
         es = self._get_es(message.eval_handle)
         value = es.repl_eval_file(message.path) if es.repl_active() else es.eval_file(message.path)
         return self._export(value, message.eval_handle)
 
     @worker_op
-    def repl_load_file(self, message: ReplLoadFileRequest) -> common_pb.ValueHandle:
+    def repl_load_file(self, message: ReplLoadFileRequest) -> ValueHandle:
         return self._export(self._get_es(message.eval_handle).repl_load_file(message.path), message.eval_handle)
 
     @worker_op
-    def eval_string(self, message: EvalStringRequest) -> common_pb.ValueHandle:
+    def eval_string(self, message: EvalStringRequest) -> ValueHandle:
         es = self._get_es(message.eval_handle)
         value = (
             es.repl_eval_string(message.expr, message.source_name)
@@ -351,7 +366,7 @@ class EvalServiceHandler(EvalServiceBase):
         return ForceJsonResponse(json=json_bytes.decode("utf-8"))
 
     @worker_op
-    def as_scalar(self, message: AsScalarRequest) -> common_pb.ScalarValue:
+    def as_scalar(self, message: AsScalarRequest) -> ScalarValue:
         accessor = _AS_SCALAR_ACCESSORS.get(message.nix_type)
         if accessor is None:
             raise ValueError(f"AsScalar does not support {message.nix_type!r}")
@@ -372,11 +387,11 @@ class EvalServiceHandler(EvalServiceBase):
         return EditLocationResponse(path=location["path"], line=location["line"])
 
     @worker_op
-    def attr(self, message: AttrRequest) -> common_pb.ValueHandle:
+    def attr(self, message: AttrRequest) -> ValueHandle:
         return self._export(self._resolve(message.handle).attr_get(message.name), message.eval_handle)
 
     @worker_op
-    def list_get(self, message: ListGetRequest) -> common_pb.ValueHandle:
+    def list_get(self, message: ListGetRequest) -> ValueHandle:
         pv = self._resolve(message.handle)
         idx = message.index
         if idx < 0:
@@ -406,11 +421,11 @@ class EvalServiceHandler(EvalServiceBase):
         return TypeNameResponse(type=nix_type)
 
     @worker_op
-    def auto_call(self, message: AutoCallRequest) -> common_pb.ValueHandle:
+    def auto_call(self, message: AutoCallRequest) -> ValueHandle:
         return self._export(self._resolve(message.handle).auto_call(), message.eval_handle)
 
     @worker_op
-    def call(self, message: CallRequest) -> common_pb.ValueHandle:
+    def call(self, message: CallRequest) -> ValueHandle:
         es = self._get_es(message.eval_handle)
         fn = self._resolve(message.handle)
         arguments: list[CoreValue] = []
@@ -456,7 +471,7 @@ class EvalServiceHandler(EvalServiceBase):
     # ── flake methods ─────────────────────────────────────────────
 
     @worker_op
-    def lock_flake(self, message: LockFlakeRequest) -> common_pb.LockedFlake:
+    def lock_flake(self, message: LockFlakeRequest) -> LockedFlake:
         if self._state.collector is not None:
             self._state.log("msg", int(common_pb.LogLevel.INFO), f"lock_flake: parsing ref '{message.ref}'")
         es = self._get_es(message.eval_handle)
@@ -489,7 +504,7 @@ class EvalServiceHandler(EvalServiceBase):
         return lf_pb
 
     @worker_op
-    def call_locked_flake(self, message: CallLockedFlakeRequest) -> common_pb.ValueHandle:
+    def call_locked_flake(self, message: CallLockedFlakeRequest) -> ValueHandle:
         lf: CoreLockedFlake = self._state.handles.get_typed(message.handle, HandleKind.LOCKED_FLAKE)
         es = self._get_es(message.eval_handle)
         return self._export(es.call_locked_flake(lf), message.eval_handle)
@@ -511,7 +526,7 @@ class EvalServiceHandler(EvalServiceBase):
         return ReleaseLockedFlakeResponse()
 
     @worker_op
-    def eval_flake(self, message: EvalFlakeRequest) -> common_pb.ValueHandle:
+    def eval_flake(self, message: EvalFlakeRequest) -> ValueHandle:
         es = self._get_es(message.eval_handle)
         value = es.eval_flake(
             message.ref,
@@ -521,7 +536,7 @@ class EvalServiceHandler(EvalServiceBase):
         return self._export(value, message.eval_handle)
 
     @worker_op
-    def get_flake(self, message: GetFlakeRequest) -> common_pb.FlakeRef:
+    def get_flake(self, message: GetFlakeRequest) -> FlakeRef:
         return self._get_es(message.eval_handle).get_flake(message.ref)
 
     @worker_op

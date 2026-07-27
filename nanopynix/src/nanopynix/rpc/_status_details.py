@@ -46,7 +46,9 @@ from nanopynix_proto.google.rpc import Status as RpcStatus
 from nanopynix_proto.nix.common import ErrorTrace, LogLevel, NixErrorInfo, SourcePos
 from pydantic import ValidationError
 
-if TYPE_CHECKING:
+from nanopynix._typechecking import BEARTYPING
+
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Sequence
 
     from betterproto2 import Message

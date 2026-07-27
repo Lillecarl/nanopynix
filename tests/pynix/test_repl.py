@@ -38,6 +38,7 @@ from pynix.repl import (  # type: ignore[reportPrivateUsage] -- tests intentiona
 from pynix.target import EvaluationTarget
 
 from nanopynix.exceptions import NixError
+from nanopynix.rpc import ReplSession, ValueProxy
 from pynix import Pynix
 
 if TYPE_CHECKING:
@@ -82,7 +83,10 @@ def test_repl_history_uses_xdg_state_home(monkeypatch: Any, tmp_path: Path) -> N
     assert list(_repl_history().load_history_strings()) == ["pkgs.hello"]
 
 
-class _Value:
+class _Value(ValueProxy):
+    def __init__(self) -> None:
+        pass
+
     async def to_python(self) -> object:
         return {"answer": 42}
 
@@ -136,7 +140,7 @@ class _TypedValue:
         return _TypeStub()
 
 
-class _Repl:
+class _Repl(ReplSession):
     def __init__(self) -> None:
         self.lines: list[str] = []
         self.loaded_files: list[str] = []
@@ -189,7 +193,7 @@ class _CompletionValue:
         self.released = True
 
 
-class _CompletionRepl:
+class _CompletionRepl(ReplSession):
     def __init__(self) -> None:
         self.value = _CompletionValue(["hello", "hello-unfree", "world"])
 
@@ -208,7 +212,7 @@ async def test_repl_loop_keeps_bindings_and_prints_expression_values(monkeypatch
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
     repl = _Repl()
 
-    await _run_repl_loop(repl, _Prompt(["answer = 42", "{ inherit answer; }", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(repl, _Prompt(["answer = 42", "{ inherit answer; }", ":quit"]))
 
     assert repl.lines == ["answer = 42", "{ inherit answer; }"]
     assert output == [
@@ -222,7 +226,7 @@ async def test_repl_load_command_uses_repl_load_file(monkeypatch: Any) -> None:
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
     repl = _Repl()
 
-    await _run_repl_loop(repl, _Prompt([":load .", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(repl, _Prompt([":load .", ":quit"]))
 
     assert repl.loaded_files == ["."]
     assert output == [_HELP, "Added 1 variables: answer"]
@@ -233,7 +237,7 @@ async def test_repl_loads_file_target_into_initial_scope(monkeypatch: Any) -> No
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
     repl = _Repl()
 
-    names = await _load_initial_target(repl, EvaluationTarget(file=Path("default.nix"), attr=None, flake=None))  # type: ignore[arg-type] -- narrow REPL fake
+    names = await _load_initial_target(repl, EvaluationTarget(file=Path("default.nix"), attr=None, flake=None))
 
     assert names == ["answer"]
     assert repl.loaded_files == ["default.nix"]
@@ -245,7 +249,7 @@ async def test_repl_last_loaded_includes_initial_target(monkeypatch: Any) -> Non
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
     repl = _Repl()
 
-    await _run_repl_loop(repl, _Prompt([":ll", ":quit"]), initial_loaded=["flake", "pkgs"])  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(repl, _Prompt([":ll", ":quit"]), initial_loaded=["flake", "pkgs"])
 
     assert output == [_HELP, "flake pkgs"]
 
@@ -255,7 +259,7 @@ async def test_repl_verbosity_shows_and_updates_nix_log_level(monkeypatch: Any) 
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
     repl = _Repl()
 
-    await _run_repl_loop(repl, _Prompt([":verbosity", ":verbosity debug", ":verbosity", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(repl, _Prompt([":verbosity", ":verbosity debug", ":verbosity", ":quit"]))
 
     assert output == [_HELP, "notice (2)", "debug (6)", "debug (6)"]
 
@@ -296,7 +300,7 @@ async def test_repl_edit_reloads_initial_sources(monkeypatch: Any) -> None:
     repl.value = value
 
     await _run_repl_loop(
-        repl,  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+        repl,
         _Prompt([":edit target", ":quit"]),
         initial_sources=[(":load", "default.nix")],
         line_editors=("hx",),
@@ -336,7 +340,7 @@ async def test_repl_run_command_runs_evaluated_derivation(tmp_path: Path, monkey
     repl = _Repl()
     repl.value = _RunValue({"meta": _RunValue({"mainProgram": "run-me"}, {})}, {"out": str(out)})
 
-    await _run_repl_loop(repl, _Prompt([":run package", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(repl, _Prompt([":run package", ":quit"]))
 
     assert marker.read_text() == "ran\n"
     assert output == [_HELP]
@@ -349,7 +353,7 @@ async def test_repl_exec_runs_realised_argv_list(tmp_path: Path, monkeypatch: An
     repl = _Repl()
     repl.value = _CommandValue(argv=["/bin/sh", "-c", f"echo exec > {marker}"])
 
-    await _run_repl_loop(repl, _Prompt([":exec [ command ]", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(repl, _Prompt([":exec [ command ]", ":quit"]))
 
     assert marker.read_text() == "exec\n"
     assert output == [_HELP]
@@ -362,7 +366,7 @@ async def test_repl_shell_runs_realised_string(tmp_path: Path, monkeypatch: Any)
     repl = _Repl()
     repl.value = _CommandValue(command=f"echo shell > {marker}")
 
-    await _run_repl_loop(repl, _Prompt([":shell command", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(repl, _Prompt([":shell command", ":quit"]))
 
     assert marker.read_text() == "shell\n"
     assert output == [_HELP]
@@ -381,7 +385,7 @@ async def test_repl_run_warns_when_using_pname(monkeypatch: Any) -> None:
 
 
 async def test_repl_completion_uses_commands_scope_and_attrsets() -> None:
-    completer = _ReplCompleter(_CompletionRepl())  # type: ignore[arg-type] -- narrow completion fake
+    completer = _ReplCompleter(_CompletionRepl())
 
     async def complete(text: str) -> list[str]:
         document = Document(text, cursor_position=len(text))
@@ -400,14 +404,14 @@ async def test_repl_completion_uses_commands_scope_and_attrsets() -> None:
 
 async def test_repl_completer_sync_hook_returns_no_completions() -> None:
     """prompt_toolkit calls the sync hook first; it must yield nothing so the async hook takes over."""
-    completer = _ReplCompleter(_CompletionRepl())  # type: ignore[arg-type] -- narrow completion fake
+    completer = _ReplCompleter(_CompletionRepl())
     document = Document("pkgs.")
 
     assert list(completer.get_completions(document, CompleteEvent())) == []
 
 
 async def test_repl_completer_returns_nothing_for_a_non_expression_command() -> None:
-    completer = _ReplCompleter(_CompletionRepl())  # type: ignore[arg-type] -- narrow completion fake
+    completer = _ReplCompleter(_CompletionRepl())
     document = Document(":quit ", cursor_position=len(":quit "))
 
     completions = [item.text async for item in completer.get_completions_async(document, CompleteEvent())]
@@ -416,7 +420,7 @@ async def test_repl_completer_returns_nothing_for_a_non_expression_command() -> 
 
 
 async def test_repl_completer_returns_nothing_when_cursor_has_no_completable_target() -> None:
-    completer = _ReplCompleter(_CompletionRepl())  # type: ignore[arg-type] -- narrow completion fake
+    completer = _ReplCompleter(_CompletionRepl())
     document = Document("1 + 1 ", cursor_position=len("1 + 1 "))
 
     completions = [item.text async for item in completer.get_completions_async(document, CompleteEvent())]
@@ -426,7 +430,7 @@ async def test_repl_completer_returns_nothing_when_cursor_has_no_completable_tar
 
 async def test_repl_completer_swallows_nix_errors_from_attr_lookup() -> None:
     """A NixError while resolving attrs for completion must not blow up the prompt."""
-    completer = _ReplCompleter(_CompletionRepl())  # type: ignore[arg-type] -- narrow completion fake
+    completer = _ReplCompleter(_CompletionRepl())
     document = Document("badexpr.", cursor_position=len("badexpr."))
 
     completions = [item.text async for item in completer.get_completions_async(document, CompleteEvent())]
@@ -510,7 +514,7 @@ async def test_repl_loop_returns_quietly_on_eof(monkeypatch: Any) -> None:
     output: list[str] = []
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
 
-    await _run_repl_loop(_Repl(), _EOFPrompt())  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(_Repl(), _EOFPrompt())
 
     assert output == [_HELP, ""]
 
@@ -519,7 +523,7 @@ async def test_repl_loop_recovers_from_keyboard_interrupt(monkeypatch: Any) -> N
     output: list[str] = []
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
 
-    await _run_repl_loop(_Repl(), _InterruptOncePrompt())  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(_Repl(), _InterruptOncePrompt())
 
     assert output == [_HELP, "^C"]
 
@@ -529,7 +533,7 @@ async def test_repl_loop_skips_blank_lines(monkeypatch: Any) -> None:
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
     repl = _Repl()
 
-    await _run_repl_loop(repl, _Prompt(["   ", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(repl, _Prompt(["   ", ":quit"]))
 
     assert repl.lines == []
     assert output == [_HELP]
@@ -539,7 +543,7 @@ async def test_repl_loop_help_command_reprints_help(monkeypatch: Any) -> None:
     output: list[str] = []
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
 
-    await _run_repl_loop(_Repl(), _Prompt([":help", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(_Repl(), _Prompt([":help", ":quit"]))
 
     assert output == [_HELP, _HELP]
 
@@ -548,7 +552,7 @@ async def test_repl_loop_unknown_command_reports_error(monkeypatch: Any) -> None
     output: list[str] = []
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
 
-    await _run_repl_loop(_Repl(), _Prompt([":bogus", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(_Repl(), _Prompt([":bogus", ":quit"]))
 
     assert output == [_HELP, "unknown command: :bogus; try :help"]
 
@@ -557,7 +561,7 @@ async def test_repl_loop_print_command_evaluates_expression(monkeypatch: Any) ->
     output: list[str] = []
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
 
-    await _run_repl_loop(_Repl(), _Prompt([":print 1 + 1", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(_Repl(), _Prompt([":print 1 + 1", ":quit"]))
 
     assert output == [_HELP, '{\n  "answer": 42\n}']
 
@@ -568,7 +572,7 @@ async def test_repl_loop_type_command_shows_nix_type(monkeypatch: Any) -> None:
     repl = _Repl()
     repl.value = _TypedValue()
 
-    await _run_repl_loop(repl, _Prompt([":type 1", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(repl, _Prompt([":type 1", ":quit"]))
 
     assert output == [_HELP, "int"]
 
@@ -579,7 +583,7 @@ async def test_repl_loop_build_command_prints_outputs(monkeypatch: Any) -> None:
     repl = _Repl()
     repl.value = _RunValue({}, {"out": "/nix/store/xxx-out"})
 
-    await _run_repl_loop(repl, _Prompt([":build pkgs.hello", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(repl, _Prompt([":build pkgs.hello", ":quit"]))
 
     assert output == [_HELP, '{\n  "out": "/nix/store/xxx-out"\n}']
 
@@ -588,7 +592,7 @@ async def test_repl_loop_add_command_adds_attrs(monkeypatch: Any) -> None:
     output: list[str] = []
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
 
-    await _run_repl_loop(_Repl(), _Prompt([":add pkgs", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(_Repl(), _Prompt([":add pkgs", ":quit"]))
 
     assert output == [_HELP, "Added 1 variables: answer"]
 
@@ -598,7 +602,7 @@ async def test_repl_loop_load_flake_command_uses_repl_eval_flake(monkeypatch: An
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
     repl = _Repl()
 
-    await _run_repl_loop(repl, _Prompt([":load-flake .#hello", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(repl, _Prompt([":load-flake .#hello", ":quit"]))
 
     assert repl.loaded_flakes == [".#hello"]
     assert output == [_HELP, "Added 1 variables: answer"]
@@ -609,7 +613,7 @@ async def test_repl_loop_reload_command_reruns_loaded_sources(monkeypatch: Any) 
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
     repl = _Repl()
 
-    await _run_repl_loop(repl, _Prompt([":reload", ":quit"]), initial_sources=[(":load", "default.nix")])  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(repl, _Prompt([":reload", ":quit"]), initial_sources=[(":load", "default.nix")])
 
     assert repl.file_cache_resets == 1
     assert repl.loaded_files == ["default.nix"]
@@ -620,7 +624,7 @@ async def test_repl_loop_verbosity_reports_invalid_level(monkeypatch: Any) -> No
     output: list[str] = []
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
 
-    await _run_repl_loop(_Repl(), _Prompt([":verbosity bogus-level", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(_Repl(), _Prompt([":verbosity bogus-level", ":quit"]))
 
     assert len(output) == 2
     assert output[0] == _HELP
@@ -634,7 +638,7 @@ async def test_repl_loop_reports_nix_error_from_a_line_expression(monkeypatch: A
     repl = _Repl()
     repl.raise_on_line = "boom"
 
-    await _run_repl_loop(repl, _Prompt(["boom", ":quit"]))  # type: ignore[arg-type] -- _Repl is a test double matching ReplSession protocol
+    await _run_repl_loop(repl, _Prompt(["boom", ":quit"]))
 
     assert len(output) == 2
     assert isinstance(output[1], ANSI)
@@ -651,7 +655,7 @@ def test_print_error_formats_repl_run_error_as_plain_text(monkeypatch: Any) -> N
 
 
 async def test_load_initial_target_returns_empty_when_no_file_or_flake_given() -> None:
-    names = await _load_initial_target(_Repl(), EvaluationTarget(file=None, attr=None, flake=None))  # type: ignore[arg-type] -- narrow REPL fake
+    names = await _load_initial_target(_Repl(), EvaluationTarget(file=None, attr=None, flake=None))
 
     assert names == []
 

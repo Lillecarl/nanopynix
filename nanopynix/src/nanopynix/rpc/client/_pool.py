@@ -34,6 +34,7 @@ from nanopynix_proto.nix.worker import (
     WorkerServiceStub,
 )
 
+from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import DEFAULT_STORE_URI, WORKER_INIT_STATUS_OK
 from nanopynix.exceptions import SessionClosedError, from_response
 from nanopynix.logging import ACTIVE_LOG_CAPTURES, BusSubscription, CallbackBus
@@ -46,7 +47,7 @@ from nanopynix.settings import (
     DEFAULT_WORKER_MAX_CONCURRENCY,
 )
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncIterator, Callable, Sequence
 
     from nanopynix_proto.nix.common import LogLevel

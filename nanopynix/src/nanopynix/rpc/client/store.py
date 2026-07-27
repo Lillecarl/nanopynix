@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, no_type_check
 
 from nanopynix_bindings.store import BuildMode
 from nanopynix_proto.nix.store import (
@@ -42,6 +42,7 @@ from nanopynix_proto.nix.store import (
 )
 from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
+from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
 from nanopynix.exceptions import SessionClosedError, StoreClosedError
 from nanopynix.models import BuildResult, Derivation, GcResult, MissingInfo, StorePath
@@ -49,7 +50,7 @@ from nanopynix.rpc.client._pool import WorkerDiedError
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
 from nanopynix.settings import DEFAULT_RPC_TIMEOUT_SECONDS
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from betterproto2 import Message
     from nanopynix_proto.nix.common import PathInfo
 
@@ -310,6 +311,10 @@ class Store:
         """Parse and return the ``.drv`` file at ``drv_path``."""
         return await self.rpc.read_derivation(ReadDerivationRequest(path=str(drv_path)))
 
+    @no_type_check  # action is validated for untyped callers by pydantic
+    # request construction below (CollectGarbageRequest raises ValidationError
+    # for an unmapped action); beartype's parameter check would otherwise
+    # intercept before that construction runs.
     async def collect_garbage(
         self,
         action: GcAction,

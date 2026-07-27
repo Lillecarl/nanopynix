@@ -33,9 +33,10 @@ from typing import TYPE_CHECKING
 
 import anyio
 
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import NixError
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     import nanopynix
 
 _HEADER_LINE_RE = re.compile(

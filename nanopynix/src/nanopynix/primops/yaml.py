@@ -14,9 +14,10 @@ from typing import TYPE_CHECKING, Any
 import yaml
 from pydantic import TypeAdapter, ValidationError
 
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.models import JsonValue, PrimOpSpec
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Iterable
 
 _JsonValue: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)

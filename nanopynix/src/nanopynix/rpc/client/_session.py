@@ -7,7 +7,7 @@ import queue
 import threading
 import weakref
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Never, Protocol, cast
+from typing import TYPE_CHECKING, Any, Never, Protocol, cast, no_type_check
 
 import anyio
 import pydantic_core
@@ -57,6 +57,7 @@ from nanopynix_proto.nix.eval import (
 
 from nanopynix._core._codec import python_to_scalar, scalar_to_python
 from nanopynix._core._nix_core import build_mode_value
+from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import HandleKind
 from nanopynix.exceptions import (
     EvalSessionClosedError,
@@ -79,7 +80,7 @@ from nanopynix.settings import (
 )
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Sequence
 
     from betterproto2 import Message
@@ -153,9 +154,11 @@ class _LeaseRef:
     handle: int
     generation: object
 
+    @no_type_check  # beartype does not support `Never` return hints (BeartypeDecorHintPepUnsupportedException)
     def __copy__(self) -> Never:
         raise TypeError("worker cleanup leases cannot be copied")
 
+    @no_type_check  # see __copy__
     def __deepcopy__(self, memo: dict[int, Any]) -> Never:
         del memo
         raise TypeError("worker cleanup leases cannot be copied")
@@ -398,9 +401,11 @@ class ValueProxy:
     async def __aexit__(self, *args: object) -> None:
         await self.release()
 
+    @no_type_check  # beartype does not support `Never` return hints (BeartypeDecorHintPepUnsupportedException)
     def __copy__(self) -> Never:
         raise TypeError("ValueProxy cannot be copied; use normal assignment to share it")
 
+    @no_type_check  # see __copy__
     def __deepcopy__(self, memo: dict[int, Any]) -> Never:
         del memo
         raise TypeError("ValueProxy cannot be copied; use normal assignment to share it")
@@ -823,9 +828,11 @@ class LockedFlakeHandle:
         self._lease = releases.new_lease(HandleKind.LOCKED_FLAKE, self.handle)
         self._finalizer = weakref.finalize(self, _finalize_lease, self._lease, releases)
 
+    @no_type_check  # beartype does not support `Never` return hints (BeartypeDecorHintPepUnsupportedException)
     def __copy__(self) -> Never:
         raise TypeError("LockedFlakeHandle cannot be copied; use normal assignment to share it")
 
+    @no_type_check  # see __copy__
     def __deepcopy__(self, memo: dict[int, Any]) -> Never:
         del memo
         raise TypeError("LockedFlakeHandle cannot be copied; use normal assignment to share it")

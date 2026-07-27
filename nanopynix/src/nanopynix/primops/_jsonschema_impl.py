@@ -19,7 +19,9 @@ import jsonschema.validators
 import pydantic_core
 from nanopynix_bindings.expr import PrimopError
 
-if TYPE_CHECKING:
+from nanopynix._typechecking import BEARTYPING
+
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Iterable
 
     from nanopynix.models import JsonValue

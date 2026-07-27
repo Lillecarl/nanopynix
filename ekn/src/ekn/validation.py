@@ -12,8 +12,9 @@ import structlog
 from anyio import Path
 
 from ekn.sops import maybe_decrypt
+from nanopynix._typechecking import BEARTYPING
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from types import TracebackType
 
     from ekn.apply import Manifest

@@ -17,7 +17,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
+from nanopynix._typechecking import BEARTYPING
+
+if TYPE_CHECKING or BEARTYPING:
     from lsprotocol import types
 
     import nanopynix

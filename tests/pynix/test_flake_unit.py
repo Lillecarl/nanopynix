@@ -22,8 +22,10 @@ from pynix.flake import (
 )
 from rich.tree import Tree
 
+from nanopynix.rpc import ValueProxy
 
-class _FakeFlakeValue:
+
+class _FakeFlakeValue(ValueProxy):
     """Duck-types the subset of ValueProxy that _build_tree relies on."""
 
     def __init__(
@@ -62,7 +64,7 @@ async def test_build_tree_marks_unresolved_when_get_type_raises() -> None:
 
     await _build_tree(
         tree,
-        _FakeFlakeValue(NixType.THUNK, raise_on_get_type=True),  # type: ignore[arg-type] -- narrow ValueProxy fake
+        _FakeFlakeValue(NixType.THUNK, raise_on_get_type=True),
         NixType,
         budget=_TreeBudget(),
     )
@@ -75,7 +77,7 @@ async def test_build_tree_renders_list_values_and_truncates_past_ten() -> None:
     value = _FakeFlakeValue(NixType.LIST, items=items)
     tree = Tree("root")
 
-    await _build_tree(tree, value, NixType, budget=_TreeBudget())  # type: ignore[arg-type] -- narrow ValueProxy fake
+    await _build_tree(tree, value, NixType, budget=_TreeBudget())
 
     labels = [str(child.label) for child in tree.children]
     assert any("[0]" in label for label in labels)
@@ -87,7 +89,7 @@ async def test_build_tree_renders_a_short_list_without_a_more_items_message() ->
     value = _FakeFlakeValue(NixType.LIST, items=items)
     tree = Tree("root")
 
-    await _build_tree(tree, value, NixType, budget=_TreeBudget())  # type: ignore[arg-type] -- narrow ValueProxy fake
+    await _build_tree(tree, value, NixType, budget=_TreeBudget())
 
     labels = [str(child.label) for child in tree.children]
     assert len(labels) == 3
@@ -99,7 +101,7 @@ async def test_build_tree_stops_list_rendering_once_the_budget_is_exhausted() ->
     value = _FakeFlakeValue(NixType.LIST, items=items)
     tree = Tree("root")
 
-    await _build_tree(tree, value, NixType, budget=_TreeBudget(remaining=0))  # type: ignore[arg-type] -- narrow ValueProxy fake
+    await _build_tree(tree, value, NixType, budget=_TreeBudget(remaining=0))
 
     labels = [str(child.label) for child in tree.children]
     assert labels == ["[dim]<...>[/dim]"]
@@ -109,7 +111,7 @@ async def test_build_tree_renders_thunk_as_a_dim_leaf() -> None:
     value = _FakeFlakeValue(NixType.THUNK)
     tree = Tree("root")
 
-    await _build_tree(tree, value, NixType, budget=_TreeBudget())  # type: ignore[arg-type] -- narrow ValueProxy fake
+    await _build_tree(tree, value, NixType, budget=_TreeBudget())
 
     assert any("thunk" in str(child.label) for child in tree.children)
 

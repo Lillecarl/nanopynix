@@ -10,7 +10,9 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 import anyio
 
-if TYPE_CHECKING:
+from nanopynix._typechecking import BEARTYPING
+
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Callable
 
 _T = TypeVar("_T")
