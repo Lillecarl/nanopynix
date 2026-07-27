@@ -31,6 +31,17 @@ directly (path is printed in the run's "failed/errored" list, or found via
 `.pytest-agent/history.jsonl`'s last line) rather than relying on the
 terminal's minimal progress lines alone.
 
+**Read `pytest-agent/SKILL.md` for how to run pytest and read its results
+here.** It is the source of truth for the whole workflow; this file only
+summarises the part you hit first. Worth knowing it covers: `pytest-agent
+digest` groups failures by root cause (start there rather than reading each one
+separately), `pytest-agent history '<test>'` answers "did I break this or was it
+already failing", `pytest-agent rerun` re-runs just the recorded failures,
+`--agent-label` names a long background run so it stays queryable while still
+going, and `agent_notes` / `from pytest_agent import note` get values out of a
+test — including from inside the code under test — in preference to a
+throwaway `python -c`.
+
 # Python coding conventions
 
 - Use `from __future__ import annotations` in Python modules that define or use
@@ -149,6 +160,13 @@ read the detail file directly — its path is printed in the run's
 `.pytest-agent/runs-NNNN/<test file path>/<test name>.log` under the run
 named in `.pytest-agent/history.jsonl`'s last line — rather than re-running
 with ad hoc shell filtering.
+
+The refusal covers renamed greps too — it identifies the reader by argv[0],
+`comm` *and* `/proc/<pid>/exe`, so this harness's `grep` shim shows up as
+`ugrep (running as .claude-wrapped)`. That is not a different tool to route
+around; drop the pipe. `| tee` and `| wc -l` are fine, and listing-only runs
+(`--collect-only`, `--fixtures`, ...) are exempt. See `pytest-agent/SKILL.md`
+for the full rule and for the query commands to use instead of filtering.
 
 ## Never paper over failures
 
