@@ -48,9 +48,18 @@ and that neither side carries a name the other does not.
 
 ``TestEveryOperationDelegates`` covers the branch the other two leave out. Each
 dispatch site is three-way -- Python, then ``underlying``, then ``nix::Store``
--- and those groups pin the first and the last; this one pins the middle for
+-- and those groups pin the first and the last; this one runs the middle for
 every operation at once, by asserting a store that implements nothing answers
-exactly as the store it delegates to.
+exactly as the store it delegates to. For five of the fifteen it *runs* the
+middle without *pinning* it: see :data:`DELEGATION_INDISTINGUISHABLE_FROM_BASE`,
+which names them and says, per operation, what was measured.
+
+``TestTheUndispatchableCaseIsSaidOutLoud`` covers the one name on that list
+that some builds cannot dispatch at all. There the dead method is unavoidable
+-- Nix declares ``Store::readDerivation`` non-virtual before 2.32 -- so what is
+pinned instead is that it is *announced*, by a warning at store-open time and a
+``build_info()`` capability. Its two tests are version-marked rather than
+runtime-branched, so a build that skipped one says so in the report.
 
 Registration is process-global and cannot be undone, so each store here gets a
 unique scheme; otherwise re-registering under a parametrized run would raise.
@@ -62,9 +71,10 @@ import itertools
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import pytest
-from nanopynix_bindings import store as nanopynix_store
+from nanopynix_bindings import store as nanopynix_store, util as nanopynix_util
 
 import nanopynix
+from nanopynix import LogCollector
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -1001,6 +1011,90 @@ class TestReadDerivationIsServedByNixSOwnParser:
         assert str(delegated.value) == str(direct.value)
 
 
+def _warnings_from_opening(python_store_cls: type[Any]) -> list[str]:
+    """Nix *warnings* emitted while opening a store of ``python_store_cls``.
+
+    ``nix::warn`` goes to ``nix::logger``, not to Python's ``warnings``
+    module, so neither ``pytest.warns`` nor ``caplog`` sees it. Installing a
+    collector for the duration of the open is the only way to observe it, and
+    ``drain()`` is the synchronous side of that collector -- ``open_store`` is
+    a blocking call with no event loop to stream from.
+
+    ``PyLogger`` overrides ``Logger::warn`` outright rather than letting it
+    fall through to ``log(lvlWarn, ...)``, so a warning arrives as its own
+    ``"warn"`` action with the text at index 3, where an ordinary ``"msg"``
+    carries a level first and the text at index 4. Selecting on the action is
+    therefore part of the assertion, not plumbing: it distinguishes a warning
+    from an info line that happens to mention the same method.
+    """
+    collector = LogCollector()
+    nanopynix_util.install_logger(collector.callback)
+    try:
+        register_and_open(python_store_cls)
+    finally:
+        nanopynix_util.remove_logger()
+    return [event[3] for event in collector.drain() if event[2] == "warn"]
+
+
+class TestTheUndispatchableCaseIsSaidOutLoud:
+    """What a build that cannot dispatch ``read_derivation`` does about it.
+
+    ``Store::readDerivation`` is non-virtual before Nix 2.32, so there is no
+    hook to install and a store's override is never called. The defect that
+    would produce -- a method that exists, type-checks and is silently dead --
+    is exactly what the rest of this file exists to prevent, so the 2.31 build
+    warns at store-open time and ``build_info()`` carries the fact as a
+    capability.
+
+    The two tests below are each other's other half, and only one of them runs
+    on any given build: a version marker rather than a runtime ``if``, so the
+    reason a test did not run appears in the report rather than as a silent
+    pass. Only the 2.31 job exercises the warning; a green 2.34 run says
+    nothing about it, which is why the ``maximum`` test exists at all.
+    """
+
+    @pytest.mark.nix_version(maximum="2.32", reason="the warning only exists where dispatch does not")
+    def test_a_build_without_dispatch_warns_when_a_store_implements_it(self) -> None:
+        class ImplementsIt(nanopynix.StoreImpl):
+            def read_derivation(self, path: str) -> str:
+                return RECORDED_DRV_ATERM
+
+        warnings = _warnings_from_opening(ImplementsIt)
+
+        assert any("read_derivation" in text for text in warnings), warnings
+        # The capability is the branchable form of the same fact, and a caller
+        # told to consult it must find it false here.
+        assert _dispatch_is_available("read_derivation") is False
+
+    @pytest.mark.nix_version(minimum="2.32", reason="a dispatching build has nothing to warn about")
+    def test_a_build_with_dispatch_says_nothing(self) -> None:
+        """The inverse: a build that *can* dispatch must not warn about it.
+
+        The guard being dropped -- warning on every version rather than only
+        where dispatch is missing -- is the mistake only this half can catch,
+        measured: with the ``#if`` replaced by ``#if 1``, the 2.31 test above
+        stays green, because on 2.31 the two conditions are the same. A guard
+        *inverted* rather than dropped fails both halves and needs neither.
+
+        This half asserts an absence, so on its own it would also pass with a
+        collector that captured nothing. What rules that out is that both
+        halves call the same :func:`_warnings_from_opening`, and the 2.31 job
+        asserts a *presence* through it. Neither version proves the pair
+        alone; the matrix does. Stated because it was nearly missed: an
+        earlier draft of the helper read the wrong tuple index and this test
+        passed anyway, while the 2.31 one failed and said so.
+        """
+
+        class ImplementsIt(nanopynix.StoreImpl):
+            def read_derivation(self, path: str) -> str:
+                return RECORDED_DRV_ATERM
+
+        warnings = _warnings_from_opening(ImplementsIt)
+
+        assert not [text for text in warnings if "read_derivation" in text], warnings
+        assert _dispatch_is_available("read_derivation") is True
+
+
 def outcome(call: Callable[[], Any]) -> tuple[str, Any]:
     """What ``call`` did, as a comparable value -- a result or a failure kind."""
     try:
@@ -1031,12 +1125,13 @@ DELEGATION_CHECKS: dict[str, Callable[[Any, Any], Any]] = {
     "verify_store": lambda s, _p: s.verify_store(False, False),
     "compute_fs_closure": lambda s, p: sorted(s.compute_fs_closure(p, False, False, False)),
     "query_missing": lambda s, p: s.query_missing([f"/nix/store/{p.to_string()}"]),
-    # Deliberately the seeded path, which is valid but not a derivation, so the
-    # two sides fail in *different* ways when delegation is missing: the real
-    # store reads the file and fails parsing it, while a `PyStoreImpl` that
-    # dropped its `underlying->` line has an empty accessor and raises
-    # `InvalidPath` instead. A nonexistent `.drv` would raise `InvalidPath` on
-    # both and pin nothing.
+    # Deliberately the seeded path, which is valid but not a derivation: both
+    # sides then fail in Nix's parser having actually read the bytes, which is
+    # the reachability this asserts. A nonexistent `.drv` would raise
+    # `InvalidPath` on both without either side reading anything.
+    #
+    # It does not distinguish the `underlying->` line -- measured, see
+    # `DELEGATION_INDISTINGUISHABLE_FROM_BASE` below for why not.
     "read_derivation": lambda s, p: s.read_derivation(p),
 }
 
