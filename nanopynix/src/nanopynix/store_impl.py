@@ -291,6 +291,15 @@ class StoreImpl:
         could not reconstruct without this module reimplementing Nix's
         ``DerivationOutput`` variants once per supported version.
 
+        A store that holds ``.drv`` files can return their bytes unread. A
+        store that *synthesizes* derivations has to produce the same format,
+        and there is no helper here for that: it is Nix's ATerm spelling,
+        ``Derive([outputs],[inputDrvs],[inputSrcs],system,builder,[args],
+        [env])``, which is what ``Derivation::unparse`` writes and what
+        ``nix derivation show --json`` is a view of. Emitting it by hand is
+        the cost of this method's fidelity; the alternative, a dict, cannot
+        carry ``__structuredAttrs`` or a nested ``inputDrvs`` tree.
+
         A malformed or empty value raises out of Nix's parser, naming
         ``path``.
 
