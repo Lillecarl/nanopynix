@@ -142,9 +142,17 @@ class Session:
 
             async with session.store() as store:
                 info = await store.query_path_info(str(sp))
-                drv = await store.rpc.build_derivation(
-                    BuildDerivationRequest(path=str(sp), build_mode=mode)
-                )
+                results = await store.build_paths_with_results([str(sp)])
+
+        This used to show ``store.rpc.build_derivation(...)`` instead, to
+        illustrate dropping to the generated request/response API. It was a
+        misleading thing to advertise twice over: ``build_derivation`` is Nix's
+        entry point for delegating one derivation over the daemon protocol, not
+        something a library consumer reaches for -- ``build_paths_with_results``
+        is -- and it is the *only* StoreService RPC the facade does not wrap, so
+        the example pointed at the one hole rather than at a general capability.
+        :attr:`Store.rpc` is still there for anything the facade has not grown a
+        method for; it just has nothing worth demonstrating with today.
 
         The store carries this session's ID — passing it to
         ``Eval`` from a different session raises ``ValueError``. Opening the
