@@ -51,10 +51,13 @@ def _child_report() -> tuple[bool, bool]:
 
     Module-level so it is picklable. The mismatch this exists to catch is the
     two disagreeing.
-    """
-    from nanopynix._typechecking import BEARTYPING as child_flag
 
-    return child_flag, _is_instrumented()
+    The import is deliberately inside the function so that the value being
+    reported is unmistakably the one read in the child, at the point of use.
+    """
+    from nanopynix._typechecking import BEARTYPING as CHILD_BEARTYPING  # noqa: PLC0415 -- read in the child, see above
+
+    return CHILD_BEARTYPING, _is_instrumented()
 
 
 def test_the_pytest_process_is_instrumented() -> None:

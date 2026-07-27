@@ -61,7 +61,7 @@ class _FakeApi(Api):
         **kwargs: object,
     ) -> AsyncGenerator[APIObject | dict[Any, Any]]:
         if not isinstance(kind, str):
-            raise AssertionError(f"this double is only exercised with string kinds, got {kind!r}")
+            raise TypeError(f"this double is only exercised with string kinds, got {kind!r}")
         self.queried_kinds.append(kind)
         for obj in self.objects_by_kind.get(kind, []):
             yield obj

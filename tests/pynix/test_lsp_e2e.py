@@ -16,7 +16,7 @@ from __future__ import annotations
 # parameter that needs the injected client, which requires every name in its
 # signature to actually resolve at import time despite `from __future__
 # import annotations` making the annotations themselves lazy strings.
-from collections.abc import AsyncIterator  # noqa: TC003 -- must stay a real import, see comment above
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest

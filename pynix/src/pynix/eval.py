@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path  # noqa: TC003 -- clypi evaluates annotations at runtime, Path must be importable
+
+# A real import, not a TYPE_CHECKING one: clypi resolves the annotations on
+# the command below at runtime to build its argument parser, so `Path` has to
+# exist as an object and not just as a lazy PEP 563 string.
+from pathlib import Path
 from typing import override
 
 import structlog

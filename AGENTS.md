@@ -4,7 +4,13 @@ Note: plain `pytest` invocations default to `--nix-test-backends local` only (in
 - direnv exec . timeout 500 pytest tests --cov --cov-report=term-missing --cov-report= # coverage report, including the multiprocessing-forkserver Nix worker subprocess (see tests/_subprocess_startup/sitecustomize.py, put on PYTHONPATH by tests/support/beartype_hook.py)
 - direnv exec . pyright
 - direnv exec . ruff check --fix
-- direnv exec . ruff check --config ruff-strict.toml --fix
+- direnv exec . ruff check --config ruff-strict.toml --fix # currently reports zero; it is a gate, not a backlog, so any finding is yours
+
+Never run either ruff config with `--unsafe-fixes`. The strict config disables
+TC001-003 because applying them breaks runtime type-checking (the reasoning,
+with the measurement behind it, is in `ruff-strict.toml`), and `--unsafe-fixes`
+is exactly how that damage would get applied in bulk to some other rule the
+same way.
 - nix build --file . pkgs.nixVersions.nix_2_34.src --no-link --print-out-paths # download the sourcecode of a Nix package and print it's location.
 
 # Version control

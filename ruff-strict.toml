@@ -14,7 +14,9 @@ select = [
   "B",
   # flake8-simplify
   "SIM",
-  # flake8-type-checking
+  # flake8-type-checking (TC001-003 ignored below — see rationale; TC004 in
+  # particular is kept, and is the rule that actually matters here: it catches
+  # an import stranded inside a type-checking block that runtime code needs)
   "TC",
   # Ruff-specific
   "RUF",
@@ -231,6 +233,34 @@ ignore = [
   # re-export pattern `import Name as Name` is CLAUDE.md-mandated style,
   # not a useless alias
   "PLC0414",
+  # "move this annotation-only import into a type-checking block" -- actively
+  # wrong for this codebase, and dangerously so. beartype checks these hints
+  # at runtime, which means it has to resolve them for real. An import moved
+  # into a plain `if TYPE_CHECKING:` block is not merely unchecked: measured
+  # under NANOPYNIX_BEARTYPING, calling the annotated function then raises
+  # BeartypeCallHintForwardRefException, for correct arguments as readily as
+  # for wrong ones. Measured for a bare name and for a subscripted generic
+  # alike, so this is not a quirk of one hint shape.
+  #
+  # Worst case is a union. `X | None` short-circuits on `None` and raises for
+  # everything else, so the breakage is *input-dependent*: a test that only
+  # ever passes None goes green while production dies on the first real
+  # argument. Ruff offers all 143 of these as `--unsafe-fixes`, so applying
+  # them in bulk would plant that, not tidy anything.
+  #
+  # The codebase's idiom for a genuinely annotation-only import is
+  # `if TYPE_CHECKING or BEARTYPING:` (see nanopynix/_typechecking.py), which
+  # keeps the import real exactly when something will check it. Ruff flags
+  # that too -- it does not recognise the disjunction as a type-checking
+  # block -- so there is no spelling that satisfies these three rules and
+  # keeps runtime checking. They have to go.
+  #
+  # TC004 stays enabled: it is the useful half of the family here, catching
+  # the reverse mistake of stranding a runtime-needed import inside a
+  # type-checking block.
+  "TC001",
+  "TC002",
+  "TC003",
 ]
 
 [lint.flake8-builtins]
