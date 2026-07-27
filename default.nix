@@ -152,10 +152,64 @@ let
             final: _prev:
             let
               tsanRuntime = if enableTsan then tsan.tsanRuntime else null;
+
+              # The interpreter's own package set, extended with every Python
+              # package this repo builds or vendors -- one per Nix version,
+              # since nanopynix-bindings and everything above it differ per
+              # version.
+              #
+              # This exists so a dependency *name* resolves to a package the
+              # same way for pyproject.nix's renderers as it does for
+              # `python.withPackages`. Before it, each package.nix rebuilt an
+              # ad-hoc set inline (`pythonPackages = python.pkgs // { inherit
+              # nanopynix clypi ...; }`), listing by hand the subset of local
+              # packages that file happened to need. Nine such sets had
+              # accumulated, and a name absent from one was not an error --
+              # `getDependencies` only looks up what a pyproject.toml
+              # declares, so an omission stayed invisible until some
+              # *other* project declared that name. That is exactly how the
+              # test runner lost `kr8s`: nothing in it listed `ekn`, so
+              # pynix's `ekn` extra could not resolve.
+              #
+              # Strictly additive -- every name here is either this repo's own
+              # or vendored under nix/, never an override of an existing
+              # nixpkgs attribute. So this adds no rebuild and cannot produce
+              # two instances of a nixpkgs package (the failure mode that
+              # makes overlaying a Python set risky). It is the
+              # `ruff = pkgs.ruff;` case from pyproject.nix's FAQ, which is
+              # what its nixpkgs docs point to for local sources.
+              #
+              # The local packages are taken from `final` rather than rebuilt
+              # here, so `python.pkgs.nanopynix` and the scope's own
+              # `nanopynix` are the same derivation, not two builds of one
+              # source. Laziness makes the knot fine: a package.nix resolves
+              # its *dependencies* through this set, never itself.
+              python = python3Packages.python.override {
+                packageOverrides = _pySelf: _pyPrev: {
+                  inherit (final)
+                    nanopynix-bindings
+                    nanopynix
+                    nanopynix-helpers
+                    ekn
+                    pynix
+                    ;
+                  inherit
+                    nanopynix-proto
+                    grpclib-transports
+                    betterproto2
+                    betterproto2-compiler
+                    clypi
+                    kr8s
+                    tree-sitter-nix
+                    ;
+                };
+              };
+
               callNixPythonPackage = lib.callPackageWith (
                 pkgs
-                // python3Packages
+                // python.pkgs
                 // {
+                  inherit python;
                   inherit
                     grpclib-transports
                     renderPyproject

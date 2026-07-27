@@ -6,12 +6,43 @@
   nixpkgs,
   gdb,
   pynix,
+  ekn,
   version,
   tsanRuntime ? null,
 }:
 let
+  # `testpaths = tests` (pytest.ini) means a CI run collects all four of this
+  # repo's test directories -- tests/nanopynix, tests/nanopynix_helpers,
+  # tests/pynix, tests/ekn -- so this environment has to satisfy all four.
+  #
+  # Each `buildPythonApplication` contributes `.dependencies`, not itself,
+  # and that is load-bearing rather than stylistic. nixpkgs' `withPackages`
+  # keeps only derivations that are importable modules, so an application is
+  # dropped from the environment *and takes its propagated dependencies with
+  # it*. pytest.ini puts every project's `src` on `pythonpath`, so the tests
+  # import this repo's own code from the tree and genuinely only need the
+  # dependencies here -- but a dependency reachable solely through an
+  # application never arrives.
+  #
+  # That is what happened to `kr8s`: this listed `pynix.dependencies`, which
+  # does contain `ekn`, and `ekn` does propagate `kr8s` -- but `ekn` is an
+  # application, so both were filtered out. `import ekn` still worked from
+  # `ekn/src` on the pythonpath, so the four ekn test modules reaching
+  # `ekn.cli` failed at *collection* with `No module named 'kr8s'` instead of
+  # failing visibly as tests. `nix/dev-env.nix` has always spelled out
+  # `ekn.dependencies` for this reason, which is why the dev shell ran these
+  # tests fine and CI did not.
   pythonEnv = python.withPackages (
-    _: pynix.dependencies ++ pynix.optional-dependencies.test ++ [ pynix ]
+    _:
+    pynix.dependencies
+    ++ pynix.optional-dependencies.test
+    ++ ekn.dependencies
+    # Applications, for `$out/bin` -- filtered off the Python path as above,
+    # so these are on their own no substitute for the dependency lists.
+    ++ [
+      pynix
+      ekn
+    ]
   );
   # Interpolating this path literal copies it into the store and substitutes
   # the resulting store path below -- see nix/tsan-suppressions.txt for why
