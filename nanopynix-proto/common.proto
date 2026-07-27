@@ -60,6 +60,11 @@ message PathInfo {
   repeated string references = 6;
   optional string ca = 7;
   bool ultimate = 8;
+  // Narinfo signatures, as Nix renders them. Empty for a locally built path
+  // that nothing has signed -- which is not the same as "this store does not
+  // report signatures", the state this field's absence used to be
+  // indistinguishable from.
+  repeated string sigs = 9;
 }
 
 message BuildResult {
@@ -201,9 +206,18 @@ message LogEvent {
 
 // ── Derivation ─────────────────────────────────────
 
+// One node of Nix's `DerivedPathMap`, which is a tree: each output name can
+// itself carry a whole node, once per level of dynamic derivation. Recursive
+// for that reason -- `dynamic_outputs` was `map<string, string>` at field 2,
+// which could hold one output name per child and nothing below it.
+//
+// Field 2 is retired rather than reused so a stale generated module fails to
+// decode instead of reading the new message as a string.
 message DerivationOutputs {
+  reserved 2;
+
   repeated string outputs = 1;
-  map<string, string> dynamic_outputs = 2;
+  map<string, DerivationOutputs> dynamic_outputs = 3;
 }
 
 message DerivationOutput {
@@ -223,6 +237,11 @@ message Derivation {
   map<string, DerivationOutputs> input_drvs = 6;
   repeated string input_srcs = 7;
   map<string, DerivationOutput> outputs = 8;
+  // Nix's `__json` payload, verbatim, for a `__structuredAttrs = true`
+  // derivation. Not recoverable from `env`: Nix's parser moves the attribute
+  // out of the environment into `Derivation::structuredAttrs`, so before this
+  // field existed those attributes were reported by nothing at all.
+  optional string structured_attrs = 9;
 }
 
 // ── Error detail ───────────────────────────────────

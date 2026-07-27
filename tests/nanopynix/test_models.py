@@ -383,6 +383,15 @@ def test_derivation_mutable_defaults_isolated():
 
 
 def test_derivation_from_dict():
+    """``dynamic_outputs`` maps to a whole node, not an output name.
+
+    This used to pass ``{"dev": "out"}``, matching a
+    ``map<string, string>`` field. That shape could not represent Nix's
+    ``DerivedPathMap``, which nests one level per level of dynamic derivation,
+    so the binding truncated every child to its first output and dropped
+    anything below it. The field is a recursive message now and the old
+    expectation is unrepresentable rather than merely different.
+    """
     drv = Derivation.from_dict(
         {
             "name": "foo",
@@ -393,7 +402,7 @@ def test_derivation_from_dict():
             "input_drvs": {
                 "/nix/store/input.drv": {
                     "outputs": ["out"],
-                    "dynamic_outputs": {"dev": "out"},
+                    "dynamic_outputs": {"dev": {"outputs": ["out", "man"]}},
                 },
             },
         },
@@ -403,4 +412,5 @@ def test_derivation_from_dict():
     assert drv.env == {"A": "1"}
     assert drv.input_srcs == ["/nix/store/src"]
     assert drv.input_drvs["/nix/store/input.drv"].outputs == ["out"]
-    assert drv.input_drvs["/nix/store/input.drv"].dynamic_outputs == {"dev": "out"}
+    child = drv.input_drvs["/nix/store/input.drv"].dynamic_outputs["dev"]
+    assert child.outputs == ["out", "man"], "a child with two outputs must keep both"
