@@ -265,6 +265,13 @@ class AsyncStore(Protocol):
     ) -> list[BuildResult]:
         """Build derived paths, treating a plain derivation path as all outputs.
 
+        Each result reports the request back decomposed:
+        :attr:`BuildResult.drv_path` is a store path and
+        :attr:`BuildResult.outputs` is what was asked of it -- empty for an
+        opaque fetch, ``["*"]`` for every output, else the named outputs Nix
+        canonicalised. :class:`~nanopynix.models.DerivedPath` is the matching
+        type for the ``^`` spelling accepted on the way in.
+
         ``eval_store`` is ``Self``, not ``AsyncStore``: both engines reject an
         ``eval_store`` from a different session at runtime, so no
         implementation can honestly accept an arbitrary store here. Typing it

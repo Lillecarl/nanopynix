@@ -5,6 +5,7 @@ from nanopynix_proto.nix.common import AttrsMap, AttrsValue
 from nanopynix.models import (
     BuildResult,
     Derivation,
+    DerivedPath,
     FlakeRef,
     Input,
     LockedFlake,
@@ -366,6 +367,51 @@ class TestStorePathEdge:
     def test_is_derivation_no_drv(self):
         sp = StorePath("a" * 32 + "-bash-5.2")
         assert sp.is_derivation is False
+
+
+# ── DerivedPath ──────────────────────────────────────────────────────
+
+_DRV = "/nix/store/" + "a" * 32 + "-foo.drv"
+
+
+class TestDerivedPath:
+    def test_a_bare_path_has_no_selector(self):
+        """``None``, not ``[]`` -- see the class docstring for why it matters."""
+        dp = DerivedPath(_DRV)
+        assert dp.drv_path == _DRV
+        assert dp.outputs is None
+
+    def test_the_all_selector_survives_as_nix_spells_it(self):
+        dp = DerivedPath(_DRV + "^*")
+        assert dp.drv_path == _DRV
+        assert dp.outputs == ["*"]
+
+    def test_named_outputs_are_kept_in_the_order_written(self):
+        """Not sorted here. Nix canonicalises, and re-sorting would hide whether
+        a round trip actually reached ``DerivedPath::parse``."""
+        assert DerivedPath(_DRV + "^out,dev").outputs == ["out", "dev"]
+
+    def test_drv_path_is_a_store_path(self):
+        assert DerivedPath(_DRV + "^out").drv_path.is_derivation
+        assert DerivedPath(_DRV + "^out").drv_path.name == "foo.drv"
+
+    def test_the_split_takes_the_last_separator(self):
+        """Mirrors Nix's ``parseWith``, which uses ``rfind('^')``. With dynamic
+        derivations the head is itself derived and so is not a store path;
+        reporting it verbatim is the only answer that does not lose it."""
+        dp = DerivedPath(_DRV + "^out^bin")
+        assert dp.drv_path == _DRV + "^out"
+        assert dp.outputs == ["bin"]
+
+    def test_no_selector_is_distinguishable_from_an_empty_one(self):
+        """The whole reason :attr:`outputs` is optional rather than a list."""
+        assert DerivedPath(_DRV).outputs is None
+        assert DerivedPath(_DRV + "^").outputs == []
+
+    def test_it_is_a_str_and_idempotent(self):
+        dp = DerivedPath(_DRV + "^out")
+        assert isinstance(dp, str)
+        assert DerivedPath(dp) is dp
 
 
 def test_derivation_mutable_defaults_isolated():
