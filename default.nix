@@ -60,12 +60,6 @@ let
   # resolve them by name.
   kr8s = python3Packages.callPackage ./nix/kr8s.nix { };
 
-  # Not packaged in nixpkgs (checked 2026-07-27). Test-only (nanopynix's
-  # `test` extra), so -- like clypi/kr8s above -- built once here and merged
-  # into callNixPythonPackage's environment below rather than per Nix
-  # version.
-  pytest-beartype = python3Packages.callPackage ./nix/pytest-beartype.nix { };
-
   tree-sitter-nix = python3Packages.callPackage ./nix/tree-sitter-nix.nix {
     # `pkgs.path` (the nixpkgs source tree) would otherwise be shadowed by
     # python3Packages' own PyPI package literally named "path" if resolved
@@ -171,7 +165,6 @@ let
                     nanopynix-proto
                     clypi
                     kr8s
-                    pytest-beartype
                     tree-sitter-nix
                     pyproject-nix
                     tofuCoreSchemaTool

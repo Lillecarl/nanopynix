@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock
 
 from ekn.apply import apply_and_prune
@@ -9,7 +9,7 @@ from kr8s._api import Api
 from kr8s.asyncio.objects import APIObject, get_class
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
 
 def _fake_configmap(name: str, namespace: str = "ns") -> APIObject:
@@ -43,7 +43,25 @@ class _FakeApi(Api):
         self.objects_by_kind = objects_by_kind
         self.queried_kinds: list[str] = []
 
-    async def async_get(self, kind: str, *, namespace: object, label_selector: object) -> AsyncIterator[APIObject]:
+    # Mirrors kr8s.asyncio.Api.async_get exactly. The double subclasses Api so
+    # that beartype's isinstance check on `prune_kinds`' annotated parameter
+    # accepts it, and a subclass has to honour the base signature -- only
+    # `kind` is read here, but a narrower override would be a different
+    # method wearing the same name.
+    async def async_get(  # noqa: PLR0913 -- the base's parameter list, not ours
+        self,
+        kind: str | type,
+        *names: str,
+        namespace: str | None = None,
+        label_selector: str | dict[str, str] | None = None,
+        field_selector: str | dict[str, str] | None = None,
+        as_object: type[APIObject] | None = None,
+        allow_unknown_type: bool = True,
+        raw: bool = False,
+        **kwargs: object,
+    ) -> AsyncGenerator[APIObject | dict[Any, Any]]:
+        if not isinstance(kind, str):
+            raise AssertionError(f"this double is only exercised with string kinds, got {kind!r}")
         self.queried_kinds.append(kind)
         for obj in self.objects_by_kind.get(kind, []):
             yield obj

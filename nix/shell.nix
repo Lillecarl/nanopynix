@@ -13,7 +13,6 @@
   grpclib-transports,
   clypi,
   kr8s,
-  pytest-beartype,
   renderEditablePyproject,
   sphinx,
   myst-parser,
@@ -37,7 +36,6 @@ let
       grpclib-transports
       clypi
       kr8s
-      pytest-beartype
       tree-sitter-nix
       renderEditablePyproject
       ;

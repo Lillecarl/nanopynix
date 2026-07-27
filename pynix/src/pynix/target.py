@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, no_type_check
+from typing import TYPE_CHECKING, Any
 
 from clypi import arg
 from nanopynix_helpers import EvaluationTargetError as EvaluationTargetError, select_attr as select_attr
 
-from nanopynix._typechecking import BEARTYPING
+from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 
 if TYPE_CHECKING or BEARTYPING:
     from pathlib import Path
@@ -16,19 +16,19 @@ if TYPE_CHECKING or BEARTYPING:
     from nanopynix.rpc import EvalSession, ReplSession, ValueProxy
 
 
-@no_type_check  # clypi's arg() returns a PartialConfig placeholder at declaration time, not the annotated type -- clypi's own machinery replaces it later; beartype would otherwise flag every call as a type violation
+@no_runtime_type_check  # clypi's arg() returns a PartialConfig placeholder at declaration time, not the annotated type -- clypi's own machinery replaces it later; beartype would otherwise flag every call as a type violation
 def file_option() -> Path | None:
     """Declare the common ``--file`` option."""
     return arg(None, short="f", help="Evaluate FILE as a Nix expression.")
 
 
-@no_type_check  # see file_option
+@no_runtime_type_check  # see file_option
 def attr_option() -> str | None:
     """Declare the common ``--attr`` option."""
     return arg(None, short="A", help="Dot-separated attribute path within the evaluation result.")
 
 
-@no_type_check  # see file_option
+@no_runtime_type_check  # see file_option
 def flake_option() -> str | None:
     """Declare the common ``--flake`` option."""
     return arg(None, help="Evaluate FLAKE, optionally with a '#'-separated attribute path.")

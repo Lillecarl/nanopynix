@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, no_type_check
+from typing import TYPE_CHECKING, Any
 
 import betterproto2
 import grpclib
@@ -13,7 +13,7 @@ from nanopynix_proto.nix.common import LogEvent
 from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
 
 from nanopynix._core._codec import deep_value_to_python, python_to_deep_value
-from nanopynix._typechecking import BEARTYPING
+from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import CALL_ROUTE
 
 if TYPE_CHECKING or BEARTYPING:
@@ -33,7 +33,7 @@ class ManagerServiceBase(betterproto2_grpclib.ServiceBase):
     async def log(self, message: LogEvent) -> LogAck:
         raise grpclib.GRPCError(Status.UNIMPLEMENTED)
 
-    @no_type_check  # `stream` is duck-typed against grpclib.server.Stream's protocol, not an instance of it, when dispatched in-process via grpclib_transports.control._UnaryServerStream
+    @no_runtime_type_check  # `stream` is duck-typed against grpclib.server.Stream's protocol, not an instance of it, when dispatched in-process via grpclib_transports.control._UnaryServerStream
     async def __rpc_log(self, stream: Stream[LogEvent, LogAck]) -> None:
         request = await stream.recv_message()
         if request is None:
@@ -68,7 +68,7 @@ class ManagerPrimopServiceBase(betterproto2_grpclib.ServiceBase):
     async def call(self, request: CallPrimopRequest) -> CallPrimopResponse:
         raise grpclib.GRPCError(Status.UNIMPLEMENTED)
 
-    @no_type_check  # see __rpc_log above
+    @no_runtime_type_check  # see __rpc_log above
     async def __rpc_call(self, stream: Stream[CallPrimopRequest, CallPrimopResponse]) -> None:
         request = await stream.recv_message()
         if request is None:

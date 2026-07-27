@@ -6,7 +6,6 @@
   nanopynix-bindings ? callPackage ../nanopynix-bindings/package.nix { },
   nanopynix-proto ? callPackage ../nanopynix-proto/package.nix { },
   grpclib-transports,
-  pytest-beartype,
   python,
   renderPyproject,
   version,
@@ -21,7 +20,6 @@ let
       "nanopynix-bindings" = nanopynix-bindings;
       "nanopynix-proto" = nanopynix-proto;
       "grpclib-transports" = grpclib-transports;
-      "pytest-beartype" = pytest-beartype;
     };
   };
 in

@@ -1,6 +1,7 @@
 """Conformance checks for transport-neutral public protocols.
 
-Two checks, because a protocol can be wrong in two directions.
+Four checks, because a protocol can be wrong in more directions than the
+obvious one.
 
 ``test_protocol_static_conformance`` is the classic one, run by pyright: does
 each engine's concrete class satisfy the protocol it claims to? That catches a
@@ -13,6 +14,15 @@ result -- ``AsyncValue`` declared 6 of 21 shared members, ``AsyncEvalSession``
 6 of 8. An under-declared protocol passes conformance while promising almost
 nothing, so the three ``Value`` divergences the ledger tracks were free to
 persist: no gate was looking at them.
+
+The remaining two are about runtime, and exist because beartype checks these
+hints for real. ``test_every_protocol_is_runtime_checkable`` pins the
+decorator that lets it do so at all, and
+``test_both_engines_pass_the_runtime_conformance_check`` re-asks the
+conformance question the way beartype will ask it. The *consequence* of
+getting the first one wrong -- beartype silently skipping whole callables --
+is asserted a file away, in
+``test_beartype_instrumentation.py::test_no_callable_is_silently_undecoratable_beyond_the_known_list``.
 """
 
 from __future__ import annotations
@@ -122,6 +132,59 @@ PROTOCOL_PAIRS: list[tuple[str, type, type, type]] = [
 
 def _public(cls: type) -> set[str]:
     return {name for name in dir(cls) if not name.startswith("_")}
+
+
+def test_every_protocol_is_runtime_checkable() -> None:
+    """Because a protocol that is not silently disables beartype around it.
+
+    beartype cannot decorate a function whose parameter is annotated with a
+    protocol it cannot pass to ``isinstance``; it skips the whole function and
+    warns. That failure is invisible from inside a passing test suite, so the
+    property is pinned here rather than left to the warning nobody reads.
+    """
+    # `_is_runtime_protocol` is what `typing.runtime_checkable` sets and what
+    # `_ProtocolMeta.__instancecheck__` reads; there is no public accessor.
+    not_checkable = [
+        name for name, protocol, _, _ in PROTOCOL_PAIRS if not getattr(protocol, "_is_runtime_protocol", False)
+    ]
+    assert not not_checkable, f"these protocols are not @runtime_checkable: {not_checkable}"
+
+
+def _conforms_at_runtime(cls: type, protocol: type) -> bool:
+    """Runtime conformance, by whichever check ``typing`` permits for ``protocol``.
+
+    ``issubclass`` is the direct question and is what we ask when we can. But
+    ``typing`` forbids it against a protocol with a non-method member --
+    ``AsyncReplSession.line_editors`` is one -- and skipping those would leave
+    the one protocol that needs a different path checked by nothing.
+
+    ``isinstance`` answers the same question there, and it is also the check
+    beartype itself performs, so it is if anything the more relevant of the
+    two. It needs an instance rather than a class; ``object.__new__`` gives an
+    uninitialized one, which is enough because
+    ``_ProtocolMeta.__instancecheck__`` reads members with
+    ``inspect.getattr_static`` -- looked up on the type, never invoked. That
+    matters for the rpc class in particular: it is ``__slots__``-based, so
+    every instance attribute is unset here and a getter-invoking check would
+    see nothing. Both engines declare ``line_editors`` as a property on the
+    class, so the static lookup finds it. No Nix state is constructed.
+    """
+    if all(callable(getattr(protocol, member, None)) for member in _public(protocol)):
+        return issubclass(cls, protocol)
+    return isinstance(object.__new__(cls), protocol)
+
+
+def test_both_engines_pass_the_runtime_conformance_check() -> None:
+    """The static conformance above, asserted again at runtime.
+
+    Not redundant: pyright checks the classes named in ``PROTOCOL_PAIRS``,
+    while this checks the objects beartype will actually see -- and beartype's
+    check is structural at runtime, so a class can satisfy pyright and still
+    fail here (a member supplied by a ``TYPE_CHECKING``-only declaration, say).
+    """
+    for name, protocol, inproc_cls, rpc_cls in PROTOCOL_PAIRS:
+        assert _conforms_at_runtime(inproc_cls, protocol), f"inproc {inproc_cls.__name__} fails {name} at runtime"
+        assert _conforms_at_runtime(rpc_cls, protocol), f"rpc {rpc_cls.__name__} fails {name} at runtime"
 
 
 def test_protocols_declare_the_whole_shared_surface() -> None:

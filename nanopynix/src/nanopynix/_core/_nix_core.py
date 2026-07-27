@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from nanopynix_bindings import expr as nanopynix_expr, store as nanopynix_store, util as nanopynix_util
 
@@ -12,6 +12,11 @@ if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Mapping, Sequence
 
 
+# Runtime-checkable so beartype can check the parameter it annotates. Without
+# it beartype cannot decorate `configure_eval_state` at all and skips the whole
+# method. The check is `isinstance` against the two names below -- structural,
+# which is the same guarantee the annotation already makes, and no stronger.
+@runtime_checkable
 class EvalSettingsTarget(Protocol):
     """The two live-mutable setters :meth:`NixCore.configure_eval_state` needs.
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast, no_type_check
+from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix_bindings.store import BuildMode
 from nanopynix_proto.nix.store import (
@@ -42,7 +42,7 @@ from nanopynix_proto.nix.store import (
 )
 from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
-from nanopynix._typechecking import BEARTYPING
+from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
 from nanopynix.exceptions import SessionClosedError, StoreClosedError
 from nanopynix.models import BuildResult, Derivation, GcResult, MissingInfo, StorePath
@@ -311,7 +311,7 @@ class Store:
         """Parse and return the ``.drv`` file at ``drv_path``."""
         return await self.rpc.read_derivation(ReadDerivationRequest(path=str(drv_path)))
 
-    @no_type_check  # action is validated for untyped callers by pydantic
+    @no_runtime_type_check  # action is validated for untyped callers by pydantic
     # request construction below (CollectGarbageRequest raises ValidationError
     # for an unmapped action); beartype's parameter check would otherwise
     # intercept before that construction runs.

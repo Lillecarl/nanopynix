@@ -34,6 +34,7 @@ import anyio
 import pytest
 
 from nanopynix.models import DerivationOutputs
+from tests.support.subprocess_output import run_process
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -76,9 +77,6 @@ in derivation {
 """
 
 
-
-
-
 async def _drv_path(session: Any, store: Any, expr: str) -> str:
     async with session.eval(store) as evaluator:
         value = await evaluator.string(expr)
@@ -116,19 +114,10 @@ async def test_rpc_read_derivation_keeps_structured_attrs(rpc_session: RpcSessio
 
 
 async def _run(*command: str) -> str:
-    process = await anyio.open_process(list(command))
-    async with process:
-        stdout = b""
-        if process.stdout is not None:
-            while True:
-                try:
-                    stdout += await process.stdout.receive()
-                except anyio.EndOfStream:
-                    break
-        await process.wait()
-    if process.returncode != 0:
-        raise RuntimeError(f"{command[0]} exited {process.returncode}")
-    return stdout.decode().strip()
+    result = await run_process(command)
+    if result.returncode != 0:
+        raise RuntimeError(f"{command[0]} {result.describe()}")
+    return result.stdout.strip()
 
 
 @pytest.fixture

@@ -29,7 +29,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-dependency", "pytest-cov", "pytest-forked", "pygit2", "pytest-beartype"]
+test = ["pytest", "pytest-dependency", "pytest-cov", "pytest-forked", "pygit2", "beartype"]
 
 [project.scripts]
 nanopynix-worker = "nanopynix.rpc.worker._worker:main"

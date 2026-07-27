@@ -22,10 +22,10 @@ from __future__ import annotations
 
 import sys
 
-import anyio
 import pytest
 
 from nanopynix.settings import DEFAULT_EXPERIMENTAL_FEATURES
+from tests.support.subprocess_output import CompletedProcess, run_process
 
 # Report the features Nix actually has on, straight after the entry point under
 # test -- before this module's fix, only what nix.conf happened to supply.
@@ -52,27 +52,17 @@ print("SURVIVED")
 """
 
 
-async def _run_python(script: str, *args: str) -> tuple[int, str]:
-    process = await anyio.open_process([sys.executable, "-c", script, *args])
-    async with process:
-        stdout = b""
-        if process.stdout is not None:
-            while True:
-                try:
-                    stdout += await process.stdout.receive()
-                except anyio.EndOfStream:
-                    break
-        await process.wait()
-    return process.returncode or 0, stdout.decode()
+async def _run_python(script: str, *args: str) -> CompletedProcess:
+    return await run_process([sys.executable, "-c", script, *args])
 
 
 @pytest.mark.parametrize("entry", ["init_nix", "init_libstore"])
 async def test_init_entry_points_enable_the_default_experimental_features(entry: str) -> None:
     """Both entry points, because wrapping only one leaves the hazard reachable."""
-    returncode, stdout = await _run_python(_REPORT_SCRIPT.format(entry=entry))
+    result = await _run_python(_REPORT_SCRIPT.format(entry=entry))
 
-    assert returncode == 0, stdout
-    enabled = set(stdout.split())
+    assert result.returncode == 0, result.describe()
+    enabled = set(result.stdout.split())
     assert set(DEFAULT_EXPERIMENTAL_FEATURES) <= enabled, (
         f"{entry} left these defaults off: {set(DEFAULT_EXPERIMENTAL_FEATURES) - enabled}"
     )
@@ -92,22 +82,11 @@ async def test_a_store_opened_after_init_survives_enabling_ca_derivations(
     """
     root = tmp_path_factory.mktemp("ca-ordering-store")
     expression = 'derivation { name = "probe"; system = builtins.currentSystem; builder = "/bin/sh"; }'
-    instantiate = await anyio.open_process(
-        ["nix-instantiate", "--store", f"local://{root}", "--expr", expression]
-    )
-    async with instantiate:
-        drv = b""
-        if instantiate.stdout is not None:
-            while True:
-                try:
-                    drv += await instantiate.stdout.receive()
-                except anyio.EndOfStream:
-                    break
-        await instantiate.wait()
+    instantiate = await run_process(["nix-instantiate", "--store", f"local://{root}", "--expr", expression])
     if instantiate.returncode != 0:
-        pytest.fail(f"nix-instantiate exited {instantiate.returncode}")
+        pytest.fail(f"nix-instantiate {instantiate.describe()}")
 
-    returncode, stdout = await _run_python(_ABORT_SCRIPT, str(root), drv.decode().strip(), entry)
+    result = await _run_python(_ABORT_SCRIPT, str(root), instantiate.stdout.strip(), entry)
 
-    assert returncode == 0, f"exited {returncode} (-6 is the SIGABRT this guards against): {stdout}"
-    assert "SURVIVED" in stdout, stdout
+    assert result.returncode == 0, f"-6 is the SIGABRT this guards against; {result.describe()}"
+    assert "SURVIVED" in result.stdout, result.describe()

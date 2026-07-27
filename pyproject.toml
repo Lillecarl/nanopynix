@@ -10,6 +10,11 @@ extraPaths = [
   "pytest-agent/src",
   "tests",
   "tests/pynix",
+  # Reached by a bare `import beartype_bootstrap` from both the sitecustomize
+  # shim beside it and tests/support/beartype_hook.py, because the directory
+  # goes on PYTHONPATH rather than being a package under `tests` -- see that
+  # module's docstring.
+  "tests/_subprocess_startup",
   "docs",
 ]
 exclude = ["**/result*"]
@@ -31,8 +36,8 @@ branch = true
 # `parallel = true` gives each process its own data file (merged later via
 # `coverage combine`); `sigterm` flushes data on graceful worker shutdown.
 # The forkserver helper itself is a freshly exec'd interpreter, so it only
-# picks up COVERAGE_PROCESS_START via the sitecustomize shim wired in
-# tests/conftest.py -- see COVERAGE_PROCESS_START there for the other half.
+# picks up COVERAGE_PROCESS_START via tests/_subprocess_startup/sitecustomize.py,
+# whose directory tests/support/beartype_hook.py puts on PYTHONPATH.
 concurrency = ["multiprocessing", "thread"]
 parallel = true
 sigterm = true

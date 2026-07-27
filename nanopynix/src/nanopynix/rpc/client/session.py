@@ -19,14 +19,14 @@ import logging
 import uuid
 import weakref
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, no_type_check
+from typing import TYPE_CHECKING, Any
 
 import anyio
 from nanopynix_proto.nix.common import LogEvent as LogEventProto, LogLevel
 
 from nanopynix._core._primops import to_primop_specs
 from nanopynix._process_title import set_manager_title
-from nanopynix._typechecking import BEARTYPING
+from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import DEFAULT_STORE_URI
 from nanopynix.logging import LogCapture
 from nanopynix.models import LogEvent
@@ -85,7 +85,7 @@ class Session:
                 info = await store.query_path_info(str(sp))
     """
 
-    @no_type_check  # nix_conf/settings validate their own types at runtime for
+    @no_runtime_type_check  # nix_conf/settings validate their own types at runtime for
     # untyped callers (see the isinstance guards below); beartype's parameter
     # check would otherwise intercept before that guard runs and raise its own
     # exception type instead of the documented TypeError.

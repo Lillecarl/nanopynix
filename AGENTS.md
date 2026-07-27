@@ -1,7 +1,7 @@
 # Useful commands
 Note: plain `pytest` invocations default to `--nix-test-backends local` only (in-process, single-store) -- the daemon backend is exercised separately by CI's `test-daemon-*` matrix jobs and by the TSan workflows (which explicitly pass `--nix-test-backends local,daemon`). Pass `--nix-test-backends local,daemon` yourself if you need to reproduce a daemon-specific failure locally.
 - direnv exec . timeout 500 pytest tests
-- direnv exec . timeout 500 pytest tests --cov --cov-report=term-missing --cov-report= # coverage report, including the multiprocessing-forkserver Nix worker subprocess (see tests/conftest.py's _enable_subprocess_coverage and tests/_coverage_subprocess/sitecustomize.py)
+- direnv exec . timeout 500 pytest tests --cov --cov-report=term-missing --cov-report= # coverage report, including the multiprocessing-forkserver Nix worker subprocess (see tests/_subprocess_startup/sitecustomize.py, put on PYTHONPATH by tests/support/beartype_hook.py)
 - direnv exec . pyright
 - direnv exec . ruff check --fix
 - direnv exec . ruff check --config ruff-strict.toml --fix
