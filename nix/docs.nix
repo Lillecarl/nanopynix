@@ -1,23 +1,16 @@
 {
   lib,
   stdenvNoCC,
-  python,
-  pynix,
-  sphinx,
-  myst-parser,
-  furo,
+  pythonSet,
 }:
 let
-  pythonEnv = python.withPackages (
-    _:
-    pynix.dependencies
-    ++ [
-      pynix
-      sphinx
-      myst-parser
-      furo
-    ]
-  );
+  # Built, not editable: this is a buildable artifact, so its inputs have to
+  # come from the store. `pynix` here is the *library* out of the package set,
+  # not the `mkApplication` wrapper of the same name in default.nix -- autodoc
+  # imports modules, and an application exposes only `bin/`.
+  pythonEnv = pythonSet.mkVirtualEnv "nanopynix-docs-env" {
+    pynix = [ "docs" ];
+  };
 in
 stdenvNoCC.mkDerivation {
   pname = "nanopynix-docs";

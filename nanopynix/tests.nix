@@ -1,49 +1,40 @@
 {
   lib,
   writeShellApplication,
-  python,
+  pythonSet,
   nix-cli,
   nixpkgs,
   gdb,
-  pynix,
-  ekn,
   version,
   tsanRuntime ? null,
 }:
 let
-  # `testpaths = tests` (pytest.ini) means a CI run collects all four of this
-  # repo's test directories -- tests/nanopynix, tests/nanopynix_helpers,
-  # tests/pynix, tests/ekn -- so this environment has to satisfy all four.
+  # A venv over the whole repo, with every project's test extra enabled.
   #
-  # Each `buildPythonApplication` contributes `.dependencies`, not itself,
-  # and that is load-bearing rather than stylistic. nixpkgs' `withPackages`
-  # keeps only derivations that are importable modules, so an application is
-  # dropped from the environment *and takes its propagated dependencies with
-  # it*. pytest.ini puts every project's `src` on `pythonpath`, so the tests
-  # import this repo's own code from the tree and genuinely only need the
-  # dependencies here -- but a dependency reachable solely through an
-  # application never arrives.
+  # This replaces a `python.withPackages` list that had to name each
+  # project's `.dependencies` by hand, because `withPackages` drops
+  # applications together with everything they propagate -- the bug that left
+  # `kr8s` out and four ekn test modules uncollectable. A venv has no such
+  # rule: `mkVirtualEnv` resolves the declared graph, so a dependency cannot
+  # go missing without the resolution failing loudly.
   #
-  # That is what happened to `kr8s`: this listed `pynix.dependencies`, which
-  # does contain `ekn`, and `ekn` does propagate `kr8s` -- but `ekn` is an
-  # application, so both were filtered out. `import ekn` still worked from
-  # `ekn/src` on the pythonpath, so the four ekn test modules reaching
-  # `ekn.cli` failed at *collection* with `No module named 'kr8s'` instead of
-  # failing visibly as tests. `nix/dev-env.nix` has always spelled out
-  # `ekn.dependencies` for this reason, which is why the dev shell ran these
-  # tests fine and CI did not.
-  pythonEnv = python.withPackages (
-    _:
-    pynix.dependencies
-    ++ pynix.optional-dependencies.test
-    ++ ekn.dependencies
-    # Applications, for `$out/bin` -- filtered off the Python path as above,
-    # so these are on their own no substitute for the dependency lists.
-    ++ [
-      pynix
-      ekn
-    ]
-  );
+  # Built, not editable, unlike the dev shell. An editable install bakes an
+  # absolute non-store path into the derivation, and this runner deliberately
+  # `cd`s into a store copy of the tree below -- so an editable install here
+  # would either point at a checkout that need not exist on the machine
+  # running the tests, or (under flake evaluation, where the path *is* in the
+  # store) be rejected by the renderer. Hermetic source and a live checkout
+  # are alternatives; the runner is the hermetic one.
+  #
+  # `pytest-agent` is deliberately absent: it auto-activates on import, and
+  # this runner is what CI executes.
+  pythonEnv = pythonSet.mkVirtualEnv "nanopynix-test-env" {
+    nanopynix = [ "test" ];
+    nanopynix-helpers = [ ];
+    pynix = [ "test" ];
+    ekn = [ ];
+  };
+
   # Interpolating this path literal copies it into the store and substitutes
   # the resulting store path below -- see nix/tsan-suppressions.txt for why
   # this specific, narrowly-scoped suppression is safe (a known-permanent

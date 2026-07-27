@@ -1,6 +1,5 @@
 {
   mkShell,
-  python,
   pyright,
   ruff,
   nixfmt,
@@ -8,45 +7,27 @@
   taplo,
   treefmt,
   actionlint,
-  renderEditablePyproject,
-  sphinx,
-  myst-parser,
-  furo,
+  editablePythonSet,
   cachix,
   statix,
   tofuCoreSchemaTool,
   gdb,
 }:
 let
-  # Reuses the same editable package definitions dev-env.nix exports (rather
-  # than its combined `pythonEnv`) so this shell's own extra docs deps
-  # (sphinx/myst-parser/furo) land in the *same* python.withPackages env --
-  # two separate envs on PATH would collide on bin/python3 et al.
-  # Only the two arguments dev-env.nix actually takes: every Python package
-  # it needs now resolves through `python.pkgs`, which is the point of having
-  # one package set.
+  # Reuses dev-env.nix's editable venv rather than assembling a second one.
+  # The docs toolchain goes *into* that venv, via pynix's `docs` extra, rather
+  # than onto PATH beside it: `sphinx-build` has to import what it documents,
+  # and a second Python environment would have its own `sys.path` without it.
   devEnv = import ./dev-env.nix {
-    inherit python renderEditablePyproject;
+    inherit editablePythonSet;
+    extraSpec = {
+      pynix = [
+        "test"
+        "ekn"
+        "docs"
+      ];
+    };
   };
-
-  pythonEnv = python.withPackages (
-    pp:
-    devEnv.nanopynix.dependencies
-    ++ devEnv.nanopynix-helpers.dependencies
-    ++ devEnv.pynix.dependencies
-    ++ devEnv.ekn.dependencies
-    ++ devEnv.pytest-agent.dependencies
-    ++ [
-      devEnv.nanopynix
-      devEnv.nanopynix-helpers
-      devEnv.pynix
-      devEnv.ekn
-      devEnv.pytest-agent
-      sphinx
-      myst-parser
-      furo
-    ]
-  );
 in
 mkShell {
   shellHook = ''
@@ -54,7 +35,7 @@ mkShell {
   '';
 
   packages = [
-    pythonEnv
+    devEnv.pythonEnv
     pyright
     ruff
     nixfmt
