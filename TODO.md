@@ -1,5 +1,30 @@
 # TODO
 
+# Deferred: PyStoreImpl overrides that answer for the Python store
+Fixing the Python-store inbound path (`register_store_implementation`) turned
+up a second, distinct defect class in `py_store_impl.cpp` that was left alone.
+The fixed bugs were all "a Python store cannot return data"; these are "a
+Python store returns data that is wrong", and they predate that work:
+
+- `querySubstitutablePaths` returns `paths` verbatim, claiming every path
+  queried is substitutable. Proven: a store whose `is_valid_path_uncached`
+  returns `False` for everything still reports the path as substitutable.
+  Nix's base implementation consults the substituters
+  (`store-api.cc:510`) and would answer `{}`.
+- `queryValidPaths` returns `paths` verbatim, i.e. claims every path is
+  already valid. Not bound to Python, but Nix reaches it internally (query
+  missing, build, the daemon protocol handler), so the lie is live. The base
+  implementation filters by actually calling `queryPathInfo` per path
+  (`store-api.cc:763`), which would route back into the Python store.
+- `queryAllValidPaths` returns `{}`, claiming an empty store, where the base
+  is `unsupported("queryAllValidPaths")` (`store-api.hh:404`).
+
+The fix is most likely deleting the three overrides rather than adding
+anything -- the base class already does the right thing in each case. It was
+deferred because it is a behaviour change (`queryAllValidPaths` would start
+raising instead of returning `[]`) in a different defect class from the one
+under repair, and belongs in its own change with its own tests.
+
 # Deferred: debatable-tier "magic value" findings
 The magic-values audit also turned up ~15 lower-confidence findings that
 were deliberately left alone in this pass (not clear violations, more a

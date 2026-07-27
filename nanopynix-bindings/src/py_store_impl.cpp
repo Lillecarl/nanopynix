@@ -2,6 +2,20 @@
 
 #include <cstdio>
 
+// Required for the std::string / std::vector / std::optional / std::shared_ptr
+// type casters. Without them nanobind has no caster for these types, so
+// `nb::cast<std::string>` still compiles -- it falls back to the bound-type
+// path -- and then fails at *runtime*. That is why a Python store had never
+// successfully returned path info: every string field threw, and
+// queryPathInfoUncached swallowed it. `shared_ptr.h` is what makes
+// `PyStoreConfig::openStore`'s `nb::cast<std::shared_ptr<nix::Store>>` work;
+// without it `underlying_store` raised `std::bad_cast` out of `open_store`, so
+// every `if (underlying)` fallthrough in this file was unreachable.
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/vector.h>
+#include <nanobind/stl/shared_ptr.h>
+
 #include <nix/store/path-info.hh>
 #include <nix/store/realisation.hh>
 #include <nix/util/hash.hh>
@@ -14,6 +28,34 @@ static bool py_has_method(nb::object obj, const char *method) {
     return nb::hasattr(obj, method) && nb::isinstance<nb::callable>(obj.attr(method));
 }
 
+// A dict entry that is present and not None.
+//
+// `contains()` alone is not enough, and getting that wrong was silently fatal:
+// `path_info_to_dict` -- the outbound rendering a Python store would naturally
+// mirror -- represents an absent optional as an explicit `None` rather than by
+// omitting the key. `deriver`, `ca` and `registration_time` are all None for an
+// ordinary locally-added path, so `nb::cast<std::string>(d["ca"])` threw on
+// nearly every real store, and the exception was swallowed (see
+// queryPathInfoUncached).
+static std::optional<nb::object> dict_entry(const nb::dict &d, const char *key) {
+    if (!d.contains(key)) return std::nullopt;
+    nb::object value = nb::borrow<nb::object>(d[key]);
+    if (value.is_none()) return std::nullopt;
+    return value;
+}
+
+// One store path from a Python store, accepting either spelling.
+//
+// The Python side is handed base names (`StorePath::to_string()`), so a store
+// that echoes back what it was given yields base names; a store that mirrors
+// `path_info_to_dict` yields full `/nix/store/...` paths. Both are reasonable
+// readings of the protocol and neither costs anything to accept.
+static nix::StorePath store_path_from_py(const nix::Store &store, const nb::object &value) {
+    auto text = nb::cast<std::string>(value);
+    if (!text.empty() && text[0] == '/') return store.parseStorePath(text);
+    return nix::StorePath{text};
+}
+
 // =========================================================================
 // PyStoreImpl
 // =========================================================================
@@ -21,6 +63,7 @@ static bool py_has_method(nb::object obj, const char *method) {
 PyStoreImpl::PyStoreImpl(nix::ref<const nix::StoreConfig> config, nb::object py_store,
                          std::shared_ptr<nix::Store> underlying)
     : Store(*config)
+    , owned_config(config)
     , py_store(std::move(py_store))
     , underlying(std::move(underlying))
 {
@@ -45,6 +88,14 @@ void PyStoreImpl::queryPathInfoUncached(
     const nix::StorePath & path,
     nix::Callback<std::shared_ptr<const nix::ValidPathInfo>> callback) noexcept
 {
+    // Whether the Python store implements this at all is a different question
+    // from whether its answer was usable, and the two must not share a handler.
+    // Absence is a legitimate "not implemented" and falls through to the
+    // underlying store; a raised exception is a real error and belongs to the
+    // caller. This used to be one try block whose catch printed to stderr and
+    // then fell through, so a store that raised -- or merely returned the same
+    // shape `path_info_to_dict` produces -- handed back the underlying store's
+    // answer as though it were its own.
     try {
         nb::gil_scoped_acquire gil;
         if (py_has_method(py_store, "query_path_info")) {
@@ -61,21 +112,35 @@ void PyStoreImpl::queryPathInfoUncached(
                     static_cast<const nix::StoreDirConfig &>(*this), nix::Hash::dummy)
 #endif
             );
-            if (d.contains("nar_hash")) {
-                info->narHash = nix::Hash::parseAny(nb::cast<std::string>(d["nar_hash"]), nix::HashAlgorithm::SHA256);
+            if (auto v = dict_entry(d, "nar_hash"))
+                info->narHash = nix::Hash::parseAny(nb::cast<std::string>(*v), nix::HashAlgorithm::SHA256);
+            if (auto v = dict_entry(d, "nar_size")) info->narSize = nb::cast<uint64_t>(*v);
+            if (auto v = dict_entry(d, "references")) {
+                for (auto ref : nb::cast<nb::list>(*v))
+                    info->references.insert(store_path_from_py(*this, nb::borrow<nb::object>(ref)));
             }
-            if (d.contains("nar_size")) info->narSize = nb::cast<uint64_t>(d["nar_size"]);
-            if (d.contains("references")) {
-                for (auto ref : nb::cast<nb::list>(d["references"]))
-                    info->references.insert(nix::StorePath{nb::cast<std::string>(ref)});
+            if (auto v = dict_entry(d, "registration_time")) info->registrationTime = nb::cast<time_t>(*v);
+            if (auto v = dict_entry(d, "deriver")) info->deriver = store_path_from_py(*this, *v);
+            if (auto v = dict_entry(d, "ca")) info->ca = nix::ContentAddress::parse(nb::cast<std::string>(*v));
+            if (auto v = dict_entry(d, "ultimate")) info->ultimate = nb::cast<bool>(*v);
+            // Same split as the outbound rendering in nix_store.cpp: 2.31 keeps
+            // signatures as plain strings, 2.34+ as parsed nix::Signature.
+            if (auto v = dict_entry(d, "sigs")) {
+                for (auto sig : nb::cast<nb::list>(*v)) {
+                    auto text = nb::cast<std::string>(nb::borrow<nb::object>(sig));
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+                    info->sigs.insert(text);
+#else
+                    info->sigs.insert(nix::Signature::parse(text));
+#endif
+                }
             }
-            if (d.contains("registration_time")) info->registrationTime = nb::cast<time_t>(d["registration_time"]);
-            if (d.contains("ca")) info->ca = nix::ContentAddress::parse(nb::cast<std::string>(d["ca"]));
             callback(info);
             return;
         }
-    } catch (std::exception &e) {
-        fprintf(stderr, "nanopynix: Python query_path_info failed: %s; falling back to underlying store\n", e.what());
+    } catch (...) {
+        callback.rethrow();
+        return;
     }
     if (underlying) {
         auto info = underlying->queryPathInfo(path);
@@ -103,7 +168,8 @@ std::optional<nix::StorePath> PyStoreImpl::queryPathFromHashPart(const std::stri
     nb::gil_scoped_acquire gil;
     if (py_has_method(py_store, "query_path_from_hash_part")) {
         auto result = py_store.attr("query_path_from_hash_part")(nb::str(hashPart.c_str()));
-        if (!result.is_none()) return nix::StorePath{nb::cast<std::string>(result)};
+        // Same two accepted spellings as the path fields of query_path_info.
+        if (!result.is_none()) return store_path_from_py(*this, nb::borrow<nb::object>(result));
     }
     if (underlying) return underlying->queryPathFromHashPart(hashPart);
     return std::nullopt;
