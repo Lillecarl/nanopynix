@@ -42,9 +42,14 @@ namespace nb = nanobind;
  *   or a list of strings", so they are excluded deliberately and permanently.
  * - `queryValidPaths` is not on that class, so nothing can call it directly;
  *   `nix::Store` derives it from `queryPathInfo`, which already dispatches.
- * - `readDerivation`, `queryMissing` and `computeFSClosure` return structured
- *   values that need a field reader each. They belong here; they are simply
- *   not done yet.
+ * - `readDerivation` is not virtual on 2.31 (`store-api.hh:771`; it gained
+ *   `virtual` by 2.34, `:819`). Dispatching it only where the base declares it
+ *   virtual would give the interface a different shape per Nix version, so a
+ *   store implementing `read_derivation` would work on 2.34 and silently do
+ *   nothing on 2.31 -- exactly the dead-method failure this list exists to make
+ *   impossible. It stays out until 2.31 leaves the matrix. A Python store can
+ *   still serve derivations: `nix::Store::readDerivation` reads the `.drv`
+ *   through `queryPathInfo`, which dispatches.
  */
 #define NANOPYNIX_STORE_DISPATCH_METHODS(X)                                                        \
     X(is_valid_path_uncached)                                                                      \
@@ -58,7 +63,9 @@ namespace nb = nanobind;
     X(add_temp_root)                                                                               \
     X(ensure_path)                                                                                 \
     X(optimise_store)                                                                              \
-    X(verify_store)
+    X(verify_store)                                                                                \
+    X(compute_fs_closure)                                                                          \
+    X(query_missing)
 
 /**
  * Which of those a given Python store implements, resolved once at open time.
@@ -163,6 +170,19 @@ struct PyStoreImpl : public nix::Store {
     void ensurePath(const nix::StorePath & path) override;
     void optimiseStore() override;
     bool verifyStore(bool checkContents, nix::RepairFlag repair) override;
+
+    // `nix::Store` declares two `computeFSClosure` overloads and only the
+    // set-taking one is virtual (`store-api.hh:836` on 2.34, `:788` on 2.31,
+    // `:979` on 2.35); the single-path one just wraps it. Overriding the wrong
+    // one would compile and never be called, so this is the set overload.
+    void computeFSClosure(
+        const nix::StorePathSet & paths,
+        nix::StorePathSet & out,
+        bool flipDirection,
+        bool includeOutputs,
+        bool includeDerivers) override;
+
+    nix::MissingPaths queryMissing(const std::vector<nix::DerivedPath> & targets) override;
 
     // Not dispatched: overridden only so `underlying` gets a chance before
     // nix::Store's own behaviour. `narFromPath` needs a `Sink &`, and

@@ -16,6 +16,7 @@
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/shared_ptr.h>
 
+#include <nix/store/derived-path.hh>
 #include <nix/store/path-info.hh>
 #include <nix/store/realisation.hh>
 #include <nix/util/hash.hh>
@@ -414,6 +415,73 @@ bool PyStoreImpl::verifyStore(bool checkContents, nix::RepairFlag repair) {
     // The base returns false, i.e. "no errors remain". That is a claim, but it
     // is Nix's own claim for any store that does not implement verification.
     return nix::Store::verifyStore(checkContents, repair);
+}
+
+void PyStoreImpl::computeFSClosure(
+    const nix::StorePathSet & paths,
+    nix::StorePathSet & out,
+    bool flipDirection,
+    bool includeOutputs,
+    bool includeDerivers) {
+    {
+        nb::gil_scoped_acquire gil;
+        if (methods.compute_fs_closure) {
+            // Insert rather than assign, for a stronger reason than
+            // queryReferrers': `computeClosure` uses this very set as its
+            // visited set (`closure.hh:35`, `res.insert(current).second`), so
+            // clearing it would lose the caller's accumulated result and, where
+            // Nix accumulates across calls, could turn a completed traversal
+            // back into a pending one.
+            for (auto & p : store_path_set_from_py(
+                     *this, py_store.attr("compute_fs_closure")(
+                                store_paths_to_py(paths), nb::bool_(flipDirection),
+                                nb::bool_(includeOutputs), nb::bool_(includeDerivers))))
+                out.insert(p);
+            return;
+        }
+    }
+    if (underlying) {
+        underlying->computeFSClosure(paths, out, flipDirection, includeOutputs, includeDerivers);
+        return;
+    }
+    // The base walks the graph itself using queryPathInfo, queryReferrers and
+    // queryValidDerivers -- all of which dispatch -- so a store that answers
+    // those gets a correct closure without implementing this at all.
+    nix::Store::computeFSClosure(paths, out, flipDirection, includeOutputs, includeDerivers);
+}
+
+nix::MissingPaths PyStoreImpl::queryMissing(const std::vector<nix::DerivedPath> & targets) {
+    {
+        nb::gil_scoped_acquire gil;
+        if (methods.query_missing) {
+            // Targets go over as the `^` strings Nix itself serializes derived
+            // paths to, which is the only spelling that survives the trip: a
+            // DerivedPath is a sum type, and `drv^out` and a bare `.drv` mean
+            // different things ("build these outputs" vs "fetch this file").
+            nb::list py_targets;
+            for (const auto & target : targets)
+                py_targets.append(nb::str(target.to_string(*this).c_str()));
+
+            auto reply = nb::cast<nb::dict>(py_store.attr("query_missing")(py_targets));
+            // Same shape `query_missing` renders outward (`nix_store.cpp`), so
+            // a store may echo one back unchanged -- the property that keeps
+            // query_path_info's round-trip test honest.
+            nix::MissingPaths missing;
+            if (auto v = dict_entry(reply, "will_build"))
+                missing.willBuild = store_path_set_from_py(*this, *v);
+            if (auto v = dict_entry(reply, "will_substitute"))
+                missing.willSubstitute = store_path_set_from_py(*this, *v);
+            if (auto v = dict_entry(reply, "unknown"))
+                missing.unknown = store_path_set_from_py(*this, *v);
+            if (auto v = dict_entry(reply, "download_size"))
+                missing.downloadSize = nb::cast<uint64_t>(*v);
+            if (auto v = dict_entry(reply, "nar_size"))
+                missing.narSize = nb::cast<uint64_t>(*v);
+            return missing;
+        }
+    }
+    if (underlying) return underlying->queryMissing(targets);
+    return nix::Store::queryMissing(targets);
 }
 
 // --- not dispatched into Python; see the dispatch list in the header ---

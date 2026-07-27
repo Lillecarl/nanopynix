@@ -41,8 +41,13 @@ of Nix store operations are deliberately absent:
   ``add_indirect_root``. Those live on Nix's ``GcStore``, ``LogStore`` and
   ``LocalFSStore`` interfaces, which a Python store does not inherit, so there
   is nothing to override.
-* ``read_derivation``, ``query_missing`` and ``compute_fs_closure``, which
-  return structured values and are simply not done yet.
+* ``read_derivation``, which is not a virtual method on Nix 2.31 -- it became
+  one by 2.34. Dispatching it only where the base declares it virtual would
+  make this interface a different shape per Nix version, so a store
+  implementing it would work on one build and silently do nothing on another.
+  It stays out until 2.31 leaves the supported matrix. Serving derivations
+  still works: Nix reads a ``.drv`` through :meth:`~StoreImpl.query_path_info`,
+  which does dispatch.
 
 This is not the same thing as :mod:`nanopynix.protocols`. Those describe the
 async API that nanopynix's own engines *provide* to callers; this describes the
@@ -219,5 +224,50 @@ class StoreImpl:
         ``check_contents`` asks for contents to be hashed and not merely for
         metadata to be checked; ``repair`` asks for what can be fixed to be
         fixed. Nix's base class returns ``False`` without looking at anything.
+        """
+        raise NotImplementedError
+
+    def compute_fs_closure(
+        self,
+        paths: Iterable[str],
+        flip_direction: bool,
+        include_outputs: bool,
+        include_derivers: bool,
+    ) -> Iterable[str]:
+        """Every path reachable from ``paths``, including ``paths`` themselves.
+
+        Follows ``references`` by default; ``flip_direction`` follows
+        ``referrers`` instead, giving the paths that can reach these.
+        ``include_outputs`` also pulls in the outputs of any derivation
+        encountered, and ``include_derivers`` its deriver.
+
+        Note this takes a *set* of paths where
+        :meth:`nanopynix_bindings.store.Store.compute_fs_closure` takes one:
+        Nix has two overloads and only the set-taking one is virtual, so it is
+        the only one that can be dispatched. The single-path form is the
+        set form with one element.
+
+        Leaving this alone is usually right. Nix's base class walks the graph
+        itself using :meth:`query_path_info`, :meth:`query_referrers` and
+        :meth:`query_valid_derivers`, all of which route back into your store,
+        so it is already correct -- implement this only if you can compute a
+        closure in one step rather than one query per node.
+        """
+        raise NotImplementedError
+
+    def query_missing(self, targets: Iterable[str]) -> dict[str, Any]:
+        """What building ``targets`` would require.
+
+        ``targets`` are derived paths in Nix's own ``^`` notation --
+        ``<drv>^out``, ``<drv>^*``, or a bare store path. The distinction is
+        load-bearing rather than cosmetic: a bare ``.drv`` means "fetch this
+        file", while ``<drv>^*`` means "build it".
+
+        Return a dict in the shape
+        :meth:`nanopynix_bindings.store.Store.query_missing` produces, so one
+        may be echoed back unchanged: ``will_build``, ``will_substitute``,
+        ``unknown``, ``download_size`` and ``nar_size``. Missing keys keep
+        Nix's defaults (empty sets, zero), so a store that only knows some of
+        them may report just those.
         """
         raise NotImplementedError
