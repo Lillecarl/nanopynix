@@ -49,11 +49,11 @@ PyStoreMethods PyStoreMethods::resolve(const nb::object &py_store) {
     auto implements = [&](const char *name) {
         return nb::cast<bool>(overrides.attr("__contains__")(nb::str(name)));
     };
-    return PyStoreMethods{
-        .is_valid_path_uncached = implements("is_valid_path_uncached"),
-        .query_path_info = implements("query_path_info"),
-        .query_path_from_hash_part = implements("query_path_from_hash_part"),
-    };
+    PyStoreMethods methods;
+#define NANOPYNIX_STORE_RESOLVE_FLAG(name) methods.name = implements(#name);
+    NANOPYNIX_STORE_DISPATCH_METHODS(NANOPYNIX_STORE_RESOLVE_FLAG)
+#undef NANOPYNIX_STORE_RESOLVE_FLAG
+    return methods;
 }
 
 // A dict entry that is present and not None.
@@ -84,6 +84,29 @@ static nix::StorePath store_path_from_py(const nix::Store &store, const nb::obje
     return nix::StorePath{text};
 }
 
+// A whole set of them, from any iterable a Python store cares to return -- a
+// list, a set and a generator are all natural ways to answer these queries.
+static nix::StorePathSet store_path_set_from_py(const nix::Store &store, const nb::object &value) {
+    nix::StorePathSet paths;
+    for (auto item : nb::cast<nb::iterable>(value))
+        paths.insert(store_path_from_py(store, nb::borrow<nb::object>(item)));
+    return paths;
+}
+
+// The outbound direction: base names, matching what every other call into the
+// Python store hands it, so a store can pass its arguments straight through.
+static nb::list store_paths_to_py(const nix::StorePathSet &paths) {
+    nb::list out;
+    for (const auto &path : paths)
+        out.append(nb::str(std::string(path.to_string()).c_str()));
+    return out;
+}
+
+// One store path as Python sees it.
+static nb::str store_path_to_py(const nix::StorePath &path) {
+    return nb::str(std::string(path.to_string()).c_str());
+}
+
 // =========================================================================
 // PyStoreImpl
 // =========================================================================
@@ -105,10 +128,15 @@ void PyStoreImpl::anchor() {}
 #endif
 
 bool PyStoreImpl::isValidPathUncached(const nix::StorePath & path) {
-    nb::gil_scoped_acquire gil;
-    if (methods.is_valid_path_uncached)
-        return nb::cast<bool>(py_store.attr("is_valid_path_uncached")(
-            nb::str(std::string(path.to_string()).c_str())));
+    // Every dispatch site in this file scopes the GIL to the Python call alone.
+    // Holding it across `underlying->...` would block every other thread for the
+    // length of a daemon round-trip, and would deadlock outright if the
+    // underlying store ever called back into Python.
+    {
+        nb::gil_scoped_acquire gil;
+        if (methods.is_valid_path_uncached)
+            return nb::cast<bool>(py_store.attr("is_valid_path_uncached")(store_path_to_py(path)));
+    }
     if (underlying) return underlying->isValidPath(path);
     return false;
 }
@@ -194,11 +222,20 @@ void PyStoreImpl::queryRealisationUncached(
 }
 
 std::optional<nix::StorePath> PyStoreImpl::queryPathFromHashPart(const std::string & hashPart) {
-    nb::gil_scoped_acquire gil;
-    if (methods.query_path_from_hash_part) {
-        auto result = py_store.attr("query_path_from_hash_part")(nb::str(hashPart.c_str()));
-        // Same two accepted spellings as the path fields of query_path_info.
-        if (!result.is_none()) return store_path_from_py(*this, nb::borrow<nb::object>(result));
+    {
+        nb::gil_scoped_acquire gil;
+        if (methods.query_path_from_hash_part) {
+            auto result = py_store.attr("query_path_from_hash_part")(nb::str(hashPart.c_str()));
+            // A store that implements this has answered, including when it
+            // answers None. This used to fall through to `underlying` on None,
+            // so a store saying "I have no such path" was overruled by one that
+            // did -- the same mistake as the queries that invented answers, and
+            // inconsistent with is_valid_path_uncached and query_path_info,
+            // which both treat the Python store's reply as final.
+            if (result.is_none()) return std::nullopt;
+            // Same two accepted spellings as the path fields of query_path_info.
+            return store_path_from_py(*this, nb::borrow<nb::object>(result));
+        }
     }
     if (underlying) return underlying->queryPathFromHashPart(hashPart);
     return std::nullopt;
@@ -245,17 +282,65 @@ void PyStoreImpl::narFromPath(const nix::StorePath & path, nix::Sink & sink) {
     unsupported("narFromPath");
 }
 
+// Every override below follows the same three-step order: dispatch to the
+// Python store if it implements the operation, otherwise delegate to
+// `underlying`, otherwise defer to `nix::Store`. The last step is what stops
+// this class inventing answers -- for several of these the base is
+// `unsupported()`, and "I cannot do this" is information a caller can act on in
+// a way that a fabricated empty result is not.
+//
+// None of them may be deleted in favour of just inheriting: `nix::Store` knows
+// nothing about `underlying`, so deleting an override drops the delegation too.
+
 void PyStoreImpl::queryReferrers(const nix::StorePath & path, nix::StorePathSet & referrers) {
+    {
+        nb::gil_scoped_acquire gil;
+        if (methods.query_referrers) {
+            // "The result is not cleared" (store-api.hh), so insert rather than
+            // assign -- computeFSClosure accumulates across calls.
+            for (auto & referrer : store_path_set_from_py(
+                     *this, py_store.attr("query_referrers")(store_path_to_py(path))))
+                referrers.insert(referrer);
+            return;
+        }
+    }
     if (underlying) { underlying->queryReferrers(path, referrers); return; }
+    // Was a silent no-op, i.e. "nothing refers to this path" -- the same class
+    // of invented answer as the queries below, and the reason a Python store
+    // could never be garbage-collection-correct. The base reports unsupported.
+    nix::Store::queryReferrers(path, referrers);
 }
 
-// The three below exist only to delegate to `underlying`. Each used to invent
-// an answer when there was no underlying store, and each invented answer was
-// wrong; deferring to `nix::Store` is both correct and less code. They cannot
-// simply be deleted, because deleting them would drop the delegation too --
-// `nix::Store` knows nothing about `underlying`.
+nix::StorePathSet PyStoreImpl::queryValidDerivers(const nix::StorePath & path) {
+    {
+        nb::gil_scoped_acquire gil;
+        if (methods.query_valid_derivers)
+            return store_path_set_from_py(
+                *this, py_store.attr("query_valid_derivers")(store_path_to_py(path)));
+    }
+    if (underlying) return underlying->queryValidDerivers(path);
+    return nix::Store::queryValidDerivers(path);
+}
+
+nix::StorePathSet PyStoreImpl::queryDerivationOutputs(const nix::StorePath & path) {
+    {
+        nb::gil_scoped_acquire gil;
+        if (methods.query_derivation_outputs)
+            return store_path_set_from_py(
+                *this, py_store.attr("query_derivation_outputs")(store_path_to_py(path)));
+    }
+    if (underlying) return underlying->queryDerivationOutputs(path);
+    // The base reads the derivation, which routes back through queryPathInfo
+    // and therefore into the Python store.
+    return nix::Store::queryDerivationOutputs(path);
+}
 
 nix::StorePathSet PyStoreImpl::queryAllValidPaths() {
+    {
+        nb::gil_scoped_acquire gil;
+        if (methods.query_all_valid_paths)
+            return store_path_set_from_py(*this, py_store.attr("query_all_valid_paths")());
+    }
     if (underlying) return underlying->queryAllValidPaths();
     // Was `{}`, i.e. "this store is empty" -- indistinguishable to a caller
     // from a store that really is empty. The base reports `unsupported`, which
@@ -264,12 +349,74 @@ nix::StorePathSet PyStoreImpl::queryAllValidPaths() {
 }
 
 nix::StorePathSet PyStoreImpl::querySubstitutablePaths(const nix::StorePathSet & paths) {
+    {
+        nb::gil_scoped_acquire gil;
+        if (methods.query_substitutable_paths)
+            return store_path_set_from_py(
+                *this, py_store.attr("query_substitutable_paths")(store_paths_to_py(paths)));
+    }
     if (underlying) return underlying->querySubstitutablePaths(paths);
     // Was `paths`, i.e. "everything you asked about has a substitute" -- so a
     // store reporting nothing valid still reported every path substitutable.
     // The base consults this store's substituters (2.34+) or returns {} (2.31).
     return nix::Store::querySubstitutablePaths(paths);
 }
+
+void PyStoreImpl::addTempRoot(const nix::StorePath & path) {
+    {
+        nb::gil_scoped_acquire gil;
+        if (methods.add_temp_root) {
+            py_store.attr("add_temp_root")(store_path_to_py(path));
+            return;
+        }
+    }
+    if (underlying) { underlying->addTempRoot(path); return; }
+    // The base debug-logs that the store does not support GC, which is exactly
+    // true of a Python store that did not implement this.
+    nix::Store::addTempRoot(path);
+}
+
+void PyStoreImpl::ensurePath(const nix::StorePath & path) {
+    {
+        nb::gil_scoped_acquire gil;
+        if (methods.ensure_path) {
+            py_store.attr("ensure_path")(store_path_to_py(path));
+            return;
+        }
+    }
+    if (underlying) { underlying->ensurePath(path); return; }
+    nix::Store::ensurePath(path);
+}
+
+void PyStoreImpl::optimiseStore() {
+    {
+        nb::gil_scoped_acquire gil;
+        if (methods.optimise_store) {
+            py_store.attr("optimise_store")();
+            return;
+        }
+    }
+    if (underlying) { underlying->optimiseStore(); return; }
+    nix::Store::optimiseStore();  // a no-op, and honestly so
+}
+
+bool PyStoreImpl::verifyStore(bool checkContents, nix::RepairFlag repair) {
+    {
+        nb::gil_scoped_acquire gil;
+        if (methods.verify_store)
+            // `repair` is lowered to a bool, matching how the Store binding
+            // raises it back up (`repair ? nix::Repair : nix::NoRepair`), so
+            // the Python signature is the same on both sides of the call.
+            return nb::cast<bool>(py_store.attr("verify_store")(
+                nb::bool_(checkContents), nb::bool_(repair == nix::Repair)));
+    }
+    if (underlying) return underlying->verifyStore(checkContents, repair);
+    // The base returns false, i.e. "no errors remain". That is a claim, but it
+    // is Nix's own claim for any store that does not implement verification.
+    return nix::Store::verifyStore(checkContents, repair);
+}
+
+// --- not dispatched into Python; see the dispatch list in the header ---
 
 nix::StorePathSet PyStoreImpl::queryValidPaths(const nix::StorePathSet & paths, nix::SubstituteFlag f) {
     if (underlying) return underlying->queryValidPaths(paths, f);
@@ -282,14 +429,6 @@ nix::StorePathSet PyStoreImpl::queryValidPaths(const nix::StorePathSet & paths, 
 std::optional<std::string> PyStoreImpl::getVersion() {
     if (underlying) return underlying->getVersion();
     return {"python-store"};
-}
-
-void PyStoreImpl::addTempRoot(const nix::StorePath & path) {
-    if (underlying) { underlying->addTempRoot(path); return; }
-}
-
-void PyStoreImpl::optimiseStore() {
-    if (underlying) { underlying->optimiseStore(); return; }
 }
 
 // =========================================================================

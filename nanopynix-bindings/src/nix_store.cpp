@@ -862,6 +862,20 @@ NB_MODULE(store, m) {
           "shape of the reply `query_path_info` returns, and the `underlying_store` "
           "attribute that delegates everything a subclass does not implement.");
 
+    // The operations `PyStoreImpl` can dispatch into Python, exported so that
+    // `nanopynix.StoreImpl` derives its method list from this one rather than
+    // repeating it. A method declared there but absent here would silently
+    // never be called; deriving makes that unrepresentable.
+    {
+        nb::list dispatch_methods;
+#define NANOPYNIX_STORE_DISPATCH_NAME(name) dispatch_methods.append(#name);
+        NANOPYNIX_STORE_DISPATCH_METHODS(NANOPYNIX_STORE_DISPATCH_NAME)
+#undef NANOPYNIX_STORE_DISPATCH_NAME
+        PyObject *as_tuple = PySequence_Tuple(dispatch_methods.ptr());
+        if (!as_tuple) throw nb::python_error();
+        m.attr("STORE_DISPATCH_METHODS") = nb::steal<nb::tuple>(as_tuple);
+    }
+
     bind_store_path(m);
     bind_store(m);
 

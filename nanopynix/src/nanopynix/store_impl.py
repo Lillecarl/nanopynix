@@ -24,6 +24,26 @@ worth knowing:
   class afterwards with ``setattr`` will not register it. Define your methods
   in the class body.
 
+What is here, and what is not
+-----------------------------
+
+The rule is that whatever you can *call* on a
+:class:`~nanopynix_bindings.store.Store`, you can *implement* here. Three groups
+of Nix store operations are deliberately absent:
+
+* Anything needing a stream or a build result -- ``add_to_store``,
+  ``nar_from_path``, ``build_paths``. Those take a C++ ``Source &``/``Sink &``
+  or return a ``BuildResult``, and this protocol's whole shape is "return a
+  dict, a string, or a list of strings". They are excluded permanently, not
+  pending.
+* Operations that are not ``nix::Store`` virtuals at all -- ``find_roots``,
+  ``get_build_log``, ``collect_garbage``, ``add_perm_root``,
+  ``add_indirect_root``. Those live on Nix's ``GcStore``, ``LogStore`` and
+  ``LocalFSStore`` interfaces, which a Python store does not inherit, so there
+  is nothing to override.
+* ``read_derivation``, ``query_missing`` and ``compute_fs_closure``, which
+  return structured values and are simply not done yet.
+
 This is not the same thing as :mod:`nanopynix.protocols`. Those describe the
 async API that nanopynix's own engines *provide* to callers; this describes the
 synchronous, per-operation interface a store *implements* for Nix to call.
@@ -33,17 +53,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from nanopynix_bindings.store import STORE_DISPATCH_METHODS
+
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from nanopynix_bindings.store import Store
 
-# The store operations the C++ trampoline (`PyStoreImpl`) can dispatch into
-# Python. Deliberately short: `nix::Store` has far more virtuals, and adding one
-# here means nothing unless `py_store_impl.cpp` grows a call site for it.
-DISPATCHABLE_METHODS = (
-    "is_valid_path_uncached",
-    "query_path_info",
-    "query_path_from_hash_part",
-)
+# The store operations the C++ trampoline (`PyStoreImpl`) dispatches into
+# Python, taken from the trampoline itself rather than restated here. Listing a
+# method this class defines but `py_store_impl.cpp` never calls would be silent
+# -- the method would simply never run -- so the list is not ours to write.
+DISPATCHABLE_METHODS: tuple[str, ...] = STORE_DISPATCH_METHODS
 
 # Where `__init_subclass__` records the answer, and the name `py_store_impl.cpp`
 # reads to find it. Changing it means changing the C++ side in lockstep.
@@ -117,6 +138,86 @@ class StoreImpl:
     def query_path_from_hash_part(self, hash_part: str) -> str | None:
         """The path whose hash is ``hash_part``, or ``None`` if there is none.
 
-        Returns a store path as a string, in either accepted spelling.
+        Returns a store path as a string, in either accepted spelling. ``None``
+        is a real answer and is not retried against
+        :attr:`underlying_store` -- if you implement this, you own it.
+        """
+        raise NotImplementedError
+
+    def query_referrers(self, path: str) -> Iterable[str]:
+        """Every path that references ``path``.
+
+        The inverse of ``references``, and the query garbage collection is
+        built on. Nix's own base class reports this as unsupported rather than
+        guessing, so a store that cannot answer should leave it alone rather
+        than returning an empty list -- "nothing refers to this" and "I don't
+        know" are very different answers to a collector.
+        """
+        raise NotImplementedError
+
+    def query_valid_derivers(self, path: str) -> Iterable[str]:
+        """Every valid ``.drv`` in this store that has ``path`` as an output.
+
+        Not the same as ``deriver`` from :meth:`query_path_info`, which names
+        the derivation that actually built the path and may no longer exist.
+        """
+        raise NotImplementedError
+
+    def query_derivation_outputs(self, path: str) -> Iterable[str]:
+        """The output paths of the derivation ``path``.
+
+        Left alone, this is derived from the derivation itself, which is read
+        through :meth:`query_path_info` and so routes back into your store.
+        Implement it only if you can answer more cheaply or more accurately.
+        """
+        raise NotImplementedError
+
+    def query_all_valid_paths(self) -> Iterable[str]:
+        """Every path this store holds.
+
+        Unimplemented, this raises rather than returning nothing -- a store
+        with no way to enumerate itself is not the same as an empty store.
+        """
+        raise NotImplementedError
+
+    def query_substitutable_paths(self, paths: Iterable[str]) -> Iterable[str]:
+        """Which of ``paths`` this store could fetch from a substituter.
+
+        A subset of ``paths``; returning them all means "every one of these is
+        available", which is a claim Nix will act on.
+        """
+        raise NotImplementedError
+
+    def add_temp_root(self, path: str) -> None:
+        """Protect ``path`` from garbage collection until the process exits.
+
+        Only meaningful for a store that collects garbage. Nix's base class
+        debug-logs that the store does not support GC and carries on, which is
+        the right behaviour for a store that does not.
+        """
+        raise NotImplementedError
+
+    def ensure_path(self, path: str) -> None:
+        """Make ``path`` valid, substituting or building it if it is not.
+
+        Should raise if it cannot be made valid.
+        """
+        raise NotImplementedError
+
+    def optimise_store(self) -> None:
+        """Deduplicate identical files in the store, if that means anything here.
+
+        Nix's base class does nothing, which is a correct implementation for
+        any store without a notion of on-disk duplication.
+        """
+        raise NotImplementedError
+
+    def verify_store(self, check_contents: bool, repair: bool) -> bool:
+        """Check this store's integrity; return ``True`` if errors *remain*.
+
+        Note the polarity: ``True`` means "still broken", not "verified".
+        ``check_contents`` asks for contents to be hashed and not merely for
+        metadata to be checked; ``repair`` asks for what can be fixed to be
+        fixed. Nix's base class returns ``False`` without looking at anything.
         """
         raise NotImplementedError

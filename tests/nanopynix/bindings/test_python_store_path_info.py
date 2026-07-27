@@ -32,11 +32,25 @@ missing, so ``open_store`` raised ``std::bad_cast`` and every ``if
 (underlying)`` fallthrough in ``py_store_impl.cpp`` -- roughly half the file --
 was unreachable. ``TestUnderlyingStoreFallthrough`` covers it.
 
-Two further groups here are about the shape of the interface rather than that
+Four further groups here are about the shape of the interface rather than that
 first set of bugs. ``TestStoreImplIsRequired`` covers the move from ``hasattr``
-probing to ``nanopynix.StoreImpl`` override detection, and
-``TestQueriesNoLongerAnswerForThePythonStore`` covers three queries that used to
+probing to ``nanopynix.StoreImpl`` override detection.
+``TestQueriesNoLongerAnswerForThePythonStore`` covers four queries that used to
 invent an answer instead of asking the store or deferring to Nix.
+
+``TestTheWholeDispatchableInterface`` covers the widening from three operations
+to twelve, and is deliberately written against the *list* rather than against
+individual methods. The failure it exists to catch is not a wrong answer but a
+dead one: a name that appears on both sides and is never wired up in between
+looks implemented, type-checks, and does nothing. So it asserts that the two
+sides agree on the list, that every name on it is both callable and dispatched,
+and that neither side carries a name the other does not.
+
+``TestEveryOperationDelegates`` covers the branch the other two leave out. Each
+dispatch site is three-way -- Python, then ``underlying``, then ``nix::Store``
+-- and those groups pin the first and the last; this one pins the middle for
+every operation at once, by asserting a store that implements nothing answers
+exactly as the store it delegates to.
 
 Registration is process-global and cannot be undone, so each store here gets a
 unique scheme; otherwise re-registering under a parametrized run would raise.
@@ -45,7 +59,7 @@ unique scheme; otherwise re-registering under a parametrized run would raise.
 from __future__ import annotations
 
 import itertools
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 from nanopynix_bindings import store as nanopynix_store
@@ -53,7 +67,7 @@ from nanopynix_bindings import store as nanopynix_store
 import nanopynix
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
 _scheme_counter = itertools.count()
 
@@ -453,3 +467,358 @@ class TestQueriesNoLongerAnswerForThePythonStore:
 
         with pytest.raises(Exception, match="not supported"):
             store.query_all_valid_paths()
+
+    def test_referrers_reports_unsupported_rather_than_no_referrers(self) -> None:
+        """The fourth query of this class, found while widening the interface.
+
+        It used to return silently without touching ``referrers``, which reads
+        as "nothing refers to this path" -- the answer that makes it safe to
+        delete. ``nix::Store`` declares it ``unsupported`` (``store-api.hh:476``
+        on 2.34), and a garbage collector deserves to hear that.
+        """
+        store = self._nothing_is_valid()
+
+        with pytest.raises(Exception, match="not supported"):
+            store.query_referrers(nanopynix_store.StorePath(BOGUS))
+
+    def test_derivation_outputs_asks_the_store_rather_than_answering(self) -> None:
+        """The one deferral that recurses back into Python, so it gets its own test.
+
+        ``nix::Store::queryDerivationOutputs`` reads the derivation, which needs
+        ``queryPathInfo`` -- which dispatches straight back here. The concern is
+        that the round trip ends legibly rather than in an abort or a confusing
+        failure from a deeper frame: the store says the path is not valid, and
+        that is exactly what the caller is told, naming the path.
+        """
+        store = self._nothing_is_valid()
+
+        with pytest.raises(Exception, match="does not exist"):
+            store.query_derivation_outputs(nanopynix_store.StorePath(f"{BOGUS}.drv"))
+
+
+# How to invoke each dispatchable operation through the bound ``Store`` API.
+#
+# The keys are checked against `DISPATCHABLE_METHODS` below, so this table
+# cannot fall behind the interface: adding an operation without a way to call it
+# fails the test rather than going untested.
+INVOCATIONS: dict[str, Callable[[Any], Any]] = {
+    "is_valid_path_uncached": lambda s: s.is_valid_path(nanopynix_store.StorePath(BOGUS)),
+    "query_path_info": lambda s: s.query_path_info(nanopynix_store.StorePath(BOGUS)),
+    "query_path_from_hash_part": lambda s: s.query_path_from_hash_part("0" * 32),
+    "query_referrers": lambda s: s.query_referrers(nanopynix_store.StorePath(BOGUS)),
+    "query_valid_derivers": lambda s: s.query_valid_derivers(nanopynix_store.StorePath(BOGUS)),
+    "query_derivation_outputs": lambda s: s.query_derivation_outputs(
+        nanopynix_store.StorePath(BOGUS)
+    ),
+    "query_all_valid_paths": lambda s: s.query_all_valid_paths(),
+    "query_substitutable_paths": lambda s: s.query_substitutable_paths(
+        [nanopynix_store.StorePath(BOGUS)]
+    ),
+    "add_temp_root": lambda s: s.add_temp_root(nanopynix_store.StorePath(BOGUS)),
+    "ensure_path": lambda s: s.ensure_path(nanopynix_store.StorePath(BOGUS)),
+    "optimise_store": lambda s: s.optimise_store(),
+    "verify_store": lambda s: s.verify_store(False, False),
+}
+
+
+class RecordingStore(nanopynix.StoreImpl):
+    """Implements every dispatchable operation and records which ones ran.
+
+    Written out longhand rather than generated, because this is also the worked
+    example of what a store implementing the whole interface looks like -- and
+    because generating the methods would have to inject them into the class body
+    to be detected at all, which is the one thing ``StoreImpl`` documents you
+    cannot do afterwards.
+    """
+
+    calls: ClassVar[list[str]] = []
+
+    def _record(self, name: str) -> None:
+        RecordingStore.calls.append(name)
+
+    def is_valid_path_uncached(self, path: str) -> bool:
+        self._record("is_valid_path_uncached")
+        return True
+
+    def query_path_info(self, path: str) -> dict[str, Any]:
+        self._record("query_path_info")
+        return dict(FULL_INFO)
+
+    def query_path_from_hash_part(self, hash_part: str) -> str:
+        self._record("query_path_from_hash_part")
+        return BOGUS
+
+    def query_referrers(self, path: str) -> Iterable[str]:
+        self._record("query_referrers")
+        return ["11111111111111111111111111111111-ref"]
+
+    def query_valid_derivers(self, path: str) -> Iterable[str]:
+        self._record("query_valid_derivers")
+        return ["22222222222222222222222222222222-d.drv"]
+
+    def query_derivation_outputs(self, path: str) -> Iterable[str]:
+        self._record("query_derivation_outputs")
+        return ["33333333333333333333333333333333-out"]
+
+    def query_all_valid_paths(self) -> Iterable[str]:
+        self._record("query_all_valid_paths")
+        return [BOGUS]
+
+    def query_substitutable_paths(self, paths: Iterable[str]) -> Iterable[str]:
+        self._record("query_substitutable_paths")
+        return list(paths)
+
+    def add_temp_root(self, path: str) -> None:
+        self._record("add_temp_root")
+
+    def ensure_path(self, path: str) -> None:
+        self._record("ensure_path")
+
+    def optimise_store(self) -> None:
+        self._record("optimise_store")
+
+    def verify_store(self, check_contents: bool, repair: bool) -> bool:
+        self._record("verify_store")
+        return True
+
+
+class TestTheWholeDispatchableInterface:
+    """Every operation the interface advertises must actually be dispatched.
+
+    The interface used to be three operations named in C++ call sites and
+    restated in Python. A name could be added on either side and do nothing:
+    Python would define a method the trampoline never called, or C++ would look
+    for one the base class never declared. Neither failed, they just silently
+    did not work -- which is how the widened interface has to be tested, not
+    one method at a time.
+    """
+
+    def test_the_two_sides_agree_on_what_is_dispatchable(self) -> None:
+        """``StoreImpl`` derives its list from the trampoline rather than repeating it."""
+        assert nanopynix.DISPATCHABLE_METHODS == nanopynix_store.STORE_DISPATCH_METHODS
+
+    def test_every_dispatchable_name_is_a_method_on_store_impl(self) -> None:
+        """A name C++ dispatches with no method to document it is unusable."""
+        missing = [
+            name
+            for name in nanopynix.DISPATCHABLE_METHODS
+            if not callable(getattr(nanopynix.StoreImpl, name, None))
+        ]
+
+        assert missing == []
+
+    def test_store_impl_declares_no_method_that_is_never_dispatched(self) -> None:
+        """The other direction: a method nothing calls looks implemented and is not."""
+        declared = {
+            name
+            for name in vars(nanopynix.StoreImpl)
+            if not name.startswith("_") and callable(vars(nanopynix.StoreImpl)[name])
+        }
+
+        assert declared == set(nanopynix.DISPATCHABLE_METHODS)
+
+    def test_the_invocation_table_covers_the_interface(self) -> None:
+        """Guards the test below: an untested operation must fail, not be skipped."""
+        assert set(INVOCATIONS) == set(nanopynix.DISPATCHABLE_METHODS)
+
+    def test_calling_each_operation_reaches_the_python_store(self) -> None:
+        """The real claim: none of the advertised operations is dead.
+
+        The record is cleared before each call, so an operation is only credited
+        for a dispatch its own invocation caused -- several of these route
+        through others in ``nix::Store``, and a shared tally would let a dead
+        dispatch pass on someone else's call. Collected rather than asserted in
+        the loop so a failure names every operation that never arrived, which is
+        what a wiring mistake looks like: a whole group missing, not one.
+        """
+        store = register_and_open(RecordingStore)
+
+        never_dispatched: list[str] = []
+        for name, invoke in INVOCATIONS.items():
+            RecordingStore.calls = []
+            invoke(store)
+            if name not in RecordingStore.calls:
+                never_dispatched.append(name)
+
+        assert never_dispatched == []
+
+    def test_answers_come_back_from_the_python_store(self) -> None:
+        """Dispatching is not enough; the reply has to survive the return trip.
+
+        The set-valued queries all go through one marshalling helper, so one
+        assertion each is enough to show the helper works in both directions --
+        and ``query_substitutable_paths`` additionally proves the *inbound*
+        direction, since it can only echo paths it was handed.
+        """
+        RecordingStore.calls = []
+        store = register_and_open(RecordingStore)
+        path = nanopynix_store.StorePath(BOGUS)
+
+        assert store.query_referrers(path) == [
+            "/nix/store/11111111111111111111111111111111-ref"
+        ]
+        assert store.query_valid_derivers(path) == [
+            "/nix/store/22222222222222222222222222222222-d.drv"
+        ]
+        assert store.query_derivation_outputs(path) == [
+            "/nix/store/33333333333333333333333333333333-out"
+        ]
+        assert store.query_all_valid_paths() == [f"/nix/store/{BOGUS}"]
+        assert store.query_substitutable_paths([path]) == [f"/nix/store/{BOGUS}"]
+        assert store.verify_store(False, False) is True
+
+    def test_any_iterable_is_an_acceptable_answer(self) -> None:
+        """A set and a generator are both natural ways to answer these queries.
+
+        Requiring a list would be a trap that only shows up at runtime, in C++,
+        as a cast failure -- the exact failure mode this whole file exists for.
+        """
+
+        class Iterables(nanopynix.StoreImpl):
+            def query_all_valid_paths(self) -> Iterable[str]:
+                return iter([BOGUS])
+
+            def query_valid_derivers(self, path: str) -> Iterable[str]:
+                return {"22222222222222222222222222222222-d.drv"}
+
+        store = register_and_open(Iterables)
+
+        assert store.query_all_valid_paths() == [f"/nix/store/{BOGUS}"]
+        assert store.query_valid_derivers(nanopynix_store.StorePath(BOGUS)) == [
+            "/nix/store/22222222222222222222222222222222-d.drv"
+        ]
+
+    def test_a_raise_from_any_operation_reaches_the_caller(self) -> None:
+        """Same guarantee the original three had, extended to the new ones."""
+
+        class Explodes(nanopynix.StoreImpl):
+            def query_valid_derivers(self, path: str) -> Iterable[str]:
+                raise ValueError("boom from query_valid_derivers")
+
+        store = register_and_open(Explodes)
+
+        with pytest.raises(ValueError, match="boom from query_valid_derivers"):
+            store.query_valid_derivers(nanopynix_store.StorePath(BOGUS))
+
+    def test_an_implemented_operation_is_not_second_guessed_by_underlying(
+        self, store: Any, store_seeded_path: Any
+    ) -> None:
+        """A Python answer is final, even when it is empty or ``None``.
+
+        ``query_path_from_hash_part`` was the one operation that broke this: a
+        ``None`` fell through to ``underlying_store``, so a store saying "I have
+        no such path" was overruled by one that did. The other two treated the
+        Python reply as final, which made the odd one out a bug rather than a
+        choice.
+        """
+        hash_part = store_seeded_path.to_string().split("-")[0]
+
+        class SaysNo(nanopynix.StoreImpl):
+            underlying_store = store
+
+            def query_path_from_hash_part(self, hash_part: str) -> None:
+                return None
+
+        # The underlying store really can resolve it, so a non-None answer here
+        # could only have come from the fallthrough.
+        assert store.query_path_from_hash_part(hash_part) is not None
+        assert register_and_open(SaysNo).query_path_from_hash_part(hash_part) is None
+
+
+def outcome(call: Callable[[], Any]) -> tuple[str, Any]:
+    """What ``call`` did, as a comparable value -- a result or a failure kind."""
+    try:
+        return ("returned", call())
+    except Exception as exc:
+        return ("raised", type(exc).__name__)
+
+
+# The same operations again, but expressed against a store that really holds the
+# path -- so the underlying store gives a substantive answer rather than every
+# call failing identically on both sides, which would make the comparison below
+# vacuous.
+DELEGATION_CHECKS: dict[str, Callable[[Any, Any], Any]] = {
+    "is_valid_path_uncached": lambda s, p: s.is_valid_path(p),
+    "query_path_info": lambda s, p: s.query_path_info(p)["nar_size"],
+    "query_path_from_hash_part": lambda s, p: str(
+        s.query_path_from_hash_part(p.to_string().split("-")[0])
+    ),
+    "query_referrers": lambda s, p: s.query_referrers(p),
+    "query_valid_derivers": lambda s, p: s.query_valid_derivers(p),
+    "query_derivation_outputs": lambda s, p: s.query_derivation_outputs(p),
+    "query_all_valid_paths": lambda s, p: p.to_string()
+    in [q.split("/")[-1] for q in s.query_all_valid_paths()],
+    "query_substitutable_paths": lambda s, p: s.query_substitutable_paths([p]),
+    "add_temp_root": lambda s, p: s.add_temp_root(p),
+    "ensure_path": lambda s, p: s.ensure_path(p),
+    # The only one that does not take the path -- it verifies the whole store.
+    "verify_store": lambda s, _p: s.verify_store(False, False),
+}
+
+# `optimise_store` is the one operation left out, and on purpose: delegating it
+# would hard-link the real test store's contents. The cost of proving that one
+# branch is a mutated store shared with every other test in the session.
+DELEGATION_UNCHECKED = {"optimise_store"}
+
+# What this test does *not* pin, measured rather than guessed by running the
+# same checks against a store with no `underlying_store` at all.
+#
+# For these four, `nix::Store`'s own answer already matches a real store's for a
+# freshly added path: nothing derives it, nothing substitutes it, nothing roots
+# it, and there is nothing to verify. So deleting their `underlying->` line
+# outright would not change the result, and this test would stay green.
+#
+# It does still catch the more likely mistake, a delegation pointed at the wrong
+# method -- verified by mutation: swapping `underlying->queryValidDerivers` for
+# `underlying->queryValidPaths`, which has the same signature and compiles
+# cleanly, fails here and names `query_valid_derivers` alone. Making the other
+# four non-vacuous would take a built derivation, a substituter and a GC root,
+# which is a different and much heavier fixture than this file's.
+DELEGATION_INDISTINGUISHABLE_FROM_BASE = {
+    "query_valid_derivers",
+    "query_substitutable_paths",
+    "add_temp_root",
+    "verify_store",
+}
+
+
+class TestEveryOperationDelegates:
+    """A store that implements nothing must be indistinguishable from its underlying one.
+
+    Each dispatch site is three branches -- Python, then ``underlying``, then
+    ``nix::Store`` -- and the other tests here pin the first and the third.
+    Without this the middle one is unverified for every operation except
+    ``query_all_valid_paths``, so transposing two ``underlying->`` calls (say
+    ``queryValidDerivers`` for ``queryValidPaths``, which have the same
+    signature) would compile, run, and go unnoticed.
+
+    See :data:`DELEGATION_INDISTINGUISHABLE_FROM_BASE` for the four operations
+    this cannot fully pin, and why.
+    """
+
+    def test_the_delegation_table_covers_the_interface(self) -> None:
+        assert set(DELEGATION_CHECKS) | DELEGATION_UNCHECKED == set(
+            nanopynix.DISPATCHABLE_METHODS
+        )
+
+    @pytest.mark.parametrize("name", sorted(DELEGATION_CHECKS))
+    def test_the_answer_is_the_underlying_store_s_answer(
+        self, name: str, store: Any, store_seeded_path: Any
+    ) -> None:
+        """Compared against the real store rather than a fixed expectation.
+
+        What each operation returns for a seeded path is not the point and
+        varies by backend; that the two agree is. Failures are compared by
+        exception type for the same reason -- an operation that raises on both
+        is still delegating, whereas one that raises only when wrapped is not.
+        """
+
+        class Delegating(nanopynix.StoreImpl):
+            underlying_store = store
+
+        delegating = register_and_open(Delegating)
+        check = DELEGATION_CHECKS[name]
+
+        assert outcome(lambda: check(delegating, store_seeded_path)) == outcome(
+            lambda: check(store, store_seeded_path)
+        )
