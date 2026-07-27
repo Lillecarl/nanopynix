@@ -44,7 +44,6 @@ service EvalService {
   rpc EvalFlake(EvalFlakeRequest) returns (nix.common.ValueHandle);
   rpc GetFlake(GetFlakeRequest) returns (nix.common.FlakeRef);
   rpc Release(ReleaseRequest) returns (ReleaseResponse);
-  rpc ReleaseAll(ReleaseAllRequest) returns (ReleaseAllResponse);
 }
 
 message OpenEvalRequest {
@@ -316,9 +315,3 @@ message ReleaseRequest {
   int64 eval_handle = 100;
 }
 message ReleaseResponse {}
-
-message ReleaseAllRequest {
-  int64 request_id = 1000;
-  int64 eval_handle = 100;
-}
-message ReleaseAllResponse {}
