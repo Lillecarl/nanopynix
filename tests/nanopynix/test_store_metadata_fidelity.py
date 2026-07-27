@@ -75,7 +75,8 @@ in derivation {
 }
 """
 
-DYNAMIC_FEATURES = ["dynamic-derivations", "ca-derivations"]
+
+
 
 
 async def _drv_path(session: Any, store: Any, expr: str) -> str:
@@ -196,25 +197,14 @@ def _check_nested_input_drvs(derivation: Any) -> None:
             assert child.outputs, f"child node carries no outputs: {child!r}"
 
 
+async def test_inproc_read_derivation_keeps_nested_input_drvs(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as session, session.store() as store:
+        drv = await _drv_path(session, store, DYNAMIC_DERIVATION_DRV)
+        _check_nested_input_drvs(await store.read_derivation(drv))
+
+
 async def test_rpc_read_derivation_keeps_nested_input_drvs(rpc_session: RpcSessionFactory) -> None:
-    """rpc only, and not an oversight -- inproc cannot ask for these features.
-
-    A nested ``DerivedPathMap`` requires ``dynamic-derivations``, and
-    ``_InprocProcessGuard`` refuses a second ``inproc.Session`` whose settings
-    differ from the ones Nix was already initialized with, because Nix
-    initialization cannot be undone. Every other test in the suite that needs a
-    non-default experimental feature is rpc-only for the same reason; there is
-    no inproc counterpart to write.
-
-    It still covers the fix rather than half of it: the recursion lives in
-    ``derived_path_node_to_dict`` (C++) and ``_derivation_outputs``
-    (``CoreStore``), both of which inproc reaches through the identical code.
-    The unit test below pins the Python half on its own.
-    """
-    async with (
-        rpc_session(experimental_features=DYNAMIC_FEATURES) as session,
-        session.store() as store,
-    ):
+    async with rpc_session() as session, session.store() as store:
         drv = await _drv_path(session, store, DYNAMIC_DERIVATION_DRV)
         _check_nested_input_drvs(await store.read_derivation(drv))
 

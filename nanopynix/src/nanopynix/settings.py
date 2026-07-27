@@ -22,7 +22,13 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
 
 
-DEFAULT_EXPERIMENTAL_FEATURES = ("flakes", "nix-command")
+DEFAULT_EXPERIMENTAL_FEATURES = (
+    "flakes",
+    "nix-command",
+    "ca-derivations",
+    "dynamic-derivations",
+    "recursive-nix",
+)
 DEFAULT_LINE_EDITORS = ("emacs", "nano", "vim", "kak", "hx")
 type SettingsSurface = Literal["global", "eval", "fetch", "flake"]
 

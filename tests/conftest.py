@@ -16,6 +16,7 @@ import pytest
 from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
 
 import nanopynix
+from nanopynix.settings import DEFAULT_EXPERIMENTAL_FEATURES
 
 pytest_plugins = (
     "tests.support.lsp_environment",
@@ -308,10 +309,19 @@ def eval_state(store: Any, init_expr: object, _register_test_primops: object) ->
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _enable_flakes() -> None:  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
-    """Enable flakes experimental feature for all tests."""
-    nanopynix.enable_experimental_feature("flakes")
-    nanopynix.enable_experimental_feature("nix-command")
+def _enable_default_experimental_features() -> None:  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
+    """Enable nanopynix's default experimental features before any store is opened.
+
+    ``nanopynix.init_nix``/``init_libstore`` already do this, for a reason
+    documented there: enabling ``ca-derivations`` *after* a ``LocalStore`` was
+    constructed without it aborts the process (SIGABRT, not a catchable error).
+    This fixture is not a second remedy, it is an ordering guarantee -- pytest
+    does not promise that the fixture calling ``init_libstore`` runs before
+    every other fixture that opens a store, and this one is autouse and
+    session-scoped. Enabling a feature twice is a no-op, so the overlap is free.
+    """
+    for feature in DEFAULT_EXPERIMENTAL_FEATURES:
+        nanopynix.enable_experimental_feature(feature)
 
 
 @pytest.fixture(scope="session", autouse=True)
