@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from nanopynix_proto.nix.common import BuildResult, BuildResultList, Derivation, MissingInfo, PathInfo
+from nanopynix_proto.nix.common import BuildResultList, Derivation, MissingInfo, PathInfo
 from nanopynix_proto.nix.store import (
     AddIndirectRootRequest,
     AddIndirectRootResponse,
@@ -14,7 +14,6 @@ from nanopynix_proto.nix.store import (
     AddTempRootResponse,
     AddToStoreRequest,
     AddToStoreResponse,
-    BuildDerivationRequest,
     BuildPathsWithResultsRequest,
     CollectGarbageRequest,
     CollectGarbageResponse,
@@ -237,12 +236,6 @@ class StoreServiceHandler(StoreServiceBase):
         return self._resolve(message.store_handle).read_derivation(message.path)
 
     # --- Mutation ---------------------------------------------------------
-
-    @worker_op
-    def build_derivation(self, message: BuildDerivationRequest) -> BuildResult:
-        return self._resolve(message.store_handle).build_derivation(
-            message.path, build_mode=message.build_mode
-        )
 
     @worker_op
     def ensure_path(self, message: EnsurePathRequest) -> EnsurePathResponse:

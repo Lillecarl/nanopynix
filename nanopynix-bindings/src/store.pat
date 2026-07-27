@@ -91,9 +91,6 @@ nanopynix_bindings.store.Store.query_missing:
 nanopynix_bindings.store.Store.read_derivation:
     def read_derivation(self, drv_path: StorePath) -> Derivation: ...
 
-nanopynix_bindings.store.Store.build_derivation:
-    def build_derivation(self, drv_path: StorePath, build_mode: BuildMode | int = BuildMode.Normal) -> BuildResult: ...
-
 nanopynix_bindings.store.Store.collect_garbage:
     def collect_garbage(self, action: GCAction, ignore_liveness: bool = False, paths_to_delete: Sequence[StorePath] = [], max_freed: int = 18446744073709551615) -> GCResults: ...
 

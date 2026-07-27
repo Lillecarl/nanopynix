@@ -589,18 +589,6 @@ static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
     return d;
 }
 
-static nb::dict build_derivation(nix::Store &s, const nix::StorePath &drvPath,
-                                  nix::BuildMode buildMode) {
-    nix::BuildResult result;
-    {
-        nb::gil_scoped_release release;
-        auto drv = s.readDerivation(drvPath);
-        result = s.buildDerivation(
-            drvPath, static_cast<const nix::BasicDerivation &>(drv), buildMode);
-    }
-    return nanopynix::build_result::from_br(result);
-}
-
 static std::string store_uri(nix::Store &s, bool with_params) {
     return with_params ? s.config.getReference().render() : s.config.getHumanReadableURI();
 }
@@ -723,7 +711,6 @@ static void bind_store(nb::module_ &m) {
             "build_mode"_a = nix::bmNormal,
             "eval_store"_a = nullptr)
         .def("read_derivation", &read_derivation, "drv_path"_a)
-        .def("build_derivation", &build_derivation, "drv_path"_a, "build_mode"_a)
         // Path info
         .def("query_path_info", &query_path_info, "path"_a)
         .def("query_path_from_hash_part",

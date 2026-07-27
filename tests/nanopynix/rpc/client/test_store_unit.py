@@ -74,7 +74,6 @@ def _make_stub_mock() -> MagicMock:
     stub.query_substitutable_paths = AsyncMock()
     stub.build_paths_with_results = AsyncMock()
     stub.read_derivation = AsyncMock()
-    stub.build_derivation = AsyncMock()
     stub.follow_links_to_store_path = AsyncMock()
     stub.add_temp_root = AsyncMock()
     stub.find_roots = AsyncMock()

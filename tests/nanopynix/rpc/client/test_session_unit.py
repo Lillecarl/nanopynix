@@ -176,7 +176,6 @@ def _mock_worker_client() -> MagicMock:
     rw.eval_stub = _make_eval_stub()
     rw.store_stub = MagicMock()
     rw.store_stub.build_paths_with_results = AsyncMock()
-    rw.store_stub.build_derivation = AsyncMock()
     rw.store_stub.read_derivation = AsyncMock()
     rw.release = AsyncMock()
 
@@ -600,7 +599,6 @@ class TestValueProxyLifecycle:
         w.eval_stub.attr.assert_not_awaited()
         w.eval_stub.force_json.assert_not_awaited()
         w.store_stub.build_paths_with_results.assert_not_awaited()
-        w.store_stub.build_derivation.assert_not_awaited()
         w.store_stub.read_derivation.assert_not_awaited()
 
     async def test_build_mode_uses_cascading_build(self):
@@ -617,7 +615,6 @@ class TestValueProxyLifecycle:
         assert build_request.build_mode == BuildMode.Check.value
         assert build_request.build_store_handle == 0
         w.store_stub.build_paths_with_results.assert_not_awaited()
-        w.store_stub.build_derivation.assert_not_awaited()
 
     async def test_build_store_overrides_build_store_not_eval_store(self):
         w = self._worker()
