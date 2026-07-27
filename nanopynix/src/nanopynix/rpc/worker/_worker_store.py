@@ -59,10 +59,11 @@ from nanopynix_proto.nix.store import (
     VerifyStoreResponse,
 )
 
+from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import HandleKind
 from nanopynix.rpc.worker._grpc_util import worker_op, wrap_service_handlers
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Sequence
 
     from nanopynix._core._objects import CoreStore

@@ -18,6 +18,8 @@ from nanopynix_helpers.fod import (
 )
 from nanopynix_proto.nix.common import Derivation, DerivationOutput, DerivationOutputs
 
+from nanopynix.rpc import Store, ValueProxy
+
 
 def test_extracts_only_the_exact_ansi_colored_nix_fod_shape() -> None:
     mismatch = extract_fod_hash_mismatch(
@@ -163,7 +165,7 @@ class _FakeForcedValue:
         return self._value
 
 
-class _FakeEvalValue:
+class _FakeEvalValue(ValueProxy):
     """Duck-types the subset of ValueProxy that evaluated_derivation_path needs."""
 
     def __init__(self, attrs: dict[str, object] | None = None) -> None:
@@ -177,29 +179,29 @@ class _FakeEvalValue:
 
 
 async def test_evaluated_derivation_path_returns_none_without_a_type_attr() -> None:
-    assert await evaluated_derivation_path(_FakeEvalValue()) is None  # type: ignore[arg-type] -- narrow ValueProxy fake
+    assert await evaluated_derivation_path(_FakeEvalValue()) is None
 
 
 async def test_evaluated_derivation_path_returns_none_for_a_non_derivation_type() -> None:
     value = _FakeEvalValue({"type": "package"})
 
-    assert await evaluated_derivation_path(value) is None  # type: ignore[arg-type] -- narrow ValueProxy fake
+    assert await evaluated_derivation_path(value) is None
 
 
 async def test_evaluated_derivation_path_returns_none_without_a_drvpath() -> None:
     value = _FakeEvalValue({"type": "derivation"})
 
-    assert await evaluated_derivation_path(value) is None  # type: ignore[arg-type] -- narrow ValueProxy fake
+    assert await evaluated_derivation_path(value) is None
 
 
 async def test_evaluated_derivation_path_rejects_a_non_string_drvpath() -> None:
     value = _FakeEvalValue({"type": "derivation", "drvPath": 123})
 
     with pytest.raises(FodSourceUpdateError, match="drvPath was not a string"):
-        await evaluated_derivation_path(value)  # type: ignore[arg-type] -- narrow ValueProxy fake
+        await evaluated_derivation_path(value)
 
 
-class _FakeStore:
+class _FakeStore(Store):
     """Duck-types the subset of Store that these closure walks need."""
 
     def __init__(self, derivations: dict[str, Derivation]) -> None:
@@ -232,7 +234,7 @@ async def test_fixed_output_derivations_in_closure_walks_input_drvs_once_each() 
     }
     store = _FakeStore(derivations)
 
-    result = await fixed_output_derivations_in_closure(store, root)  # type: ignore[arg-type] -- narrow store fake
+    result = await fixed_output_derivations_in_closure(store, root)
 
     assert result == {fixed_dep}
 
@@ -240,13 +242,16 @@ async def test_fixed_output_derivations_in_closure_walks_input_drvs_once_each() 
 async def test_mismatch_is_target_fod_is_true_without_a_drv_path() -> None:
     mismatch = FodHashMismatch(specified="a", got="b", drv_path=None)
 
-    assert await mismatch_is_target_fod(None, None, mismatch)  # type: ignore[arg-type] -- store/root unused when drv_path is None
+    # store/root are unused when drv_path is None -- their contents never
+    # matter, but the parameter types are enforced regardless, so these are
+    # real (if inert) fakes rather than None.
+    assert await mismatch_is_target_fod(_FakeStore({}), _FakeEvalValue(), mismatch)
 
 
 async def test_mismatch_is_target_fod_is_false_when_root_is_not_a_derivation() -> None:
     mismatch = FodHashMismatch(specified="a", got="b", drv_path="/nix/store/x.drv")
 
-    assert not await mismatch_is_target_fod(None, _FakeEvalValue(), mismatch)  # type: ignore[arg-type] -- narrow fakes
+    assert not await mismatch_is_target_fod(_FakeStore({}), _FakeEvalValue(), mismatch)
 
 
 async def test_is_fixed_output_derivation_in_closure_true_via_matching_derivation_name() -> None:
@@ -263,7 +268,7 @@ async def test_is_fixed_output_derivation_in_closure_true_via_matching_derivatio
     }
     store = _FakeStore(derivations)
 
-    assert await is_fixed_output_derivation_in_closure(store, root, candidate)  # type: ignore[arg-type] -- narrow store fake
+    assert await is_fixed_output_derivation_in_closure(store, root, candidate)
 
 
 async def test_is_fixed_output_derivation_in_closure_false_when_name_match_is_not_fixed_output() -> None:
@@ -280,7 +285,7 @@ async def test_is_fixed_output_derivation_in_closure_false_when_name_match_is_no
     }
     store = _FakeStore(derivations)
 
-    assert not await is_fixed_output_derivation_in_closure(store, root, candidate)  # type: ignore[arg-type] -- narrow store fake
+    assert not await is_fixed_output_derivation_in_closure(store, root, candidate)
 
 
 async def test_is_fixed_output_derivation_in_closure_false_when_name_match_is_ambiguous() -> None:
@@ -299,4 +304,4 @@ async def test_is_fixed_output_derivation_in_closure_false_when_name_match_is_am
     }
     store = _FakeStore(derivations)
 
-    assert not await is_fixed_output_derivation_in_closure(store, root, candidate)  # type: ignore[arg-type] -- narrow store fake
+    assert not await is_fixed_output_derivation_in_closure(store, root, candidate)

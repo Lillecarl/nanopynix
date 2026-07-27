@@ -8,8 +8,9 @@ import structlog
 from clypi import Command, arg
 
 from nanopynix import NixType
+from nanopynix._typechecking import BEARTYPING
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from nanopynix.rpc import ValueProxy
 
 from pynix._util import error_exit, print_json, report_and_exit, store_session

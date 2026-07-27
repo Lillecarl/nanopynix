@@ -4,14 +4,15 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
-if TYPE_CHECKING:
-    from collections.abc import Iterable
-
 import structlog
 from clypi import Command, Positional, arg
 
 import nanopynix
+from nanopynix._typechecking import BEARTYPING
 from pynix._util import print_json, store_session
+
+if TYPE_CHECKING or BEARTYPING:
+    from collections.abc import Iterable
 
 logger = structlog.get_logger(__name__)
 

@@ -17,8 +17,10 @@ from typing import Any
 import pytest
 from pynix.target import EvaluationTarget, EvaluationTargetError, evaluate_target, select_attr
 
+from nanopynix.rpc import EvalSession, ValueProxy
 
-class _FakeValue:
+
+class _FakeValue(ValueProxy):
     def __init__(self, attrs: dict[str, _FakeValue] | None = None, *, auto_called: bool = False) -> None:
         self._attrs = attrs or {}
         self.auto_called = auto_called
@@ -36,7 +38,7 @@ class _FakeValue:
         return _FakeValue(self._attrs, auto_called=True)
 
 
-class _FakeSession:
+class _FakeSession(EvalSession):
     def __init__(self, file_value: _FakeValue | None = None) -> None:
         self._file_value = file_value
 
@@ -54,7 +56,7 @@ async def test_evaluate_target_with_a_file_skips_auto_call_by_default() -> None:
     value = _FakeValue()
     session = _FakeSession(file_value=value)
 
-    result = await evaluate_target(target, session)  # type: ignore[arg-type] -- narrow session fake
+    result = await evaluate_target(target, session)
 
     assert result is value
     assert not value.auto_called
@@ -75,7 +77,7 @@ async def test_evaluate_target_raises_if_flake_is_missing_after_bypassing_valida
     monkeypatch.setattr(EvaluationTarget, "validate", _no_op_validate)
 
     with pytest.raises(EvaluationTargetError, match="either --file or --flake is required"):
-        await evaluate_target(target, _FakeSession())  # type: ignore[arg-type] -- narrow session fake
+        await evaluate_target(target, _FakeSession())
 
 
 async def test_select_attr_rejects_an_empty_attrpath_component() -> None:

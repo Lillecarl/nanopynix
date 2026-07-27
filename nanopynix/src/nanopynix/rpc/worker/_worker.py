@@ -58,6 +58,7 @@ from nanopynix_proto.nix.worker import (
 from nanopynix._core._objects import CoreRuntime
 from nanopynix._core._primops import import_primop_callable as _import_callable
 from nanopynix._process_title import set_process_title, set_worker_title
+from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import (
     NIX_CONFIG_ENV,
     NIX_USER_CONF_FILES_ENV,
@@ -78,7 +79,7 @@ from nanopynix.rpc.worker._worker_primop import (
 from nanopynix.rpc.worker._worker_store import StoreServiceHandler
 from nanopynix.settings import DEFAULT_WORKER_MAX_CONCURRENCY
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncIterator, Callable
 
     from grpclib._typing import (

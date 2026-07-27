@@ -5,10 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import nanopynix
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import NixError
 from pynix._value_render import format_json
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from pynix._lsp._dialect import Dialect
 
 

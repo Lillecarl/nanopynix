@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nanopynix_proto.nix.common import LogEvent as LogEventProto, NixLogEvent, ResultType
+from nanopynix_proto.nix.common import LogEvent as LogEventProto, NixLogEvent, ResultType, ScalarValue
 from nanopynix_proto.nix.eval import ForceJsonResponse
 
 import nanopynix.rpc.client._pool as pool_module
@@ -99,7 +99,7 @@ def _mock_scalar(value: Any) -> MagicMock:
     gone -- the wire op went the way of the client's ``force()``. AsScalar
     answers with the scalar itself, so the wrapper went with it.
     """
-    scalar = MagicMock()
+    scalar = MagicMock(spec=ScalarValue)
     scalar.string_value = value if isinstance(value, str) else None
     scalar.int_value = value if isinstance(value, int) and not isinstance(value, bool) else None
     scalar.float_value = value if isinstance(value, float) else None
@@ -149,9 +149,10 @@ def _mock_has_attr_response(has: bool = True) -> MagicMock:
 
 def _mock_pool() -> MagicMock:
     """Return a mock worker client that serializes individual RPCs."""
-    pool = MagicMock()
+    pool = MagicMock(spec=WorkerClient)
     pool.eval_stub = _make_eval_stub()
     pool.store_stub = MagicMock()
+    pool.rpc_timeout = DEFAULT_RPC_TIMEOUT_SECONDS
 
     async def _invoke(method: Any, request: Any, *, timeout: float) -> Any:  # noqa: ASYNC109 -- mock implementing WorkerClient.invoke; timeout passed to grpclib stub
         return await method(request, timeout=timeout)
@@ -162,9 +163,10 @@ def _mock_pool() -> MagicMock:
 
 def _mock_worker_client() -> MagicMock:
     """Return a mock worker client with eval and Store RPC stubs."""
-    rw = MagicMock()
+    rw = MagicMock(spec=WorkerClient)
     rw.eval_stub = _make_eval_stub()
     rw.store_stub = MagicMock()
+    rw.rpc_timeout = DEFAULT_RPC_TIMEOUT_SECONDS
     rw.store_stub.build_paths_with_results = AsyncMock()
     rw.store_stub.read_derivation = AsyncMock()
     rw.release = AsyncMock()

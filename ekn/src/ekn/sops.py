@@ -13,8 +13,9 @@ import structlog
 import yaml
 
 from ekn.apply import apply_one, build_object
+from nanopynix._typechecking import BEARTYPING
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from kr8s._api import Api  # kr8s.asyncio.api() returns this, not kr8s.Api
 
     from ekn.apply import Manifest

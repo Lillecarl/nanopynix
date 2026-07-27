@@ -20,9 +20,10 @@ from nanopynix_bindings.store import BuildMode
 from nanopynix_proto.nix.common import LogLevel
 from nanopynix_proto.nix.store import GcAction, StoreDirs
 
+from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from nanopynix.models import (
         BuildResult,
         Derivation,

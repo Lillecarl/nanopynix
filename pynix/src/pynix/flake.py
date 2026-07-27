@@ -12,9 +12,10 @@ from rich.console import Console
 from rich.tree import Tree
 
 import nanopynix
+from nanopynix._typechecking import BEARTYPING
 from pynix._util import eval_session, print_json
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from nanopynix.rpc import ValueProxy
 
 logger = structlog.get_logger(__name__)

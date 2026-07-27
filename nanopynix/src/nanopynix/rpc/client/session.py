@@ -19,13 +19,14 @@ import logging
 import uuid
 import weakref
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, no_type_check
 
 import anyio
 from nanopynix_proto.nix.common import LogEvent as LogEventProto, LogLevel
 
 from nanopynix._core._primops import to_primop_specs
 from nanopynix._process_title import set_manager_title
+from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import DEFAULT_STORE_URI
 from nanopynix.logging import LogCapture
 from nanopynix.models import LogEvent
@@ -42,7 +43,7 @@ from nanopynix.settings import (
 )
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
     from os import PathLike
 
@@ -84,6 +85,10 @@ class Session:
                 info = await store.query_path_info(str(sp))
     """
 
+    @no_type_check  # nix_conf/settings validate their own types at runtime for
+    # untyped callers (see the isinstance guards below); beartype's parameter
+    # check would otherwise intercept before that guard runs and raise its own
+    # exception type instead of the documented TypeError.
     def __init__(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
         self,
         *,

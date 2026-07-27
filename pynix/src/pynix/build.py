@@ -6,14 +6,14 @@ from typing import TYPE_CHECKING, Any, override
 
 import structlog
 from clypi import Command, arg
-
-if TYPE_CHECKING:
-    from nanopynix.rpc import ValueProxy
-
 from nanopynix_helpers.build import FodBuildError, build_with_fod_update
 
 import nanopynix
+from nanopynix._typechecking import BEARTYPING
 from pynix._util import error_console, error_exit, nix_session, print_json, report_and_exit
+
+if TYPE_CHECKING or BEARTYPING:
+    from nanopynix.rpc import ValueProxy
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,

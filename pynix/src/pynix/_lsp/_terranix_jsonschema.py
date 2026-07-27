@@ -22,7 +22,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-if TYPE_CHECKING:
+from nanopynix._typechecking import BEARTYPING
+
+if TYPE_CHECKING or BEARTYPING:
     from pynix._lsp._terranix_schema import SchemaAttribute, SchemaBlock
 
 # Every compound cty type is encoded as a 2-element [kind, arg] JSON array.

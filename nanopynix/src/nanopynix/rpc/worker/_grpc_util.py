@@ -9,9 +9,10 @@ from typing import TYPE_CHECKING, Any, Concatenate, Protocol
 from grpclib.const import Status
 from grpclib.exceptions import GRPCError
 
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.rpc._status_details import details_for_exception
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Callable
     from types import CoroutineType
 

@@ -122,7 +122,7 @@ async def test_drain_waits_for_pending_work_to_finish() -> None:
     executor = NixThreadExecutor(max_workers=1)
     try:
         await executor.run(time.sleep, 0.05)
-        await executor.drain(timeout=5)
+        await executor.drain(timeout=5.0)
         assert not executor.has_pending_work()
     finally:
         executor.shutdown()

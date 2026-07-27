@@ -9,6 +9,7 @@ import pytest
 
 import nanopynix._process_title as process_title
 import nanopynix.rpc.client.session as nix_module
+from nanopynix.rpc.client._pool import WorkerClient
 from nanopynix.rpc.client.session import Session
 from nanopynix.rpc.client.store import StoreHandle
 
@@ -61,7 +62,7 @@ def test_session_sets_manager_title(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.anyio
 async def test_store_session_opens_store_with_its_uri() -> None:
-    pool = MagicMock()
+    pool = MagicMock(spec=WorkerClient)
     pool.worker_stub.open_store = AsyncMock(return_value=SimpleNamespace(store_handle=42))
 
     async def invoke(method: object, request: object, *, timeout: float) -> object:  # noqa: ASYNC109 -- mock implementing WorkerClient.invoke interface

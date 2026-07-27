@@ -10,6 +10,9 @@ import anyio
 import pytest
 from nanopynix_proto.nix.store import GetUriRequest
 
+from nanopynix._core._objects import (
+    CoreStore,  # type: ignore[reportPrivateUsage] -- test constructs worker's local runtime
+)
 from nanopynix._wire import HandleKind
 from nanopynix.rpc.worker._worker import WorkerState
 from nanopynix.rpc.worker._worker_store import StoreServiceHandler
@@ -25,7 +28,7 @@ async def test_store_handler_runs_independent_calls_on_multiple_store_threads() 
     active = 0
     peak_active = 0
 
-    class SlowStore:
+    class SlowStore(CoreStore):
         """Stands in for CoreStore, whose typed methods the handler now calls.
 
         It used to implement ``store_get_uri(request_dict)`` -- the proto-dict
@@ -33,6 +36,9 @@ async def test_store_handler_runs_independent_calls_on_multiple_store_threads() 
         handler calls the same ``CoreStore.get_uri`` the inproc engine does,
         so the fake matches that signature instead.
         """
+
+        def __init__(self) -> None:
+            pass
 
         def get_uri(self, *, with_params: bool = False) -> str:
             nonlocal active, peak_active

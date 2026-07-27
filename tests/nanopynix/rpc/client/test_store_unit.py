@@ -13,6 +13,11 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from nanopynix_proto.nix.common import (
+    BuildResult,
+    Derivation,
+    MissingInfo,
+)
 from nanopynix_proto.nix.store import (
     AddIndirectRootRequest,
     AddPermRootRequest,
@@ -49,6 +54,7 @@ from nanopynix_proto.nix.store import (
 )
 
 import nanopynix
+from nanopynix.rpc.client._pool import WorkerClient
 from nanopynix.rpc.client.store import Store as PublicStore, StoreHandle as Store
 
 
@@ -92,7 +98,7 @@ def _make_stub_mock() -> MagicMock:
 
 @pytest.fixture
 def pool() -> MagicMock:
-    p: MagicMock = MagicMock()
+    p: MagicMock = MagicMock(spec=WorkerClient)
     p.store_stub = _make_stub_mock()
 
     async def _passthrough(method: Any, request: Any, *, timeout: float) -> Any:  # noqa: ASYNC109 -- mock implementing WorkerClient.invoke interface
@@ -135,7 +141,7 @@ def _mock_path_info(**overrides: Any) -> MagicMock:
 
 
 def _mock_build_result(**overrides: Any) -> MagicMock:
-    br = MagicMock()
+    br = MagicMock(spec=BuildResult)
     br.drv_path = overrides.get("drv_path", "")
     br.success = overrides.get("success", True)
     br.status = overrides.get("status", "built")
@@ -144,7 +150,7 @@ def _mock_build_result(**overrides: Any) -> MagicMock:
 
 
 def _mock_derivation(**overrides: Any) -> MagicMock:
-    d = MagicMock()
+    d = MagicMock(spec=Derivation)
     d.name = overrides.get("name", "foo")
     d.system = overrides.get("system", "x86_64-linux")
     d.builder = overrides.get("builder", "/bin/sh")
@@ -168,7 +174,7 @@ def _mock_build_result_list(results: list[Any] | None = None) -> MagicMock:
 
 
 def _mock_missing_info(**overrides: Any) -> MagicMock:
-    mi = MagicMock()
+    mi = MagicMock(spec=MissingInfo)
     mi.will_build = overrides.get("will_build", [])
     mi.will_substitute = overrides.get("will_substitute", [])
     mi.unknown = overrides.get("unknown", [])

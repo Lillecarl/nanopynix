@@ -20,6 +20,8 @@ from nanopynix_proto.nix.common import LogLevel
 from nanopynix_proto.nix.worker import (
     CloseStoreRequest,
     GetVerbosityRequest,
+    InitRequest,
+    OpenStoreRequest,
     SetVerbosityRequest,
     ShutdownRequest,
     SubscribeLogsRequest,
@@ -121,10 +123,10 @@ def test_log_without_a_collector_is_a_no_op() -> None:
 
 async def test_init_requires_an_executor() -> None:
     handler = WorkerServiceHandler(WorkerState())
-    message = SimpleNamespace(settings={}, nix_conf=None, request_id=1)
+    message = InitRequest(settings={}, nix_conf=None, request_id=1)
 
     with pytest.raises(GRPCError, match="worker executor is unavailable"):
-        await handler.init(message)  # type: ignore[arg-type] -- narrow message fake; init fails before touching other fields
+        await handler.init(message)
 
 
 async def test_init_writes_nix_conf_and_skips_empty_settings_render(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,7 +144,7 @@ async def test_init_writes_nix_conf_and_skips_empty_settings_render(monkeypatch:
     state.executor = NixThreadExecutor()
     state.rpc_bridge = _FakeBridge()  # type: ignore[assignment] -- only presence and start()/stop() matter to the initialization path
     handler = WorkerServiceHandler(state)
-    message = SimpleNamespace(
+    message = InitRequest(
         settings={},
         nix_conf="/tmp/fake-nix.conf",
         experimental_features=[],
@@ -154,7 +156,7 @@ async def test_init_writes_nix_conf_and_skips_empty_settings_render(monkeypatch:
     )
 
     try:
-        response = await handler.init(message)  # type: ignore[arg-type] -- narrow message fake matching InitRequest's used fields
+        response = await handler.init(message)
     finally:
         state.executor.shutdown()
 
@@ -174,7 +176,7 @@ async def test_init_reports_and_reraises_initialization_failures(
     state.executor = NixThreadExecutor()
     state.rpc_bridge = _FakeBridge()  # type: ignore[assignment] -- only presence and start()/stop() matter to the initialization path
     handler = WorkerServiceHandler(state)
-    message = SimpleNamespace(
+    message = InitRequest(
         settings={},
         nix_conf=None,
         experimental_features=["flakes"],
@@ -187,7 +189,7 @@ async def test_init_reports_and_reraises_initialization_failures(
 
     try:
         with pytest.raises(GRPCError, match="nix init exploded"):
-            await handler.init(message)  # type: ignore[arg-type] -- narrow message fake matching InitRequest's used fields
+            await handler.init(message)
     finally:
         state.executor.shutdown()
 
@@ -198,7 +200,7 @@ async def test_open_store_requires_a_store_limiter() -> None:
     handler = WorkerServiceHandler(WorkerState())
 
     with pytest.raises(GRPCError, match="worker store limiter is unavailable"):
-        await handler.open_store(SimpleNamespace(request_id=1, uri="auto"))  # type: ignore[arg-type] -- narrow message fake
+        await handler.open_store(OpenStoreRequest(request_id=1, uri="auto"))
 
 
 async def test_close_store_requires_an_executor() -> None:

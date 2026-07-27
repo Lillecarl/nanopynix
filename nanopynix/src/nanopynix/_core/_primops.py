@@ -14,9 +14,10 @@ from typing import TYPE_CHECKING, Any
 
 from nanopynix_bindings import expr as nanopynix_expr
 
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.models import PrimOpSpec
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Callable, Mapping, Sequence
 
 

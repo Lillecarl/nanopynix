@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING, cast
 
 from lsprotocol import types
 
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import NixError
 from pynix._jsonschema import FindingKind, list_properties, render, validate
 from pynix._lsp._dialect import Dialect
@@ -77,7 +78,7 @@ from pynix._lsp._terranix_schema import (
 )
 from pynix._lsp._tofu_core_schema import detect_tofu_version, get_core_schema, merge_schema_blocks
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Mapping
 
     import nanopynix

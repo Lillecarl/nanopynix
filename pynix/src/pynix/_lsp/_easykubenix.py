@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Any
 
 from lsprotocol import types
 
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import NixError
 from pynix._jsonschema import list_properties, render, walk
 from pynix._lsp._dialect import Dialect
@@ -54,7 +55,7 @@ from pynix._lsp._easykubenix_schema import find_definition_key, load_schema, spl
 from pynix._lsp._module_system import CONFIG_NAME, MODULE_ENTRY_NAME, derive_module_roots
 from pynix._lsp._syntax import completion_target_at, enclosing_binding_path_at, identifier_path_at
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     import nanopynix
     from pynix._lsp._context import FileContext
 

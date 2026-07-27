@@ -7,9 +7,10 @@ import kr8s
 import structlog
 from kr8s.asyncio.objects import APIObject, get_class, new_class
 
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.models import JsonValue
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from kr8s._api import Api  # kr8s.asyncio.api() returns this, not kr8s.Api
 
 _log = structlog.get_logger()

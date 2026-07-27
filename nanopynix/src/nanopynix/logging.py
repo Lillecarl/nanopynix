@@ -20,9 +20,10 @@ import anyio
 import janus
 from nanopynix_proto.nix.common import LogEvent as LogEventProto
 
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.models import LogEvent
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncIterator, Callable
 
     type LogCallback = Callable[..., None]

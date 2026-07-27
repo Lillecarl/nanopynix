@@ -6,9 +6,10 @@ import structlog
 from clypi import Command, Positional, arg
 from rich.console import Console
 
+from nanopynix._typechecking import BEARTYPING
 from pynix._util import print_json, store_session
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     import nanopynix
 
 logger = structlog.get_logger(__name__)

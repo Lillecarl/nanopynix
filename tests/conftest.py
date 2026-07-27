@@ -5,18 +5,28 @@ from __future__ import annotations
 import atexit
 import contextlib
 import functools
+import importlib
 import inspect
 import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
-import anyio
-import pytest
-from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
+# A plain `import tests.support.beartype_hook` statement here would be an
+# ordinary import, which makes it fair game for ruff's isort to alphabetize
+# alongside the imports below -- and `nanopynix` sorts before
+# `tests.support.beartype_hook`, which is exactly backwards: nanopynix's own
+# import cascade must not run before this hook installs, see the module's
+# docstring. Routing the side effect through a function call instead of an
+# import statement keeps it outside anything isort will ever reorder.
+importlib.import_module("tests.support.beartype_hook")
 
-import nanopynix
-from nanopynix.settings import DEFAULT_EXPERIMENTAL_FEATURES
+import anyio  # noqa: E402 -- see hook install above
+import pytest  # noqa: E402 -- see hook install above
+from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util  # noqa: E402 -- see hook install above
+
+import nanopynix  # noqa: E402 -- see hook install above
+from nanopynix.settings import DEFAULT_EXPERIMENTAL_FEATURES  # noqa: E402 -- see hook install above
 
 pytest_plugins = (
     "tests.support.lsp_environment",

@@ -24,6 +24,7 @@ from rich.table import Table
 from tree_sitter import Query, QueryCursor
 
 import nanopynix
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import NixError
 from nanopynix.verbosity import normalize_log_level
 from pynix._completion import completion_prefix_at
@@ -39,7 +40,7 @@ from pynix.target import (
     load_repl_target,
 )
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable
 
     from prompt_toolkit.document import Document

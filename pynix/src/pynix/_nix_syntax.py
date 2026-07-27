@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Protocol, cast
 import tree_sitter_nix  # type: ignore[reportMissingTypeStubs] -- tree-sitter-nix does not ship type stubs
 from tree_sitter import Language, Parser
 
-if TYPE_CHECKING:
+from nanopynix._typechecking import BEARTYPING
+
+if TYPE_CHECKING or BEARTYPING:
     from tree_sitter import Tree
 
 

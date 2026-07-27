@@ -27,13 +27,14 @@ from typing import TYPE_CHECKING, Any, cast
 from lsprotocol import types
 from pygls.uris import from_fs_path
 
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import NixError
 from pynix._lsp._dialect import Dialect
 from pynix._lsp._render import render_value
 from pynix._lsp._syntax import completion_target_at, identifier_path_at, top_level_lambda_formals
 from pynix._value_render import format_json
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     import nanopynix
     from pynix._lsp._context import FileContext
 

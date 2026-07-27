@@ -10,12 +10,21 @@ from typing import TYPE_CHECKING
 
 import anyio
 from lsprotocol import types
+
+# `types.PrepareRenameResult` is a PEP 563-deferred type alias whose own
+# string annotation ("Range | RenameFilePlaceholder | None") beartype
+# resolves against *this* module's namespace rather than lsprotocol.types',
+# so `_prepare_rename`'s return hint can't be checked unless a bare `Range`
+# name exists here too -- not used by name anywhere below, only re-exported
+# for beartype's forward-ref lookup to find.
+from lsprotocol.types import Range as Range
 from pygls.io_ import StdinAsyncReader, StdoutWriter, run_async
 from pygls.lsp.server import LanguageServer
 from pygls.uris import from_fs_path, to_fs_path
 from pygls.workspace import TextDocument
 
 import nanopynix
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import NixError
 from pynix._lsp._context import FileContext, SharedEvalCache, parse_directives, resolve_root_path
 from pynix._lsp._dialects import DIALECTS
@@ -31,7 +40,7 @@ from pynix._lsp._syntax import (
     top_level_symbols,
 )
 
-if TYPE_CHECKING:
+if TYPE_CHECKING or BEARTYPING:
     from pynix._lsp._syntax import ParseErrorRange
 
 _SERVER_NAME = "pynix-lsp"
