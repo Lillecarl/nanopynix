@@ -54,6 +54,23 @@ PyStoreMethods PyStoreMethods::resolve(const nb::object &py_store) {
 #define NANOPYNIX_STORE_RESOLVE_FLAG(name) methods.name = implements(#name);
     NANOPYNIX_STORE_DISPATCH_METHODS(NANOPYNIX_STORE_RESOLVE_FLAG)
 #undef NANOPYNIX_STORE_RESOLVE_FLAG
+
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+    // The one operation this build cannot dispatch, said out loud rather than
+    // left to be discovered. `readDerivation` is non-virtual here, so there is
+    // no hook; the store still opens and every other operation works, which is
+    // why this warns instead of throwing -- one unsupported method should not
+    // cost a caller the whole store, and `dynamic_primop_registration` sets the
+    // same precedent by degrading rather than refusing. What it must not do is
+    // stay quiet, since the failure it would otherwise produce is a method that
+    // exists, type-checks, and is never called.
+    if (methods.read_derivation)
+        nix::warn(
+            "this store implements read_derivation, which the linked Nix (%s) cannot dispatch: "
+            "Store::readDerivation is not virtual before 2.32, so the method will not be called. "
+            "nanopynix.build_info()['capabilities']['store_impl_read_derivation'] reports this.",
+            NANOPYNIX_NIX_VERSION);
+#endif
     return methods;
 }
 
@@ -483,6 +500,51 @@ nix::MissingPaths PyStoreImpl::queryMissing(const std::vector<nix::DerivedPath> 
     if (underlying) return underlying->queryMissing(targets);
     return nix::Store::queryMissing(targets);
 }
+
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+#else
+nix::Derivation PyStoreImpl::readDerivation(const nix::StorePath & drvPath) {
+    // The one dispatched operation whose Python return value is a
+    // *serialization* rather than a rendering: the ATerm text of the `.drv`,
+    // which is exactly the bytes a store holding one already has. Every other
+    // method here answers with the same dict/list shape `nix_store.cpp` renders
+    // outward, and mirroring that would mean rebuilding a `nix::Derivation`
+    // from a dict -- five `DerivationOutput` variants, a `DerivedPathMap` tree
+    // and `structuredAttrs`, each of which changed shape across the supported
+    // versions. `parseDerivation` is Nix's own reader for this format, has an
+    // identical signature on 2.31, 2.34 and 2.35, and is what
+    // `readDerivationCommon` itself calls, so reusing it is both less code and
+    // the only version of it guaranteed to agree with Nix.
+    std::optional<std::string> aterm;
+    {
+        nb::gil_scoped_acquire gil;
+        if (methods.read_derivation)
+            aterm = nb::cast<std::string>(py_store.attr("read_derivation")(store_path_to_py(drvPath)));
+    }
+    // Parsed outside the GIL: it is pure C++ over a string we already own.
+    //
+    // The wrapping is `readDerivationCommon`'s, not decoration.
+    // `parseDerivation` reports only what it choked on -- "expected string 'D'"
+    // -- with no indication of *which* store object was unreadable, and this
+    // caller has no file path to fall back on the way a real store does. Nix
+    // adds the path for exactly that reason, and the empty case gets its own
+    // message there too, which here is the likelier bug: a store returning ""
+    // is a method that forgot to return, and "expected string 'D'" does not say
+    // so. `msg()` rather than `message()` because 2.31 declares the latter
+    // non-const (`error.hh:159`).
+    if (aterm) {
+        try {
+            if (aterm->empty())
+                throw nix::FormatError("derivation is empty (the store returned no ATerm text)");
+            return nix::parseDerivation(config, std::move(*aterm), nix::Derivation::nameFromPath(drvPath));
+        } catch (nix::FormatError & e) {
+            throw nix::Error("error parsing derivation '%s': %s", printStorePath(drvPath), e.msg());
+        }
+    }
+    if (underlying) return underlying->readDerivation(drvPath);
+    return nix::Store::readDerivation(drvPath);
+}
+#endif
 
 // --- not dispatched into Python; see the dispatch list in the header ---
 

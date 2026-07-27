@@ -28,7 +28,7 @@ What is here, and what is not
 -----------------------------
 
 The rule is that whatever you can *call* on a
-:class:`~nanopynix_bindings.store.Store`, you can *implement* here. Three groups
+:class:`~nanopynix_bindings.store.Store`, you can *implement* here. Two groups
 of Nix store operations are deliberately absent:
 
 * Anything needing a stream or a build result -- ``add_to_store``,
@@ -41,13 +41,20 @@ of Nix store operations are deliberately absent:
   ``add_indirect_root``. Those live on Nix's ``GcStore``, ``LogStore`` and
   ``LocalFSStore`` interfaces, which a Python store does not inherit, so there
   is nothing to override.
-* ``read_derivation``, which is not a virtual method on Nix 2.31 -- it became
-  one by 2.34. Dispatching it only where the base declares it virtual would
-  make this interface a different shape per Nix version, so a store
-  implementing it would work on one build and silently do nothing on another.
-  It stays out until 2.31 leaves the supported matrix. Serving derivations
-  still works: Nix reads a ``.drv`` through :meth:`~StoreImpl.query_path_info`,
-  which does dispatch.
+One operation is present but *version-dependent*:
+:meth:`~StoreImpl.read_derivation` is only dispatched where Nix declares
+``Store::readDerivation`` virtual, which it does not before 2.32. On an older
+build the method is never called; the store still opens, every other operation
+works, and Nix logs a warning at open time saying so. To branch on it instead,
+read ``nanopynix.build_info()["capabilities"]["store_impl_read_derivation"]``
+-- the same mechanism ``dynamic_primop_registration`` uses for primops, which
+are likewise unavailable on 2.31.
+
+There is no workaround on those builds, and an earlier version of this note
+claimed there was. Nix does *not* read a ``.drv`` through
+:meth:`~StoreImpl.query_path_info`: it reads it through a store accessor,
+which a Python store without an ``underlying_store`` cannot serve, so
+``read_derivation`` against one has always failed with ``InvalidPath``.
 
 This is not the same thing as :mod:`nanopynix.protocols`. Those describe the
 async API that nanopynix's own engines *provide* to callers; this describes the
@@ -269,5 +276,27 @@ class StoreImpl:
         ``unknown``, ``download_size`` and ``nar_size``. Missing keys keep
         Nix's defaults (empty sets, zero), so a store that only knows some of
         them may report just those.
+        """
+        raise NotImplementedError
+
+    def read_derivation(self, path: str) -> str:
+        """The derivation stored at ``path``, as ATerm text.
+
+        Alone among these methods, the return value is a *serialization*
+        rather than a rendering: the literal contents of the ``.drv``, which
+        is what a store holding one already has. Nix parses it with its own
+        reader, so a derivation round-trips exactly -- including
+        ``__structuredAttrs`` and nested ``inputDrvs``, which a dict shaped
+        like :meth:`nanopynix_bindings.store.Store.read_derivation`'s output
+        could not reconstruct without this module reimplementing Nix's
+        ``DerivationOutput`` variants once per supported version.
+
+        A malformed or empty value raises out of Nix's parser, naming
+        ``path``.
+
+        Only dispatched where ``Store::readDerivation`` is virtual, which is
+        not the case before Nix 2.32 -- see the module docstring, and check
+        ``build_info()["capabilities"]["store_impl_read_derivation"]`` to
+        branch on it.
         """
         raise NotImplementedError

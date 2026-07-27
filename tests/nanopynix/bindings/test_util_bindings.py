@@ -20,6 +20,7 @@ def test_build_info_reports_compile_time_compatibility() -> None:
         "build_result_sum",
         "eval_state_mem",
         "dynamic_primop_registration",
+        "store_impl_read_derivation",
     }
     assert all(isinstance(value, bool) for value in info["capabilities"].values())
 

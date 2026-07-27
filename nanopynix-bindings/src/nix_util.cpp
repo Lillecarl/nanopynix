@@ -193,10 +193,15 @@ static nb::dict build_info() {
     capabilities["build_result_sum"] = false;
     capabilities["eval_state_mem"] = false;
     capabilities["dynamic_primop_registration"] = false;
+    // Whether `nanopynix.StoreImpl.read_derivation` is dispatched at all --
+    // `nix::Store::readDerivation` is non-virtual before 2.32, so there is no
+    // hook to install. See `py_store_impl.hh`'s dispatch-list comment.
+    capabilities["store_impl_read_derivation"] = false;
 #else
     capabilities["build_result_sum"] = true;
     capabilities["eval_state_mem"] = true;
     capabilities["dynamic_primop_registration"] = true;
+    capabilities["store_impl_read_derivation"] = true;
 #endif
 
     nb::dict info;
