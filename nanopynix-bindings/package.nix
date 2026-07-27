@@ -40,7 +40,7 @@ buildPythonPackage (
   attrs
   // {
     version = "${attrs.version}-${version}";
-    
+
     src = ./.;
 
     build-system = attrs.build-system ++ [

@@ -44,9 +44,7 @@ def _info(*, traces: int = 0, msg: str = "boom", **overrides: Any) -> dict[str, 
         "pos": {"file": "«string»", "line": 1, "column": 1},
         "is_from_expr": True,
         "status": 1,
-        "traces": [
-            {"hint": f"while evaluating frame {i} " + "x" * 200, "pos": None} for i in range(traces)
-        ],
+        "traces": [{"hint": f"while evaluating frame {i} " + "x" * 200, "pos": None} for i in range(traces)],
         "truncated": False,
         "suggestions": [],
         **overrides,

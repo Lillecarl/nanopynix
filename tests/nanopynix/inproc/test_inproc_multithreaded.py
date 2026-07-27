@@ -352,9 +352,7 @@ async def test_inproc_independent_builds_overlap_without_cpu_pressure(
                         first_seconds.call(uuid.uuid4().hex),
                         second_seconds.call(uuid.uuid4().hex),
                     )
-                    first_path, second_path = [
-                        await value.attr("drvPath").as_string() for value in (first, second)
-                    ]
+                    first_path, second_path = [await value.attr("drvPath").as_string() for value in (first, second)]
                     drv_paths.extend([first_path, second_path])
                     async with _measuring_build_dispatch(nix) as starts:
                         first_result, second_result = await asyncio.gather(

@@ -96,9 +96,7 @@ def _info_diff(case: str, rpc: dict[str, Any] | None, inproc_: dict[str, Any] | 
     """Which ErrorInfo keys differ between the engines, and how."""
     if rpc is None or inproc_ is None:
         return f"{case}: rpc info={rpc is not None} inproc info={inproc_ is not None}"
-    differing = sorted(
-        key for key in set(rpc) | set(inproc_) if rpc.get(key, _MISSING) != inproc_.get(key, _MISSING)
-    )
+    differing = sorted(key for key in set(rpc) | set(inproc_) if rpc.get(key, _MISSING) != inproc_.get(key, _MISSING))
     return f"{case}: " + "; ".join(
         f"{key}: rpc={rpc.get(key, _MISSING)!r} inproc={inproc_.get(key, _MISSING)!r}" for key in differing
     )
@@ -226,8 +224,7 @@ async def _build_status(store: Any, derived_path: str) -> dict[str, Any]:
         "module": None,
         "message": "",
         "results": [
-            {"success": result.success, "status": result.status, "error_msg": result.error_msg}
-            for result in built
+            {"success": result.success, "status": result.status, "error_msg": result.error_msg} for result in built
         ],
     }
 

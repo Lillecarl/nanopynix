@@ -55,6 +55,7 @@ if TYPE_CHECKING:
 
     from nanopynix.rpc.client._pool import WorkerClient
 
+
 class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreServiceBase):
     """Private session-bound proxy for the generated ``StoreService`` API.
 

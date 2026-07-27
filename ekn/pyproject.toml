@@ -7,20 +7,18 @@ name = "ekn"
 version = "0.1.0"
 description = "easykubenix CLI"
 requires-python = ">=3.10"
-authors = [
-    { name = "easykubenix contributors" },
-]
+authors = [{ name = "easykubenix contributors" }]
 dependencies = [
-    "nanopynix",
-    "nanopynix-helpers",
-    "pygit2",
-    "pyyaml",
-    "clypi",
-    "kr8s",
-    "anyio",
-    "structlog",
-    "rich",
-    "pydantic-core",
+  "nanopynix",
+  "nanopynix-helpers",
+  "pygit2",
+  "pyyaml",
+  "clypi",
+  "kr8s",
+  "anyio",
+  "structlog",
+  "rich",
+  "pydantic-core",
 ]
 
 [project.scripts]

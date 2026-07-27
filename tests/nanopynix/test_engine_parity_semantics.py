@@ -323,8 +323,7 @@ async def test_engines_agree_on_success(
     rpc_outcome = await _run(rpc_session, case)
     if case.name in SEMANTIC_LEDGER:
         assert inproc_outcome != rpc_outcome, (
-            f"{case.name!r} is in SEMANTIC_LEDGER but the engines now agree "
-            f"({inproc_outcome!r}) -- delete the entry"
+            f"{case.name!r} is in SEMANTIC_LEDGER but the engines now agree ({inproc_outcome!r}) -- delete the entry"
         )
         return
     assert inproc_outcome[0] == "value", f"inproc raised: {inproc_outcome!r}"
@@ -347,8 +346,7 @@ async def test_engines_agree_on_failure(
     rpc_outcome = await _run(rpc_session, case)
     if case.name in SEMANTIC_LEDGER:
         assert inproc_outcome != rpc_outcome, (
-            f"{case.name!r} is in SEMANTIC_LEDGER but the engines now agree "
-            f"({inproc_outcome!r}) -- delete the entry"
+            f"{case.name!r} is in SEMANTIC_LEDGER but the engines now agree ({inproc_outcome!r}) -- delete the entry"
         )
         return
     assert inproc_outcome[0] == "raise", f"inproc did not raise: {inproc_outcome!r}"
