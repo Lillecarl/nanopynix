@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from nanopynix_bindings import store as nanopynix_store
 
+from nanopynix.models import StorePath
 from tests.support.nix_markers import NIX_GC_ROOTS_BUG
 
 if TYPE_CHECKING:
@@ -51,6 +52,64 @@ class TestStorePath:
         assert b in s
 
 
+# The base names the two implementations have to agree on. A `.drv`, a plain
+# path, a name whose *middle* contains `.drv` (the case a naive `in` check gets
+# wrong), a name with a dot that is not `.drv`, and a name that is empty after
+# the hash separator -- the boundary where `substr(HashLen + 1)` on an
+# out-of-range index and Python slicing part company.
+DRIFT_BASE_NAMES: list[str] = [
+    "00000000000000000000000000000000-hello-2.12.1",
+    "11111111111111111111111111111111-hello.drv",
+    "22222222222222222222222222222222-foo.drv.bar",
+    "33333333333333333333333333333333-lib.so.1",
+    "44444444444444444444444444444444-a",
+]
+
+
+@pytest.mark.parametrize("base_name", DRIFT_BASE_NAMES)
+class TestStorePathModelDoesNotDriftFromNix:
+    """``nanopynix.models.StorePath`` reimplements Nix's accessors in Python.
+
+    That is deliberate: routing construction through the bindings would cost a
+    nanobind call per path for validation the worker already did, and
+    ``rpc/client/store.py`` wraps in bulk in a dozen places where
+    ``query_all_valid_paths`` can return an entire store. What it does *not*
+    buy is a guarantee, so these tests are the guarantee: the pure-Python
+    accessors are checked against ``nix::StorePath``'s own, which is the thing
+    they are a copy of.
+
+    A divergence here is silent everywhere else -- both sides return a string
+    and neither raises -- so it would surface as a wrong answer rather than an
+    error.
+    """
+
+    def test_name(self, base_name: str) -> None:
+        assert StorePath(base_name).name == nanopynix_store.StorePath(base_name).name()
+
+    def test_hash_part(self, base_name: str) -> None:
+        assert StorePath(base_name).hash_part == nanopynix_store.StorePath(base_name).hash_part()
+
+    def test_is_derivation(self, base_name: str) -> None:
+        assert StorePath(base_name).is_derivation == nanopynix_store.StorePath(base_name).is_derivation()
+
+    def test_the_accessors_agree_through_a_full_path_too(self, base_name: str) -> None:
+        """``models.StorePath`` also accepts ``/nix/store/...``; the bindings do not.
+
+        Nix's ``StorePath`` takes a base name, so the full-path spelling is
+        surface that exists only on the Python side and has nothing to compare
+        against unless it is stripped first. Stripping it must land back on the
+        same answers -- otherwise ``base_name`` and the accessors disagree
+        about where the path ends.
+        """
+        full = StorePath("/nix/store/" + base_name)
+        assert full.base_name == base_name
+        assert (full.name, full.hash_part, full.is_derivation) == (
+            StorePath(base_name).name,
+            StorePath(base_name).hash_part,
+            StorePath(base_name).is_derivation,
+        )
+
+
 class TestStore:
     def test_store_dir(self, store: Any):
         assert store.get_store_dir() == "/nix/store"
@@ -83,6 +142,32 @@ class TestStore:
         assert len(results) == 1
         assert not results[0]["success"]
         assert results[0]["status"] != "already-valid"
+
+    def test_a_non_derivation_is_reported_as_an_opaque_request(self, store: Any, store_seeded_path: Any):
+        """Empty ``outputs`` is a real answer, not a missing one.
+
+        A path that is not a derivation parses to ``DerivedPath::Opaque`` --
+        "fetch this path" -- which has no outputs to select. That is why the
+        field is a list that can be empty rather than one that is always
+        populated, and why ``models.DerivedPath.outputs`` uses ``None`` for
+        "the string did not say" instead of reusing ``[]``.
+        """
+        results = store.build_paths_with_results([store_seeded_path])
+        assert results[0]["drv_path"] == f"{store.get_store_dir()}/{store_seeded_path.to_string()}"
+        assert results[0]["outputs"] == []
+
+    def test_a_derivation_with_no_selector_is_reported_as_all_outputs(self, store: Any):
+        """The Built branch, without needing a build to succeed.
+
+        The result is keyed by the *request*, so a derivation that cannot be
+        built still reports which outputs were asked for. A bare ``.drv`` means
+        every output, and it arrives as ``["*"]`` rather than as a ``^*``
+        suffix welded onto ``drv_path``.
+        """
+        drv = nanopynix_store.StorePath("00000000000000000000000000000000-bogus.drv")
+        results = store.build_paths_with_results([drv])
+        assert results[0]["drv_path"] == f"{store.get_store_dir()}/{drv.to_string()}"
+        assert results[0]["outputs"] == ["*"]
 
     def test_query_path_info(self, store: Any, store_seeded_path: Any):
         info = store.query_path_info(store_seeded_path)
