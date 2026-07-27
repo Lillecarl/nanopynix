@@ -9,10 +9,11 @@ import re
 import signal
 import subprocess
 import sys
+from pathlib import Path
 
 import conftest
 import pytest
-from pytest_agent._runtime import MAX_TERMINAL_SUMMARY_LINES
+from pytest_agent._runtime import DEFAULT_MAX_TERMINAL_SUMMARY_LINES, coverage_total
 
 # The PYTHONPATH wiring and harness-env-var cleanup these subprocess runs
 # depend on live in conftest._clean_agent_env, which is autouse for every
@@ -473,35 +474,191 @@ def test_durations_asked_for_on_the_command_line_actually_appear(pytester: pytes
     assert "test_slowish" in out
 
 
-def test_a_long_report_keeps_its_head_and_its_tail(pytester: pytest.Pytester) -> None:
-    # A coverage table's TOTAL is its last line and its column headings are
-    # the first, so eliding from either end alone loses the half somebody ran
-    # the report for.
-    pytester.makeconftest(
-        """
+# Row counts for the report fixtures below, either side of the default bound.
+# Derived from it rather than written as literals: a changed default would
+# otherwise turn the tests using them vacuous rather than failing.
+_SHORT_REPORT_ROWS = DEFAULT_MAX_TERMINAL_SUMMARY_LINES // 8
+_LONG_REPORT_ROWS = DEFAULT_MAX_TERMINAL_SUMMARY_LINES * 2
+
+
+def _report_conftest(rows: int, *, total_row: str = "REPORT-TOTAL") -> str:
+    return f"""
         def pytest_terminal_summary(terminalreporter, exitstatus, config):
             terminalreporter.write_line("REPORT-HEADER")
-            for n in range(100):
-                terminalreporter.write_line(f"row {n}")
-            terminalreporter.write_line("REPORT-TOTAL")
-        """,
-    )
+            for n in range({rows}):
+                terminalreporter.write_line(f"row {{n}}")
+            terminalreporter.write_line({total_row!r})
+        """
+
+
+def test_a_short_report_is_printed_where_it_can_be_read(pytester: pytest.Pytester) -> None:
+    # Under the bound nothing is held back. `--durations`, a junit path, a
+    # small table: reading them costs a glance, and sending somebody to a file
+    # for five lines would be worse than printing them.
+    pytester.makeconftest(_report_conftest(_SHORT_REPORT_ROWS))
     pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
 
     result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent")
     assert result.ret == pytest.ExitCode.OK
 
     out = "\n".join(result.outlines)
-    assert "REPORT-HEADER" in out
-    assert "REPORT-TOTAL" in out
-    assert "lines elided, full text in terminal.txt" in out
-    # Genuinely bounded, not just truncated somewhere: a 102-line report must
-    # not push the failure list off the top of an agent's context.
-    assert out.count("\nrow ") < MAX_TERMINAL_SUMMARY_LINES
+    assert "not shown" not in out
+    assert out.count("\nrow ") == _SHORT_REPORT_ROWS
 
-    terminal_log = pytester.path / ".pytest-agent" / "runs-0001" / "terminal.txt"
-    text = terminal_log.read_text(encoding="utf-8")
-    assert "row 50" in text, "the elided middle is still on disk"
+
+def test_a_report_past_the_bound_is_pointed_at_rather_than_shown_in_pieces(pytester: pytest.Pytester) -> None:
+    # The regression. `pytest --cov --cov-report=term-missing` on the suite
+    # this package was written for produces an 88-line table, and the old
+    # behaviour printed its first 20 and last 15 lines -- column headings,
+    # TOTAL, and none of the per-file rows, which is what a coverage table
+    # *is*. A fragment of a table is worse than a pointer to the whole one,
+    # because it reads as the whole one.
+    pytester.makeconftest(_report_conftest(_LONG_REPORT_ROWS))
+    pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
+
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent")
+    assert result.ret == pytest.ExitCode.OK
+
+    out = "\n".join(result.outlines)
+    # Its own first line survives, so the pointer says *which* report is
+    # waiting rather than only how long it was.
+    assert "REPORT-HEADER" in out
+    assert out.count("\nrow ") == 0, "no fragment of the table, in either direction"
+    assert "REPORT-TOTAL" not in out
+    # The path is repeated at the point of the cut, resolved: this is where
+    # somebody stops when the content they came for is missing.
+    assert f"{_LONG_REPORT_ROWS + 1} more report lines not shown; full text in" in out
+    assert f"{Path('.pytest-agent') / 'runs-0001' / 'reports.txt'}" in out
+    # Named where it is needed. The bound is a preference, and somebody who
+    # wants the table inline should not have to go and find out how.
+    assert "--agent-max-summary-lines=0" in out
+
+    reports = (pytester.path / ".pytest-agent" / "runs-0001" / "reports.txt").read_text(encoding="utf-8")
+    assert f"row {_LONG_REPORT_ROWS // 2}" in reports, "everything held back is on disk"
+    assert "REPORT-TOTAL" in reports
+
+
+def test_the_coverage_line_survives_the_report_being_held_back(pytester: pytest.Pytester) -> None:
+    # The case the headline number matters most in, and the one where reading
+    # it off the table is not available at all. The percentage is taken from
+    # the whole report rather than from the part that got printed.
+    pytester.makeconftest(_report_conftest(_LONG_REPORT_ROWS, total_row="TOTAL      184      6    97%"))
+    pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
+
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent")
+    assert result.ret == pytest.ExitCode.OK
+
+    out = "\n".join(result.outlines)
+    assert "not shown" in out, "the report has to be over budget for this to test anything"
+    assert "TOTAL      184" not in out, "and its TOTAL row genuinely did not reach the terminal"
+    assert "[pytest-agent] coverage: 97%" in out
+
+
+def test_the_reports_file_holds_the_report_and_only_the_report(pytester: pytest.Pytester) -> None:
+    # The pointer has to lead somewhere that needs no searching. terminal.txt
+    # has this content too, but wrapped in the whole pytest transcript --
+    # session header, tracebacks, short summary -- and an agent that follows a
+    # pointer into a mixed file can come back with the wrong half of it.
+    pytester.makeconftest(_report_conftest(3))
+    pytester.makepyfile(test_sample="def test_fails():\n    assert 1 == 2\n")
+
+    result = pytester.runpytest_subprocess(*conftest.agent_plugin_cli_args(), "--agent")
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+
+    run_dir = pytester.path / ".pytest-agent" / "runs-0001"
+    reports = (run_dir / "reports.txt").read_text(encoding="utf-8")
+    assert reports.splitlines() == ["REPORT-HEADER", "row 0", "row 1", "row 2", "REPORT-TOTAL"]
+    # The transcript it was lifted out of still has everything, including the
+    # failure this run also produced -- which reports.txt must not.
+    terminal = (run_dir / "terminal.txt").read_text(encoding="utf-8")
+    assert "REPORT-TOTAL" in terminal
+    assert "test session starts" in terminal
+    assert "test session starts" not in reports
+    assert "test_fails" not in reports
+
+    out = "\n".join(result.outlines)
+    assert f"also reported by other plugins ({Path('.pytest-agent') / 'runs-0001' / 'reports.txt'})" in out
+
+
+@pytest.mark.parametrize(
+    ("report", "expected"),
+    [
+        pytest.param(["TOTAL                        184      6    97%"], "97%", id="total-row"),
+        pytest.param(["TOTAL      184   6   96.85%   88-93, 101"], "96.85%", id="total-row-with-missing"),
+        pytest.param(["Required test coverage of 80% reached. Total coverage: 96.85%"], "96.85%", id="fail-under"),
+        pytest.param(["Name    Stmts", "mypkg/a.py    12    100%"], None, id="no-total-row"),
+        pytest.param(["TOTAL DURATION 4.1s"], None, id="someone-elses-total"),
+        pytest.param([], None, id="empty"),
+    ],
+)
+def test_the_coverage_total_is_read_out_of_the_report_text(report: list[str], expected: str | None) -> None:
+    # Read from the text rather than from pytest-cov's plugin object, so this
+    # is where the shapes it has to survive are written down. The two negatives
+    # matter as much as the positives: a plugin that prints its own TOTAL of
+    # something else must not be reported as coverage.
+    assert coverage_total(report) == expected
+
+
+def test_a_real_cov_run_puts_the_percentage_on_its_own_line(pytester: pytest.Pytester) -> None:
+    # End to end against the actual plugin, because the unit test above pins
+    # this package's reading of pytest-cov's format and nothing pins that the
+    # format is still that.
+    pytest.importorskip("pytest_cov")
+    pytester.makepyfile(
+        mypkg="""
+        def covered():
+            return 1
+
+
+        def uncovered():
+            return 2
+        """,
+    )
+    pytester.makepyfile(test_sample="import mypkg\n\n\ndef test_ok():\n    assert mypkg.covered() == 1\n")
+
+    result = pytester.runpytest_subprocess(
+        *conftest.agent_plugin_cli_args(),
+        "--agent",
+        "--cov=mypkg",
+        "--cov-report=term-missing",
+    )
+    assert result.ret == pytest.ExitCode.OK
+
+    out = "\n".join(result.outlines)
+    total = re.search(r"^\[pytest-agent\] coverage: (\d+(?:\.\d+)?)%$", out, re.MULTILINE)
+    assert total is not None, out
+    # The package has one uncovered return, so this is a real measurement and
+    # not a table of zeroes that would match any regex.
+    assert 0 < float(total.group(1)) < 100
+
+    reports = (pytester.path / ".pytest-agent" / "runs-0001" / "reports.txt").read_text(encoding="utf-8")
+    assert "mypkg.py" in reports
+    assert f"{total.group(1)}%" in reports
+
+
+@pytest.mark.parametrize(
+    ("budget", "holds_back"),
+    [("500", False), ("0", False), ("3", True)],
+    ids=["raised", "disabled", "lowered"],
+)
+def test_the_report_bound_is_tunable(pytester: pytest.Pytester, budget: str, holds_back: bool) -> None:
+    # Where the line falls is project-dependent -- a monorepo's coverage table
+    # is a different animal from a five-file package's -- so it is a knob
+    # rather than a number this package picks for everybody. 0 means no bound,
+    # matching --agent-heartbeat's reading of 0.
+    pytester.makeconftest(_report_conftest(_LONG_REPORT_ROWS))
+    pytester.makepyfile(test_sample="def test_ok():\n    assert True\n")
+
+    result = pytester.runpytest_subprocess(
+        *conftest.agent_plugin_cli_args(),
+        "--agent",
+        f"--agent-max-summary-lines={budget}",
+    )
+    assert result.ret == pytest.ExitCode.OK
+
+    out = "\n".join(result.outlines)
+    assert ("not shown" in out) is holds_back
+    assert (out.count("\nrow ") == _LONG_REPORT_ROWS) is not holds_back
 
 
 def test_a_run_with_nothing_extra_to_report_stays_as_quiet_as_before(pytester: pytest.Pytester) -> None:

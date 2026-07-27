@@ -114,6 +114,7 @@ that swaps the same path is a race.
                               # label, pid, argv -- so an in-progress run is
                               # already queryable
     terminal.txt              # what plain pytest would have printed, verbatim
+    reports.txt               # only the other-plugin reports from it (--cov, ...)
     notes.jsonl               # one line per note() call
     collect_errors/           # one log per module that failed to import
     tests/test_foo.py/
@@ -255,7 +256,13 @@ stop truncating, not learn a flag for truncating anyway.)
 - **Other plugins' end-of-run reports are not lost.** Agent mode redirects
   pytest's builtin reporter to `terminal.txt`, then reprints what any plugin
   wrote at the end — coverage tables, `--durations`, `--junit-xml`'s path.
-  Long reports are elided in the middle; the full text is in `terminal.txt`.
+  Short ones print inline. One longer than `--agent-max-summary-lines` (40) is
+  **not printed in part** — you get its first line and a pointer, because half
+  a coverage table reads like a whole one. Read the run's `reports.txt`, which
+  holds *only* those reports (unlike `terminal.txt`, the whole pytest
+  transcript), or re-run with `--agent-max-summary-lines=0` to have it inline.
+  With `--cov` the overall percentage also gets a `[pytest-agent] coverage: NN%`
+  line of its own, so the headline number never needs the file at all.
 - **`terminal.txt` is the file to read** when the problem is with pytest's own
   reporting rather than with a test.
 - **`--agent-keep-runs` prunes old run directories**, so `history` and
