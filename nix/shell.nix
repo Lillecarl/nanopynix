@@ -21,6 +21,7 @@
   statix,
   tofuCoreSchemaTool,
   tree-sitter-nix,
+  gdb,
 }:
 let
   # Reuses the same editable package definitions dev-env.nix exports (rather
@@ -75,6 +76,7 @@ mkShell {
     actionlint
     cachix
     statix
+    gdb
     # pynix._lsp._tofu_core_schema invokes this at LSP-server runtime (see
     # its module docstring) rather than baking a static snapshot -- on PATH
     # here so the editable dev shell resolves it exactly like the real,
