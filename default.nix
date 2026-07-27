@@ -7,7 +7,7 @@ in
   pkgs ? inputs.nixpkgs.legacyPackages.${system},
 }:
 let
-  inherit (pkgs) lib python3Packages;
+  inherit (pkgs) lib;
 
   pyproject-nix = import "${inputs.pyproject-nix}" { inherit lib; };
 
@@ -39,39 +39,80 @@ let
           ;
       };
 
-  inherit (pkgs.callPackage inputs.grpclib-transports { })
+  # Every Python package this repo needs that does *not* depend on
+  # nanopynix-bindings, added to the interpreter's own package set.
+  #
+  # The division is the point. Nothing here reaches nix-store/nix-expr or the
+  # bindings, so none of it varies by Nix version and all of it is built once
+  # rather than once per version. Putting it in the base interpreter rather
+  # than in the per-version scope makes that structural instead of a
+  # convention someone has to keep: the per-version overlay further down can
+  # only usefully add packages that need the bindings, because everything
+  # else already resolves before it runs. Adding a version-independent
+  # package to that overlay by mistake would rebuild it three times over,
+  # and there would be nothing to notice it.
+  #
+  # `pySelf.callPackage`, not `python3Packages.callPackage`: these must be
+  # members of the set that resolves their dependencies, or `clypi` built
+  # against the plain set and `clypi` seen from this one would be two
+  # derivations of one source.
+  #
+  # Strictly additive -- every name is this repo's own or vendored under
+  # nix/, never an override of an existing nixpkgs attribute -- so it forces
+  # no rebuild of nixpkgs' own Python packages and leaves the interpreter
+  # derivation itself untouched.
+  pythonBase = pkgs.python3.override {
+    packageOverrides = pySelf: _pyPrev: {
+      # Built by their own repo against plain `pkgs.python3Packages`. Same
+      # interpreter, and we only add names, so there is no second instance
+      # of anything to collide.
+      inherit (pkgs.callPackage inputs.grpclib-transports { })
+        grpclib-transports
+        betterproto2
+        betterproto2-compiler
+        ;
+
+      # `python = pythonBase`, not the `python` that `callPackage` would
+      # supply from the set. `self.python` is the *un-overridden*
+      # interpreter -- `(python3.override { packageOverrides = ... })
+      # .pkgs.python.pkgs` does not contain the overrides, which is easy to
+      # miss and fails far away: `renderPyproject` defaults
+      # `pythonPackages` to `python.pkgs`, so the renderer would resolve
+      # `betterproto2` against plain nixpkgs and report it missing.
+      # Self-reference is fine here -- `packageOverrides` is not forced
+      # until the set is.
+      nanopynix-proto = pySelf.callPackage ./nanopynix-proto/package.nix {
+        inherit renderPyproject;
+        python = pythonBase;
+      };
+
+      clypi = pySelf.callPackage ./nix/clypi.nix { };
+
+      kr8s = pySelf.callPackage ./nix/kr8s.nix { };
+
+      tree-sitter-nix = pySelf.callPackage ./nix/tree-sitter-nix.nix {
+        # `pkgs.path` (the nixpkgs source tree) would otherwise be shadowed
+        # by the Python set's own PyPI package literally named "path" --
+        # passing `pkgs.path` explicitly sidesteps that entirely.
+        nixpkgsPath = pkgs.path;
+        # Same shadowing problem: the set's `tree-sitter` is the PyPI
+        # bindings package, not pkgs.tree-sitter (the CLI derivation, whose
+        # passthru has `buildGrammar`).
+        treeSitterCli = pkgs.tree-sitter;
+        treeSitterNixSrc = inputs.tree-sitter-nix-numtide;
+      };
+    };
+  };
+
+  inherit (pythonBase.pkgs)
     grpclib-transports
     betterproto2
     betterproto2-compiler
+    nanopynix-proto
+    clypi
+    kr8s
+    tree-sitter-nix
     ;
-
-  nanopynix-proto = python3Packages.callPackage ./nanopynix-proto/package.nix {
-    inherit betterproto2 betterproto2-compiler renderPyproject;
-  };
-
-  clypi = python3Packages.callPackage ./nix/clypi.nix { };
-
-  # Neither depends on any Nix-version-specific code (no nix-store/nix-expr/
-  # nanopynix/nanopynix-bindings), so -- like clypi above -- these live here
-  # rather than inside nanopynixForNixVersions/extendNixScope, built once
-  # instead of once per Nix version. Only merged into callNixPythonPackage's
-  # environment below (see `inherit kr8s tree-sitter-nix` in the merge) so
-  # in-scope package.nix files (ekn, pynix, nanopynix-helpers) can still
-  # resolve them by name.
-  kr8s = python3Packages.callPackage ./nix/kr8s.nix { };
-
-  tree-sitter-nix = python3Packages.callPackage ./nix/tree-sitter-nix.nix {
-    # `pkgs.path` (the nixpkgs source tree) would otherwise be shadowed by
-    # python3Packages' own PyPI package literally named "path" if resolved
-    # through python3Packages -- calling this directly with `pkgs.path`
-    # sidesteps that entirely.
-    nixpkgsPath = pkgs.path;
-    # Same shadowing problem: python3Packages.tree-sitter is the PyPI
-    # `tree-sitter` bindings package, not pkgs.tree-sitter (the CLI
-    # derivation, whose passthru has `buildGrammar`).
-    treeSitterCli = pkgs.tree-sitter;
-    treeSitterNixSrc = inputs.tree-sitter-nix-numtide;
-  };
 
   # Exports OpenTofu's built-in ("core") HCL block schema
   # (resource/data/count/for_each/lifecycle/...) as JSON for a given OpenTofu
@@ -138,13 +179,12 @@ let
       # nix's own components (nix-util, nix-store, ...) keep resolving
       # through scope.newScope completely unmodified below -- so their own
       # deps (e.g. nix-util's `brotli`) still come from plain nixpkgs, not
-      # from python3Packages (which has its own, incompatible `brotli`: the
+      # from the Python set (which has its own, incompatible `brotli`: the
       # Python bindings, not the C library with a pkg-config .pc file). Our
       # own packages instead go through callNixPythonPackage, a second
-      # callPackage-like function that also has python3Packages/pkgs/our
-      # extras in scope (mirroring the pre-carlmazing nanopynixForNixEx's
-      # `pkgs // python3Packages // {...} // extra`), plus `final` so they can
-      # still reference nix-store/nix-expr/nanopynix-bindings/etc directly.
+      # callPackage-like function that also has `python.pkgs` and pkgs in
+      # scope, plus `final` so they can still reference
+      # nix-store/nix-expr/nanopynix-bindings/etc directly.
       extendNixScope =
         scope:
         lib.makeScope scope.newScope (
@@ -153,73 +193,60 @@ let
             let
               tsanRuntime = if enableTsan then tsan.tsanRuntime else null;
 
-              # The interpreter's own package set, extended with every Python
-              # package this repo builds or vendors -- one per Nix version,
-              # since nanopynix-bindings and everything above it differ per
-              # version.
+              # `pythonBase` plus this repo's bindings-dependent packages --
+              # and *only* those. Everything version-independent is already in
+              # the base set, so this overlay is exactly the list of things
+              # that genuinely differ per Nix version.
               #
-              # This exists so a dependency *name* resolves to a package the
-              # same way for pyproject.nix's renderers as it does for
+              # Why a package set at all: so a dependency *name* resolves the
+              # same way for pyproject.nix's renderers as for
               # `python.withPackages`. Before it, each package.nix rebuilt an
               # ad-hoc set inline (`pythonPackages = python.pkgs // { inherit
-              # nanopynix clypi ...; }`), listing by hand the subset of local
+              # nanopynix clypi ...; }`), naming by hand the subset of local
               # packages that file happened to need. Nine such sets had
               # accumulated, and a name absent from one was not an error --
               # `getDependencies` only looks up what a pyproject.toml
-              # declares, so an omission stayed invisible until some
-              # *other* project declared that name. That is exactly how the
-              # test runner lost `kr8s`: nothing in it listed `ekn`, so
-              # pynix's `ekn` extra could not resolve.
+              # declares, so an omission stayed invisible until some *other*
+              # project declared that name. That is how pynix's `ekn` extra
+              # could not resolve.
               #
-              # Strictly additive -- every name here is either this repo's own
-              # or vendored under nix/, never an override of an existing
-              # nixpkgs attribute. So this adds no rebuild and cannot produce
-              # two instances of a nixpkgs package (the failure mode that
-              # makes overlaying a Python set risky). It is the
-              # `ruff = pkgs.ruff;` case from pyproject.nix's FAQ, which is
-              # what its nixpkgs docs point to for local sources.
+              # `composeExtensions` rather than a plain `packageOverrides`:
+              # `.override` replaces its argument, so overriding `pythonBase`
+              # again with a bare `packageOverrides` would silently drop
+              # clypi, kr8s, nanopynix-proto and the rest -- the failure would
+              # surface far from here, as an unresolvable dependency name.
               #
-              # The local packages are taken from `final` rather than rebuilt
-              # here, so `python.pkgs.nanopynix` and the scope's own
-              # `nanopynix` are the same derivation, not two builds of one
-              # source. Laziness makes the knot fine: a package.nix resolves
-              # its *dependencies* through this set, never itself.
-              python = python3Packages.python.override {
-                packageOverrides = _pySelf: _pyPrev: {
-                  inherit (final)
-                    nanopynix-bindings
-                    nanopynix
-                    nanopynix-helpers
-                    ekn
-                    pynix
-                    ;
-                  inherit
-                    nanopynix-proto
-                    grpclib-transports
-                    betterproto2
-                    betterproto2-compiler
-                    clypi
-                    kr8s
-                    tree-sitter-nix
-                    ;
-                };
-              };
+              # Local packages come from `final` rather than being rebuilt, so
+              # `python.pkgs.nanopynix` and the scope's own `nanopynix` are
+              # one derivation. Laziness makes the knot fine: a package.nix
+              # resolves its *dependencies* through this set, never itself.
+              python = pythonBase.override (old: {
+                packageOverrides = lib.composeExtensions (old.packageOverrides or (_: _: { })) (
+                  _pySelf: _pyPrev: {
+                    inherit (final)
+                      nanopynix-bindings
+                      nanopynix
+                      nanopynix-helpers
+                      ekn
+                      pynix
+                      ;
+                  }
+                );
+              });
 
+              # Only non-package arguments are listed here now. Every Python
+              # dependency -- ours and nixpkgs' alike -- arrives through
+              # `python.pkgs`, which is the whole point of having built one
+              # set: there is no second place a package name can come from,
+              # and so no way for the two to disagree.
               callNixPythonPackage = lib.callPackageWith (
                 pkgs
                 // python.pkgs
                 // {
-                  inherit python;
                   inherit
-                    grpclib-transports
+                    python
                     renderPyproject
                     renderEditablePyproject
-                    betterproto2
-                    betterproto2-compiler
-                    nanopynix-proto
-                    clypi
-                    kr8s
-                    tree-sitter-nix
                     pyproject-nix
                     tofuCoreSchemaTool
                     ;

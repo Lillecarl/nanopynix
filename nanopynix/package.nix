@@ -1,11 +1,6 @@
 {
   lib,
-  callPackage,
   buildPythonPackage,
-  # cool deps
-  nanopynix-bindings ? callPackage ../nanopynix-bindings/package.nix { },
-  nanopynix-proto ? callPackage ../nanopynix-proto/package.nix { },
-  grpclib-transports,
   python,
   renderPyproject,
   version,
@@ -16,11 +11,6 @@ let
   attrs = renderPyproject {
     projectRoot = toString ./.;
     inherit python;
-    pythonPackages = python.pkgs // {
-      "nanopynix-bindings" = nanopynix-bindings;
-      "nanopynix-proto" = nanopynix-proto;
-      "grpclib-transports" = grpclib-transports;
-    };
   };
 in
 buildPythonPackage (

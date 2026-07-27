@@ -2,9 +2,6 @@
   lib,
   buildPythonApplication,
   nanopynix,
-  nanopynix-helpers,
-  clypi,
-  tree-sitter-nix,
   python,
   renderPyproject,
   tofuCoreSchemaTool,
@@ -21,14 +18,6 @@ let
   attrs = renderPyproject {
     projectRoot = toString ./.;
     inherit python;
-    pythonPackages = python.pkgs // {
-      inherit
-        nanopynix
-        nanopynix-helpers
-        clypi
-        tree-sitter-nix
-        ;
-    };
   };
 in
 buildPythonApplication (
