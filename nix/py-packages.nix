@@ -1,0 +1,179 @@
+# This repo's own Python projects, as a pyproject.nix builders overlay.
+#
+# One definition per project, rendered two ways -- built, and editable for the
+# dev shell -- and used as each other's dependencies in both. The two overlays
+# below differ only in which renderer they call, so a build input added for
+# one is present in the other and they cannot drift.
+{
+  lib,
+  callPackage,
+  runCommand,
+  ps,
+  python,
+  root,
+  # nanopynix's version suffix -- the linked Nix version, so two builds of the
+  # same source against different Nix components are distinguishable.
+  version,
+  enableTsan ? false,
+  tsanRuntime ? null,
+}:
+
+let
+  protoSrc = callPackage (root + "/nanopynix-proto/generated.nix") { inherit python; };
+
+  # Applied to both the built and the editable form of a project, so a build
+  # input added for one is present in the other.
+  extraFor = {
+    nanopynix-proto = pySelf: rendered: {
+      # Built from the generated tree rather than the checkout: this
+      # project's entire `src/` comes out of protoc, and generated.nix
+      # emits a complete project (pyproject.toml included) precisely so
+      # this can be an ordinary `src` and not a codegen step wedged into
+      # someone else's build. `projectRoot` still points at the checkout,
+      # which is where the pyproject.toml that Nix *reads* at eval time
+      # lives -- generated.nix copies that same file into `$out`, so the
+      # metadata and the build cannot disagree.
+      src = protoSrc;
+
+      # The builders have no `pythonImportsCheck` equivalent, and this is
+      # the project that most needs one: its entire contents come from a
+      # code generator, so a `.proto` renamed or dropped from
+      # generated.nix's file list produces a package that installs
+      # perfectly and is missing a module. Checking through a venv (rather
+      # than `$out` directly) is what makes the imports resolvable at all,
+      # since a builders package propagates nothing.
+      passthru = rendered.passthru // {
+        tests.imports =
+          runCommand "nanopynix-proto-imports"
+            {
+              nativeBuildInputs = [
+                (pySelf.mkVirtualEnv "nanopynix-proto-check-env" { nanopynix-proto = [ ]; })
+              ];
+            }
+            ''
+              python -c 'import nanopynix_proto, nanopynix_proto.nix.common, nanopynix_proto.google.rpc'
+              touch "$out"
+            '';
+      };
+
+      meta = rendered.meta // {
+        license = lib.licenses.lgpl21Plus;
+        platforms = lib.platforms.unix;
+      };
+    };
+
+    nanopynix = _pySelf: rendered: {
+      version = "${rendered.version}-${version}";
+
+      # The bindings get dlopen()ed into whatever process imports nanopynix;
+      # when they were built with TSAN its runtime has to be preloaded there
+      # too, or the static-TLS failure described in
+      # nanopynix-bindings/package.nix happens instead.
+      env = lib.optionalAttrs (enableTsan && tsanRuntime != null) {
+        LD_PRELOAD = tsanRuntime;
+      };
+
+      meta = rendered.meta // {
+        license = lib.licenses.lgpl21Plus;
+        platforms = lib.platforms.unix;
+      };
+    };
+
+    nanopynix-helpers = _pySelf: rendered: {
+      meta = rendered.meta // {
+        platforms = lib.platforms.unix;
+      };
+    };
+
+    ekn = _pySelf: rendered: {
+      # `cacert` was a `nativeBuildInputs` entry only so `postInstall` could
+      # point git at a CA bundle while generating completions. Completions
+      # are generated outside the package now (see `mkApp`), because a
+      # builders package has no propagated dependencies and so cannot run
+      # its own entry point during its build.
+      meta = rendered.meta // {
+        platforms = lib.platforms.unix;
+      };
+    };
+
+    pynix = _pySelf: rendered: {
+      meta = rendered.meta // {
+        platforms = lib.platforms.unix;
+      };
+    };
+
+    pytest-agent = _pySelf: rendered: {
+      meta = rendered.meta // {
+        platforms = lib.platforms.unix;
+      };
+    };
+  };
+
+  # Per-project options. No `extras` here on purpose: the renderer's `extras`
+  # argument only feeds PEP-508 marker evaluation -- `optional-dependencies`
+  # is populated from *every* declared extra regardless. Which extras are
+  # actually installed is chosen per environment, in the `mkVirtualEnv` spec,
+  # which is where it belongs: the same `pynix` is a release application
+  # without its test extra and a dev install with it.
+  projects = {
+    # `editable = false`: this project has no working-tree source to point an
+    # editable install at -- every module is generated (generated.nix), so
+    # `src/` does not exist in the checkout. Editing it means editing a
+    # `.proto` and rebuilding, which is what the built form already does.
+    nanopynix-proto = {
+      editable = false;
+    };
+    nanopynix = { };
+    nanopynix-helpers = { };
+    ekn = { };
+    pynix = { };
+    # In the set so the dev shell can install it editable -- pytest-agent is
+    # developed here alongside everything else. Deliberately *not* in the
+    # test runner's venv: it auto-activates on import and would start writing
+    # `.pytest-agent/` run directories from CI.
+    pytest-agent = { };
+  };
+in
+{
+  # The overlay: every project built normally.
+  built =
+    pySelf: _pyPrev:
+    lib.mapAttrs (
+      name: _opts:
+      pySelf.callPackage (ps.mkProject {
+        projectRoot = root + "/${name}";
+        inherit python;
+        extra = extraFor.${name} pySelf;
+      }) { }
+    ) projects;
+
+  /*
+    The same projects as editable installs, for the dev shell and the test
+    runner. Layered *over* `built` so that anything not listed keeps its
+    built form, and so a project's dependencies resolve to the editable copy
+    of its siblings rather than a store copy of them. A project marked
+    `editable = false` is exactly that case: it stays as `built` supplied it.
+  */
+  editable =
+    pySelf: _pyPrev:
+    lib.mapAttrs (
+      name: _opts:
+      pySelf.callPackage (ps.mkEditableProject {
+        projectRoot = root + "/${name}";
+        # The *project* root, not its `src/` -- `mkDerivationEditable` reads
+        # the wheel's own package layout out of pyproject.toml and appends
+        # the subdirectory itself. Passing `src/` produced `.../src/src` path
+        # hooks that silently pointed nowhere; nothing failed, because
+        # pytest.ini's `pythonpath` was quietly supplying the source instead.
+        #
+        # `toString`, not a path value: a path would be copied into the store
+        # and the install would stop being live. That also makes this set
+        # local-checkout-only -- under flake evaluation `root` *is* a store
+        # path and the renderer rejects it outright -- which is why only the
+        # dev shell uses it. See nanopynix/tests.nix.
+        root = toString (root + "/${name}");
+        inherit python;
+        extra = extraFor.${name} pySelf;
+      }) { }
+    ) (lib.filterAttrs (_: opts: opts.editable or true) projects);
+}

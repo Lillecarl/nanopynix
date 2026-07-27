@@ -21,24 +21,6 @@ let
       inherit python pythonPackages;
     };
 
-  renderEditablePyproject =
-    {
-      projectRoot,
-      root,
-      python,
-      pythonPackages ? python.pkgs,
-      extras ? [ ],
-    }:
-    (pyproject-nix.lib.project.loadPyproject { inherit projectRoot; }).renderers.mkPythonEditablePackage
-      {
-        inherit
-          root
-          python
-          pythonPackages
-          extras
-          ;
-      };
-
   # Every Python package this repo needs that does *not* depend on
   # nanopynix-bindings, added to the interpreter's own package set.
   #
@@ -72,20 +54,6 @@ let
         betterproto2-compiler
         ;
 
-      # `python = pythonBase`, not the `python` that `callPackage` would
-      # supply from the set. `self.python` is the *un-overridden*
-      # interpreter -- `(python3.override { packageOverrides = ... })
-      # .pkgs.python.pkgs` does not contain the overrides, which is easy to
-      # miss and fails far away: `renderPyproject` defaults
-      # `pythonPackages` to `python.pkgs`, so the renderer would resolve
-      # `betterproto2` against plain nixpkgs and report it missing.
-      # Self-reference is fine here -- `packageOverrides` is not forced
-      # until the set is.
-      nanopynix-proto = pySelf.callPackage ./nanopynix-proto/package.nix {
-        inherit renderPyproject;
-        python = pythonBase;
-      };
-
       clypi = pySelf.callPackage ./nix/clypi.nix { };
 
       kr8s = pySelf.callPackage ./nix/kr8s.nix { };
@@ -108,7 +76,6 @@ let
     grpclib-transports
     betterproto2
     betterproto2-compiler
-    nanopynix-proto
     clypi
     kr8s
     tree-sitter-nix
@@ -122,6 +89,11 @@ let
   # nanopynix/Nix version, so it lives here rather than inside
   # nanopynixForNixVersions.
   tofuCoreSchemaTool = pkgs.callPackage ./tools/tofu-core-schema/package.nix { };
+
+  # pyproject.nix's builders: `ps` is this repo's own seam onto them (see
+  # nix/python-set.nix), `pyprojectUtil` is where `mkApplication` lives.
+  ps = pkgs.callPackage ./nix/python-set.nix { inherit pyproject-nix; };
+  pyprojectUtil = pkgs.callPackage pyproject-nix.build.util { };
 
   tsan = pkgs.callPackage ./nix/tsan.nix { };
 
@@ -193,46 +165,92 @@ let
             let
               tsanRuntime = if enableTsan then tsan.tsanRuntime else null;
 
-              # `pythonBase` plus this repo's bindings-dependent packages --
-              # and *only* those. Everything version-independent is already in
-              # the base set, so this overlay is exactly the list of things
-              # that genuinely differ per Nix version.
+              # `pythonBase` unchanged. There used to be a per-version overlay
+              # here adding our own projects to the interpreter's set, but
+              # they are pyproject.nix builders packages now and live in
+              # `pythonSet` below. The only per-version Python package left is
+              # nanopynix-bindings, and that goes straight into the builders
+              # set as a lifted root -- so nothing version-specific needs to
+              # be in the interpreter's own set at all.
+              python = pythonBase;
+
+              # A release build of one of our applications.
               #
-              # Why a package set at all: so a dependency *name* resolves the
-              # same way for pyproject.nix's renderers as for
-              # `python.withPackages`. Before it, each package.nix rebuilt an
-              # ad-hoc set inline (`pythonPackages = python.pkgs // { inherit
-              # nanopynix clypi ...; }`), naming by hand the subset of local
-              # packages that file happened to need. Nine such sets had
-              # accumulated, and a name absent from one was not an error --
-              # `getDependencies` only looks up what a pyproject.toml
-              # declares, so an omission stayed invisible until some *other*
-              # project declared that name. That is how pynix's `ekn` extra
-              # could not resolve.
+              # Not a package with an entry point, but a venv plus a thin
+              # symlink tree over it: `mkApplication` takes the shape of the
+              # package's own `$out` and links the corresponding paths out of
+              # the venv, skipping site-packages. So `$out/bin/<name>` is a
+              # real venv entry point that runs standalone -- which is the
+              # whole reason completions can be generated at all.
               #
-              # `composeExtensions` rather than a plain `packageOverrides`:
-              # `.override` replaces its argument, so overriding `pythonBase`
-              # again with a bare `packageOverrides` would silently drop
-              # clypi, kr8s, nanopynix-proto and the rest -- the failure would
-              # surface far from here, as an unresolvable dependency name.
-              #
-              # Local packages come from `final` rather than being rebuilt, so
-              # `python.pkgs.nanopynix` and the scope's own `nanopynix` are
-              # one derivation. Laziness makes the knot fine: a package.nix
-              # resolves its *dependencies* through this set, never itself.
-              python = pythonBase.override (old: {
-                packageOverrides = lib.composeExtensions (old.packageOverrides or (_: _: { })) (
-                  _pySelf: _pyPrev: {
-                    inherit (final)
-                      nanopynix-bindings
-                      nanopynix
-                      nanopynix-helpers
-                      ekn
-                      pynix
-                      ;
-                  }
-                );
-              });
+              # Under the nixpkgs builders they were generated in the
+              # package's own `postInstall`, by running `$out/bin/ekn`. A
+              # builders package propagates nothing, so its entry point is not
+              # runnable during its own build; generation moves out here,
+              # against the finished application, where it is anyway more
+              # honest -- it exercises the thing users get.
+              mkApp =
+                {
+                  name,
+                  package,
+                  completions ? null,
+                  pathInputs ? [ ],
+                }:
+                let
+                  venv = final.pythonSet.mkVirtualEnv "${name}-env" {
+                    ${name} = [ ];
+                  };
+
+                  app = pyprojectUtil.mkApplication { inherit venv package; };
+
+                  generated =
+                    pkgs.runCommand "${name}-completions"
+                      {
+                        nativeBuildInputs = [
+                          pkgs.installShellFiles
+                          pkgs.cacert
+                        ];
+                      }
+                      (
+                        ''
+                          # ekn imports pygit2 at start-up, which initialises
+                          # OpenSSL and fails outright without a CA bundle -- even
+                          # though generating completions touches no network.
+                          export SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+                          export GIT_SSL_CAINFO="$SSL_CERT_FILE"
+                        ''
+                        +
+                          lib.concatMapStrings
+                            (sh: ''
+                              installShellCompletion --cmd ${name} \
+                                --${sh} <(env ${completions.var}=source_${sh} ${app}/bin/${name})
+                            '')
+                            [
+                              "bash"
+                              "zsh"
+                              "fish"
+                            ]
+                      );
+
+                  wrapped =
+                    if pathInputs == [ ] then
+                      app
+                    else
+                      pkgs.runCommand "${name}-wrapped" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
+                        mkdir -p "$out/bin"
+                        makeWrapper "${app}/bin/${name}" "$out/bin/${name}" \
+                          --prefix PATH : ${lib.makeBinPath pathInputs}
+                      '';
+                in
+                pkgs.symlinkJoin {
+                  inherit name;
+                  paths = [ wrapped ] ++ lib.optional (completions != null) generated;
+                  inherit (package) meta;
+                  passthru = package.passthru // {
+                    inherit venv package;
+                    inherit (package) version;
+                  };
+                };
 
               # Only non-package arguments are listed here now. Every Python
               # dependency -- ours and nixpkgs' alike -- arrives through
@@ -246,7 +264,6 @@ let
                   inherit
                     python
                     renderPyproject
-                    renderEditablePyproject
                     pyproject-nix
                     tofuCoreSchemaTool
                     ;
@@ -255,31 +272,110 @@ let
               );
             in
             {
+              # nanopynix-bindings stays a nixpkgs `buildPythonPackage`: it is
+              # a cmake/nanobind extension linked against *this* scope's Nix
+              # C++ components, with its own stub generation, and none of that
+              # is what pyproject.nix's builders are for. It is lifted into
+              # the builders set below instead -- which is exactly what
+              # `hacks.nixpkgsPrebuilt` exists for.
               nanopynix-bindings = callNixPythonPackage ./nanopynix-bindings/package.nix {
                 inherit enableTsan tsanRuntime;
               };
-              nanopynix =
-                callNixPythonPackage ./nanopynix/package.nix {
-                  inherit enableTsan tsanRuntime;
-                }
-                // {
-                  test = callNixPythonPackage ./nanopynix/tests.nix {
-                    inherit (final.nanopynix) version;
-                    inherit (inputs) nixpkgs;
-                    inherit tsanRuntime;
-                  };
+
+              # Everything above the bindings is a pyproject.nix builders
+              # package. The set is built once per Nix version and holds both
+              # the built and the editable form of each project.
+              pyPackages = pkgs.callPackage ./nix/py-packages.nix {
+                inherit
+                  ps
+                  python
+                  enableTsan
+                  tsanRuntime
+                  ;
+                root = ./.;
+                # The linked Nix version, so two builds of the same source
+                # against different Nix components are distinguishable.
+                inherit (final) version;
+              };
+
+              pythonSet = ps.mkPythonSet {
+                inherit python;
+                # Sourced from nixpkgs: the build systems, plus the whole
+                # third-party runtime closure, plus our own native extension.
+                # `python.pkgs` already resolved every one of those names, so
+                # the roots are just the propagated inputs nixpkgs computed --
+                # no second hand-written dependency list to fall out of date.
+                nixpkgsRoots = [
+                  final.nanopynix-bindings
+                ]
+                ++ ps.nixpkgsRootsFor {
+                  inherit python;
+                  projectRoots = map (n: ./. + "/${n}") [
+                    "nanopynix-proto"
+                    "nanopynix"
+                    "nanopynix-helpers"
+                    "ekn"
+                    "pynix"
+                    "pytest-agent"
+                  ];
+                  # Supplied by the overlay, not by nixpkgs.
+                  exclude = [
+                    "nanopynix"
+                    "nanopynix-proto"
+                    "nanopynix-helpers"
+                    "nanopynix-bindings"
+                    "ekn"
+                    "pytest-agent"
+                  ];
                 };
-              nanopynix-helpers = callNixPythonPackage ./nanopynix-helpers/package.nix { };
-              # ekn's own Python source now lives here (migrated from
-              # easykubenix/ekn -- see ekn/package.nix), so it's built
-              # against exactly the nanopynix/nanopynix-bindings wheels
-              # built in this same scope, with no cross-repo source
-              # reference. easykubenix consumes this build's output
-              # (`nanopynix.ekn`) for its own parseYamlStream.nix IFD
-              # fallback rather than building its own copy.
-              ekn = callNixPythonPackage ./ekn/package.nix { };
-              pynix = callNixPythonPackage ./pynix/package.nix {
-                inherit (final) ekn;
+                overlay = final.pyPackages.built;
+              };
+
+              # The same set with our projects swapped for editable installs.
+              # `mkVirtualEnv` from here gives a venv whose site-packages
+              # points back at this checkout.
+              editablePythonSet = final.pythonSet.overrideScope final.pyPackages.editable;
+
+              inherit (final.pythonSet)
+                nanopynix-proto
+                nanopynix-helpers
+                ;
+
+              nanopynix = final.pythonSet.nanopynix // {
+                test = callNixPythonPackage ./nanopynix/tests.nix {
+                  inherit (final.nanopynix) version;
+                  inherit (inputs) nixpkgs;
+                  inherit tsanRuntime;
+                  inherit (final) pythonSet;
+                };
+              };
+
+              # ekn's own Python source lives here (migrated from
+              # easykubenix/ekn), so it is built against exactly the
+              # nanopynix/nanopynix-bindings built in this same scope, with no
+              # cross-repo source reference. easykubenix consumes this
+              # build's output (`nanopynix.ekn`) for its own
+              # parseYamlStream.nix IFD fallback rather than building its own.
+              #
+              # A release build is `mkApplication` over a venv: the venv has
+              # the real dependency closure, and mkApplication symlinks out
+              # just the parts of the package's own `$out` that belong in a
+              # program, leaving site-packages behind.
+              ekn = mkApp {
+                name = "ekn";
+                package = final.pythonSet.ekn;
+                completions = {
+                  var = "_EKN_COMPLETE";
+                };
+              };
+
+              pynix = mkApp {
+                name = "pynix";
+                package = final.pythonSet.pynix;
+                # pynix._lsp._tofu_core_schema shells out to this at LSP
+                # runtime rather than baking a static snapshot, so it has to
+                # be on the program's PATH.
+                pathInputs = [ tofuCoreSchemaTool ];
               };
               shell = callNixPythonPackage ./nix/shell.nix { };
               # A live, editable-install `pynix`/`ekn` env (no devtools --
@@ -389,6 +485,7 @@ in
     nanopynix
     nanopynix-bindings
     nanopynix-helpers
+    nanopynix-proto
     ekn
     pynix
     pynixDevEnv
@@ -400,7 +497,6 @@ in
     flake
     pkgs
     nanopynixVersions
-    nanopynix-proto
     clypi
     grpclib-transports
     pyproject-nix

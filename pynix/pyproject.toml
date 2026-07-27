@@ -28,6 +28,10 @@ pynix = "pynix:main"
 [project.optional-dependencies]
 test = ["nanopynix[test]", "pytest-lsp"]
 ekn = ["ekn"]
+# The documentation toolchain. Declared here rather than wired into the Nix
+# build because sphinx has to import what it documents, so it belongs in the
+# same environment as pynix and everything pynix depends on.
+docs = ["sphinx", "myst-parser", "furo"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pynix"]

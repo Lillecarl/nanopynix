@@ -33,7 +33,6 @@ which shows up as a handful of concrete constraints.
 | Crash isolation | a worker crash/OOM raises `WorkerDiedError` — your process survives | a Nix-side crash takes the whole process down |
 | Custom Python primops | yes — `Session(primops=..., primop_callables=...)` | not supported |
 | Call overhead | gRPC request/response per call | direct call on the Nix thread |
-| Forcing a compound value | `ValueProxy.force()` returns a lazy `ValueAttrs`/`ValueList` view | `Value.force()` converts straight to a Python `dict`/`list` |
 | Nix library initialization | scoped to each worker subprocess | process-global — a second `inproc.Session` with different settings raises |
 
 The process-global initialization is the constraint most likely to surprise

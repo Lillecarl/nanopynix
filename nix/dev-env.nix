@@ -1,97 +1,47 @@
+# The interactive development environment: one venv containing every project
+# in this repo as an editable install, so an edit is live with no rebuild.
+#
+# The whole thing is a `mkVirtualEnv` spec now. What it replaces was a
+# hand-written `python.withPackages` list that had to append each project's
+# `.dependencies` alongside the project itself, because nixpkgs' Python
+# environments keep only importable modules and so drop an application
+# *together with everything it propagates*. That is not a rule a venv has, so
+# the dependency graph no longer has to be restated here -- and a name that
+# goes missing from a pyproject.toml now fails resolution instead of silently
+# falling back to a store copy.
+#
+# Extras are chosen here rather than on the packages themselves, which is why
+# the same `pynix` that ships as a release application without its test extra
+# appears here with it (see nix/py-packages.nix).
 {
-  python,
-  renderEditablePyproject,
+  editablePythonSet,
+  # Merged over the venv spec below, replacing the entry for any project it
+  # names. The full nanopynix shell uses it to turn on pynix's `docs` extra,
+  # which the exported `pynixDevEnv` has no use for.
+  extraSpec ? { },
 }:
-let
-  # The one place in this repo where an explicit `python.pkgs // { ... }` is
-  # right rather than an accident.
-  #
-  # Everywhere else the interpreter's own package set already holds our
-  # packages, so a splice would only be a second, divergent copy of that
-  # list. Here the job is the opposite: *shadow* each built package with its
-  # editable build, so that a cross-reference between two of our projects
-  # resolves to the editable copy on both sides.
-  #
-  # That matters because `mkPythonEditablePackage` eagerly resolves every
-  # declared `[project.optional-dependencies]` name for the editable
-  # install's metadata, whatever `extras` says -- so pynix's `ekn` extra is
-  # looked up regardless. Against the plain set it would find the *built*
-  # ekn and quietly pin the dev shell to a store copy, defeating the point of
-  # ekn and pynix sharing one venv: ekn's source can cross-import pynix's
-  # modules and vice versa, which a real application-to-application
-  # dependency cannot do without a derivation cycle (see pynix/package.nix's
-  # `ekn` argument, which bundles the built one for non-dev use).
-  #
-  # One set, referenced by every project below, rather than the four
-  # hand-maintained ones this replaced -- a name missing from one of those
-  # was not an error, just a silent fallback to the built package.
-  pythonPackages = python.pkgs // {
-    inherit
-      nanopynix
-      nanopynix-helpers
-      pynix
-      ekn
-      pytest-agent
-      ;
-  };
-
-  editable =
-    name:
-    {
-      extras ? [ ],
-    }:
-    python.pkgs.mkPythonEditablePackage (renderEditablePyproject {
-      projectRoot = ../. + "/${name}";
-      # `toString`'d absolute path into this checkout, not a store copy -- see
-      # the note on pythonEnv below for why that is load-bearing.
-      root = toString (../. + "/${name}/src");
-      inherit python pythonPackages extras;
-    });
-
-  nanopynix = editable "nanopynix" { };
-  nanopynix-helpers = editable "nanopynix-helpers" { };
-  ekn = editable "ekn" { };
-  pynix = editable "pynix" { extras = [ "test" ]; };
-  pytest-agent = editable "pytest-agent" { };
-in
 {
-  inherit
-    nanopynix
-    nanopynix-helpers
-    pynix
-    ekn
-    pytest-agent
-    ;
-
-  # A `pynix`/`ekn` (plus the plain `python3` interpreter) backed entirely
-  # by editable installs -- each package's `root` above is this checkout's
-  # own `toString`'d absolute path (no store copy, since this whole tree is
-  # consumed via a local path override rather than flake eval), so the
-  # generated loaders resolve straight back here at import time with
-  # nothing for a consumer to export. Exported so other repos (e.g.
-  # hetzkube) can drop a live, hot-reloading `pynix ekn` into their own
-  # devShell/direnv setup without rebuilding on every edit. Does not include
-  # nanopynix's own devtools (pyright/ruff/...) -- see nix/shell.nix for the
-  # full interactive nanopynix dev shell.
-  #
-  # Each project contributes `.dependencies` as well as itself, and that is
-  # not redundant: `withPackages` keeps only importable modules, so an
-  # application is dropped from the environment *together with everything it
-  # propagates*. Listing only the packages is how the test runner lost
-  # `kr8s`.
-  pythonEnv = python.withPackages (
-    _pp:
-    nanopynix.dependencies
-    ++ nanopynix-helpers.dependencies
-    ++ pynix.dependencies
-    ++ ekn.dependencies
-    ++ pytest-agent.dependencies
-    ++ [
-      nanopynix
-      nanopynix-helpers
-      pynix
-      ekn
-      pytest-agent
-    ]
+  # Exported so other repos can drop a live, hot-reloading `pynix`/`ekn` into
+  # their own devShell or direnv without rebuilding on every edit here: each
+  # project's editable root is this checkout's own absolute path, so the
+  # generated path hooks resolve straight back here at import time with
+  # nothing for the consumer to export. Does not include nanopynix's devtools
+  # (pyright/ruff/...) -- see nix/shell.nix for the full interactive shell.
+  pythonEnv = editablePythonSet.mkVirtualEnv "nanopynix-dev-env" (
+    {
+      nanopynix = [ "test" ];
+      nanopynix-helpers = [ "test" ];
+      # `ekn` as well as `test`: pynix declares an optional dependency on ekn,
+      # and enabling it here is what lets the two cross-import each other's
+      # modules from one venv -- which a real application-to-application
+      # dependency cannot do without a derivation cycle.
+      pynix = [
+        "test"
+        "ekn"
+      ];
+      ekn = [ ];
+      pytest-agent = [ ];
+    }
+    // extraSpec
   );
 }

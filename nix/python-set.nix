@@ -141,6 +141,55 @@ rec {
       });
 
   /*
+    The nixpkgs packages a set of our own projects depend on, read out of
+    their pyproject.toml files.
+
+    Used to seed `mkPythonSet`'s `nixpkgsRoots`. The obvious alternative --
+    asking the previously nixpkgs-built copies of our projects for their
+    `propagatedBuildInputs` -- is circular once those projects are built by
+    the builders set instead, and would also mean the roots were derived from
+    a build we are in the middle of replacing. Reading the declarations is
+    both acyclic and closer to the truth.
+
+    `exclude` names our own projects: they are supplied by the overlay, not
+    by nixpkgs, so they must not be looked up here. Everything else is
+    resolved against `python.pkgs`, which is where a name is expected to be
+    resolvable -- an unresolvable one is a real error and says so, rather
+    than being silently dropped and reappearing as an import failure inside
+    a venv.
+
+    Type: nixpkgsRootsFor :: AttrSet -> [derivation]
+  */
+  nixpkgsRootsFor =
+    {
+      python,
+      projectRoots,
+      exclude ? [ ],
+    }:
+    let
+      declaredNames =
+        projectRoot:
+        let
+          inherit (pyproject-nix.lib.project.loadPyproject { inherit projectRoot; }) dependencies;
+        in
+        map (dep: normalize dep.name) (
+          dependencies.dependencies
+          ++ dependencies.build-systems
+          ++ lib.concatLists (lib.attrValues dependencies.extras)
+        );
+
+      wanted = lib.subtractLists (map normalize exclude) (
+        lib.unique (lib.concatMap declaredNames projectRoots)
+      );
+    in
+    map (
+      name:
+      python.pkgs.${name} or (throw "no nixpkgs Python package `${name}`, declared by one of ${
+        lib.concatMapStringsSep ", " toString projectRoots
+      }")
+    ) wanted;
+
+  /*
     A builders package set for `python`, containing the transitive closure of
     every nixpkgs package in `nixpkgsRoots` plus whatever `overlay` adds on
     top (this repo's own projects).
@@ -167,8 +216,19 @@ rec {
       # never actually excludes a package; it only keeps the lift from
       # shadowing an infrastructure attribute should nixpkgs ever grow a
       # Python package called e.g. `python` or `hooks`.
+      # The builders' *own* editable hook is itself built as a venv out of
+      # this set (`build/hooks/editable_hook/default.nix`), so `libcst` --
+      # which its `patch-editable` script imports -- has to be resolvable
+      # here even though nothing in this repo depends on it. A lock-file
+      # consumer never notices, because a `uv.lock` covering an editable
+      # install already contains libcst. Sourcing it from nixpkgs like
+      # everything else keeps that true for us.
+      infraRoots = [ python.pkgs.libcst ] ++ lib.optional (python.pythonOlder "3.11") python.pkgs.tomli;
+
       lifted = lib.mapAttrs (_: liftNixpkgsPackage { inherit hacks python; }) (
-        lib.filterAttrs (name: _: !(base.pythonPkgsHostHost ? ${name})) (closure nixpkgsRoots)
+        lib.filterAttrs (name: _: !(base.pythonPkgsHostHost ? ${name})) (
+          closure (nixpkgsRoots ++ infraRoots)
+        )
       );
     in
     base.pythonPkgsHostHost.overrideScope (lib.composeExtensions (_final: _prev: lifted) overlay);
@@ -195,7 +255,6 @@ rec {
     {
       projectRoot,
       python,
-      extras ? [ ],
       extra ? (_rendered: { }),
     }:
     {
@@ -208,10 +267,50 @@ rec {
         (pyproject-nix.build.lib.renderers.mkDerivation {
           project = pyproject-nix.lib.project.loadPyproject { inherit projectRoot; };
           environ = pep508.mkEnviron python;
-          inherit extras;
         })
           {
             inherit pyprojectHook resolveBuildSystem;
+          };
+    in
+    stdenv.mkDerivation (rendered // extra rendered);
+
+  /*
+    The same, as an *editable* install: the project's `src` is left in the
+    working tree and the venv gets a path hook pointing back at it, so an
+    edit is live without a rebuild.
+
+    This is what the dev shell and the test runner install our own projects
+    as. Under the nixpkgs builders that role was filled by `pytest.ini`'s
+    `pythonpath`, which worked but meant the tests were importing something
+    the packaging had never built -- a project could pass its whole suite and
+    still not be installable. An editable install is the same liveness with
+    the real dependency graph behind it.
+
+    Type: mkEditableProject :: AttrSet -> (AttrSet -> derivation)
+  */
+  mkEditableProject =
+    {
+      projectRoot,
+      # Absolute path to the source root, as a string. Not a `path` value:
+      # that would copy the tree into the store and defeat the point.
+      root,
+      python,
+      extra ? (_rendered: { }),
+    }:
+    {
+      stdenv,
+      pyprojectEditableHook,
+      resolveBuildSystem,
+    }:
+    let
+      rendered =
+        (pyproject-nix.build.lib.renderers.mkDerivationEditable {
+          project = pyproject-nix.lib.project.loadPyproject { inherit projectRoot; };
+          environ = pep508.mkEnviron python;
+          inherit root;
+        })
+          {
+            inherit pyprojectEditableHook resolveBuildSystem;
           };
     in
     stdenv.mkDerivation (rendered // extra rendered);
