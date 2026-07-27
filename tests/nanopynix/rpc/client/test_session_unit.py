@@ -90,7 +90,6 @@ def _make_eval_stub() -> MagicMock:
     stub.eval_flake = AsyncMock()
     stub.get_flake = AsyncMock()
     stub.release = AsyncMock()
-    stub.release_all = AsyncMock()
     return stub
 
 

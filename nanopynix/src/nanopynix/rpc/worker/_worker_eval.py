@@ -53,8 +53,6 @@ from nanopynix_proto.nix.eval import (
     RealiseArgvResponse,
     RealiseStringRequest,
     RealiseStringResponse,
-    ReleaseAllRequest,
-    ReleaseAllResponse,
     ReleaseLockedFlakeRequest,
     ReleaseLockedFlakeResponse,
     ReleaseRequest,
@@ -535,8 +533,3 @@ class EvalServiceHandler(EvalServiceBase):
         value.close()
         self._state.handles.release(message.handle)
         return ReleaseResponse()
-
-    @worker_op
-    def release_all(self, message: ReleaseAllRequest) -> ReleaseAllResponse:
-        release_eval_resources(self._state, message.eval_handle)
-        return ReleaseAllResponse()
