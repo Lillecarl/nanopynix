@@ -94,6 +94,7 @@ async def test_rpc_navigation_accessors_are_strict(expr: str, rpc_session: RpcSe
     async with rpc_session() as session, session.store() as store, session.eval(store) as ev:
         await _check_navigation(await ev.string(expr), NAVIGATION_TABLE[expr], "rpc")
 
+
 # `apply("builtins.toString")` is Nix's own string coercion. These
 # expectations were taken from a real `nix eval` of builtins.toString over the
 # same expressions, so they fail rather than drift if Nix ever changes them.

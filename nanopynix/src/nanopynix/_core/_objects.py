@@ -214,9 +214,7 @@ class CoreStore:
     def query_referrers(self, path: str | nanopynix_store.StorePath) -> list[StorePath]:
         return self._public_paths(self.require_raw().query_referrers(self._store_path(path)))
 
-    def query_substitutable_paths(
-        self, paths: Sequence[str | nanopynix_store.StorePath]
-    ) -> list[StorePath]:
+    def query_substitutable_paths(self, paths: Sequence[str | nanopynix_store.StorePath]) -> list[StorePath]:
         return self._public_paths(
             self.require_raw().query_substitutable_paths([self._store_path(path) for path in paths]),
         )
@@ -311,9 +309,7 @@ class CoreStore:
         )
         return GcResult(paths=self._public_paths(result["paths"]), bytes_freed=result["bytes_freed"])
 
-    def _public_paths(
-        self, raw_paths: Sequence[nanopynix_store.StorePath | str]
-    ) -> list[StorePath]:
+    def _public_paths(self, raw_paths: Sequence[nanopynix_store.StorePath | str]) -> list[StorePath]:
         return [StorePath(path) for path in self.print_store_paths(raw_paths)]
 
 

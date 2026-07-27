@@ -102,8 +102,7 @@ def test_protocol_static_conformance() -> None:
 # engines" -- not "we did not get to it". Every one of these is also recorded
 # in tests/nanopynix/test_engine_parity.py, which is where the work to remove
 # it is tracked; this table only records that the protocol is knowingly silent.
-UNDECLARED: dict[str, str] = {
-}
+UNDECLARED: dict[str, str] = {}
 
 # (protocol name, protocol, inproc class, rpc class)
 PROTOCOL_PAIRS: list[tuple[str, type, type, type]] = [

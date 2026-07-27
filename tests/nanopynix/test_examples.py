@@ -46,9 +46,7 @@ def _seed_isolated_store(root: Path) -> str:
     try:
         seed_file = root.parent / "example-seed.txt"
         seed_file.write_text("nanopynix doc-example fixture\n", encoding="utf-8")
-        added = store.add_to_store(
-            str(seed_file), name="example-seed", method="flat", hash_algo="sha256"
-        )
+        added = store.add_to_store(str(seed_file), name="example-seed", method="flat", hash_algo="sha256")
         gc_root = root.parent / "example-gcroot"
         store.add_perm_root(added, str(gc_root))
     finally:

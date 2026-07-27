@@ -171,17 +171,13 @@ class StoreServiceHandler(StoreServiceBase):
         return ParseStorePathResponse(path=self._resolve(message.store_handle).parse_store_path(message.path))
 
     @worker_op
-    def follow_links_to_store_path(
-        self, message: FollowLinksToStorePathRequest
-    ) -> FollowLinksToStorePathResponse:
+    def follow_links_to_store_path(self, message: FollowLinksToStorePathRequest) -> FollowLinksToStorePathResponse:
         return FollowLinksToStorePathResponse(
             path=self._resolve(message.store_handle).follow_links_to_store_path(message.path),
         )
 
     @worker_op
-    def query_path_from_hash_part(
-        self, message: QueryPathFromHashPartRequest
-    ) -> QueryPathFromHashPartResponse:
+    def query_path_from_hash_part(self, message: QueryPathFromHashPartRequest) -> QueryPathFromHashPartResponse:
         return QueryPathFromHashPartResponse(
             path=self._resolve(message.store_handle).query_path_from_hash_part(message.hash_part),
         )
@@ -211,7 +207,9 @@ class StoreServiceHandler(StoreServiceBase):
 
     @worker_op
     def query_derivation_outputs(self, message: QueryDerivationOutputsRequest) -> PathsResponse:
-        return PathsResponse(paths=_widen_paths(self._resolve(message.store_handle).query_derivation_outputs(message.path)))
+        return PathsResponse(
+            paths=_widen_paths(self._resolve(message.store_handle).query_derivation_outputs(message.path))
+        )
 
     @worker_op
     def query_valid_derivers(self, message: QueryValidDeriversRequest) -> PathsResponse:

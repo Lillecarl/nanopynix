@@ -229,7 +229,9 @@ FAILURE_CASES: list[StoreCase] = [
     # that normalises on the way in. "x" and "garbage" are the two that used to
     # answer differently per engine.
     *[
-        StoreCase(f"parse_store_path_{path or 'empty'!r}", lambda store, _seeded, path=path: store.parse_store_path(path))
+        StoreCase(
+            f"parse_store_path_{path or 'empty'!r}", lambda store, _seeded, path=path: store.parse_store_path(path)
+        )
         for path in MALFORMED_PATHS
     ],
     *[
@@ -397,9 +399,7 @@ async def test_every_row_tells_its_inputs_apart(
     empty = outcomes[_malformed_label("")]
     assert empty[0] == "raise", f"{row.name} accepted an empty path: {empty!r}"
     bands = {band: frozenset(repr(outcomes[label]) for label in labels) for band, labels in _BANDS.items()}
-    assert bands["present"] != bands["unparseable"], (
-        f"{row.name} cannot tell a real store path from garbage: {bands!r}"
-    )
+    assert bands["present"] != bands["unparseable"], f"{row.name} cannot tell a real store path from garbage: {bands!r}"
 
 
 @pytest.mark.parametrize("row", HASH_PART_ROWS, ids=lambda row: row.name)

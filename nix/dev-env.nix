@@ -58,7 +58,12 @@ let
     root = toString (../ekn + "/src");
     inherit python;
     pythonPackages = python.pkgs // {
-      inherit nanopynix nanopynix-helpers clypi kr8s;
+      inherit
+        nanopynix
+        nanopynix-helpers
+        clypi
+        kr8s
+        ;
     };
   });
 

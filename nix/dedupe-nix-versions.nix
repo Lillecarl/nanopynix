@@ -25,6 +25,9 @@ let
         seen = state.seen ++ [ drvPath ];
         names = state.names ++ [ name ];
       };
-  picked = lib.foldl' pick { seen = [ ]; names = [ ]; } orderedNames;
+  picked = lib.foldl' pick {
+    seen = [ ];
+    names = [ ];
+  } orderedNames;
 in
 lib.getAttrs picked.names versions

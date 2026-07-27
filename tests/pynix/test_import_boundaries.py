@@ -25,7 +25,9 @@ def _banned_imports(tree: ast.Module) -> set[str]:
             names.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module is not None:
             names.add(node.module)
-    return {name for name in names if any(name == prefix or name.startswith(f"{prefix}.") for prefix in _BANNED_PREFIXES)}
+    return {
+        name for name in names if any(name == prefix or name.startswith(f"{prefix}.") for prefix in _BANNED_PREFIXES)
+    }
 
 
 def test_pynix_does_not_import_nanopynix_internals_or_raw_proto() -> None:

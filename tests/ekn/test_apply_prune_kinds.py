@@ -44,9 +44,7 @@ class _FakeApi:
         self.objects_by_kind = objects_by_kind
         self.queried_kinds: list[str] = []
 
-    async def async_get(
-        self, kind: str, *, namespace: object, label_selector: object
-    ) -> AsyncIterator[APIObject]:
+    async def async_get(self, kind: str, *, namespace: object, label_selector: object) -> AsyncIterator[APIObject]:
         self.queried_kinds.append(kind)
         for obj in self.objects_by_kind.get(kind, []):
             yield obj

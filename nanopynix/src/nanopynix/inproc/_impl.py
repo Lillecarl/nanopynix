@@ -818,14 +818,10 @@ class Store:
         means it tried to fix it, not that it succeeded.
         """
         return await self._session.run(
-            functools.partial(
-                self._require_core().verify_store, check_contents=check_contents, repair=repair
-            ),
+            functools.partial(self._require_core().verify_store, check_contents=check_contents, repair=repair),
         )
 
-    async def _public_store_paths(
-        self, raw_paths: Sequence[nanopynix_store.StorePath | str]
-    ) -> list[StorePath]:
+    async def _public_store_paths(self, raw_paths: Sequence[nanopynix_store.StorePath | str]) -> list[StorePath]:
         paths = await self._session.run(_print_store_paths, self._require_raw(), raw_paths)
         return [StorePath(path) for path in paths]
 
@@ -1580,7 +1576,6 @@ class Value:
         return {name: output.path for name, output in derivation.outputs.items() if output.path is not None}
 
 
-
 def _call(target: Any, args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> Any:
     return target(*args, **kwargs)
 
@@ -1593,7 +1588,6 @@ def _attr_values(local: Any) -> dict[str, Any]:
 def _list_values(local: Any) -> list[Any]:
     """Every element of a list, in one hop onto the Nix thread."""
     return [local.list_get(index) for index in range(local.list_length())]
-
 
 
 __all__ = [

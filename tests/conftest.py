@@ -228,9 +228,7 @@ def store_seeded_path(store: Any, l1_nix_environment: NixTestEnvironment) -> Any
     """
     source = l1_nix_environment.root.parent / "l1-store-fixture.txt"
     source.write_text("nanopynix L1 binding fixture\n", encoding="utf-8")
-    return store.add_to_store(
-        str(source), name="nanopynix-l1-fixture", method="flat", hash_algo="sha256"
-    )
+    return store.add_to_store(str(source), name="nanopynix-l1-fixture", method="flat", hash_algo="sha256")
 
 
 @pytest.fixture(scope="session")

@@ -9,7 +9,9 @@
 }:
 let
   pythonEnv = python.withPackages (
-    _: pynix.dependencies ++ [
+    _:
+    pynix.dependencies
+    ++ [
       pynix
       sphinx
       myst-parser

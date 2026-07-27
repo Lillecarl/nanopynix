@@ -15,7 +15,12 @@ let
     projectRoot = toString ./.;
     inherit python;
     pythonPackages = python.pkgs // {
-      inherit nanopynix nanopynix-helpers clypi kr8s;
+      inherit
+        nanopynix
+        nanopynix-helpers
+        clypi
+        kr8s
+        ;
     };
   };
 in

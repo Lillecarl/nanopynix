@@ -48,7 +48,9 @@ def register_import_path_primops(specs: Sequence[PrimOpSpec]) -> None:
     """
     for spec in specs:
         if spec.rpc:
-            raise ValueError(f"primop {spec.name!r} needs rpc=True bridging, not supported by register_import_path_primops")
+            raise ValueError(
+                f"primop {spec.name!r} needs rpc=True bridging, not supported by register_import_path_primops"
+            )
         nanopynix_expr.register_primop(
             spec.name,
             spec.arity,
