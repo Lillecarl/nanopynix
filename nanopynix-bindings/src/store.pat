@@ -130,3 +130,10 @@ nanopynix_bindings.store.Store.query_referrers:
 
 nanopynix_bindings.store.Store.query_substitutable_paths:
     def query_substitutable_paths(self, paths: Sequence[StorePath]) -> list[str]: ...
+
+# stubgen writes module-level constants as their bare runtime type, so this
+# arrives as `tuple` and every element is Unknown -- which propagates into
+# `nanopynix.DISPATCHABLE_METHODS`, since that derives from this rather than
+# restating the list.
+nanopynix_bindings.store.STORE_DISPATCH_METHODS:
+    STORE_DISPATCH_METHODS: tuple[str, ...] = ...
