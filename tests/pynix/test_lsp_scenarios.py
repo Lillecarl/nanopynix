@@ -45,8 +45,6 @@ from tests.support.lsp_scenario import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-
     import pytest_lsp
     from pynix._lsp._handlers import PynixLanguageServer
 
@@ -62,53 +60,62 @@ _DEFINITION_SCOPE_NIX = asset("module_system/definition_scope.nix")
 _DEFINITION_IMPORT_NIX = asset("module_system/definition_import.nix")
 
 
+def _driver_for(request: pytest.FixtureRequest) -> LspDriver:
+    """Build only the backend this parametrization actually asked for.
+
+    Naming ``lsp_server`` and ``lsp_wire`` as plain fixture parameters would
+    set *both* up for every test -- two ``PynixLanguageServer``s, two RPC
+    sessions, two stores -- and immediately discard one. Resolving the chosen
+    one lazily halves the per-test fixture cost across all of these scenarios.
+
+    The cost of that laziness is that the discarded fixture also leaves the
+    test's declared fixture closure, and ``nix_backend`` is parametrized off
+    that closure (``tests/support/nix_runtime.py``'s ``pytest_generate_tests``
+    keys on ``metafunc.fixturenames``). Each fixture below therefore keeps
+    naming ``nix_backend`` for its parametrizing side effect -- see the
+    comment there.
+    """
+    if request.param == "in_process":
+        server: PynixLanguageServer = request.getfixturevalue("lsp_server")
+        return InProcessDriver(server)
+    wire: tuple[PynixLanguageServer, pytest_lsp.LanguageClient] = request.getfixturevalue("lsp_wire")
+    _wire_server, wire_client = wire
+    return WireDriver(wire_client)
+
+
+# ``nix_backend`` is named by each fixture below but never read: it has to stay
+# in the declared fixture closure so these scenarios keep running once per
+# configured backend. Dropping it does not silently halve the matrix -- no
+# plain ``nix_backend`` fixture exists, so the run errors out -- but it is the
+# reason an apparently unused parameter is here. See ``_driver_for`` above.
 @pytest.fixture(params=["in_process", "wire"])
-async def terranix_driver(
-    request: pytest.FixtureRequest,
-    lsp_server: PynixLanguageServer,
-    lsp_wire: tuple[PynixLanguageServer, pytest_lsp.LanguageClient],
-) -> AsyncIterator[LspDriver]:
+def terranix_driver(request: pytest.FixtureRequest, nix_backend: str) -> LspDriver:
     """Both backends for the terranix scenarios below, parametrized so each scenario runs against each."""
-    if request.param == "in_process":
-        yield InProcessDriver(lsp_server)
-        return
-    _wire_server, wire_client = lsp_wire
-    yield WireDriver(wire_client)
+    del nix_backend
+    return _driver_for(request)
 
 
 @pytest.fixture(params=["in_process", "wire"])
-async def module_system_driver(
-    request: pytest.FixtureRequest,
-    lsp_server: PynixLanguageServer,
-    lsp_wire: tuple[PynixLanguageServer, pytest_lsp.LanguageClient],
-) -> AsyncIterator[LspDriver]:
+def module_system_driver(request: pytest.FixtureRequest, nix_backend: str) -> LspDriver:
     """Both backends for the module-system definition/rename/highlight/references scenarios below."""
-    if request.param == "in_process":
-        yield InProcessDriver(lsp_server)
-        return
-    _wire_server, wire_client = lsp_wire
-    yield WireDriver(wire_client)
+    del nix_backend
+    return _driver_for(request)
 
 
 @pytest.fixture(params=["in_process", "wire"])
-async def easykubenix_driver(
+def easykubenix_driver(
     request: pytest.FixtureRequest,
-    lsp_server: PynixLanguageServer,
-    lsp_wire: tuple[PynixLanguageServer, pytest_lsp.LanguageClient],
+    nix_backend: str,
     easykubenix_openapi_schema: str,
-) -> AsyncIterator[LspDriver]:
+) -> LspDriver:
     """Both backends for the easykubenix scenarios below, parametrized so each scenario runs against each.
 
     ``easykubenix_openapi_schema`` is requested for its side effect: these
     scenarios resolve Kinds through a ``fetchurl``-ed OpenAPI document that
     nothing else in the chain ever builds. See its docstring in ``conftest``.
     """
-    del easykubenix_openapi_schema
-    if request.param == "in_process":
-        yield InProcessDriver(lsp_server)
-        return
-    _wire_server, wire_client = lsp_wire
-    yield WireDriver(wire_client)
+    del easykubenix_openapi_schema, nix_backend
+    return _driver_for(request)
 
 
 async def test_hover_inside_a_tfref_string_resolves_the_cross_resource_reference(
