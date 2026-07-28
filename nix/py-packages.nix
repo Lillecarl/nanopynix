@@ -11,13 +11,24 @@
   ps,
   python,
   root,
-  # nanopynix's version suffix -- the linked Nix version, so two builds of the
-  # same source against different Nix components are distinguishable.
+  # The linked Nix version, appended as a PEP 440 local segment to every
+  # project here that reaches nanopynix-bindings -- see `nixLinked` below.
   version,
 }:
 
 let
   protoSrc = callPackage (root + "/nanopynix-proto/generated.nix") { inherit python; };
+
+  # Every project that reaches nanopynix-bindings -- directly, or through
+  # `nanopynix` -- is built against one specific Nix version's C++ components
+  # and is not interchangeable with the same source built against another, so
+  # the version says which one. See nanopynix-bindings/package.nix for why
+  # this is a PEP 440 local segment (`+nix...`) and not a plain suffix.
+  #
+  # nanopynix-proto and pytest-agent deliberately don't get it: neither
+  # reaches the bindings, so both really are the same package whatever Nix is
+  # linked, and suffixing them would rebuild them once per version for nothing.
+  nixLinked = rendered: { version = "${rendered.version}+nix${version}"; };
 
   # Applied to both the built and the editable form of a project, so a build
   # input added for one is present in the other.
@@ -60,9 +71,7 @@ let
       };
     };
 
-    nanopynix = _pySelf: rendered: {
-      version = "${rendered.version}-${version}";
-
+    nanopynix = _pySelf: rendered: nixLinked rendered // {
       # No LD_PRELOAD of the TSAN runtime here, deliberately. It used to be
       # set, reasoning that the bindings get dlopen()ed into whatever process
       # imports nanopynix -- but a derivation's `env` is its *build*
@@ -87,13 +96,13 @@ let
       };
     };
 
-    nanopynix-helpers = _pySelf: rendered: {
+    nanopynix-helpers = _pySelf: rendered: nixLinked rendered // {
       meta = rendered.meta // {
         platforms = lib.platforms.unix;
       };
     };
 
-    ekn = _pySelf: rendered: {
+    ekn = _pySelf: rendered: nixLinked rendered // {
       # `cacert` was a `nativeBuildInputs` entry only so `postInstall` could
       # point git at a CA bundle while generating completions. Completions
       # are generated outside the package now (see `mkApp`), because a
@@ -104,7 +113,7 @@ let
       };
     };
 
-    pynix = _pySelf: rendered: {
+    pynix = _pySelf: rendered: nixLinked rendered // {
       meta = rendered.meta // {
         platforms = lib.platforms.unix;
       };
