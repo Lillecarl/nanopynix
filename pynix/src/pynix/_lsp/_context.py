@@ -111,6 +111,19 @@ class SharedEvalCache:
         self._store = store
         self._entries: dict[tuple[str, str], _SharedEval] = {}
         self._lock = anyio.Lock()
+        self._store_exec_prefix: list[str] | None = None
+
+    async def store_exec_prefix(self) -> list[str]:
+        """argv prefix needed to run binaries out of the store these evaluations use.
+
+        Empty unless that store is relocated -- see
+        ``nanopynix.store_exec_prefix``. Memoized because it costs a
+        ``store_dirs()`` round trip and cannot change for a given store, and
+        because the dialects reach for it on a per-keystroke path.
+        """
+        if self._store_exec_prefix is None:
+            self._store_exec_prefix = await nanopynix.store_exec_prefix(self._store)
+        return self._store_exec_prefix
 
     async def acquire(
         self, expr: str, path: str
@@ -196,6 +209,14 @@ class FileContext:
             if error is not None:
                 self.errors[directive.name] = error
         self._acquired_keys = acquired_keys
+
+    async def store_exec_prefix(self) -> list[str]:
+        """argv prefix needed to run binaries out of the store backing this context.
+
+        Dialects that exec something they just built go through this. See
+        ``SharedEvalCache.store_exec_prefix``.
+        """
+        return await self._shared.store_exec_prefix()
 
     def eval_session(self, root_name: str) -> nanopynix.rpc.EvalSession | None:
         """The ``EvalSession`` that produced ``roots[root_name]``, if any.

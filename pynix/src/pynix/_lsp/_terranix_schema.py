@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -110,10 +111,18 @@ def _cache_key(tofu_out: str, module_out: str) -> str:
     return hashlib.sha256(f"{tofu_out}:{module_out}".encode()).hexdigest()[:16]
 
 
-async def get_provider_schemas(tofu_out: str, module_out: str) -> ProviderSchemas:
+async def get_provider_schemas(
+    tofu_out: str, module_out: str, store_exec_prefix: Sequence[str] = ()
+) -> ProviderSchemas:
     """Return the parsed ``tofu providers schema -json`` output for this pair of outputs.
 
     Cached in-memory for the server's lifetime, and on disk across restarts.
+
+    *store_exec_prefix* (from ``nanopynix.store_exec_prefix``) is what makes
+    *tofu_out* executable when it lives in a relocated store; it is empty
+    otherwise. It is deliberately *not* part of the cache key: it changes how
+    the command is run, never what it returns, since the same pair of store
+    paths is the same pair of derivation outputs whichever store holds them.
     """
     cache_key = _cache_key(tofu_out, module_out)
     cached = _MEM_CACHE.get(cache_key)
@@ -127,7 +136,7 @@ async def get_provider_schemas(tofu_out: str, module_out: str) -> ProviderSchema
         if await disk_path.exists():
             schemas = ProviderSchemas.model_validate_json(await disk_path.read_text())
         else:
-            schemas = await _run_tofu_schema(tofu_out, module_out)
+            schemas = await _run_tofu_schema(tofu_out, module_out, store_exec_prefix)
             await disk_path.parent.mkdir(parents=True, exist_ok=True)
             await disk_path.write_text(schemas.model_dump_json())
         _MEM_CACHE[cache_key] = schemas
@@ -137,7 +146,7 @@ async def get_provider_schemas(tofu_out: str, module_out: str) -> ProviderSchema
 _INIT_OK_MARKER = ".pynix-init-ok"
 
 
-async def _run_tofu_schema(tofu_out: str, module_out: str) -> ProviderSchemas:
+async def _run_tofu_schema(tofu_out: str, module_out: str, store_exec_prefix: Sequence[str] = ()) -> ProviderSchemas:
     """Run ``tofu init`` (if needed) then ``providers schema -json`` in a scratch dir.
 
     *tofu_out* is a directive's ``tofu`` output: a self-contained wrapper
@@ -168,10 +177,12 @@ async def _run_tofu_schema(tofu_out: str, module_out: str) -> ProviderSchemas:
     init_ok_marker = state_dir / _INIT_OK_MARKER
 
     if not await init_ok_marker.exists():
-        await anyio.run_process([tofu_bin, "init", "-input=false"], cwd=str(state_dir))
+        await anyio.run_process([*store_exec_prefix, tofu_bin, "init", "-input=false"], cwd=str(state_dir))
         await init_ok_marker.write_text("")
 
-    completed = await anyio.run_process([tofu_bin, "providers", "schema", "-json"], cwd=str(state_dir))
+    completed = await anyio.run_process(
+        [*store_exec_prefix, tofu_bin, "providers", "schema", "-json"], cwd=str(state_dir)
+    )
     return ProviderSchemas.model_validate_json(completed.stdout)
 
 

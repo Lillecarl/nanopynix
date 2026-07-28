@@ -127,6 +127,7 @@ from nanopynix.settings import (
     list_flake_settings_metadata,
     list_settings_metadata,
 )
+from nanopynix.store_exec import STORE_EXEC_TOOL as STORE_EXEC_TOOL, store_exec_prefix as store_exec_prefix
 from nanopynix.store_impl import DISPATCHABLE_METHODS as DISPATCHABLE_METHODS, StoreImpl as StoreImpl
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
@@ -172,6 +173,7 @@ def _enable_default_experimental_features() -> None:
 
 __all__ = [
     "DISPATCHABLE_METHODS",
+    "STORE_EXEC_TOOL",
     "AsyncEvalSession",
     "AsyncLockedFlake",
     "AsyncReplSession",
@@ -279,6 +281,7 @@ __all__ = [
     "set_manager_title",
     "set_setting",
     "set_verbosity",
+    "store_exec_prefix",
     "strip_ansi",
     "to_yaml",
     "yaml_primops",
