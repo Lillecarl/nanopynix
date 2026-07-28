@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 importlib.import_module("tests.support.beartype_hook")
 
 import anyio  # noqa: E402 -- see hook install above
+import coverage  # noqa: E402 -- see hook install above
 import pytest  # noqa: E402 -- see hook install above
 from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util  # noqa: E402 -- see hook install above
 
@@ -130,6 +131,31 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         items[:] = forked + rest
 
 
+def _save_coverage_before_hard_exit() -> None:
+    """Persist ``coverage run`` data that the ``os._exit`` below would discard.
+
+    ``coverage run`` writes its data file from an atexit handler, and
+    ``os._exit`` runs none -- so under the test runner's coverage mode the
+    entire session's measurement vanished and ``coverage combine`` reported
+    "No data to combine".
+
+    Only in that mode. Under a plain ``pytest --cov`` the data is already
+    written and combined by pytest-cov, from inside ``pytest_runtestloop``
+    and therefore before this hook; saving again there would just leave an
+    uncombined part file behind.
+
+    Coverage running at all is optional, so a missing instance is normal, not
+    an error.
+    """
+    if not os.environ.get("NANOPYNIX_COVERAGE"):
+        return
+    current = coverage.Coverage.current()
+    if current is None:
+        return
+    current.stop()
+    current.save()
+
+
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_sessionfinish(exitstatus: int | pytest.ExitCode) -> Generator[None]:
     """Force-exit once every other sessionfinish hook has run, terminal
@@ -153,6 +179,7 @@ def pytest_sessionfinish(exitstatus: int | pytest.ExitCode) -> Generator[None]:
     yield
     sys.stdout.flush()
     sys.stderr.flush()
+    _save_coverage_before_hard_exit()
     os._exit(int(exitstatus))
 
 
