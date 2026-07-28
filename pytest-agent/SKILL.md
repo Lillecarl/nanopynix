@@ -268,11 +268,14 @@ stop truncating, not learn a flag for truncating anyway.)
 - **`--agent-keep-runs` prunes old run directories**, so `history` and
   `compare` say how many runs they actually read. "Failed in 2 of 3 runs" means
   three runs *still on disk*, not three runs ever.
-- **pytest-xdist (`-n auto`) does not work with agent mode.** Every worker
-  process runs `pytest_configure` and claims its own `runs-NNNN`, so one
-  logical run scatters across N partial records and queries silently answer
-  from whichever worker won. Run without `-n` for the detail, or set
-  `PYTEST_AGENT_NO_AUTODETECT=1` for xdist's speed.
+- **pytest-xdist (`-n N`) works with agent mode**, and is the way to make a
+  slow suite bearable. Only the controller records -- it receives every
+  worker's report, tracebacks and captured output included -- so you still get
+  one run directory and one `history.jsonl` entry. Two things degrade, and the
+  banner says so at startup: `note()`/`attach()` land inline in the test's
+  `.log` instead of `notes.jsonl`/the index, and stuck-test dumps are off
+  (a dump from the controller would name an innocent test). Drop `-n` when you
+  need either of those.
 - **A run that cannot write its directory turns agent mode off** rather than
   failing the run, and says so loudly on stderr. If you see that, the next
   query will answer from a *stale* run — fix `--agent-dir` before believing it.

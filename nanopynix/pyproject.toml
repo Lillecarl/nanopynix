@@ -34,6 +34,7 @@ test = [
   "pytest-dependency",
   "pytest-cov",
   "pytest-forked",
+  "pytest-xdist",
   "pygit2",
   "beartype",
 ]

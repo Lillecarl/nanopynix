@@ -137,6 +137,7 @@ class AgentRuntime:
         terminal_log_path: Path | None = None,
         label: str | None = None,
         autodetected_via: str | None = None,
+        distributed: bool = False,
     ) -> None:
         self.config = config
         self.root = root
@@ -151,6 +152,7 @@ class AgentRuntime:
         self.terminal_log = terminal_log
         self.terminal_log_path = terminal_log_path
         self.autodetected_via = autodetected_via
+        self.distributed = distributed
         self.recorder = TestRecorder(root, rootpath=config.rootpath)
         self.started_at_iso = ""
 
@@ -195,6 +197,12 @@ class AgentRuntime:
             )
         named = f"run {self.run_number}" if self.label is None else f"run {self.run_number} [{self.label}]"
         self._print(f"{named}: writing full per-test detail to: {self.root.resolve()}")
+        if self.distributed:
+            self._print(
+                "xdist: recording from the controller -- tracebacks, captured output and "
+                "durations are complete; note()/attach() appear inline in each test's .log "
+                "instead of notes.jsonl, and stuck-test dumps are off",
+            )
         self._thread = threading.Thread(target=self._watch, name="pytest-agent-watcher", daemon=True)
         self._thread.start()
 
@@ -221,6 +229,20 @@ class AgentRuntime:
                     "args": list(self.config.invocation_params.args),
                 },
             )
+
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_xdist_node_collection_finished(self, node: object, ids: list[str]) -> None:
+        """The collected total, which an xdist controller has no other way to know.
+
+        Under `-n` the controller does not collect: the workers do, and
+        ``session.items`` stays empty in this process, so the progress line
+        would read ``tot=?`` for the whole run. Every worker collects the same
+        set (xdist refuses to start if they disagree), so the first one to
+        report settles it. ``optionalhook`` because this hookspec only exists
+        when xdist is installed.
+        """
+        del node
+        self.total_collected = max(self.total_collected, len(ids))
 
     def pytest_collection_finish(self, session: pytest.Session) -> None:
         self.total_collected = len(session.items)

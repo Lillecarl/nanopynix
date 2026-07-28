@@ -50,6 +50,19 @@ def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _xdist_role(config: pytest.Config) -> str:
+    """``"worker"``, ``"controller"``, or ``""`` when xdist is not distributing.
+
+    ``workerinput`` is the attribute xdist sets on a worker's config and
+    nothing else does; it is the documented way to tell the two apart.
+    """
+    if hasattr(config, "workerinput"):
+        return "worker"
+    if getattr(config.option, "dist", "no") not in {"no", None}:
+        return "controller"
+    return ""
+
+
 def _agent_default() -> bool:
     global _autodetected_via  # noqa: PLW0603 -- one-shot record of which harness env var triggered autodetection, set once during pytest startup
     if _env_flag("PYTEST_AGENT"):
@@ -181,6 +194,23 @@ def pytest_configure(config: pytest.Config) -> None:
     if zero_detail_mode(config) is not None:
         return
 
+    # Under `-n`, only the controller records. It is the one process that sees
+    # the whole run: xdist ships every worker's TestReport back to it, and a
+    # serialized report carries the traceback, the captured stdout/stderr/log
+    # sections and the durations -- everything add_report() reads. A worker
+    # that recorded too would claim a second runs-NNNN and write a partial
+    # index.jsonl into it, which is the scattering that made agent mode and
+    # xdist incompatible in the first place.
+    #
+    # What the controller cannot see is the part that never goes through a
+    # report: note() and attach() run inside the worker. With no runtime
+    # registered there they fall back to printing, and that print lands in the
+    # worker's captured output -- which *is* shipped, so a note still reaches
+    # the test's .log, just not notes.jsonl or the index. See the xdist
+    # section of the README.
+    if _xdist_role(config) == "worker":
+        return
+
     # Before claiming a run directory, so a rejected label doesn't leave an
     # empty runs-NNNN behind; and here rather than in pytest_addoption, so a
     # --collect-only run that never records anything isn't refused over the
@@ -230,6 +260,15 @@ def pytest_configure(config: pytest.Config) -> None:
     heartbeat_interval = cast("float", config.getoption("agent_heartbeat"))
     keep_runs = cast("int", config.getoption("agent_keep_runs"))
     stuck_after = cast("float", config.getoption("agent_stuck_after"))
+    # A stuck dump is faulthandler dumping *this* process's threads. On an
+    # xdist controller the hung test is in another process entirely, so the
+    # dump would show the controller idling in its own event loop and name an
+    # innocent test -- worse than no dump, because it reads like evidence.
+    # Turned off rather than reimplemented: doing it properly means dumping
+    # from inside the worker, which is worker-side recording (see the README).
+    distributed = _xdist_role(config) == "controller"
+    if distributed:
+        stuck_after = 0.0
     max_summary_lines = cast("int", config.getoption("agent_max_summary_lines"))
     runtime = AgentRuntime(
         config,
@@ -245,6 +284,7 @@ def pytest_configure(config: pytest.Config) -> None:
         terminal_log_path=terminal_log_path,
         label=label,
         autodetected_via=autodetected_via,
+        distributed=distributed,
     )
     config.pluginmanager.register(runtime, RUNTIME_PLUGIN_NAME)
     # So pytest_agent.note() can find this session without a fixture to carry
