@@ -172,9 +172,7 @@ async def test_rpc_query_path_info_reports_signatures(
 
 def _check_nested_input_drvs(derivation: Any) -> None:
     """One input must carry a child node, not a flattened output name."""
-    children = {
-        path: node.dynamic_outputs for path, node in derivation.input_drvs.items() if node.dynamic_outputs
-    }
+    children = {path: node.dynamic_outputs for path, node in derivation.input_drvs.items() if node.dynamic_outputs}
     assert children, f"no input carried a dynamic-output child: {derivation.input_drvs!r}"
 
     for child_map in children.values():

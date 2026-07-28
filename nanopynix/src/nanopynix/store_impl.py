@@ -112,9 +112,7 @@ class StoreImpl:
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         cls._nanopynix_store_overrides = frozenset(
-            name
-            for name in DISPATCHABLE_METHODS
-            if getattr(cls, name, None) is not getattr(StoreImpl, name)
+            name for name in DISPATCHABLE_METHODS if getattr(cls, name, None) is not getattr(StoreImpl, name)
         )
 
     def is_valid_path_uncached(self, path: str) -> bool:

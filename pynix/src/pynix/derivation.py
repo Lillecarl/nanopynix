@@ -94,9 +94,7 @@ class Show(Command):
         dump raises on a dynamic derivation.
         """
         return {
-            "dynamicOutputs": {
-                name: Show._input_drv_to_dict(child) for name, child in node.dynamic_outputs.items()
-            },
+            "dynamicOutputs": {name: Show._input_drv_to_dict(child) for name, child in node.dynamic_outputs.items()},
             "outputs": list(node.outputs),
         }
 
