@@ -1,8 +1,8 @@
 """nanopynix compiled bindings namespace package.
 
-The seven binding areas -- ``errors``, ``util``, ``store``, ``expr``,
-``fetchers``, ``flake``, ``main`` -- used to be seven separate extension
-modules. They are submodules of one, ``_ext``, for the reason set out in
+The six binding areas -- ``errors``, ``util``, ``store``, ``expr``,
+``fetchers``, ``flake`` -- used to be separate extension modules. They are
+submodules of one, ``_ext``, for the reason set out in
 ``src/nanopynix_modules.hh``: a function-local static in a header is a separate
 object in every hidden-visibility ``.so`` that includes it, and that cost us a
 real bug rather than just tidiness.
@@ -29,7 +29,6 @@ from . import (
     expr as expr,
     fetchers as fetchers,
     flake as flake,
-    main as main,
     store as store,
     util as util,
 )
@@ -39,7 +38,6 @@ __all__ = [
     "expr",
     "fetchers",
     "flake",
-    "main",
     "store",
     "util",
 ]

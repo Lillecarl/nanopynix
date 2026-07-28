@@ -7,7 +7,6 @@ from __future__ import annotations
 from nanopynix_bindings.expr import EvalState, PrimopError, Value, eval_file, init_libexpr, register_primop
 from nanopynix_bindings.fetchers import input_from_attrs, input_from_url
 from nanopynix_bindings.flake import get_flake, lock_flake, parse_flake_ref
-from nanopynix_bindings.main import init_nix as _init_nix_raw, init_plugins
 from nanopynix_bindings.store import (
     BuildMode as BuildMode,
     open_store as open_store,
@@ -132,8 +131,17 @@ from nanopynix.store_impl import DISPATCHABLE_METHODS as DISPATCHABLE_METHODS, S
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
 
-def init_nix(load_config: bool = True) -> None:
-    """Initialize Nix, then enable nanopynix's default experimental features.
+def init_libstore(load_config: bool = True) -> None:
+    """Initialize libstore, then enable nanopynix's default experimental features.
+
+    The one Nix initialisation entry point nanopynix offers. There used to be a
+    second, ``init_nix``, wrapping ``nix::initNix``; it is gone because
+    everything ``initNix`` adds over ``initLibStore`` is a process-wide side
+    effect a library has no business imposing on its host -- a signal-handler
+    thread, ``SIGCHLD`` reset to ``SIG_DFL``, a ``SIGSEGV`` handler, an
+    ``NIX_SIG_MULTI_INT`` handler, ``umask(0022)``, a ``RLIMIT_NOFILE`` bump
+    and a static buffer installed on ``std::cerr``. Python has its own signal
+    machinery, and nothing in nanopynix ever called it.
 
     Enabling the features here, rather than leaving it to whoever opens a
     store, is load-bearing: Nix latches some of them at store *construction*
@@ -145,22 +153,10 @@ def init_nix(load_config: bool = True) -> None:
     trips ``assert(stmt.stmt)`` and aborts the process -- SIGABRT, not an
     exception, so there is nothing a caller could have caught.
 
-    Since ``initNix`` has to run before any libstore call anyway, doing it here
-    means every store nanopynix can open is constructed with the defaults
-    already in force. ``Session`` applies the same settings again through
-    ``runtime.initialize``; that is additive and harmless.
-    """
-    _init_nix_raw(load_config=load_config)
-    _enable_default_experimental_features()
-
-
-def init_libstore(load_config: bool = True) -> None:
-    """Initialize libstore only, then enable nanopynix's default experimental features.
-
-    The lighter of the two entry points, and it needs the same treatment as
-    ``init_nix`` for the same reason -- see that function for why the ordering
-    matters. Wrapping only one of them would leave the hazard reachable through
-    the other.
+    Since libstore has to be initialised before any libstore call anyway, doing
+    it here means every store nanopynix can open is constructed with the
+    defaults already in force. ``Session`` applies the same settings again
+    through ``runtime.initialize``; that is additive and harmless.
     """
     _init_libstore_raw(load_config=load_config)
     _enable_default_experimental_features()
@@ -258,8 +254,6 @@ __all__ = [
     "get_verbosity",
     "init_libexpr",
     "init_libstore",
-    "init_nix",
-    "init_plugins",
     "inproc",
     "input_from_attrs",
     "input_from_url",

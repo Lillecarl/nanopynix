@@ -288,7 +288,6 @@ known-first-party = [
   "nanopynix_expr",
   "nanopynix_fetchers",
   "nanopynix_flake",
-  "nanopynix_main",
   "nanopynix_store",
   "nanopynix_util",
 ]

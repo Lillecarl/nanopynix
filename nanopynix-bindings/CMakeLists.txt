@@ -61,7 +61,7 @@ endfunction()
 # NIX_*_LIBRARIES, so a target naming one Nix component ends up on a link line
 # naming five, and every one of them became a DT_NEEDED entry whether or not a
 # single symbol came from it. Measured on the 2.35 build before this was added,
-# five of the twenty-four edges were dead: main.so declared libnixexpr,
+# five of the twenty-four edges were dead: the old main.so declared libnixexpr,
 # libnixfetchers, libnixstore and libnixutil and used nothing from any of them;
 # errors.so declared libnixfetchers, flake.so libnixstore, likewise.
 #
@@ -82,17 +82,18 @@ endfunction()
 
 # --- the extension ---
 #
-# One target, seven translation units. The BUILD_* options that used to gate
-# each module individually are gone with the seven targets: they were pinned ON
-# in pyproject.toml and nothing else ever set them, and a partial build is not
-# meaningful now that the areas share a single module init.
+# One target, one translation unit per area. The BUILD_* options that used to
+# gate each module individually are gone with the separate targets: they were
+# pinned ON in pyproject.toml and nothing else ever set them, and a partial
+# build is not meaningful now that the areas share a single module init.
 #
-# The union of the include dirs and libraries the seven areas asked for
-# separately. --as-needed prunes whatever this build does not actually resolve
+# The union of the include dirs and libraries the areas asked for separately.
+# Deliberately absent alongside nix-cmd: nix-main. It existed only to bind
+# `initNix`/`initPlugins`, which nanopynix removed -- see the `main` area's
+# removal for why a library has no business installing signal handlers or
+# dlopening ABI-coupled C++ plugins named by someone's nix.conf. --as-needed prunes whatever this build does not actually resolve
 # a symbol from, so the union costs nothing but says plainly which Nix
 # components the bindings are built against.
-pkg_check_modules(NIX_MAIN REQUIRED nix-main)
-
 nanobind_add_module(_ext
   src/nanopynix_module.cpp
   src/nix_errors.cpp
@@ -102,13 +103,12 @@ nanobind_add_module(_ext
   src/nix_expr.cpp
   src/nix_fetchers.cpp
   src/nix_flake.cpp
-  src/nix_main.cpp
 )
 target_include_directories(_ext PRIVATE
-  ${NIX_MAIN_INCLUDE_DIRS} ${NIX_FLAKE_INCLUDE_DIRS} ${NIX_FETCHERS_INCLUDE_DIRS}
+  ${NIX_FLAKE_INCLUDE_DIRS} ${NIX_FETCHERS_INCLUDE_DIRS}
   ${NIX_EXPR_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS} ${NIX_UTIL_INCLUDE_DIRS})
 target_link_libraries(_ext PRIVATE
-  ${NIX_MAIN_LIBRARIES} ${NIX_FLAKE_LIBRARIES} ${NIX_FETCHERS_LIBRARIES}
+  ${NIX_FLAKE_LIBRARIES} ${NIX_FETCHERS_LIBRARIES}
   ${NIX_EXPR_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES})
 # nix-expr propagates bdw-gc. Its public thread-registration declarations are
 # intentionally visible only to consumers defining GC_THREADS. Only
@@ -121,7 +121,14 @@ nanopynix_link_as_needed(_ext)
 # --- Install rules ---
 install(TARGETS _ext LIBRARY DESTINATION nanopynix_bindings)
 # The whole directory, not a file list: it holds `__init__.py` plus one
-# republishing module per area now, and a list here would be a second place to
+# republishing module per area, and a list here would be a second place to
 # remember when an area is added.
+#
+# `*.pyi` is named explicitly because CMake's PATTERN is a suffix match rather
+# than a full-name glob, so `*.py` already drags `_ext.pyi` along -- better to
+# say so than to leave it looking accidental. Shipping it is right: the
+# installed tree has the real extension, and the stub gives a type checker the
+# submodule names the republishing modules read. The per-area `.pyi` files are
+# not here; postInstall generates those from the built module.
 install(DIRECTORY src/nanopynix_bindings/ DESTINATION nanopynix_bindings
-        FILES_MATCHING PATTERN "*.py")
+        FILES_MATCHING PATTERN "*.py" PATTERN "*.pyi")
