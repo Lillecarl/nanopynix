@@ -11,11 +11,11 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyio
 import pytest
 from nanopynix_bindings.store import BuildMode
 from nanopynix_proto.nix.common import LogLevel
@@ -832,10 +832,18 @@ async def test_shell_rejects_empty_command() -> None:
 
 
 async def test_shell_reports_launch_failure(monkeypatch: Any) -> None:
+    # Patches `anyio.open_process`, which is what `_shell` actually calls.
+    #
+    # This used to patch `asyncio.create_subprocess_shell` -- an implementation
+    # detail of anyio's asyncio backend, and one it stopped using in 4.14.2 in
+    # favour of `loop.subprocess_shell()`. The patch then intercepted nothing,
+    # the test really ran `echo hi`, and it failed on DID NOT RAISE rather than
+    # on anything about pynix. Patching the boundary the code under test calls
+    # is both the correct scope and immune to that happening again.
     async def _raise(*_args: object, **_kwargs: object) -> None:
         raise OSError("boom")
 
-    monkeypatch.setattr(asyncio, "create_subprocess_shell", _raise)
+    monkeypatch.setattr(anyio, "open_process", _raise)
 
     with pytest.raises(ReplRunError, match="cannot start shell"):
         await _shell("echo hi")
