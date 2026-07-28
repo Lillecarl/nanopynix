@@ -1,5 +1,43 @@
 # TODO
 
+# Deferred: a `nix run`-alike, so store binaries work against a relocated store
+
+`pynix`'s terranix dialect execs binaries straight out of a store path
+(`_terranix_schema.py`'s `tofu init` / `tofu providers schema -json`,
+`_tofu_core_schema.py`'s `tofu version -json` and its own tool). That is only
+correct when the store's physical root is `/`. This suite's Nix sessions run
+against relocated stores (`local://?root=...`, `unix://...?root=...`), where
+`build()` still reports an ordinary logical `/nix/store/...` path while the
+bytes land under the store's own root -- so the exec hits a path that need
+not exist. It went unnoticed because a developer machine usually has the same
+derivation in its host store already; a fresh CI runner does not, and there
+it fails as `FileNotFoundError` on a perfectly valid store path.
+`tests/pynix/conftest.py`'s `terranix_tofu_module` fixture is the stopgap: it
+realises the same derivations into the *host* store so the logical path
+resolves. Delete it when the real capability lands.
+
+The real fix is to expose a `nix run`-equivalent from nanopynix and route
+those four exec sites through it. Nix does handle this -- `execProgramInStore`
+re-execs under a private user+mount namespace with the real store bind-mounted
+over the logical store dir -- but it cannot be bound from the library:
+
+- It lives in `src/nix/run.cc`, part of the `nix` CLI binary, in every version
+  we build (checked 2.31, 2.34, git). It is in no `libnix*` component.
+- The diverted-store path works by `execve`ing *the nix binary itself* with
+  `argv[0] == "__run_in_chroot"` (`chrootHelperName`), dispatched from
+  `main.cc`. From CPython `getSelfExe()` is `python`, which has no such entry
+  point.
+- `unshare(CLONE_NEWUSER)` cannot be done from a multithreaded process, which
+  is precisely why Nix does the re-exec dance instead of unsharing in place.
+- It `execve`s: it replaces the process rather than spawning one.
+
+So the capability has to shell out to the `nix` CLI (`nix shell --store <uri>
+<path> -c <prog> <args>`), which means nanopynix gains a `nix` CLI runtime
+dependency it does not have today -- it currently only links the libraries.
+`Store.uri(with_params=True)` already exists, so the store side is in place.
+That runtime-dependency question is the reason this is deferred rather than
+bundled with the CI fixes.
+
 # Deferred: debatable-tier "magic value" findings
 The magic-values audit also turned up ~15 lower-confidence findings that
 were deliberately left alone in this pass (not clear violations, more a

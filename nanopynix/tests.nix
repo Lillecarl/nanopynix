@@ -4,7 +4,9 @@
   pythonSet,
   nix-cli,
   nixpkgs,
+  coreutils,
   gdb,
+  tofuCoreSchemaTool,
   version,
   tsanRuntime ? null,
 }:
@@ -46,7 +48,21 @@ in
   runtimeInputs = [
     pythonEnv
     nix-cli
+    # mktemp/wc/head/rm, for bounding the post-mortem backtrace below.
+    # writeShellApplication only *prepends* runtimeInputs to the ambient
+    # PATH, so without this the crash path would silently depend on the host
+    # having coreutils -- true on a GitHub runner, not something this runner
+    # should rely on.
+    coreutils
     gdb
+    # `pynix._lsp._tofu_core_schema` resolves `nanopynix-tofu-core-schema`
+    # off PATH, so every core (non-provider) meta-argument hover/completion
+    # needs it present. The dev shell and the released `pynix` app both
+    # already supply it; this runner did not, which is why those scenarios
+    # passed interactively and failed in CI -- `get_core_schema` catches the
+    # OSError and returns None, so the LSP answered "no schema" rather than
+    # erroring, and the tests read as a schema bug.
+    tofuCoreSchemaTool
   ];
   text = ''
     cd ${../.}
@@ -95,11 +111,37 @@ in
         core_file=''${core_files[0]:-}
         if [ -n "$core_file" ]; then
           echo "=== gdb post-mortem backtrace from $core_file ===" >&2
+          # Both limits exist because the crash this was built for is a stack
+          # overflow: the faulting thread's stack is tens of thousands of
+          # identical recursive frames, so an unbounded `thread apply all bt
+          # full` produced millions of lines and swamped the GitHub Actions
+          # log (and the uploaded artifact) with no added information.
+          #
+          # `bt $frames` rather than `bt`: the innermost frames identify a
+          # runaway recursion just as well as all of them do, and the repeat
+          # is the diagnosis. `bt` rather than `bt full`: this closure is
+          # stripped, so `full` only adds a "No symbol table info available."
+          # line per frame -- it multiplies the volume without adding detail.
+          # Raise NANOPYNIX_CORE_BT_FRAMES/_LINES to widen either when a crash
+          # genuinely needs more than the default.
+          frames="''${NANOPYNIX_CORE_BT_FRAMES:-64}"
+          max_lines="''${NANOPYNIX_CORE_BT_LINES:-2000}"
+          gdb_log=$(mktemp)
           # No explicit executable argument -- gdb resolves the exact binary
           # from the core file's own recorded path. Passing python's PATH
           # symlink here instead silently broke symbol/shared-library
           # resolution for every frame in a real CI crash.
-          gdb -q -batch -ex "thread apply all bt full" -ex quit -c "$core_file" >&2 || true
+          gdb -q -batch \
+            -ex "set pagination off" \
+            -ex "set print frame-arguments scalars" \
+            -ex "thread apply all bt $frames" \
+            -ex quit -c "$core_file" >"$gdb_log" 2>&1 || true
+          total_lines=$(wc -l <"$gdb_log")
+          head -n "$max_lines" "$gdb_log" >&2
+          if [ "$total_lines" -gt "$max_lines" ]; then
+            echo "=== $((total_lines - max_lines)) further backtrace lines suppressed (NANOPYNIX_CORE_BT_LINES=$max_lines) ===" >&2
+          fi
+          rm -f "$gdb_log"
         else
           echo "no core file found matching $core_glob -- check kernel.core_pattern" >&2
         fi

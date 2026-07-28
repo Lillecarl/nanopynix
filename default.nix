@@ -88,6 +88,13 @@ let
   # race without any behavior change for single-threaded use.
   emptyBindingsPatch = ./nix/patches/nix-thread-local-empty-bindings.patch;
 
+  # printValueAsJSON recurses without consulting max-call-depth on 2.31, so a
+  # cyclic value with no `outPath`/`__toString` to stop at overflows the C++
+  # stack and SIGSEGVs the process instead of raising -- and nanopynix reaches
+  # that function from `Value.to_python()`. Upstream's own one-line fix,
+  # already present from 2.34 on; see the patch header for the provenance.
+  valueToJsonCallDepthPatch = ./nix/patches/nix-2.31-value-to-json-call-depth.patch;
+
   # Which patches to apply to a given nix version's modular component set,
   # keyed by that version's own major.minor (e.g. "2.34"), with `default`
   # as the fallback for anything without its own entry (git's rolling
@@ -96,11 +103,17 @@ let
     default = [ emptyBindingsPatch ];
     "2.34" = [ emptyBindingsPatch ];
     "2.35" = [ emptyBindingsPatch ];
-    # 2.31's surrounding attr-set.cc/.hh source doesn't match
-    # emptyBindingsPatch's hunks (confirmed by trying), and it's the
-    # lowest-priority supported version, so it's left unpatched rather
-    # than broken -- revisit if/when 2.31 support is reconsidered.
-    "2.31" = [ ];
+    # 2.31 is the one version that gets neither the same list nor the
+    # default. emptyBindingsPatch is absent because 2.31's surrounding
+    # attr-set.cc/.hh source doesn't match its hunks (confirmed by trying),
+    # and 2.31 is the lowest-priority supported version, so it goes without
+    # that patch rather than with a broken one -- revisit if/when 2.31
+    # support is reconsidered.
+    #
+    # valueToJsonCallDepthPatch is 2.31-only in the other direction: 2.34+
+    # already carry it upstream, and applying it there would fail on the
+    # context it's trying to add.
+    "2.31" = [ valueToJsonCallDepthPatch ];
   };
 
   patchesFor = scope: nixPatches.${lib.versions.majorMinor scope.version} or nixPatches.default;
@@ -237,6 +250,10 @@ let
                   inherit (inputs) nixpkgs;
                   inherit tsanRuntime;
                   inherit (final) pythonSet;
+                  # The same tool the `pynix` app above puts on its PATH, for
+                  # the same reason -- the LSP tests drive the real handlers,
+                  # so they need it exactly as the released program does.
+                  inherit tofuCoreSchemaTool;
                 };
               };
 

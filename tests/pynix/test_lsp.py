@@ -548,8 +548,10 @@ async def test_hover_falls_back_to_the_last_error_free_parse(lsp_server: PynixLa
 
 async def test_hover_shows_provider_schema_description_for_a_resource_attribute(
     lsp_server: PynixLanguageServer,
+    terranix_tofu_module: tuple[str, str],
 ) -> None:
     """Hovering `byte_length` in `resource.random_id.suffix.byte_length = 4;` shows the real provider schema."""
+    del terranix_tofu_module  # requested for its side effect; see conftest
     uri = asset("terranix/modules/random.nix").as_uri()
     await _sync_document(lsp_server, uri)
 
@@ -565,8 +567,10 @@ async def test_hover_shows_provider_schema_description_for_a_resource_attribute(
 
 async def test_completion_lists_real_schema_attribute_names_for_a_resource_type(
     lsp_server: PynixLanguageServer,
+    terranix_tofu_module: tuple[str, str],
 ) -> None:
     """Completing after `resource.random_id.suffix.` lists the real schema's attribute names."""
+    del terranix_tofu_module  # requested for its side effect; see conftest
     uri = asset("terranix/modules/random.nix").as_uri()
     await _sync_document(lsp_server, uri)
 
@@ -581,8 +585,10 @@ async def test_completion_lists_real_schema_attribute_names_for_a_resource_type(
 
 async def test_hover_resolves_a_cross_resource_reference_inside_a_tfref_string(
     lsp_server: PynixLanguageServer,
+    terranix_tofu_module: tuple[str, str],
 ) -> None:
     """Hovering inside `lib.tfRef "random_id.suffix.hex"` resolves against `random_id`'s real schema."""
+    del terranix_tofu_module  # requested for its side effect; see conftest
     uri = asset("terranix/modules/null.nix").as_uri()
     await _sync_document(lsp_server, uri)
 
@@ -597,8 +603,10 @@ async def test_hover_resolves_a_cross_resource_reference_inside_a_tfref_string(
 
 async def test_completion_inside_a_tfref_string_lists_matching_schema_attribute_names(
     lsp_server: PynixLanguageServer,
+    terranix_tofu_module: tuple[str, str],
 ) -> None:
     """Completing mid-token inside `lib.tfRef "random_id.suffix.he"` lists matching schema attribute names."""
+    del terranix_tofu_module  # requested for its side effect; see conftest
     uri = asset("terranix/modules/null.nix").as_uri()
     await _sync_document(lsp_server, uri)
 
