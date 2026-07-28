@@ -318,9 +318,7 @@ class TestUnderlyingStoreFallthrough:
 
         assert isinstance(register_and_open(Delegating), nanopynix_store.Store)
 
-    def test_unimplemented_methods_reach_the_underlying_store(
-        self, store: Any, store_seeded_path: Any
-    ) -> None:
+    def test_unimplemented_methods_reach_the_underlying_store(self, store: Any, store_seeded_path: Any) -> None:
         """A store that implements nothing still answers, via the real one.
 
         Both assertions matter: ``is_valid_path`` would be ``False`` and
@@ -334,13 +332,12 @@ class TestUnderlyingStoreFallthrough:
         delegating = register_and_open(Delegating)
 
         assert delegating.is_valid_path(store_seeded_path) is True
-        assert delegating.query_path_info(store_seeded_path)["nar_size"] == (
-            store.query_path_info(store_seeded_path)["nar_size"]
+        assert (
+            delegating.query_path_info(store_seeded_path)["nar_size"]
+            == (store.query_path_info(store_seeded_path)["nar_size"])
         )
 
-    def test_an_implemented_method_wins_over_the_underlying_store(
-        self, store: Any, store_seeded_path: Any
-    ) -> None:
+    def test_an_implemented_method_wins_over_the_underlying_store(self, store: Any, store_seeded_path: Any) -> None:
         """Delegation is a fallback, not an override -- otherwise it is useless.
 
         The seeded path really is valid in the underlying store, so a ``False``
@@ -387,9 +384,7 @@ class TestUnderlyingStoreFallthrough:
 
         delegating = register_and_open(Delegating)
 
-        assert store_seeded_path.to_string() in [
-            p.split("/")[-1] for p in delegating.query_all_valid_paths()
-        ]
+        assert store_seeded_path.to_string() in [p.split("/")[-1] for p in delegating.query_all_valid_paths()]
 
 
 class TestStoreImplIsRequired:
@@ -467,7 +462,7 @@ class TestQueriesNoLongerAnswerForThePythonStore:
         assert list(store.query_substitutable_paths([path])) == []
 
     def test_all_valid_paths_reports_unsupported_rather_than_an_empty_store(self) -> None:
-        """"Empty" and "cannot enumerate" are different answers.
+        """ "Empty" and "cannot enumerate" are different answers.
 
         Returning ``[]`` made them indistinguishable to a caller. ``nix::Store``
         declares this ``unsupported`` (``store-api.hh:404`` on 2.34), which is
@@ -517,22 +512,16 @@ INVOCATIONS: dict[str, Callable[[Any], Any]] = {
     "query_path_from_hash_part": lambda s: s.query_path_from_hash_part("0" * 32),
     "query_referrers": lambda s: s.query_referrers(nanopynix_store.StorePath(BOGUS)),
     "query_valid_derivers": lambda s: s.query_valid_derivers(nanopynix_store.StorePath(BOGUS)),
-    "query_derivation_outputs": lambda s: s.query_derivation_outputs(
-        nanopynix_store.StorePath(BOGUS)
-    ),
+    "query_derivation_outputs": lambda s: s.query_derivation_outputs(nanopynix_store.StorePath(BOGUS)),
     "query_all_valid_paths": lambda s: s.query_all_valid_paths(),
-    "query_substitutable_paths": lambda s: s.query_substitutable_paths(
-        [nanopynix_store.StorePath(BOGUS)]
-    ),
+    "query_substitutable_paths": lambda s: s.query_substitutable_paths([nanopynix_store.StorePath(BOGUS)]),
     "add_temp_root": lambda s: s.add_temp_root(nanopynix_store.StorePath(BOGUS)),
     "ensure_path": lambda s: s.ensure_path(nanopynix_store.StorePath(BOGUS)),
     "optimise_store": lambda s: s.optimise_store(),
     "verify_store": lambda s: s.verify_store(False, False),
     # The bound `Store` takes one path here and the dispatched virtual takes a
     # set -- Nix declares both overloads and only the set one is virtual.
-    "compute_fs_closure": lambda s: s.compute_fs_closure(
-        nanopynix_store.StorePath(BOGUS), False, False, False
-    ),
+    "compute_fs_closure": lambda s: s.compute_fs_closure(nanopynix_store.StorePath(BOGUS), False, False, False),
     # `^*` rather than a bare path: a DerivedPath is a sum type, and a bare
     # `.drv` parses as "fetch this file" instead of "build it".
     "query_missing": lambda s: s.query_missing([f"/nix/store/{BOGUS}.drv^*"]),
@@ -685,9 +674,7 @@ class TestTheWholeDispatchableInterface:
     def test_every_dispatchable_name_is_a_method_on_store_impl(self) -> None:
         """A name C++ dispatches with no method to document it is unusable."""
         missing = [
-            name
-            for name in nanopynix.DISPATCHABLE_METHODS
-            if not callable(getattr(nanopynix.StoreImpl, name, None))
+            name for name in nanopynix.DISPATCHABLE_METHODS if not callable(getattr(nanopynix.StoreImpl, name, None))
         ]
 
         assert missing == []
@@ -754,15 +741,9 @@ class TestTheWholeDispatchableInterface:
         store = register_and_open(RecordingStore)
         path = nanopynix_store.StorePath(BOGUS)
 
-        assert store.query_referrers(path) == [
-            "/nix/store/11111111111111111111111111111111-ref"
-        ]
-        assert store.query_valid_derivers(path) == [
-            "/nix/store/22222222222222222222222222222222-d.drv"
-        ]
-        assert store.query_derivation_outputs(path) == [
-            "/nix/store/33333333333333333333333333333333-out"
-        ]
+        assert store.query_referrers(path) == ["/nix/store/11111111111111111111111111111111-ref"]
+        assert store.query_valid_derivers(path) == ["/nix/store/22222222222222222222222222222222-d.drv"]
+        assert store.query_derivation_outputs(path) == ["/nix/store/33333333333333333333333333333333-out"]
         assert store.query_all_valid_paths() == [f"/nix/store/{BOGUS}"]
         assert store.query_substitutable_paths([path]) == [f"/nix/store/{BOGUS}"]
         assert store.verify_store(False, False) is True
@@ -819,9 +800,7 @@ class TestTheWholeDispatchableInterface:
             def query_missing(self, targets: Iterable[str]) -> dict[str, Any]:
                 return {"will_build": [f"{BOGUS}.drv"]}
 
-        missing = register_and_open(KnowsOnlyWhatItWillBuild).query_missing(
-            [f"/nix/store/{BOGUS}.drv^*"]
-        )
+        missing = register_and_open(KnowsOnlyWhatItWillBuild).query_missing([f"/nix/store/{BOGUS}.drv^*"])
 
         assert missing["will_build"] == [f"/nix/store/{BOGUS}.drv"]
         assert missing["will_substitute"] == []
@@ -1110,14 +1089,11 @@ def outcome(call: Callable[[], Any]) -> tuple[str, Any]:
 DELEGATION_CHECKS: dict[str, Callable[[Any, Any], Any]] = {
     "is_valid_path_uncached": lambda s, p: s.is_valid_path(p),
     "query_path_info": lambda s, p: s.query_path_info(p)["nar_size"],
-    "query_path_from_hash_part": lambda s, p: str(
-        s.query_path_from_hash_part(p.to_string().split("-")[0])
-    ),
+    "query_path_from_hash_part": lambda s, p: str(s.query_path_from_hash_part(p.to_string().split("-")[0])),
     "query_referrers": lambda s, p: s.query_referrers(p),
     "query_valid_derivers": lambda s, p: s.query_valid_derivers(p),
     "query_derivation_outputs": lambda s, p: s.query_derivation_outputs(p),
-    "query_all_valid_paths": lambda s, p: p.to_string()
-    in [q.split("/")[-1] for q in s.query_all_valid_paths()],
+    "query_all_valid_paths": lambda s, p: p.to_string() in [q.split("/")[-1] for q in s.query_all_valid_paths()],
     "query_substitutable_paths": lambda s, p: s.query_substitutable_paths([p]),
     "add_temp_root": lambda s, p: s.add_temp_root(p),
     "ensure_path": lambda s, p: s.ensure_path(p),
@@ -1186,14 +1162,10 @@ class TestEveryOperationDelegates:
     """
 
     def test_the_delegation_table_covers_the_interface(self) -> None:
-        assert set(DELEGATION_CHECKS) | DELEGATION_UNCHECKED == set(
-            nanopynix.DISPATCHABLE_METHODS
-        )
+        assert set(DELEGATION_CHECKS) | DELEGATION_UNCHECKED == set(nanopynix.DISPATCHABLE_METHODS)
 
     @pytest.mark.parametrize("name", sorted(DELEGATION_CHECKS))
-    def test_the_answer_is_the_underlying_store_s_answer(
-        self, name: str, store: Any, store_seeded_path: Any
-    ) -> None:
+    def test_the_answer_is_the_underlying_store_s_answer(self, name: str, store: Any, store_seeded_path: Any) -> None:
         """Compared against the real store rather than a fixed expectation.
 
         What each operation returns for a seeded path is not the point and
@@ -1210,6 +1182,4 @@ class TestEveryOperationDelegates:
         delegating = register_and_open(Delegating)
         check = DELEGATION_CHECKS[name]
 
-        assert outcome(lambda: check(delegating, store_seeded_path)) == outcome(
-            lambda: check(store, store_seeded_path)
-        )
+        assert outcome(lambda: check(delegating, store_seeded_path)) == outcome(lambda: check(store, store_seeded_path))
