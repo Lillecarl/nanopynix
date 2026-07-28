@@ -209,12 +209,14 @@ let
               # Everything above the bindings is a pyproject.nix builders
               # package. The set is built once per Nix version and holds both
               # the built and the editable form of each project.
+              # No enableTsan/tsanRuntime: nothing in these pure-Python
+              # builds loads the instrumented extension, and preloading the
+              # TSAN runtime here only instrumented `uv` -- see the comment
+              # on the `nanopynix` override in that file.
               pyPackages = pkgs.callPackage ./nix/py-packages.nix {
                 inherit
                   ps
                   python
-                  enableTsan
-                  tsanRuntime
                   ;
                 root = ./.;
                 # The linked Nix version, so two builds of the same source
