@@ -1,4 +1,4 @@
-"""Do the init entry points enable the default features before a store can exist?
+"""Does the init entry point enable the default features before a store can exist?
 
 ``ca-derivations`` is one of nanopynix's defaults, and Nix treats it
 asymmetrically: ``LocalStore`` prepares its realisation SQL statements only if
@@ -8,9 +8,10 @@ dereferences those statements (``:1563``). Enabling it after a store already
 exists therefore trips ``assert(stmt.stmt)`` and takes the process down with
 SIGABRT -- no exception, nothing to catch, no traceback.
 
-``nanopynix.init_nix`` and ``nanopynix.init_libstore`` close that window by
-enabling the defaults themselves, so every store nanopynix can open is built
-with them already in force.
+``nanopynix.init_libstore`` closes that window by enabling the defaults itself,
+so every store nanopynix can open is built with them already in force. It used
+to have a sibling, ``init_nix``, and this file used to run each case against
+both; that entry point is gone, so there is one to check.
 
 These run in subprocesses on purpose. The pytest process enables the same
 features in a session-scoped autouse fixture before anything opens a store, so
@@ -43,8 +44,8 @@ _ABORT_SCRIPT = """
 import sys
 import nanopynix
 
-root, drv, entry = sys.argv[1], sys.argv[2], sys.argv[3]
-getattr(nanopynix, entry)(load_config=False)
+root, drv = sys.argv[1], sys.argv[2]
+nanopynix.init_libstore(load_config=False)
 store = nanopynix.open_store("local://" + root)
 nanopynix.enable_experimental_feature("ca-derivations")
 store.query_missing([drv])
@@ -56,21 +57,17 @@ async def _run_python(script: str, *args: str) -> CompletedProcess:
     return await run_process([sys.executable, "-c", script, *args])
 
 
-@pytest.mark.parametrize("entry", ["init_nix", "init_libstore"])
-async def test_init_entry_points_enable_the_default_experimental_features(entry: str) -> None:
-    """Both entry points, because wrapping only one leaves the hazard reachable."""
-    result = await _run_python(_REPORT_SCRIPT.format(entry=entry))
+async def test_init_entry_point_enables_the_default_experimental_features() -> None:
+    result = await _run_python(_REPORT_SCRIPT.format(entry="init_libstore"))
 
     assert result.returncode == 0, result.describe()
     enabled = set(result.stdout.split())
     assert set(DEFAULT_EXPERIMENTAL_FEATURES) <= enabled, (
-        f"{entry} left these defaults off: {set(DEFAULT_EXPERIMENTAL_FEATURES) - enabled}"
+        f"init_libstore left these defaults off: {set(DEFAULT_EXPERIMENTAL_FEATURES) - enabled}"
     )
 
 
-@pytest.mark.parametrize("entry", ["init_nix", "init_libstore"])
 async def test_a_store_opened_after_init_survives_enabling_ca_derivations(
-    entry: str,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
     """The abort this ordering exists to prevent, exercised end to end.
@@ -86,7 +83,7 @@ async def test_a_store_opened_after_init_survives_enabling_ca_derivations(
     if instantiate.returncode != 0:
         pytest.fail(f"nix-instantiate {instantiate.describe()}")
 
-    result = await _run_python(_ABORT_SCRIPT, str(root), instantiate.stdout.strip(), entry)
+    result = await _run_python(_ABORT_SCRIPT, str(root), instantiate.stdout.strip())
 
     assert result.returncode == 0, f"-6 is the SIGABRT this guards against; {result.describe()}"
     assert "SURVIVED" in result.stdout, result.describe()

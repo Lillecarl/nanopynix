@@ -29,4 +29,3 @@ void nanopynix_bind_store(nanobind::module_ &m);
 void nanopynix_bind_expr(nanobind::module_ &m);
 void nanopynix_bind_fetchers(nanobind::module_ &m);
 void nanopynix_bind_flake(nanobind::module_ &m);
-void nanopynix_bind_main(nanobind::module_ &m);

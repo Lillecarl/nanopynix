@@ -362,7 +362,7 @@ def eval_state(store: Any, init_expr: object, _register_test_primops: object) ->
 def _enable_default_experimental_features() -> None:  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     """Enable nanopynix's default experimental features before any store is opened.
 
-    ``nanopynix.init_nix``/``init_libstore`` already do this, for a reason
+    ``nanopynix.init_libstore`` already does this, for a reason
     documented there: enabling ``ca-derivations`` *after* a ``LocalStore`` was
     constructed without it aborts the process (SIGABRT, not a catchable error).
     This fixture is not a second remedy, it is an ordering guarantee -- pytest

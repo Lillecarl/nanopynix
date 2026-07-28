@@ -190,14 +190,20 @@ class NixSettings(_NixConfigModel):
     narinfo_cache_negative_ttl: int | None = None
     narinfo_cache_positive_ttl: int | None = None
     netrc_file: str | None = None
-    # No nix_shell_* here. `nix-shell-always-looks-for-shell-nix` and
-    # `nix-shell-shebang-arguments-relative-to-script` are libcmd's
-    # CompatibilitySettings, and nanopynix stopped linking libcmd. They are
-    # also the two settings in the whole surface that could not mean anything
-    # here even if they were registered: both describe how the `nix-shell`
-    # command interprets its arguments, and a library binding has no
-    # `nix-shell`. check_settings_model_drift() is what noticed.
-    plugin_files: list[str] | None = None
+    # Three settings are deliberately absent from this block, all of them
+    # registered by Nix components nanopynix stopped linking, and all three
+    # meaningless to a library even if they were registered.
+    # `check_settings_model_drift()` is what notices, which is what it is for.
+    #
+    # `nix-shell-always-looks-for-shell-nix` and
+    # `nix-shell-shebang-arguments-relative-to-script`: libcmd's
+    # CompatibilitySettings. Both describe how the `nix-shell` *command*
+    # interprets its arguments, and a library binding has no `nix-shell`.
+    #
+    # `plugin-files`: libmain's PluginSettings. It names C++ DSOs for
+    # `initPlugins` to dlopen into the process, which must be ABI-compatible
+    # with the exact Nix build; nanopynix does not bind `initPlugins`, and
+    # `register_primop` is how you extend this evaluator.
     post_build_hook: str | None = None
     pre_build_hook: str | None = None
     preallocate_contents: bool | None = None

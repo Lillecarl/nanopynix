@@ -21,4 +21,3 @@ store: ModuleType
 expr: ModuleType
 fetchers: ModuleType
 flake: ModuleType
-main: ModuleType

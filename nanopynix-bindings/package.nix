@@ -7,10 +7,8 @@
   nix-util,
   nix-store,
   nix-expr,
-  nix-cmd,
   nix-fetchers,
   nix-flake,
-  nix-main,
   cmake,
   ninja,
   pyproject-nix,
@@ -93,10 +91,8 @@ buildPythonPackage (
           nix-util
           nix-store
           nix-expr
-          nix-cmd
           nix-fetchers
           nix-flake
-          nix-main
         ];
       in
       lib.unique ([ nanobind2_13 ] ++ recdep ++ (recursivePropagation recdep));
@@ -141,7 +137,7 @@ buildPythonPackage (
     # says so and exits rather than guessing, which is how this was found.
     postInstall = ''
       _site="$out/${python.sitePackages}"
-      for mod in errors util store expr fetchers flake main; do
+      for mod in errors util store expr fetchers flake; do
         _pat=""
         if [ -f "src/$mod.pat" ]; then
           _pat="-p src/$mod.pat"
@@ -159,7 +155,6 @@ buildPythonPackage (
       "nanopynix_bindings.expr"
       "nanopynix_bindings.fetchers"
       "nanopynix_bindings.flake"
-      "nanopynix_bindings.main"
     ];
 
     meta = attrs.meta // {

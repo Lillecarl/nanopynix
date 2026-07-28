@@ -25,8 +25,9 @@ logger = logging.getLogger(__name__)
 # 64 MiB, per the comment there.) Nix has no `stack-size` setting to read it
 # from, so it is a constant here too.
 #
-# Note *where* Nix calls it: the CLI's `main()`, not `initNix()`. We call
-# `initNix()` and so never inherited this, which is the whole bug -- Nix's
+# Note *where* Nix calls it: the CLI's `main()`, not `initNix()`, so no
+# embedder of libnix inherits it however it initialises -- which is the whole
+# bug. Nix's
 # default `max-call-depth` of 10000 needs roughly 27 MB of C stack, so on the
 # 8 MiB a thread inherits from `RLIMIT_STACK` the stack is exhausted long
 # before the counter fires and `let f = n: f (n + 1); in f 0` segfaults

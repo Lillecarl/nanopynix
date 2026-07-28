@@ -70,7 +70,4 @@ NB_MODULE(_ext, m) {
     // now, where it used to be duplicated per shared object.
     auto flake = area(m, "flake");
     nanopynix_bind_flake(flake);
-
-    auto main = area(m, "main");
-    nanopynix_bind_main(main);
 }
