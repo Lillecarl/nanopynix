@@ -14,6 +14,7 @@
   cmake,
   ninja,
   pyproject-nix,
+  pyprojectVersionPatchHook,
   version,
   enableTsan ? false,
   tsanRuntime ? null,
@@ -39,7 +40,21 @@ in
 buildPythonPackage (
   attrs
   // {
-    version = "${attrs.version}-${version}";
+    # PEP 440 local version identifier: `<our version>+nix<nix version>`, so
+    # two builds of the same source against different Nix components stay
+    # distinguishable *and* parse. The old `-` form did not -- `0.1.0-2.35.1`
+    # is not a version at all under PEP 440 (a `-` separator is only legal
+    # before a post/pre/dev segment, so `0.1.0-2` parses as `0.1.0.post2` and
+    # `0.1.0-2.35.1` is rejected outright). That went unnoticed until nixpkgs
+    # added pythonMetadataCheckHook, which parses both the derivation version
+    # and the one in `.dist-info/METADATA` with `packaging`.
+    #
+    # The local segment is the right place for it: it keeps the public
+    # version `0.1.0` (so dependency specifiers on this project still work),
+    # it orders the way you would want between Nix versions, and PEP 440
+    # normalisation accepts the git scope's version too
+    # (`2.35pre20260619_f8bb823a` -> local `nix2.35pre20260619.f8bb823a`).
+    version = "${attrs.version}+nix${version}";
 
     src = ./.;
 
@@ -50,6 +65,13 @@ buildPythonPackage (
 
     nativeBuildInputs = [
       pkg-config
+      # Rewrites `project.version` in pyproject.toml to the derivation's
+      # `version` before the build reads it, so the wheel's METADATA carries
+      # the `+nix<version>` local segment too. Without it the build is still
+      # correct but pythonMetadataCheckHook fails the derivation, because
+      # scikit-build-core would emit the unsuffixed `0.1.0` from the checkout
+      # while the derivation claims the suffixed one.
+      pyprojectVersionPatchHook
     ];
     # nix's modular components don't propagatedBuildInputs their own C
     # library deps (blake3, boost, libarchive, libsodium, ...) to consumers,
