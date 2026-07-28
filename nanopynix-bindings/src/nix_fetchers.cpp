@@ -1,4 +1,6 @@
 #include <nanobind/nanobind.h>
+
+#include "nanopynix_modules.hh"
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/map.h>
@@ -92,7 +94,7 @@ static void bind_input(nb::module_ &m) {
 
 // =========================================================================
 
-NB_MODULE(fetchers, m) {
+void nanopynix_bind_fetchers(nb::module_ &m) {
     m.doc() = "nanopynix: Nix fetchers bindings (Input, fetch)";
 
     m.def("input_from_url", &input_from_url, "url"_a,

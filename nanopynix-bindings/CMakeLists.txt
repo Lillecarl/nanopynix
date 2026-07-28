@@ -19,8 +19,8 @@ pkg_check_modules(NIX_UTIL REQUIRED nix-util)
 pkg_check_modules(NIX_STORE REQUIRED nix-store)
 pkg_check_modules(NIX_EXPR REQUIRED nix-expr)
 pkg_check_modules(NIX_FETCHERS REQUIRED nix-fetchers)
-# nix-flake, so builtins.getFlake is registered on every EvalState the expr
-# module constructs (see nix_expr.cpp's evalSettingsConfigurators call).
+# nix-flake, so builtins.getFlake is registered on every EvalState (see
+# nix_flake.cpp's evalSettingsConfigurators call).
 pkg_check_modules(NIX_FLAKE REQUIRED nix-flake)
 
 # Deliberately absent: nix-cmd. The only symbol nanopynix ever took from it was
@@ -80,124 +80,48 @@ function(nanopynix_link_as_needed target)
   target_link_options(${target} PRIVATE "LINKER:--as-needed")
 endfunction()
 
-option(BUILD_UTIL     "Build nanopynix_util"     ON)
-option(BUILD_STORE    "Build nanopynix_store"    ON)
-option(BUILD_EXPR     "Build nanopynix_expr"     ON)
-option(BUILD_FETCHERS "Build nanopynix_fetchers" ON)
-option(BUILD_FLAKE    "Build nanopynix_flake"    ON)
-option(BUILD_MAIN     "Build nanopynix_main"     ON)
+# --- the extension ---
+#
+# One target, seven translation units. The BUILD_* options that used to gate
+# each module individually are gone with the seven targets: they were pinned ON
+# in pyproject.toml and nothing else ever set them, and a partial build is not
+# meaningful now that the areas share a single module init.
+#
+# The union of the include dirs and libraries the seven areas asked for
+# separately. --as-needed prunes whatever this build does not actually resolve
+# a symbol from, so the union costs nothing but says plainly which Nix
+# components the bindings are built against.
+pkg_check_modules(NIX_MAIN REQUIRED nix-main)
 
-# --- nanopynix_errors ---
-# Owns every Nix exception class and the single translator that dispatches
-# them (src/nix_errors.cpp explains why they must stay in one translation
-# unit). Needs expr+store+util headers for the type definitions and their
-# libraries for the RTTI the catch chain dispatches on.
-if(BUILD_EXPR)
-  nanobind_add_module(errors src/nix_errors.cpp)
-  target_include_directories(errors PRIVATE
-    ${NIX_EXPR_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS} ${NIX_UTIL_INCLUDE_DIRS})
-  target_link_libraries(errors PRIVATE
-    ${NIX_EXPR_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES})
-  target_compile_options(errors PRIVATE -std=c++23)
-  nanopynix_target_uses_nix_compat(errors)
-  nanopynix_link_as_needed(errors)
-endif()
-
-# --- nanopynix_util ---
-if(BUILD_UTIL)
-  nanobind_add_module(util src/nix_util.cpp)
-  target_include_directories(util PRIVATE ${NIX_UTIL_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS})
-  target_link_libraries(util PRIVATE ${NIX_UTIL_LIBRARIES} ${NIX_STORE_LIBRARIES})
-  target_compile_options(util PRIVATE -std=c++23)
-  nanopynix_target_uses_nix_compat(util)
-  nanopynix_link_as_needed(util)
-endif()
-
-# --- nanopynix_store ---
-if(BUILD_STORE)
-  nanobind_add_module(store src/nix_store.cpp src/py_store_impl.cpp)
-  target_include_directories(store PRIVATE ${NIX_STORE_INCLUDE_DIRS} ${NIX_UTIL_INCLUDE_DIRS})
-  target_link_libraries(store PRIVATE ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES})
-  target_compile_options(store PRIVATE -std=c++23)
-  nanopynix_target_uses_nix_compat(store)
-  nanopynix_link_as_needed(store)
-endif()
-
-# --- nanopynix_expr ---
-if(BUILD_EXPR)
-  nanobind_add_module(expr src/nix_expr.cpp)
-  target_include_directories(expr PRIVATE
-    ${NIX_EXPR_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS} ${NIX_UTIL_INCLUDE_DIRS}
-    ${NIX_FETCHERS_INCLUDE_DIRS} ${NIX_FLAKE_INCLUDE_DIRS})
-  target_link_libraries(expr PRIVATE
-    ${NIX_EXPR_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES}
-    ${NIX_FETCHERS_LIBRARIES} ${NIX_FLAKE_LIBRARIES})
-  # nix-expr propagates bdw-gc. Its public thread-registration declarations
-  # are intentionally visible only to consumers defining GC_THREADS.
-  target_compile_definitions(expr PRIVATE GC_THREADS)
-  target_compile_options(expr PRIVATE -std=c++23)
-  nanopynix_target_uses_nix_compat(expr)
-  nanopynix_link_as_needed(expr)
-endif()
-
-# --- nanopynix_fetchers ---
-if(BUILD_FETCHERS)
-  nanobind_add_module(fetchers src/nix_fetchers.cpp)
-  target_include_directories(fetchers PRIVATE
-    ${NIX_FETCHERS_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS} ${NIX_UTIL_INCLUDE_DIRS})
-  target_link_libraries(fetchers PRIVATE
-    ${NIX_FETCHERS_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES})
-  target_compile_options(fetchers PRIVATE -std=c++23)
-  nanopynix_target_uses_nix_compat(fetchers)
-  nanopynix_link_as_needed(fetchers)
-endif()
-
-# --- nanopynix_flake ---
-if(BUILD_FLAKE)
-  nanobind_add_module(flake src/nix_flake.cpp)
-  target_include_directories(flake PRIVATE
-    ${NIX_FLAKE_INCLUDE_DIRS} ${NIX_EXPR_INCLUDE_DIRS}
-    ${NIX_FETCHERS_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS} ${NIX_UTIL_INCLUDE_DIRS})
-  target_link_libraries(flake PRIVATE
-    ${NIX_FLAKE_LIBRARIES} ${NIX_EXPR_LIBRARIES}
-    ${NIX_FETCHERS_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES})
-  target_compile_options(flake PRIVATE -std=c++23)
-  nanopynix_target_uses_nix_compat(flake)
-  nanopynix_link_as_needed(flake)
-endif()
-
-# --- nanopynix_main ---
-if(BUILD_MAIN)
-  pkg_check_modules(NIX_MAIN REQUIRED nix-main)
-  nanobind_add_module(main src/nix_main.cpp)
-  target_include_directories(main PRIVATE ${NIX_MAIN_INCLUDE_DIRS})
-  target_link_libraries(main PRIVATE ${NIX_MAIN_LIBRARIES})
-  target_compile_options(main PRIVATE -std=c++23)
-  nanopynix_target_uses_nix_compat(main)
-  nanopynix_link_as_needed(main)
-endif()
+nanobind_add_module(_ext
+  src/nanopynix_module.cpp
+  src/nix_errors.cpp
+  src/nix_util.cpp
+  src/nix_store.cpp
+  src/py_store_impl.cpp
+  src/nix_expr.cpp
+  src/nix_fetchers.cpp
+  src/nix_flake.cpp
+  src/nix_main.cpp
+)
+target_include_directories(_ext PRIVATE
+  ${NIX_MAIN_INCLUDE_DIRS} ${NIX_FLAKE_INCLUDE_DIRS} ${NIX_FETCHERS_INCLUDE_DIRS}
+  ${NIX_EXPR_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS} ${NIX_UTIL_INCLUDE_DIRS})
+target_link_libraries(_ext PRIVATE
+  ${NIX_MAIN_LIBRARIES} ${NIX_FLAKE_LIBRARIES} ${NIX_FETCHERS_LIBRARIES}
+  ${NIX_EXPR_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES})
+# nix-expr propagates bdw-gc. Its public thread-registration declarations are
+# intentionally visible only to consumers defining GC_THREADS. Only
+# src/nix_expr.cpp includes <gc/gc.h>, but the define is per-target.
+target_compile_definitions(_ext PRIVATE GC_THREADS)
+target_compile_options(_ext PRIVATE -std=c++23)
+nanopynix_target_uses_nix_compat(_ext)
+nanopynix_link_as_needed(_ext)
 
 # --- Install rules ---
-if(BUILD_EXPR)
-  install(TARGETS errors LIBRARY DESTINATION nanopynix_bindings)
-endif()
-if(BUILD_UTIL)
-  install(TARGETS util LIBRARY DESTINATION nanopynix_bindings)
-endif()
-if(BUILD_STORE)
-  install(TARGETS store LIBRARY DESTINATION nanopynix_bindings)
-endif()
-if(BUILD_EXPR)
-  install(TARGETS expr LIBRARY DESTINATION nanopynix_bindings)
-endif()
-if(BUILD_FETCHERS)
-  install(TARGETS fetchers LIBRARY DESTINATION nanopynix_bindings)
-endif()
-if(BUILD_FLAKE)
-  install(TARGETS flake LIBRARY DESTINATION nanopynix_bindings)
-endif()
-if(BUILD_MAIN)
-  install(TARGETS main LIBRARY DESTINATION nanopynix_bindings)
-endif()
-
-install(FILES src/nanopynix_bindings/__init__.py DESTINATION nanopynix_bindings)
+install(TARGETS _ext LIBRARY DESTINATION nanopynix_bindings)
+# The whole directory, not a file list: it holds `__init__.py` plus one
+# republishing module per area now, and a list here would be a second place to
+# remember when an area is added.
+install(DIRECTORY src/nanopynix_bindings/ DESTINATION nanopynix_bindings
+        FILES_MATCHING PATTERN "*.py")

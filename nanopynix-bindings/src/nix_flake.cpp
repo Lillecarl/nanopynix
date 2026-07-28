@@ -1,6 +1,8 @@
 #include <filesystem>
 
 #include <nanobind/nanobind.h>
+
+#include "nanopynix_modules.hh"
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/optional.h>
@@ -242,7 +244,7 @@ static void bind_locked_flake(nb::module_ &m) {
 
 // =========================================================================
 
-NB_MODULE(flake, m) {
+void nanopynix_bind_flake(nb::module_ &m) {
     m.doc() = "nanopynix: Nix flake bindings (FlakeRef, lockFlake, callFlake)";
 
     // Register builtins.getFlake on every EvalState by configuring its

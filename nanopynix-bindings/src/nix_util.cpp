@@ -1,4 +1,6 @@
 #include <nanobind/nanobind.h>
+
+#include "nanopynix_modules.hh"
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/map.h>
@@ -218,7 +220,7 @@ static int get_verbosity() {
     return (int) nix::verbosity;
 }
 
-NB_MODULE(util, m) {
+void nanopynix_bind_util(nb::module_ &m) {
     m.doc() = "nanopynix: Nix util bindings (settings, init)";
 
     m.def("init_libstore", &nix::initLibStore, nb::call_guard<nb::gil_scoped_release>(),

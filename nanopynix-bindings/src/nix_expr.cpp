@@ -1,4 +1,6 @@
 #include <nanobind/nanobind.h>
+
+#include "nanopynix_modules.hh"
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/optional.h>
@@ -1542,20 +1544,16 @@ static void exit_evaluator_thread() {
 
 // =========================================================================
 
-NB_MODULE(expr, m) {
+void nanopynix_bind_expr(nb::module_ &m) {
     m.doc() = "nanopynix: Nix expr bindings (EvalState, Value)";
 
-    // Register builtins.getFlake on every EvalState constructed through this
-    // module by configuring its EvalSettings with flake primops -- mirrors
-    // nix_flake.cpp's own registration. PyEvalState::evalSettingsConfigurators()
-    // is a function-local static, so each nanobind module (.so) that includes
-    // py_eval.hh gets its own copy; nix_flake.cpp's registration alone doesn't
-    // reach EvalStates built via this module, hence the duplicate call here.
-    PyEvalState::evalSettingsConfigurators().push_back(
-        [](nix::EvalSettings &es) {
-            static nix::flake::Settings flakeSettings;
-            flakeSettings.configureEvalSettings(es);
-        });
+    // No flake-primop registration here. There used to be one, duplicating
+    // nix_flake.cpp's, because PyEvalState::evalSettingsConfigurators() is a
+    // function-local static in a header and each hidden-visibility .so
+    // therefore got its own copy -- so nix_flake.cpp's registration did not
+    // reach an EvalState constructed through this module. There is one shared
+    // object now (nanopynix_modules.hh), so there is one vector, and the
+    // registration nix_flake.cpp already does covers every EvalState.
 
     m.def("init_libexpr", []() {
         nix::initGC();

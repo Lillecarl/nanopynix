@@ -20,9 +20,3 @@ Homepage = "https://github.com/lillecarl/nanopynix"
 [tool.scikit-build]
 minimum-version = "build-system.requires"
 wheel.platlib = false
-cmake.define.BUILD_UTIL = "ON"
-cmake.define.BUILD_STORE = "ON"
-cmake.define.BUILD_EXPR = "ON"
-cmake.define.BUILD_FETCHERS = "ON"
-cmake.define.BUILD_FLAKE = "ON"
-cmake.define.BUILD_MAIN = "ON"
