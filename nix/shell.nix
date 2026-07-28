@@ -18,7 +18,7 @@ let
   # The docs toolchain goes *into* that venv, via pynix's `docs` extra, rather
   # than onto PATH beside it: `sphinx-build` has to import what it documents,
   # and a second Python environment would have its own `sys.path` without it.
-  devEnv = import ./dev-env.nix {
+  pythonEnv = import ./dev-env.nix {
     inherit editablePythonSet;
     extraSpec = {
       pynix = [
@@ -35,7 +35,7 @@ mkShell {
   '';
 
   packages = [
-    devEnv.pythonEnv
+    pythonEnv
     pyright
     ruff
     nixfmt

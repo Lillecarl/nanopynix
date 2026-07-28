@@ -51,9 +51,6 @@ let
     lib.isDerivation pkg && pkg ? pythonModule && !(lib.hasPrefix "python3" (pkg.pname or pkg.name));
 
   propagatedOf = pkg: lib.filter isPythonModule (pkg.propagatedBuildInputs or [ ]);
-in
-rec {
-  inherit normalize nameOf isPythonModule;
 
   /*
     Every nixpkgs Python package reachable from `roots` by propagation,
@@ -140,6 +137,11 @@ rec {
         '';
       });
 
+in
+# Four entry points, all of them used: two package-set constructors, the
+# renderer wrapper each project goes through, and the roots reader that seeds
+# a set. Everything above is internal to those.
+{
   /*
     The nixpkgs packages a set of our own projects depend on, read out of
     their pyproject.toml files.
@@ -151,12 +153,12 @@ rec {
     a build we are in the middle of replacing. Reading the declarations is
     both acyclic and closer to the truth.
 
-    `exclude` names our own projects: they are supplied by the overlay, not
-    by nixpkgs, so they must not be looked up here. Everything else is
-    resolved against `python.pkgs`, which is where a name is expected to be
-    resolvable -- an unresolvable one is a real error and says so, rather
-    than being silently dropped and reappearing as an import failure inside
-    a venv.
+    The projects' own names are never looked up: a project is supplied by the
+    overlay, not by nixpkgs, and they depend on each other. `exclude` is for
+    anything *else* the overlay provides. Everything remaining is resolved
+    against `python.pkgs`, which is where a name is expected to be resolvable
+    -- an unresolvable one is a real error and says so, rather than being
+    silently dropped and reappearing as an import failure inside a venv.
 
     Type: nixpkgsRootsFor :: AttrSet -> [derivation]
   */
@@ -178,7 +180,7 @@ rec {
           ++ lib.concatLists (lib.attrValues dependencies.extras)
         );
 
-      wanted = lib.subtractLists (map normalize exclude) (
+      wanted = lib.subtractLists (map normalize (exclude ++ map baseNameOf projectRoots)) (
         lib.unique (lib.concatMap declaredNames projectRoots)
       );
     in

@@ -135,6 +135,10 @@ let
   };
 in
 {
+  # The project directories, for `nixpkgsRootsFor`. Derived from `projects`
+  # rather than written out again, so adding a project is one edit.
+  projectRoots = lib.mapAttrsToList (name: _: root + "/${name}") projects;
+
   # The overlay: every project built normally.
   built =
     pySelf: _pyPrev:
