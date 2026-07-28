@@ -74,6 +74,14 @@ in
     cd ${../.}
     export PYTHONNOUSERSITE=1
     export NIX_PATH=nixpkgs=${nixpkgs}
+    # This runner is the gate, so it always takes the faithful path: every
+    # pynix command opens its own worker, store and evaluator, exactly as the
+    # real CLI does. The dev-shell default shares them across commands
+    # (tests/pynix/_shared_sessions.py) -- ~25% faster on tests/pynix, but by
+    # construction blind to anything that needs a command to get a *fresh*
+    # process, store handle or evaluator. That trade belongs in the local
+    # edit-run loop, not in the run that decides whether a change is good.
+    export NANOPYNIX_TEST_FAITHFUL_SESSIONS=1
   ''
   + lib.optionalString (tsanRuntime != null) ''
     # ThreadSanitizer's runtime must be loaded before any other allocation in

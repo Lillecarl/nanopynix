@@ -30,6 +30,7 @@ from structlog.exceptions import DropEvent
 
 import pynix
 from pynix import Pynix
+from tests.pynix._shared_sessions import FAITHFUL_SESSIONS_ENV_VAR, SharedSessions
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Generator, Iterator
@@ -390,6 +391,24 @@ def pynix_live_log(
     with contextlib.suppress(RuntimeError, ValueError):
         faulthandler.unregister(signal.SIGUSR2)
     stack_file.close()
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def _shared_pynix_sessions() -> (  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
+    AsyncIterator[None]
+):
+    """Share one Nix session/store/evaluator across pynix commands, unless CI
+    asked for the faithful per-command path -- see tests/pynix/_shared_sessions.py."""
+    if os.environ.get(FAITHFUL_SESSIONS_ENV_VAR):
+        yield
+        return
+    shared = SharedSessions()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        shared.install(monkeypatch)
+        try:
+            yield
+        finally:
+            await shared.aclose()
 
 
 @pytest.fixture(autouse=True)
