@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pynix._util import _forward_nix_logs
+from pynix._util import _forward_nix_logs, _LogActivity
 
 from nanopynix import LogEvent
 
@@ -39,8 +39,14 @@ async def test_nix_log_forwarder_skips_empty_activity_events(monkeypatch: Any) -
 
     monkeypatch.setattr("pynix._util.structlog.get_logger", get_logger)
 
-    await _forward_nix_logs(_Session(), print_build_logs=False)
+    activity = _LogActivity()
+    await _forward_nix_logs(_Session(), print_build_logs=False, activity=activity)
 
     assert logger.calls == [
         ("info", ("nix log",), {"message": "useful message", "action": "msg", "request_id": 0, "result_type": None})
     ]
+    # The exit drain stops once this counter stops moving, so it has to count
+    # every event the stream produced -- including the two this forwarder
+    # filters out. Counting only logged events would let a burst of skipped
+    # ones look like a quiet stream and cut the drain short.
+    assert activity.count == 3
