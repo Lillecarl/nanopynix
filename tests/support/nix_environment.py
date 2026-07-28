@@ -18,6 +18,7 @@ import anyio
 import pytest
 
 import nanopynix
+from nanopynix.settings import DEFAULT_EXPERIMENTAL_FEATURES
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
@@ -191,6 +192,27 @@ async def _start_daemon(root: Path) -> _Daemon:
             "--option",
             "require-drop-supplementary-groups",
             "false",
+            # Stated explicitly, from the same tuple the client uses, because
+            # otherwise this daemon reads the *host's* nix.conf for them. The
+            # client is already hermetic (`load_config=False` plus
+            # `NixSettings.experimental_features`), so leaving the daemon to
+            # the host makes the pair disagree on any host that enables a
+            # different set: `ca-derivations` is in `/etc/nix/nix.conf` on a
+            # typical NixOS dev box but not on a GitHub runner, where
+            # install-nix-action writes only "nix-command flakes" -- which is
+            # exactly why `test_*_read_derivation_keeps_nested_input_drvs`
+            # passed locally and failed in CI, on the daemon backend alone.
+            # A command-line --option outranks any config file, so this is
+            # deterministic wherever the suite runs.
+            #
+            # Deliberately narrow: substituters are NOT pinned here, so this
+            # daemon keeps inheriting the host's (the local daemon socket, a
+            # cachix cache in CI, ...). Substitution is the one host coupling
+            # these hermetic stores are meant to keep -- see
+            # `NixTestEnvironment.settings`.
+            "--option",
+            "experimental-features",
+            " ".join(DEFAULT_EXPERIMENTAL_FEATURES),
             env=daemon_environment,
             start_new_session=True,
             preexec_fn=_die_with_parent,
