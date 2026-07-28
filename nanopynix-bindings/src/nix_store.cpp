@@ -1,4 +1,6 @@
 #include <nanobind/nanobind.h>
+
+#include "nanopynix_modules.hh"
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/optional.h>
@@ -842,7 +844,7 @@ static void bind_store(nb::module_ &m) {
 
 // =========================================================================
 
-NB_MODULE(store, m) {
+void nanopynix_bind_store(nb::module_ &m) {
     m.doc() = "nanopynix: Nix store bindings (StorePath, Store, build)";
 
     nb::enum_<nix::BuildMode>(m, "BuildMode")

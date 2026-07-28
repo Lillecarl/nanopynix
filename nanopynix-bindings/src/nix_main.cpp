@@ -1,12 +1,14 @@
 #include <nanobind/nanobind.h>
 
+#include "nanopynix_modules.hh"
+
 #include <nix/main/shared.hh>
 #include <nix/main/plugin.hh>
 
 namespace nb = nanobind;
 using namespace nb::literals;
 
-NB_MODULE(main, m) {
+void nanopynix_bind_main(nb::module_ &m) {
     m.doc() = "nanopynix: Nix main bindings (initNix)";
 
     m.def("init_nix", &nix::initNix, nb::call_guard<nb::gil_scoped_release>(),

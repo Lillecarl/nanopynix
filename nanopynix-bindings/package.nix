@@ -131,6 +131,14 @@ buildPythonPackage (
       LD_PRELOAD = tsanRuntime;
     };
 
+    # One `.pyi` per area, exactly as when each area was its own extension
+    # module -- so `nanopynix_bindings.expr` still resolves to `expr.pyi` for a
+    # type checker even though there is no `expr` file on disk any more. A stub
+    # with no source counterpart is fine in a `py.typed` package.
+    #
+    # `-o <file>` rather than `-O <dir>`: stubgen infers the output name from
+    # the module's `__file__`, and a submodule of an extension has none. It
+    # says so and exits rather than guessing, which is how this was found.
     postInstall = ''
       _site="$out/${python.sitePackages}"
       for mod in errors util store expr fetchers flake main; do
@@ -139,7 +147,7 @@ buildPythonPackage (
           _pat="-p src/$mod.pat"
         fi
         PYTHONPATH="$_site:$PYTHONPATH" \
-          ${python}/bin/python -m nanobind.stubgen -m "nanopynix_bindings.$mod" $_pat -O "$_site/nanopynix_bindings"
+          ${python}/bin/python -m nanobind.stubgen -m "nanopynix_bindings.$mod" $_pat -o "$_site/nanopynix_bindings/$mod.pyi"
       done
       touch "$_site/nanopynix_bindings/py.typed"
     '';

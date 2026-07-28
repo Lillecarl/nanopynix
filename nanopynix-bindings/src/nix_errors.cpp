@@ -46,6 +46,8 @@
 
 #include <nanobind/nanobind.h>
 
+#include "nanopynix_modules.hh"
+
 #include <nix/expr/eval-error.hh>
 #include <nix/store/store-api.hh>
 #include <nix/util/error.hh>
@@ -109,7 +111,7 @@ PyObject *make_error_class(nb::module_ &m, const char *name, nb::handle base = P
 
 } // namespace
 
-NB_MODULE(errors, m) {
+void nanopynix_bind_errors(nb::module_ &m) {
     m.doc() =
         "nanopynix: the Nix exception hierarchy and its single C++ -> Python "
         "translator. Importing this module is what installs the translator, so "

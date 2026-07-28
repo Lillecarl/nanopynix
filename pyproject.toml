@@ -20,6 +20,19 @@ extraPaths = [
 exclude = ["**/result*"]
 
 [[tool.pyright.executionEnvironments]]
+root = "nanopynix-bindings/src"
+# `_ext` is a compiled extension: it exists in a built tree and never in the
+# checkout, so the `_ext.pyi` beside the seven area modules is stub-only by
+# construction and every import of it trips this rule. Scoped to this
+# directory, which contains nothing but those eight files.
+#
+# This is also where the repo's *other* 68 reports of this rule used to come
+# from -- consumers importing `nanopynix_bindings.expr` and friends, which were
+# stubs with a `.so` (not a source module) beside them. Giving each area a real
+# `.py` retired those; only the one genuinely unavoidable case is left.
+reportMissingModuleSource = "none"
+
+[[tool.pyright.executionEnvironments]]
 root = "tests"
 reportPrivateUsage = "none"
 
