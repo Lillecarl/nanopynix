@@ -49,7 +49,7 @@ from nanopynix._typechecking import BEARTYPING
 from pynix._lsp._terranix_schema import SchemaBlock
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
 
 class CoreBlockSchema(BaseModel):
@@ -89,10 +89,17 @@ async def get_core_schema(tofu_version: str) -> Mapping[str, CoreBlockSchema] | 
     return schema
 
 
-async def detect_tofu_version(tofu_bin: str) -> str | None:
-    """Run ``tofu version -json`` and return its ``terraform_version`` field, or None on failure."""
+async def detect_tofu_version(tofu_bin: str, store_exec_prefix: Sequence[str] = ()) -> str | None:
+    """Run ``tofu version -json`` and return its ``terraform_version`` field, or None on failure.
+
+    *tofu_bin* is a path inside the Nix store the caller evaluated against, so
+    it is only directly executable when that store sits at its own logical
+    location. *store_exec_prefix* -- from ``nanopynix.store_exec_prefix`` --
+    is what makes it runnable when the store is relocated instead; it is empty
+    for an ordinary store, so passing it is unconditional.
+    """
     try:
-        completed = await anyio.run_process([tofu_bin, "version", "-json"])
+        completed = await anyio.run_process([*store_exec_prefix, tofu_bin, "version", "-json"])
     except (OSError, subprocess.CalledProcessError):
         return None
     try:

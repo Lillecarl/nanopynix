@@ -223,10 +223,12 @@ class TerranixDialect(Dialect):
             return None
         return tofu_out, module_out
 
-    async def _schema_for(self, tofu_out: str, module_out: str) -> ProviderSchemas | None:
-        return await get_provider_schemas(tofu_out, module_out)
+    async def _schema_for(
+        self, context: FileContext, tofu_out: str, module_out: str
+    ) -> ProviderSchemas | None:
+        return await get_provider_schemas(tofu_out, module_out, await context.store_exec_prefix())
 
-    async def _core_schema_for(self, tofu_out: str) -> Mapping[str, CoreBlockSchema] | None:
+    async def _core_schema_for(self, context: FileContext, tofu_out: str) -> Mapping[str, CoreBlockSchema] | None:
         """Core (built-in) HCL block schema for whichever OpenTofu version *tofu_out* is.
 
         Falls back to ``_DEFAULT_TOFU_VERSION`` if the real binary's version
@@ -235,10 +237,10 @@ class TerranixDialect(Dialect):
         ``count``/``for_each``/``lifecycle`` than none at all, and the core
         schema barely changes between versions anyway.
         """
-        version = await self._detect_tofu_version_cached(tofu_out)
+        version = await self._detect_tofu_version_cached(context, tofu_out)
         return await get_core_schema(version)
 
-    async def _detect_tofu_version_cached(self, tofu_out: str) -> str:
+    async def _detect_tofu_version_cached(self, context: FileContext, tofu_out: str) -> str:
         """Memoized ``detect_tofu_version``, keyed by *tofu_out*'s (content-addressed) store path.
 
         Without this, every hover/completion request re-spawns ``tofu
@@ -249,7 +251,10 @@ class TerranixDialect(Dialect):
         cached = self._version_cache.get(tofu_out)
         if cached is not None:
             return cached
-        version = await detect_tofu_version(f"{tofu_out}/bin/tofu") or _DEFAULT_TOFU_VERSION
+        version = (
+            await detect_tofu_version(f"{tofu_out}/bin/tofu", await context.store_exec_prefix())
+            or _DEFAULT_TOFU_VERSION
+        )
         self._version_cache[tofu_out] = version
         return version
 
@@ -279,9 +284,9 @@ class TerranixDialect(Dialect):
         if outputs is None:
             return None
         tofu_out, module_out = outputs
-        schemas = await self._schema_for(tofu_out, module_out)
+        schemas = await self._schema_for(context, tofu_out, module_out)
         provider_block = find_resource_block(schemas, block_kind, resource_type) if schemas is not None else None
-        core_schema = await self._core_schema_for(tofu_out)
+        core_schema = await self._core_schema_for(context, tofu_out)
         core_block = core_schema.get(block_kind) if core_schema is not None else None
         if provider_block is None:
             return core_block.block if core_block is not None else None
@@ -387,7 +392,7 @@ class TerranixDialect(Dialect):
             if outputs is None:
                 return None
             tofu_out, module_out = outputs
-            schemas = await self._schema_for(tofu_out, module_out)
+            schemas = await self._schema_for(context, tofu_out, module_out)
             if schemas is None:
                 return None
             names = list_resource_type_names(schemas, prefix[0])

@@ -367,50 +367,6 @@ def easykubenix_openapi_schema(repo_root: Path) -> str:
 
 
 @pytest.fixture(scope="session")
-def terranix_tofu_module(repo_root: Path) -> tuple[str, str]:
-    """Realise the terranix demo's ``tofu`` wrapper and ``module`` into the *host* store.
-
-    Same shape of gap as ``easykubenix_openapi_schema`` above, reached a
-    different way. ``TerranixDialect`` does build these two derivations
-    (``_terranix.py``'s ``_resource_output`` calls ``.build()``), but it builds
-    them through the *test* session -- and this suite's sessions run against a
-    relocated store (``local://?root=...`` / ``unix://...?root=...``, see
-    ``tests/support/nix_environment.py``). A relocated store still reports
-    ordinary logical ``/nix/store/...`` paths while the bytes actually land
-    under its own root, so ``_terranix_schema.py`` then execs
-    ``{tofu_out}/bin/tofu`` at a path that need not exist. Realising the same
-    derivations into the host store is what makes that logical path resolve.
-
-    This is a stopgap, not the end state. The real fix is a ``nix run``-alike
-    exposed from nanopynix, so the dialect execs through the same chroot Nix
-    itself sets up for a diverted store; see TODO.md for why that cannot be a
-    plain binding and what it costs. Delete this fixture when that lands.
-
-    Without this the terranix scenarios pass only on a machine that happens to
-    have built the demo before (which is why they pass locally and fail on a
-    fresh runner), and fail with ``FileNotFoundError`` on a store path that is
-    perfectly valid and simply absent -- reading as an LSP bug rather than a
-    missing fixture.
-
-    Sync on purpose, for the same reason as ``easykubenix_openapi_schema``.
-    """
-    entry = repo_root / "tests/pynix/test_lsp/terranix/default.nix"
-    result = subprocess.run(  # noqa: S603 -- fixed argv, no shell, paths from the repo itself
-        ["nix-build", "--no-out-link", str(entry), "-A", "tofu", "-A", "module"],  # noqa: S607 -- nix-build resolved from PATH, as everywhere else in this suite
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        pytest.skip(f"could not realise the terranix demo tofu/module (offline?):\n{result.stderr}")
-    paths = result.stdout.split()
-    expected_outputs = 2
-    if len(paths) != expected_outputs:
-        raise AssertionError(f"nix-build -A tofu -A module produced {len(paths)} paths, expected 2: {paths!r}")
-    return paths[0], paths[1]
-
-
-@pytest.fixture(scope="session")
 def pynix_live_log(
     request: pytest.FixtureRequest,
     tmp_path_factory: pytest.TempPathFactory,

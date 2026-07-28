@@ -71,6 +71,14 @@ let
   # nanopynixForNixVersions.
   tofuCoreSchemaTool = pkgs.callPackage ./tools/tofu-core-schema/package.nix { };
 
+  # Execs a program out of a *relocated* store with that store mounted at its
+  # own logical path, the way `nix run` does -- see tools/store-exec/store-exec.c
+  # for why this cannot be a binding and has to be a separate exec-final
+  # binary. A no-op `execvp` when the store is not relocated, so callers route
+  # through it unconditionally. Like tofuCoreSchemaTool it depends on no Nix
+  # library, so it lives out here rather than in nanopynixForNixVersions.
+  storeExecTool = pkgs.callPackage ./tools/store-exec/package.nix { };
+
   # This repo's seam onto pyproject.nix's builders: `ps` builds package sets
   # (nix/python-set.nix), `mkApp` turns one of their packages into a release
   # application (nix/mk-app.nix).
@@ -250,10 +258,10 @@ let
                   inherit (inputs) nixpkgs;
                   inherit tsanRuntime;
                   inherit (final) pythonSet;
-                  # The same tool the `pynix` app above puts on its PATH, for
+                  # The same tools the `pynix` app above puts on its PATH, for
                   # the same reason -- the LSP tests drive the real handlers,
-                  # so they need it exactly as the released program does.
-                  inherit tofuCoreSchemaTool;
+                  # so they need them exactly as the released program does.
+                  inherit tofuCoreSchemaTool storeExecTool;
                 };
               };
 
@@ -280,9 +288,17 @@ let
                 # pynix._lsp._tofu_core_schema shells out to this at LSP
                 # runtime rather than baking a static snapshot, so it has to
                 # be on the program's PATH.
-                pathInputs = [ tofuCoreSchemaTool ];
+                #
+                # storeExecTool likewise: nanopynix.store_exec_prefix resolves
+                # it off PATH, and the terranix dialect execs `tofu` straight
+                # out of whatever store the LSP is evaluating against -- which
+                # is relocated whenever pynix is pointed at a non-root store.
+                pathInputs = [
+                  tofuCoreSchemaTool
+                  storeExecTool
+                ];
               };
-              shell = final.callPackage ./nix/shell.nix { inherit tofuCoreSchemaTool; };
+              shell = final.callPackage ./nix/shell.nix { inherit tofuCoreSchemaTool storeExecTool; };
               # A live, editable-install `pynix`/`ekn` env (no devtools --
               # see nix/shell.nix for the full interactive nanopynix shell),
               # exported so other repos can drop a hot-reloading `pynix`
@@ -405,5 +421,6 @@ in
     pyproject-nix
     tests
     tofuCoreSchemaTool
+    storeExecTool
     ;
 }
