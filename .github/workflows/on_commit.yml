@@ -330,12 +330,32 @@ jobs:
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
         rm -f "$paths_to_delete"
+        # Not stderr: pytest captures fd 2 per test by default and only
+        # prints the buffer when that test fails, so a SIGSEGV takes the
+        # GC thread log down with it -- a full run that crashed produced
+        # zero diagnostic lines. A file is outside pytest's capture.
+        gc_thread_log="${{ github.workspace }}/gc-thread-debug.log"
+        rm -f "$gc_thread_log"
         status=0
-        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+        # NANOPYNIX_COVERAGE rather than pytest-cov's --cov: the runner
+        # then measures with `coverage run` and combines after pytest
+        # exits. pytest-cov combines *inside* the run, alongside live
+        # evaluator threads and forkserver workers, and that combine
+        # intermittently failed with "database is locked" -- exit 3 on a
+        # job whose tests had all passed. See nanopynix/tests.nix.
+        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG_FILE="$gc_thread_log" NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_COVERAGE=1 NANOPYNIX_COVERAGE_XML=${{ github.workspace }}/coverage.xml NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends daemon \
-          --cov --cov-report=term-missing --cov-report=xml:${{ github.workspace }}/coverage.xml \
           --junitxml=${{ github.workspace }}/junit.xml \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
+        # Only on a crash: this file has one line per evaluator thread
+        # registration and is long, so it is worth the log space solely
+        # when there is a faulting LWP to correlate it against.
+        if [ "$status" -gt 128 ] && [ -s "$gc_thread_log" ]; then
+          {
+            echo "=== Boehm GC thread registration log ($(wc -l <"$gc_thread_log") lines) ==="
+            cat "$gc_thread_log"
+          } >> ${{ github.workspace }}/test-gdb-output.log
+        fi
         if [ -s "$paths_to_delete" ]; then
           nix store delete --stdin < "$paths_to_delete" || true
         fi
@@ -345,6 +365,12 @@ jobs:
       with:
         name: test-output-daemon-git
         path: ${{ github.workspace }}/test-gdb-output.log
+      if: ${{ !cancelled() }}
+    - name: Upload Boehm GC thread registration log
+      uses: actions/upload-artifact@main
+      with:
+        name: gc-thread-debug-daemon-git
+        path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@main
@@ -394,12 +420,32 @@ jobs:
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
         rm -f "$paths_to_delete"
+        # Not stderr: pytest captures fd 2 per test by default and only
+        # prints the buffer when that test fails, so a SIGSEGV takes the
+        # GC thread log down with it -- a full run that crashed produced
+        # zero diagnostic lines. A file is outside pytest's capture.
+        gc_thread_log="${{ github.workspace }}/gc-thread-debug.log"
+        rm -f "$gc_thread_log"
         status=0
-        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+        # NANOPYNIX_COVERAGE rather than pytest-cov's --cov: the runner
+        # then measures with `coverage run` and combines after pytest
+        # exits. pytest-cov combines *inside* the run, alongside live
+        # evaluator threads and forkserver workers, and that combine
+        # intermittently failed with "database is locked" -- exit 3 on a
+        # job whose tests had all passed. See nanopynix/tests.nix.
+        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG_FILE="$gc_thread_log" NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_COVERAGE=1 NANOPYNIX_COVERAGE_XML=${{ github.workspace }}/coverage.xml NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends daemon \
-          --cov --cov-report=term-missing --cov-report=xml:${{ github.workspace }}/coverage.xml \
           --junitxml=${{ github.workspace }}/junit.xml \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
+        # Only on a crash: this file has one line per evaluator thread
+        # registration and is long, so it is worth the log space solely
+        # when there is a faulting LWP to correlate it against.
+        if [ "$status" -gt 128 ] && [ -s "$gc_thread_log" ]; then
+          {
+            echo "=== Boehm GC thread registration log ($(wc -l <"$gc_thread_log") lines) ==="
+            cat "$gc_thread_log"
+          } >> ${{ github.workspace }}/test-gdb-output.log
+        fi
         if [ -s "$paths_to_delete" ]; then
           nix store delete --stdin < "$paths_to_delete" || true
         fi
@@ -409,6 +455,12 @@ jobs:
       with:
         name: test-output-daemon-nix_2_31
         path: ${{ github.workspace }}/test-gdb-output.log
+      if: ${{ !cancelled() }}
+    - name: Upload Boehm GC thread registration log
+      uses: actions/upload-artifact@main
+      with:
+        name: gc-thread-debug-daemon-nix_2_31
+        path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@main
@@ -458,12 +510,32 @@ jobs:
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
         rm -f "$paths_to_delete"
+        # Not stderr: pytest captures fd 2 per test by default and only
+        # prints the buffer when that test fails, so a SIGSEGV takes the
+        # GC thread log down with it -- a full run that crashed produced
+        # zero diagnostic lines. A file is outside pytest's capture.
+        gc_thread_log="${{ github.workspace }}/gc-thread-debug.log"
+        rm -f "$gc_thread_log"
         status=0
-        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+        # NANOPYNIX_COVERAGE rather than pytest-cov's --cov: the runner
+        # then measures with `coverage run` and combines after pytest
+        # exits. pytest-cov combines *inside* the run, alongside live
+        # evaluator threads and forkserver workers, and that combine
+        # intermittently failed with "database is locked" -- exit 3 on a
+        # job whose tests had all passed. See nanopynix/tests.nix.
+        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG_FILE="$gc_thread_log" NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_COVERAGE=1 NANOPYNIX_COVERAGE_XML=${{ github.workspace }}/coverage.xml NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends daemon \
-          --cov --cov-report=term-missing --cov-report=xml:${{ github.workspace }}/coverage.xml \
           --junitxml=${{ github.workspace }}/junit.xml \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
+        # Only on a crash: this file has one line per evaluator thread
+        # registration and is long, so it is worth the log space solely
+        # when there is a faulting LWP to correlate it against.
+        if [ "$status" -gt 128 ] && [ -s "$gc_thread_log" ]; then
+          {
+            echo "=== Boehm GC thread registration log ($(wc -l <"$gc_thread_log") lines) ==="
+            cat "$gc_thread_log"
+          } >> ${{ github.workspace }}/test-gdb-output.log
+        fi
         if [ -s "$paths_to_delete" ]; then
           nix store delete --stdin < "$paths_to_delete" || true
         fi
@@ -473,6 +545,12 @@ jobs:
       with:
         name: test-output-daemon-nix_2_34
         path: ${{ github.workspace }}/test-gdb-output.log
+      if: ${{ !cancelled() }}
+    - name: Upload Boehm GC thread registration log
+      uses: actions/upload-artifact@main
+      with:
+        name: gc-thread-debug-daemon-nix_2_34
+        path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@main
@@ -522,12 +600,32 @@ jobs:
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
         rm -f "$paths_to_delete"
+        # Not stderr: pytest captures fd 2 per test by default and only
+        # prints the buffer when that test fails, so a SIGSEGV takes the
+        # GC thread log down with it -- a full run that crashed produced
+        # zero diagnostic lines. A file is outside pytest's capture.
+        gc_thread_log="${{ github.workspace }}/gc-thread-debug.log"
+        rm -f "$gc_thread_log"
         status=0
-        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+        # NANOPYNIX_COVERAGE rather than pytest-cov's --cov: the runner
+        # then measures with `coverage run` and combines after pytest
+        # exits. pytest-cov combines *inside* the run, alongside live
+        # evaluator threads and forkserver workers, and that combine
+        # intermittently failed with "database is locked" -- exit 3 on a
+        # job whose tests had all passed. See nanopynix/tests.nix.
+        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG_FILE="$gc_thread_log" NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_COVERAGE=1 NANOPYNIX_COVERAGE_XML=${{ github.workspace }}/coverage.xml NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends daemon \
-          --cov --cov-report=term-missing --cov-report=xml:${{ github.workspace }}/coverage.xml \
           --junitxml=${{ github.workspace }}/junit.xml \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
+        # Only on a crash: this file has one line per evaluator thread
+        # registration and is long, so it is worth the log space solely
+        # when there is a faulting LWP to correlate it against.
+        if [ "$status" -gt 128 ] && [ -s "$gc_thread_log" ]; then
+          {
+            echo "=== Boehm GC thread registration log ($(wc -l <"$gc_thread_log") lines) ==="
+            cat "$gc_thread_log"
+          } >> ${{ github.workspace }}/test-gdb-output.log
+        fi
         if [ -s "$paths_to_delete" ]; then
           nix store delete --stdin < "$paths_to_delete" || true
         fi
@@ -537,6 +635,12 @@ jobs:
       with:
         name: test-output-daemon-nix_2_35
         path: ${{ github.workspace }}/test-gdb-output.log
+      if: ${{ !cancelled() }}
+    - name: Upload Boehm GC thread registration log
+      uses: actions/upload-artifact@main
+      with:
+        name: gc-thread-debug-daemon-nix_2_35
+        path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@main
@@ -586,12 +690,32 @@ jobs:
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
         rm -f "$paths_to_delete"
+        # Not stderr: pytest captures fd 2 per test by default and only
+        # prints the buffer when that test fails, so a SIGSEGV takes the
+        # GC thread log down with it -- a full run that crashed produced
+        # zero diagnostic lines. A file is outside pytest's capture.
+        gc_thread_log="${{ github.workspace }}/gc-thread-debug.log"
+        rm -f "$gc_thread_log"
         status=0
-        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+        # NANOPYNIX_COVERAGE rather than pytest-cov's --cov: the runner
+        # then measures with `coverage run` and combines after pytest
+        # exits. pytest-cov combines *inside* the run, alongside live
+        # evaluator threads and forkserver workers, and that combine
+        # intermittently failed with "database is locked" -- exit 3 on a
+        # job whose tests had all passed. See nanopynix/tests.nix.
+        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG_FILE="$gc_thread_log" NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_COVERAGE=1 NANOPYNIX_COVERAGE_XML=${{ github.workspace }}/coverage.xml NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local \
-          --cov --cov-report=term-missing --cov-report=xml:${{ github.workspace }}/coverage.xml \
           --junitxml=${{ github.workspace }}/junit.xml \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
+        # Only on a crash: this file has one line per evaluator thread
+        # registration and is long, so it is worth the log space solely
+        # when there is a faulting LWP to correlate it against.
+        if [ "$status" -gt 128 ] && [ -s "$gc_thread_log" ]; then
+          {
+            echo "=== Boehm GC thread registration log ($(wc -l <"$gc_thread_log") lines) ==="
+            cat "$gc_thread_log"
+          } >> ${{ github.workspace }}/test-gdb-output.log
+        fi
         if [ -s "$paths_to_delete" ]; then
           nix store delete --stdin < "$paths_to_delete" || true
         fi
@@ -601,6 +725,12 @@ jobs:
       with:
         name: test-output-local-git
         path: ${{ github.workspace }}/test-gdb-output.log
+      if: ${{ !cancelled() }}
+    - name: Upload Boehm GC thread registration log
+      uses: actions/upload-artifact@main
+      with:
+        name: gc-thread-debug-local-git
+        path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@main
@@ -650,12 +780,32 @@ jobs:
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
         rm -f "$paths_to_delete"
+        # Not stderr: pytest captures fd 2 per test by default and only
+        # prints the buffer when that test fails, so a SIGSEGV takes the
+        # GC thread log down with it -- a full run that crashed produced
+        # zero diagnostic lines. A file is outside pytest's capture.
+        gc_thread_log="${{ github.workspace }}/gc-thread-debug.log"
+        rm -f "$gc_thread_log"
         status=0
-        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+        # NANOPYNIX_COVERAGE rather than pytest-cov's --cov: the runner
+        # then measures with `coverage run` and combines after pytest
+        # exits. pytest-cov combines *inside* the run, alongside live
+        # evaluator threads and forkserver workers, and that combine
+        # intermittently failed with "database is locked" -- exit 3 on a
+        # job whose tests had all passed. See nanopynix/tests.nix.
+        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG_FILE="$gc_thread_log" NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_COVERAGE=1 NANOPYNIX_COVERAGE_XML=${{ github.workspace }}/coverage.xml NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local \
-          --cov --cov-report=term-missing --cov-report=xml:${{ github.workspace }}/coverage.xml \
           --junitxml=${{ github.workspace }}/junit.xml \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
+        # Only on a crash: this file has one line per evaluator thread
+        # registration and is long, so it is worth the log space solely
+        # when there is a faulting LWP to correlate it against.
+        if [ "$status" -gt 128 ] && [ -s "$gc_thread_log" ]; then
+          {
+            echo "=== Boehm GC thread registration log ($(wc -l <"$gc_thread_log") lines) ==="
+            cat "$gc_thread_log"
+          } >> ${{ github.workspace }}/test-gdb-output.log
+        fi
         if [ -s "$paths_to_delete" ]; then
           nix store delete --stdin < "$paths_to_delete" || true
         fi
@@ -665,6 +815,12 @@ jobs:
       with:
         name: test-output-local-nix_2_31
         path: ${{ github.workspace }}/test-gdb-output.log
+      if: ${{ !cancelled() }}
+    - name: Upload Boehm GC thread registration log
+      uses: actions/upload-artifact@main
+      with:
+        name: gc-thread-debug-local-nix_2_31
+        path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@main
@@ -714,12 +870,32 @@ jobs:
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
         rm -f "$paths_to_delete"
+        # Not stderr: pytest captures fd 2 per test by default and only
+        # prints the buffer when that test fails, so a SIGSEGV takes the
+        # GC thread log down with it -- a full run that crashed produced
+        # zero diagnostic lines. A file is outside pytest's capture.
+        gc_thread_log="${{ github.workspace }}/gc-thread-debug.log"
+        rm -f "$gc_thread_log"
         status=0
-        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+        # NANOPYNIX_COVERAGE rather than pytest-cov's --cov: the runner
+        # then measures with `coverage run` and combines after pytest
+        # exits. pytest-cov combines *inside* the run, alongside live
+        # evaluator threads and forkserver workers, and that combine
+        # intermittently failed with "database is locked" -- exit 3 on a
+        # job whose tests had all passed. See nanopynix/tests.nix.
+        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG_FILE="$gc_thread_log" NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_COVERAGE=1 NANOPYNIX_COVERAGE_XML=${{ github.workspace }}/coverage.xml NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local \
-          --cov --cov-report=term-missing --cov-report=xml:${{ github.workspace }}/coverage.xml \
           --junitxml=${{ github.workspace }}/junit.xml \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
+        # Only on a crash: this file has one line per evaluator thread
+        # registration and is long, so it is worth the log space solely
+        # when there is a faulting LWP to correlate it against.
+        if [ "$status" -gt 128 ] && [ -s "$gc_thread_log" ]; then
+          {
+            echo "=== Boehm GC thread registration log ($(wc -l <"$gc_thread_log") lines) ==="
+            cat "$gc_thread_log"
+          } >> ${{ github.workspace }}/test-gdb-output.log
+        fi
         if [ -s "$paths_to_delete" ]; then
           nix store delete --stdin < "$paths_to_delete" || true
         fi
@@ -729,6 +905,12 @@ jobs:
       with:
         name: test-output-local-nix_2_34
         path: ${{ github.workspace }}/test-gdb-output.log
+      if: ${{ !cancelled() }}
+    - name: Upload Boehm GC thread registration log
+      uses: actions/upload-artifact@main
+      with:
+        name: gc-thread-debug-local-nix_2_34
+        path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@main
@@ -778,12 +960,32 @@ jobs:
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
         rm -f "$paths_to_delete"
+        # Not stderr: pytest captures fd 2 per test by default and only
+        # prints the buffer when that test fails, so a SIGSEGV takes the
+        # GC thread log down with it -- a full run that crashed produced
+        # zero diagnostic lines. A file is outside pytest's capture.
+        gc_thread_log="${{ github.workspace }}/gc-thread-debug.log"
+        rm -f "$gc_thread_log"
         status=0
-        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+        # NANOPYNIX_COVERAGE rather than pytest-cov's --cov: the runner
+        # then measures with `coverage run` and combines after pytest
+        # exits. pytest-cov combines *inside* the run, alongside live
+        # evaluator threads and forkserver workers, and that combine
+        # intermittently failed with "database is locked" -- exit 3 on a
+        # job whose tests had all passed. See nanopynix/tests.nix.
+        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG_FILE="$gc_thread_log" NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_COVERAGE=1 NANOPYNIX_COVERAGE_XML=${{ github.workspace }}/coverage.xml NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
           ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local \
-          --cov --cov-report=term-missing --cov-report=xml:${{ github.workspace }}/coverage.xml \
           --junitxml=${{ github.workspace }}/junit.xml \
           2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
+        # Only on a crash: this file has one line per evaluator thread
+        # registration and is long, so it is worth the log space solely
+        # when there is a faulting LWP to correlate it against.
+        if [ "$status" -gt 128 ] && [ -s "$gc_thread_log" ]; then
+          {
+            echo "=== Boehm GC thread registration log ($(wc -l <"$gc_thread_log") lines) ==="
+            cat "$gc_thread_log"
+          } >> ${{ github.workspace }}/test-gdb-output.log
+        fi
         if [ -s "$paths_to_delete" ]; then
           nix store delete --stdin < "$paths_to_delete" || true
         fi
@@ -793,6 +995,12 @@ jobs:
       with:
         name: test-output-local-nix_2_35
         path: ${{ github.workspace }}/test-gdb-output.log
+      if: ${{ !cancelled() }}
+    - name: Upload Boehm GC thread registration log
+      uses: actions/upload-artifact@main
+      with:
+        name: gc-thread-debug-local-nix_2_35
+        path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@main

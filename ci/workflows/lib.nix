@@ -71,12 +71,32 @@ let
               set -o pipefail
               paths_to_delete="''${{ github.workspace }}/nanopynix-test-store-paths.txt"
               rm -f "$paths_to_delete"
+              # Not stderr: pytest captures fd 2 per test by default and only
+              # prints the buffer when that test fails, so a SIGSEGV takes the
+              # GC thread log down with it -- a full run that crashed produced
+              # zero diagnostic lines. A file is outside pytest's capture.
+              gc_thread_log="''${{ github.workspace }}/gc-thread-debug.log"
+              rm -f "$gc_thread_log"
               status=0
-              env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=''${{ github.workspace }}/.coverage NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+              # NANOPYNIX_COVERAGE rather than pytest-cov's --cov: the runner
+              # then measures with `coverage run` and combines after pytest
+              # exits. pytest-cov combines *inside* the run, alongside live
+              # evaluator threads and forkserver workers, and that combine
+              # intermittently failed with "database is locked" -- exit 3 on a
+              # job whose tests had all passed. See nanopynix/tests.nix.
+              env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG_FILE="$gc_thread_log" NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=''${{ github.workspace }}/.coverage NANOPYNIX_COVERAGE=1 NANOPYNIX_COVERAGE_XML=''${{ github.workspace }}/coverage.xml NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
                 ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends ${backend} \
-                --cov --cov-report=term-missing --cov-report=xml:''${{ github.workspace }}/coverage.xml \
                 --junitxml=''${{ github.workspace }}/junit.xml \
                 2>&1 | tee ''${{ github.workspace }}/test-gdb-output.log || status=$?
+              # Only on a crash: this file has one line per evaluator thread
+              # registration and is long, so it is worth the log space solely
+              # when there is a faulting LWP to correlate it against.
+              if [ "$status" -gt 128 ] && [ -s "$gc_thread_log" ]; then
+                {
+                  echo "=== Boehm GC thread registration log ($(wc -l <"$gc_thread_log") lines) ==="
+                  cat "$gc_thread_log"
+                } >> ''${{ github.workspace }}/test-gdb-output.log
+              fi
               if [ -s "$paths_to_delete" ]; then
                 nix store delete --stdin < "$paths_to_delete" || true
               fi
@@ -87,6 +107,18 @@ let
           name = "Upload test output";
           artifactName = "test-output-${backend}-${version}";
           path = "\${{ github.workspace }}/test-gdb-output.log";
+        })
+        # Uploaded on every run, not just a crash. The step above inlines this
+        # into the log only when pytest died of a signal, which turned out to
+        # be the wrong trigger: the same suspected evaluator-state corruption
+        # also surfaces as an ordinary *test failure* (a value of the wrong
+        # type reaching nixpkgs' `env` type check, exit 1), and that path
+        # needs the same registration history to correlate against. As an
+        # artifact it costs no log space.
+        (steps.uploadArtifact {
+          name = "Upload Boehm GC thread registration log";
+          artifactName = "gc-thread-debug-${backend}-${version}";
+          path = "\${{ github.workspace }}/gc-thread-debug.log";
         })
         (withCond "\${{ !cancelled() }}" {
           name = "Upload coverage reports to Codecov";

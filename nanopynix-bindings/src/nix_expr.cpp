@@ -13,6 +13,7 @@
 #include <mutex>
 #include <stdexcept>
 
+#include <fcntl.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -1347,12 +1348,46 @@ static bool gc_thread_debug_enabled() {
     return enabled;
 }
 
+// Where the log goes. stderr is the default but is *useless for the crash this
+// exists to diagnose*: pytest captures at the file-descriptor level by
+// default, so these writes land in a per-test buffer that is only printed if
+// that test fails -- and a SIGSEGV kills the process with the buffer
+// undrained. A full CI run with NANOPYNIX_GC_THREAD_DEBUG=1 that segfaulted
+// therefore produced zero diagnostic lines. Setting
+// NANOPYNIX_GC_THREAD_DEBUG_FILE to a path writes there instead, outside
+// pytest's capture, so the record survives the crash that needs it.
+//
+// Opened once, O_APPEND, and written with raw write(2) rather than a FILE*:
+// unbuffered means nothing is lost when the process dies mid-eval, and
+// O_APPEND keeps concurrent writes from separate processes (the forkserver
+// worker) from overwriting each other.
+static int gc_thread_debug_fd() {
+    static const int fd = [] {
+        const char *path = std::getenv("NANOPYNIX_GC_THREAD_DEBUG_FILE");
+        if (path == nullptr || *path == '\0')
+            return STDERR_FILENO;
+        int opened = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+        // Falling back to stderr rather than failing: this is a diagnostic,
+        // and an unwritable path must not take the evaluator down with it.
+        return opened < 0 ? STDERR_FILENO : opened;
+    }();
+    return fd;
+}
+
 static void gc_thread_debug_log(const char *event) {
     if (!gc_thread_debug_enabled())
         return;
-    std::fprintf(stderr, "[nanopynix-gc-thread-debug] tid=%ld event=%s\n",
-                 static_cast<long>(syscall(SYS_gettid)), event);
-    std::fflush(stderr);
+    char line[256];
+    int length = std::snprintf(line, sizeof(line), "[nanopynix-gc-thread-debug] tid=%ld event=%s\n",
+                               static_cast<long>(syscall(SYS_gettid)), event);
+    if (length <= 0)
+        return;
+    size_t remaining = static_cast<size_t>(length) < sizeof(line) ? static_cast<size_t>(length)
+                                                                 : sizeof(line) - 1;
+    // Best-effort: a short or failed write loses one diagnostic line, which is
+    // strictly better than retrying forever inside GC thread registration.
+    ssize_t written = write(gc_thread_debug_fd(), line, remaining);
+    (void) written;
 }
 
 // libstdc++'s classic std::ctype<char> facet caches narrow()/widen()

@@ -97,6 +97,38 @@ in
     export TSAN_OPTIONS="halt_on_error=1 history_size=7 second_deadlock_stack=1 die_after_fork=0 suppressions=${tsanSuppressions}"
   ''
   + ''
+    # Coverage is measured by `coverage run` and combined *after* pytest has
+    # exited, rather than by pytest-cov. pytest-cov combines inside its
+    # pytest_runtestloop hook -- while this suite still has live evaluator
+    # threads and forkserver worker processes -- and that combine
+    # intermittently died with `sqlite3.OperationalError: database is locked`
+    # on the destination .coverage. It surfaced as an INTERNALERROR and exit
+    # 3, which failed whole CI jobs *after every test had passed* and
+    # swallowed the run's own failure summary on the way out. Proven
+    # non-deterministic: two runs of the identical commit hit it in different
+    # jobs, both times with a green test session behind it.
+    #
+    # Doing it as a separate step after the process exits removes the race by
+    # construction: nothing else is alive to hold the database. Unset, this
+    # is a plain pytest run, so the documented local `pytest --cov` workflow
+    # is untouched.
+    pytest_cmd=(python -m pytest -p no:cacheprovider)
+    if [ -n "''${NANOPYNIX_COVERAGE:-}" ]; then
+      pytest_cmd=(python -m coverage run -m pytest -p no:cacheprovider)
+    fi
+
+    # Reports the combine/report failure through the exit status rather than
+    # swallowing it: a broken coverage pipeline should be visible, just not
+    # by destroying an otherwise-complete test result.
+    finish_coverage() {
+      [ -n "''${NANOPYNIX_COVERAGE:-}" ] || return 0
+      python -m coverage combine || return $?
+      python -m coverage report --show-missing || return $?
+      if [ -n "''${NANOPYNIX_COVERAGE_XML:-}" ]; then
+        python -m coverage xml -o "$NANOPYNIX_COVERAGE_XML" || return $?
+      fi
+    }
+
     if [ -n "''${NANOPYNIX_CORE_DEBUG:-}" ]; then
       # Run at full speed (no ptrace attached -- a live gdb/strace attach
       # changes scheduling/timing enough to mask race-condition crashes).
@@ -107,7 +139,7 @@ in
       ulimit -c unlimited
       core_glob="''${NANOPYNIX_CORE_GLOB:-/tmp/core.*}"
       status=0
-      python -m pytest -p no:cacheprovider "$@" || status=$?
+      "''${pytest_cmd[@]}" "$@" || status=$?
       if [ "$status" -gt 128 ]; then
         sig=$((status - 128))
         echo "python exited due to signal $sig; looking for a core dump matching $core_glob" >&2
@@ -137,10 +169,24 @@ in
           # from the core file's own recorded path. Passing python's PATH
           # symlink here instead silently broke symbol/shared-library
           # resolution for every frame in a real CI crash.
+          #
+          # The trailer below exists because `bt $frames` alone cannot tell a
+          # stack overflow from an ordinary fault: a 2026-07-28 SIGSEGV in
+          # nix::ExprVar::maybeThunk showed exactly `$frames` frames of varied
+          # (non-repeating) evaluator frames, which is what both look like once
+          # the cap truncates. `bt -3` names the outermost frames, and the
+          # stack pointer against the crashing thread's own mapping is the
+          # decisive test: an $sp within a page or so of the low end of its
+          # region is an overflow, anywhere else is not.
           gdb -q -batch \
             -ex "set pagination off" \
             -ex "set print frame-arguments scalars" \
             -ex "thread apply all bt $frames" \
+            -ex "echo \n=== crashing thread: outermost frames ===\n" \
+            -ex "bt -3" \
+            -ex "echo \n=== crashing thread: stack pointer vs mappings ===\n" \
+            -ex "info registers rsp" \
+            -ex "maintenance info sections" \
             -ex quit -c "$core_file" >"$gdb_log" 2>&1 || true
           total_lines=$(wc -l <"$gdb_log")
           head -n "$max_lines" "$gdb_log" >&2
@@ -152,9 +198,22 @@ in
           echo "no core file found matching $core_glob -- check kernel.core_pattern" >&2
         fi
       fi
+      # Only when pytest itself ran to completion: after a signal the data
+      # files are truncated mid-write, and a combine failure there would
+      # replace the crash's exit status with a far less informative one.
+      if [ "$status" -le 128 ]; then
+        finish_coverage || cov_status=$?
+        [ "$status" -eq 0 ] && status="''${cov_status:-0}"
+      fi
       exit "$status"
     fi
-    exec python -m pytest -p no:cacheprovider "$@"
+    status=0
+    "''${pytest_cmd[@]}" "$@" || status=$?
+    if [ "$status" -le 128 ]; then
+      finish_coverage || cov_status=$?
+      [ "$status" -eq 0 ] && status="''${cov_status:-0}"
+    fi
+    exit "$status"
   '';
   passthru = {
     inherit pythonEnv;
