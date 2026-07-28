@@ -123,7 +123,6 @@ class _NixConfigModel(BaseModel):
 
 
 _NIX_2_35 = "2.35"
-_NIX_2_24 = "2.24"
 
 
 class NixSettings(_NixConfigModel):
@@ -191,14 +190,13 @@ class NixSettings(_NixConfigModel):
     narinfo_cache_negative_ttl: int | None = None
     narinfo_cache_positive_ttl: int | None = None
     netrc_file: str | None = None
-    nix_shell_always_looks_for_shell_nix: bool | None = Field(
-        default=None,
-        json_schema_extra={"nix_version_min": _NIX_2_24},
-    )
-    nix_shell_shebang_arguments_relative_to_script: bool | None = Field(
-        default=None,
-        json_schema_extra={"nix_version_min": _NIX_2_24},
-    )
+    # No nix_shell_* here. `nix-shell-always-looks-for-shell-nix` and
+    # `nix-shell-shebang-arguments-relative-to-script` are libcmd's
+    # CompatibilitySettings, and nanopynix stopped linking libcmd. They are
+    # also the two settings in the whole surface that could not mean anything
+    # here even if they were registered: both describe how the `nix-shell`
+    # command interprets its arguments, and a library binding has no
+    # `nix-shell`. check_settings_model_drift() is what noticed.
     plugin_files: list[str] | None = None
     post_build_hook: str | None = None
     pre_build_hook: str | None = None
