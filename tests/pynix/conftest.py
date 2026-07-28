@@ -394,11 +394,26 @@ def pynix_live_log(
 
 
 @pytest.fixture(scope="session", autouse=True)
-async def _shared_pynix_sessions() -> (  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
-    AsyncIterator[None]
-):
+async def _shared_pynix_sessions(  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
+    anyio_backend: str,  # noqa: ARG001 -- see below; requested for its side effect on the fixture closure
+) -> AsyncIterator[None]:
     """Share one Nix session/store/evaluator across pynix commands, unless CI
-    asked for the faithful per-command path -- see tests/pynix/_shared_sessions.py."""
+    asked for the faithful per-command path -- see tests/pynix/_shared_sessions.py.
+
+    `anyio_backend` is unused in the body and load-bearing anyway. anyio's
+    plugin only wraps an async fixture when `anyio_backend` is in the
+    *requesting test's* fixture closure (`pytest_fixture_setup`:
+    `if "anyio_backend" in request.fixturenames`). An async autouse fixture at
+    session scope is therefore fine right up until the first test to reach it
+    is a sync one, at which point pytest is handed a raw async generator and
+    errors out -- and every later test in the run collapses behind it with an
+    internal `assert not self._finalizers`.
+
+    Which test comes first depends on selection, so this passed for `pytest
+    tests` and failed for `pytest tests/pynix/test_repl.py`, whose first test
+    is sync: exactly backwards from what makes a bug easy to find. Naming the
+    fixture here pulls it into every test's closure and settles it.
+    """
     if os.environ.get(FAITHFUL_SESSIONS_ENV_VAR):
         yield
         return
