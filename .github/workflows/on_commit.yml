@@ -143,6 +143,7 @@ jobs:
           ${{ github.workspace }}/tsan-output-git.log
           ${{ github.workspace }}/tsan-output-broad-git.log
       if: ${{ !cancelled() }}
+    timeout-minutes: 30
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan-git,')
     runs-on: ubuntu-24.04
@@ -221,6 +222,7 @@ jobs:
           ${{ github.workspace }}/tsan-output-nix_2_34.log
           ${{ github.workspace }}/tsan-output-broad-nix_2_34.log
       if: ${{ !cancelled() }}
+    timeout-minutes: 30
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan-nix_2_34,')
     runs-on: ubuntu-24.04
@@ -299,6 +301,7 @@ jobs:
           ${{ github.workspace }}/tsan-output-nix_2_35.log
           ${{ github.workspace }}/tsan-output-broad-nix_2_35.log
       if: ${{ !cancelled() }}
+    timeout-minutes: 30
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan-nix_2_35,')
     runs-on: ubuntu-24.04
@@ -389,6 +392,7 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    timeout-minutes: 30
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-git,')
     runs-on: ubuntu-24.04
@@ -479,6 +483,7 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    timeout-minutes: 30
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-nix_2_31,')
     runs-on: ubuntu-24.04
@@ -569,6 +574,7 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    timeout-minutes: 30
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-nix_2_34,')
     runs-on: ubuntu-24.04
@@ -659,6 +665,7 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    timeout-minutes: 30
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-nix_2_35,')
     runs-on: ubuntu-24.04
@@ -749,6 +756,7 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    timeout-minutes: 30
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-git,')
     runs-on: ubuntu-24.04
@@ -839,6 +847,7 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    timeout-minutes: 30
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-nix_2_31,')
     runs-on: ubuntu-24.04
@@ -929,6 +938,7 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    timeout-minutes: 30
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-nix_2_34,')
     runs-on: ubuntu-24.04
@@ -1019,6 +1029,7 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    timeout-minutes: 30
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-nix_2_35,')
     runs-on: ubuntu-24.04

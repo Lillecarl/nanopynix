@@ -79,6 +79,16 @@ let
         default = "ubuntu-24.04";
         description = "Runner label(s) this job executes on.";
       };
+      timeout-minutes = mkOption {
+        type = types.nullOr types.int;
+        default = null;
+        description = ''
+          Minutes GitHub waits before killing this job. Left unset, GitHub's
+          default is six hours -- long enough that a job which hangs rather
+          than fails burns most of a day of runner time before anyone sees a
+          result, and reports nothing when it finally stops.
+        '';
+      };
       needs = mkOption {
         type = types.nullOr (types.either types.str (types.listOf types.str));
         default = null;

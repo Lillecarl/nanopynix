@@ -29,6 +29,15 @@ let
     "local"
   ];
 
+  # Every test job here finishes well inside this: the regular suites take
+  # 8-13 minutes and the TSAN ones about 4. The cap exists for the case that
+  # is not a slow job but a stopped one -- twice now a daemon job has hung on
+  # a forkserver child that never reported, and GitHub's unset default let it
+  # sit for 117 and 145 minutes before a human noticed and cancelled it. A
+  # hang that runs to a timeout is still a failed job, but it fails in half an
+  # hour and it fails visibly.
+  testTimeoutMinutes = 30;
+
   # A single cachix/install-nix-action (multi-user) install suffices for every
   # job now: the test suite owns its own daemon and local store paths
   # entirely (see tests/support/nix_environment.py), so the CI runner's own
@@ -57,6 +66,8 @@ let
     }:
     lib.optionalAttrs (needs != [ ]) { inherit needs; }
     // {
+      # See testTimeoutMinutes -- a suite that hangs must not cost six hours.
+      timeout-minutes = testTimeoutMinutes;
       steps = mkTestSetup { inherit ref lockArtifact; } ++ [
         {
           name = "Build nanopynix test runner for Nix ${version}";
@@ -155,6 +166,8 @@ let
     in
     lib.optionalAttrs (needs != [ ]) { inherit needs; }
     // {
+      # See testTimeoutMinutes -- a suite that hangs must not cost six hours.
+      timeout-minutes = testTimeoutMinutes;
       steps = mkTestSetup { inherit ref lockArtifact; } ++ [
         {
           name = "Build TSAN nanopynix test runner (${bareVersion})";

@@ -150,6 +150,7 @@ jobs:
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -240,6 +241,7 @@ jobs:
           ${{ github.workspace }}/tsan-output-${{ matrix.version }}.log
           ${{ github.workspace }}/tsan-output-broad-${{ matrix.version }}.log
       if: ${{ !cancelled() }}
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
