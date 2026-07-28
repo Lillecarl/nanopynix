@@ -5,6 +5,7 @@ from __future__ import annotations
 import atexit
 import functools
 import importlib
+import importlib.util
 import inspect
 import os
 import sys
@@ -55,6 +56,37 @@ def _with_test_timeout(func: Callable[..., Awaitable[None]]) -> Callable[..., Aw
             await func(*args, **kwargs)
 
     return wrapper
+
+
+def _pytest_agent_installed() -> bool:
+    return importlib.util.find_spec("pytest_agent") is not None
+
+
+if not _pytest_agent_installed():
+
+    class _NoopNotes:
+        """Stand-in for pytest-agent's ``agent_notes``, for runs without the plugin."""
+
+        def note(self, **values: object) -> None:
+            """Discard the recording. Notes are observability, never an assertion."""
+
+    @pytest.fixture
+    def agent_notes() -> _NoopNotes:
+        """``agent_notes`` when pytest-agent is not installed.
+
+        The packaged test runner (``nanopynix/tests.nix``) deliberately leaves
+        pytest-agent out -- it auto-activates on import, and that runner is what
+        CI executes. Without this fallback, every test that records a note
+        errors at *collection* with "fixture 'agent_notes' not found", so it
+        fails in CI on every Nix version and both backends while passing in any
+        dev shell. That is how ``test_error_detail_survives_every_boundary``
+        failed: not on its own subject matter at all.
+
+        Defined only when the real plugin is absent, so a normal run still gets
+        pytest-agent's own fixture rather than this one -- a conftest fixture
+        would otherwise shadow the plugin's.
+        """
+        return _NoopNotes()
 
 
 def pytest_addoption(parser: pytest.Parser):

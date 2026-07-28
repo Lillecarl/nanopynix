@@ -22,7 +22,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from nanopynix_bindings import expr as nanopynix_expr, flake as nanopynix_flake, store as nanopynix_store
+from nanopynix_bindings import (
+    errors as nanopynix_errors,
+    expr as nanopynix_expr,
+    flake as nanopynix_flake,
+    store as nanopynix_store,
+)
 from nanopynix_proto.nix.store import GcAction, StoreDirs
 
 from nanopynix._core._extract import flake_ref_attrs
@@ -108,6 +113,38 @@ class CoreStore:
             path = f"{raw.get_store_dir()}/{path}"
         return raw.parse_store_path(path)
 
+    @staticmethod
+    def _require_filesystem_path(path: str, method: str) -> None:
+        """Reject the empty string for the methods that take a *filesystem* path.
+
+        ``_store_path`` above forwards ``""`` to ``parse_store_path``, whose
+        C++ guard rejects it. The three methods that take a filesystem path
+        rather than a store path -- ``follow_links_to_store_path``,
+        ``add_to_store`` and ``compute_store_path`` -- never reach that guard,
+        and Nix resolves a relative path against the *process working
+        directory*, so ``""`` silently becomes "whatever directory this process
+        happens to be in".
+
+        That is not a theoretical hazard. It is invisible from a source
+        checkout, because the cwd is not in the store and Nix then errors
+        anyway -- but run from a cwd that *is* inside the store (which is
+        exactly what the packaged test runner does, since it ``cd``s into a
+        store copy of the tree) and ``follow_links_to_store_path("")`` returns
+        the cwd's store path as a perfectly good answer, on every supported Nix
+        version. ``add_to_store("")`` would likewise have copied the working
+        directory into the store.
+
+        Nix's own behaviour here is neither safe nor consistent across
+        versions: 2.35 and git raise a bare ``std::filesystem`` "cannot make
+        absolute path: Invalid argument" ``RuntimeError`` instead, which is at
+        least an error but not one a caller can distinguish from any other
+        internal failure. Rejecting it here gives one answer everywhere, and
+        the same ``BadStorePath`` every other path-taking entry point already
+        produces for ``""``.
+        """
+        if path == "":
+            raise nanopynix_errors.BadStorePath(f"{method}: the empty string is not a path")
+
     def print_store_path(self, path: nanopynix_store.StorePath | str) -> str:
         """Render a store path absolute, whichever of Nix's two spellings arrives.
 
@@ -188,6 +225,7 @@ class CoreStore:
         return StorePath(self.print_store_path(self._store_path(path)))
 
     def follow_links_to_store_path(self, path: str) -> StorePath:
+        self._require_filesystem_path(path, "follow_links_to_store_path")
         return StorePath(self.print_store_path(self.require_raw().follow_links_to_store_path(path)))
 
     def query_path_from_hash_part(self, hash_part: str) -> StorePath | None:
@@ -267,6 +305,7 @@ class CoreStore:
         method: str = DEFAULT_CA_METHOD,
         hash_algo: str = DEFAULT_HASH_ALGO,
     ) -> StorePath:
+        self._require_filesystem_path(path, "add_to_store")
         return StorePath(
             self.print_store_path(self.require_raw().add_to_store(path, name, method, hash_algo)),
         )
@@ -279,6 +318,7 @@ class CoreStore:
         method: str = DEFAULT_CA_METHOD,
         hash_algo: str = DEFAULT_HASH_ALGO,
     ) -> StorePath:
+        self._require_filesystem_path(path, "compute_store_path")
         return StorePath(
             self.print_store_path(self.require_raw().compute_store_path(path, name, method, hash_algo)),
         )

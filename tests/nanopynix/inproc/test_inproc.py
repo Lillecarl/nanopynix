@@ -474,8 +474,20 @@ async def test_inproc_ensure_path_accepts_a_valid_path_and_raises_for_an_absent_
         await store.ensure_path(seeded_store_path)  # already valid: a no-op
         assert await store.is_valid_path(seeded_store_path)
 
-        with pytest.raises(nanopynix.NixError, match="no substituter"):
+        with pytest.raises(nanopynix.NixError) as caught:
             await store.ensure_path(absent)
+
+    # Nix words this refusal differently per version -- 2.34+ say "no
+    # substituter ...", 2.31 says "path '...' does not exist and cannot be
+    # created" -- so matching one release's prose pinned a message, not a
+    # behaviour, and failed on 2.31 alone. What the docstring above actually
+    # claims is that it raises NixError, which both do.
+    #
+    # The path assertion is what keeps this from going vacuous: without it,
+    # any NixError at all -- a closed store, a bad session -- would satisfy
+    # the test. Naming the path proves the error is about *this* lookup.
+    message = nanopynix.strip_ansi(str(caught.value))
+    assert "nanopynix-absent" in message, message
 
 
 @pytest.mark.anyio
