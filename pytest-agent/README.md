@@ -548,24 +548,39 @@ intentionally not mentioned in the refusal message: an agent reading that
 refusal should stop truncating, not learn a flag that lets it keep
 truncating.
 
-### Known incompatibility: pytest-xdist
+### pytest-xdist
 
-Agent mode and `pytest -n auto` should not be expected to work together, and
-this is untested rather than merely unsupported.
+`pytest -n N` works with agent mode: one run directory, one `index.jsonl`, one
+`history.jsonl` entry, and the queries answer about the whole run.
 
-The mechanism: `pytest_configure` runs in every xdist worker process, so each
-worker independently calls `next_run_dir()` and claims its own `runs-NNNN`
-directory. One logical run would scatter across N run directories with N
-partial `index.jsonl` files, N summaries, and N `history.jsonl` entries, and
-every query -- `last-failures`, `digest`, `compare` -- would silently answer
-from whichever worker happened to claim the highest number. The controller
-process, meanwhile, is the only one that sees the whole run, and it is the one
-whose terminal output agent mode silences.
+Recording happens in the controller, because it is the one process that sees
+everything. xdist ships each worker's `TestReport` back, and a serialized
+report carries the traceback, the captured stdout/stderr/logging sections and
+the durations -- which is everything the recorder reads. Workers detect
+themselves by the `workerinput` attribute xdist sets on their config and record
+nothing, so no worker claims a second `runs-NNNN`. (That scattering, with every
+query silently answering from whichever worker won the race for the highest
+number, is what made these two incompatible before.)
 
-Making these work together means recording per-worker and merging in the
-controller. Until then, run the suite without `-n` when you want agent mode's
-detail, and turn agent mode off (`--agent` is opt-out via
-`PYTEST_AGENT_NO_AUTODETECT=1`) when you want xdist's speed.
+Two things degrade, and the startup banner says so rather than leaving it to be
+discovered:
+
+- **`note()` and `attach()`** run inside a worker, where no runtime is
+  registered, so they fall back to printing. That print lands in the worker's
+  captured output, which *is* shipped -- so a note still reaches the test's
+  `.log`, but not `notes.jsonl` and not the `notes` field in `index.jsonl`.
+- **Stuck-test dumps are off.** A dump is `faulthandler` dumping the calling
+  process's threads; from the controller that would show the controller idling
+  and name whichever test happened to be current, which reads like evidence
+  while being none. `--agent-stuck-after` is forced to 0 under `-n`.
+
+Both are the same missing piece -- worker-side recording -- and both are
+recoverable by running without `-n` when the detail matters more than the wall
+clock.
+
+One caveat that is xdist's rather than agent mode's: with `-n`, several tests
+are in flight at once, so the progress line's `cur=` names one of them rather
+than the only one.
 
 `--agent-allow-pipe` (or `PYTEST_AGENT_ALLOW_PIPE=1`) skips the guard. It is
 intentionally not mentioned in the refusal message: an agent reading that
