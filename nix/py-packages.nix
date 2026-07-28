@@ -14,8 +14,6 @@
   # nanopynix's version suffix -- the linked Nix version, so two builds of the
   # same source against different Nix components are distinguishable.
   version,
-  enableTsan ? false,
-  tsanRuntime ? null,
 }:
 
 let
@@ -65,14 +63,24 @@ let
     nanopynix = _pySelf: rendered: {
       version = "${rendered.version}-${version}";
 
-      # The bindings get dlopen()ed into whatever process imports nanopynix;
-      # when they were built with TSAN its runtime has to be preloaded there
-      # too, or the static-TLS failure described in
-      # nanopynix-bindings/package.nix happens instead.
-      env = lib.optionalAttrs (enableTsan && tsanRuntime != null) {
-        LD_PRELOAD = tsanRuntime;
-      };
-
+      # No LD_PRELOAD of the TSAN runtime here, deliberately. It used to be
+      # set, reasoning that the bindings get dlopen()ed into whatever process
+      # imports nanopynix -- but a derivation's `env` is its *build*
+      # environment and reaches no consumer, so it never served that purpose.
+      # What it did do was preload libtsan into every process this build runs,
+      # `uv` included, and TSAN then reported data races inside uv's own Rust
+      # code and failed the build with exit 66 -- before a single test ran.
+      # That is the whole reason all three test-tsan-* jobs were red.
+      #
+      # Nothing here needs it: this is the pure-Python distribution, the
+      # builders have no `pythonImportsCheck` equivalent (see the comment on
+      # nanopynix-proto above), so no phase of this build ever imports
+      # nanopynix and nothing dlopens the instrumented .so.
+      #
+      # The two places that genuinely need the preload still have it, both
+      # scoped to a process that really does load the extension:
+      # nanopynix-bindings/package.nix (stubgen + pythonImportsCheck) and
+      # nanopynix/tests.nix's runner script (the pytest process itself).
       meta = rendered.meta // {
         license = lib.licenses.lgpl21Plus;
         platforms = lib.platforms.unix;
