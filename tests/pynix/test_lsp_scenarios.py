@@ -67,8 +67,15 @@ async def terranix_driver(
     request: pytest.FixtureRequest,
     lsp_server: PynixLanguageServer,
     lsp_wire: tuple[PynixLanguageServer, pytest_lsp.LanguageClient],
+    terranix_tofu_module: tuple[str, str],
 ) -> AsyncIterator[LspDriver]:
-    """Both backends for the terranix scenarios below, parametrized so each scenario runs against each."""
+    """Both backends for the terranix scenarios below, parametrized so each scenario runs against each.
+
+    ``terranix_tofu_module`` is requested for its side effect: these scenarios
+    reach a real ``tofu providers schema -json``, and the dialect execs that
+    binary from a *host* store path. See its docstring in ``conftest``.
+    """
+    del terranix_tofu_module
     if request.param == "in_process":
         yield InProcessDriver(lsp_server)
         return

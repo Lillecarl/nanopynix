@@ -1,0 +1,40 @@
+Guard printValueAsJSON's recursion with the max-call-depth counter (2.31 only).
+
+nix::printValueAsJSON (src/libexpr/value-to-json.cc) recurses through attrs
+and list elements. It stops at `__toString` and at `outPath`, which is why a
+derivation -- cyclic though it is -- converts to its store path instead of
+recursing forever. A cycle with neither, e.g. `let x = { y = x; }; in x`, has
+no such stopping rule, so on 2.31 the recursion is bounded only by the C++
+stack: it overflows and the process takes SIGSEGV. That is not an error a
+caller can catch, it kills the whole interpreter, and nanopynix reaches this
+function from `Value.to_python()` / `Value.to_json()` -- so an ordinary
+library call on an ordinary (if silly) Nix value takes the host process down.
+
+Upstream fixed this by routing the recursion through EvalState's existing
+call-depth counter, which raises nix::EvalBaseError ("stack overflow;
+max-call-depth exceeded") instead. Verified by diffing the 2.31 and 2.34
+sources: 2.34's copy of this function opens with `state.addCallDepth(pos)`
+and 2.31's does not, and the two files are otherwise identical here. The
+release in between is gone from nixpkgs (`nix_2_32`/`nix_2_33` both throw
+"has been removed"), so 2.31 is the only version we build that still needs
+this, and the fix is unnecessary -- not merely redundant -- from 2.34 on.
+
+The call is a straight backport, not a reimplementation: EvalState::addCallDepth
+already exists in 2.31 (src/libexpr/include/nix/expr/eval-inline.hh) with the
+same signature and the same "throw once callDepth passes settings.maxCallDepth"
+body that 2.34 has, and value-to-json.cc already includes eval-inline.hh. The
+returned CallDepth is an RAII counter, so `_level` is deliberately unused --
+it decrements on scope exit.
+
+diff -ruN a/src/libexpr/value-to-json.cc b/src/libexpr/value-to-json.cc
+--- a/src/libexpr/value-to-json.cc
++++ b/src/libexpr/value-to-json.cc
+@@ -16,6 +16,8 @@
+ {
+     checkInterrupt();
+ 
++    auto _level = state.addCallDepth(pos);
++
+     if (strict)
+         state.forceValue(v, pos);
+ 
