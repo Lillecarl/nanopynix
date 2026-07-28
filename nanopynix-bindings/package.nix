@@ -13,7 +13,7 @@
   nix-main,
   cmake,
   ninja,
-  renderPyproject,
+  pyproject-nix,
   version,
   enableTsan ? false,
   tsanRuntime ? null,
@@ -31,10 +31,10 @@ let
   );
 in
 let
-  attrs = renderPyproject {
-    projectRoot = toString ./.;
-    inherit python;
-  };
+  attrs =
+    (pyproject-nix.lib.project.loadPyproject { projectRoot = toString ./.; })
+    .renderers.buildPythonPackage
+      { inherit python; };
 in
 buildPythonPackage (
   attrs
