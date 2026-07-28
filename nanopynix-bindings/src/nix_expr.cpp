@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <locale>
 #include <mutex>
 #include <stdexcept>
@@ -28,11 +29,14 @@
 #include <nix/expr/attr-set.hh>
 #include <nix/expr/primops.hh>
 #include <nix/expr/value-to-json.hh>
-#include <nix/cmd/common-eval-args.hh>
+#include <nix/fetchers/fetch-to-store.hh>
+#include <nix/fetchers/tarball.hh>
+#include <nix/flake/flakeref.hh>
 #include <nix/flake/settings.hh>
 #include <nix/store/build-result.hh>
 #include <nix/store/derived-path.hh>
 #include <nix/util/experimental-features.hh>
+#include <nix/util/file-system.hh>
 #include <nix/util/logging.hh>
 #include <nix/util/util.hh>
 
@@ -453,6 +457,79 @@ std::string PyValue::repr() {
 }
 
 // =========================================================================
+// File-argument resolution
+// =========================================================================
+
+/// Resolve a user-supplied file argument the way the `nix` CLI does: a
+/// pseudo-URL is downloaded, a `flake:` reference is fetched, `<name>` goes
+/// through the lookup path, and anything else is an ordinary path.
+///
+/// This is `nix::lookupFileArg` from libcmd, reimplemented here rather than
+/// called, for two reasons.
+///
+/// The first is correctness, and it is not cosmetic. libcmd's version resolves
+/// the `flake:` branch through `nix::fetchSettings` -- a *process-global*
+/// `fetchers::Settings` that libcmd defines and the `nix` binary configures
+/// from its command line. nanopynix has no such global: every `PyEvalState`
+/// carries its own `fetchSettings` (see py_eval.hh), which is what
+/// `set_fetch_setting` writes to and what the constructor's
+/// `fetchSettingsOverrides` populate. Calling libcmd meant a `flake:` argument
+/// silently ignored all of that and fetched with process-wide defaults, while
+/// every other path through the bindings honoured the session's. Using
+/// `state.fetchSettings` throughout is the whole point.
+///
+/// The second is that this was the *only* symbol nanopynix took from libcmd,
+/// and libcmd drags lowdown and editline -- a Markdown renderer and a line
+/// editor -- into the address space of every Python process that imports
+/// nanopynix. Twenty-five lines is a better trade than a REPL's dependencies.
+///
+/// The `baseDir` parameter of the original is dropped: all three call sites
+/// passed none, and `absPath` already resolves against the process's working
+/// directory in that case.
+static nix::SourcePath lookup_file_arg(nix::EvalState &state, std::string_view s) {
+    if (nix::EvalSettings::isPseudoUrl(s)) {
+        auto accessor = nix::fetchers::downloadTarball(
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+            state.store,
+#else
+            *state.store,
+#endif
+            state.fetchSettings, nix::EvalSettings::resolvePseudoUrl(s));
+        auto storePath = nix::fetchToStore(
+            state.fetchSettings, *state.store, nix::SourcePath(accessor), nix::FetchMode::Copy);
+        return state.storePath(storePath);
+    }
+
+    if (nix::hasPrefix(s, "flake:")) {
+        nix::experimentalFeatureSettings.require(nix::Xp::Flakes);
+        auto flakeRef =
+            nix::parseFlakeRef(state.fetchSettings, std::string(s.substr(6)), {}, true, false);
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+        // resolve()/lazyFetch() read the fetch settings off the store's own
+        // state before 2.32; they grew explicit Settings parameters after.
+        auto [accessor, lockedRef] = flakeRef.resolve(state.store).lazyFetch(state.store);
+#else
+        auto [accessor, lockedRef] = flakeRef.resolve(state.fetchSettings, *state.store)
+                                         .lazyFetch(state.fetchSettings, *state.store);
+#endif
+        auto storePath = nix::fetchToStore(
+            state.fetchSettings, *state.store, nix::SourcePath(accessor), nix::FetchMode::Copy,
+            lockedRef.input.getName());
+        state.allowPath(storePath);
+        return state.storePath(storePath);
+    }
+
+    if (s.size() > 2 && s.front() == '<' && s.back() == '>')
+        return state.findFile(std::string(s.substr(1, s.size() - 2)));
+
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+    return state.rootPath(nix::absPath(s));
+#else
+    return state.rootPath(nix::absPath(std::filesystem::path{s}).string());
+#endif
+}
+
+// =========================================================================
 // PyEvalState out-of-line methods
 // =========================================================================
 
@@ -524,7 +601,7 @@ PyValue PyEvalState::repl_eval_file(const std::string &path) {
     nix::Value *v;
     {
         nb::gil_scoped_release release;
-        auto sourcePath = nix::resolveExprPath(nix::lookupFileArg(*state, path));
+        auto sourcePath = nix::resolveExprPath(lookup_file_arg(*state, path));
         auto *parsedExpr = state->parseExprFromFile(sourcePath, repl_static_env);
         v = state->allocValue();
         parsedExpr->eval(*state, *repl_env, *v);
@@ -539,7 +616,7 @@ PyValue PyEvalState::repl_load_file(const std::string &path) {
     nix::Value *v;
     {
         nb::gil_scoped_release release;
-        auto sourcePath = nix::lookupFileArg(*state, path);
+        auto sourcePath = lookup_file_arg(*state, path);
         auto *loaded = state->allocValue();
         state->evalFile(sourcePath, *loaded);
         auto autoArgs = state->buildBindings(0);
@@ -694,7 +771,7 @@ PyValue PyEvalState::eval_file(const std::string &path) {
     nix::Value *v;
     {
         nb::gil_scoped_release release;
-        auto sourcePath = nix::lookupFileArg(*state, path);
+        auto sourcePath = lookup_file_arg(*state, path);
         v = state->allocValue();
         state->evalFile(sourcePath, *v);
     }

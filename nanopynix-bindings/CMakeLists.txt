@@ -18,12 +18,18 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(NIX_UTIL REQUIRED nix-util)
 pkg_check_modules(NIX_STORE REQUIRED nix-store)
 pkg_check_modules(NIX_EXPR REQUIRED nix-expr)
-pkg_check_modules(NIX_CMD REQUIRED nix-cmd)
-# nix-flake, so builtins.getFlake is registered on every EvalState this
-# module constructs (see nix_expr.cpp's evalSettingsConfigurators call) --
-# pkg-config resolves nix-flake's own transitive Requires (nix-fetchers, ...)
-# automatically, so NIX_FLAKE_LIBRARIES/_INCLUDE_DIRS already cover them.
+pkg_check_modules(NIX_FETCHERS REQUIRED nix-fetchers)
+# nix-flake, so builtins.getFlake is registered on every EvalState the expr
+# module constructs (see nix_expr.cpp's evalSettingsConfigurators call).
 pkg_check_modules(NIX_FLAKE REQUIRED nix-flake)
+
+# Deliberately absent: nix-cmd. The only symbol nanopynix ever took from it was
+# `nix::lookupFileArg`, and src/nix_expr.cpp now implements that itself against
+# the EvalState's own fetch settings instead of libcmd's process-global ones --
+# see the comment on `lookup_file_arg` there for why that is a fix and not just
+# a dependency trim. Linking libcmd also dlopened lowdown and editline into
+# every Python process that imports nanopynix: a Markdown renderer and a line
+# editor, neither of which a library binding has any use for.
 
 # Nix's C++ bindings are a release stream, not an independent feature matrix.
 # Compatibility uses ordered release bands: < 2.32, < 2.35, then the latest
@@ -49,6 +55,31 @@ function(nanopynix_target_uses_nix_compat target)
   target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 endfunction()
 
+# Record only the libraries a module actually resolves a symbol from.
+#
+# pkg-config expands each component's transitive `Requires` into
+# NIX_*_LIBRARIES, so a target naming one Nix component ends up on a link line
+# naming five, and every one of them became a DT_NEEDED entry whether or not a
+# single symbol came from it. Measured on the 2.35 build before this was added,
+# five of the twenty-four edges were dead: main.so declared libnixexpr,
+# libnixfetchers, libnixstore and libnixutil and used nothing from any of them;
+# errors.so declared libnixfetchers, flake.so libnixstore, likewise.
+#
+# Those edges cost load-time work in every process that imports the package and
+# they misdescribe the dependency graph to anyone reading it. --as-needed drops
+# them at link time, and does it per Nix version, which hand-pruning the
+# pkg_check_modules lists could not: which component owns a given symbol has
+# moved between 2.31, 2.34 and 2.35 more than once.
+#
+# Safe here because nothing nanopynix links is loaded purely for its static
+# initialisers -- every Nix component it names, it calls into. The failure mode
+# if that ever stops being true is a missing registration at runtime, so a new
+# component pulled in for its side effects alone needs `-Wl,--no-as-needed`
+# around it and a comment saying why.
+function(nanopynix_link_as_needed target)
+  target_link_options(${target} PRIVATE "LINKER:--as-needed")
+endfunction()
+
 option(BUILD_UTIL     "Build nanopynix_util"     ON)
 option(BUILD_STORE    "Build nanopynix_store"    ON)
 option(BUILD_EXPR     "Build nanopynix_expr"     ON)
@@ -69,6 +100,7 @@ if(BUILD_EXPR)
     ${NIX_EXPR_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES})
   target_compile_options(errors PRIVATE -std=c++23)
   nanopynix_target_uses_nix_compat(errors)
+  nanopynix_link_as_needed(errors)
 endif()
 
 # --- nanopynix_util ---
@@ -78,6 +110,7 @@ if(BUILD_UTIL)
   target_link_libraries(util PRIVATE ${NIX_UTIL_LIBRARIES} ${NIX_STORE_LIBRARIES})
   target_compile_options(util PRIVATE -std=c++23)
   nanopynix_target_uses_nix_compat(util)
+  nanopynix_link_as_needed(util)
 endif()
 
 # --- nanopynix_store ---
@@ -87,33 +120,28 @@ if(BUILD_STORE)
   target_link_libraries(store PRIVATE ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES})
   target_compile_options(store PRIVATE -std=c++23)
   nanopynix_target_uses_nix_compat(store)
+  nanopynix_link_as_needed(store)
 endif()
 
 # --- nanopynix_expr ---
 if(BUILD_EXPR)
   nanobind_add_module(expr src/nix_expr.cpp)
   target_include_directories(expr PRIVATE
-    ${NIX_CMD_INCLUDE_DIRS} ${NIX_EXPR_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS} ${NIX_UTIL_INCLUDE_DIRS}
-    ${NIX_FLAKE_INCLUDE_DIRS})
+    ${NIX_EXPR_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS} ${NIX_UTIL_INCLUDE_DIRS}
+    ${NIX_FETCHERS_INCLUDE_DIRS} ${NIX_FLAKE_INCLUDE_DIRS})
   target_link_libraries(expr PRIVATE
-    ${NIX_CMD_LIBRARIES} ${NIX_EXPR_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES}
-    ${NIX_FLAKE_LIBRARIES})
+    ${NIX_EXPR_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES}
+    ${NIX_FETCHERS_LIBRARIES} ${NIX_FLAKE_LIBRARIES})
   # nix-expr propagates bdw-gc. Its public thread-registration declarations
   # are intentionally visible only to consumers defining GC_THREADS.
   target_compile_definitions(expr PRIVATE GC_THREADS)
   target_compile_options(expr PRIVATE -std=c++23)
   nanopynix_target_uses_nix_compat(expr)
+  nanopynix_link_as_needed(expr)
 endif()
 
 # --- nanopynix_fetchers ---
 if(BUILD_FETCHERS)
-  if(NOT DEFINED NIX_STORE_LIBRARIES)
-    pkg_check_modules(NIX_STORE    REQUIRED nix-store)
-  endif()
-  if(NOT DEFINED NIX_UTIL_LIBRARIES)
-    pkg_check_modules(NIX_UTIL     REQUIRED nix-util)
-  endif()
-  pkg_check_modules(NIX_FETCHERS   REQUIRED nix-fetchers)
   nanobind_add_module(fetchers src/nix_fetchers.cpp)
   target_include_directories(fetchers PRIVATE
     ${NIX_FETCHERS_INCLUDE_DIRS} ${NIX_STORE_INCLUDE_DIRS} ${NIX_UTIL_INCLUDE_DIRS})
@@ -121,19 +149,11 @@ if(BUILD_FETCHERS)
     ${NIX_FETCHERS_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES})
   target_compile_options(fetchers PRIVATE -std=c++23)
   nanopynix_target_uses_nix_compat(fetchers)
+  nanopynix_link_as_needed(fetchers)
 endif()
 
 # --- nanopynix_flake ---
 if(BUILD_FLAKE)
-  if(NOT DEFINED NIX_STORE_LIBRARIES)
-    pkg_check_modules(NIX_STORE    REQUIRED nix-store)
-  endif()
-  if(NOT DEFINED NIX_UTIL_LIBRARIES)
-    pkg_check_modules(NIX_UTIL     REQUIRED nix-util)
-  endif()
-  pkg_check_modules(NIX_EXPR       REQUIRED nix-expr)
-  pkg_check_modules(NIX_FETCHERS   REQUIRED nix-fetchers)
-  pkg_check_modules(NIX_FLAKE      REQUIRED nix-flake)
   nanobind_add_module(flake src/nix_flake.cpp)
   target_include_directories(flake PRIVATE
     ${NIX_FLAKE_INCLUDE_DIRS} ${NIX_EXPR_INCLUDE_DIRS}
@@ -143,6 +163,7 @@ if(BUILD_FLAKE)
     ${NIX_FETCHERS_LIBRARIES} ${NIX_STORE_LIBRARIES} ${NIX_UTIL_LIBRARIES})
   target_compile_options(flake PRIVATE -std=c++23)
   nanopynix_target_uses_nix_compat(flake)
+  nanopynix_link_as_needed(flake)
 endif()
 
 # --- nanopynix_main ---
@@ -153,6 +174,7 @@ if(BUILD_MAIN)
   target_link_libraries(main PRIVATE ${NIX_MAIN_LIBRARIES})
   target_compile_options(main PRIVATE -std=c++23)
   nanopynix_target_uses_nix_compat(main)
+  nanopynix_link_as_needed(main)
 endif()
 
 # --- Install rules ---
