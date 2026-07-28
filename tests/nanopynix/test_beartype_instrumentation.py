@@ -35,6 +35,13 @@ from tests.support.subprocess_output import run_process
 # probing them costs nothing and touches no Nix state.
 _PROBE_ARGUMENT = 123
 
+# How long the forkserver child below gets. Generous against the work it does
+# -- the child only imports and probes -- because the point is to convert an
+# unbounded hang into a report, not to police startup latency. The whole
+# daemon-backend suite runs in about 6 minutes locally, so 120s here cannot
+# turn a slow runner into a spurious failure.
+_CHILD_TIMEOUT_SECONDS = 120
+
 
 def _is_instrumented() -> bool:
     """Did beartype's hook reach the module ``normalize_nix_path`` lives in?"""
@@ -95,7 +102,17 @@ def test_a_forkserver_child_is_instrumented_not_merely_flagged() -> None:
     ctx = multiprocessing.get_context("forkserver")
     ctx.set_forkserver_preload(["nanopynix.rpc.worker._worker"])
     with ctx.Pool(processes=1) as pool:
-        flag_set, instrumented = pool.apply(_child_report)
+        # Bounded, because a plain `pool.apply()` waits forever if the child
+        # never comes up -- and it sometimes does not. Twice now this exact
+        # call has hung a CI job until it was cancelled, at 117 and 145
+        # minutes, on two different Nix versions, with the forkserver child
+        # still alive as an orphan process at cleanup. A hang that long
+        # reports nothing at all: no test name, no traceback, just a job that
+        # never ends. Failing at 120s instead names the test and leaves the
+        # preload -- the whole Nix worker module graph, imported in a child
+        # that has just been forked from the forkserver helper -- as the
+        # thing to look at.
+        flag_set, instrumented = pool.apply_async(_child_report).get(timeout=_CHILD_TIMEOUT_SECONDS)
 
     assert flag_set is True, "the child did not inherit NANOPYNIX_BEARTYPING"
     assert instrumented, (
