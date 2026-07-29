@@ -281,6 +281,43 @@ async def test_a_collected_value_gives_its_root_back_to_the_collector(
 
 
 @pytest.mark.anyio
+async def test_a_dropped_parent_gives_its_root_back_while_a_child_lives(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    """Keeping one attribute must not keep the attrset it came from.
+
+    A child used to hold its parent through ``nb::keep_alive``, and the
+    evaluator only through that chain, so one leaf pinned every root above it
+    -- and a root pins everything reachable from it in the Nix heap, which for
+    the top of a tree is the whole tree. Measured before the change, on the
+    shape below: the tracked count fell to 200 and Boehm freed nothing at all.
+
+    Two hundred separate attrsets, not one, because a single root is 32 bytes
+    and Boehm's own accounting drifts by about that much.
+    """
+    parents = 200
+
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as evaluator:
+        before = await _root_bytes(evaluator)
+
+        roots = [await evaluator.string(f"{{ a = {index}; b = 2; c = 3; }}") for index in range(parents)]
+        kept = [(await value.as_dict())["a"] for value in roots]
+        held = await _root_bytes(evaluator)
+        note(root_bytes_with_parents=held - before)
+
+        del roots
+        gc.collect()
+        await anyio.lowlevel.checkpoint()
+        remaining = await _root_bytes(evaluator)
+        note(root_bytes_after_dropping_parents=remaining - before)
+
+        # The kept children and nothing else. Each parent is one more root, so
+        # holding on to them would show as roughly twice this.
+        assert remaining - before < (held - before) * 2 // 3, "a dropped parent kept its Nix root"
+        assert await kept[7].as_int() == 7, "the child was released with its parent"
+
+
+@pytest.mark.anyio
 async def test_a_value_the_caller_still_holds_survives_a_collection(
     inproc_session: InprocSessionFactory,
 ) -> None:

@@ -62,6 +62,31 @@ class TestEvalString:
 
         assert value.as_int() == 42
 
+    def test_a_selected_value_keeps_the_eval_state_alive_without_its_parent(
+        self, store: Any, init_expr: object
+    ) -> None:
+        """A child must hold the evaluator itself, not the value it came from.
+
+        The parent is dropped here on purpose. ``attr_get`` used to keep it
+        alive, and the evaluator only through it, which meant one child pinned
+        every root above it. It now reaches the evaluator directly, and this
+        is the guarantee that must survive that change.
+
+        Nothing softer would do. A value that outlives its ``EvalState`` is
+        not merely unusable: ``EvalMemory`` owns the AST arena and
+        ``EvalState`` owns the symbol table, so a thunk would hold ``Expr *``
+        into freed memory and an attrset would hold ``Symbol`` into a
+        destroyed table.
+        """
+        eval_state = nanopynix.EvalState(store)
+        parent = eval_state.eval_string("{ a = 1; }")
+        child = parent.attr_get("a")
+
+        del parent, eval_state
+        gc.collect()
+
+        assert child.as_int() == 1
+
 
 class TestEvalAttrs:
     def test_eval_simple_attrs(self, eval_state: nanopynix.EvalState):

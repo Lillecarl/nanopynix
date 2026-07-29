@@ -1333,6 +1333,44 @@ static void register_primop(
 // bindings
 // =========================================================================
 
+// Keep the evaluator alive for as long as the value this call returns, and
+// keep nothing else alive.
+//
+// `nb::keep_alive<0, 1>` was here, and it links the result to its receiver
+// instead. A chain of selections then holds every link, so one leaf pinned
+// every root above it and Nix could collect none of the tree. Measured on 200
+// attrsets with one child kept from each: every parent dropped, and Boehm
+// freed nothing at all.
+//
+// The promise that annotation delivers is only ever about the far end of the
+// chain. A value must not outlive its `EvalState`: `EvalMemory` owns the AST
+// arena, which is a monotonic buffer freed as one block, and `EvalState` owns
+// the symbol table. So a surviving thunk holds `Expr *` into freed memory, and
+// a surviving attrset holds `Symbol` into a destroyed table -- `attr_names()`
+// alone would read it. `PyValue::eval_alive` turns that into an exception
+// rather than undefined behaviour, and this keeps it from arising.
+//
+// Reaching the evaluator directly keeps the promise and drops the links in
+// between, which were cost and nothing else.
+struct KeepEvaluatorAlive {
+    static void precall(PyObject **, size_t, nb::detail::cleanup_list *) {}
+
+    static void postcall(PyObject **args, size_t nargs, nb::handle result) {
+        if (nargs == 0 || !result.is_valid())
+            return;
+        nb::handle receiver = args[0];
+        PyValue *value = nb::inst_ptr<PyValue>(receiver);
+        nb::object evaluator;
+        if (value != nullptr && value->eval != nullptr)
+            evaluator = nb::find(*value->eval);
+        // The receiver as a fallback, which is what this replaced. It reaches
+        // the evaluator the long way, so the promise holds either way. It is
+        // only reachable if an `EvalState` has no Python object, which nothing
+        // in this project can produce.
+        nb::detail::keep_alive(result.ptr(), evaluator.is_valid() ? evaluator.ptr() : receiver.ptr());
+    }
+};
+
 static void bind_value(nb::module_ &m) {
     nb::class_<PyValue>(m, "Value")
         .def("_release", &PyValue::release,
@@ -1359,12 +1397,12 @@ static void bind_value(nb::module_ &m) {
         .def("realise_argv", &PyValue::realise_argv)
         .def("edit_location", &PyValue::edit_location)
         .def("list_length", &PyValue::list_length)
-        .def("list_get", &PyValue::list_get, "idx"_a, nb::keep_alive<0, 1>())
+        .def("list_get", &PyValue::list_get, "idx"_a, nb::call_policy<KeepEvaluatorAlive>())
         .def("attr_names", &PyValue::attr_names)
         .def("has_attr", &PyValue::has_attr, "name"_a)
-        .def("attr_get", &PyValue::attr_get, "name"_a, nb::keep_alive<0, 1>())
-        .def("auto_call", &PyValue::auto_call, nb::keep_alive<0, 1>())
-        .def("call", &PyValue::call, "arg"_a, nb::keep_alive<0, 1>())
+        .def("attr_get", &PyValue::attr_get, "name"_a, nb::call_policy<KeepEvaluatorAlive>())
+        .def("auto_call", &PyValue::auto_call, nb::call_policy<KeepEvaluatorAlive>())
+        .def("call", &PyValue::call, "arg"_a, nb::call_policy<KeepEvaluatorAlive>())
         .def("derived_path", &PyValue::derived_path)
         .def("build", [](PyValue &self, nb::object build_store, int build_mode, nb::object eval_store) {
             std::shared_ptr<nix::Store> build_store_ptr = nullptr;
