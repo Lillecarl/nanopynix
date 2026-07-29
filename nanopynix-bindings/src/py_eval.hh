@@ -5,8 +5,10 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <nanobind/nanobind.h>
@@ -30,6 +32,11 @@ struct PyEvalState {
     nix::EvalSettings evalSettings{_readOnlyMode};
     std::shared_ptr<nix::EvalState> state;
     std::shared_ptr<bool> alive = std::make_shared<bool>(true);
+
+    /// The thread that built this evaluator, and the only one that may drive
+    /// it. A default member initializer, so it is set before the constructor
+    /// body calls `init`.
+    const std::thread::id owner = std::this_thread::get_id();
     std::shared_ptr<nix::StaticEnv> repl_static_env;
     nix::Env *repl_env = nullptr;
     size_t repl_displ = 0;
@@ -75,17 +82,46 @@ struct PyEvalState {
             *alive = false;
     }
 
+    /// Refuse an operation that does not come from the owning thread.
+    ///
+    /// The Boehm collector neither scans nor suspends a thread it does not
+    /// know, and an evaluator allocates in the collected heap, and writes
+    /// pointers into it, on whichever thread drives it. So a foreign thread
+    /// is not an unlikely race. It is a stack the collector cannot see, and a
+    /// heap it can mutate under a collection. Nothing said no before this,
+    /// and a foreign thread returned correct answers -- see issue #30.
+    ///
+    /// The shape copies `alive`, which turns a use-after-free into an
+    /// exception. This turns silent corruption into an exception.
+    ///
+    /// Destruction is deliberately not guarded. `~PyValue` runs wherever the
+    /// last Python reference dies, which is usually not this thread, and it
+    /// only frees a Boehm root. `GC_free` needs no registration.
+    void checkThread() const {
+        const auto here = std::this_thread::get_id();
+        if (here == owner)
+            return;
+        std::ostringstream message;
+        message << "this evaluator belongs to thread " << owner
+                << ", so thread " << here << " cannot use it. Nix confines an "
+                << "EvalState, and every value of that EvalState, to the "
+                << "thread that built it.";
+        throw std::runtime_error(message.str());
+    }
+
     /// Apply one registered eval setting to this instance's own EvalSettings.
     /// Construction-time-snapshotted settings (nix-path, pure-eval,
     /// restrict-eval, the profiler settings) only take effect when passed to
     /// the constructor; the rest may be changed at any time.
     void set_eval_setting(const std::string &name, const std::string &value) {
+        checkThread();
         if (!evalSettings.set(name, value))
             throw std::runtime_error("unknown eval setting: " + name);
     }
 
     /// Apply one registered fetch setting to this instance's own fetchers::Settings.
     void set_fetch_setting(const std::string &name, const std::string &value) {
+        checkThread();
         if (!fetchSettings.set(name, value))
             throw std::runtime_error("unknown fetch setting: " + name);
     }

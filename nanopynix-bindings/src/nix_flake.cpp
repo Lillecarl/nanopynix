@@ -114,6 +114,7 @@ static PyLockedFlake lock_flake(
     bool write_lock_file = true,
     const std::map<std::string, std::string> &flake_settings = {})
 {
+    es.checkThread();
     nix::flake::Settings flakeSettings;
     apply_settings_overrides(flakeSettings, flake_settings);
     nix::flake::LockFlags lockFlags;
@@ -174,6 +175,7 @@ static PyLockedFlake lock_flake(
 
 static PyFlakeRef get_flake(PyEvalState &es, PyFlakeRef &flakeRef,
                              bool useRegistries = true) {
+    es.checkThread();
     std::optional<nix::flake::Flake> flake;
     {
         nb::gil_scoped_release release;
@@ -186,6 +188,7 @@ static PyFlakeRef get_flake(PyEvalState &es, PyFlakeRef &flakeRef,
 }
 
 static PyValue call_flake(PyEvalState &es, PyLockedFlake &lf) {
+    es.checkThread();
     nix::Value *v;
     {
         nb::gil_scoped_release release;
@@ -198,6 +201,7 @@ static PyValue call_flake(PyEvalState &es, PyLockedFlake &lf) {
 static PyValue eval_flake(PyEvalState &es, const std::string &ref,
                            bool write_lock_file = true,
                            const std::map<std::string, std::string> &flake_settings = {}) {
+    es.checkThread();
     nix::flake::Settings flakeSettings;
     apply_settings_overrides(flakeSettings, flake_settings);
     nix::flake::LockFlags lockFlags;

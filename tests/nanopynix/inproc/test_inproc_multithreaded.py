@@ -256,6 +256,44 @@ async def test_inproc_evaluator_keeps_one_thread_for_its_entire_lifetime() -> No
 
 
 @pytest.mark.anyio
+async def test_inproc_a_value_reads_from_a_second_event_loop() -> None:
+    """L1 confines an evaluator to one thread. The public API must not.
+
+    Every operation funnels through ``EvalSession.run`` onto the evaluator's
+    own thread, and ``asyncio.wrap_future(future, loop=...)`` hands the result
+    back to whichever loop asked for it. So a ``Value`` read from a second
+    loop, on a second thread, still reads correctly.
+
+    This is the property the thread guard of issue #30 must not break. The
+    guard refuses a foreign thread at the binding, and the only way that stays
+    invisible up here is if nothing ever routes past the executor.
+    """
+    async with _session(store_workers=2) as nix, nix.store() as store:
+        evaluator = nix.eval(store)
+        await evaluator.open()
+        try:
+            value = await evaluator.string("{ answer = 42; other = 7; }")
+
+            def read_in_a_second_loop() -> tuple[int, int, int]:
+                async def read() -> tuple[int, int, int]:
+                    answer = await value.attr("answer").as_int()
+                    other = await value.attr("other").as_int()
+                    return threading.get_ident(), answer, other
+
+                return asyncio.run(read())
+
+            reader_thread, answer, other = await anyio.to_thread.run_sync(read_in_a_second_loop)
+            assert (answer, other) == (42, 7)
+
+            # Three distinct threads: this test's, the reader's, and the
+            # evaluator's. Without the third one the test proves nothing.
+            evaluator_thread = await evaluator.run(threading.get_ident)
+            assert len({reader_thread, threading.get_ident(), evaluator_thread}) == 3
+        finally:
+            await evaluator.close()
+
+
+@pytest.mark.anyio
 async def test_inproc_store_metadata_and_closure_queries_run_concurrently() -> None:
     """One shared Store supports concurrent cache-miss metadata work."""
     async with _session(store_workers=4) as nix, nix.store() as store:
