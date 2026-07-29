@@ -1,220 +1,310 @@
 # Useful commands
-Note: plain `pytest` invocations default to `--nix-test-backends local` only (in-process, single-store) -- the daemon backend is exercised separately by CI's `test-daemon-*` matrix jobs and by the TSan workflows (which explicitly pass `--nix-test-backends local,daemon`). Pass `--nix-test-backends local,daemon` yourself if you need to reproduce a daemon-specific failure locally.
-- direnv exec . timeout 500 pytest tests
-- direnv exec . timeout 500 pytest tests --cov --cov-report=term-missing --cov-report= # coverage report, including the multiprocessing-forkserver Nix worker subprocess (see tests/_subprocess_startup/sitecustomize.py, put on PYTHONPATH by tests/support/beartype_hook.py)
 
-The table this prints is ~88 lines, so agent mode does not put it on the
-terminal: you get `[pytest-agent] coverage: NN%` for the headline number, and
-the table itself in `.pytest-agent/runs-NNNN/reports.txt` (the path is in the
-line above it). Read that file for the per-file rows and `Missing` columns --
-do not conclude anything about coverage from the terminal alone, and do not
-re-run with a different reporter to get around it. `--agent-max-summary-lines=0`
-prints it inline if you genuinely want it there.
+A plain `pytest` invocation uses `--nix-test-backends local` only. This backend
+runs in-process and uses one store. CI tests the daemon backend separately, in
+the `test-daemon-*` matrix jobs and in the TSan workflows. Those jobs pass
+`--nix-test-backends local,daemon`. Pass `--nix-test-backends local,daemon`
+yourself to reproduce a daemon failure on your machine.
+
+- direnv exec . timeout 500 pytest tests
+- direnv exec . timeout 500 pytest tests --cov --cov-report=term-missing --cov-report= # coverage report. It includes the Nix worker subprocess that multiprocessing starts with the forkserver. See tests/_subprocess_startup/sitecustomize.py, which tests/support/beartype_hook.py puts on PYTHONPATH.
+
+The coverage table has approximately 88 lines, so agent mode does not print the
+table to the terminal. The terminal shows `[pytest-agent] coverage: NN%` for
+the total. Agent mode writes the table to
+`.pytest-agent/runs-NNNN/reports.txt`, and the line above the total gives this
+path.
+
+Read that file for the row of each file and for the `Missing` columns. Do not
+make a conclusion about coverage from the terminal alone. Do not run the tests
+again with a different reporter to get the table. To print the table to the
+terminal, pass `--agent-max-summary-lines=0`.
+
 - direnv exec . pyright
 - direnv exec . ruff check --fix
-- direnv exec . ruff check --config ruff-strict.toml --fix # currently reports zero; it is a gate, not a backlog, so any finding is yours
+- direnv exec . ruff check --config ruff-strict.toml --fix # This configuration reports zero findings now. Keep it at zero. A new finding comes from your change.
 
-Never run either ruff config with `--unsafe-fixes`. The strict config disables
-TC001-003 because applying them breaks runtime type-checking (the reasoning,
-with the measurement behind it, is in `ruff-strict.toml`), and `--unsafe-fixes`
-is exactly how that damage would get applied in bulk to some other rule the
-same way.
-- nix build --file . pkgs.nixVersions.nix_2_34.src --no-link --print-out-paths # download the sourcecode of a Nix package and print it's location.
+Never run either ruff configuration with `--unsafe-fixes`. The strict
+configuration disables TC001-003, because these rules break type-checking at
+runtime. `ruff-strict.toml` gives the reason and the measurement behind it.
+`--unsafe-fixes` is the mechanism that applies the same damage in bulk to
+another rule.
+
+- nix build --file . pkgs.nixVersions.nix_2_34.src --no-link --print-out-paths # Download the source code of a Nix package and print the path to it.
 
 # Version control
 
-This repository uses Jujutsu (`jj`) for version control. Prefer `jj` commands
-for status, diffs, history, and commit/change inspection. Do not assume a Git
-workflow or run Git porcelain commands such as `git status`, `git diff`,
-`git commit`, `git checkout`, or `git reset` unless the user explicitly asks for
-Git or a tool requires Git-specific plumbing.
+This repository uses Jujutsu (`jj`) for version control. Use `jj` commands for
+status, for diffs, for history, and for inspection of commits and changes. Do
+not run a Git porcelain command such as `git status`, `git diff`, `git commit`,
+`git checkout`, or `git reset`. Use a Git command only when the user asks for
+Git, or when a tool needs Git plumbing.
 
-`pynix` is nanopynix's dogfooding consumer. It should depend on public
-`nanopynix` APIs. If it needs a generally useful library capability, expose it
-from nanopynix rather than importing a private implementation module. A narrow
-private dependency is acceptable only when a redesign is not justified, and
-must be explicitly documented at the import site.
+`pynix` is the dogfooding consumer of nanopynix. `pynix` must depend on the
+public APIs of `nanopynix`. If `pynix` needs a library capability of general
+use, add that capability to nanopynix, and do not import a private
+implementation module. A narrow dependency on a private module is acceptable
+only when a redesign is not justified. Document each such dependency at the
+import site.
 
-pytest-agent auto-activates in this environment (it detects `CLAUDECODE` and
-similar agent-harness env vars), so plain `pytest ...` invocations already
-write full per-test detail — tracebacks, captured stdout/stderr/logs — to
-`.pytest-agent/runs-NNNN/` regardless of what the terminal shows. There is no
-need to pipe pytest through `tee`/`tail` to avoid losing output anymore; let
-pytest's output go to stdout unfiltered. If a test fails, read its detail file
-directly (path is printed in the run's "failed/errored" list, or found via
-`.pytest-agent/history.jsonl`'s last line) rather than relying on the
-terminal's minimal progress lines alone.
+pytest-agent starts automatically in this environment, because it detects
+`CLAUDECODE` and similar environment variables of an agent harness. Each plain
+`pytest ...` invocation therefore writes the full detail of each test to
+`.pytest-agent/runs-NNNN/`. This detail includes tracebacks and the captured
+stdout, stderr, and logs. The terminal output does not change what pytest-agent
+writes, so do not pipe pytest through `tee` or `tail` to keep the output.
 
-**Read `pytest-agent/SKILL.md` for how to run pytest and read its results
-here.** It is the source of truth for the whole workflow; this file only
-summarises the part you hit first. Worth knowing it covers: `pytest-agent
-digest` groups failures by root cause (start there rather than reading each one
-separately), `pytest-agent history '<test>'` answers "did I break this or was it
-already failing", `pytest-agent rerun` re-runs just the recorded failures,
-`--agent-label` names a long background run so it stays queryable while still
-going, and `agent_notes` / `from pytest_agent import note` get values out of a
-test — including from inside the code under test — in preference to a
-throwaway `python -c`.
+When a test fails, read the detail file of that test. The list of failed and
+errored tests at the end of the run gives the path to the file. The last line
+of `.pytest-agent/history.jsonl` names the run. Do not use the minimal progress
+lines in the terminal alone.
+
+**Read `pytest-agent/SKILL.md` for the procedure to run pytest here and to read
+the results.** That file is the source of truth for the full workflow, and this
+file summarises only the first part of it. `SKILL.md` also documents these
+commands:
+
+- `pytest-agent digest` groups the failures by root cause. Start with this
+  command, and do not read each failure separately first.
+- `pytest-agent history '<test>'` tells you if your change broke the test, or
+  if the test failed before your change.
+- `pytest-agent rerun` runs only the recorded failures again.
+- `--agent-label` gives a name to a long background run, so that you can query
+  the run while the run continues.
+- `agent_notes` and `from pytest_agent import note` get a value out of a test,
+  and also out of the code under test. Use them instead of a separate
+  `python -c` command.
 
 # Python coding conventions
 
-- Use `from __future__ import annotations` in Python modules that define or use
-  type annotations.
-- Do not use string type hints such as `"Store"`. Use future annotations and
-  `if TYPE_CHECKING:` imports instead.
-- Keep imports at the top of the file. Lazy imports inside functions or methods
-  are forbidden unless they are absolutely necessary to break a circular import
-  cycle; prefer moving shared types to a neutral module over lazy imports.
-- Import ordering:
+- Use `from __future__ import annotations` in each Python module that defines
+  or uses a type annotation.
+- Do not use a string type hint such as `"Store"`. Use future annotations and
+  an import in an `if TYPE_CHECKING:` block.
+- Keep the imports at the top of the file. Do not write a lazy import in a
+  function or in a method. A lazy import is permitted only when it is necessary
+  to break a circular import cycle. To break such a cycle, first try to move
+  the shared types to a neutral module.
+- Use this import order:
   1. `from __future__ import annotations`
-  2. standard library imports
-  3. third-party imports
+  2. imports of the standard library
+  3. imports of third-party packages
   4. local `nanopynix` imports
-  5. `if TYPE_CHECKING:` block containing only type-only imports
+  5. an `if TYPE_CHECKING:` block that contains only type-only imports
   6. module constants
   7. code
-- When re-exporting a name from another module, use the explicit re-export
-  pattern `from module import Name as Name`. Consolidate related re-exports into
-  one multi-line import block.
-- Do not use `assert` statements outside `tests/`. For runtime validation, use
-  explicit `if ...: raise ...`. To satisfy type checkers, prefer local variable
-  aliasing or explicit `if value is None: raise ...` checks.
-- Do not use `asyncio.get_event_loop()`. Use `asyncio.get_running_loop()` inside
-  async code. For timestamps, use `time.monotonic()`.
-- Keep a strong reference to background tasks created with
-  `asyncio.create_task()`, for example in an instance `set` or `list`.
-- Do not hide unexpected failures with `except Exception: pass`. Log unexpected
-  exceptions. Use `contextlib.suppress(...)` only for expected ignored
-  exceptions, with a comment explaining why they are safe to ignore.
-- Every lint or type-checker suppression must name the specific rule and give
-  an inline justification. Use the form
-  `# type: ignore[rule-name] -- reason` or `# noqa: RULE -- reason`; do not
-  use blanket or unexplained suppressions.
-- Prefer anyio primitives (`anyio.Lock`/`Event`, memory object streams,
-  `anyio.fail_after`/`move_on_after`, `anyio.create_task_group`,
-  `anyio.open_process`, `anyio.to_thread`/`from_thread.BlockingPortal`) over
-  raw `asyncio` equivalents in new code. Two documented, intentional
-  exceptions exist: `_core/_nix_executor.py`'s `asyncio.wrap_future` call
-  (interop with an already-running dedicated `concurrent.futures` thread —
-  routing it through `anyio.to_thread` would spend a slot in anyio's shared
-  capacity limiter for no benefit), and `asyncio.create_task()` used to host
-  a `CancelScope`/`TaskGroup` (a plain `anyio.create_task_group()` or
-  `anyio.from_thread.BlockingPortal`) whose `start()`/`close()` are invoked
-  from different tasks (e.g. separate gRPC handler calls) — see
-  `rpc/worker/_worker_primop.py`, since anyio's `CancelScope`/`TaskGroup`
-  must be entered and exited by the same task.
+- To re-export a name from another module, use the explicit pattern
+  `from module import Name as Name`. Put the related re-exports in one import
+  block of multiple lines.
+- Do not use an `assert` statement outside `tests/`. For validation at runtime,
+  write `if ...: raise ...`. To satisfy the type checker, use a local variable
+  alias, or an explicit `if value is None: raise ...` check.
+- Do not use `asyncio.get_event_loop()`. Use `asyncio.get_running_loop()` in
+  async code. For a timestamp, use `time.monotonic()`.
+- Keep a strong reference to each background task that `asyncio.create_task()`
+  creates. Put the reference in a `set` or in a `list` on the instance.
+- Do not hide an unexpected failure with `except Exception: pass`. Log each
+  unexpected exception. Use `contextlib.suppress(...)` only for an exception
+  that you expect, and add a comment that tells why the exception is safe to
+  ignore.
+- Give a specific rule name and an inline justification for each suppression of
+  a lint rule or of a type-checker rule. Use the form
+  `# type: ignore[rule-name] -- reason` or `# noqa: RULE -- reason`. Do not
+  write a blanket suppression, and do not write a suppression with no reason.
+- Use the anyio primitives in new code, and do not use the raw `asyncio`
+  equivalents. These primitives include `anyio.Lock`, `anyio.Event`, the memory
+  object streams, `anyio.fail_after`, `anyio.move_on_after`,
+  `anyio.create_task_group`, `anyio.open_process`, `anyio.to_thread`, and
+  `anyio.from_thread.BlockingPortal`. Two exceptions are intentional, and this
+  file documents both:
+  1. `_core/_nix_executor.py` calls `asyncio.wrap_future`. This call operates
+     with a dedicated `concurrent.futures` thread that already runs. A route
+     through `anyio.to_thread` would use a slot in the shared capacity limiter
+     of anyio for no benefit.
+  2. `asyncio.create_task()` hosts a `CancelScope` or a `TaskGroup`, which is a
+     plain `anyio.create_task_group()` or an
+     `anyio.from_thread.BlockingPortal`, when different tasks call `start()`
+     and `close()`. Two separate gRPC handler calls do this in
+     `rpc/worker/_worker_primop.py`. The same task must enter and exit a
+     `CancelScope` or a `TaskGroup` of anyio.
 
 # Banned patterns
 
-- **In an async function, always use the async alternative when one exists —
-  never a blocking sync call**, even in test code. `subprocess.run`/`Popen`/
-  `os.system` → `anyio.open_process` (defaults `stdin`/`stdout`/`stderr` to
-  `PIPE`, unlike asyncio — pass `None` explicitly to inherit the terminal).
-  Blocking `pathlib.Path` I/O (`.read_text()`, `.write_text()`, `.exists()`,
-  `.mkdir()`, etc.) → `anyio.Path`, same API, easy to miss since it doesn't
-  look like a blocking call. Pure path manipulation with no filesystem access
-  is still fine as plain `pathlib.Path`.
+- **In an async function, always use the async alternative when one exists.
+  Never use a blocking sync call.** This rule also applies to test code.
+  - Replace `subprocess.run`, `subprocess.Popen`, and `os.system` with
+    `anyio.open_process`. `anyio.open_process` sets `stdin`, `stdout`, and
+    `stderr` to `PIPE` by default, and asyncio does not. Pass `None` for each
+    of these three arguments to inherit the terminal.
+  - Replace blocking `pathlib.Path` I/O with `anyio.Path`. This I/O includes
+    `.read_text()`, `.write_text()`, `.exists()`, and `.mkdir()`. `anyio.Path`
+    has the same API. Such a call is easy to miss, because it does not look
+    like a blocking call.
+  - Pure manipulation of a path with no access to the file system stays a plain
+    `pathlib.Path`.
+
+# Writing style: ASD-STE100
+
+Write all descriptive English in this repository in Simplified Technical
+English (ASD-STE100). This applies to documentation, READMEs, commit messages,
+docstrings, code comments, error messages, and pull request descriptions. It
+does not apply to code itself, to identifiers, or to quoted command output.
+
+Follow these rules:
+
+- Use one topic for each sentence. Keep a descriptive sentence to 25 words or
+  fewer, and an instruction to 20 words or fewer.
+- Use the active voice. Write "the worker sends the event", not "the event is
+  sent by the worker".
+- Give an instruction as a command. Write "Run the tests", not "The tests
+  should be run" or "You may want to run the tests".
+- Use the simple present, past, or future tense. Do not use a perfect tense
+  ("has changed", "had run") when a simple tense is sufficient.
+- Use each technical word with one meaning only, and always use the same word
+  for the same thing. Do not write "evaluator" in one paragraph and "evaluation
+  engine" in the next paragraph.
+- Do not use a noun as a verb, and do not use a verb as a noun.
+- Keep a noun cluster to three words or fewer. Write "the cache of the worker
+  process", not "the worker process result cache".
+- Keep the articles ("a", "the") and the relative pronouns ("that", "which").
+  Do not remove them to save space.
+- Write out what a pronoun refers to when the reference is not immediate.
+  Replace "it does this because it is faster" with the actual subjects.
+- Keep a descriptive paragraph to six sentences or fewer. Start the paragraph
+  with the topic sentence.
+- Write the steps of a procedure in the order that the reader must do them.
+- Do not use slang, an idiom, or jargon that this repository does not define.
+  Do not use humour, and do not ask a rhetorical question.
+- Put a warning or a caution before the step that it applies to, and start the
+  warning with the command.
+
+A commit message keeps the Conventional Commits prefix, for example
+`feat(scope):` or `fix(tests):`. ASD-STE100 applies to the text after the
+prefix and to the body.
+
+This file follows these rules, and it is the example to copy. Apply the rules
+to text that you write or change. Do not rewrite other existing prose only to
+make that prose comply.
 
 # Design notes
 
-**Nix "stderr" = logging, not OS stderr**: Nix uses "stderr" terminology to
-refer to `nix::Logger` log events. These already flow through the worker↔master
-RPC pipe as `action: "msg"` / `action: "error"` events. Worker IPC uses only
-stdin/stdout (JSON-RPC protocol); actual subprocess fd 2 inherits the parent.
-Do NOT add a separate stderr pipe — it would be redundant and conflate Nix's
-logging abstraction with OS-level stderr.
+**In Nix, the term "stderr" means logging. It does not mean the stderr of the
+operating system.** Nix uses the term "stderr" for the log events of
+`nix::Logger`. These events already flow through the RPC pipe between the
+worker and the master, as `action: "msg"` events and `action: "error"` events.
+The IPC of the worker uses stdin and stdout only, for the JSON-RPC protocol.
+The subprocess inherits file descriptor 2 from the parent.
 
-# Test Failure Discipline
+Do not add a separate stderr pipe. Such a pipe is redundant, and it confuses
+the logging abstraction of Nix with the stderr of the operating system.
 
-Do not assume failing tests are unrelated, flaky, or pre-existing.
+# Test failure discipline
 
-When a test fails after your changes, your default assumption must be:
+Do not assume that a failed test is unrelated, flaky, or pre-existing.
 
-> "My change caused or exposed this failure."
+When a test fails after your change, start with this assumption:
 
-You may only call something a pre-existing issue after proving it with evidence.
+> "My change caused this failure, or my change made this failure visible."
 
-## Required procedure for failing tests
+Call a failure pre-existing only after you prove that it is pre-existing.
 
-When any test fails:
+## Required procedure for a failing test
 
-1. Re-run the exact failing test command to confirm the failure.
-2. Inspect the failure carefully before making claims.
-3. Check whether your recent changes could plausibly affect the failing behavior.
-4. Use `git diff` to review every file you changed.
-5. If you believe the failure is unrelated, verify that claim by either:
-   - reverting your changes and showing the test still fails, or
-   - running the same test on a clean baseline branch/commit, or
-   - finding an existing failing CI/test record predating your work.
+When a test fails:
 
-Without one of those checks, do not say:
+1. Run the exact failing command again, and confirm the failure.
+2. Inspect the failure carefully before you make a claim about it.
+3. Decide if your recent changes can affect the behavior that failed.
+4. Use `jj diff` to review each file that you changed.
+5. To support a claim that the failure is unrelated, do one of these three
+   things:
+   - Revert your changes, and show that the test still fails.
+   - Run the same test on a clean baseline branch or commit.
+   - Find a CI record or a test record of the same failure from before your
+     work.
+
+Do not write one of these statements until you complete one of those three
+checks:
+
 - "This is pre-existing"
 - "The tests are broken"
 - "This is unrelated"
 - "This is likely flaky"
 - "The failure is outside the scope"
 
-Instead say:
+Write this instead:
 
-> "I have not proven this is unrelated yet. I will continue debugging under the assumption my change caused it."
+> "I have not proven that this failure is unrelated. I will continue to debug
+> it under the assumption that my change caused it."
 
 ## Pytest output discipline
 
-pytest-agent auto-activates in this environment and already enforces this:
-it refuses to run (exit code 2, before collecting anything) if it detects
-its own stdout piped directly into `head`/`tail`/`grep`/`sed`/`awk`/etc., and
-it always writes full per-test detail — tracebacks, captured stdout/stderr/
-logs — to `.pytest-agent/runs-NNNN/` regardless of what the terminal shows.
-So just let pytest's output go to the terminal unfiltered; there's no need to
-route it through `tee` to avoid losing evidence anymore.
+pytest-agent starts automatically in this environment, and it enforces this
+rule. pytest-agent refuses to run when it detects a pipe from its own stdout
+into `head`, `tail`, `grep`, `sed`, `awk`, or a similar reader. It then exits
+with code 2 before it collects a test. pytest-agent always writes the full
+detail of each test to `.pytest-agent/runs-NNNN/`, and this detail includes
+tracebacks and the captured stdout, stderr, and logs. The terminal output does
+not change what pytest-agent writes.
 
-If pytest's minimal terminal output isn't enough to understand a failure,
-read the detail file directly — its path is printed in the run's
-"failed/errored" list at the end, or the test's log lives at
-`.pytest-agent/runs-NNNN/<test file path>/<test name>.log` under the run
-named in `.pytest-agent/history.jsonl`'s last line — rather than re-running
-with ad hoc shell filtering.
+Let the output of pytest go to the terminal with no filter. A pipe into `tee`
+is not necessary to keep the evidence.
 
-The refusal covers renamed greps too — it identifies the reader by argv[0],
-`comm` *and* `/proc/<pid>/exe`, so this harness's `grep` shim shows up as
-`ugrep (running as .claude-wrapped)`. That is not a different tool to route
-around; drop the pipe. `| tee` and `| wc -l` are fine, and listing-only runs
-(`--collect-only`, `--fixtures`, ...) are exempt. See `pytest-agent/SKILL.md`
-for the full rule and for the query commands to use instead of filtering.
+When the minimal terminal output of pytest is not sufficient to explain a
+failure, read the detail file of the test. The list of failed and errored tests
+at the end of the run gives the path. The log of a test is also at
+`.pytest-agent/runs-NNNN/<test file path>/<test name>.log`, under the run that
+the last line of `.pytest-agent/history.jsonl` names. Do not run the tests
+again with a shell filter.
 
-## Never paper over failures
+The refusal also applies to a renamed grep, because pytest-agent identifies the
+reader by `argv[0]`, by `comm`, and by `/proc/<pid>/exe`. The `grep` shim of
+this harness shows as `ugrep (running as .claude-wrapped)`. This shim is not a
+different tool, and you must not use it to get around the rule. Remove the
+pipe.
 
-Do not modify tests just to match broken behavior.
+A pipe into `tee` or into `wc -l` is permitted. A run that only makes a list is
+exempt, for example a run with `--collect-only` or with `--fixtures`. Read
+`pytest-agent/SKILL.md` for the full rule, and for the query commands that
+replace a filter.
 
-Only update tests when:
-- the intended behavior changed,
-- the old test expectation is demonstrably obsolete,
-- and the reason is explained clearly.
+## Never hide a failure
 
-Do not weaken assertions, skip tests, delete coverage, or loosen error handling to make tests pass unless explicitly justified.
+Do not change a test only to make it match broken behavior.
 
-## Debugging expectations
+Change a test only when all three of these conditions are true:
 
-Prefer small, evidence-driven steps:
+- The intended behavior changed.
+- The old expectation of the test is obsolete, and you can show this.
+- You explain the reason clearly.
 
-- reproduce the failure
-- isolate the smallest failing test
-- inspect the relevant code path
-- add temporary logging only if it helps identify the issue
-- remove temporary logging before finishing
-- make the smallest fix that addresses the root cause
-- re-run the failing test
-- then run the relevant broader test set
+Do not weaken an assertion, skip a test, delete coverage, or loosen error
+handling to make a test pass. Do these things only with an explicit
+justification.
 
-## Reporting failures
+## Expectations for debugging
 
-When reporting a test failure, include:
+Use small steps, and base each step on evidence:
 
-- the exact command run
-- the exact failing test name
-- the error or assertion message
-- whether the failure was reproduced after your change
-- why your fix addresses the root cause
+- Reproduce the failure.
+- Isolate the smallest test that fails.
+- Inspect the related code path.
+- Add temporary logging only when the logging helps you to identify the
+  problem.
+- Remove the temporary logging before you finish.
+- Make the smallest change that corrects the root cause.
+- Run the failing test again.
+- Then run the larger set of related tests.
 
-If you believe a failure is pre-existing, include the proof.
-A suspicion is not proof.
+## Reports of a failure
+
+When you report a test failure, include this information:
+
+- the exact command that you ran
+- the exact name of the test that failed
+- the error message or the assertion message
+- whether the failure occurred again after your change
+- why your correction addresses the root cause
+
+When you think that a failure is pre-existing, include the proof. A suspicion
+is not a proof.
