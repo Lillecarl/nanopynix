@@ -7,6 +7,9 @@ Eval Nix from Python — a fast, async-first Python binding for the Nix evaluato
 :caption: Contents
 
 architecture
+architecture-principles
+quality-gates
+decisions
 examples
 api/index
 ```
