@@ -38,10 +38,15 @@ from nanopynix.settings import (
     NanopynixSettings,
     NixEvalSettings,
     NixFetchSettings,
+    NixGlobalSettings,
     NixSettings,
+    NixStoreDefaults,
+    SettingsProvenance,
     normalize_nix_path,
     normalize_nix_settings,
+    reject_settings_write_while_open,
 )
+from nanopynix.stores import StoreConfig, resolve_store_spec
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
 if TYPE_CHECKING or BEARTYPING:
@@ -94,7 +99,7 @@ class Session:
     def __init__(  # noqa: PLR0913 -- tracked complexity/arg-count debt, see TODO.md
         self,
         *,
-        store_uri: str = DEFAULT_STORE_URI,
+        store_uri: StoreConfig | str = DEFAULT_STORE_URI,
         nix_conf: Path | None = None,
         load_config: bool = True,
         settings: NixSettings | PathLike[str] | str | None = None,
@@ -125,6 +130,10 @@ class Session:
         nanopynix_settings = runtime_settings or NanopynixSettings()
         self.runtime_settings = nanopynix_settings
         self.namespace = namespace
+        # Nix has no global for these four, so the only place a session-wide
+        # default can go is the URI of each store this session opens.
+        self._store_defaults = NixStoreDefaults.from_settings(nix_settings)
+        store_uri = resolve_store_spec(store_uri, self._store_defaults)
         self._store_uri = store_uri
         worker_settings = nix_settings.to_worker_settings()
         if namespace is not None:
@@ -156,7 +165,7 @@ class Session:
         # stop accumulating; this does not.
         self._stores: weakref.WeakSet[Store] = weakref.WeakSet()
 
-    def store(self, uri: str | None = None) -> Store:
+    def store(self, uri: StoreConfig | str | None = None) -> Store:
         """Create an ergonomic Store facade for store operations.
 
         Usage::
@@ -174,8 +183,13 @@ class Session:
         The store carries this session's ID — passing it to
         ``Eval`` from a different session raises ``ValueError``. Opening the
         handle adds its URI to the worker's process title.
+
+        Args:
+            uri: A :mod:`nanopynix.stores` model, a store URI, or ``None`` for
+                this session's default store. A model has this session's store
+                defaults merged under it, so a value set on the model wins.
         """
-        selected_uri = self._store_uri if uri is None else uri
+        selected_uri = self._store_uri if uri is None else resolve_store_spec(uri, self._store_defaults)
         store = Store(
             StoreHandle(
                 self._manager,
@@ -282,6 +296,51 @@ class Session:
     async def set_verbosity(self, verbosity: LogLevelInput) -> LogLevel:
         """Set the worker-side Nix log verbosity for this session."""
         return await self._manager.set_verbosity(normalize_log_level(verbosity))
+
+    async def settings(self, *, overridden_only: bool = False) -> dict[str, str]:
+        """Return this session's effective Nix settings.
+
+        Args:
+            overridden_only: Report only the settings something set, rather
+                than the whole registry. This is what tells an applied value
+                apart from a default.
+
+        Returns:
+            The settings, as Nix reports them.
+        """
+        response = await self._manager.get_settings(overridden_only=overridden_only)
+        return dict(response.settings)
+
+    async def settings_provenance(self) -> SettingsProvenance:
+        """Return where this session's configuration came from.
+
+        With ``load_config=True`` the host's ``nix.conf`` and environment are
+        read before this session applies its own settings, so the two can be
+        told apart. :attr:`SettingsProvenance.overridden_from_config` is the
+        interesting part: the settings where the host asked for one value and
+        this session uses another.
+        """
+        response = await self._manager.get_settings(overridden_only=True)
+        return SettingsProvenance(from_config=dict(response.from_config), applied=dict(response.applied))
+
+    async def set_settings(self, settings: NixGlobalSettings) -> dict[str, str]:
+        """Apply global Nix settings to this session, and read each one back.
+
+        The values come back from Nix rather than being echoed, so a caller
+        sees what Nix made of each one. An unknown setting name raises.
+
+        Refuses while a store or an evaluator is open. Nix builds both from the
+        globals as they stand and never looks again, so a write now would not
+        reach what the caller is holding. Close them, write, and open again.
+
+        Raises:
+            SettingNotLiveError: A store or an evaluator is open.
+        """
+        reject_settings_write_while_open(
+            open_stores=sum(1 for store in self._stores if store.is_open),
+            open_evaluators=len(self._evals),
+        )
+        return dict(await self._manager.set_settings(settings.to_worker_settings(explicit_only=True)))
 
     def subscribe(self, callback: Any) -> Any:
         """Subscribe a callback to live log events.

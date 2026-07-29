@@ -72,10 +72,16 @@ from nanopynix.settings import (
     NixEvalSettings,
     NixFetchSettings,
     NixFlakeSettings,
+    NixGlobalSettings,
     NixSettings,
+    NixStoreDefaults,
+    SettingsProvenance,
     normalize_nix_path,
     normalize_nix_settings,
+    reject_construction_time_keys,
+    reject_settings_write_while_open,
 )
+from nanopynix.stores import StoreConfig, resolve_store_spec
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
 if TYPE_CHECKING or BEARTYPING:
@@ -201,7 +207,7 @@ class Session:
         verbosity: LogLevelInput | None = None,
         nix_path: str | Sequence[str] | None = None,
         primops: Sequence[PrimOpSpec | Mapping[str, Any]] | None = None,
-        store_uri: str = DEFAULT_STORE_URI,
+        store_uri: StoreConfig | str = DEFAULT_STORE_URI,
         store_workers: int = 4,
     ) -> None:
         if nix_conf is not None:
@@ -215,12 +221,15 @@ class Session:
         self._verbosity = normalize_log_level(verbosity) if verbosity is not None else None
         self._nix_path = normalize_nix_path(nix_path)
         self._primops = to_primop_specs(primops)
-        self._store_uri = store_uri
+        self._store_defaults = NixStoreDefaults.from_settings(self._settings)
+        self._store_uri = resolve_store_spec(store_uri, self._store_defaults)
         if store_workers < 1:
             raise ValueError("store_workers must be at least 1")
         self._store_workers = store_workers
         self._collector = LogCollector()
         self._runtime = CoreRuntime()
+        #: Where this session's configuration came from, recorded by `open`.
+        self._provenance = SettingsProvenance()
         # Creation is deliberately lazy: merely importing nanopynix.inproc
         # must not start a Nix thread in an L3 manager process.
         self._executor: NixThreadExecutor | None = None
@@ -277,7 +286,7 @@ class Session:
         )
 
     def _init_nix(self) -> None:
-        self._runtime.initialize(
+        self._provenance = self._runtime.initialize(
             settings=self._settings.to_worker_settings(),
             load_config=self._load_config,
             verbosity=None if self._verbosity is None else int(self._verbosity),
@@ -398,9 +407,16 @@ class Session:
             capture._register_request(operation_id)  # type: ignore[reportPrivateUsage] -- the ACTIVE_LOG_CAPTURES dispatch contract; rpc does the same  # noqa: SLF001
         return operation_id
 
-    def store(self, uri: str | None = None) -> Store:
-        """Return a direct-pointer store context manager."""
-        store = Store(self, self._store_uri if uri is None else uri)
+    def store(self, uri: StoreConfig | str | None = None) -> Store:
+        """Return a direct-pointer store context manager.
+
+        Args:
+            uri: A :mod:`nanopynix.stores` model, a store URI, or ``None`` for
+                this session's default store. A model has this session's store
+                defaults merged under it, so a value set on the model wins.
+        """
+        selected = self._store_uri if uri is None else resolve_store_spec(uri, self._store_defaults)
+        store = Store(self, selected)
         self._stores.add(store)
         return store
 
@@ -471,6 +487,53 @@ class Session:
         level = normalize_log_level(verbosity)
         return LogLevel(await self.run(self._runtime.set_verbosity, int(level)))
 
+    async def settings(self, *, overridden_only: bool = False) -> dict[str, str]:
+        """Return this session's effective Nix settings.
+
+        Args:
+            overridden_only: Report only the settings something set, rather
+                than the whole registry. This is what tells an applied value
+                apart from a default.
+
+        Returns:
+            The settings, as Nix reports them.
+        """
+        return dict(await self.run(self._runtime.list_settings, overridden_only))
+
+    async def settings_provenance(self) -> SettingsProvenance:
+        """Return where this session's configuration came from.
+
+        With ``load_config=True`` the host's ``nix.conf`` and environment are
+        read before this session applies its own settings, so the two can be
+        told apart. :attr:`SettingsProvenance.overridden_from_config` is the
+        interesting part: the settings where the host asked for one value and
+        this session uses another.
+        """
+        return self._provenance
+
+    async def set_settings(self, settings: NixGlobalSettings) -> dict[str, str]:
+        """Apply global Nix settings to this session, and read each one back.
+
+        The values come back from Nix rather than being echoed, so a caller
+        sees what Nix made of each one. An unknown setting name raises.
+
+        Refuses while a store or an evaluator is open. Nix builds both from the
+        globals as they stand and never looks again, so a write now would not
+        reach what the caller is holding. Close them, write, and open again.
+
+        Raises:
+            SettingNotLiveError: A store or an evaluator is open.
+        """
+        reject_settings_write_while_open(
+            open_stores=sum(1 for store in self._stores if store.is_open),
+            open_evaluators=len(self._evals),
+        )
+        applied = dict(await self.run(self._runtime.apply_settings, settings.to_worker_settings(explicit_only=True)))
+        self._provenance = self._provenance.model_copy(
+            update={"applied": {**self._provenance.applied, **applied}},
+        )
+        return applied
+
     async def log_stream(self) -> AsyncIterator[LogEvent]:
         """Async iterator over log events from this process's Nix logger."""
         send_stream, receive_stream = anyio.create_memory_object_stream[LogEvent](max_buffer_size=math.inf)
@@ -537,6 +600,16 @@ class Store:
         if self._core is None:
             raise StoreClosedError("Store is not open — use async with")
         return self._core.require_raw()
+
+    @property
+    def is_open(self) -> bool:
+        """True while this store is open.
+
+        Read by ``Session.set_settings``: a store reads its settings while Nix
+        constructs it, so changing a global while one is open would be lost on
+        that store without a word.
+        """
+        return self._core is not None
 
     def _require_core(self) -> CoreStore:
         if self._core is None:
@@ -925,16 +998,23 @@ class EvalSession:
         eval_settings: NixEvalSettings | None = None,
         fetch_settings: NixFetchSettings | None = None,
     ) -> None:
-        """Apply live-mutable eval/fetch settings to this already-open evaluator.
+        """Apply live eval and fetch settings to this already-open evaluator.
 
-        Only settings Nix reads fresh on every access take effect this way
-        (e.g. ``max_call_depth``, ``allowed_uris``, lint settings) —
-        construction-time-snapshotted ones (``nix_path``, ``pure_eval``,
-        ``restrict_eval``) require a new :class:`EvalSession`.
+        Only the settings Nix reads fresh at the point of use can be changed
+        this way, such as ``max_call_depth``, ``allowed_uris`` and the lint
+        settings. Nix reads the others once, while it builds the evaluator, so
+        this raises for those rather than accepting them and doing nothing.
+        Every fetch setting is live.
+
+        Raises:
+            SettingNotLiveError: A setting Nix reads only at construction, such
+                as ``nix_path``, ``pure_eval`` or ``restrict_eval``. Open a new
+                evaluator with it: ``session.eval(store, eval_settings=...)``.
         """
         rendered_eval = eval_settings.to_worker_settings() if eval_settings is not None else {}
-        rendered_eval.pop(NIX_PATH_SETTING_KEY, None)
         rendered_fetch = fetch_settings.to_worker_settings() if fetch_settings is not None else {}
+        reject_construction_time_keys(rendered_eval, model=NixEvalSettings, target="evaluator")
+        reject_construction_time_keys(rendered_fetch, model=NixFetchSettings, target="evaluator")
         await self.run(self._require_core().configure, rendered_eval, rendered_fetch)
 
     async def close(self) -> None:

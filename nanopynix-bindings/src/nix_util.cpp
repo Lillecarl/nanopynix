@@ -40,12 +40,16 @@ static void set_setting(const std::string &name, const std::string &value) {
     throw std::runtime_error("unknown setting: " + name);
 }
 
-static std::map<std::string, std::string> list_settings() {
+static std::map<std::string, std::string> list_settings(bool overridden_only) {
     std::map<std::string, nix::Config::SettingInfo> settings;
-    nix::globalConfig.getSettings(settings);
+    nix::globalConfig.getSettings(settings, overridden_only);
     std::map<std::string, std::string> out;
     for (auto &[k, v] : settings) out[k] = v.value;
     return out;
+}
+
+static void reset_overridden() {
+    nix::globalConfig.resetOverridden();
 }
 
 static std::string list_settings_metadata_json() {
@@ -231,7 +235,18 @@ void nanopynix_bind_util(nb::module_ &m) {
 
     m.def("set_setting", &set_setting, "name"_a, "value"_a);
     m.def("get_setting", &get_setting, "name"_a);
-    m.def("list_settings", &list_settings);
+    m.def("list_settings", &list_settings, "overridden_only"_a = false,
+          "Return the effective value of every registered global setting.\n\n"
+          "With overridden_only=True, return only the settings something has "
+          "actually set, rather than every setting with its default. Nix tracks "
+          "this per setting (`AbstractSetting::overridden`), and combined with "
+          "reset_overridden() it tells apart what a nix.conf supplied from what "
+          "the caller changed afterwards.");
+    m.def("reset_overridden", &reset_overridden,
+          "Clear the 'overridden' flag on every registered global setting.\n\n"
+          "Does NOT change any value. It only resets the bookkeeping, so a "
+          "later list_settings(overridden_only=True) reports what was set after "
+          "this call rather than everything set before it.");
     m.def("list_settings_metadata_json", &list_settings_metadata_json);
     m.def("current_system", &current_system,
           "Return the effective system used by builtins.currentSystem.");

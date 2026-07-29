@@ -45,9 +45,9 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import quote
 
 from nanopynix._typechecking import BEARTYPING
+from nanopynix.stores import LocalOverlay
 
 # Not a plain `if TYPE_CHECKING:` block: beartype resolves this annotation at
 # call time, and under a TYPE_CHECKING-only import it cannot. It then raises
@@ -132,16 +132,28 @@ class OverlayNamespace:
             lower_store=lower_store,
         )
 
+    def store_config(self) -> LocalOverlay:
+        """Return the typed store configuration this layout names.
+
+        ``work_dir`` is absent on purpose. OverlayFS needs it, and Nix does
+        not: it is a requirement of the mount, which is this class's concern,
+        not a setting of the store.
+        """
+        return LocalOverlay(
+            lower_store=self.lower_store,
+            upper_layer=self.upper_dir,
+            state=self.state_dir,
+            log=self.log_dir,
+        )
+
     def store_uri(self) -> str:
-        """Return the ``local-overlay://`` URI that names this store."""
-        params = {
-            "lower-store": self.lower_store,
-            "upper-layer": self.upper_dir,
-            "state": self.state_dir,
-            "log": self.log_dir,
-        }
-        query = "&".join(f"{key}={quote(value, safe='/:')}" for key, value in params.items())
-        return f"local-overlay://?{query}"
+        """Return the ``local-overlay://`` URI that names this store.
+
+        Rendered by :mod:`nanopynix.stores`, so this URI is spelled and escaped
+        exactly like every other store URI the library produces, and Nix's own
+        parser is what validates it.
+        """
+        return self.store_config().uri()
 
     def required_settings(self) -> dict[str, str]:
         """Return the Nix settings this store cannot work without.

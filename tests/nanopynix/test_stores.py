@@ -1,0 +1,322 @@
+"""Typed store models: rendering, parsing, drift and version gates.
+
+Every URI these tests assert on is checked against Nix's own
+``StoreReference`` parser, so a passing test means Nix accepts the string, not
+only that this library is self-consistent.
+
+The two local store types are also opened for real. The SSH and S3 models
+cannot be opened here, because there is no remote to open them against, so
+their coverage is the drift check and the round-trip only. That is stated
+rather than implied.
+"""
+
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
+# The store bindings are C++ nanobind extensions without type stubs.
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+import pytest
+from nanopynix_bindings import store as nanopynix_store
+from pydantic import ValidationError
+from pytest_agent import note
+
+import nanopynix
+from nanopynix import stores
+from nanopynix.namespace import OverlayNamespace
+from nanopynix.settings import NIX_2_34, NixStoreDefaults, field_is_supported, running_nix_version
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+#: One instance of every model, covering the authority, the scheme override,
+#: a list-valued setting and a setting whose value is itself a store URI.
+CASES: list[stores.StoreConfig] = [
+    stores.Auto(),
+    stores.Auto(priority=9),
+    stores.Dummy(),
+    stores.Local(root="/tmp/x", require_sigs=False),
+    stores.Local(root="/tmp/x", system_features=["big-parallel", "kvm"], trusted=True),
+    stores.LocalOverlay(lower_store="daemon", upper_layer="/tmp/u", state="/tmp/s", log="/tmp/l"),
+    stores.LocalOverlay(lower_store="unix:///run/nix/socket?max-connections=4", upper_layer="/tmp/u"),
+    stores.Daemon(),
+    stores.Daemon(socket="/run/nix/daemon-socket/socket", max_connections=4),
+    stores.Ssh(host="user@build.example.com", compress=True, log_fd=2),
+    stores.SshNg(host="user@build.example.com", remote_program=["nix", "daemon"], max_connection_age=60),
+    stores.MountedSshNg(host="b.example.com", real="/nix/store", root="/mnt/remote"),
+    stores.FileBinaryCache(path="/var/cache/nix", compression="zstd"),
+    stores.HttpBinaryCache(host="cache.nixos.org"),
+    stores.HttpBinaryCache(url_scheme="http", host="localhost:8080/nix", want_mass_query=True),
+    stores.S3BinaryCache(bucket="my-bucket", region="eu-north-1", scheme="http", multipart_upload=True),
+]
+
+
+def _identifier(config: stores.StoreConfig) -> str:
+    return f"{type(config).__name__}-{len(config.params())}"
+
+
+@pytest.mark.parametrize("config", CASES, ids=_identifier)
+def test_every_model_round_trips_through_nixs_own_parser(config: stores.StoreConfig) -> None:
+    """Model to URI to model is the identity, and Nix accepts the URI.
+
+    This is the property everything else rests on. Without it a store model is
+    a second, divergent spelling of a Nix store rather than the same one.
+    """
+    uri = config.uri()
+    note(**{f"uri/{_identifier(config)}": uri})
+
+    reparsed = stores.parse(uri)
+
+    assert type(reparsed) is type(config)
+    assert reparsed == config, "parsing the rendered URI did not give the same configuration back"
+    assert reparsed.uri() == uri, "the URI is not stable under a second render"
+
+
+@pytest.mark.parametrize("config", CASES, ids=_identifier)
+def test_nix_parses_every_rendered_uri(config: stores.StoreConfig) -> None:
+    """Nix's ``StoreReference::parse`` accepts what these models render.
+
+    Separate from the round-trip above because it fails differently: this
+    catches a URI this library reads back happily and Nix refuses.
+    """
+    uri = config.uri()
+    parsed: Any = nanopynix_store.parse_store_reference(uri)
+    assert parsed["render"] == uri
+
+
+def test_a_setting_the_store_type_does_not_have_is_refused() -> None:
+    """A parameter Nix would silently ignore is an error here.
+
+    ``upper-layer`` belongs to the overlay store. Nix drops it from a plain
+    local store without a word, which is exactly the silence this library is
+    built to remove.
+    """
+    with pytest.raises(ValueError, match="upper-layer") as excinfo:
+        stores.parse("local://?upper-layer=/tmp/u")
+    note(unknown_param_error=str(excinfo.value))
+
+
+def test_an_unknown_scheme_names_the_schemes_that_exist() -> None:
+    with pytest.raises(ValueError, match="no store model for scheme") as excinfo:
+        stores.parse("nosuchscheme://x")
+    assert "local" in str(excinfo.value), "the error should list the schemes that do work"
+
+
+def test_a_required_authority_cannot_be_omitted() -> None:
+    """An SSH store without a host is not a store, so the model refuses it."""
+    with pytest.raises(ValidationError, match="host"):
+        stores.Ssh()  # type: ignore[reportCallIssue] -- the missing argument is the point
+
+
+def test_store_dir_is_not_the_global_store_setting() -> None:
+    """Nix registers ``store`` twice, meaning two unrelated things.
+
+    On a store it is the logical store directory. In ``globalConfig`` it is the
+    URL of the store to use. Pydantic accepts a duplicate alias silently and
+    sets both fields from one key, so keeping them apart is load-bearing.
+    """
+    config = stores.Local(store_dir="/custom/store")
+    assert config.params() == {"store": "/custom/store"}
+    assert "store" not in set(stores.StoreConfig.model_fields)
+
+    settings = nanopynix.NixGlobalSettings(store="daemon")
+    assert settings.to_worker_settings()["store"] == "daemon"
+    assert "store-dir" not in settings.to_worker_settings()
+
+
+def test_a_list_setting_survives_the_trip_through_a_uri() -> None:
+    """Nix joins a list setting with spaces, and the parser splits it back."""
+    config = stores.Local(system_features=["big-parallel", "kvm", "nixos-test"])
+    assert config.params()["system-features"] == "big-parallel kvm nixos-test"
+
+    reparsed = stores.parse(config.uri())
+    assert isinstance(reparsed, stores.Local)
+    assert reparsed.system_features == ["big-parallel", "kvm", "nixos-test"]
+
+
+def test_a_nested_store_uri_survives_as_a_parameter_value() -> None:
+    """An overlay store's lower store is itself a URI, with its own parameters.
+
+    The nested ``?`` and ``=`` have to be escaped going in and unescaped coming
+    out, and this is the case where getting that wrong is silent.
+    """
+    lower = stores.Daemon(socket="/run/nix/socket", max_connections=4).uri()
+    config = stores.LocalOverlay(lower_store=lower, upper_layer="/tmp/u")
+
+    reparsed = stores.parse(config.uri())
+    assert isinstance(reparsed, stores.LocalOverlay)
+    assert reparsed.lower_store == lower
+
+
+# ── Drift against the Nix this build is linked with ──────────────────
+
+
+def test_every_store_model_matches_nixs_registry() -> None:
+    """The models and Nix's store registry name the same settings.
+
+    Nix's registry is built by a static initialiser per linked store
+    implementation, so this checks what this build can open rather than what
+    Nix documents.
+    """
+    drift = stores.check_all_store_model_drift()
+    note(nix_version=running_nix_version())
+    for name, result in drift.items():
+        note(**{f"drift/{name}": {"missing": result.missing, "extra": result.extra}})
+    offenders = {name: result for name, result in drift.items() if not result.ok}
+    assert not offenders, f"store models drifted from Nix's registry: {offenders}"
+
+
+#: The store types Nix itself ships, pinned so that dropping one is an error.
+#: The registry also holds anything :func:`register_store_implementation` added,
+#: which the suite does, so the two sets are not equal and must not be compared.
+NIX_BUILTIN_STORE_TYPES = frozenset(
+    {
+        "Dummy Store",
+        "Experimental Local Overlay Store",
+        "Experimental SSH Store",
+        "Experimental SSH Store with filesystem mounted",
+        "HTTP Binary Cache Store",
+        "Local Binary Cache Store",
+        "Local Daemon Store",
+        "Local Store",
+        "S3 Binary Cache Store",
+        "SSH Store",
+    },
+)
+
+
+def test_every_store_type_nix_ships_has_a_model() -> None:
+    """Nix's own store types are all modelled, and every model names a real one.
+
+    Not an equality against the whole registry. That registry is process-global
+    and grows: ``register_store_implementation`` adds a type permanently, and
+    the suite registers several. So this checks the two directions that are
+    actually true.
+
+    A store type added by a *future* Nix is the known blind spot here. It shows
+    up as an unmodelled name in the note below rather than as a failure,
+    because this process cannot tell it apart from one the suite registered.
+    """
+    registered = set(stores.list_store_types())
+    modelled = {model.store_type_name for model in stores.STORE_MODELS} - {None}
+
+    note(unmodelled=sorted(registered - modelled - NIX_BUILTIN_STORE_TYPES))
+    assert modelled <= registered, "a model names a store type this build does not register"
+    assert modelled == NIX_BUILTIN_STORE_TYPES, "the models and Nix's own store types diverged"
+    assert registered >= NIX_BUILTIN_STORE_TYPES, "this build does not register a store type Nix ships"
+
+
+def test_auto_has_no_registry_entry_and_says_so() -> None:
+    """``auto`` is resolved by ``openStore``, not implemented as a store type."""
+    assert stores.Auto.store_type_name is None
+    assert stores.check_store_model_drift(stores.Auto).ok
+    assert stores.Auto().uri() == "auto"
+
+
+# ── Version gates ────────────────────────────────────────────────────
+
+
+def test_a_setting_this_nix_lacks_raises_rather_than_rendering() -> None:
+    """A version-gated field is refused loudly on a Nix that has no such setting.
+
+    Rendering it anyway would put a parameter in the URI that Nix ignores.
+    """
+    running = running_nix_version()
+    field = stores.S3BinaryCache.model_fields["buffer_size"]
+    supported = field_is_supported(field)
+    note(running_nix=running, buffer_size_supported=supported)
+
+    config = stores.S3BinaryCache(bucket="b", buffer_size=1024)
+    if supported:
+        assert config.params()["buffer-size"] == "1024"
+    else:
+        with pytest.raises(ValueError, match=r"buffer-size .*removed in Nix"):
+            config.uri()
+
+
+def test_the_gates_bound_a_field_from_both_sides() -> None:
+    """``multipart-chunk-size`` and ``buffer-size`` are the same setting, renamed.
+
+    Exactly one of them is available on any supported Nix, which is what the
+    two gates together express.
+    """
+    fields = stores.S3BinaryCache.model_fields
+    new_name = field_is_supported(fields["multipart_chunk_size"])
+    old_name = field_is_supported(fields["buffer_size"])
+    note(multipart_chunk_size=new_name, buffer_size=old_name, boundary=NIX_2_34)
+    assert new_name != old_name, "the rename boundary should make exactly one of the two names live"
+
+
+# ── Session defaults, and the overlay store ──────────────────────────
+
+
+def test_session_store_defaults_go_under_the_store_that_names_them() -> None:
+    """A session default reaches the URI, and a value on the store beats it.
+
+    Nix has no global for these four settings, so rendering them into each
+    store's URI is the only way a session-wide default can mean anything.
+    """
+    defaults = NixStoreDefaults(priority=5, trusted=True, want_mass_query=True)
+
+    filled = stores.resolve_store_spec(stores.Local(root="/tmp/x"), defaults)
+    assert stores.parse(filled) == stores.Local(
+        root="/tmp/x",
+        priority=5,
+        trusted=True,
+        want_mass_query=True,
+    )
+
+    overridden = stores.resolve_store_spec(stores.Local(root="/tmp/x", priority=99), defaults)
+    parsed = stores.parse(overridden)
+    assert isinstance(parsed, stores.Local)
+    assert parsed.priority == 99, "a value set on the store must beat the session default"
+
+
+def test_a_uri_string_is_never_rewritten() -> None:
+    """A URI a caller wrote by hand reaches Nix exactly as written.
+
+    Merging a default into it would mean reparsing and re-rendering someone
+    else's string, and a store URI is too load-bearing to rewrite quietly.
+    """
+    defaults = NixStoreDefaults(priority=5)
+    assert stores.resolve_store_spec("local://?root=/tmp/x", defaults) == "local://?root=/tmp/x"
+
+
+def test_the_overlay_namespace_renders_through_the_store_model(tmp_path: Path) -> None:
+    """``OverlayNamespace`` names a store, and the store model spells it.
+
+    ``work_dir`` is deliberately absent from the URI. OverlayFS needs it; Nix
+    does not, because it is a requirement of the mount rather than a setting.
+    """
+    namespace = OverlayNamespace.under(tmp_path)
+    config = namespace.store_config()
+    note(overlay_uri=namespace.store_uri())
+
+    assert isinstance(config, stores.LocalOverlay)
+    assert config.upper_layer == namespace.upper_dir
+    assert config.state == namespace.state_dir
+    assert config.log == namespace.log_dir
+    assert config.lower_store == namespace.lower_store
+    assert namespace.work_dir not in namespace.store_uri()
+
+    assert stores.parse(namespace.store_uri()) == config
+
+
+# ── Opening a real store ─────────────────────────────────────────────
+
+
+async def test_a_model_opens_the_store_it_describes(tmp_path: Path) -> None:
+    """The two local models are opened for real, not only rendered.
+
+    The SSH and S3 models have no remote to answer them here, so their
+    coverage stops at the drift check and the round-trip above.
+    """
+    config = stores.Local(root=str(tmp_path / "store"), require_sigs=False)
+    store = nanopynix.open_store(config.uri())
+    note(local_store_dir=store.get_store_dir())
+    assert store.get_store_dir() == "/nix/store"
+
+    dummy = nanopynix.open_store(stores.Dummy().uri())
+    assert dummy.get_store_dir() == "/nix/store"

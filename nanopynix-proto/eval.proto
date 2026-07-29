@@ -56,6 +56,12 @@ message OpenEvalRequest {
   // evaluator read from one store and build into another; inproc has always
   // accepted that pair, and the worker used to hardcode None here.
   int64 build_store_handle = 4;
+  // Empty means "use the session's nix_path". Nix reads the search path while
+  // it constructs the EvalState, so it cannot travel in eval_settings, which
+  // the worker applies to the settings registry. inproc has always honoured a
+  // per-evaluator nix_path; without this field rpc dropped it in silence,
+  // which is the asymmetry this repairs.
+  repeated string nix_path = 5;
 }
 message OpenEvalResponse {
   int64 eval_handle = 1;

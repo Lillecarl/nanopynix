@@ -128,6 +128,16 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
     async def __aexit__(self, *args: object) -> None:
         await self.close()
 
+    @property
+    def is_open(self) -> bool:
+        """True once this store is open, and False again after it closes.
+
+        Read by ``Session.set_settings``: a store reads its settings while Nix
+        constructs it, so changing a global while one is open would be lost on
+        that store without a word.
+        """
+        return self._active
+
     def _check_active(self) -> None:
         if not self._active:
             raise StoreClosedError("StoreHandle is closed — use 'async with session.store() as store:'")
@@ -175,6 +185,11 @@ class Store:
     def store_handle(self) -> int:
         """Worker-side handle for internal session integration."""
         return self._rpc.store_handle
+
+    @property
+    def is_open(self) -> bool:
+        """True while this store is open. See :attr:`StoreHandle.is_open`."""
+        return self._rpc.is_open
 
     async def open(self) -> None:
         """Open the underlying store."""

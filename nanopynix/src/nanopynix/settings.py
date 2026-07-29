@@ -6,7 +6,7 @@ import json
 import os
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
 import yaml
 from nanopynix_bindings import (
@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
+from nanopynix.exceptions import SettingNotLiveError
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Iterator, Mapping, Sequence
@@ -39,6 +40,121 @@ def _alias(field_name: str) -> str:
     return field_name.replace("_", "-")
 
 
+def field_key(field_name: str, field: Any) -> str:
+    """The nix.conf key a field is *written* as.
+
+    Rendering and drift checking both go through this, so a field that has to
+    diverge from the derived spelling stays correct in both. ``store_dir`` is
+    the reason it exists: Nix registers it as ``store``, which is also the name
+    of an unrelated global setting, so that field declares its own
+    ``serialization_alias`` and this reports it.
+    """
+    return field.serialization_alias or _alias(field_name)
+
+
+#: When Nix reads a setting, and therefore whether it can be changed later.
+#: ``"live"`` is read at the point of use; ``"construction"`` is read once,
+#: while the object that owns it is being built.
+type Mutability = Literal["live", "construction"]
+
+MUTABILITY_KEY = "mutability"
+
+
+def _live() -> Any:
+    """A field Nix reads at the point of use, so it can be changed at any time."""
+    return Field(default=None, json_schema_extra={MUTABILITY_KEY: "live"})
+
+
+def _construction() -> Any:
+    """A field Nix reads once, while constructing the object that owns it.
+
+    Changing it afterwards does nothing, so the setters refuse it rather than
+    accept it silently.
+    """
+    return Field(default=None, json_schema_extra={MUTABILITY_KEY: "construction"})
+
+
+def field_mutability(field: Any) -> Mutability:
+    """Return when Nix reads ``field``. Untagged fields are ``"live"``.
+
+    ``"live"`` is the default because it claims nothing: only the
+    ``"construction"`` tag makes this library refuse a change, so an untagged
+    field can never make a refusal appear out of a missing tag. A *missing*
+    ``"construction"`` tag is the dangerous direction, and
+    ``test_the_model_names_exactly_the_construction_time_eval_settings`` pins
+    the whole set against that.
+    """
+    extras: dict[str, Any] = field.json_schema_extra or {}
+    value: Any = extras.get(MUTABILITY_KEY)
+    return "construction" if value == "construction" else "live"
+
+
+def construction_time_keys(model: type[BaseModel]) -> frozenset[str]:
+    """The ``nix.conf`` keys of the ``model`` fields Nix reads only at construction."""
+    return frozenset(
+        field_key(name, field)
+        for name, field in model.model_fields.items()
+        if field_mutability(field) == "construction"
+    )
+
+
+def reject_construction_time_keys(rendered: Mapping[str, str], *, model: type[BaseModel], target: str) -> None:
+    """Raise if ``rendered`` names a setting Nix reads only at construction.
+
+    The alternative is what this library used to do: send the setting, have Nix
+    ignore it, and report success. A caller then believes an evaluator is pure
+    when it is not.
+
+    It checks the rendered keys rather than a typed model, because a rendered
+    mapping is all that reaches a worker. Both engines check before they send,
+    and the worker checks again, so nothing can slip past by building a request
+    by hand.
+
+    Raises:
+        SettingNotLiveError: One or more keys cannot take effect.
+    """
+    offenders = sorted(construction_time_keys(model) & set(rendered))
+    if offenders:
+        raise SettingNotLiveError(_not_live_message(offenders, target))
+
+
+def reject_settings_write_while_open(*, open_stores: int, open_evaluators: int) -> None:
+    """Raise if a store or an evaluator has already read the global settings.
+
+    Nix builds a store and an evaluator from the globals as they stand at that
+    moment, and neither looks again. Writing a global while one is open is
+    therefore the silent-drop case in its purest form: the write succeeds, and
+    the object that a caller is holding keeps the old value.
+
+    Refusing is what makes ``set_settings`` honest without an allowlist of
+    "settings that are safe to change late". Close what is open, write, then
+    open again -- and everything opened after the write sees it.
+
+    Raises:
+        SettingNotLiveError: A store or an evaluator is open.
+    """
+    if not open_stores and not open_evaluators:
+        return
+    open_objects = ", ".join(
+        f"{count} {noun}" for count, noun in ((open_stores, "store"), (open_evaluators, "evaluator")) if count
+    )
+    raise SettingNotLiveError(
+        f"cannot change the Nix settings of this session while {open_objects} is open. "
+        "Nix reads the settings while it constructs a store or an evaluator, and never again, "
+        "so the change would not reach what you are holding. Close them first, or pass the "
+        "settings to the session when you open it.",
+    )
+
+
+def _not_live_message(offenders: Sequence[str], target: str) -> str:
+    names = ", ".join(offenders)
+    plural = "settings" if len(offenders) > 1 else "setting"
+    return (
+        f"Nix reads {names} only while constructing the {target}, so changing it now does nothing. "
+        f"Pass the {plural} when you open the {target} instead."
+    )
+
+
 def _nix_version_tuple(version: str) -> tuple[int, ...]:
     parsed: list[int] = []
     for part in version.split("."):
@@ -56,13 +172,50 @@ def _nix_version_at_least(version: str, minimum: str) -> bool:
     return actual + (0,) * (width - len(actual)) >= expected + (0,) * (width - len(expected))
 
 
-def _field_is_supported(field: Any) -> bool:
-    extras: dict[str, Any] = field.json_schema_extra or {}
-    minimum: Any = extras.get("nix_version_min")
-    if minimum is None:
-        return True
+#: Metadata keys that bound a field to a range of Nix versions.
+#: ``nix_version_min`` is the first version that has the setting, inclusive.
+#: ``nix_version_removed`` is the first version that no longer has it,
+#: exclusive -- a setting Nix dropped rather than one it never had.
+NIX_VERSION_MIN_KEY = "nix_version_min"
+NIX_VERSION_REMOVED_KEY = "nix_version_removed"
+
+NIX_2_34 = "2.34"
+NIX_2_35 = "2.35"
+
+
+def since(version: str) -> Any:
+    """A field the Nix versions before ``version`` do not have."""
+    return Field(default=None, json_schema_extra={NIX_VERSION_MIN_KEY: version})
+
+
+def until(version: str) -> Any:
+    """A field Nix removed in ``version``."""
+    return Field(default=None, json_schema_extra={NIX_VERSION_REMOVED_KEY: version})
+
+
+def running_nix_version() -> str:
+    """The version of the Nix that nanopynix is linked with."""
     build_info_result: Any = nanopynix_util.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
-    return _nix_version_at_least(build_info_result["nix_version"], minimum)
+    return str(build_info_result["nix_version"])
+
+
+def _field_version_problem(field: Any) -> str | None:
+    """Why the running Nix cannot take this field, or ``None`` when it can."""
+    extras: dict[str, Any] = field.json_schema_extra or {}
+    minimum: Any = extras.get(NIX_VERSION_MIN_KEY)
+    removed: Any = extras.get(NIX_VERSION_REMOVED_KEY)
+    if minimum is None and removed is None:
+        return None
+    version = running_nix_version()
+    if minimum is not None and not _nix_version_at_least(version, minimum):
+        return f"requires Nix {minimum} or newer (running {version})"
+    if removed is not None and _nix_version_at_least(version, removed):
+        return f"was removed in Nix {removed} (running {version})"
+    return None
+
+
+def field_is_supported(field: Any) -> bool:
+    return _field_version_problem(field) is None
 
 
 class NixSettingMetadata(BaseModel):
@@ -74,6 +227,31 @@ class NixSettingMetadata(BaseModel):
     default_value: Any = Field(default=None, alias="defaultValue")
     document_default: bool | None = Field(default=None, alias="documentDefault")
     experimental_feature: str | None = Field(default=None, alias="experimentalFeature")
+
+
+class SettingsProvenance(BaseModel):
+    """Where the effective Nix configuration of a session came from.
+
+    Nix tracks an ``overridden`` flag for each setting, so the values a
+    ``nix.conf`` supplied can be told apart from the values nanopynix applied
+    afterwards. Without this a caller cannot tell an applied setting from one
+    that was accepted and discarded.
+    """
+
+    #: What ``nix.conf``, ``NIX_CONFIG``, and the environment supplied, read
+    #: immediately after ``initLibStore``. Empty when ``load_config`` is False.
+    from_config: dict[str, str] = Field(default_factory=dict)
+    #: What nanopynix applied afterwards, and Nix accepted.
+    applied: dict[str, str] = Field(default_factory=dict)
+
+    @property
+    def overridden_from_config(self) -> dict[str, str]:
+        """The settings nanopynix changed that ``nix.conf`` had also set.
+
+        These are the ones worth showing a user: the host asked for one value
+        and this session uses another.
+        """
+        return {name: value for name, value in self.applied.items() if name in self.from_config}
 
 
 class SettingsDrift(BaseModel):
@@ -88,7 +266,7 @@ class SettingsDrift(BaseModel):
         return not self.missing and not self.extra
 
 
-class _NixConfigModel(BaseModel):
+class NixConfigModel(BaseModel):
     """Shared base for Nix settings models: renders set fields as nix.conf key/value pairs."""
 
     model_config = ConfigDict(
@@ -97,36 +275,53 @@ class _NixConfigModel(BaseModel):
         extra="forbid",
     )
 
-    def _iter_set(self) -> Iterator[tuple[str, str]]:
+    def _iter_set(self, *, explicit_only: bool = False) -> Iterator[tuple[str, str]]:
+        explicit = self.model_fields_set
         for name, field in type(self).model_fields.items():
+            if explicit_only and name not in explicit:
+                continue
             value = getattr(self, name)
             if value is None:
                 continue
-            if not _field_is_supported(field):
-                extra: Any = field.json_schema_extra
-                minimum = extra["nix_version_min"]
-                build_info_result: Any = nanopynix_util.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
-                version = build_info_result["nix_version"]
-                raise ValueError(f"{_alias(name)} requires Nix {minimum} or newer (running {version})")
+            problem = _field_version_problem(field)
+            if problem is not None:
+                raise ValueError(f"{field_key(name, field)} {problem}")
             rendered = _render_value(value)
             if rendered == "" and not isinstance(value, str):
                 continue
-            yield _alias(name), rendered
+            yield field_key(name, field), rendered
 
     def to_nix_config(self) -> str:
         """Render the set fields as ``nix.conf`` text (``key = value`` lines)."""
         return "\n".join(f"{key} = {value}" for key, value in self._iter_set())
 
-    def to_worker_settings(self) -> dict[str, str]:
-        """Render the set fields as a ``{nix-conf-key: rendered-value}`` mapping."""
-        return dict(self._iter_set())
+    def to_worker_settings(self, *, explicit_only: bool = False) -> dict[str, str]:
+        """Render the set fields as a ``{nix-conf-key: rendered-value}`` mapping.
+
+        Args:
+            explicit_only: Render only the fields the caller actually named,
+                leaving out every default. A *write* to an already-configured
+                session needs this: ``experimental_features`` has a default, so
+                without it ``set_settings(NixGlobalSettings(max_jobs=3))`` would
+                also reset the feature list and silently drop whatever that
+                session had enabled beyond the defaults.
+        """
+        return dict(self._iter_set(explicit_only=explicit_only))
 
 
-_NIX_2_35 = "2.35"
+class NixGlobalSettings(NixConfigModel):
+    """The process-global Nix settings, as registered in ``globalConfig``.
 
+    One scope of several. :class:`NixSettings` inherits this together with the
+    store, eval, fetch and flake scopes, and is what a caller normally passes.
+    This class exists on its own because ``globalConfig`` is a distinct registry,
+    and :func:`check_settings_model_drift` compares against it field for field.
 
-class NixSettings(_NixConfigModel):
-    """Nix settings rendered as nix.conf-compatible key/value pairs."""
+    ``store`` here is the *URL of the store to use*, which is what
+    ``globals.hh`` registers under that name. It is not the logical store
+    directory, which Nix also calls ``store`` but registers per store type --
+    see :mod:`nanopynix.stores`, where it is spelled ``store_dir``.
+    """
 
     allow_new_privileges: bool | None = None
     allow_symlinked_store: bool | None = None
@@ -151,21 +346,18 @@ class NixSettings(_NixConfigModel):
     external_builders: list[str] | None = None
     extra_platforms: list[str] | None = None
     fallback: bool | None = None
-    filetransfer_retry_attempts: int | None = Field(default=None, json_schema_extra={"nix_version_min": _NIX_2_35})
-    filetransfer_retry_delay: int | None = Field(default=None, json_schema_extra={"nix_version_min": _NIX_2_35})
-    filetransfer_retry_delay_rate_limited: int | None = Field(
-        default=None,
-        json_schema_extra={"nix_version_min": _NIX_2_35},
-    )
-    filetransfer_retry_jitter: bool | None = Field(default=None, json_schema_extra={"nix_version_min": _NIX_2_35})
-    filetransfer_retry_max_delay: int | None = Field(default=None, json_schema_extra={"nix_version_min": _NIX_2_35})
+    filetransfer_retry_attempts: int | None = since(NIX_2_35)
+    filetransfer_retry_delay: int | None = since(NIX_2_35)
+    filetransfer_retry_delay_rate_limited: int | None = since(NIX_2_35)
+    filetransfer_retry_jitter: bool | None = since(NIX_2_35)
+    filetransfer_retry_max_delay: int | None = since(NIX_2_35)
     filter_syscalls: bool | None = None
     fsync_metadata: bool | None = None
     fsync_store_paths: bool | None = None
     gc_reserved_space: int | None = None
     hashed_mirrors: list[str] | None = None
     http2: bool | None = None
-    http3: bool | None = Field(default=None, json_schema_extra={"nix_version_min": _NIX_2_35})
+    http3: bool | None = since(NIX_2_35)
     http_connections: int | None = None
     id_count: int | None = None
     ignored_acls: list[str] | None = None
@@ -238,7 +430,7 @@ class NixSettings(_NixConfigModel):
     warn_large_path_threshold: int | None = None
 
     @classmethod
-    def from_file(cls, path: os.PathLike[str] | str) -> NixSettings:
+    def from_file(cls, path: os.PathLike[str] | str) -> Self:
         """Load settings from a ``.json``, ``.toml``, ``.yaml``/``.yml``, or ``nix.conf``-style file.
 
         Format is inferred from the file extension; anything else is parsed
@@ -259,7 +451,7 @@ class NixSettings(_NixConfigModel):
             raise TypeError(f"Nix settings file must contain an object: {config_path}")
         return cls.model_validate(raw)
 
-    def with_experimental_features(self, features: list[str] | None) -> NixSettings:
+    def with_experimental_features(self, features: list[str] | None) -> Self:
         """Return a copy with ``features`` merged into ``experimental_features`` (order-preserving, deduplicated)."""
         if not features:
             return self
@@ -270,33 +462,88 @@ class NixSettings(_NixConfigModel):
         return self.model_copy(update={"experimental_features": merged})
 
 
-class NixEvalSettings(_NixConfigModel):
-    """Eval-specific Nix settings, applied per-``EvalState``."""
+class NixStoreDefaults(NixConfigModel):
+    """Store settings that make sense as a session-wide default.
 
-    allow_import_from_derivation: bool | None = None
-    allow_unsafe_native_code_during_evaluation: bool | None = None
-    allowed_uris: list[str] | None = None
-    abort_on_warn: bool | None = None
-    debugger_on_trace: bool | None = None
-    debugger_on_warn: bool | None = None
-    eval_attrset_update_layer_rhs_threshold: int | None = None
-    eval_cache: bool | None = None
-    eval_profile_file: str | None = None
-    eval_profiler: str | None = None
-    eval_profiler_frequency: int | None = None
-    eval_system: str | None = None
-    ignore_try: bool | None = None
-    lint_absolute_path_literals: str | None = None
-    lint_short_path_literals: str | None = None
-    lint_url_literals: str | None = None
-    max_call_depth: int | None = None
-    nix_path: list[str] | None = None
-    pure_eval: bool | None = None
-    restrict_eval: bool | None = None
-    trace_function_calls: bool | None = None
-    trace_import_from_derivation: bool | None = None
-    trace_verbose: bool | None = None
-    warn_short_path_literals: bool | None = None
+    Exactly the settings every one of Nix's 10 store types accepts *and* that
+    ``globalConfig`` does not register. Nix has no global for these, so a
+    default is only meaningful because nanopynix renders it into each store's
+    URI itself -- which is also the only spelling that was measured to work.
+
+    The fifth and sixth settings shared by all store types are deliberately
+    absent. ``system-features`` is in ``globalConfig`` already, so it lives on
+    :class:`NixGlobalSettings`. ``store`` -- the *logical store directory* --
+    is per store and never a session-wide default: it is the setting two
+    stores must agree on before a path can be copied between them, so it
+    belongs on the store, spelled ``store_dir`` in :mod:`nanopynix.stores`.
+    """
+
+    path_info_cache_size: int | None = None
+    priority: int | None = None
+    trusted: bool | None = None
+    want_mass_query: bool | None = None
+
+    @classmethod
+    def from_settings(cls, settings: BaseModel) -> Self:
+        """Take the store-scoped fields out of a wider settings object.
+
+        Both engines do this to a :class:`NixSettings`, and both must get the
+        same answer, so the extraction lives here rather than in each session.
+        """
+        return cls.model_validate(settings.model_dump(include=set(cls.model_fields), exclude_none=True))
+
+
+class NixEvalSettings(NixConfigModel):
+    """Eval-specific Nix settings, applied per-``EvalState``.
+
+    Each field records **when Nix reads it**, because that decides whether it
+    can be changed on an evaluator that already exists. Eight of the settings
+    below are read once, while ``EvalState`` is being constructed; the rest are
+    read at the point of use, so they can be changed at any time.
+
+    :meth:`EvalSession.configure` refuses the construction-time ones instead of
+    accepting them and doing nothing, which is what it used to do. To change
+    one, open a new evaluator: ``session.eval(store, eval_settings=...)``.
+
+    The classification comes from mapping every ``EvalSettings`` member to its
+    use sites in Nix 2.34 ``src/libexpr/``, then checking the behaviour against
+    a running Nix. Two results were not obvious from the header:
+
+    * ``restrict_eval`` is also read live, in ``checkURI``. It is still tagged
+      construction, because path restriction rides the source accessor chosen
+      in the constructor -- measured: ``configure(restrict_eval=True)`` did not
+      stop ``readFile`` of a path outside the store.
+    * ``eval_system`` backs ``builtins.currentSystem``, which
+      ``createBaseEnv`` registers with ``addConstant`` while constructing the
+      evaluator.
+    """
+
+    allow_import_from_derivation: bool | None = _live()
+    allow_unsafe_native_code_during_evaluation: bool | None = _live()
+    allowed_uris: list[str] | None = _live()
+    abort_on_warn: bool | None = _live()
+    debugger_on_trace: bool | None = _live()
+    debugger_on_warn: bool | None = _live()
+    eval_attrset_update_layer_rhs_threshold: int | None = _live()
+    eval_cache: bool | None = _live()
+    eval_profile_file: str | None = _construction()
+    eval_profiler: str | None = _construction()
+    eval_profiler_frequency: int | None = _construction()
+    eval_system: str | None = _construction()
+    ignore_try: bool | None = _live()
+    lint_absolute_path_literals: str | None = _live()
+    lint_short_path_literals: str | None = _live()
+    lint_url_literals: str | None = _live()
+    max_call_depth: int | None = _live()
+    nix_path: list[str] | None = _construction()
+    pure_eval: bool | None = _construction()
+    restrict_eval: bool | None = _construction()
+    trace_function_calls: bool | None = _construction()
+    trace_import_from_derivation: bool | None = _live()
+    trace_verbose: bool | None = _live()
+    #: Deprecated by Nix in favour of ``lint_short_path_literals = "warn"``;
+    #: Nix registers it as a ``DeprecatedWarnSetting`` over the same value.
+    warn_short_path_literals: bool | None = _live()
 
 
 NIX_PATH_SETTING_KEY = _alias("nix_path")
@@ -304,24 +551,68 @@ NIX_PATH_SETTING_KEY = _alias("nix_path")
 same alias_generator that renders it, rather than restated as a literal."""
 
 
-class NixFetchSettings(_NixConfigModel):
-    """Fetcher-specific Nix settings."""
+class NixFetchSettings(NixConfigModel):
+    """Fetcher-specific Nix settings, applied per-evaluator.
 
-    access_tokens: dict[str, str] | None = None
-    allow_dirty: bool | None = None
-    allow_dirty_locks: bool | None = None
-    flake_registry: str | None = None
-    tarball_ttl: int | None = None
-    trust_tarballs_from_git_forges: bool | None = None
-    warn_dirty: bool | None = None
+    Every field is live. ``EvalState`` holds ``const fetchers::Settings &`` -- a
+    reference, documented "Must outlive the lifetime of this EvalState!" -- and
+    nothing copies it at construction, so there is no snapshot to go stale.
+    :meth:`EvalSession.configure` therefore accepts all of these.
+    """
+
+    access_tokens: dict[str, str] | None = _live()
+    allow_dirty: bool | None = _live()
+    allow_dirty_locks: bool | None = _live()
+    flake_registry: str | None = _live()
+    # Nix 2.31 keeps `tarball-ttl` in the global registry. Nix 2.34 moved it
+    # into the fetcher registry, where the two versions disagree about the
+    # owner rather than about the setting. Live, like every field here -- the
+    # version gate is what it has to say, and untagged already means live.
+    tarball_ttl: int | None = since(NIX_2_34)
+    trust_tarballs_from_git_forges: bool | None = _live()
+    warn_dirty: bool | None = _live()
 
 
-class NixFlakeSettings(_NixConfigModel):
+class NixFlakeSettings(NixConfigModel):
     """Flake-specific Nix settings, applied per flake operation."""
 
     accept_flake_config: bool | None = None
     commit_lock_file_summary: str | None = None
     use_registries: bool | None = None
+
+
+class NixEvaluatorSettings(NixEvalSettings, NixFetchSettings):
+    """Everything one evaluator is configured with, in one object.
+
+    Nix keeps the eval and fetch settings in two registries, and this library
+    keeps two classes so each can be checked against its own registry. An
+    evaluator owns both, so this is what :meth:`Session.eval` takes. The two
+    registries share no setting name, so nothing is ambiguous here.
+
+    A narrow parameter typed :class:`NixEvalSettings` accepts one of these,
+    because it really is one.
+    """
+
+
+class NixSettings(NixGlobalSettings, NixStoreDefaults, NixEvaluatorSettings, NixFlakeSettings):
+    """Every Nix setting nanopynix can express, in one object.
+
+    The catch-all: hand it to a :class:`Session` and each field reaches the
+    place that can honour it. The globals are applied to the process, and the
+    store, eval, fetch and flake fields become that session's *defaults* --
+    overridden by anything passed to an individual store or evaluator.
+
+    Each scope is also its own class, so a narrower parameter can ask for
+    exactly what it uses and still accept this. The scopes exist because Nix
+    reads them at different moments, and :func:`check_settings_model_drift`
+    compares each against its own registry.
+
+    One Nix setting is deliberately unreachable from here. Nix registers
+    ``store`` twice, meaning the store *URL* globally and the *logical store
+    directory* per store. Only the first is a session-wide idea, so it is the
+    one this class inherits; for the second, see ``store_dir`` in
+    :mod:`nanopynix.stores`.
+    """
 
 
 class NixSettingsEnv(NixSettings, BaseSettings):
@@ -439,7 +730,7 @@ def check_settings_model_drift(
         metadata = {name: setting for name, setting in metadata.items() if name not in non_global_settings}
     known = set(metadata.keys())
     model_type = _model_for_surface(surface)
-    model = {_alias(name) for name, field in model_type.model_fields.items() if _field_is_supported(field)}
+    model = {field_key(name, field) for name, field in model_type.model_fields.items() if field_is_supported(field)}
     registered_aliases = {alias for setting in metadata.values() for alias in setting.aliases}
     return SettingsDrift(missing=sorted(known - model), extra=sorted(model - known - registered_aliases))
 
@@ -475,8 +766,11 @@ def _metadata_for_surface(surface: SettingsSurface) -> dict[str, NixSettingMetad
 
 
 def _model_for_surface(surface: SettingsSurface) -> type[BaseModel]:
+    # The scope class, never the NixSettings catch-all. Each surface is checked
+    # against its own registry, and the catch-all inherits every scope, so it
+    # would report all the other scopes' fields as `extra` on each one.
     if surface == "global":
-        return NixSettings
+        return NixGlobalSettings
     if surface == "eval":
         return NixEvalSettings
     if surface == "fetch":
