@@ -9,12 +9,15 @@
 
 #include <atomic>
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <locale>
+#include <map>
 #include <mutex>
 #include <stdexcept>
+#include <string>
 
 #include <fcntl.h>
 #include <sys/syscall.h>
@@ -1528,6 +1531,38 @@ static void enter_evaluator_thread() {
     gc_thread_debug_log("enter_evaluator_thread:registered");
 }
 
+// `GC_gcollect` from a thread Boehm does not know about is not an error return
+// -- it is ABORT("Collecting from unknown thread"), which core-dumps the
+// process. Measured, before this guard existed. Refuse first.
+static void gc_collect() {
+    if (!GC_thread_is_registered())
+        throw std::runtime_error(
+            "cannot collect from a thread that Boehm GC does not know; "
+            "run this on an evaluator thread");
+    GC_gcollect();
+}
+
+// The Boehm counters. `GC_get_heap_size` and its neighbours are unsynchronized
+// getters, which is why they are read one after the other rather than through
+// GC_get_prof_stats: a caller must already quiesce the evaluator to get a
+// meaningful number, and the atomic variant would suggest otherwise.
+//
+// Signed, although Boehm counts in an unsigned GC_word. `non_gc_bytes` does go
+// below zero: Boehm rounds an allocation up to a granule but subtracts the
+// block size on the free, so a load of allocate-then-free leaves it a little
+// under where it started. Measured at -32 bytes after 500 root values came and
+// went. As unsigned that arrives in Python as 2^64 - 32, which reads as a leak
+// of 18 exabytes. The drift is the honest number.
+static std::map<std::string, int64_t> gc_stats() {
+    return {
+        {"gc_no", static_cast<int64_t>(GC_get_gc_no())},
+        {"heap_size", static_cast<int64_t>(GC_get_heap_size())},
+        {"free_bytes", static_cast<int64_t>(GC_get_free_bytes())},
+        {"memory_use", static_cast<int64_t>(GC_get_memory_use())},
+        {"non_gc_bytes", static_cast<int64_t>(GC_get_non_gc_bytes())},
+    };
+}
+
 static void exit_evaluator_thread() {
     gc_thread_debug_log("exit_evaluator_thread:begin");
     if (!evaluator_thread_registered)
@@ -1564,6 +1599,21 @@ void nanopynix_bind_expr(nb::module_ &m) {
           "Internal: register the current dedicated evaluator thread with Boehm GC.");
     m.def("_exit_evaluator_thread", &exit_evaluator_thread,
           "Internal: unregister the current dedicated evaluator thread from Boehm GC.");
+    m.def("_gc_collect", &gc_collect, nb::call_guard<nb::gil_scoped_release>(),
+          "Internal: run one full Boehm collection now, on an evaluator thread.\n\n"
+          "Python's gc.collect() does not reach the Nix heap. A test that drops a "
+          "value and wants to see the effect must run both collectors.\n\n"
+          "Call it through `EvalSession.run`. `nix::initGC` runs on the session's "
+          "Nix thread, so the Python main thread is not registered with Boehm, and "
+          "Boehm aborts the process on a collection from an unregistered thread. "
+          "This refuses first, with an exception.");
+    m.def("_gc_stats", &gc_stats,
+          "Internal: the Boehm counters, for a test that must measure the Nix heap.\n\n"
+          "`non_gc_bytes` is the interesting one. Every `nix::allocRootValue` is one "
+          "GC_MALLOC_UNCOLLECTABLE block, so this number moves with the count of live "
+          "root values -- including a root that Python bookkeeping cannot see.\n\n"
+          "It counts every uncollectable allocation in the process, not only root "
+          "values. Compare a delta across one operation, never an absolute.");
     m.def("parse_nix_path", [](std::optional<std::string> raw) -> std::vector<std::string> {
         std::string value;
         if (raw) {
