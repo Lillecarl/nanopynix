@@ -363,7 +363,7 @@ class Scenario:
         for action in self._actions:
             await self._apply(driver, action)
 
-    async def _apply(self, driver: LspDriver, action: Action) -> None:  # noqa: C901, PLR0912, PLR0915 tracked complexity/arg-count debt, see TODO.md
+    async def _apply(self, driver: LspDriver, action: Action) -> None:  # noqa: C901, PLR0912, PLR0915 -- tracked complexity/arg-count debt, see TODO.md
         match action:
             case GoTo(marker):
                 self._cursor = self._markers[marker].range.start

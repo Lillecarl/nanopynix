@@ -29,7 +29,7 @@ class FodBuildError(RuntimeError):
     """A build could not be completed, or safely retried, after a FOD mismatch."""
 
 
-async def build_with_fod_update(  # noqa: C901, PLR0912, PLR0913 tracked complexity/arg-count debt, see TODO.md
+async def build_with_fod_update(  # noqa: C901, PLR0912, PLR0913 -- tracked complexity/arg-count debt, see TODO.md
     evaluate: Callable[[], Awaitable[ValueProxy]],
     *,
     nix: Session,

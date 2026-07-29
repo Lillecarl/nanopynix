@@ -31,7 +31,7 @@ if TYPE_CHECKING or BEARTYPING:
 _CTY_COMPOUND_TYPE_ARITY = 2
 
 
-def cty_type_to_json_schema(cty_type: Any) -> dict[str, Any]:  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
+def cty_type_to_json_schema(cty_type: Any) -> dict[str, Any]:  # noqa: PLR0911 -- tracked complexity/arg-count debt, see TODO.md
     """Translate one cty type-constraint JSON value into a JSON Schema fragment."""
     if cty_type == "string":
         return {"type": "string"}

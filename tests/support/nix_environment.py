@@ -149,7 +149,7 @@ async def _force_rmtree(path: Path) -> None:
             # A Nix worker can finish releasing a store entry just after its
             # RPC shutdown acknowledgement. Retry its one filesystem race
             # rather than leaving pytest's managed temporary root behind.
-            await asyncio.sleep(0.05)
+            await anyio.sleep(0.05)
         else:
             return
 
@@ -229,7 +229,7 @@ async def _start_daemon(root: Path) -> _Daemon:
                 f"temporary nix daemon exited with status {process.returncode}; "
                 f"log:\n{daemon_log_path.read_text(errors='replace')}",
             )
-        await asyncio.sleep(0.05)
+        await anyio.sleep(0.05)
     else:
         process.terminate()
         await process.wait()

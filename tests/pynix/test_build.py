@@ -7,7 +7,10 @@ import pytest
 from anyio import Path as AnyioPath
 from nanopynix_helpers import build as nanopynix_helpers_build
 from nanopynix_helpers.fod import replace_fod_hash as _real_replace_fod_hash
-from pynix.build import BuildTargetError, _build_target  # pyright: ignore[reportPrivateUsage]
+from pynix.build import (
+    BuildTargetError,
+    _build_target,  # pyright: ignore[reportPrivateUsage] -- test drives the private build step directly to exercise FOD-update/dry-run paths
+)
 from pynix.target import EvaluationTarget
 from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 

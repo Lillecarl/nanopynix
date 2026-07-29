@@ -9,6 +9,8 @@ Run with::
 """
 
 # ruff: noqa: T201
+# This script's entire purpose is emitting the rendered CI matrix on
+# stdout for the caller to redirect; print is the interface.
 
 from __future__ import annotations
 

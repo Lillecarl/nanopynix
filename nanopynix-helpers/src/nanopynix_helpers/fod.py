@@ -232,7 +232,7 @@ def _fod_hash_literals(source: bytes) -> list[FodHashLiteral]:
     return literals
 
 
-def _run_command_hash_bindings(root: Any, source: bytes) -> dict[int, str]:  # noqa: C901 tracked complexity/arg-count debt, see TODO.md
+def _run_command_hash_bindings(root: Any, source: bytes) -> dict[int, str]:  # noqa: C901 -- tracked complexity/arg-count debt, see TODO.md
     """Return direct output-hash bindings of ``runCommand NAME { ... }`` calls."""
     names: dict[int, str] = {}
     nodes: list[Any] = [root]

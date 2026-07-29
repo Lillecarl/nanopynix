@@ -9,6 +9,8 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, cast
 
+import anyio
+import anyio.to_thread
 import pytest
 from nanopynix_bindings import util as nanopynix_util
 
@@ -304,7 +306,7 @@ async def test_inproc_close_wait_false_preserves_running_store_work() -> None:
     started = threading.Event()
     release = threading.Event()
     work = asyncio.create_task(session.run(_block_until_released, started, release))
-    await asyncio.to_thread(started.wait)
+    await anyio.to_thread.run_sync(started.wait)
     with pytest.raises(RuntimeError, match="outstanding"):
         await session.close(wait=False)
     release.set()

@@ -162,8 +162,8 @@ class GcResult:
 class LogEventExt(_LogEventProto):
     """Typed worker log event with Nix-log convenience accessors."""
 
-    _ = _LogEventProto._betterproto  # noqa: SLF001
-    _betterproto_meta = _LogEventProto._betterproto_meta  # noqa: SLF001
+    _ = _LogEventProto._betterproto  # noqa: SLF001 -- forces the parent's classproperty to compute and cache its metadata first
+    _betterproto_meta = _LogEventProto._betterproto_meta  # noqa: SLF001 -- copies the cached metadata so this handwritten subclass never recomputes it via get_type_hints in models.py's namespace
 
     def __init__(self, **kwargs: Any) -> None:
         if "args" in kwargs:

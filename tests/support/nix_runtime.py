@@ -120,7 +120,7 @@ def _version_in_exclusions(version: NixVersion, values: Iterable[object]) -> str
     return None
 
 
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:  # noqa: C901, PLR0912, PLR0915 tracked complexity/arg-count debt, see TODO.md
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:  # noqa: C901, PLR0912, PLR0915 -- tracked complexity/arg-count debt, see TODO.md
     runtime = linked_nix_runtime()
     sanitizer = config.getoption("--nix-sanitizer", default=None)
     for item in items:

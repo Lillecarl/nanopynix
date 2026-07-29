@@ -15,8 +15,8 @@ from nanopynix_bindings import (
 )
 
 from nanopynix._core._extract import (
-    _attrs_map,  # pyright: ignore[reportPrivateUsage]
-    _attrs_value,  # pyright: ignore[reportPrivateUsage]
+    _attrs_map,  # pyright: ignore[reportPrivateUsage] -- test reaches into _extract's private helper for direct unit coverage, see below
+    _attrs_value,  # pyright: ignore[reportPrivateUsage] -- test reaches into _extract's private helper for direct unit coverage, see below
     flake_ref_attrs,
     input_attrs,
     locked_flake,

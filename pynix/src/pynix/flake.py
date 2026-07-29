@@ -88,7 +88,7 @@ def _navigate(root: ValueProxy, attrpath: str) -> ValueProxy:
     return root
 
 
-async def _build_tree(  # noqa: C901 tracked complexity/arg-count debt, see TODO.md
+async def _build_tree(  # noqa: C901 -- tracked complexity/arg-count debt, see TODO.md
     tree: Tree,
     value: ValueProxy,
     nix_type_enum: type[nanopynix.NixType],
@@ -145,7 +145,7 @@ async def _build_tree(  # noqa: C901 tracked complexity/arg-count debt, see TODO
         tree.add(f"[dim]{nix_type.name.lower()}[/dim]")
 
 
-def _format_attr(name: str, nix_type: nanopynix.NixType, nix_type_enum: type[nanopynix.NixType]) -> str:  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
+def _format_attr(name: str, nix_type: nanopynix.NixType, nix_type_enum: type[nanopynix.NixType]) -> str:  # noqa: PLR0911 -- tracked complexity/arg-count debt, see TODO.md
     if nix_type == nix_type_enum.ATTRS:
         return f"[cyan]{name}[/cyan]"
     if nix_type == nix_type_enum.LIST:

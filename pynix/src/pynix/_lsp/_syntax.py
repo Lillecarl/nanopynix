@@ -168,7 +168,7 @@ def enclosing_binding_path_at(source: str, byte_offset: int) -> list[str]:
     return [segment for group in segments for segment in group]
 
 
-def _identifier_path_at_node(source: str, node: Any | None) -> list[str] | None:  # noqa: C901, PLR0911, PLR0912 tracked complexity/arg-count debt, see TODO.md
+def _identifier_path_at_node(source: str, node: Any | None) -> list[str] | None:  # noqa: C901, PLR0911, PLR0912 -- tracked complexity/arg-count debt, see TODO.md
     if node is None:
         return None
 
@@ -440,7 +440,7 @@ def _direct_bindings(node: Any) -> list[Any]:
     return bindings
 
 
-def attrpath_range(source: str, path: tuple[str, ...]) -> tuple[int, int, int, int] | None:  # noqa: C901 tracked complexity/arg-count debt, see TODO.md
+def attrpath_range(source: str, path: tuple[str, ...]) -> tuple[int, int, int, int] | None:  # noqa: C901 -- tracked complexity/arg-count debt, see TODO.md
     """Return the ``(start_row, start_column, end_row, end_column)`` span of the binding at *path*.
 
     Handles both a single flat dotted binding (``a.b.c = ...;``) and nested
@@ -621,7 +621,7 @@ def _let_declared_names(let_expression: Any, encoded: bytes) -> set[str]:
     return names
 
 
-def _binding_site_at(node: Any, encoded: bytes) -> tuple[str, Any, Any] | None:  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
+def _binding_site_at(node: Any, encoded: bytes) -> tuple[str, Any, Any] | None:  # noqa: PLR0911 -- tracked complexity/arg-count debt, see TODO.md
     """If *node* is itself a v1-renameable binding's own name, return ``(name, scope_root, definition_node)``.
 
     Renameable kinds: a ``formal``'s ``name``, a ``function_expression``'s
@@ -664,7 +664,7 @@ def _binding_site_at(node: Any, encoded: bytes) -> tuple[str, Any, Any] | None: 
     return None
 
 
-def _resolve_declaration(node: Any, name: str, encoded: bytes) -> tuple[Any, Any] | None:  # noqa: C901, PLR0912 tracked complexity/arg-count debt, see TODO.md
+def _resolve_declaration(node: Any, name: str, encoded: bytes) -> tuple[Any, Any] | None:  # noqa: C901, PLR0912 -- tracked complexity/arg-count debt, see TODO.md
     """Climb ancestors of a reference *node* for the nearest enclosing declaration of *name*.
 
     Returns ``(definition_node, scope_root)``, or None if the nearest

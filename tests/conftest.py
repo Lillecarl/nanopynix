@@ -352,7 +352,7 @@ def _register_test_primops() -> None:  # type: ignore[reportUnusedFunction] -- p
 
 
 @pytest.fixture(scope="session")
-def eval_state(store: Any, init_expr: object, _register_test_primops: object) -> Any:  # noqa: ARG001
+def eval_state(store: Any, init_expr: object, _register_test_primops: object) -> Any:  # noqa: ARG001 -- init_expr and _register_test_primops are ordering-only fixture dependencies, never read here
     """Create a session-scoped EvalState. Depends on _register_test_primops
     so that primops are registered before EvalState processes them."""
     return nanopynix.EvalState(store)

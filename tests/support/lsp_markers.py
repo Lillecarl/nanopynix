@@ -89,7 +89,7 @@ def _check_column(target_line: str, column: int, check: str | None, *, context: 
         )
 
 
-def parse_markers(source: str) -> dict[str, Marker]:  # noqa: C901 tracked complexity/arg-count debt, see TODO.md
+def parse_markers(source: str) -> dict[str, Marker]:  # noqa: C901 -- tracked complexity/arg-count debt, see TODO.md
     """Parse every ``# LS...`` marker comment in *source* into a name -> ``Marker`` map.
 
     Raises ``ValueError`` on a malformed scenario file: a marker with no

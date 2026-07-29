@@ -188,7 +188,7 @@ class NixThreadExecutor:
         # add_done_callback resolving a future on the running loop) and this
         # project always runs anyio's asyncio backend, where asyncio-native
         # interop is explicitly supported.
-        return await asyncio.wrap_future(future, loop=loop)
+        return await asyncio.wrap_future(future, loop=loop)  # noqa: TID251 -- the work already runs on this executor's own thread; see the comment above
 
     def _discard_future(self, future: concurrent.futures.Future[Any]) -> None:
         with self._lock:
@@ -222,7 +222,7 @@ class NixThreadExecutor:
         loop = asyncio.get_running_loop()
         with anyio.move_on_after(timeout) as scope:
             for future in futures:
-                await asyncio.wrap_future(future, loop=loop)
+                await asyncio.wrap_future(future, loop=loop)  # noqa: TID251 -- same dedicated-executor-thread interop as _await_future above
         if scope.cancelled_caught:
             raise TimeoutError("timed out waiting for Nix executor work to finish")
 

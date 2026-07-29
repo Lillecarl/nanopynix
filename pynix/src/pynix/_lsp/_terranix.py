@@ -223,9 +223,7 @@ class TerranixDialect(Dialect):
             return None
         return tofu_out, module_out
 
-    async def _schema_for(
-        self, context: FileContext, tofu_out: str, module_out: str
-    ) -> ProviderSchemas | None:
+    async def _schema_for(self, context: FileContext, tofu_out: str, module_out: str) -> ProviderSchemas | None:
         return await get_provider_schemas(tofu_out, module_out, await context.store_exec_prefix())
 
     async def _core_schema_for(self, context: FileContext, tofu_out: str) -> Mapping[str, CoreBlockSchema] | None:
@@ -343,7 +341,7 @@ class TerranixDialect(Dialect):
             return None
         return value
 
-    async def complete(  # noqa: C901, PLR0911 tracked complexity/arg-count debt, see TODO.md
+    async def complete(  # noqa: C901, PLR0911 -- tracked complexity/arg-count debt, see TODO.md
         self,
         context: FileContext,
         source: str,
@@ -407,7 +405,7 @@ class TerranixDialect(Dialect):
             return None
         return [types.CompletionItem(label=name) for name in names if name.startswith(partial)]
 
-    async def diagnostics(self, context: FileContext, source: str) -> list[types.Diagnostic] | None:  # noqa: C901, PLR0912 tracked complexity/arg-count debt, see TODO.md
+    async def diagnostics(self, context: FileContext, source: str) -> list[types.Diagnostic] | None:  # noqa: C901, PLR0912 -- tracked complexity/arg-count debt, see TODO.md
         """Flag unknown attributes/nested-block types on every resource/data instance declared in *source*.
 
         ``context.roots`` reflects the *whole* terranix project (every

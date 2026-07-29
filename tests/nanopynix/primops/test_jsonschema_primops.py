@@ -39,7 +39,7 @@ async def test_invalid_value_raises_with_violation_details():
         session.store() as store,
         session.eval(store) as eval,
     ):
-        with pytest.raises(Exception) as exc_info:  # noqa: PT011
+        with pytest.raises(Exception) as exc_info:  # noqa: PT011 -- exact subclass depends on exceptions.py's message-based classification; content is asserted piecewise below
             await (await eval.string(f"builtins.validateJSONSchema {{ count = -1; }} {_WIDGET_SCHEMA}")).to_python()
         message = str(exc_info.value)
         assert "validateJSONSchema: value does not match schema" in message
@@ -54,7 +54,7 @@ async def test_malformed_schema_raises_descriptive_error():
         session.store() as store,
         session.eval(store) as eval,
     ):
-        with pytest.raises(Exception) as exc_info:  # noqa: PT011
+        with pytest.raises(Exception) as exc_info:  # noqa: PT011 -- exact subclass depends on exceptions.py's message-based classification; content is asserted piecewise below
             await (await eval.string(f"builtins.validateJSONSchema {{ }} {_MALFORMED_SCHEMA}")).to_python()
         message = str(exc_info.value)
         assert "validateJSONSchema: schema file" in message

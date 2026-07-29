@@ -20,11 +20,11 @@ from typing import Any
 
 from nanopynix_proto.nix.common import NixType
 from pynix.flake import (
-    _attrs_value_to_json,  # pyright: ignore[reportPrivateUsage]
-    _build_tree,  # pyright: ignore[reportPrivateUsage]
-    _format_attr,  # pyright: ignore[reportPrivateUsage]
-    _locked_input_to_json,  # pyright: ignore[reportPrivateUsage]
-    _TreeBudget,  # pyright: ignore[reportPrivateUsage]
+    _attrs_value_to_json,  # pyright: ignore[reportPrivateUsage] -- test unit-tests pynix.flake's private rendering helpers directly, see module docstring
+    _build_tree,  # pyright: ignore[reportPrivateUsage] -- test unit-tests pynix.flake's private rendering helpers directly, see module docstring
+    _format_attr,  # pyright: ignore[reportPrivateUsage] -- test unit-tests pynix.flake's private rendering helpers directly, see module docstring
+    _locked_input_to_json,  # pyright: ignore[reportPrivateUsage] -- test unit-tests pynix.flake's private rendering helpers directly, see module docstring
+    _TreeBudget,  # pyright: ignore[reportPrivateUsage] -- test unit-tests pynix.flake's private rendering helpers directly, see module docstring
 )
 from rich.tree import Tree
 

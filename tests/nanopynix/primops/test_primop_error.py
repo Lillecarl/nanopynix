@@ -55,7 +55,7 @@ async def test_primop_error_message_is_shown_bare_and_multiline():
         session.store() as store,
         session.eval(store) as eval,
     ):
-        with pytest.raises(Exception) as exc_info:  # noqa: PT011
+        with pytest.raises(Exception) as exc_info:  # noqa: PT011 -- Nix's pretty-printer reformats the multi-line message, so lines are checked individually below rather than pinned as one regex
             await (await eval.string("builtins.testRaiseCustomError null")).to_python()
         message = str(exc_info.value)
         # Nix's own error pretty-printer re-indents continuation lines under
@@ -74,7 +74,7 @@ async def test_unexpected_exception_keeps_its_type_name_prefix():
         session.store() as store,
         session.eval(store) as eval,
     ):
-        with pytest.raises(Exception) as exc_info:  # noqa: PT011
+        with pytest.raises(Exception) as exc_info:  # noqa: PT011 -- exact subclass depends on exceptions.py's message-based classification, not a stable contract to pin
             await (await eval.string("builtins.testRaiseUnexpected null")).to_python()
         message = str(exc_info.value)
         assert "KeyError" in message

@@ -296,7 +296,7 @@ class Store:
         A plain derivation path builds all outputs. Use Nix's ``^`` syntax to
         select explicit outputs in a canonical DerivedPath string.
         """
-        if eval_store is not None and eval_store._session_id != self._session_id:  # noqa: SLF001
+        if eval_store is not None and eval_store._session_id != self._session_id:  # noqa: SLF001 -- eval_store is another Store of this same class; comparing its private session id
             raise ValueError("eval_store belongs to a different Session")
         response = await self.rpc.build_paths_with_results(
             BuildPathsWithResultsRequest(

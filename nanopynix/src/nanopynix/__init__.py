@@ -1,5 +1,10 @@
 # ruff: noqa: F401
 # pyright: reportUnusedImport=false
+# Justifies both pragmas above. This module is nanopynix's public surface:
+# every import in it is a deliberate re-export, so 'unused' is exactly
+# what a correct entry in it looks like. The reason sits here rather than
+# after the codes because pyright rejects trailing text on its pragma --
+# it reports a directive error and silently stops suppressing.
 """nanopynix — nanobind-based Python bindings for Nix."""
 
 from __future__ import annotations

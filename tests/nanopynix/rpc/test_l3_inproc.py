@@ -7,11 +7,11 @@ behaviour and the exact ``HandleRegistry`` state behind the RPC boundary.
 
 from __future__ import annotations
 
-import asyncio
 import gc
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
+import anyio
 import pytest
 from grpclib.exceptions import GRPCError
 from grpclib_transports import inproc_worker_with_backchannel
@@ -55,7 +55,7 @@ class _InprocWorkerClient(WorkerClient):
 
     _fake_eval_stub: Any
     _fake_worker_stub: Any
-    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _lock: anyio.Lock = field(default_factory=anyio.Lock)
     _next_request_id: int = 3
 
     @property

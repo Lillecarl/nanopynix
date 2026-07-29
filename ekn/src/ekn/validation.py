@@ -8,6 +8,7 @@ import socket
 import tempfile
 from typing import TYPE_CHECKING, Any, cast
 
+import anyio
 import structlog
 from anyio import Path
 
@@ -259,7 +260,7 @@ class EphemeralControlPlane:
             )
             if rc == 0:
                 break
-            await asyncio.sleep(attempt * 0.5)
+            await anyio.sleep(attempt * 0.5)
         else:
             _log.error("etcd failed to start\n%s", err)
             if self._etcd_proc.returncode is not None and self._etcd_proc.stderr is not None:
@@ -307,7 +308,7 @@ class EphemeralControlPlane:
             )
             if rc == 0:
                 break
-            await asyncio.sleep(attempt * 0.5)
+            await anyio.sleep(attempt * 0.5)
         else:
             _log.error("kube-apiserver failed to start\n%s", err)
             if self._apiserver_proc.returncode is not None and self._apiserver_proc.stderr is not None:

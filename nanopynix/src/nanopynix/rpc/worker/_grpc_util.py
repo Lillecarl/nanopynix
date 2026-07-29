@@ -83,9 +83,9 @@ def worker_op[S: _WorkerDispatch, **P, R](
         # picking whichever key happens to come first would silently take the
         # wrong object the moment a second keyword exists.
         message = args[0] if args else kwargs["message"]
-        # pyright: ignore is on the next line rather than a rename because
-        # _run must stay private: wrap_service_handlers treats every public
-        # async method on the handler as an RPC entry point.
+        # The suppression on the next line is there rather than a rename
+        # because _run must stay private: wrap_service_handlers treats every
+        # public async method on the handler as an RPC entry point.
         return await self._run(  # type: ignore[reportPrivateUsage] -- _WorkerDispatch declares _run as this protocol's whole contract
             message,
             functools.partial(handler, self),

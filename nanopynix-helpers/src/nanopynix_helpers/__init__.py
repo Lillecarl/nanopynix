@@ -1,4 +1,6 @@
 # pyright: reportUnusedImport=false
+# Same re-export surface as nanopynix's own __init__: the imports here are
+# the package's public API, so none of them is read within this file.
 """Reusable building blocks layered on nanopynix, kept out of its core to avoid pulling in dependencies (e.g. tree-sitter) that most nanopynix consumers don't need."""
 
 from __future__ import annotations

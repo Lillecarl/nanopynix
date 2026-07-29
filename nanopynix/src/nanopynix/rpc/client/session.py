@@ -89,7 +89,7 @@ class Session:
     # untyped callers (see the isinstance guards below); beartype's parameter
     # check would otherwise intercept before that guard runs and raise its own
     # exception type instead of the documented TypeError.
-    def __init__(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
+    def __init__(  # noqa: PLR0913 -- tracked complexity/arg-count debt, see TODO.md
         self,
         *,
         store_uri: str = DEFAULT_STORE_URI,

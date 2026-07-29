@@ -137,7 +137,7 @@ def _flat_identifier_chain_before_dot(nodes: list[Any], byte_offset: int, encode
     return ".".join(segments)
 
 
-def _tree_prefix_at(source: str, byte_offset: int) -> tuple[str | None, str] | None | _NoMatch:  # noqa: C901, PLR0911 tracked complexity/arg-count debt, see TODO.md
+def _tree_prefix_at(source: str, byte_offset: int) -> tuple[str | None, str] | None | _NoMatch:  # noqa: C901, PLR0911 -- tracked complexity/arg-count debt, see TODO.md
     """Tier 1: a tree-sitter structural match ending exactly at *byte_offset*.
 
     Matches three shapes: a ``select_expression`` (so it can complete after

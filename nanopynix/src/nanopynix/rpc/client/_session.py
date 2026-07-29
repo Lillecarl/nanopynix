@@ -1,4 +1,7 @@
 # ruff: noqa: ASYNC109
+# Every `timeout` parameter in this module is threaded straight through to
+# a grpclib stub call, which takes one. ASYNC109 wants a deadline instead,
+# but the transport owns the timeout here, not this layer.
 """Eval session and ValueProxy for eval over gRPC."""
 
 from __future__ import annotations
@@ -448,8 +451,8 @@ class ValueProxy:
         if isinstance(self._state, _ResolvedValue):
             return
         lazy = self._state
-        await lazy.parent._ensure_resolved(timeout=timeout)  # noqa: SLF001
-        parent = lazy.parent._resolved  # noqa: SLF001
+        await lazy.parent._ensure_resolved(timeout=timeout)  # noqa: SLF001 -- lazy.parent is another ValueProxy of this same class, resolved recursively
+        parent = lazy.parent._resolved  # noqa: SLF001 -- same-class access, reading the now-resolved parent ValueProxy's state
         if isinstance(lazy.selector, str):
             handle = await self._ctx.proxy.attr(AttrRequest(handle=parent.handle, name=lazy.selector))
         else:
@@ -475,7 +478,7 @@ class ValueProxy:
         if isinstance(value, ValueProxy):
             if not self._ctx.owner.owns(value):
                 raise ForeignValueError("cannot pass a ValueProxy from another EvalSession")
-            await value._ensure_resolved(timeout=timeout)  # noqa: SLF001
+            await value._ensure_resolved(timeout=timeout)  # noqa: SLF001 -- value is another ValueProxy of this same class, ownership already checked above
             return CallArg(remote_value=RemoteCallArg(handle=value.handle))
         if isinstance(value, list):
             return CallArg(
@@ -901,7 +904,7 @@ class EvalSession:
         "_worker",
     )
 
-    def __init__(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
+    def __init__(  # noqa: PLR0913 -- tracked complexity/arg-count debt, see TODO.md
         self,
         worker: WorkerClient,
         owner_session: _EvalSessionOwner | None = None,

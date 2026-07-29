@@ -191,7 +191,7 @@ class Session:
     # callers (see the isinstance guard below); beartype's parameter check
     # would otherwise intercept before that guard runs and raise its own
     # exception type instead of the documented TypeError.
-    def __init__(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
+    def __init__(  # noqa: PLR0913 -- tracked complexity/arg-count debt, see TODO.md
         self,
         *,
         nix_conf: Path | None = None,
@@ -284,7 +284,7 @@ class Session:
         )
         register_import_path_primops(self._primops)
 
-    async def close(  # noqa: C901, PLR0912 tracked complexity/arg-count debt, see TODO.md
+    async def close(  # noqa: C901, PLR0912 -- tracked complexity/arg-count debt, see TODO.md
         self,
         *,
         wait: bool = True,
