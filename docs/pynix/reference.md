@@ -23,6 +23,10 @@ Build a Nix derivation value
 | `--print-build-logs` | `bool` | Print build log lines to stderr. (default: `False`) |
 | `--update-fod` | `bool` | Update plain fixed-output hash literals after a hash mismatch. (default: `False`) |
 | `--dry-run` | `bool` | Show --update-fod changes without writing or rebuilding. (default: `False`) |
+| `--namespaced` | `bool` | Build in a private user namespace, against an overlay store whose lower layer is the host store. Nothing is copied in, the host store does not change, and this process owns the sandbox settings that the daemon otherwise controls. Linux only. (default: `False`) |
+| `--overlay-dir` | `Path or None` | Keep the overlay's upper layer here, instead of in a temporary directory that is deleted on exit. Reuse the same directory to keep what earlier --namespaced builds produced. Implies --namespaced. (default: `None`) |
+| `--copy-back` | `bool` | Copy the outputs of a --namespaced build into the host store when the build succeeds. Without it the outputs are gone when the worker exits. (default: `True`) |
+| `--sandbox-path` | `list[str]` | Extra path to mount into the build sandbox, as /inside=/outside or /path. Repeatable. Requires --namespaced, because the daemon does not let a client change its sandbox. (default: `[]`) |
 
 ### `pynix config`
 

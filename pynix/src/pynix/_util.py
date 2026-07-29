@@ -124,6 +124,7 @@ async def nix_session(
     experimental_features: Sequence[str] | None = None,
     verbosity: nanopynix.LogLevelInput | None = None,
     print_build_logs: bool = False,
+    namespace: nanopynix.OverlayNamespace | None = None,
 ) -> AsyncGenerator[Session]:
     """Open an RPC session and forward its Nix logs for the duration of the block.
 
@@ -140,6 +141,8 @@ async def nix_session(
         kwargs["experimental_features"] = list(experimental_features)
     if verbosity is not None:
         kwargs["verbosity"] = verbosity
+    if namespace is not None:
+        kwargs["namespace"] = namespace
     async with (
         nanopynix.rpc.Session(**kwargs) as nix,
         forward_nix_logs(nix, print_build_logs=print_build_logs),
