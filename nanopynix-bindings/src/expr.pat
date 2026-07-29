@@ -16,6 +16,16 @@ nanopynix_bindings.expr.register_primop:
         callback: Callable[..., ValueType],
     ) -> None: ...
 
+# stubgen drops a module function whose name starts with an underscore unless a
+# pattern names it, which is why `_enter_evaluator_thread` is absent from the
+# stub and its call sites carry a blanket `type: ignore`. These two are named
+# so that pyright checks the calls instead.
+nanopynix_bindings.expr._gc_collect:
+    def _gc_collect() -> None: ...
+
+nanopynix_bindings.expr._gc_stats:
+    def _gc_stats() -> dict[str, int]: ...
+
 nanopynix_bindings.expr.Value.edit_location:
     def edit_location(self) -> EditLocation: ...
 
