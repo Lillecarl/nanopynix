@@ -75,6 +75,41 @@ commands:
   and also out of the code under test. Use them instead of a separate
   `python -c` command.
 
+# Issues, and how a commit closes one
+
+This repository tracks work as GitHub issues. Use the `gh` CLI to read them,
+and to create one.
+
+**Put `Closes #<number>` in the commit message when the commit completes an
+issue.** Write it on its own line at the end of the body, after the
+Conventional Commits subject. The default branch of this repository is
+`develop`, so GitHub closes the issue when the commit reaches `develop`.
+
+```
+fix(inproc): let a cancellation leave Session.close
+
+close_resource caught BaseException, so it collected a CancelledError into
+the error list. The scope that owns the cancellation never saw it.
+
+Closes #9
+```
+
+Follow these rules:
+
+- Use `Closes #<number>` for a commit that satisfies the whole issue. Use
+  `Refs #<number>` for a commit that is one part of a larger issue. Do not
+  write `Closes` for partial work, because GitHub closes the issue anyway.
+- Name each issue that the commit completes. Write a separate `Closes #N` line
+  for each one.
+- An issue states its acceptance criteria and the tests that it needs. Meet
+  both before you write `Closes`. A commit that closes an issue without the
+  tests that the issue asks for is not complete.
+- To find the work, read issue #26. That issue tracks the roadmap of the code
+  review, and it links each item.
+- `CODE_IMPROVEMENT_PLAN.md` maps a finding of the review to its issue number.
+  That file holds **no status**, because the issue holds the status. Do not add
+  a status column to it, and do not mark an item done there.
+
 # Python coding conventions
 
 - Use `from __future__ import annotations` in each Python module that defines
