@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -15,6 +16,7 @@ import pytest
 from anyio import Path as AnyioPath
 from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
 from nanopynix_proto.nix.store import GcAction
+from pytest_agent import note
 
 import nanopynix
 from nanopynix import Derivation, GcResult, MissingInfo, NixType, StorePath, inproc, yaml_primops
@@ -162,6 +164,135 @@ async def test_inproc_value_context_manager_releases_rooted_value(inproc_session
             assert await root.attr("answer").as_int() == 42
         with pytest.raises(nanopynix.ValueReleasedError):
             await root.get_type()
+
+
+_ATTRSET_OF_500 = "builtins.listToAttrs (builtins.genList (n: { name = toString n; value = n; }) 500)"
+
+
+def _tracked_values(evaluator: Any) -> int:
+    """How many ``CoreValue`` objects this evaluator still knows about.
+
+    A proxy for the number of rooted Nix values, and a partial one: it cannot
+    see a binding object that Python still holds for a reason of its own.
+    ``_root_bytes`` below is the measurement; this is the precise guard on the
+    thing that regressed.
+    """
+    core = evaluator._require_core()  # type: ignore[reportPrivateUsage] -- the count under test is not public
+    return len(core._values)  # type: ignore[reportPrivateUsage] -- the count under test is not public
+
+
+def _collect_and_read_non_gc_bytes() -> int:
+    """Collect, then read Boehm's uncollectable total. Evaluator thread only."""
+    # Underscore-prefixed because these are an L1 probe, not an API. This test
+    # is the caller they exist for.
+    nanopynix_expr._gc_collect()  # type: ignore[reportPrivateUsage] -- L1 collector probe
+    return nanopynix_expr._gc_stats()["non_gc_bytes"]  # type: ignore[reportPrivateUsage] -- L1 collector probe
+
+
+async def _root_bytes(evaluator: Any) -> int:
+    """Bytes of Boehm memory that are roots, measured on the evaluator thread.
+
+    Every ``nix::allocRootValue`` is one ``GC_MALLOC_UNCOLLECTABLE`` block, so
+    this number moves with the count of live root values. One root measures 32
+    bytes on this platform.
+
+    Compare deltas, never absolutes. The counter includes every uncollectable
+    allocation in the process, and Boehm's own accounting drifts by tens of
+    bytes across an allocate-and-free cycle, so it can read below where it
+    started.
+
+    ``_gc_collect`` must run on an evaluator thread. ``nix::initGC`` runs on
+    the session's Nix thread, so the collector does not know the Python main
+    thread, and it aborts the process rather than refusing a collection from
+    one it does not know.
+    """
+    return await evaluator.run(_collect_and_read_non_gc_bytes)
+
+
+@pytest.mark.anyio
+async def test_a_collected_value_releases_its_nix_root(inproc_session: InprocSessionFactory) -> None:
+    """Dropping the last Python reference must free the Nix root behind it.
+
+    Measured before this behaviour existed, on an attrset of 500 attributes::
+
+        rooted after string:  1
+        after as_dict:      501    after drop and collect: 501
+        after as_dict:     1001    after drop and collect: 1001
+
+    ``as_dict`` roots every child in one call, and it is the documented way to
+    read a value Nix cannot flatten to JSON, so the count grew with every read
+    and never came back down.
+
+    Nothing defers the release. ``nanopynix_expr.Value`` holds the
+    ``RootValue`` by value, Nix allocates it with Boehm's
+    ``traceable_allocator``, and that frees with ``GC_FREE``. So the
+    destructor of the binding object removes the root, and ``gc.collect()`` is
+    all this test has to do.
+    """
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as evaluator:
+        root = await evaluator.string(_ATTRSET_OF_500)
+        assert _tracked_values(evaluator) == 1
+
+        children = await root.as_dict()
+        assert _tracked_values(evaluator) == 501, "as_dict roots every child"
+
+        del children
+        gc.collect()
+        # One step of the event loop, not one Nix operation. asyncio's handle
+        # for the most recent awaited result outlives the `await` that
+        # consumed it, and `as_dict` awaits a dict of every child. The loop
+        # drops that handle when it takes its next step, and `gc.collect()`
+        # cannot: a live frame holds it. Measured -- without this the count
+        # stays at 501, whatever the collector does.
+        await anyio.lowlevel.checkpoint()
+
+        assert _tracked_values(evaluator) == 1, "a collected value never released its Nix root"
+
+
+@pytest.mark.anyio
+async def test_a_collected_value_gives_its_root_back_to_the_collector(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    """The same claim, measured in the Nix heap rather than in Python.
+
+    The count above cannot see a root that something other than ``CoreValue``
+    holds. Measured: 200 attrsets, one child kept from each, every parent
+    dropped -- the count falls to 200 and Boehm frees nothing, because each
+    child holds its parent through ``nb::keep_alive``. So the count alone
+    would call that fixed.
+    """
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as evaluator:
+        before = await _root_bytes(evaluator)
+
+        root = await evaluator.string(_ATTRSET_OF_500)
+        children = await root.as_dict()
+        rooted = await _root_bytes(evaluator)
+        note(root_bytes_held=rooted - before)
+        assert rooted - before > 500 * 16, "as_dict did not root the children it returned"
+
+        del children
+        gc.collect()
+        released = await _root_bytes(evaluator)
+        note(root_bytes_after_drop=released - before)
+
+        # One root, for `root`, plus Boehm's drift. Both are tens of bytes
+        # against the thousands above.
+        assert released - before < (rooted - before) // 10, "the Nix roots were not given back"
+
+
+@pytest.mark.anyio
+async def test_a_value_the_caller_still_holds_survives_a_collection(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    """Collection must free what nobody holds, and nothing else."""
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as evaluator:
+        root = await evaluator.string('{ kept = 42; dropped = "gone"; }')
+        children = await root.as_dict()
+        kept = children["kept"]
+        del children
+        gc.collect()
+
+        assert await kept.as_int() == 42, "a value the caller still holds was released under it"
 
 
 @pytest.mark.anyio
