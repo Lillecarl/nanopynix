@@ -2,39 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING
 
 from nanopynix_bindings import expr as nanopynix_expr, store as nanopynix_store, util as nanopynix_util
 
 from nanopynix._typechecking import BEARTYPING
-from nanopynix.settings import (
-    NixEvalSettings,
-    NixFetchSettings,
-    SettingsProvenance,
-    reject_construction_time_keys,
-)
+from nanopynix.settings import SettingsProvenance
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Mapping, Sequence
-
-
-# Runtime-checkable so beartype can check the parameter it annotates. Without
-# it beartype cannot decorate `configure_eval_state` at all and skips the whole
-# method. The check is `isinstance` against the two names below -- structural,
-# which is the same guarantee the annotation already makes, and no stronger.
-@runtime_checkable
-class EvalSettingsTarget(Protocol):
-    """The two live-mutable setters :meth:`NixCore.configure_eval_state` needs.
-
-    Structural rather than the concrete ``EvalState`` because that is the whole
-    of the contract -- the method applies settings and touches nothing else --
-    and stating it exactly is what lets a test substitute a recorder without a
-    cast. ``nanopynix_bindings.expr.EvalState`` satisfies it as written.
-    """
-
-    def set_eval_setting(self, name: str, value: str) -> None: ...
-
-    def set_fetch_setting(self, name: str, value: str) -> None: ...
 
 
 def build_mode_value(build_mode: nanopynix_store.BuildMode | int | None) -> int:
@@ -150,32 +126,6 @@ class NixCore:
             dict(eval_settings) if eval_settings else {},
             dict(fetch_settings) if fetch_settings else {},
         )
-
-    def configure_eval_state(
-        self,
-        eval_state: EvalSettingsTarget,
-        eval_settings: Mapping[str, str] | None = None,
-        fetch_settings: Mapping[str, str] | None = None,
-    ) -> None:
-        """Apply live eval and fetch settings to an already-open ``EvalState``.
-
-        The backstop under both engines' ``configure()``. Those check the typed
-        model, which is the check that gives a good message; this checks the
-        rendered keys, which is all that reaches a worker over RPC. A worker
-        must refuse what the client refuses, whatever built the request.
-
-        Raises:
-            SettingNotLiveError: A key Nix reads only while constructing the
-                evaluator.
-        """
-        eval_rendered = eval_settings or {}
-        fetch_rendered = fetch_settings or {}
-        reject_construction_time_keys(eval_rendered, model=NixEvalSettings, target="evaluator")
-        reject_construction_time_keys(fetch_rendered, model=NixFetchSettings, target="evaluator")
-        for name, value in eval_rendered.items():
-            eval_state.set_eval_setting(name, value)
-        for name, value in fetch_rendered.items():
-            eval_state.set_fetch_setting(name, value)
 
     def get_verbosity(self) -> int:
         return nanopynix_util.get_verbosity()

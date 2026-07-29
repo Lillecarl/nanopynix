@@ -107,8 +107,8 @@ def reject_construction_time_keys(rendered: Mapping[str, str], *, model: type[Ba
 
     It checks the rendered keys rather than a typed model, because a rendered
     mapping is all that reaches a worker. Both engines check before they send,
-    and the worker checks again, so nothing can slip past by building a request
-    by hand.
+    and ``CoreEvalState.configure`` checks again on the far side, so nothing
+    can slip past by building a request by hand.
 
     Raises:
         SettingNotLiveError: One or more keys cannot take effect.

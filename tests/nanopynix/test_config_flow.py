@@ -24,11 +24,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from nanopynix_proto.nix.eval import ConfigureEvalRequest
 from pytest_agent import note
 
 import nanopynix
 from nanopynix import NixEvalSettings, NixFetchSettings, stores
-from nanopynix.exceptions import EvalError, SettingNotLiveError
+from nanopynix.exceptions import EvalError, NixError, SettingNotLiveError
 from nanopynix.namespace import STORE_DIR
 from nanopynix.settings import (
     NixEvaluatorSettings,
@@ -280,11 +281,11 @@ async def _resolve_search_paths(factory: Any, entries: list[str]) -> list[int]:
 
 
 def test_the_worker_side_check_works_on_rendered_keys() -> None:
-    """A request built by hand cannot get past the client-side check.
+    """The one check both sides run, on the rendered keys.
 
-    Both sides run this one check, on the rendered keys, because a rendered
-    mapping is all that reaches a worker. A hand-built request meets the same
-    refusal the client would have raised.
+    A rendered mapping is all that reaches a worker, so the check reads keys
+    rather than a typed model. This pins the check itself; the three tests
+    below prove that the worker actually runs it.
     """
     with pytest.raises(SettingNotLiveError, match="pure-eval"):
         reject_construction_time_keys({"pure-eval": "true"}, model=NixEvalSettings, target="evaluator")
@@ -305,6 +306,93 @@ def test_the_message_names_every_offending_setting_at_once() -> None:
     assert "nix-path" in message
     assert "pure-eval" in message
     assert "max-call-depth" not in message, "a live setting must not be blamed"
+
+
+async def test_the_worker_refuses_a_hand_built_configure_request(
+    shared_nix_environment: NixTestEnvironment,
+) -> None:
+    """The refusal belongs to the protocol, not to one client.
+
+    ``EvalSession.configure`` checks before it sends, so the public route never
+    reaches the worker with a construction-time key. This test goes around that
+    check and speaks to the worker's own entry point, which is what a second
+    client, or a caller holding the proxy, can do.
+
+    Measured before the worker had the check: the worker accepted the request,
+    answered with an empty response, and dropped ``pure-eval``.
+
+    The class does not survive the trip. ``convert_handler_errors`` renders
+    every worker exception to ``GRPCError(UNKNOWN, "TypeName: msg")``, so the
+    client raises :class:`~nanopynix.NixError` and not
+    :class:`~nanopynix.SettingNotLiveError`. The refusal and the message both
+    survive, and those are what this asserts. Issue #28 covers the general fix.
+    """
+    async with (
+        shared_nix_environment.rpc_session() as session,
+        session.store() as store,
+        session.eval(store) as evaluator,
+    ):
+        with pytest.raises(NixError) as excinfo:
+            # The proxy, not `configure()`: a caller who bypassed the public
+            # API is the subject here.
+            await evaluator._ensure_proxy().configure_eval(
+                ConfigureEvalRequest(eval_settings={"pure-eval": "true"}),
+            )
+        message = str(excinfo.value)
+        note(worker_refusal=message)
+        assert "pure-eval" in message, "the message must name the setting"
+        assert "open the evaluator" in message, "the message must say what to do instead"
+
+        # A refusal that applied the setting anyway would be worse than none.
+        assert await _evaluator_purity(evaluator) == "impure"
+
+
+async def test_the_worker_applies_a_live_setting_from_a_hand_built_request(
+    shared_nix_environment: NixTestEnvironment,
+) -> None:
+    """The worker's refusal is targeted, exactly as the client's is.
+
+    ``max-call-depth`` is read at call time and never in the constructor, so
+    the same route that refuses ``pure-eval`` must let this one through and
+    take effect.
+    """
+    recurse = "let f = n: if n == 0 then 0 else f (n - 1); in f 200"
+
+    async with (
+        shared_nix_environment.rpc_session() as session,
+        session.store() as store,
+        session.eval(store) as evaluator,
+    ):
+        # The same bypassed route as the test above.
+        await evaluator._ensure_proxy().configure_eval(
+            ConfigureEvalRequest(eval_settings={"max-call-depth": "20"}),
+        )
+        with pytest.raises(EvalError, match="max-call-depth"):
+            await evaluator.string(recurse)
+
+
+async def test_the_core_layer_is_what_refuses(
+    shared_nix_environment: NixTestEnvironment,
+) -> None:
+    """One implementation guards both engines, and inproc shows its class.
+
+    The check lives on ``CoreEvalState.configure``. rpc reaches that method
+    through its worker handler, inproc through its evaluator thread, so one
+    check covers both. Reaching it directly on inproc goes past
+    ``configure()``'s own check with no transport in between, which is the one
+    route where :class:`~nanopynix.SettingNotLiveError` is visible as itself.
+    """
+    async with (
+        shared_nix_environment.inproc_session() as session,
+        session.store() as store,
+        session.eval(store) as evaluator,
+    ):
+        # Straight to the shared object, past `configure()`'s own check.
+        core = evaluator._require_core()
+        with pytest.raises(SettingNotLiveError, match="pure-eval"):
+            await evaluator.run(core.configure, {"pure-eval": "true"}, {})
+
+        assert await _evaluator_purity(evaluator) == "impure"
 
 
 # ── Store construction is its own moment ─────────────────────────────
@@ -565,14 +653,19 @@ async def _global_scope_holds(session: Any) -> str:
     return (await session.settings())["substituters"]
 
 
+async def _evaluator_purity(evaluator: Any) -> str:
+    """Whether this open evaluator is pure. ``builtins.currentTime`` is impure."""
+    try:
+        await (await evaluator.string("builtins.currentTime")).to_python()
+    except EvalError:
+        return "pure"
+    return "impure"
+
+
 async def _eval_scope_holds(session: Any, store: Any, **eval_kwargs: Any) -> str:
-    """Whether the evaluator is pure. ``builtins.currentTime`` is impure."""
+    """Whether a freshly opened evaluator is pure."""
     async with session.eval(store, **eval_kwargs) as evaluator:
-        try:
-            await (await evaluator.string("builtins.currentTime")).to_python()
-        except EvalError:
-            return "pure"
-        return "impure"
+        return await _evaluator_purity(evaluator)
 
 
 async def _fetch_scope_holds(session: Any, store: Any, ref: str, **eval_kwargs: Any) -> str:
