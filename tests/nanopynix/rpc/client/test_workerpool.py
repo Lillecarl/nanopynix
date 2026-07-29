@@ -76,7 +76,7 @@ async def test_concurrent_log_stream():
             await store.store_dir()
 
         # Cancel the collector after a brief pause
-        await asyncio.sleep(0.5)
+        await anyio.sleep(0.5)
         bg_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await bg_task
@@ -292,4 +292,4 @@ async def test_close_reports_every_failure_it_collected():
 
 async def _collect(nix: Nix, events: list[LogEvent]) -> None:
     async for event in nix.log_stream():
-        events.append(event)  # noqa: PERF401
+        events.append(event)  # noqa: PERF401 -- events is a shared list a background caller polls while this loop keeps running; a comprehension would defer visibility until the stream ends

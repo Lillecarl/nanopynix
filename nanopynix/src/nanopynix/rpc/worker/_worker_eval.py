@@ -282,7 +282,7 @@ class EvalServiceHandler(EvalServiceBase):
     def _get_store(self, store_handle: int) -> Any:
         return self._state.handles.get_typed(store_handle, HandleKind.STORE)
 
-    def _call_arg_to_python(self, arg: common_pb.CallArg, es: Any) -> Any:  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
+    def _call_arg_to_python(self, arg: common_pb.CallArg, es: Any) -> Any:  # noqa: PLR0911 -- tracked complexity/arg-count debt, see TODO.md
         if arg.scalar is not None:
             sv = arg.scalar
             if sv.string_value is not None:

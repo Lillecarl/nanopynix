@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import socket
 from typing import TYPE_CHECKING, Any
 
+import anyio
+import anyio.to_thread
 import pytest
 
 import nanopynix
@@ -15,13 +18,23 @@ if TYPE_CHECKING:
 
 
 async def _serve_one_connection(listener: socket.socket, store: Any) -> None:
-    connection, _address = await asyncio.to_thread(listener.accept)
+    connection, _address = await anyio.to_thread.run_sync(listener.accept)
     try:
-        await asyncio.to_thread(
-            nanopynix.process_connection,
-            store,
-            connection.fileno(),
-            trusted=False,
+        # functools.partial, not keyword arguments to run_sync: unlike
+        # asyncio.to_thread, anyio's run_sync does not forward **kwargs to the
+        # callable -- its only keyword parameters are its own
+        # (abandon_on_cancel, cancellable, limiter), so `trusted=False` here
+        # would be swallowed by run_sync itself and raise TypeError. `trusted`
+        # is positional-or-keyword and could be passed positionally, but
+        # process_connection's contract is that the caller explicitly decides
+        # whether the peer is trusted, and a bare `False` is not that.
+        await anyio.to_thread.run_sync(
+            functools.partial(
+                nanopynix.process_connection,
+                store,
+                connection.fileno(),
+                trusted=False,
+            )
         )
     finally:
         connection.close()

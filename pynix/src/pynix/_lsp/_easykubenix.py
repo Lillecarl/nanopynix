@@ -195,7 +195,7 @@ class EasykubenixDialect(Dialect):
             return None
         return render(fragment, root=schema)
 
-    async def complete(  # noqa: PLR0911 tracked complexity/arg-count debt, see TODO.md
+    async def complete(  # noqa: PLR0911 -- tracked complexity/arg-count debt, see TODO.md
         self,
         context: FileContext,
         source: str,

@@ -136,7 +136,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
     - Direct access to ``store_stub`` and ``eval_stub`` for gRPC calls.
     """
 
-    def __init__(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
+    def __init__(  # noqa: PLR0913 -- tracked complexity/arg-count debt, see TODO.md
         self,
         *,
         store_uri: str = DEFAULT_STORE_URI,

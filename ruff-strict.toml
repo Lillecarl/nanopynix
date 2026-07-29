@@ -266,6 +266,118 @@ ignore = [
 [lint.flake8-builtins]
 ignorelist = ["eval"]
 
+# Raw-asyncio APIs this codebase does not use, with the anyio replacement named
+# in the message so the fix is in the diagnostic rather than in someone's head.
+#
+# Scope, and why it is not larger. Every entry here was checked against the
+# call sites that already exist: an API is banned only when *none* of its
+# current uses would need restructuring to comply. That rule is what keeps this
+# a lint config rather than a migration ticket in disguise -- the surveyed
+# alternative banned six more symbols and would have imported 75 sites of real
+# refactoring (changed exception aggregation, `async with` blocks where a
+# function call used to be) behind a config diff. Those six are named at the
+# bottom with what they would actually cost.
+#
+# Two tiers, deliberately labelled, because they are not the same kind of rule:
+# CORRECTNESS entries prevent a defect, CONSISTENCY entries express a
+# preference. A consistency rule dressed up as a correctness rule is how a
+# lint config loses its credibility, so they are marked.
+#
+# Ruff reports a `from asyncio import X` at the import, and a plain
+# `asyncio.X` / aliased `aio.X` at the call, so neither spelling escapes.
+# What it cannot see is a call laundered through a local binding
+# (`fn = asyncio.gather; fn(...)`) -- that needs whole-program inference, which
+# pyright already provides and which this table is not trying to replicate.
+[lint.flake8-tidy-imports.banned-api]
+
+# -- CORRECTNESS ------------------------------------------------------------
+
+# Deprecated since 3.12 and no longer creates a loop when none is running: it
+# raises instead, so the classic `loop = asyncio.get_event_loop()` at import
+# time is now a crash rather than the implicit-loop convenience it once was.
+"asyncio.get_event_loop".msg = "Use asyncio.get_running_loop() inside async code; time.monotonic() for timestamps. Deprecated since 3.12 and raises when no loop is running."
+
+# anyio.run owns the loop. Installing or replacing a process-global default
+# loop underneath it desynchronises anyio's runner state from the loop actually
+# executing tasks.
+"asyncio.set_event_loop".msg = "anyio.run() owns the event loop; do not install a process-global default underneath it."
+"asyncio.new_event_loop".msg = "Use anyio.run(), which creates and owns the loop."
+"asyncio.get_event_loop_policy".msg = "Select a backend via anyio.run(backend=...) rather than a global loop policy."
+"asyncio.set_event_loop_policy".msg = "Select a backend via anyio.run(backend=..., backend_options=...) rather than a global loop policy."
+
+# The real difference is resource bounding, not spelling: asyncio.to_thread
+# spawns without limit, so a fan-out over N items creates N threads. anyio's
+# goes through a CapacityLimiter (40 by default, overridable per call via
+# limiter=), which is why nanopynix can fan out over a store query without
+# sizing a pool by hand.
+#
+# Not a drop-in when the callable takes keyword arguments, and it fails in the
+# nastiest possible way. asyncio.to_thread(fn, /, *args, **kwargs) forwards
+# kwargs to fn; anyio's run_sync(fn, *args, ...) does not -- its keyword
+# parameters are its own (abandon_on_cancel, cancellable, limiter). So a
+# mechanical rewrite of `to_thread(fn, x, flag=True)` sends `flag` to run_sync
+# rather than to fn, which is a TypeError at call time, in a thread, at
+# runtime. Wrap it: `run_sync(functools.partial(fn, x, flag=True))`.
+#
+# Also import the submodule (`import anyio.to_thread`). A bare `import anyio`
+# reaches it at runtime but pyright will not resolve the attribute, and the
+# resulting Unknown silently disables type checking of the whole call.
+"asyncio.to_thread".msg = "Use anyio.to_thread.run_sync(fn, *args) -- bounded by a CapacityLimiter, unlike asyncio's unbounded spawn. It does NOT forward **kwargs: wrap keyword args in functools.partial."
+
+# Bridging a concurrent.futures.Future into the running loop. Banned so the
+# two places that legitimately need it stay visible; both carry an inline
+# `# noqa: TID251 -- ...` naming the reason, per CLAUDE.md's documented
+# exception for _core/_nix_executor.py.
+"asyncio.wrap_future".msg = "Prefer anyio.to_thread / anyio.from_thread.BlockingPortal. The dedicated-executor-thread exception is documented in CLAUDE.md and must carry an inline noqa saying so."
+
+# -- CONSISTENCY ------------------------------------------------------------
+# These work correctly today on the asyncio backend. The argument is that
+# nanopynix expresses concurrency in one vocabulary, and that anyio's
+# primitives are the ones that stay correct if a backend ever changes.
+
+"asyncio.sleep".msg = "Use anyio.sleep()."
+"asyncio.Lock".msg = "Use anyio.Lock()."
+# anyio.Event is deliberately not resettable -- it has no clear(). Code that
+# needs to re-arm creates a new Event, which is what makes the wait/set race
+# that clear() invites unrepresentable.
+"asyncio.Event".msg = "Use anyio.Event(). Note it has no clear(): create a new Event to re-arm."
+"asyncio.Semaphore".msg = "Use anyio.Semaphore(initial_value)."
+"asyncio.BoundedSemaphore".msg = "Use anyio.Semaphore(n, max_value=n)."
+"asyncio.Condition".msg = "Use anyio.Condition()."
+"asyncio.TaskGroup".msg = "Use `async with anyio.create_task_group() as tg:`."
+"asyncio.timeout".msg = "Use `with anyio.fail_after(seconds):` (or move_on_after to expire silently)."
+"asyncio.timeout_at".msg = "Use `with anyio.CancelScope(deadline=...):`, against anyio.current_time()."
+
+# -- DELIBERATELY ABSENT ----------------------------------------------------
+#
+# Not oversights. Each of these has current uses that anyio cannot express
+# without changing behaviour, so banning them would assert a migration this
+# repo has not made:
+#
+#   asyncio.gather (46 uses)  anyio has no gather(). Every site becomes a task
+#                             group plus manual indexed result collection, and
+#                             error aggregation changes from gather's
+#                             first-exception model to an ExceptionGroup.
+#   create_subprocess_exec    Two thirds of the uses call proc.communicate(),
+#   /_shell (12)              which anyio has no equivalent for -- replacing it
+#                             means hand-rolling concurrent pipe drainage to
+#                             avoid deadlock. One site needs preexec_fn
+#                             (PR_SET_PDEATHSIG), which open_process does not
+#                             accept at all.
+#   asyncio.create_task (10)  Several sites hold a task across two
+#                             independently-callable public methods
+#                             (open()/close()); anyio has no spawn-now,
+#                             join-later primitive outside a same-task group.
+#                             CLAUDE.md documents this shape as intentional.
+#   asyncio.wait_for (9)      fail_after is a context manager, not a call
+#                             wrapper, so each site is a control-flow rewrite.
+#   asyncio.ensure_future (4) Same task-group restructuring as create_task.
+#   asyncio.Queue (2)         Memory object streams split send and receive into
+#                             two objects, so both the producer wiring and the
+#                             consumer loop change shape.
+#
+# Turning any of these on is a refactor with its own tests, not a config edit.
+
 [lint.per-file-ignores]
 # tests intentionally inspect private implementation state, use bare
 # assert (pytest idiom), reference fake/illustrative "/tmp/..." fixture

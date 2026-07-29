@@ -26,7 +26,7 @@ class _LogTestModule(Protocol):
 _log_test: Callable[[str], None] = cast("_LogTestModule", nanopynix_util)._log_test  # type: ignore[reportPrivateUsage] -- test imports private helper
 
 
-async def _collect(collector: LogCollector, count: int, timeout: float = 2.0) -> list[tuple[str, int, str, int, str]]:  # noqa: ASYNC109
+async def _collect(collector: LogCollector, count: int, timeout: float = 2.0) -> list[tuple[str, int, str, int, str]]:  # noqa: ASYNC109 -- timeout is passed straight through to asyncio.wait_for, which accepts a timeout parameter
     """Collect `count` events from the async stream."""
     events: list[tuple[str, int, str, int, str]] = []
     stream = collector.stream()

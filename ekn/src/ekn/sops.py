@@ -227,7 +227,7 @@ async def ensure_age_identities(
             # __getitem__/get etc. ship with zero type annotations upstream
             # (box/box.py) -- pyright can't resolve indexing through it at
             # all, with or without an intervening annotated variable.
-            key_text = base64.b64decode(secret.raw["data"][key]).decode()  # pyright: ignore[reportUnknownArgumentType]
+            key_text = base64.b64decode(secret.raw["data"][key]).decode()  # pyright: ignore[reportUnknownArgumentType] -- python-box Box's __getitem__ ships with zero upstream type annotations
         except kr8s.NotFoundError:
             # The Secret's own namespace may not exist yet either (e.g. a
             # fresh bootstrap target whose Namespace object hasn't been

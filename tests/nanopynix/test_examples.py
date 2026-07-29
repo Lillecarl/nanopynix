@@ -73,10 +73,14 @@ def test_example_runs(path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
         monkeypatch.setattr(nanopynix.rpc, "Session", _isolated_session)
 
-    loop = asyncio.new_event_loop()
+    # The examples are synchronous entry points that call asyncio.run() themselves, executed here by runpy. Draining
+    # whatever tasks they leave pending needs a loop object this test still holds a reference to, installed as the
+    # process default so the example's own asyncio.run() picks it up -- anyio has no installable-default-loop concept,
+    # because owning the loop is precisely what anyio.run() does instead.
+    loop = asyncio.new_event_loop()  # noqa: TID251 -- see above; the example script, not this test, runs the loop
     sys.path.insert(0, str(_EXAMPLES))
     try:
-        asyncio.set_event_loop(loop)
+        asyncio.set_event_loop(loop)  # noqa: TID251 -- see above; runpy needs this installed as the process default
         runpy.run_path(str(path), run_name="__main__")
     finally:
         pending = asyncio.all_tasks(loop)

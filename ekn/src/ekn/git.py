@@ -41,7 +41,7 @@ def _build_tree(repo: Any, files: list[tuple[str, str]]) -> Any:
     index = pygit2.Index()
     for rel_path, content in files:
         blob_id = repo.create_blob(content.encode("utf-8"))
-        entry = pygit2.IndexEntry(rel_path, blob_id, pygit2.GIT_FILEMODE_BLOB)  # pyright: ignore — pygit2 GIT_FILEMODE_BLOB is an int but IndexEntry.mode accepts it at runtime
+        entry = pygit2.IndexEntry(rel_path, blob_id, pygit2.GIT_FILEMODE_BLOB)  # pyright: ignore[reportArgumentType] -- pygit2 types IndexEntry.mode as FileMode but exposes GIT_FILEMODE_BLOB as a plain int
         index.add(entry)
     return index.write_tree(repo)
 

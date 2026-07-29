@@ -14,7 +14,7 @@ import yaml
 from yaml.representer import RepresenterError
 
 from nanopynix.primops.yaml import (
-    _parse_error_message,  # pyright: ignore[reportPrivateUsage]
+    _parse_error_message,  # pyright: ignore[reportPrivateUsage] -- test reaches into the private helper for direct unit coverage of its fallback branches
     from_yaml,
     from_yaml11,
     from_yaml11_stream,

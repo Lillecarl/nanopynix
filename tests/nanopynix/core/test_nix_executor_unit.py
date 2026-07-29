@@ -15,7 +15,9 @@ import time
 
 import pytest
 
-from nanopynix._core._nix_executor import NixThreadExecutor  # pyright: ignore[reportPrivateUsage]
+from nanopynix._core._nix_executor import (
+    NixThreadExecutor,  # pyright: ignore[reportPrivateUsage] -- test reaches into the private executor module for the lifecycle edge cases described above
+)
 
 
 def test_rejects_a_non_positive_max_workers() -> None:
@@ -27,7 +29,7 @@ async def test_thread_initializer_runs_on_the_worker_thread() -> None:
     executor = NixThreadExecutor(thread_initializer=lambda: None)
     try:
         await executor.run(lambda: None)
-        assert executor._thread_started.is_set()  # pyright: ignore[reportPrivateUsage]
+        assert executor._thread_started.is_set()  # pyright: ignore[reportPrivateUsage] -- asserts the executor's private flag directly to verify the initializer ran on the worker thread
     finally:
         executor.shutdown()
 

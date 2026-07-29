@@ -7,6 +7,8 @@ import sys
 from pathlib import Path as _Path
 from typing import TYPE_CHECKING, Literal, NoReturn, cast
 
+import anyio
+import anyio.to_thread
 import kr8s.asyncio
 import pygit2
 import rich.traceback
@@ -241,7 +243,7 @@ def _default_commit_message(attr: str | None) -> str:
     return f"ekn: render manifests from {attr or 'root'} @ {head_sha}"
 
 
-async def _finalize_commit(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
+async def _finalize_commit(  # noqa: PLR0913 -- tracked complexity/arg-count debt, see TODO.md
     deploy_branch: str,
     source_branch: str | None,
     files: list[tuple[str, str]],
@@ -338,7 +340,7 @@ async def _git_push(remote: str, deploy_branch: str, source_branch: str | None) 
         raise SystemExit(1)
 
 
-async def _push_cache(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
+async def _push_cache(  # noqa: PLR0913 -- tracked complexity/arg-count debt, see TODO.md
     attr: str, file: _Path | None, flake: str | None, to: str, *, substitute_on_destination: bool, check_sigs: bool
 ) -> None:
     try:
@@ -682,7 +684,7 @@ class KubeApply(Command):
             current = out.strip()
             if rc != 0 or not current.endswith(self.confirm_context):
                 _log.warning(f"current kubectl context is {current!r}, not *{self.confirm_context}")
-                answer = await asyncio.to_thread(input, "Continue anyway? [y/N] ")
+                answer = await anyio.to_thread.run_sync(input, "Continue anyway? [y/N] ")
                 if answer.strip().lower() != "y":
                     raise SystemExit("Aborted.")
 

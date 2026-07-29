@@ -121,7 +121,7 @@ class AgentRuntime:
     mode to configure.
     """
 
-    def __init__(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
+    def __init__(  # noqa: PLR0913 -- tracked complexity/arg-count debt, see TODO.md
         self,
         config: pytest.Config,
         *,

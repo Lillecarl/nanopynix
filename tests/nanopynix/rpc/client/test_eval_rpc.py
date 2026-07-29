@@ -677,7 +677,7 @@ async def test_worker_from_yaml_rejects_document_stream(rpc_session: RpcSessionF
         session.store() as store,
         session.eval(store) as eval,
     ):
-        with pytest.raises(Exception) as exc_info:  # noqa: PT011
+        with pytest.raises(Exception) as exc_info:  # noqa: PT011 -- match only asserts presence, but this also asserts "Python primop" is absent below, which needs a separate check
             await eval.string('builtins.fromYAML "kind: ConfigMap\\n---\\nkind: Service\\n"')
         message = strip_ansi(str(exc_info.value))
         assert "fromYAML: expected exactly one YAML document, got 2" in message
@@ -693,7 +693,7 @@ async def test_worker_from_yaml_parse_error_is_descriptive(rpc_session: RpcSessi
         session.store() as store,
         session.eval(store) as eval,
     ):
-        with pytest.raises(Exception) as exc_info:  # noqa: PT011
+        with pytest.raises(Exception) as exc_info:  # noqa: PT011 -- match only asserts presence, but this also asserts "Python primop" is absent below, which needs a separate check
             await eval.string('builtins.fromYAML "metadata:\\n  name: demo\\n  : bad\\n"')
         message = strip_ansi(str(exc_info.value))
         assert "fromYAML: failed to parse YAML 1.2 document" in message
@@ -734,7 +734,7 @@ async def test_worker_to_yaml_rejects_functions(rpc_session: RpcSessionFactory):
         session.store() as store,
         session.eval(store) as eval,
     ):
-        with pytest.raises(Exception) as exc_info:  # noqa: PT011
+        with pytest.raises(Exception) as exc_info:  # noqa: PT011 -- match only asserts presence, but this also asserts "Python primop" is absent below, which needs a separate check
             await eval.string("builtins.toYAML { f = x: x; }")
         message = strip_ansi(str(exc_info.value))
         assert "toYAML: argument contains non JSON-compatible Nix value of type" in message

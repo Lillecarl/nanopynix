@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyio
 import pytest
 from anyio import Path as AnyioPath
 from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
@@ -909,7 +910,7 @@ async def test_inproc_session_subscribe_receives_log_events(inproc_session: Inpr
             for _ in range(50):
                 if events:
                     break
-                await asyncio.sleep(0.05)
+                await anyio.sleep(0.05)
             assert any(event.message == "inproc subscribe test" for event in events)
         finally:
             subscription.unsubscribe()
@@ -937,7 +938,7 @@ async def test_inproc_session_subscribe_receives_a_request_finalized_event(
             for _ in range(50):
                 if any(event.is_request_finalized for event in events):
                     break
-                await asyncio.sleep(0.05)
+                await anyio.sleep(0.05)
             assert any(event.is_request_finalized for event in events)
         finally:
             subscription.unsubscribe()

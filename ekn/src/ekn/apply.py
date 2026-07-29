@@ -62,7 +62,7 @@ async def build_object(spec: Manifest, api: Api) -> APIObject:
         lookup = f"{kind}.{group}" if group else kind
         # kr8s.Api.async_lookup_kind's `kind` parameter has no upstream type
         # annotation, so pyright can't resolve the member's own type fully.
-        _, plural, namespaced = await api.async_lookup_kind(lookup)  # pyright: ignore[reportUnknownMemberType]
+        _, plural, namespaced = await api.async_lookup_kind(lookup)  # pyright: ignore[reportUnknownMemberType] -- kr8s async_lookup_kind's kind param has no upstream type annotation
         cls = new_class(kind, api_version, namespaced=namespaced, plural=plural)
     return cls(spec, api=api)
 
@@ -89,14 +89,14 @@ async def ssa_apply(
     # kr8s.APIObject.api's property getter has no upstream return annotation
     # (kr8s/_objects.py), so pyright can only infer a partially-Unknown union
     # for it -- cast to the precise type its docstring/behavior guarantees.
-    api = cast("Api | None", obj.api)  # pyright: ignore[reportUnknownMemberType]
+    api = cast("Api | None", obj.api)  # pyright: ignore[reportUnknownMemberType] -- kr8s APIObject.api getter has no upstream return annotation
     if api is None:
         raise RuntimeError("APIObject has no attached kr8s Api instance")
     params = {"fieldManager": field_manager, "force": "true" if force else "false"}
     if dry_run:
         params["dryRun"] = "All"
     # kr8s.Api.call_api's **kwargs has no upstream type annotation.
-    async with api.call_api(  # pyright: ignore[reportUnknownMemberType]
+    async with api.call_api(  # pyright: ignore[reportUnknownMemberType] -- kr8s Api.call_api's **kwargs has no upstream type annotation
         "PATCH",
         version=obj.version,
         url=f"{obj.endpoint}/{obj.name}",
@@ -146,7 +146,7 @@ def _with_discriminator_label(spec: Manifest, label: str, value: str) -> Manifes
     return labeled
 
 
-async def apply_and_prune(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
+async def apply_and_prune(  # noqa: PLR0913 -- tracked complexity/arg-count debt, see TODO.md
     objects: list[Manifest],
     *,
     api: Api,
@@ -207,7 +207,7 @@ async def apply_and_prune(  # noqa: PLR0913 tracked complexity/arg-count debt, s
         # kr8s.Api.async_get's `label_selector`/`field_selector` params and its
         # `APIObject | dict` yield type are both bare-`dict`/unannotated
         # upstream, so pyright can't resolve the member or the loop variable.
-        async for obj in api.async_get(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        async for obj in api.async_get(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] -- kr8s Api.async_get's selector params and yield type are unannotated upstream
             kind,
             namespace=kr8s.ALL,
             label_selector={discriminator_label: discriminator},

@@ -78,7 +78,7 @@ def resolved_targets(gitops_targets: dict[str, GitOpsTargetEntry]) -> dict[GitOp
     return dict(result)
 
 
-def flatten_manifests(  # noqa: C901 tracked complexity/arg-count debt, see TODO.md
+def flatten_manifests(  # noqa: C901 -- tracked complexity/arg-count debt, see TODO.md
     data: Sequence[JsonValue],
     subdir: str = "./",
     kustomize: bool = False,

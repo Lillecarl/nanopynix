@@ -446,7 +446,7 @@ def _capture_pynix_test_structlog(  # type: ignore[reportUnusedFunction] -- pyte
 
 
 @pytest.fixture(scope="module")
-async def pynix_store_scenario(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
+async def pynix_store_scenario(  # noqa: PLR0913 -- tracked complexity/arg-count debt, see TODO.md
     request: pytest.FixtureRequest,
     repo_root: Path,
     nixpkgs_path: str,

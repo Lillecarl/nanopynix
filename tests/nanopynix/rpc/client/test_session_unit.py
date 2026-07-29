@@ -17,6 +17,8 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
+import anyio
+import anyio.lowlevel
 import pytest
 from nanopynix_proto.nix.common import LogEvent as LogEventProto, NixLogEvent, ResultType, ScalarValue
 from nanopynix_proto.nix.eval import ForceJsonResponse
@@ -290,8 +292,8 @@ class TestEvalSessionLifecycle:
     async def test_eval_proxy_serializes_concurrent_operations(self):
         """One EvalState never receives overlapping RPCs from its proxies."""
         pool = _mock_pool()
-        started = asyncio.Event()
-        unblock = asyncio.Event()
+        started = anyio.Event()
+        unblock = anyio.Event()
         active = 0
         peak_active = 0
 
@@ -311,7 +313,7 @@ class TestEvalSessionLifecycle:
             first = asyncio.create_task(session.string("1"))
             await started.wait()
             second = asyncio.create_task(session.string("2"))
-            await asyncio.sleep(0)
+            await anyio.lowlevel.checkpoint()
             assert peak_active == 1
             unblock.set()
             await asyncio.gather(first, second)

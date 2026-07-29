@@ -518,7 +518,7 @@ def _store_dirs_to_json(dirs: Any) -> dict[str, str | None]:
     }
 
 
-async def _add_to_store(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
+async def _add_to_store(  # noqa: PLR0913 -- tracked complexity/arg-count debt, see TODO.md
     *,
     path: str,
     name: str | None,

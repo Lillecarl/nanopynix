@@ -124,7 +124,7 @@ class BuildTargetError(EvaluationTargetError):
     pass
 
 
-async def _build_target(  # noqa: PLR0913 tracked complexity/arg-count debt, see TODO.md
+async def _build_target(  # noqa: PLR0913 -- tracked complexity/arg-count debt, see TODO.md
     target: EvaluationTarget,
     session: Any,
     *,
