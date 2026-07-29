@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import contextlib
 import difflib
+import functools
+import shutil
+import tempfile
+from contextlib import AsyncExitStack, asynccontextmanager
 
 # A real import, not a TYPE_CHECKING one: clypi resolves the annotations on
 # the command below at runtime to build its argument parser, so `Path` has to
@@ -8,7 +13,10 @@ import difflib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
+import anyio
+import anyio.to_thread
 import structlog
+from anyio import Path as AnyioPath
 from clypi import Command, arg
 from nanopynix_helpers.build import FodBuildError, build_with_fod_update
 
@@ -17,6 +25,8 @@ from nanopynix._typechecking import BEARTYPING
 from pynix._util import error_console, error_exit, nix_session, print_json, report_and_exit
 
 if TYPE_CHECKING or BEARTYPING:
+    from collections.abc import AsyncGenerator
+
     from nanopynix.rpc import ValueProxy
 from pynix.target import (
     EvaluationTarget,
@@ -29,8 +39,17 @@ from pynix.target import (
 
 logger = structlog.get_logger("pynix.build")
 
+#: Explicitly the daemon, never "auto" -- see _promote_to_host_store.
+_HOST_STORE_URI = "daemon"
+
 _DEFAULT_SUBSTITUTERS = "https://cache.nixos.org/"
 _DEFAULT_TRUSTED_PUBLIC_KEYS = "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+
+
+def _no_sandbox_paths() -> list[str]:
+    """Default for ``--sandbox-path``. A named function rather than ``list``,
+    which would give the field an unparameterised ``list[Unknown]``."""
+    return []
 
 
 class Build(Command):
@@ -54,6 +73,49 @@ class Build(Command):
     print_build_logs: bool = arg(False, help="Print build log lines to stderr.")
     update_fod: bool = arg(False, help="Update plain fixed-output hash literals after a hash mismatch.")
     dry_run: bool = arg(False, help="Show --update-fod changes without writing or rebuilding.")
+    namespaced: bool = arg(
+        False,
+        help=(
+            "Build in a private user namespace, against an overlay store whose lower layer is the host "
+            "store. Nothing is copied in, the host store does not change, and this process owns the "
+            "sandbox settings that the daemon otherwise controls. Linux only."
+        ),
+    )
+    overlay_dir: Path | None = arg(
+        None,
+        help=(
+            "Keep the overlay's upper layer here, instead of in a temporary directory that is deleted "
+            "on exit. Reuse the same directory to keep what earlier --namespaced builds produced. "
+            "Implies --namespaced."
+        ),
+    )
+    copy_back: bool = arg(
+        True,
+        # Snake case, not the dashed spelling: clypi normalises the parsed
+        # option to snake case before it compares against this.
+        negative="no_copy_back",
+        help=(
+            "Copy the outputs of a --namespaced build into the host store when the build succeeds. "
+            "Without it the outputs are gone when the worker exits."
+        ),
+    )
+    sandbox_path: list[str] = arg(
+        default_factory=_no_sandbox_paths,
+        help=(
+            "Extra path to mount into the build sandbox, as /inside=/outside or /path. Repeatable. "
+            "Requires --namespaced, because the daemon does not let a client change its sandbox."
+        ),
+    )
+
+    def _resolve_namespaced(self) -> bool:
+        """Decide whether this build gets its own namespace, and reject the
+        flag combinations that cannot mean anything."""
+        namespaced = self.namespaced or self.overlay_dir is not None
+        if self.sandbox_path and not namespaced:
+            error_exit("--sandbox-path requires --namespaced: the daemon owns the sandbox of the host store")
+        if namespaced and self.store != "auto":
+            error_exit("--namespaced builds in its own overlay store, so it cannot be combined with --store")
+        return namespaced
 
     @override
     async def run(self) -> None:
@@ -67,18 +129,38 @@ class Build(Command):
         if self.dry_run and not self.update_fod:
             error_exit("--dry-run requires --update-fod")
 
+        namespaced = self._resolve_namespaced()
+
         settings = nanopynix.NixSettingsEnv(
             substituters=self.substituters.split(),
             trusted_public_keys=self.trusted_public_keys.split(),
         )
-        async with nix_session(
-            settings=settings,
-            verbosity=self.verbosity,
-            print_build_logs=self.print_build_logs,
-        ) as nix:
+        if self.sandbox_path:
+            settings = settings.model_copy(update={"sandbox_paths": list(self.sandbox_path)})
+
+        async with AsyncExitStack() as stack:
+            namespace = await stack.enter_async_context(_overlay_namespace(namespaced, self.overlay_dir))
+            # Passed only when there is one, which is the convention
+            # nix_session documents: the test suite substitutes a double for
+            # it, and a keyword that is always present makes every such double
+            # wrong even for the ordinary build that never wanted a namespace.
+            namespace_kwargs: dict[str, Any] = {} if namespace is None else {"namespace": namespace}
+            nix = await stack.enter_async_context(
+                nix_session(
+                    settings=settings,
+                    verbosity=self.verbosity,
+                    print_build_logs=self.print_build_logs,
+                    **namespace_kwargs,
+                )
+            )
+            # None, not "auto", when namespaced: the session already defaults
+            # to its overlay store, and naming "auto" here would open a
+            # different store instead.
+            store_uri = None if namespaced else self.store
+            promote = namespaced and self.copy_back
             try:
                 if self.eval_store is None:
-                    async with nix.store(self.store) as store:
+                    async with nix.store(store_uri) as store:
                         async with nix.eval(store) as session:
                             logger.info("pynix build evaluating target")
                             outputs, updates = await _build_target(
@@ -90,10 +172,12 @@ class Build(Command):
                                 dry_run=self.dry_run,
                             )
                         logger.info("pynix build finished")
+                        if promote:
+                            await _promote_to_host_store(nix, store, outputs)
                 else:
                     async with (
                         nix.store(self.eval_store) as eval_store,
-                        nix.store(self.store) as build_store,
+                        nix.store(store_uri) as build_store,
                     ):
                         async with nix.eval(eval_store) as session:
                             logger.info("pynix build evaluating target")
@@ -107,10 +191,71 @@ class Build(Command):
                                 dry_run=self.dry_run,
                             )
                         logger.info("pynix build finished")
+                        if promote:
+                            await _promote_to_host_store(nix, build_store, outputs)
             except BuildTargetError as exc:
                 report_and_exit(exc)
 
         print_json({"outputs": outputs, "updatedFods": updates, "dryRun": self.dry_run})
+
+
+@asynccontextmanager
+async def _overlay_namespace(
+    enabled: bool,
+    overlay_dir: Path | None,
+) -> AsyncGenerator[nanopynix.OverlayNamespace | None]:
+    """Yield the overlay layout for this build, and clean it up if it is ours.
+
+    A directory the user named survives, which is the point of naming one. An
+    unnamed one is temporary and goes away with the build.
+    """
+    if not enabled:
+        yield None
+        return
+
+    if overlay_dir is not None:
+        await AnyioPath(overlay_dir).mkdir(parents=True, exist_ok=True)
+        yield nanopynix.OverlayNamespace.under(overlay_dir)
+        return
+
+    root = await anyio.to_thread.run_sync(functools.partial(tempfile.mkdtemp, prefix="pynix-overlay-"))
+    try:
+        yield nanopynix.OverlayNamespace.under(root)
+    finally:
+        await anyio.to_thread.run_sync(_force_rmtree, root)
+
+
+def _force_rmtree(root: str) -> None:
+    """Remove *root*, including the read-only directories a store leaves.
+
+    Store directories are ``r-xr-xr-x``, and removing what is inside one needs
+    the write bit on the directory itself. This process owns them, because the
+    namespace mapped it to root, so it can put the bit back.
+    """
+    for dirpath, dirnames, _ in Path(root).walk():
+        for name in dirnames:
+            with contextlib.suppress(OSError):
+                (dirpath / name).chmod(0o700)
+    shutil.rmtree(root, ignore_errors=True)
+
+
+async def _promote_to_host_store(nix: Any, store: Any, outputs: dict[str, str]) -> None:
+    """Copy the outputs of a namespaced build into the host store.
+
+    ``daemon`` by name rather than ``auto``. The worker is root inside its own
+    user namespace, so ``auto`` would resolve to a *local* store at
+    ``/nix/store`` -- which is the overlay mount, not the host store.
+
+    Signature checking is off because these paths were built here a moment ago
+    and nothing has signed them. The daemon still decides: it accepts unsigned
+    paths from a trusted user and refuses them otherwise.
+    """
+    paths = sorted(set(outputs.values()))
+    if not paths:
+        return
+    async with nix.store(_HOST_STORE_URI) as host:
+        logger.info("pynix build promoting outputs to the host store", paths=len(paths))
+        await store.copy_closure(paths, host, check_sigs=False)
 
 
 async def _evaluate_build_target(target: EvaluationTarget, session: Any) -> ValueProxy:
