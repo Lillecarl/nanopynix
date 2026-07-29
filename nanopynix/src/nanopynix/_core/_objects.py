@@ -46,7 +46,12 @@ from nanopynix.models import (
     PathInfo,
     StorePath,
 )
-from nanopynix.settings import SettingsProvenance
+from nanopynix.settings import (
+    NixEvalSettings,
+    NixFetchSettings,
+    SettingsProvenance,
+    reject_construction_time_keys,
+)
 
 _RAW_GC_ACTIONS = {
     GcAction.RETURN_LIVE: nanopynix_store.GCAction.ReturnLive,
@@ -495,11 +500,30 @@ class CoreEvalState:
         eval_settings: Mapping[str, str] | None = None,
         fetch_settings: Mapping[str, str] | None = None,
     ) -> None:
-        """Apply live-mutable eval/fetch settings to this already-open evaluator."""
+        """Apply live-mutable eval/fetch settings to this already-open evaluator.
+
+        The backstop under both engines' ``configure()``. Those check the typed
+        model, which is the check that gives a good message; this checks the
+        rendered keys, which is all that reaches a worker over RPC. A worker
+        must refuse what its client refuses, whatever built the request.
+
+        The check runs before ``require_raw``, which is the order the two
+        engines already use: each rejects before it dispatches. A hand-built
+        request therefore meets the same answer whether or not the evaluator is
+        still open.
+
+        Raises:
+            SettingNotLiveError: A key Nix reads only while constructing the
+                evaluator.
+        """
+        eval_rendered = eval_settings or {}
+        fetch_rendered = fetch_settings or {}
+        reject_construction_time_keys(eval_rendered, model=NixEvalSettings, target="evaluator")
+        reject_construction_time_keys(fetch_rendered, model=NixFetchSettings, target="evaluator")
         raw = self.require_raw()
-        for name, value in (eval_settings or {}).items():
+        for name, value in eval_rendered.items():
             raw.set_eval_setting(name, value)
-        for name, value in (fetch_settings or {}).items():
+        for name, value in fetch_rendered.items():
             raw.set_fetch_setting(name, value)
 
     def discard_locked_flake(self, locked_flake: CoreLockedFlake) -> None:

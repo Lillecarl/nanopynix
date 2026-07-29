@@ -212,8 +212,12 @@ class CallbackBus:
                 _logger.exception("log bus subscriber failed")
 
 
-# See EvalSettingsTarget in _core/_nix_core.py for why: without this beartype
-# skips `LogCapture.__init__` entirely rather than checking its one parameter.
+# `@runtime_checkable` because this Protocol annotates a parameter. Without it
+# beartype cannot decorate `LogCapture.__init__` at all and skips the whole
+# method, rather than checking it loosely. The check is `isinstance` against
+# the member names below -- structural, which is the same guarantee the
+# annotation already makes, and no stronger. This is the reference site: the
+# other Protocols in this position point here.
 @runtime_checkable
 class LogEventBus(Protocol):
     """What a :class:`LogCapture` needs from whatever produces log events.

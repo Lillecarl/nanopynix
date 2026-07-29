@@ -96,8 +96,8 @@ if TYPE_CHECKING or BEARTYPING:
     from nanopynix.rpc.client.store import Store
 
 
-# See EvalSettingsTarget in _core/_nix_core.py for why: without this beartype
-# skips `EvalSession.__init__` entirely rather than checking its owner argument.
+# See LogEventBus in logging.py for why: without this beartype skips
+# `EvalSession.__init__` entirely rather than checking its owner argument.
 @runtime_checkable
 class _EvalSessionOwner(Protocol):
     def claim_eval(self, eval_session: EvalSession) -> None: ...
