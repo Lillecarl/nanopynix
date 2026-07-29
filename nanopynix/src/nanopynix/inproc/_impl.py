@@ -246,6 +246,11 @@ class Session:
         self._operation_ids = itertools.count(1)
         self._evals: set[EvalSession] = set()
         self._stores: set[Store] = set()
+        # What `NIX_USER_CONF_FILES` held before `open` set it. `None` is a
+        # real value here -- "the process did not have it" -- so the flag is
+        # separate rather than encoded into the same attribute.
+        self._nix_conf_env_saved = False
+        self._nix_conf_env_before: str | None = None
 
     async def __aenter__(self) -> Session:
         await self.open()
@@ -264,6 +269,8 @@ class Session:
         logger_installed = False
         try:
             if self._nix_conf is not None:
+                self._nix_conf_env_before = os.environ.get(NIX_USER_CONF_FILES_ENV)
+                self._nix_conf_env_saved = True
                 os.environ[NIX_USER_CONF_FILES_ENV] = str(self._nix_conf)
             nanopynix_util.install_logger(self._collector.callback)
             logger_installed = True
@@ -280,8 +287,32 @@ class Session:
                     executor.shutdown(wait=True)
                 finally:
                     self._executor = None
+                    self._restore_nix_conf_env()
                     _process_guard.release(self)
             raise
+
+    def _restore_nix_conf_env(self) -> None:
+        """Put ``NIX_USER_CONF_FILES`` back the way ``open`` found it.
+
+        The variable is an input Nix reads once, in ``loadConfFile``, while
+        ``initialize`` runs. Nothing looks at it again, so putting it back
+        costs the session nothing.
+
+        The RPC worker sets the same variable and never restores it, and there
+        that is correct: the worker process is disposable. This process is not.
+        Leaving the assignment behind changed the environment of the whole
+        program for every later use of Nix in it, including one by a library
+        that never opened a session.
+        """
+        if not self._nix_conf_env_saved:
+            return
+        self._nix_conf_env_saved = False
+        previous = self._nix_conf_env_before
+        self._nix_conf_env_before = None
+        if previous is None:
+            os.environ.pop(NIX_USER_CONF_FILES_ENV, None)
+        else:
+            os.environ[NIX_USER_CONF_FILES_ENV] = previous
 
     def _initialization_signature(self) -> tuple[object, ...]:
         # The globals only, because process-global state is all this guard
@@ -364,6 +395,7 @@ class Session:
                 errors.append(exc)
             self._executor = None
             self._opened = False
+            self._restore_nix_conf_env()
             _process_guard.release(self)
 
         # Cancellation is not collected, and neither is it collected in
