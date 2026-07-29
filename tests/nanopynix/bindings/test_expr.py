@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import gc
+import re
+import threading
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from nanopynix_bindings import expr as nanopynix_expr
+from pytest_agent import note
 
 import nanopynix
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -295,3 +300,151 @@ class TestAllocValue:
         assert v is not None
         # alloc'd values start as thunks/nulls — accessing type is fine
         assert isinstance(v.type(), str)
+
+
+def _off_thread(work: Callable[[], Any]) -> Any:
+    """Run ``work`` on a fresh thread, and give its result back here.
+
+    An error travels back too, and this function raises it on the calling
+    thread, so a test can use ``pytest.raises`` as usual.
+    """
+    outcome: list[tuple[str, Any]] = []
+
+    def body() -> None:
+        try:
+            outcome.append(("value", work()))
+        except Exception as error:
+            # Broad on purpose, and nothing is hidden: the caller raises this
+            # again below, on its own thread. A thread that dies of an
+            # exception reports it nowhere the test can see.
+            outcome.append(("error", error))
+
+    thread = threading.Thread(target=body, name="foreign")
+    thread.start()
+    thread.join()
+    kind, payload = outcome[0]
+    if kind == "error":
+        raise payload
+    return payload
+
+
+def _thread_ids_in(message: str) -> list[str]:
+    """The thread identifiers the refusal names, in the order it names them.
+
+    ``std::thread::id`` streams as the underlying ``pthread_t`` on glibc,
+    which is the same number ``threading.get_ident()`` returns. The tests
+    below compare the two. A libstdc++ that changes that representation must
+    fail here rather than quietly stop naming anything a reader can act on.
+    """
+    return re.findall(r"thread (\d+)", message)
+
+
+class TestThreadConfinement:
+    """An evaluator belongs to the thread that built it, and says so.
+
+    The Boehm collector neither scans nor suspends a thread it does not know,
+    and an evaluator allocates in the collected heap, and writes pointers into
+    it, on whichever thread drives it. So a foreign thread is not a rare race.
+    It is a stack the collector cannot see.
+
+    Before this guard a foreign thread forced thunks, allocated, and returned
+    correct answers, which is the worst outcome available: the corruption is
+    silent. See issue #30.
+    """
+
+    def test_a_foreign_thread_cannot_read_a_value(self, store: Any, init_expr: object) -> None:
+        eval_state = nanopynix.EvalState(store)
+        value = eval_state.eval_string("1 + 1")
+        assert value.as_int() == 2
+
+        caller_ident: list[int] = []
+
+        def read_from_a_foreign_thread() -> int:
+            caller_ident.append(threading.get_ident())
+            return value.as_int()
+
+        with pytest.raises(RuntimeError) as excinfo:
+            _off_thread(read_from_a_foreign_thread)
+
+        message = str(excinfo.value)
+        note(refusal=message)
+        owner, caller = _thread_ids_in(message)
+        assert owner == str(threading.get_ident())
+        assert caller == str(caller_ident[0])
+
+    @pytest.mark.parametrize(
+        "operation",
+        [
+            "type",
+            "attr_names",
+            "to_python",
+            "force",
+        ],
+    )
+    def test_every_accessor_refuses_a_foreign_thread(self, store: Any, init_expr: object, operation: str) -> None:
+        """One funnel, so one guard covers all of them.
+
+        Each accessor reaches ``PyValue::evalState`` through ``checkedValue``
+        or ``requireEvalState``. These four take different routes through
+        that funnel, so they are the sample that shows the funnel holds.
+        """
+        eval_state = nanopynix.EvalState(store)
+        value = eval_state.eval_string("{ a = 1; }")
+
+        with pytest.raises(RuntimeError, match="belongs to thread"):
+            _off_thread(getattr(value, operation))
+
+    def test_a_foreign_thread_cannot_drive_the_eval_state(self, store: Any, init_expr: object) -> None:
+        eval_state = nanopynix.EvalState(store)
+
+        with pytest.raises(RuntimeError, match="belongs to thread"):
+            _off_thread(lambda: eval_state.eval_string("1"))
+
+    def test_the_owner_is_the_building_thread_and_not_the_main_thread(self, store: Any, init_expr: object) -> None:
+        """The rule is affinity, not "the main thread".
+
+        The evaluator here is built on a worker thread, so that worker owns
+        it, and this thread -- the main one -- is the foreign one.
+        """
+        built: list[Any] = []
+
+        def build_and_read() -> int:
+            eval_state = nanopynix.EvalState(store)
+            built.append(eval_state)
+            return eval_state.eval_string("7").as_int()
+
+        assert _off_thread(build_and_read) == 7
+
+        with pytest.raises(RuntimeError, match="belongs to thread"):
+            built[0].eval_string("7")
+
+    def test_a_value_dropped_on_a_foreign_thread_still_frees_its_root(self, store: Any, init_expr: object) -> None:
+        """The destructor is exempt, on purpose.
+
+        Since #11 the last reference to a value usually dies on whichever
+        thread drops it, which is not the evaluator's thread. ``~PyValue``
+        only frees a Boehm root, and ``GC_FREE`` needs no registration, so a
+        guard there would break every caller and protect nothing.
+
+        No collection is needed to see the memory come back. Nix allocates a
+        root with ``traceable_allocator``, which is ``GC_MALLOC_UNCOLLECTABLE``
+        to allocate and ``GC_FREE`` to release, so the counter of
+        uncollectable bytes moves the moment the destructor runs.
+        """
+        eval_state = nanopynix.EvalState(store)
+        before = nanopynix_expr._gc_stats()["non_gc_bytes"]  # type: ignore[reportPrivateUsage] -- L1 collector probe
+
+        values = [eval_state.eval_string(str(n)) for n in range(200)]
+        rooted = nanopynix_expr._gc_stats()["non_gc_bytes"]  # type: ignore[reportPrivateUsage] -- L1 collector probe
+        assert rooted > before
+
+        _off_thread(values.clear)
+        gc.collect()
+        after = nanopynix_expr._gc_stats()["non_gc_bytes"]  # type: ignore[reportPrivateUsage] -- L1 collector probe
+        note(root_bytes_held=rooted - before, root_bytes_left=after - before)
+
+        # Every root the 200 values held came back. The counter can end below
+        # `before`, because `gc.collect()` also reaches values that earlier
+        # tests left behind, so this is a ceiling and not an equality.
+        assert after <= before
+        assert eval_state.eval_string("1").as_int() == 1

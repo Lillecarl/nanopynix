@@ -539,6 +539,7 @@ static nix::SourcePath lookup_file_arg(nix::EvalState &state, std::string_view s
 // =========================================================================
 
 PyValue PyEvalState::eval_string(const std::string &expr, const std::string &path) {
+    checkThread();
     nix::Value *v;
     {
         nb::gil_scoped_release release;
@@ -552,6 +553,7 @@ PyValue PyEvalState::eval_string(const std::string &expr, const std::string &pat
 }
 
 void PyEvalState::begin_repl() {
+    checkThread();
     if (repl_env != nullptr)
         throw std::runtime_error("REPL scope is already active");
 
@@ -570,6 +572,7 @@ void PyEvalState::begin_repl() {
 }
 
 bool PyEvalState::repl_active() const {
+    checkThread();
     return repl_env != nullptr;
 }
 
@@ -584,6 +587,7 @@ void PyEvalState::repl_bind(nix::Symbol symbol, nix::Value &value) {
 }
 
 PyValue PyEvalState::repl_eval_string(const std::string &expr, const std::string &path) {
+    checkThread();
     if (repl_env == nullptr || !repl_static_env)
         throw std::runtime_error("REPL scope is not active");
 
@@ -600,6 +604,7 @@ PyValue PyEvalState::repl_eval_string(const std::string &expr, const std::string
 }
 
 PyValue PyEvalState::repl_eval_file(const std::string &path) {
+    checkThread();
     if (repl_env == nullptr || !repl_static_env)
         throw std::runtime_error("REPL scope is not active");
 
@@ -615,6 +620,7 @@ PyValue PyEvalState::repl_eval_file(const std::string &path) {
 }
 
 PyValue PyEvalState::repl_load_file(const std::string &path) {
+    checkThread();
     if (repl_env == nullptr || !repl_static_env)
         throw std::runtime_error("REPL scope is not active");
 
@@ -632,10 +638,12 @@ PyValue PyEvalState::repl_load_file(const std::string &path) {
 }
 
 void PyEvalState::reset_file_cache() {
+    checkThread();
     state->resetFileCache();
 }
 
 std::optional<PyValue> PyEvalState::repl_process_line(const std::string &line, const std::string &path) {
+    checkThread();
     if (repl_env == nullptr || !repl_static_env)
         throw std::runtime_error("REPL scope is not active");
 
@@ -718,6 +726,7 @@ std::optional<PyValue> PyEvalState::repl_process_line(const std::string &line, c
 }
 
 std::vector<std::string> PyEvalState::repl_add_attrs(PyValue attrs) {
+    checkThread();
     if (repl_env == nullptr || !repl_static_env)
         throw std::runtime_error("REPL scope is not active");
 
@@ -749,6 +758,7 @@ std::vector<std::string> PyEvalState::repl_add_attrs(PyValue attrs) {
 }
 
 std::vector<std::string> PyEvalState::repl_scope_names() const {
+    checkThread();
     if (repl_env == nullptr || !repl_static_env)
         throw std::runtime_error("REPL scope is not active");
 
@@ -767,12 +777,14 @@ std::vector<std::string> PyEvalState::repl_scope_names() const {
 }
 
 PyValue PyEvalState::alloc_value() {
+    checkThread();
     auto *value = state->allocValue();
     value->mkNull();
     return PyValue(value, this, alive);
 }
 
 PyValue PyEvalState::eval_file(const std::string &path) {
+    checkThread();
     nix::Value *v;
     {
         nb::gil_scoped_release release;
@@ -791,6 +803,11 @@ PyValue PyEvalState::eval_file(const std::string &path) {
 nix::EvalState *PyValue::evalState() const {
     if (!eval_alive || !*eval_alive || eval == nullptr)
         throw std::runtime_error("EvalState has been released");
+    // The one funnel for every accessor of a value: each one reaches this
+    // through `checkedValue` or `requireEvalState`. See
+    // `PyEvalState::checkThread` for why a foreign thread is refused, and for
+    // why the destructor is not guarded.
+    eval->checkThread();
     return eval->state.get();
 }
 
@@ -1205,6 +1222,7 @@ static void python_to_value(
 }
 
 PyValue PyEvalState::value_from_python(nb::object obj) {
+    checkThread();
     auto *v = state->allocValue();
     python_to_value(*state, obj, *v);
     return PyValue(v, this, alive);
