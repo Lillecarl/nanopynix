@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 import math
 from pathlib import Path
@@ -38,6 +39,7 @@ from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import DEFAULT_STORE_URI, WORKER_INIT_STATUS_OK
 from nanopynix.exceptions import SessionClosedError, from_response
 from nanopynix.logging import ACTIVE_LOG_CAPTURES, BusSubscription, CallbackBus
+from nanopynix.namespace import probe_namespace_support
 from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC, unpack_error_details
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
 from nanopynix.rpc.worker._worker import worker_service_factory
@@ -53,6 +55,7 @@ if TYPE_CHECKING or BEARTYPING:
     from nanopynix_proto.nix.common import LogLevel
 
     from nanopynix.models import PrimOpSpec
+    from nanopynix.namespace import OverlayNamespace
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +154,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         worker_oom_score_adj: int | None = None,
         rpc_timeout: float = DEFAULT_RPC_TIMEOUT_SECONDS,
         shutdown_timeout: float = DEFAULT_SHUTDOWN_TIMEOUT_SECONDS,
+        namespace: OverlayNamespace | None = None,
     ) -> None:
         self._store_uri = store_uri
         self._nix_conf = nix_conf
@@ -162,6 +166,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         self._primops = primops or []
         self._primop_callables = primop_callables or {}
         self._worker_oom_score_adj = worker_oom_score_adj
+        self._namespace = namespace
         self.rpc_timeout = rpc_timeout
         self._shutdown_timeout = shutdown_timeout
         self._worker_pid: int | None = None
@@ -180,14 +185,36 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
 
     async def open(self) -> None:
         """Spawn the worker via multiprocessing forkserver and initialise Nix."""
+        if self._namespace is not None:
+            # Ask before spawning. The namespace is set up inside the
+            # forkserver child, so a host that cannot do it kills the child
+            # before it serves anything, and the caller would see a dead
+            # worker rather than the reason it died.
+            support = await anyio.to_thread.run_sync(
+                functools.partial(probe_namespace_support, root=Path(self._namespace.upper_dir).parent)
+            )
+            if not support:
+                raise RuntimeError(f"cannot start an overlay store worker: {support.reason}")
+
         self._stack = contextlib.AsyncExitStack()
 
         self._primop_handler = ManagerPrimopServiceHandler()
         self._primop_handler.register_all(self._primop_callables)
 
+        # A partial rather than a closure: grpclib_transports pickles the
+        # factory through the forkserver, so it has to be a module-level
+        # function plus picklable arguments. An environment variable would not
+        # arrive at all -- the forkserver copies the environment once, when it
+        # starts, and reuses that copy for every child.
+        service_factory = (
+            worker_service_factory
+            if self._namespace is None
+            else functools.partial(worker_service_factory, namespace=self._namespace)
+        )
+
         self._channel = await self._stack.enter_async_context(
             multiprocessing_worker_with_backchannel(
-                worker_service_factory,
+                service_factory,
                 [
                     self._primop_handler,
                 ],

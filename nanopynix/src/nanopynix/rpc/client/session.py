@@ -30,6 +30,7 @@ from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import DEFAULT_STORE_URI
 from nanopynix.logging import LogCapture
 from nanopynix.models import LogEvent
+from nanopynix.namespace import EXPERIMENTAL_FEATURE
 from nanopynix.rpc.client._pool import WorkerClient
 from nanopynix.rpc.client._session import EvalSession, ReplSession
 from nanopynix.rpc.client.store import Store, StoreHandle
@@ -48,6 +49,7 @@ if TYPE_CHECKING or BEARTYPING:
     from os import PathLike
 
     from nanopynix.models import PrimOpSpec
+    from nanopynix.namespace import OverlayNamespace
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +105,7 @@ class Session:
         primop_callables: Mapping[str, Callable[..., Any]] | None = None,
         worker_oom_score_adj: int | None = None,
         runtime_settings: NanopynixSettings | None = None,
+        namespace: OverlayNamespace | None = None,
     ) -> None:
         set_manager_title()
         if nix_conf is not None:
@@ -111,10 +114,23 @@ class Session:
             if not nix_conf.exists():
                 raise FileNotFoundError(nix_conf)
         nix_settings = normalize_nix_settings(settings).with_experimental_features(experimental_features)
+        if namespace is not None:
+            nix_settings = nix_settings.with_experimental_features([EXPERIMENTAL_FEATURE])
+            # The overlay store is this session's default store unless the
+            # caller named one. Opening the host store from inside the
+            # namespace still works, and copying results back needs exactly
+            # that, so this only chooses the default.
+            if store_uri == DEFAULT_STORE_URI:
+                store_uri = namespace.store_uri()
         nanopynix_settings = runtime_settings or NanopynixSettings()
         self.runtime_settings = nanopynix_settings
+        self.namespace = namespace
         self._store_uri = store_uri
         worker_settings = nix_settings.to_worker_settings()
+        if namespace is not None:
+            # Under the settings the caller gave, not over them: a caller that
+            # sets build-users-group itself has a reason to.
+            worker_settings = {**namespace.required_settings(), **worker_settings}
         self._manager = WorkerClient(
             store_uri=store_uri,
             nix_conf=nix_conf,
@@ -128,6 +144,7 @@ class Session:
             worker_oom_score_adj=worker_oom_score_adj,
             rpc_timeout=nanopynix_settings.rpc_timeout,
             shutdown_timeout=nanopynix_settings.shutdown_timeout,
+            namespace=namespace,
         )
         self._session_id = uuid.uuid4().hex
         self._evals: set[EvalSession] = set()
