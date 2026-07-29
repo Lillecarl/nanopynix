@@ -641,9 +641,11 @@ class CoreValue:
 
         Nix functions are curried -- ``f a b`` is ``(f a) b`` -- so more than
         one argument means more than one application, and the partial results
-        in between are rooted values no caller ever sees. They are released
-        here, including on the way out of a failure, because nothing else
-        holds a reference to them.
+        in between are rooted values no caller ever sees. Rebinding ``result``
+        frees each one, because nothing else holds it: ``call`` keeps only the
+        evaluator alive, not the value it was applied to. It used to keep the
+        receiver alive too, and then every partial survived until the final
+        result did, so this loop released each one by hand.
 
         Shared rather than per-engine: inproc took exactly one ``argument``,
         which the signature ledger carried as ``Value.call:params``, and the
@@ -659,18 +661,8 @@ class CoreValue:
         if not arguments:
             raise TypeError("call() needs at least one argument; Nix has no nullary application")
         result = self.require_raw()
-        owned = False  # `result` is still the caller's value until the first application
-        try:
-            for argument in arguments:
-                applied = result.call(argument.require_raw())
-                if owned:
-                    result._release()  # type: ignore[reportPrivateUsage] -- L1 RootValue lifetime API  # noqa: SLF001
-                result = applied
-                owned = True
-        except BaseException:
-            if owned:
-                result._release()  # type: ignore[reportPrivateUsage] -- L1 RootValue lifetime API  # noqa: SLF001
-            raise
+        for argument in arguments:
+            result = result.call(argument.require_raw())
         return self._eval_state.wrap_value(result)
 
     def build(self, build_store: CoreStore | None, build_mode: int, eval_store: CoreStore | None) -> dict[str, object]:
