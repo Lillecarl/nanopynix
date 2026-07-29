@@ -76,6 +76,7 @@ from nanopynix.settings import (
     NixSettings,
     NixStoreDefaults,
     SettingsProvenance,
+    merge_defaults,
     normalize_nix_path,
     normalize_nix_settings,
     reject_construction_time_keys,
@@ -221,7 +222,13 @@ class Session:
         self._verbosity = normalize_log_level(verbosity) if verbosity is not None else None
         self._nix_path = normalize_nix_path(nix_path)
         self._primops = to_primop_specs(primops)
-        self._store_defaults = NixStoreDefaults.from_settings(self._settings)
+        # One scope for each door Nix opens -- see the same block in
+        # rpc.client.session.Session.__init__, which must agree with this one.
+        self._global_settings = NixGlobalSettings.for_scope(self._settings)
+        self._store_defaults = NixStoreDefaults.for_scope(self._settings)
+        self._eval_defaults = NixEvalSettings.for_scope(self._settings)
+        self._fetch_defaults = NixFetchSettings.for_scope(self._settings)
+        self._flake_defaults = NixFlakeSettings.for_scope(self._settings)
         self._store_uri = resolve_store_spec(store_uri, self._store_defaults)
         if store_workers < 1:
             raise ValueError("store_workers must be at least 1")
@@ -277,17 +284,28 @@ class Session:
             raise
 
     def _initialization_signature(self) -> tuple[object, ...]:
+        # The globals only, because process-global state is all this guard
+        # guards. Two sessions that differ in an eval or a fetch setting are
+        # compatible: those live on each `EvalState`, not on the process, so
+        # refusing them was over-strict. The store defaults are likewise per
+        # store, and travel in each store's URI.
+        #
+        # `nix_path` leaves for the same reason, and it is the clearest case:
+        # `_init_nix` below never reads it. It reaches `open_eval_state`, once
+        # for each evaluator, which is why the same session may already give
+        # two evaluators two different search paths. Keeping it here made
+        # `Session(nix_path=...)` refuse what `NixSettings(nix_path=...)`
+        # allows -- two spellings of one per-evaluator setting, disagreeing.
         return (
             self._nix_conf,
             self._load_config,
-            tuple(sorted(self._settings.to_worker_settings().items())),
+            tuple(sorted(self._global_settings.to_worker_settings().items())),
             self._verbosity,
-            tuple(self._nix_path),
         )
 
     def _init_nix(self) -> None:
         self._provenance = self._runtime.initialize(
-            settings=self._settings.to_worker_settings(),
+            settings=self._global_settings.to_worker_settings(),
             load_config=self._load_config,
             verbosity=None if self._verbosity is None else int(self._verbosity),
         )
@@ -432,10 +450,19 @@ class Session:
 
         ``eval_settings``/``fetch_settings`` configure this evaluator alone —
         each :class:`EvalSession` owns an independent Nix evaluator, so
-        concurrently open sessions may use different settings.
+        concurrently open sessions may use different settings. Each is merged
+        over this session's own eval and fetch defaults, so a field named here
+        wins and the rest come from ``Session(settings=...)``.
         """
         self._require_own_stores(store, build_store)
-        return EvalSession(self, store, build_store, eval_settings=eval_settings, fetch_settings=fetch_settings)
+        return EvalSession(
+            self,
+            store,
+            build_store,
+            eval_settings=merge_defaults(eval_settings, self._eval_defaults),
+            fetch_settings=merge_defaults(fetch_settings, self._fetch_defaults),
+            flake_defaults=self._flake_defaults,
+        )
 
     def repl(
         self,
@@ -458,8 +485,9 @@ class Session:
             self,
             store,
             build_store,
-            eval_settings=eval_settings,
-            fetch_settings=fetch_settings,
+            eval_settings=merge_defaults(eval_settings, self._eval_defaults),
+            fetch_settings=merge_defaults(fetch_settings, self._fetch_defaults),
+            flake_defaults=self._flake_defaults,
             line_editors=line_editors,
         )
 
@@ -919,7 +947,7 @@ class Store:
 class EvalSession:
     """Own one thread-confined direct ``EvalState`` pointer."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 -- two stores and one settings object for each of Nix's three evaluator-facing scopes; grouping them would hide which scope a field belongs to, which is the whole point of the split
         self,
         session: Session,
         store: Store,
@@ -927,12 +955,17 @@ class EvalSession:
         *,
         eval_settings: NixEvalSettings | None = None,
         fetch_settings: NixFetchSettings | None = None,
+        flake_defaults: NixFlakeSettings | None = None,
     ) -> None:
         self._session = session
         self._store = store
         self._build_store = build_store
         self._eval_settings = eval_settings
         self._fetch_settings = fetch_settings
+        # Not `_flake_settings`: a flake setting belongs to one flake
+        # operation, not to the evaluator, so this is only what those
+        # operations fall back to. `Session.eval` passes the session's.
+        self._flake_defaults = flake_defaults if flake_defaults is not None else NixFlakeSettings()
         self._core: CoreEvalState | None = None
         self._active = False
         self._locked_flakes: set[LockedFlake] = set()
@@ -1125,14 +1158,18 @@ class EvalSession:
         write_lock_file: bool = True,
         flake_settings: NixFlakeSettings | None = None,
     ) -> LockedFlake:
-        """Lock a flake, optionally retaining the lock only in memory."""
+        """Lock a flake, optionally retaining the lock only in memory.
+
+        ``flake_settings`` is merged over this session's flake defaults, so a
+        field named here wins and the rest come from ``Session(settings=...)``.
+        """
         local = await self.run(
             partial(
                 self._require_core().lock_flake,
                 ref,
                 update_inputs=update_inputs,
                 write_lock_file=write_lock_file,
-                flake_settings=flake_settings.to_worker_settings() if flake_settings is not None else None,
+                flake_settings=merge_defaults(flake_settings, self._flake_defaults).to_worker_settings(),
             ),
         )
         proto = await self.run(_locked_flake_proto, local.require_raw())
@@ -1147,13 +1184,17 @@ class EvalSession:
         write_lock_file: bool = True,
         flake_settings: NixFlakeSettings | None = None,
     ) -> Value:
-        """Lock and evaluate a flake in one step."""
+        """Lock and evaluate a flake in one step.
+
+        ``flake_settings`` is merged over this session's flake defaults, as in
+        :meth:`lock_flake`.
+        """
         local = await self.run(
             partial(
                 self._require_core().eval_flake,
                 ref,
                 write_lock_file=write_lock_file,
-                flake_settings=flake_settings.to_worker_settings() if flake_settings is not None else None,
+                flake_settings=merge_defaults(flake_settings, self._flake_defaults).to_worker_settings(),
             ),
         )
         return self._track_value(local)
@@ -1182,7 +1223,7 @@ class ReplSession(EvalSession):
     exists to serve.
     """
 
-    def __init__(  # noqa: PLR0913 -- EvalSession's five parameters plus line_editors; narrowing either would drop a capability
+    def __init__(  # noqa: PLR0913 -- EvalSession's six parameters plus line_editors; narrowing either would drop a capability
         self,
         session: Session,
         store: Store,
@@ -1190,6 +1231,7 @@ class ReplSession(EvalSession):
         *,
         eval_settings: NixEvalSettings | None = None,
         fetch_settings: NixFetchSettings | None = None,
+        flake_defaults: NixFlakeSettings | None = None,
         line_editors: Sequence[str] = DEFAULT_LINE_EDITORS,
     ) -> None:
         super().__init__(
@@ -1198,6 +1240,7 @@ class ReplSession(EvalSession):
             build_store,
             eval_settings=eval_settings,
             fetch_settings=fetch_settings,
+            flake_defaults=flake_defaults,
         )
         self._line_editors = tuple(line_editors)
         self._repl_begun = False

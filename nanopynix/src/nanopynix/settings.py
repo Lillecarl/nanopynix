@@ -308,6 +308,52 @@ class NixConfigModel(BaseModel):
         """
         return dict(self._iter_set(explicit_only=explicit_only))
 
+    @classmethod
+    def for_scope(cls, settings: BaseModel) -> Self:
+        """Take this scope's fields out of a wider settings object.
+
+        :class:`NixSettings` inherits every scope, but Nix keeps each in its own
+        registry and reads each at its own moment. This is what separates them
+        again, so a session can send the globals to ``globalConfig`` and hold
+        the rest as defaults for the objects that read them.
+
+        Both engines do this to the same object and must get the same answer,
+        so the extraction lives here rather than in each session.
+        """
+        return cls.model_validate(settings.model_dump(include=set(cls.model_fields), exclude_none=True))
+
+
+def fill_unset_fields[M: NixConfigModel](spec: M, defaults: NixConfigModel) -> M:
+    """Return ``spec`` with each field it left unset filled from ``defaults``.
+
+    The one place "a value set on the object itself wins" is written down. A
+    field counts as unset when it is ``None``, which is exact for every scope
+    model here: each of their fields defaults to ``None``.
+
+    ``defaults`` is any settings model, not necessarily ``spec``'s own class,
+    because the two are related by field name rather than by inheritance. A
+    store model takes its defaults from :class:`NixStoreDefaults`, which is not
+    a store type; a name ``spec`` does not have is skipped.
+    """
+    fields = type(spec).model_fields
+    filled = {
+        name: value
+        for name, value in defaults.model_dump(exclude_none=True).items()
+        if name in fields and getattr(spec, name) is None
+    }
+    return spec.model_copy(update=filled) if filled else spec
+
+
+def merge_defaults[M: NixConfigModel](spec: M | None, defaults: M) -> M:
+    """Merge a per-call settings object over this session's defaults for that scope.
+
+    What makes a session-wide default real: a caller states ``pure_eval`` once
+    on the session, and every evaluator it opens is pure, unless that call says
+    otherwise. ``spec`` of ``None`` means the call said nothing at all, so the
+    defaults apply whole.
+    """
+    return defaults if spec is None else fill_unset_fields(spec, defaults)
+
 
 class NixGlobalSettings(NixConfigModel):
     """The process-global Nix settings, as registered in ``globalConfig``.
@@ -482,15 +528,6 @@ class NixStoreDefaults(NixConfigModel):
     priority: int | None = None
     trusted: bool | None = None
     want_mass_query: bool | None = None
-
-    @classmethod
-    def from_settings(cls, settings: BaseModel) -> Self:
-        """Take the store-scoped fields out of a wider settings object.
-
-        Both engines do this to a :class:`NixSettings`, and both must get the
-        same answer, so the extraction lives here rather than in each session.
-        """
-        return cls.model_validate(settings.model_dump(include=set(cls.model_fields), exclude_none=True))
 
 
 class NixEvalSettings(NixConfigModel):
@@ -719,15 +756,12 @@ def check_settings_model_drift(
     """
     if metadata is None:
         metadata = _metadata_for_surface(surface)
-    if surface == "global":
-        # globalConfig aggregates every registered Config instance, including
-        # the evaluator, fetcher, and flake-specific settings.  Those have
-        # dedicated Python models and must not be reported as missing from
-        # NixSettings.
-        non_global_settings = set(list_eval_settings_metadata())
-        non_global_settings.update(list_fetch_settings_metadata())
-        non_global_settings.update(list_flake_settings_metadata())
-        metadata = {name: setting for name, setting in metadata.items() if name not in non_global_settings}
+    # The global surface used to subtract the eval, fetch and flake names here,
+    # on the belief that `globalConfig` aggregates those registries. It does
+    # not: the four are disjoint, measured on every supported version --
+    # 2.31.5, 2.34.8 and 2.35.1 each report zero overlap between `globalConfig`
+    # and any of the other three. The step removed nothing, and
+    # `test_the_four_settings_registries_are_disjoint` now pins that.
     known = set(metadata.keys())
     model_type = _model_for_surface(surface)
     model = {field_key(name, field) for name, field in model_type.model_fields.items() if field_is_supported(field)}

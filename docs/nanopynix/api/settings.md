@@ -43,12 +43,38 @@ async with nanopynix.rpc.Session(
     ...
 ```
 
-The global fields go to the process. The store, eval, fetch and flake fields
-become that session's *defaults*, and anything passed to an individual store or
-evaluator overrides them.
+Each scope goes to the part of Nix that accepts it. Nix keeps the five in
+separate registries, and no setting is in two of them, so there is exactly one
+door for each field:
+
+| Scope | Door | Overridden by |
+|---|---|---|
+| {class}`~nanopynix.NixGlobalSettings` | `globalConfig`, at session start | `await nix.set_settings(...)` |
+| {class}`~nanopynix.NixStoreDefaults` | the URI of each store the session opens | a field on the {mod}`nanopynix.stores` model |
+| {class}`~nanopynix.NixEvalSettings` | the `EvalState` constructor | `nix.eval(store, eval_settings=...)` |
+| {class}`~nanopynix.NixFetchSettings` | the same constructor | `nix.eval(store, fetch_settings=...)` |
+| {class}`~nanopynix.NixFlakeSettings` | each flake operation | `lock_flake(..., flake_settings=...)` |
+
+The four scopes below the globals are that session's *defaults*. A field named
+on an individual store, evaluator or flake operation always wins, and the
+fields that the call leaves unset come from the session.
+
+A store URI that you write yourself is one exception, and it is deliberate: a
+string passes through untouched, because this library does not rewrite what you
+gave it. Pass a {mod}`nanopynix.stores` model to get the session defaults.
 
 Each scope is also a class of its own, so a narrow parameter can ask for
 exactly what it uses and still accept the catch-all.
+
+### The search path
+
+`nix_path` is an eval setting, and `Session` also takes it as an argument of
+its own. The more specific value wins:
+
+1. `nix.eval(store, eval_settings=NixEvalSettings(nix_path=...))`
+2. `Session(settings=NixSettings(nix_path=...))`
+3. `Session(nix_path=...)`
+4. the `NIX_PATH` environment variable
 
 ```{eval-rst}
 .. autoclass:: nanopynix.NixSettings

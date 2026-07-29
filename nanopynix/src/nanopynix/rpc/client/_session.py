@@ -80,6 +80,7 @@ from nanopynix.settings import (
     NixEvalSettings,
     NixFetchSettings,
     NixFlakeSettings,
+    merge_defaults,
     reject_construction_time_keys,
 )
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
@@ -891,6 +892,7 @@ class EvalSession:
         "_ctx",
         "_eval_settings",
         "_fetch_settings",
+        "_flake_defaults",
         "_line_editors",
         "_owner",
         "_owner_session",
@@ -918,6 +920,7 @@ class EvalSession:
         build_store: Store | None = None,
         eval_settings: NixEvalSettings | None = None,
         fetch_settings: NixFetchSettings | None = None,
+        flake_defaults: NixFlakeSettings | None = None,
     ) -> None:
         self._worker = worker
         self._owner_session = owner_session
@@ -932,6 +935,10 @@ class EvalSession:
         self._repl_begun = False
         self._eval_settings = eval_settings
         self._fetch_settings = fetch_settings
+        # Not `_flake_settings`: a flake setting belongs to one flake
+        # operation, not to the evaluator, so this is only what those
+        # operations fall back to. `Session.eval` passes the session's.
+        self._flake_defaults = flake_defaults if flake_defaults is not None else NixFlakeSettings()
         self._active: list[bool] = [False]
         self._owner = _EvalOwner(_EvalOwnerToken(), self._active)
         self._ctx: _EvalProxyContext | None = None
@@ -1113,9 +1120,12 @@ class EvalSession:
         Returns a session-bound ``LockedFlakeHandle``.  When
         ``write_lock_file=False``, the lock is updated in memory only; call
         ``await locked.write_lock_file()`` later to persist it.
+
+        ``flake_settings`` is merged over this session's flake defaults, so a
+        field named here wins and the rest come from ``Session(settings=...)``.
         """
         proxy = self._ensure_proxy()
-        rendered_flake = flake_settings.to_worker_settings() if flake_settings is not None else {}
+        rendered_flake = merge_defaults(flake_settings, self._flake_defaults).to_worker_settings()
         if update_inputs is True:
             locked = await proxy.lock_flake(
                 LockFlakeRequest(
@@ -1202,12 +1212,15 @@ class EvalSession:
 
         For more control (e.g. updating locks in memory before evaluating),
         use ``lock_flake()`` + ``locked.eval()`` instead.
+
+        ``flake_settings`` is merged over this session's flake defaults, as in
+        :meth:`lock_flake`.
         """
         handle = await self._ensure_proxy().eval_flake(
             EvalFlakeRequest(
                 ref=ref,
                 write_lock_file=write_lock_file,
-                flake_settings=flake_settings.to_worker_settings() if flake_settings is not None else {},
+                flake_settings=merge_defaults(flake_settings, self._flake_defaults).to_worker_settings(),
             ),
         )
         return self._proxy_context().value(handle.handle, handle.type)

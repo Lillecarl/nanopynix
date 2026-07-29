@@ -45,6 +45,7 @@ from nanopynix.settings import (
     SettingsDrift,
     field_is_supported,
     field_key,
+    fill_unset_fields,
     since,
     until,
 )
@@ -549,13 +550,7 @@ def resolve_store_spec(spec: StoreConfig | str, defaults: NixStoreDefaults | Non
         return spec
     if defaults is None:
         return spec.uri()
-    fields = type(spec).model_fields
-    merged = {
-        name: value
-        for name, value in defaults.model_dump(exclude_none=True).items()
-        if name in fields and getattr(spec, name) is None
-    }
-    return spec.model_copy(update=merged).uri() if merged else spec.uri()
+    return fill_unset_fields(spec, defaults).uri()
 
 
 def list_store_types() -> dict[str, dict[str, Any]]:

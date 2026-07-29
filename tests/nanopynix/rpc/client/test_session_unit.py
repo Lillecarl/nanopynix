@@ -46,7 +46,12 @@ from nanopynix.rpc.client._session import (
 )
 from nanopynix.rpc.client.session import Session
 from nanopynix.rpc.client.store import Store, StoreHandle
-from nanopynix.settings import DEFAULT_RPC_TIMEOUT_SECONDS
+from nanopynix.settings import (
+    DEFAULT_RPC_TIMEOUT_SECONDS,
+    NixEvalSettings,
+    NixFetchSettings,
+    NixFlakeSettings,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -375,6 +380,13 @@ class TestSessionEvalFacade:
         session = object.__new__(Session)
         session._manager = _mock_pool()  # type: ignore[reportPrivateUsage] -- test injects mock manager
         session._session_id = "session-id"  # type: ignore[reportPrivateUsage] -- test injects internal session ID
+        # `eval()` merges the session's defaults for the three evaluator-facing
+        # scopes under the per-call argument. Empty models here: these tests are
+        # about the store handle and the ownership guard, so the defaults must
+        # add nothing. The routing itself is covered in test_config_flow.py.
+        session._eval_defaults = NixEvalSettings()  # type: ignore[reportPrivateUsage] -- test injects session-scoped defaults
+        session._fetch_defaults = NixFetchSettings()  # type: ignore[reportPrivateUsage] -- test injects session-scoped defaults
+        session._flake_defaults = NixFlakeSettings()  # type: ignore[reportPrivateUsage] -- test injects session-scoped defaults
         return session
 
     def _store(self, session_id: str = "session-id", handle: int = 42) -> Store:
