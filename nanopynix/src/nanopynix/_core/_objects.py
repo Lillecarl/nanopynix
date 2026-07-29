@@ -20,6 +20,7 @@ build on, below the process boundary that distinguishes ``inproc`` from
 
 from __future__ import annotations
 
+import weakref
 from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix_bindings import (
@@ -384,7 +385,23 @@ class CoreEvalState:
     def __init__(self, raw: nanopynix_expr.EvalState, store: CoreStore) -> None:
         self.raw: nanopynix_expr.EvalState | None = raw
         self.store = store
-        self._values: set[CoreValue] = set()
+        # Weak. This set does not own a value, and it must not: reference
+        # counting already owns it. `nanopynix_expr.Value` holds Nix's
+        # `RootValue` by value, and Nix allocates that with Boehm's
+        # `traceable_allocator`, which is `GC_MALLOC_UNCOLLECTABLE` to allocate
+        # and `GC_FREE` to release. So the destructor of the binding object
+        # removes the Nix root, at once, the moment the last Python reference
+        # goes. A strong `set` here defeated all of that and made every value
+        # the evaluator ever handed out immortal.
+        #
+        # What the set is for is `close` below: it frees the roots of the
+        # values a caller still holds, while `_run_closing` still has the
+        # evaluator thread. That ordering matters. Each value holds its parent
+        # through `nb::keep_alive`, up to the `EvalState` object, so a leaked
+        # handle would otherwise keep `nix::EvalState` alive past
+        # `executor.shutdown`, and destroy it -- its AST arena, its symbol
+        # table -- on whichever thread finally dropped the handle.
+        self._values: weakref.WeakSet[CoreValue] = weakref.WeakSet()
         self._locked_flakes: set[CoreLockedFlake] = set()
 
     def close(self) -> None:
