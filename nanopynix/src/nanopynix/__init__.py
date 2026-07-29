@@ -105,6 +105,12 @@ from nanopynix.models import (
     StorePath,
     ValueHandle,
 )
+from nanopynix.namespace import (
+    NamespaceSupport as NamespaceSupport,
+    OverlayNamespace as OverlayNamespace,
+    enter_overlay_namespace as enter_overlay_namespace,
+    probe_namespace_support as probe_namespace_support,
+)
 from nanopynix.primops import from_yaml, from_yaml11, from_yaml11_stream, from_yaml_stream, to_yaml, yaml_primops
 from nanopynix.protocols import (
     AsyncEvalSession,
@@ -203,6 +209,7 @@ __all__ = [
     "LogLimitExceededError",
     "MiscBuildError",
     "MissingAttributeError",
+    "NamespaceSupport",
     "NanopynixSettings",
     "NixAssertionError",
     "NixError",
@@ -220,6 +227,7 @@ __all__ = [
     "ObjectLifetimeError",
     "ObjectMisuseError",
     "OutputRejectedError",
+    "OverlayNamespace",
     "ParseError",
     "PathInfo",
     "PermanentBuildError",
@@ -249,6 +257,7 @@ __all__ = [
     "check_settings_model_drift",
     "current_system",
     "enable_experimental_feature",
+    "enter_overlay_namespace",
     "eval_file",
     "from_yaml",
     "from_yaml11",
@@ -272,6 +281,7 @@ __all__ = [
     "normalize_log_level",
     "open_store",
     "parse_flake_ref",
+    "probe_namespace_support",
     "process_connection",
     "register_primop",
     "register_store_implementation",

@@ -67,6 +67,7 @@ from nanopynix._wire import (
 )
 from nanopynix.logging import LogCollector, LogStreamEventKind
 from nanopynix.models import PrimOpSpec
+from nanopynix.namespace import enter_overlay_namespace
 from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
 from nanopynix.rpc.worker._handle_registry import HandleRegistry
@@ -86,6 +87,8 @@ if TYPE_CHECKING or BEARTYPING:
         IServable,  # type: ignore[reportPrivateUsage] -- private import required by grpclib protobuf service binding
     )
     from grpclib_transports import WorkerBackchannel
+
+    from nanopynix.namespace import OverlayNamespace
 
 # Re-export for the multiprocessing runner in _pool.py
 __all__ = ["main", "run_worker", "worker_service_factory"]
@@ -436,11 +439,18 @@ def worker_service_factory(
     *,
     executor: NixThreadExecutor | None = None,
     store_limiter: anyio.CapacityLimiter | None = None,
+    namespace: OverlayNamespace | None = None,
 ) -> list[IServable]:
     """Create service handlers with a shared WorkerState.
 
     Must be called *inside* the worker process (before Nix init so that
     the logger is installed early).
+
+    When *namespace* is given, this is also the point where the worker enters
+    its own user namespace and mounts the overlay store. It happens here
+    because this is the last moment the process has one thread, which
+    ``unshare(CLONE_NEWUSER)`` requires -- see :mod:`nanopynix.namespace`. The
+    executor below starts the second thread.
 
     Sets up:
 
@@ -453,6 +463,11 @@ def worker_service_factory(
       -- this factory must stay synchronous to satisfy grpclib_transports'
       ``BackchannelServiceFactory`` contract)
     """
+    # First, before the logger and before the executor thread: the namespace
+    # call needs this process to still be single-threaded.
+    if namespace is not None:
+        enter_overlay_namespace(namespace)
+
     collector = LogCollector()
     nanopynix_util.install_logger(collector.callback)
     with contextlib.suppress(RuntimeError, ValueError):
