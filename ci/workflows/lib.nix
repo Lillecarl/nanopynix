@@ -236,6 +236,37 @@ let
       ];
     };
 
+  # The four static gates of nix/checks.nix, in one job. They share a checkout
+  # and a Nix install, they take about a minute between them, and Nix already
+  # builds the four in parallel -- so one job costs one runner and reports
+  # every gate. `--keep-going` is what makes that last part true: without it
+  # the first failing gate hides the other three.
+  mkStaticChecksJob =
+    {
+      ref ? null,
+      lockArtifact ? null,
+      needs ? [ ],
+    }:
+    lib.optionalAttrs (needs != [ ]) { inherit needs; }
+    // {
+      timeout-minutes = 20;
+      steps = [
+        (steps.checkout { inherit ref; })
+      ]
+      ++ lib.optional (lockArtifact != null) (steps.downloadArtifact { artifactName = lockArtifact; })
+      ++ [
+        (steps.installNix { })
+        (steps.cachix { })
+        {
+          name = "Run the static gates (ruff, ruff-strict, ruff format, pyright)";
+          run = ''
+            nix build --no-link --print-build-logs --keep-going \
+              ".#check-lint" ".#check-lint-strict" ".#check-format" ".#check-types"
+          '';
+        }
+      ];
+    };
+
   mkDocsBuildJob =
     {
       needs,
@@ -307,6 +338,7 @@ in
     tsanVersionNames
     mkRegularTestJob
     mkTsanTestJob
+    mkStaticChecksJob
     mkDocsBuildJob
     mkDocsDeployJob
     ;

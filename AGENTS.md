@@ -30,6 +30,15 @@ runtime. `ruff-strict.toml` gives the reason and the measurement behind it.
 `--unsafe-fixes` is the mechanism that applies the same damage in bulk to
 another rule.
 
+CI runs those three commands, and `ruff format --check`, in the `static-checks`
+job. Each one is a derivation in `nix/checks.nix`, and each is a package. Build
+them to run a gate the way CI runs it, in a sandbox and not in the dev shell:
+
+- nix build --no-link --keep-going .#check-lint .#check-lint-strict .#check-format .#check-types
+
+Do not use `nix flake check` for this. That command evaluates every package,
+and `packages.shell` cannot evaluate in a pure flake evaluation.
+
 - nix build --file . pkgs.nixVersions.nix_2_34.src --no-link --print-out-paths # Download the source code of a Nix package and print the path to it.
 
 # Version control

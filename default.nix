@@ -309,6 +309,10 @@ let
               # env var is needed.
               pynixDevEnv = final.callPackage ./nix/dev-env.nix { };
               nanopynix-docs = final.callPackage ./nix/docs.nix { };
+              # An attrset of derivations, not one derivation, so a failing
+              # run names the gate. `flake.nix` puts it under `checks`; the
+              # `packages` filter drops it, which is what we want.
+              checks = final.callPackage ./nix/checks.nix { };
             }
           ) scope.packages
         );
@@ -414,6 +418,7 @@ in
     pynixDevEnv
     shell
     nanopynix-docs
+    checks
     ;
 
   inherit

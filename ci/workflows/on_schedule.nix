@@ -12,6 +12,12 @@ let
   # matrix -- there's no longer an install-mode axis to fan out over (see
   # ci/workflows/lib.nix), just the version.
   allTestJobs = {
+    static-checks = workflow.mkStaticChecksJob {
+      ref = branch;
+      inherit lockArtifact;
+      needs = [ updateJob ];
+    };
+
     test-regular =
       workflow.mkRegularTestJob {
         version = "\${{ matrix.version }}";
