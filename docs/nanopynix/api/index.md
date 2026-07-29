@@ -11,6 +11,7 @@ Worker (L3) <worker>
 Inproc (L2) <inproc>
 namespace
 settings
+stores
 models
 protocols
 exceptions

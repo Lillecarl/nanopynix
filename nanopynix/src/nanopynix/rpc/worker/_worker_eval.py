@@ -242,7 +242,9 @@ class EvalServiceHandler(EvalServiceBase):
             operation=self._state.runtime.open_eval_state,
             args=(
                 store,
-                self._state.nix_path,
+                # The session's search path unless this evaluator named its
+                # own, which matches what inproc does.
+                list(message.nix_path) or self._state.nix_path,
                 build_store,
                 dict(message.eval_settings),
                 dict(message.fetch_settings),

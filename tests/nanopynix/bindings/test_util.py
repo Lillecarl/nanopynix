@@ -1,8 +1,14 @@
 """Tests for nanopynix_util (settings, init, experimental features)."""
 
 import pytest
+from nanopynix_bindings import util as nanopynix_util
 
 import nanopynix
+
+# `set_setting` and `get_setting` are bindings-level only. The `nanopynix`
+# package does not re-export them, because they report and change the globals
+# of the calling process, which is the wrong process whenever a worker holds
+# Nix. This file tests the bindings, so it reaches for them directly.
 
 
 class TestInitLibstore:
@@ -18,19 +24,19 @@ class TestInitLibstore:
 
 class TestSettings:
     def test_get_setting_keep_going(self):
-        nanopynix.set_setting("keep-going", "false")
-        assert nanopynix.get_setting("keep-going") == "false"
+        nanopynix_util.set_setting("keep-going", "false")
+        assert nanopynix_util.get_setting("keep-going") == "false"
 
     def test_get_setting_nonexistent(self):
-        assert nanopynix.get_setting("this-setting-does-not-exist-xyz") is None
+        assert nanopynix_util.get_setting("this-setting-does-not-exist-xyz") is None
 
     def test_set_and_get_max_jobs(self):
-        nanopynix.set_setting("max-jobs", "4")
-        assert nanopynix.get_setting("max-jobs") == "4"
+        nanopynix_util.set_setting("max-jobs", "4")
+        assert nanopynix_util.get_setting("max-jobs") == "4"
 
     def test_set_setting_unknown_raises(self):
         with pytest.raises(RuntimeError, match="unknown setting"):
-            nanopynix.set_setting("not-a-real-setting-xyz", "value")
+            nanopynix_util.set_setting("not-a-real-setting-xyz", "value")
 
     def test_list_settings_includes_known(self):
         settings = nanopynix.list_settings()

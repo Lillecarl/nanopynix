@@ -46,6 +46,7 @@ from nanopynix.models import (
     PathInfo,
     StorePath,
 )
+from nanopynix.settings import SettingsProvenance
 
 _RAW_GC_ACTIONS = {
     GcAction.RETURN_LIVE: nanopynix_store.GCAction.ReturnLive,
@@ -691,12 +692,22 @@ class CoreRuntime:
         settings: Mapping[str, str],
         load_config: bool,
         verbosity: int | None,
-    ) -> None:
-        self._core.initialize(
+    ) -> SettingsProvenance:
+        return self._core.initialize(
             settings=settings,
             load_config=load_config,
             verbosity=verbosity,
         )
+
+    # Not keyword-only: the worker dispatches this through `run_request`, which
+    # forwards positional arguments only.
+    def list_settings(self, overridden_only: bool = False) -> dict[str, str]:
+        """Read Nix's global settings registry. See :meth:`NixCore.list_settings`."""
+        return self._core.list_settings(overridden_only)
+
+    def apply_settings(self, settings: Mapping[str, str]) -> dict[str, str]:
+        """Write global settings, and read each back. See :meth:`NixCore.apply_settings`."""
+        return self._core.apply_settings(settings)
 
     def open_store(self, uri: str) -> CoreStore:
         return CoreStore(self._core.open_store(uri))

@@ -27,7 +27,9 @@
 #include <nix/store/remote-store.hh>
 #include <nix/store/content-address.hh>
 #include <nix/store/store-reference.hh>
+#include <nix/store/store-registration.hh>
 #include <nlohmann/json.hpp>
+#include <nix/util/experimental-features.hh>
 #include <nix/util/hash.hh>
 #include <nix/util/serialise.hh>
 #include <nix/util/file-descriptor.hh>
@@ -956,6 +958,32 @@ void nanopynix_bind_store(nb::module_ &m) {
           "older tooling that chokes on 'unix://'. So the same connection can render differently "
           "depending on the process-wide default socket path at the time it was opened, "
           "independent of the URI string originally used to connect it.");
+    m.def("list_store_types_json", []() {
+            auto res = nlohmann::json::object();
+            for (auto &[name, implem] : nix::Implementations::registered()) {
+                auto &entry = res[name];
+                entry["doc"] = implem.doc;
+                entry["uri-schemes"] = implem.uriSchemes;
+                // getConfig() builds the config with no params, so every value
+                // here is the default rather than anything a URI asked for.
+                entry["settings"] = implem.getConfig()->toJSON();
+                if (implem.experimentalFeature)
+                    entry["experimentalFeature"] =
+                        std::string(nix::showExperimentalFeature(*implem.experimentalFeature));
+                else
+                    entry["experimentalFeature"] = nullptr;
+            }
+            return res.dump();
+          },
+          "Return every registered store type as JSON, keyed by type name.\n\n"
+          "Each entry has 'doc', 'uri-schemes', 'settings' (the same metadata shape as "
+          "list_settings_metadata_json, one entry per setting the type accepts as a URI "
+          "query parameter), and 'experimentalFeature' (the feature gating the type, or "
+          "None).\n\n"
+          "The registry is populated by static initializers, one per linked store "
+          "implementation, so this reports what THIS build can actually open rather than "
+          "what Nix documents. Use it to check a typed store model against the Nix it is "
+          "linked with.");
     m.def("render_store_reference", [](const std::string &uri, bool with_params) {
             return nix::StoreReference::parse(uri).render(with_params);
           },

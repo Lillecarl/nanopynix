@@ -10,6 +10,8 @@ service WorkerService {
   rpc CloseStore(CloseStoreRequest) returns (CloseStoreResponse);
   rpc GetVerbosity(GetVerbosityRequest) returns (GetVerbosityResponse);
   rpc SetVerbosity(SetVerbosityRequest) returns (SetVerbosityResponse);
+  rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
+  rpc SetSettings(SetSettingsRequest) returns (SetSettingsResponse);
   rpc SubscribeLogs(SubscribeLogsRequest) returns (stream nix.common.LogEvent);
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 }
@@ -62,6 +64,33 @@ message SetVerbosityRequest {
 }
 message SetVerbosityResponse {
   nix.common.LogLevel verbosity = 1;
+}
+
+message GetSettingsRequest {
+  int64 request_id = 1000;
+  // Report only the settings something overrode, rather than the whole
+  // registry. Nix tracks this per setting, and it is what tells an applied
+  // value apart from a default.
+  bool overridden_only = 1;
+}
+message GetSettingsResponse {
+  map<string, string> settings = 1;
+  // What nix.conf and the environment supplied, read before this session
+  // applied its own. Empty when the session was opened with load_config off.
+  map<string, string> from_config = 2;
+  // What this session applied afterwards, and Nix accepted.
+  map<string, string> applied = 3;
+}
+
+message SetSettingsRequest {
+  int64 request_id = 1000;
+  map<string, string> settings = 1;
+}
+message SetSettingsResponse {
+  // The effective value of each setting named in the request, read back from
+  // Nix rather than echoed. A name Nix does not know is an error, not a
+  // silent no-op.
+  map<string, string> applied = 1;
 }
 
 message ShutdownRequest { int64 request_id = 1000; }

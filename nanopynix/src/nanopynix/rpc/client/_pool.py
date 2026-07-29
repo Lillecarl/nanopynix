@@ -27,8 +27,11 @@ from nanopynix_proto.nix.common import PrimOpSpec as PrimOpSpecPB
 from nanopynix_proto.nix.eval import EvalServiceStub
 from nanopynix_proto.nix.store import StoreServiceStub
 from nanopynix_proto.nix.worker import (
+    GetSettingsRequest,
+    GetSettingsResponse,
     GetVerbosityRequest,
     InitRequest,
+    SetSettingsRequest,
     SetVerbosityRequest,
     ShutdownRequest,
     SubscribeLogsRequest,
@@ -50,7 +53,7 @@ from nanopynix.settings import (
 )
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import AsyncIterator, Callable, Sequence
+    from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 
     from nanopynix_proto.nix.common import LogLevel
 
@@ -451,6 +454,23 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         )
         self._verbosity = response.verbosity
         return response.verbosity
+
+    async def get_settings(self, *, overridden_only: bool = False) -> GetSettingsResponse:
+        """Return the worker's effective Nix settings, and their provenance."""
+        return await self.invoke(
+            self.worker_stub.get_settings,
+            GetSettingsRequest(overridden_only=overridden_only),
+            timeout=self.rpc_timeout,
+        )
+
+    async def set_settings(self, settings: Mapping[str, str]) -> dict[str, str]:
+        """Apply global Nix settings in the worker, and return each value read back."""
+        response = await self.invoke(
+            self.worker_stub.set_settings,
+            SetSettingsRequest(settings=dict(settings)),
+            timeout=self.rpc_timeout,
+        )
+        return dict(response.applied)
 
     # The three stub properties are where a closed session is actually refused:
     # every dispatch names one, so together they are rpc's counterpart of

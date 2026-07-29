@@ -41,12 +41,16 @@ from nanopynix_proto.nix.common import LogEvent, LogLevel, NixLogEvent, RequestF
 from nanopynix_proto.nix.worker import (
     CloseStoreRequest,
     CloseStoreResponse,
+    GetSettingsRequest,
+    GetSettingsResponse,
     GetVerbosityRequest,
     GetVerbosityResponse,
     InitRequest,
     InitResponse,
     OpenStoreRequest,
     OpenStoreResponse,
+    SetSettingsRequest,
+    SetSettingsResponse,
     SetVerbosityRequest,
     SetVerbosityResponse,
     ShutdownRequest,
@@ -60,7 +64,6 @@ from nanopynix._core._primops import import_primop_callable as _import_callable
 from nanopynix._process_title import set_process_title, set_worker_title
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import (
-    NIX_CONFIG_ENV,
     NIX_USER_CONF_FILES_ENV,
     WORKER_INIT_STATUS_OK,
     HandleKind,
@@ -78,7 +81,7 @@ from nanopynix.rpc.worker._worker_primop import (
     rpc_primop_callback_factory as rpc_primop_callback_factory,  # type: ignore[reportPrivateUsage] -- internal module, required for primop callback factory
 )
 from nanopynix.rpc.worker._worker_store import StoreServiceHandler
-from nanopynix.settings import DEFAULT_WORKER_MAX_CONCURRENCY
+from nanopynix.settings import DEFAULT_WORKER_MAX_CONCURRENCY, SettingsProvenance
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncIterator, Callable
@@ -170,6 +173,10 @@ class WorkerState:
         self.nix_path: list[str] = []
         self.worker_subname: str = "worker"
         self.named_store_uris: dict[int, str] = {}
+        #: Where this worker's configuration came from, recorded by ``Init``.
+        #: Kept so ``GetSettings`` can tell a host value from one this session
+        #: applied, which a caller has no other way to learn across the wire.
+        self.provenance = SettingsProvenance()
 
     async def run_request(
         self,
@@ -230,16 +237,18 @@ class WorkerServiceHandler(WorkerServiceBase):
         """Bootstrap Nix without splitting its global state across threads."""
         try:
             settings = dict(message.settings)
-            # These environment variables must be in place before libstore
-            # reads configuration. They are process state, not Nix state.
+            # NIX_USER_CONF_FILES must be in place before libstore reads
+            # configuration, because `loadConfFile` is what reads it. It is an
+            # input to Nix, not a side channel.
+            #
+            # The settings themselves do not travel through NIX_CONFIG any
+            # more. They used to, because they were applied before
+            # `initLibStore` and `loadConfFile` then overwrote them; the
+            # environment variable existed only to win that race. They are now
+            # applied after init, straight into globalConfig -- see
+            # NixCore.initialize.
             if message.nix_conf is not None:
                 os.environ[NIX_USER_CONF_FILES_ENV] = message.nix_conf
-            if settings:
-                rendered_settings = "\n".join(f"{key} = {value}" for key, value in settings.items())
-                inherited_settings = os.environ.get(NIX_CONFIG_ENV)
-                os.environ[NIX_CONFIG_ENV] = (
-                    f"{inherited_settings}\n{rendered_settings}" if inherited_settings else rendered_settings
-                )
 
             if self._state.executor is None:
                 raise RuntimeError("worker executor is unavailable")  # noqa: TRY301 -- guard clause intentionally caught by except block which prints traceback and re-raises
@@ -271,7 +280,7 @@ class WorkerServiceHandler(WorkerServiceBase):
         """Run every Nix C++ initialization operation on the Nix thread."""
         for feature in message.experimental_features:
             nanopynix_util.enable_experimental_feature(feature)
-        self._state.runtime.initialize(
+        self._state.provenance = self._state.runtime.initialize(
             settings=settings,
             load_config=message.load_config,
             # None means "leave Nix's own default alone", which is what inproc
@@ -372,6 +381,48 @@ class WorkerServiceHandler(WorkerServiceBase):
             args=(int(message.verbosity),),
         )
         return SetVerbosityResponse(verbosity=LogLevel(verbosity))
+
+    async def get_settings(self, message: GetSettingsRequest) -> GetSettingsResponse:
+        """Return the worker's effective Nix configuration, and where it came from.
+
+        Unanswerable before this existed: the worker holds its own globals, in
+        its own process, and nothing reported them back.
+        """
+        if self._state.executor is None:
+            raise RuntimeError("worker executor is unavailable")
+        settings = await self._state.run_request(
+            request_id=message.request_id,
+            executor=self._state.executor,
+            operation=self._state.runtime.list_settings,
+            args=(message.overridden_only,),
+        )
+        provenance = self._state.provenance
+        return GetSettingsResponse(
+            settings=dict(settings),
+            from_config=dict(provenance.from_config),
+            applied=dict(provenance.applied),
+        )
+
+    async def set_settings(self, message: SetSettingsRequest) -> SetSettingsResponse:
+        """Apply global settings to this worker, and read each one back.
+
+        The client refuses to send this while a store or an evaluator is open,
+        because both read their settings at construction. That guard is on the
+        client because only the client knows which objects the caller still
+        holds; the worker applies what it is given.
+        """
+        if self._state.executor is None:
+            raise RuntimeError("worker executor is unavailable")
+        applied = await self._state.run_request(
+            request_id=message.request_id,
+            executor=self._state.executor,
+            operation=self._state.runtime.apply_settings,
+            args=(dict(message.settings),),
+        )
+        self._state.provenance = self._state.provenance.model_copy(
+            update={"applied": {**self._state.provenance.applied, **dict(applied)}},
+        )
+        return SetSettingsResponse(applied=dict(applied))
 
     def _update_store_title(self) -> None:
         subname = " ".join(self._state.named_store_uris.values()) or self._state.worker_subname

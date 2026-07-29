@@ -80,6 +80,7 @@ from nanopynix.settings import (
     NixEvalSettings,
     NixFetchSettings,
     NixFlakeSettings,
+    reject_construction_time_keys,
 )
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
@@ -952,8 +953,20 @@ class EvalSession:
         releases = _DeferredReleases()
         proxy = EvalProxy(self._worker, releases, self._rpc_timeout)
         rendered_eval = self._eval_settings.to_worker_settings() if self._eval_settings is not None else {}
-        rendered_eval.pop(NIX_PATH_SETTING_KEY, None)  # this worker applies nix_path session-wide, not per-eval
+        # nix_path travels in its own field, not in the settings map: Nix reads
+        # the search path while it builds the EvalState, and the worker applies
+        # the map to the settings registry, which is too late. Empty means "use
+        # the session's".
+        rendered_eval.pop(NIX_PATH_SETTING_KEY, None)
+        nix_path = list(self._eval_settings.nix_path or ()) if self._eval_settings is not None else []
         rendered_fetch = self._fetch_settings.to_worker_settings() if self._fetch_settings is not None else {}
+        # Only named when this evaluator actually has one. An empty search path
+        # means "use the session's", which is what leaving the field alone
+        # already says, and not naming it keeps this request buildable against
+        # a generated proto that predates the field. A caller that does use the
+        # feature still gets a hard error there, which is correct: the worker
+        # on the other side cannot honour it.
+        request_nix_path: dict[str, Any] = {"nix_path": nix_path} if nix_path else {}
         try:
             response = await proxy.open_eval(
                 OpenEvalRequest(
@@ -962,6 +975,7 @@ class EvalSession:
                     build_store_handle=0 if self._build_store is None else self._build_store.store_handle,
                     eval_settings=rendered_eval,
                     fetch_settings=rendered_fetch,
+                    **request_nix_path,
                 ),
             )
             proxy._eval_handle = response.eval_handle  # type: ignore[reportPrivateUsage] -- EvalSession owns its proxy's eval_handle assignment  # noqa: SLF001
@@ -994,16 +1008,23 @@ class EvalSession:
         eval_settings: NixEvalSettings | None = None,
         fetch_settings: NixFetchSettings | None = None,
     ) -> None:
-        """Apply live-mutable eval/fetch settings to this already-open evaluator.
+        """Apply live eval and fetch settings to this already-open evaluator.
 
-        Only settings Nix reads fresh on every access take effect this way
-        (e.g. ``max_call_depth``, ``allowed_uris``, lint settings) —
-        construction-time-snapshotted ones (``nix_path``, ``pure_eval``,
-        ``restrict_eval``) require a new :class:`EvalSession`.
+        Only the settings Nix reads fresh at the point of use can be changed
+        this way, such as ``max_call_depth``, ``allowed_uris`` and the lint
+        settings. Nix reads the others once, while it builds the evaluator, so
+        this raises for those rather than accepting them and doing nothing.
+        Every fetch setting is live.
+
+        Raises:
+            SettingNotLiveError: A setting Nix reads only at construction, such
+                as ``nix_path``, ``pure_eval`` or ``restrict_eval``. Open a new
+                evaluator with it: ``session.eval(store, eval_settings=...)``.
         """
         rendered_eval = eval_settings.to_worker_settings() if eval_settings is not None else {}
-        rendered_eval.pop(NIX_PATH_SETTING_KEY, None)
         rendered_fetch = fetch_settings.to_worker_settings() if fetch_settings is not None else {}
+        reject_construction_time_keys(rendered_eval, model=NixEvalSettings, target="evaluator")
+        reject_construction_time_keys(rendered_fetch, model=NixFetchSettings, target="evaluator")
         await self._ensure_proxy().configure_eval(
             ConfigureEvalRequest(eval_settings=rendered_eval, fetch_settings=rendered_fetch),
         )

@@ -202,6 +202,16 @@ class AsyncStore(Protocol):
 
     async def __aexit__(self, *args: object) -> None: ...
 
+    @property
+    def is_open(self) -> bool:
+        """Whether this store holds an open Nix store.
+
+        A plain attribute rather than a coroutine, because the session reads it
+        to decide whether it may write the global settings, and that decision
+        must not need the worker.
+        """
+        ...
+
     async def open(self) -> None:
         """Open the underlying store."""
         ...

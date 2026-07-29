@@ -7,6 +7,12 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from nanopynix_bindings import expr as nanopynix_expr, store as nanopynix_store, util as nanopynix_util
 
 from nanopynix._typechecking import BEARTYPING
+from nanopynix.settings import (
+    NixEvalSettings,
+    NixFetchSettings,
+    SettingsProvenance,
+    reject_construction_time_keys,
+)
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Mapping, Sequence
@@ -61,13 +67,70 @@ class NixCore:
         settings: Mapping[str, str],
         load_config: bool,
         verbosity: int | None,
-    ) -> None:
+    ) -> SettingsProvenance:
+        """Initialise Nix, then apply ``settings``, and report what came from where.
+
+        The settings are applied **after** ``init_libstore``, not before.
+        ``initLibStore`` is the call that reads ``nix.conf`` and ``NIX_CONFIG``,
+        through ``loadConfFile``, so settings applied first are overwritten by
+        whatever the host configured. It reads no setting of its own -- it is
+        ``initLibUtil``, ``loadConfFile``, ``preloadNSS`` and
+        ``curl_global_init`` -- so nothing needs a value early.
+
+        This ordering is load-bearing rather than cosmetic. With the settings
+        applied first, a caller's value was silently discarded for every key the
+        host's ``nix.conf`` also named: measured with ``max-jobs``, the caller
+        asked for 4, ``nix.conf`` said 99, and Nix used 99.
+        """
+        nanopynix_util.init_libstore(load_config=load_config)
+        # Whatever loadConfFile just set is, by definition, the overridden set.
+        from_config = dict(nanopynix_util.list_settings(overridden_only=True))
+        # Reset the bookkeeping only -- no value changes -- so the same query
+        # after applying our settings reports ours and nothing else.
+        nanopynix_util.reset_overridden()
+
         for name, value in settings.items():
             nanopynix_util.set_setting(name, value)
-        nanopynix_util.init_libstore(load_config=load_config)
+        applied = dict(nanopynix_util.list_settings(overridden_only=True))
+
         if verbosity is not None:
             nanopynix_util.set_verbosity(verbosity)
         nanopynix_expr.init_libexpr()
+        return SettingsProvenance(from_config=from_config, applied=applied)
+
+    # Not keyword-only: the worker dispatches it through `run_request`, which
+    # forwards positional arguments only.
+    def list_settings(self, overridden_only: bool = False) -> dict[str, str]:
+        """Read Nix's global settings registry.
+
+        With ``overridden_only``, only the settings something has set, which is
+        what tells an applied value apart from a default.
+        """
+        return dict(nanopynix_util.list_settings(overridden_only=overridden_only))
+
+    def apply_settings(self, settings: Mapping[str, str]) -> dict[str, str]:
+        """Write ``settings`` into Nix's global registry, and read each one back.
+
+        The value comes back from Nix rather than being echoed, so a caller
+        sees what Nix made of it. An unknown name raises, because a setting
+        that goes nowhere is the failure this whole layer exists to prevent.
+
+        This does not reach a store or an evaluator that already exists. Both
+        read their settings while Nix constructs them, so the callers guard
+        against that by refusing to write while either is open.
+        """
+        for name, value in settings.items():
+            nanopynix_util.set_setting(name, value)
+        applied: dict[str, str] = {}
+        for name in settings:
+            read_back: str | None = nanopynix_util.get_setting(name)
+            if read_back is None:
+                # `set_setting` raises for a name Nix does not know, so a name
+                # that vanishes between the write and the read is a defect in
+                # the bindings rather than a caller mistake.
+                raise RuntimeError(f"Nix accepted the setting {name!r} and then reported no value for it")
+            applied[name] = read_back
+        return applied
 
     def open_store(self, uri: str) -> nanopynix_store.Store:
         return nanopynix_store.open_store(uri)
@@ -94,10 +157,24 @@ class NixCore:
         eval_settings: Mapping[str, str] | None = None,
         fetch_settings: Mapping[str, str] | None = None,
     ) -> None:
-        """Apply live-mutable eval/fetch settings to an already-open ``EvalState``."""
-        for name, value in (eval_settings or {}).items():
+        """Apply live eval and fetch settings to an already-open ``EvalState``.
+
+        The backstop under both engines' ``configure()``. Those check the typed
+        model, which is the check that gives a good message; this checks the
+        rendered keys, which is all that reaches a worker over RPC. A worker
+        must refuse what the client refuses, whatever built the request.
+
+        Raises:
+            SettingNotLiveError: A key Nix reads only while constructing the
+                evaluator.
+        """
+        eval_rendered = eval_settings or {}
+        fetch_rendered = fetch_settings or {}
+        reject_construction_time_keys(eval_rendered, model=NixEvalSettings, target="evaluator")
+        reject_construction_time_keys(fetch_rendered, model=NixFetchSettings, target="evaluator")
+        for name, value in eval_rendered.items():
             eval_state.set_eval_setting(name, value)
-        for name, value in (fetch_settings or {}).items():
+        for name, value in fetch_rendered.items():
             eval_state.set_fetch_setting(name, value)
 
     def get_verbosity(self) -> int:

@@ -16,10 +16,15 @@ class Show(Command):
     @override
     async def run(self) -> None:
         nanopynix.init_libstore(load_config=True)
+        settings = nanopynix.list_settings()
         if self.setting is not None:
-            print_json({self.setting: nanopynix.get_setting(self.setting)})
+            # Read one out of the whole registry rather than asking Nix for the
+            # single name. A per-setting getter on the module reports the
+            # globals of *this* process, which is the wrong process as soon as
+            # a worker holds Nix, so nanopynix no longer offers one.
+            print_json({self.setting: settings.get(self.setting)})
             return
-        print_json(nanopynix.list_settings())
+        print_json(settings)
 
 
 class Check(Command):

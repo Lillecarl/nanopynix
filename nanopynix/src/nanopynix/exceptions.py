@@ -366,6 +366,21 @@ class ObjectMisuseError(RuntimeError):
     """
 
 
+class SettingNotLiveError(ObjectMisuseError):
+    """A setting was changed on an object that had already read it.
+
+    Nix reads some settings once, while it constructs the object that owns
+    them, and others fresh at the point of use. Changing one of the first kind
+    afterwards does nothing at all: Nix accepts the assignment, stores it, and
+    never looks at it again. This library used to report success for that, so
+    a caller could believe an evaluator was pure when it was not.
+
+    Not a :class:`NixError`, because Nix was never consulted: nanopynix knows
+    from the settings model when the value is read, and refuses before the
+    call goes anywhere. To apply the setting, construct a new object with it.
+    """
+
+
 class ObjectLifetimeError(ObjectMisuseError):
     """A nanopynix object was used after it was closed or released.
 
