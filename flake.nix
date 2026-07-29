@@ -55,8 +55,18 @@
           // lib.mapAttrs' (
             n: v: lib.nameValuePair "nanopynix-${n}" v.nanopynix
           ) eachDefNix.${system}.nanopynixVersions
+          # Also under `packages`, and not only under `checks` below, because
+          # CI builds a job's outputs by `nix build ".#<name>"`. See
+          # nix/checks.nix.
+          // lib.mapAttrs' (n: v: lib.nameValuePair "check-${n}" v) eachDefNix.${system}.checks
         )
       );
+      # The standard place for the four static gates, although `nix flake
+      # check` cannot run them today: that command evaluates every package,
+      # and `packages.shell` fails a pure evaluation with "Editable root was
+      # passed as a Nix store path string". Build the `check-*` packages
+      # above instead, which is what CI does.
+      checks = forAllSystems (system: eachDefNix.${system}.checks);
       devShells = forAllSystems (system: {
         default = eachDefNix.${system}.shell;
       });

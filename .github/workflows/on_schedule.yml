@@ -7,8 +7,34 @@ name: On schedule
   schedule:
   - cron: 17 3 * * *
 jobs:
+  static-checks:
+    needs:
+    - update-lockfile
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: develop
+    - uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Run the static gates (ruff, ruff-strict, ruff format, pyright)
+      run: |
+        nix build --no-link --print-build-logs --keep-going \
+          ".#check-lint" ".#check-lint-strict" ".#check-format" ".#check-types"
+    timeout-minutes: 20
+    runs-on: ubuntu-24.04
   docs-build:
     needs:
+    - static-checks
     - test-regular
     - test-tsan
     steps:

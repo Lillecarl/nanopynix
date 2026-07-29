@@ -760,11 +760,14 @@ async def test_a_per_call_setting_beats_the_session_default(
     session_class = nanopynix.rpc.Session if engine == "rpc" else nanopynix.inproc.Session
 
     seen: dict[str, str] = {}
-    async with session_class(
-        load_config=False,
-        settings=settings,
-        store_uri=stores.Local(root=str(tmp_path / "override-store")),
-    ) as session, session.store(stores.Local(root=str(tmp_path / "untrusted"), trusted=False)) as store:
+    async with (
+        session_class(
+            load_config=False,
+            settings=settings,
+            store_uri=stores.Local(root=str(tmp_path / "override-store")),
+        ) as session,
+        session.store(stores.Local(root=str(tmp_path / "untrusted"), trusted=False)) as store,
+    ):
         seen["store"] = await store.uri(with_params=True)
         seen["eval"] = await _eval_scope_holds(session, store, eval_settings=NixEvalSettings(pure_eval=False))
         seen["fetch"] = await _fetch_scope_holds(
