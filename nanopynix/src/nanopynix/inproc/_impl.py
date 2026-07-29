@@ -338,12 +338,12 @@ class Session:
                 eval_session._resume()  # type: ignore[reportPrivateUsage] -- Session owns evaluator executors  # noqa: SLF001
             raise
 
-        errors: list[BaseException] = []
+        errors: list[Exception] = []
 
         async def close_resource(operation: Any) -> None:
             try:
                 await operation
-            except BaseException as exc:
+            except Exception as exc:
                 errors.append(exc)
 
         try:
@@ -360,12 +360,24 @@ class Session:
         finally:
             try:
                 executor.shutdown(wait=True)
-            except BaseException as exc:
+            except Exception as exc:
                 errors.append(exc)
             self._executor = None
             self._opened = False
             _process_guard.release(self)
 
+        # Cancellation is not collected, and neither is it collected in
+        # `close_resource` above. Collecting it did two things, both wrong. The
+        # scope that owns the cancellation never saw it, so an enclosing
+        # `fail_after` could not turn its own expiry into a `TimeoutError`. And
+        # the loop above did not stop, so every resource left was closed under
+        # the same cancelled scope and cut short at its first checkpoint --
+        # measured as five `CancelledError` for one cancellation, reported as a
+        # group. rpc catches `Exception` here for the same reason; the comment
+        # in `rpc/client/session.py` records that this file taught it that.
+        #
+        # Letting it through costs nothing: the `finally` above shuts the
+        # executor down and releases the process guard either way.
         if len(errors) == 1:
             raise errors[0]
         if errors:

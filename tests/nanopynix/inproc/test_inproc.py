@@ -1096,6 +1096,77 @@ async def test_inproc_session_close_auto_closes_open_eval(inproc_session: Inproc
 
 
 @pytest.mark.anyio
+async def test_a_cancelled_close_stops_instead_of_cancelling_every_resource(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    """A cancellation ends the close; it does not become one per resource.
+
+    ``close_resource`` used to catch ``BaseException``, which includes
+    ``CancelledError``. Collecting one did not stop the loop, so ``close`` went
+    on to the next resource with the scope still cancelled, and that one was
+    cancelled too. Measured before this change, with one store and one
+    evaluator open: five ``CancelledError`` for one cancellation -- the
+    evaluator, the store, the log collector, the log task and the logger
+    removal, each cut short at its first checkpoint and reported as a
+    ``BaseExceptionGroup``.
+
+    ``Store.close`` discards itself from the session before it awaits, so a
+    store still listed is a store the loop never reached. That is the
+    assertion: the cancellation left at the evaluator, which is where it
+    arrived.
+
+    ``TimeoutError`` reaching the caller is asserted beside it. That part
+    already worked, because ``fail_after`` unwraps the group -- which is what
+    hid the multiplication.
+    """
+    session = inproc_session()
+    await session.open()
+    store = session.store()
+    await store.open()
+    evaluator = session.eval(store)
+    await evaluator.open()
+
+    with pytest.raises(TimeoutError), anyio.fail_after(0):
+        await session.close()
+
+    open_stores = session._stores  # type: ignore[reportPrivateUsage] -- Session owns store lifetime tracking
+    assert store in open_stores, "the close continued past the cancellation it collected"
+
+    # The teardown still ran, so the process guard is free for the next
+    # session. Without this the whole inproc suite would fail after this test.
+    with pytest.raises(nanopynix.SessionClosedError):
+        await session.run(lambda: None)
+
+
+@pytest.mark.anyio
+async def test_a_cancelled_close_does_not_wrap_the_cancellation_in_a_group(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    """The cancellation leaves as itself, not inside a ``BaseExceptionGroup``.
+
+    Collecting it made ``close`` continue through the resources it had left,
+    each of which was cancelled at once, so one cancellation became several and
+    left wrapped. A caller that awaits ``close()`` in a task must see the task
+    cancelled, not completed with an error.
+    """
+    session = inproc_session()
+    await session.open()
+    store = session.store()
+    await store.open()
+    evaluator = session.eval(store)
+    await evaluator.open()
+
+    task = asyncio.create_task(session.close())
+    # One turn, so `close` is inside its first await rather than not started.
+    await anyio.lowlevel.checkpoint()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert task.cancelled(), "a collected cancellation leaves the task finished, not cancelled"
+
+
+@pytest.mark.anyio
 async def test_inproc_eval_close_releases_leftover_locked_flakes(
     tmp_path: Path,
     inproc_session: InprocSessionFactory,
