@@ -38,10 +38,12 @@ from nanopynix.settings import (
     NanopynixSettings,
     NixEvalSettings,
     NixFetchSettings,
+    NixFlakeSettings,
     NixGlobalSettings,
     NixSettings,
     NixStoreDefaults,
     SettingsProvenance,
+    merge_defaults,
     normalize_nix_path,
     normalize_nix_settings,
     reject_settings_write_while_open,
@@ -130,12 +132,22 @@ class Session:
         nanopynix_settings = runtime_settings or NanopynixSettings()
         self.runtime_settings = nanopynix_settings
         self.namespace = namespace
-        # Nix has no global for these four, so the only place a session-wide
-        # default can go is the URI of each store this session opens.
-        self._store_defaults = NixStoreDefaults.from_settings(nix_settings)
+        # One scope for each door Nix opens. `NixSettings` is the catch-all, and
+        # this is where it comes apart again: the globals go to the process,
+        # and the other four become this session's defaults for the objects
+        # that read them. Sending all five to `globalConfig` is what used to
+        # happen, and it raised `unknown setting: pure-eval` for four of them.
+        #
+        # Nix has no global for the store scope, so the only place a
+        # session-wide default can go is the URI of each store this session
+        # opens.
+        self._store_defaults = NixStoreDefaults.for_scope(nix_settings)
+        self._eval_defaults = NixEvalSettings.for_scope(nix_settings)
+        self._fetch_defaults = NixFetchSettings.for_scope(nix_settings)
+        self._flake_defaults = NixFlakeSettings.for_scope(nix_settings)
         store_uri = resolve_store_spec(store_uri, self._store_defaults)
         self._store_uri = store_uri
-        worker_settings = nix_settings.to_worker_settings()
+        worker_settings = NixGlobalSettings.for_scope(nix_settings).to_worker_settings()
         if namespace is not None:
             # Under the settings the caller gave, not over them: a caller that
             # sets build-users-group itself has a reason to.
@@ -378,9 +390,11 @@ class Session:
             build_store: Optional second store to build into while evaluating
                    against ``store``. Same guard as ``store``.
             eval_settings: Construction-time evaluator settings for this
-                   ``EvalSession`` alone (e.g. ``pure_eval``, ``nix_path``).
+                   ``EvalSession`` alone (e.g. ``pure_eval``, ``nix_path``),
+                   merged over this session's eval defaults. A field named
+                   here wins; the rest come from ``Session(settings=...)``.
             fetch_settings: Construction-time fetcher settings for this
-                   ``EvalSession`` alone.
+                   ``EvalSession`` alone, merged the same way.
 
         Returns an ``EvalSession`` context manager. All exported handles are
         released on exit. Any number of ``EvalSession``/``ReplSession``
@@ -397,8 +411,9 @@ class Session:
             rpc_timeout=self._manager.rpc_timeout,
             store=store,
             build_store=build_store,
-            eval_settings=eval_settings,
-            fetch_settings=fetch_settings,
+            eval_settings=merge_defaults(eval_settings, self._eval_defaults),
+            fetch_settings=merge_defaults(fetch_settings, self._fetch_defaults),
+            flake_defaults=self._flake_defaults,
         )
 
     def repl(
@@ -441,8 +456,9 @@ class Session:
             line_editors=self.runtime_settings.line_editors if line_editors is None else line_editors,
             store=store,
             build_store=build_store,
-            eval_settings=eval_settings,
-            fetch_settings=fetch_settings,
+            eval_settings=merge_defaults(eval_settings, self._eval_defaults),
+            fetch_settings=merge_defaults(fetch_settings, self._fetch_defaults),
+            flake_defaults=self._flake_defaults,
         )
 
     def _require_own_stores(self, store: Store, build_store: Store | None) -> None:

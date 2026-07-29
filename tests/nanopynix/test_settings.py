@@ -14,11 +14,14 @@ from nanopynix.settings import (
     NixEvalSettings,
     NixFetchSettings,
     NixFlakeSettings,
+    NixGlobalSettings,
     NixSettingMetadata,
     NixSettings,
     NixSettingsEnv,
+    NixStoreDefaults,
     check_all_settings_model_drift,
     check_settings_model_drift,
+    merge_defaults,
 )
 
 if TYPE_CHECKING:
@@ -141,6 +144,75 @@ def test_optional_settings_drift_is_not_checked_by_default() -> None:
     drift = check_all_settings_model_drift()
 
     assert set(drift) == {"global"}
+
+
+# ── for_scope: taking one scope out of the catch-all ─────────────────
+
+
+def test_for_scope_takes_one_scope_out_of_the_catch_all() -> None:
+    """``NixSettings`` inherits five scopes, and each goes to a different Nix.
+
+    This is the split that makes the catch-all work. Sending all five to
+    ``globalConfig`` is what used to happen, and four of them raised
+    ``unknown setting`` because the registries are disjoint.
+    """
+    everything = NixSettings(max_jobs=4, trusted=True, pure_eval=True, warn_dirty=False, use_registries=False)
+
+    assert NixGlobalSettings.for_scope(everything).max_jobs == 4
+    assert NixStoreDefaults.for_scope(everything).trusted is True
+    assert NixEvalSettings.for_scope(everything).pure_eval is True
+    assert NixFetchSettings.for_scope(everything).warn_dirty is False
+    assert NixFlakeSettings.for_scope(everything).use_registries is False
+
+
+def test_the_global_scope_carries_no_setting_from_another_registry() -> None:
+    """What reaches ``globalConfig`` must hold global keys and nothing else.
+
+    ``set_setting`` raises for a name Nix does not know, so one leaked key
+    here fails every session that names it. Asserting on the rendering rather
+    than on the model is deliberate: the rendering is what travels.
+    """
+    rendered = NixGlobalSettings.for_scope(
+        NixSettings(max_jobs=4, trusted=True, pure_eval=True, warn_dirty=False, use_registries=False),
+    ).to_worker_settings()
+
+    assert rendered["max-jobs"] == "4"
+    for foreign in ("trusted", "pure-eval", "warn-dirty", "use-registries"):
+        assert foreign not in rendered
+
+
+def test_for_scope_leaves_a_field_the_catch_all_did_not_set_unset() -> None:
+    assert NixEvalSettings.for_scope(NixSettings(max_jobs=4)).pure_eval is None
+
+
+# ── merge_defaults: a per-call value beats a session default ─────────
+
+
+def test_merge_defaults_fills_only_what_the_call_left_unset() -> None:
+    merged = merge_defaults(
+        NixEvalSettings(pure_eval=False),
+        NixEvalSettings(pure_eval=True, max_call_depth=20),
+    )
+
+    assert merged.pure_eval is False, "the value named on the call wins"
+    assert merged.max_call_depth == 20, "and the rest come from the session"
+
+
+def test_merge_defaults_takes_the_defaults_whole_when_the_call_says_nothing() -> None:
+    defaults = NixEvalSettings(pure_eval=True)
+
+    assert merge_defaults(None, defaults) is defaults
+
+
+def test_merge_defaults_does_not_mutate_either_side() -> None:
+    """Both sides outlive the call: the defaults belong to the session."""
+    spec = NixFlakeSettings(use_registries=False)
+    defaults = NixFlakeSettings(use_registries=True, accept_flake_config=True)
+
+    merge_defaults(spec, defaults)
+
+    assert spec.accept_flake_config is None
+    assert defaults.use_registries is True
 
 
 def test_default_experimental_features_are_the_ones_we_intend() -> None:

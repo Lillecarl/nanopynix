@@ -34,8 +34,13 @@ from nanopynix.settings import (
     NixEvaluatorSettings,
     construction_time_keys,
     field_is_supported,
+    list_eval_settings_metadata,
+    list_fetch_settings_metadata,
+    list_flake_settings_metadata,
+    list_settings_metadata,
     reject_construction_time_keys,
 )
+from tests.support.git import init_flake_repo
 
 if TYPE_CHECKING:
     from tests.support.nix_environment import NixTestEnvironment
@@ -501,3 +506,239 @@ async def test_writing_settings_leaves_the_unnamed_ones_alone(
     note(experimental_features_before=before, experimental_features_after=after, written=written)
     assert written == {"max-jobs": "5"}, "only the named setting may be written"
     assert after == before, "an unnamed setting must survive a write"
+
+
+# ── The routing matrix: five scopes, both engines, both backends ─────
+#
+# `NixSettings` inherits five scopes, and every one of them used to be sent to
+# `globalConfig`. Only the global scope is registered there, so four of the
+# five raised `unknown setting`. Measured before the fix, on both engines:
+# `pure_eval`, `trusted`, `warn_dirty` and `use_registries` all failed to open
+# a session at all.
+#
+# The suite was green at 2534 passed while that shipped, because every
+# `NixSettings(...)` in the tests and the examples named global-scope fields
+# only. Each case below therefore asserts through the door that owns the
+# scope, which is the only way to tell an applied setting from an accepted and
+# discarded one.
+
+
+def test_the_four_settings_registries_are_disjoint() -> None:
+    """No setting is registered in two of Nix's four registries.
+
+    ``check_settings_model_drift`` used to subtract the eval, fetch and flake
+    names from the global registry, on the belief that ``globalConfig``
+    aggregates them. It does not. That step removed nothing, and this is what
+    notices if a future Nix makes it necessary again -- at which point the
+    routing itself needs a rule for the setting that appears twice.
+    """
+    registries = {
+        "eval": set(list_eval_settings_metadata()),
+        "fetch": set(list_fetch_settings_metadata()),
+        "flake": set(list_flake_settings_metadata()),
+    }
+    global_names = set(list_settings_metadata())
+    overlaps = {name: sorted(names & global_names) for name, names in registries.items()}
+    note(registry_sizes={name: len(names) for name, names in registries.items()}, overlaps=overlaps)
+
+    assert overlaps == {"eval": [], "fetch": [], "flake": []}
+
+
+@pytest.fixture
+def dirty_flake(tmp_path: Path) -> str:
+    """A local git flake whose working tree differs from its last commit.
+
+    The fetch scope needs an observable that reaches no network, and
+    ``allow_dirty`` is it: Nix refuses to fetch a dirty tree when it is off.
+    The dirtied file has to be a *tracked* one -- an untracked file leaves the
+    tree clean as far as this check is concerned.
+    """
+    flake_dir = tmp_path / "dirty-flake"
+    flake_dir.mkdir()
+    init_flake_repo(flake_dir)
+    flake_file = flake_dir / "flake.nix"
+    flake_file.write_text(flake_file.read_text(encoding="utf-8") + "\n# dirtied after the commit\n", encoding="utf-8")
+    return f"git+file://{flake_dir}"
+
+
+async def _global_scope_holds(session: Any) -> str:
+    return (await session.settings())["substituters"]
+
+
+async def _eval_scope_holds(session: Any, store: Any, **eval_kwargs: Any) -> str:
+    """Whether the evaluator is pure. ``builtins.currentTime`` is impure."""
+    async with session.eval(store, **eval_kwargs) as evaluator:
+        try:
+            await (await evaluator.string("builtins.currentTime")).to_python()
+        except EvalError:
+            return "pure"
+        return "impure"
+
+
+async def _fetch_scope_holds(session: Any, store: Any, ref: str, **eval_kwargs: Any) -> str:
+    """Whether the fetcher accepts a dirty git tree."""
+    async with session.eval(store, **eval_kwargs) as evaluator:
+        try:
+            await evaluator.lock_flake(ref, write_lock_file=False)
+        except Exception:
+            return "refused"
+        return "accepted"
+
+
+async def _flake_scope_holds(session: Any, store: Any, **flake_kwargs: Any) -> str:
+    """Whether an indirect flake reference may be looked up in a registry.
+
+    ``nixpkgs`` is an indirect reference, so with the registries off Nix fails
+    before it reaches any network. That is what makes this assertable here.
+    """
+    async with session.eval(store) as evaluator:
+        try:
+            await evaluator.lock_flake("nixpkgs", write_lock_file=False, **flake_kwargs)
+        except Exception:
+            return "refused"
+        return "resolved"
+
+
+@pytest.mark.parametrize("engine", ["inproc", "rpc"])
+async def test_every_settings_scope_reaches_the_door_that_owns_it(
+    shared_nix_environment: NixTestEnvironment,
+    engine: str,
+    tmp_path: Path,
+    dirty_flake: str,
+) -> None:
+    """One object states all five scopes, and every one of them takes effect.
+
+    Before the fix this session did not open: ``Session.__init__`` sent all
+    five scopes to ``globalConfig`` and Nix answered ``unknown setting:
+    pure-eval``. The store scope was the one half that worked, through the
+    store URI.
+
+    The globals are the environment's own, unchanged, because one process
+    hosts at most one set of inproc globals. That this inproc session opens at
+    all beside the suite's others is the second half of the fix: the guard now
+    compares the *global* scope only, and an eval or fetch difference no
+    longer makes two sessions incompatible. Those live on each ``EvalState``.
+    """
+    settings = shared_nix_environment.settings.model_copy(
+        update={"trusted": True, "pure_eval": True, "allow_dirty": False, "use_registries": False},
+    )
+    session_class = nanopynix.rpc.Session if engine == "rpc" else nanopynix.inproc.Session
+    # A store *model*, not the environment's URI string: a URI the caller wrote
+    # by hand is passed through untouched, so the store defaults have nothing
+    # to merge into. That is `resolve_store_spec`'s documented rule.
+    store_config = stores.Local(root=str(tmp_path / "matrix-store"))
+
+    expected_substituters = " ".join(shared_nix_environment.settings.substituters or ())
+    seen: dict[str, str] = {}
+    async with (
+        session_class(load_config=False, settings=settings, store_uri=store_config) as session,
+        session.store() as store,
+    ):
+        seen["global"] = await _global_scope_holds(session)
+        seen["store"] = await store.uri(with_params=True)
+        seen["eval"] = await _eval_scope_holds(session, store)
+        seen["fetch"] = await _fetch_scope_holds(session, store, dirty_flake)
+        seen["flake"] = await _flake_scope_holds(session, store)
+
+    note(**{f"{engine}/routing": seen})
+    assert seen["global"] == expected_substituters, "a global-scope field must reach globalConfig"
+    assert "trusted=true" in seen["store"], "a store-scope field must reach the store URI"
+    assert seen["eval"] == "pure", "an eval-scope field must reach the evaluator"
+    assert seen["fetch"] == "refused", "a fetch-scope field must reach the fetcher"
+    assert seen["flake"] == "refused", "a flake-scope field must reach the flake operation"
+
+
+@pytest.mark.parametrize("engine", ["inproc", "rpc"])
+async def test_a_per_call_setting_beats_the_session_default(
+    shared_nix_environment: NixTestEnvironment,
+    engine: str,
+    tmp_path: Path,
+    dirty_flake: str,
+) -> None:
+    """The session states a default; the call overrides it. Both directions.
+
+    Each case names the *opposite* of the session's value, so a default that
+    silently wins and an override that silently wins are both caught. Without
+    this, a session default is only reachable by opening a second session.
+    """
+    settings = shared_nix_environment.settings.model_copy(
+        update={"trusted": True, "pure_eval": True, "allow_dirty": False, "use_registries": True},
+    )
+    session_class = nanopynix.rpc.Session if engine == "rpc" else nanopynix.inproc.Session
+
+    seen: dict[str, str] = {}
+    async with session_class(
+        load_config=False,
+        settings=settings,
+        store_uri=stores.Local(root=str(tmp_path / "override-store")),
+    ) as session, session.store(stores.Local(root=str(tmp_path / "untrusted"), trusted=False)) as store:
+        seen["store"] = await store.uri(with_params=True)
+        seen["eval"] = await _eval_scope_holds(session, store, eval_settings=NixEvalSettings(pure_eval=False))
+        seen["fetch"] = await _fetch_scope_holds(
+            session,
+            store,
+            dirty_flake,
+            fetch_settings=NixFetchSettings(allow_dirty=True),
+        )
+        seen["flake"] = await _flake_scope_holds(
+            session,
+            store,
+            flake_settings=nanopynix.NixFlakeSettings(use_registries=False),
+        )
+
+    note(**{f"{engine}/override": seen})
+    assert "trusted=false" in seen["store"], "a field set on the store model must beat the session default"
+    assert seen["eval"] == "impure", "eval_settings must beat the session default"
+    assert seen["fetch"] == "accepted", "fetch_settings must beat the session default"
+    assert seen["flake"] == "refused", "flake_settings must beat the session default"
+
+
+@pytest.mark.parametrize("engine", ["inproc", "rpc"])
+async def test_the_search_path_has_one_order_of_precedence(
+    shared_nix_environment: NixTestEnvironment,
+    engine: str,
+    tmp_path: Path,
+) -> None:
+    """``nix_path`` has two session-level spellings, and the more specific wins.
+
+    ``Session`` takes it as an argument of its own, and it is also a field of
+    :class:`NixEvalSettings`, which a session now honours as a default. The
+    order is per-call, then the settings object, then the argument. The
+    argument still applies whenever the settings object says nothing, so
+    nothing that worked before changes.
+    """
+    entries: dict[str, Path] = {}
+    for index, name in enumerate(("from_argument", "from_settings", "from_call"), start=1):
+        directory = tmp_path / name
+        directory.mkdir()
+        (directory / "default.nix").write_text(f"{index}\n", encoding="utf-8")
+        entries[name] = directory
+
+    # `Any`, as everywhere else in this module: the two engines share no
+    # nominal base, which is exactly what these tests exist to check.
+    session_class: Any = nanopynix.rpc.Session if engine == "rpc" else nanopynix.inproc.Session
+    settings = shared_nix_environment.settings.model_copy(
+        update={"nix_path": [f"precedence={entries['from_settings']}"]},
+    )
+
+    seen: dict[str, int] = {}
+    async with (
+        session_class(
+            store_uri=shared_nix_environment.store_uri,
+            load_config=False,
+            settings=settings,
+            nix_path=[f"precedence={entries['from_argument']}"],
+        ) as session,
+        session.store() as store,
+    ):
+        async with session.eval(store) as evaluator:
+            seen["settings_beats_argument"] = await (await evaluator.string("import <precedence>")).as_int()
+        async with session.eval(
+            store,
+            eval_settings=NixEvalSettings(nix_path=[f"precedence={entries['from_call']}"]),
+        ) as evaluator:
+            seen["call_beats_settings"] = await (await evaluator.string("import <precedence>")).as_int()
+
+    note(**{f"{engine}/nix_path": seen})
+    assert seen["settings_beats_argument"] == 2, "NixSettings.nix_path must beat Session(nix_path=...)"
+    assert seen["call_beats_settings"] == 3, "a per-evaluator nix_path must beat both"
