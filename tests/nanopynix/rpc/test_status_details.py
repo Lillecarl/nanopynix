@@ -12,6 +12,10 @@ RPC round-trip cannot reach. Two categories:
   int32, ``pos`` is a message). A payload that does not fit must degrade to
   less detail, never to a :class:`ValidationError` raised *by the thing
   reporting an error*.
+* **The error identity.** ``ErrorIdentity`` names the class the worker raised,
+  and it is what lets the client raise that class rather than guess from
+  prose. It rides the same trailer, and it is the one detail the byte budget
+  must never reclaim.
 """
 
 from __future__ import annotations
@@ -21,17 +25,27 @@ from typing import Any
 
 import pytest
 from grpclib.const import Status
+from nanopynix_bindings import errors as nanopynix_errors
 from nanopynix_proto.google.protobuf import Any as ProtoAny
 from nanopynix_proto.google.rpc import Status as RpcStatus
-from nanopynix_proto.nix.common import LogLevel, NixErrorInfo
+from nanopynix_proto.nix.common import ErrorIdentity, LogLevel, NixErrorInfo, SourcePos
 
-from nanopynix.exceptions import EvalError
+from nanopynix.exceptions import (
+    EvalError,
+    ListIndexError,
+    MissingAttributeError,
+    SettingNotLiveError,
+    UnresolvedValueError,
+)
 from nanopynix.rpc._status_details import (
     MAX_DETAILS_BYTES,
     NixStatusDetailsCodec,
+    ReceivedError,
     details_for_exception,
     error_info_from_dict,
     error_info_to_dict,
+    identity_for_exception,
+    status_for_exception,
     unpack_error_details,
 )
 
@@ -52,12 +66,15 @@ def _info(*, traces: int = 0, msg: str = "boom", **overrides: Any) -> dict[str, 
 
 
 def _encode(raw: str = "error: boom", info: dict[str, Any] | None = None) -> bytes:
+    """Encode the pair a real worker sends: the identity, then the Nix detail."""
     encoded = error_info_from_dict(raw=raw, info=info)
-    details = [] if encoded is None else [encoded]
+    details: list[Any] = [ErrorIdentity(nix_type="EvalError")]
+    if encoded is not None:
+        details.append(encoded)
     return NixStatusDetailsCodec().encode(Status.UNKNOWN, "EvalError: boom", details)
 
 
-def _decode(data: bytes) -> tuple[str, dict[str, Any] | None]:
+def _decode(data: bytes) -> ReceivedError:
     details = NixStatusDetailsCodec().decode(Status.UNKNOWN, "EvalError: boom", data)
     return unpack_error_details(list(details))
 
@@ -152,10 +169,10 @@ def test_pos_absent_round_trips_as_none_not_as_an_empty_message() -> None:
 
 
 def test_a_small_payload_is_not_trimmed() -> None:
-    raw, info = _decode(_encode(info=_info(traces=1)))
+    received = _decode(_encode(info=_info(traces=1)))
 
-    assert raw == "error: boom"
-    assert info == _info(traces=1)
+    assert received.raw == "error: boom"
+    assert received.info == _info(traces=1)
 
 
 def test_raw_is_dropped_before_any_trace_frame() -> None:
@@ -164,12 +181,12 @@ def test_raw_is_dropped_before_any_trace_frame() -> None:
     Spending the budget on it would mean discarding real structure to keep a
     string the reader can reconstruct, so it goes first.
     """
-    raw, info = _decode(_encode(raw="e" * MAX_DETAILS_BYTES, info=_info(traces=4)))
+    received = _decode(_encode(raw="e" * MAX_DETAILS_BYTES, info=_info(traces=4)))
 
-    assert raw == ""
-    assert info is not None
-    assert len(info["traces"]) == 4, "traces must survive a large `raw`"
-    assert info["truncated"] is True
+    assert received.raw == ""
+    assert received.info is not None
+    assert len(received.info["traces"]) == 4, "traces must survive a large `raw`"
+    assert received.info["truncated"] is True
 
 
 def test_traces_are_trimmed_from_the_tail_when_info_alone_is_oversize() -> None:
@@ -177,7 +194,7 @@ def test_traces_are_trimmed_from_the_tail_when_info_alone_is_oversize() -> None:
     encoded = _encode(info=original)
 
     assert len(encoded) <= MAX_DETAILS_BYTES
-    _, info = _decode(encoded)
+    info = _decode(encoded).info
     assert info is not None
     kept = info["traces"]
     assert 0 < len(kept) < 200
@@ -186,30 +203,73 @@ def test_traces_are_trimmed_from_the_tail_when_info_alone_is_oversize() -> None:
     assert info["truncated"] is True
 
 
-def test_an_untrimmable_payload_gives_up_rather_than_overflow_the_header() -> None:
+def test_the_identity_survives_a_trim_that_empties_the_nix_detail() -> None:
+    """The budget must never reclaim the class.
+
+    A deep trace is exactly when the trimmer runs, so an identity that the
+    trimmer could drop would make the errors with the most to say arrive as
+    the least specific class.
+    """
+    received = _decode(_encode(raw="e" * MAX_DETAILS_BYTES, info=_info(traces=200)))
+
+    assert received.nix_type == "EvalError"
+
+
+def test_an_untrimmable_payload_keeps_the_identity_and_drops_the_rest() -> None:
     """A single enormous `msg` is past what the C++ per-string cap allows.
 
-    Dropping the trailer loses the detail; overflowing the header list loses
-    the whole response to a protocol error. Prefer the former.
+    Dropping the Nix detail loses the position and the trace; overflowing the
+    header list loses the whole response to a protocol error. Prefer the
+    former -- but the identity is a few dozen bytes and decides which class
+    the caller catches, so it stays.
     """
     encoded = _encode(raw="", info=_info(msg="m" * (MAX_DETAILS_BYTES * 2)))
 
     assert len(encoded) <= MAX_DETAILS_BYTES
-    assert _decode(encoded) == ("", None)
-    # The status message itself -- which carries the exception type -- survives.
+    assert _decode(encoded) == ReceivedError(nix_type="EvalError")
+    # The status message itself -- which also carries the exception type, for
+    # a peer that cannot read the identity -- survives.
     assert RpcStatus.parse(encoded).message == "EvalError: boom"
+
+
+def test_an_unshrinkable_detail_costs_the_nix_info_and_not_the_identity() -> None:
+    """A detail this build cannot trim must not take the class down with it.
+
+    The trimmer knows how to shrink a ``NixErrorInfo`` and nothing else. A
+    newer peer, or a future message, therefore reaches the give-up path -- and
+    the give-up path used to send no details at all.
+    """
+    identity = ErrorIdentity(nix_type="EvalError")
+    # Any registered message the trimmer has no rule for. `SourcePos` is one
+    # the schema already has, so this needs no fixture message of its own.
+    unshrinkable = SourcePos(file="f" * (MAX_DETAILS_BYTES * 2))
+
+    encoded = NixStatusDetailsCodec().encode(Status.UNKNOWN, "EvalError: boom", [identity, unshrinkable])
+
+    assert len(encoded) <= MAX_DETAILS_BYTES
+    assert [detail.unpack() for detail in RpcStatus.parse(encoded).details] == [identity]
 
 
 # ── details_for_exception ─────────────────────────────────────────────
 
 
+def _nix_info_in(details: list[Any]) -> NixErrorInfo:
+    """The one ``NixErrorInfo`` among the details, by type rather than by index.
+
+    The identity comes first in production, so an index would only record the
+    current ordering.
+    """
+    found = [detail for detail in details if isinstance(detail, NixErrorInfo)]
+    assert len(found) == 1, f"expected exactly one NixErrorInfo, got {details}"
+    return found[0]
+
+
 def test_details_for_exception_reads_a_translated_nix_error() -> None:
     exc = EvalError("EvalError", "boom", raw="error: boom", info=_info(traces=1))
-    details = details_for_exception(exc)
+    detail = _nix_info_in(details_for_exception(exc))
 
-    assert details is not None
-    assert details[0].raw == "error: boom"
-    assert details[0].msg == "boom"
+    assert detail.raw == "error: boom"
+    assert detail.msg == "boom"
 
 
 def test_details_for_exception_reads_binding_style_attributes() -> None:
@@ -222,9 +282,7 @@ def test_details_for_exception_reads_binding_style_attributes() -> None:
     exc.raw = "error: boom"  # type: ignore[attr-defined] -- mimics nix_error_info.hh
     exc.info = _info()  # type: ignore[attr-defined] -- mimics nix_error_info.hh
 
-    details = details_for_exception(exc)
-    assert details is not None
-    assert details[0].is_from_expr is True
+    assert _nix_info_in(details_for_exception(exc)).is_from_expr is True
 
 
 @pytest.mark.parametrize(
@@ -233,14 +291,106 @@ def test_details_for_exception_reads_binding_style_attributes() -> None:
 )
 def test_details_for_exception_ignores_wrong_typed_attributes(raw_attr: object, info_attr: object) -> None:
     """Guarded by type, not ``hasattr``: this runs on *every* unhandled handler
-    exception, including non-Nix ones that may carry an unrelated ``info``."""
+    exception, including non-Nix ones that may carry an unrelated ``info``.
+
+    The identity still goes out. It costs a few dozen bytes and it is the only
+    thing that tells the client this was a ``RuntimeError``.
+    """
     exc = RuntimeError("boom")
     if raw_attr is not None:
         exc.raw = raw_attr  # type: ignore[attr-defined] -- deliberately wrong type
     if info_attr is not None:
         exc.info = info_attr  # type: ignore[attr-defined] -- deliberately wrong type
 
-    assert details_for_exception(exc) is None
+    assert details_for_exception(exc) == [ErrorIdentity(class_name="RuntimeError")]
+
+
+# ── the error identity ────────────────────────────────────────────────
+
+
+def test_a_binding_exception_is_named_in_the_nix_vocabulary() -> None:
+    """``__module__`` is the discriminator, exactly as translate_nix_exception uses it.
+
+    A bound class's Python name *is* its Nix C++ name, so it goes in
+    ``nix_type`` where ``exception_for_nix_type`` can look it up.
+    """
+    assert identity_for_exception(nanopynix_errors.EvalError("boom")) == ErrorIdentity(nix_type="EvalError")
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        SettingNotLiveError("pure-eval is read at construction"),
+        EvalError("EvalError", "boom"),
+        RuntimeError("boom"),
+        KeyError("handle 7 not found"),
+    ],
+    ids=lambda exc: type(exc).__name__,
+)
+def test_everything_else_is_named_in_the_python_vocabulary(exc: Exception) -> None:
+    """A class Nix did not raise is named by its own class, whatever it is.
+
+    ``EvalError`` is in this list on purpose: a *translated* NixError is
+    nanopynix's class, not Nix's, even though it describes a Nix failure.
+    """
+    assert identity_for_exception(exc) == ErrorIdentity(class_name=type(exc).__name__)
+
+
+def test_an_identity_is_always_sent_even_with_no_nix_detail() -> None:
+    """Never ``None``. Every exception has a class, and the class is the one
+    thing the client can always use."""
+    assert details_for_exception(UnresolvedValueError("not resolved")) == [
+        ErrorIdentity(class_name="UnresolvedValueError"),
+    ]
+
+
+def test_both_details_ride_the_same_trailer() -> None:
+    """Adding the identity must not cost the Nix detail that was already there."""
+    exc = EvalError("EvalError", "boom", raw="error: boom", info=_info(traces=1))
+
+    received = _decode(NixStatusDetailsCodec().encode(Status.UNKNOWN, "boom", details_for_exception(exc)))
+
+    assert received.class_name == "EvalError"
+    assert received.raw == "error: boom"
+    assert received.info == _info(traces=1)
+
+
+# ── the status code ───────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        (SettingNotLiveError("not live"), Status.FAILED_PRECONDITION),
+        (UnresolvedValueError("not resolved"), Status.FAILED_PRECONDITION),
+        (ValueError("bad scalar type"), Status.INVALID_ARGUMENT),
+        (TypeError("handle 7 is a store, not an eval"), Status.INVALID_ARGUMENT),
+        (KeyError("handle 7 not found"), Status.INVALID_ARGUMENT),
+        (IndexError("list index out of range: 9"), Status.INVALID_ARGUMENT),
+        (RuntimeError("worker executor is unavailable"), Status.UNKNOWN),
+        (TimeoutError("primop timed out"), Status.UNKNOWN),
+        (EvalError("EvalError", "boom"), Status.UNKNOWN),
+    ],
+    ids=lambda value: value.name if isinstance(value, Status) else type(value).__name__,
+)
+def test_the_status_code_names_the_family(exc: Exception, expected: Status) -> None:
+    """A client in another language reads the code before it reads anything else."""
+    assert status_for_exception(exc) == expected
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        MissingAttributeError("EvalError", "attribute 'nope' missing"),
+        ListIndexError("EvalError", "list index 9 is out of bounds"),
+    ],
+    ids=lambda exc: type(exc).__name__,
+)
+def test_a_nix_answer_is_not_a_bad_argument(exc: Exception) -> None:
+    """``MissingAttributeError`` is also a ``KeyError``, and ``ListIndexError``
+    is also an ``IndexError``. Neither is a bad argument to the RPC: Nix
+    answered, and the answer was "not there"."""
+    assert status_for_exception(exc) == Status.UNKNOWN
 
 
 # ── decode robustness ─────────────────────────────────────────────────
@@ -250,7 +400,7 @@ def test_details_for_exception_ignores_wrong_typed_attributes(raw_attr: object, 
 def test_unpack_degrades_to_no_detail_rather_than_raising(details: object) -> None:
     """Degrading is mandatory here: the path is already reporting a failure, so
     a malformed trailer must not replace the caller's Nix error with its own."""
-    assert unpack_error_details(details) == ("", None)
+    assert unpack_error_details(details) == ReceivedError()
 
 
 @pytest.mark.parametrize("data", [b"\xff\xff\xff\xff garbage", b"\x08", b"\x1a\xff"])
@@ -271,9 +421,9 @@ def test_codec_decode_skips_detail_types_this_build_does_not_know() -> None:
         ],
     )
 
-    raw, info = _decode(bytes(proto))
-    assert raw == "error: boom"
-    assert info is not None
+    received = _decode(bytes(proto))
+    assert received.raw == "error: boom"
+    assert received.info is not None
 
 
 def test_codec_emits_a_standard_google_rpc_status() -> None:
@@ -283,7 +433,10 @@ def test_codec_emits_a_standard_google_rpc_status() -> None:
 
     assert parsed.code == Status.UNKNOWN.value
     assert parsed.message == "EvalError: boom"
-    assert parsed.details[0].type_url == "type.googleapis.com/nix.common.NixErrorInfo"
+    assert [detail.type_url for detail in parsed.details] == [
+        "type.googleapis.com/nix.common.ErrorIdentity",
+        "type.googleapis.com/nix.common.NixErrorInfo",
+    ]
 
 
 def test_codec_is_picklable_for_the_forkserver_worker() -> None:

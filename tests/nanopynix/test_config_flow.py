@@ -28,7 +28,7 @@ from nanopynix_proto.nix.eval import ConfigureEvalRequest
 
 import nanopynix
 from nanopynix import NixEvalSettings, NixFetchSettings, stores
-from nanopynix.exceptions import EvalError, NixError, SettingNotLiveError
+from nanopynix.exceptions import EvalError, SettingNotLiveError
 from nanopynix.namespace import STORE_DIR
 from nanopynix.settings import (
     NixEvaluatorSettings,
@@ -321,18 +321,18 @@ async def test_the_worker_refuses_a_hand_built_configure_request(
     Measured before the worker had the check: the worker accepted the request,
     answered with an empty response, and dropped ``pure-eval``.
 
-    The class does not survive the trip. ``convert_handler_errors`` renders
-    every worker exception to ``GRPCError(UNKNOWN, "TypeName: msg")``, so the
-    client raises :class:`~nanopynix.NixError` and not
-    :class:`~nanopynix.SettingNotLiveError`. The refusal and the message both
-    survive, and those are what this asserts. Issue #28 covers the general fix.
+    The class survives the trip, which is what #28 fixed. The worker sends a
+    ``nix.common.ErrorIdentity`` in the status trailer, so this is the same
+    class the inproc route raises two tests below -- and it is the right
+    family, because ``SettingNotLiveError`` says Nix was never consulted while
+    ``NixError`` says the opposite. Before #28 this asserted ``NixError``.
     """
     async with (
         shared_nix_environment.rpc_session() as session,
         session.store() as store,
         session.eval(store) as evaluator,
     ):
-        with pytest.raises(NixError) as excinfo:
+        with pytest.raises(SettingNotLiveError) as excinfo:
             # The proxy, not `configure()`: a caller who bypassed the public
             # API is the subject here.
             await evaluator._ensure_proxy().configure_eval(

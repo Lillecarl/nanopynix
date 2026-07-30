@@ -7,6 +7,7 @@ fallback behavior, and the from_response() factory.
 from __future__ import annotations
 
 from nanopynix.exceptions import (
+    _WIRE_EXCEPTION_TYPES,  # type: ignore[reportPrivateUsage] -- the allowlist this file pins
     BuildHashMismatchError,
     EvalError,
     EvalHashMismatchError,
@@ -18,11 +19,13 @@ from nanopynix.exceptions import (
     NixTypeError,
     ParseError,
     RestrictedPathError,
+    SettingNotLiveError,
     StoreError,
     ThrownError,
     UndefinedVarError,
     UsageError,
     _classify,  # type: ignore[reportPrivateUsage] -- test imports private classifier
+    exception_from_wire,
     from_response,
 )
 
@@ -358,6 +361,133 @@ def test_from_response_fallback_keeps_type_name():
     e = from_response("CustomNixError", "a very unusual error")
     assert isinstance(e, NixError)
     assert e.error_type == "CustomNixError"
+
+
+# ════════════════════════════════════════════════════════════════════
+# exception_from_wire — the allowlist for boundary B
+# ════════════════════════════════════════════════════════════════════
+
+# Every class the rpc client will build from a name the worker sent.
+#
+# Pinned as a literal on purpose. The table is derived, so a new exception
+# class in `exceptions.py` joins it silently, and "may a worker construct this
+# from a message?" is a decision somebody has to make rather than inherit.
+# Update this list when you have made it.
+#
+# `WrongNixTypeError` is deliberately absent: its `__init__` is keyword-only,
+# so a message alone cannot rebuild it. The six builtins are exactly what
+# `rpc/worker/` and `nanopynix/_core/` raise.
+WIRE_CLASSES = {
+    "BadStorePathError",
+    "BuildError",
+    "BuildHashMismatchError",
+    "BuildTimedOutError",
+    "CachedBuildFailureError",
+    "DependencyFailedError",
+    "EvalError",
+    "EvalHashMismatchError",
+    "EvalSessionClosedError",
+    "ForeignValueError",
+    "HashMismatchError",
+    "IndexError",
+    "InfiniteRecursionError",
+    "InputRejectedError",
+    "InvalidPathError",
+    "KeyError",
+    "ListIndexError",
+    "LockedFlakeReleasedError",
+    "LogLimitExceededError",
+    "MiscBuildError",
+    "MissingArgumentError",
+    "MissingAttributeError",
+    "NixAssertionError",
+    "NixError",
+    "NixSysError",
+    "NixTypeError",
+    "NoSubstitutersError",
+    "NotDeterministicError",
+    "ObjectLifetimeError",
+    "ObjectMisuseError",
+    "OutputRejectedError",
+    "ParseError",
+    "PermanentBuildError",
+    "RestrictedPathError",
+    "RuntimeError",
+    "SessionClosedError",
+    "SettingNotLiveError",
+    "StoreClosedError",
+    "StoreError",
+    "ThrownError",
+    "TimeoutError",
+    "TransientBuildError",
+    "TypeError",
+    "UndefinedVarError",
+    "UnimplementedError",
+    "UnresolvedValueError",
+    "UnsupportedError",
+    "UsageError",
+    "ValueError",
+    "ValueReleasedError",
+}
+
+
+def test_the_wire_allowlist_is_what_this_file_says_it_is():
+    assert set(_WIRE_EXCEPTION_TYPES) == WIRE_CLASSES
+
+
+def test_the_allowlist_holds_only_classes_this_module_defines_and_the_named_builtins():
+    """``__module__`` is the fence around a table built by walking subclasses.
+
+    Without it a subclass declared in a test, or in a consumer of this
+    library, would enter the table and make the resolution depend on which
+    modules happened to be imported first.
+    """
+    outside = {
+        name: cls.__module__
+        for name, cls in _WIRE_EXCEPTION_TYPES.items()
+        if cls.__module__ not in {"builtins", "nanopynix.exceptions"}
+    }
+    assert outside == {}
+
+
+def test_no_base_exception_can_be_named():
+    """An open resolver would let the payload construct ``SystemExit``."""
+    for name in ("SystemExit", "KeyboardInterrupt", "BaseException", "GeneratorExit"):
+        assert exception_from_wire(nix_type="", class_name=name, msg="boom") is None
+
+
+def test_a_nix_type_is_resolved_exactly_as_the_prose_prefix_was():
+    """The identity replaces the *source* of the name and nothing after it.
+
+    Same class, same ``error_type``, same message as the prefix path produces
+    for the same worker error -- including the refinement, which is what keeps
+    a coarse ``EvalError`` from re-coarsening a type error.
+    """
+    from_identity = exception_from_wire(nix_type="EvalError", class_name="", msg="EvalError: cannot compare a b")
+    from_prose = from_response("Unknown", "EvalError: cannot compare a b")
+
+    assert type(from_identity) is type(from_prose) is NixTypeError
+    assert isinstance(from_identity, NixError)
+    assert (from_identity.error_type, from_identity.msg) == (from_prose.error_type, from_prose.msg)
+
+
+def test_a_plain_class_is_built_from_the_message_alone():
+    resolved = exception_from_wire(
+        nix_type="",
+        class_name="SettingNotLiveError",
+        msg="SettingNotLiveError: pure-eval is read at construction",
+    )
+
+    assert type(resolved) is SettingNotLiveError
+    assert str(resolved) == "pure-eval is read at construction"
+
+
+def test_a_prefix_that_is_not_the_resolved_name_is_left_alone():
+    """Exact match only. A message that merely holds a colon is not a prefix."""
+    resolved = exception_from_wire(nix_type="", class_name="ValueError", msg="setting: not one we know")
+
+    assert type(resolved) is ValueError
+    assert str(resolved) == "setting: not one we know"
 
 
 # ════════════════════════════════════════════════════════════════════

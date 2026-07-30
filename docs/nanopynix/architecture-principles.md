@@ -74,9 +74,26 @@ Four families, and every exception belongs to exactly one:
 | The engine failed | `EngineError` *(new, #15)* | the transport or the worker failed |
 | Python's own | `TimeoutError`, `ValueError`, … | ordinary Python conditions |
 
-`NixError` keeps its three boundaries (A: nanobind type name, B: worker
-message prefix plus status trailer, C: daemon prose). That model is sound and
-documented; leave it.
+`NixError` keeps its three boundaries (A: nanobind type name, B: the status
+trailer, C: daemon prose). That model is sound and documented; leave it.
+
+Boundary B carries the class as a field, not as prose. The worker sends a
+`nix.common.ErrorIdentity` beside the `NixErrorInfo`, and the client resolves
+it against an allowlist that `nanopynix.exceptions` builds at import. That is
+what makes the "same exception class" rule below hold for an exception Nix did
+not raise, and it is what lets a client in another language read the class
+without splitting a string. Two rules go with it:
+
+- **The identity seeds the resolution; it does not end it.** Nix reports both
+  a type error and a hash mismatch as plain `nix::EvalError`, so the client
+  still narrows by message. Narrow only, never widen.
+- **The identity is never trimmed.** It is a few dozen bytes, and the byte
+  budget binds exactly when the trace is deep, which is when the class matters
+  most.
+
+The worker keeps the older `"TypeName: message"` prefix on the status message.
+It is what a peer without the codec still recovers, and it is why an absent
+identity degrades rather than fails.
 
 ## Transport-independent domain models
 

@@ -1,14 +1,23 @@
-"""Carry a Nix error's structured detail across the worker RPC (boundary B).
+"""Carry a worker error's structured detail across the worker RPC (boundary B).
 
-A gRPC failure normally reduces to a status code plus one string. That is
-enough to recover *which* exception type to raise -- the worker prefixes the
-class name onto the message -- but not the ``nix::ErrorInfo`` the bindings
-recovered on the C++ side: source position, evaluation trace, suggestions.
-Without a channel for it, the rpc engine raises the right exception class with
-an empty :attr:`~nanopynix.NixError.info`, while the inproc engine raising the
-same failure has the full payload. Process isolation is the only thing rpc has
-that inproc does not, and none of that applies to an error's contents, so the
-asymmetry would be a defect rather than a consequence.
+A gRPC failure normally reduces to a status code plus one string. Two things
+do not fit in that string, and both used to be lost:
+
+* **Which class the worker raised.** The prose prefix on the status message
+  recovers a Nix C++ class and nothing else, because that is the only
+  vocabulary ``exceptions.from_response`` can read from it. Every other
+  exception the worker raises reached the client as a plain ``NixError``.
+  :class:`~nanopynix_proto.nix.common.ErrorIdentity` carries the class as a
+  field instead.
+* **The ``nix::ErrorInfo`` the bindings recovered on the C++ side**: source
+  position, evaluation trace, suggestions. Without a channel for it, the rpc
+  engine raises the right exception class with an empty
+  :attr:`~nanopynix.NixError.info`, while the inproc engine raising the same
+  failure has the full payload.
+
+Process isolation is the only thing rpc has that inproc does not, and none of
+that applies to an error's contents, so either asymmetry would be a defect
+rather than a consequence.
 
 gRPC's channel for exactly this is the ``grpc-status-details-bin`` trailer: a
 serialized ``google.rpc.Status`` whose ``details`` are ``Any``-packed messages.
@@ -26,6 +35,11 @@ the server omits the trailer and the client leaves ``details`` as ``None``, with
 no error either side. See ``rpc/worker/_worker.py`` and
 ``rpc/client/_pool.py`` for the two installation points.
 
+That silent degradation is why the worker still prefixes ``"TypeName: "`` onto
+the status message. A peer without the codec recovers a Nix C++ class from the
+prefix, which is what every client did before the identity existed. A peer with
+the codec strips the duplicate.
+
 The public :attr:`~nanopynix.NixError.info` stays a plain ``dict``, not
 :class:`~nanopynix_proto.nix.common.NixErrorInfo`. On inproc there is no proto
 anywhere in the path -- ``nix_error_info.hh`` builds the dict directly in C++ --
@@ -38,21 +52,23 @@ with. The message is a wire encoding; the dict is the API.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from grpclib.const import Status
 from grpclib.encoding.base import StatusDetailsCodecBase
 from nanopynix_proto.google.protobuf import Any as ProtoAny
 from nanopynix_proto.google.rpc import Status as RpcStatus
-from nanopynix_proto.nix.common import ErrorTrace, LogLevel, NixErrorInfo, SourcePos
+from nanopynix_proto.nix.common import ErrorIdentity, ErrorTrace, LogLevel, NixErrorInfo, SourcePos
 from pydantic import ValidationError
 
 from nanopynix._typechecking import BEARTYPING
+from nanopynix.exceptions import NixError, ObjectMisuseError
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Sequence
 
     from betterproto2 import Message
-    from grpclib.const import Status
 
 logger = logging.getLogger(__name__)
 
@@ -159,17 +175,69 @@ class NixStatusDetailsCodec(StatusDetailsCodecBase):
 NIX_STATUS_DETAILS_CODEC = NixStatusDetailsCodec()
 
 
-def details_for_exception(exc: BaseException) -> list[NixErrorInfo] | None:
-    """Extract an exception's structured Nix detail, if it has any.
+def identity_for_exception(exc: BaseException) -> ErrorIdentity:
+    """Name the exception's class, in whichever of the two vocabularies fits.
 
-    Worker handlers see errors in two shapes, and one lookup covers both
-    because the bindings and :class:`~nanopynix.NixError` agree on the names:
+    ``__module__`` is the discriminator, exactly as in
+    ``translate_nix_exception``: a class from ``nanopynix_bindings`` is a Nix
+    C++ class, and its Python name *is* the C++ name that
+    :func:`~nanopynix.exceptions.exception_for_nix_type` looks up. Anything
+    else is a nanopynix or a Python class, and the client resolves it against
+    its own allowlist.
+
+    Never ``None``. Every exception has a class, and the class is the one
+    thing the client can always use.
+    """
+    name = type(exc).__name__
+    if type(exc).__module__.startswith("nanopynix_bindings"):
+        return ErrorIdentity(nix_type=name)
+    return ErrorIdentity(class_name=name)
+
+
+def status_for_exception(exc: BaseException) -> Status:
+    """Choose the gRPC status code for a worker failure.
+
+    A client in another language reads the code before it reads anything else,
+    and a blanket ``UNKNOWN`` tells it nothing. Two families have a code that
+    means what gRPC says it means:
+
+    * :class:`~nanopynix.ObjectMisuseError` -- the object's state is wrong for
+      the call, which is ``FAILED_PRECONDITION`` in as many words.
+    * the four argument-shaped builtins -- the request named an index, a
+      handle or a type the worker cannot use, which is ``INVALID_ARGUMENT``.
+
+    Everything else stays ``UNKNOWN``, including every :class:`NixError` and
+    every Nix C++ error. A Nix failure is a failure of the requested *work*,
+    not of the request, and gRPC has no code for that. ``DEADLINE_EXCEEDED``
+    and ``UNIMPLEMENTED`` stay unused for the opposite reason: both mean
+    something specific to gRPC middleware that a worker-internal
+    ``TimeoutError`` or a ``nix::UnimplementedError`` is not.
+    """
+    if isinstance(exc, ObjectMisuseError):
+        return Status.FAILED_PRECONDITION
+    # `NixError` first: `MissingAttributeError` is also a `KeyError` and
+    # `ListIndexError` is also an `IndexError`, and neither is a bad argument
+    # to the RPC -- Nix answered, and the answer was "not there".
+    if isinstance(exc, NixError):
+        return Status.UNKNOWN
+    if isinstance(exc, (IndexError, KeyError, TypeError, ValueError)):
+        return Status.INVALID_ARGUMENT
+    return Status.UNKNOWN
+
+
+def details_for_exception(exc: BaseException) -> list[Message]:
+    """Everything the status trailer carries for one worker exception.
+
+    Always at least the :class:`ErrorIdentity`, which is what lets the client
+    raise the class the worker raised. The :class:`NixErrorInfo` joins it when
+    the exception has one, in two shapes that one lookup covers because the
+    bindings and :class:`~nanopynix.NixError` agree on the names:
 
     * a raw nanobind binding exception, with ``raw``/``info`` attached by
       ``nix_error_info.hh``. This is the common case -- the worker
       deliberately does *not* run ``translate_nix_exception``, because the
-      wire protocol identifies the error by its Nix C++ class name and
-      translating would replace that with the public one.
+      identity carries the Nix C++ class name and translating would replace
+      that with the public one.
     * an already-translated :class:`~nanopynix.NixError` from worker-side
       helper code, where ``raw``/``info`` are declared attributes.
 
@@ -183,11 +251,36 @@ def details_for_exception(exc: BaseException) -> list[NixErrorInfo] | None:
         raw=raw if isinstance(raw, str) else "",
         info=cast("dict[str, Any]", info) if isinstance(info, dict) else None,
     )
-    return None if encoded is None else [encoded]
+    details: list[Message] = [identity_for_exception(exc)]
+    if encoded is not None:
+        details.append(encoded)
+    return details
 
 
-def unpack_error_details(details: Any) -> tuple[str, dict[str, Any] | None]:
-    """Read a received ``GRPCError.details`` back into ``(raw, info)``.
+@dataclass(frozen=True, slots=True)
+class ReceivedError:
+    """What the status trailer of a failed RPC told the client.
+
+    Every field has an "absent" value that is also its default, because a peer
+    with no codec sends no trailer at all and that has to stay a loss of
+    detail rather than a second failure.
+    """
+
+    nix_type: str = ""
+    """The Nix C++ class the worker named, or ``""``."""
+
+    class_name: str = ""
+    """The nanopynix or Python class the worker named, or ``""``."""
+
+    raw: str = ""
+    """``showErrorInfo``'s rendering, for :attr:`~nanopynix.NixError.raw`."""
+
+    info: dict[str, Any] | None = None
+    """The ``nix::ErrorInfo`` dict, for :attr:`~nanopynix.NixError.info`."""
+
+
+def unpack_error_details(details: Any) -> ReceivedError:
+    """Read a received ``GRPCError.details`` back into its parts.
 
     Tolerant on purpose: ``details`` is ``None`` whenever the peer has no codec
     installed, and the contents are only as trustworthy as the peer. Anything
@@ -195,11 +288,21 @@ def unpack_error_details(details: Any) -> tuple[str, dict[str, Any] | None]:
     the path that is already reporting a failure.
     """
     if not isinstance(details, list):
-        return "", None
+        return ReceivedError()
+    identity = ErrorIdentity()
+    raw = ""
+    info: dict[str, Any] | None = None
     for detail in cast("list[Any]", details):
-        if isinstance(detail, NixErrorInfo):
-            return detail.raw, error_info_to_dict(detail)
-    return "", None
+        if isinstance(detail, ErrorIdentity):
+            identity = detail
+        elif isinstance(detail, NixErrorInfo):
+            raw, info = detail.raw, error_info_to_dict(detail)
+    return ReceivedError(
+        nix_type=identity.nix_type,
+        class_name=identity.class_name,
+        raw=raw,
+        info=info,
+    )
 
 
 def _build_error_info(*, raw: str, info: dict[str, Any]) -> NixErrorInfo:
@@ -257,25 +360,32 @@ def _as_str(value: object) -> str:
 def _trim_to_budget(proto: RpcStatus) -> RpcStatus:
     """Shrink an oversized ``Status`` until it fits :data:`MAX_DETAILS_BYTES`.
 
-    ``raw`` goes first: it is ``showErrorInfo``'s rendering of the very fields
-    beside it, so it is the half a reader can reconstruct. Trace frames go
-    next, from the tail, since the innermost frames are the ones worth
-    keeping. Anything dropped sets ``truncated``, so a reader can tell "no
-    trace" from "trace discarded" -- the same flag the C++ side sets when it
-    hits its own frame cap.
+    The :class:`ErrorIdentity` is never trimmed. It is a few dozen bytes, and
+    it is the one detail that decides which exception the client raises;
+    losing it on a deep trace would mean the errors with the most to say
+    arrive as the least specific class.
+
+    Of the rest, ``raw`` goes first: it is ``showErrorInfo``'s rendering of
+    the very fields beside it, so it is the half a reader can reconstruct.
+    Trace frames go next, from the tail, since the innermost frames are the
+    ones worth keeping. Anything dropped sets ``truncated``, so a reader can
+    tell "no trace" from "trace discarded" -- the same flag the C++ side sets
+    when it hits its own frame cap.
     """
     unpacked = [detail.unpack() for detail in proto.details]
+    kept = [detail for detail in unpacked if isinstance(detail, ErrorIdentity)]
     payloads = [detail for detail in unpacked if isinstance(detail, NixErrorInfo)]
-    if len(payloads) != len(unpacked):
-        # Something untrimmable is taking up the budget; there is nothing
-        # smarter to do than send the status with no details at all.
-        return RpcStatus(code=proto.code, message=proto.message)
+    if len(kept) + len(payloads) != len(unpacked):
+        # A detail this function does not know how to shrink is taking up the
+        # budget. Keep the identity, drop the rest: an unshrinkable payload
+        # must not cost the client the exception class as well.
+        return _repack(proto, kept)
 
     for payload in payloads:
         if payload.raw:
             payload.raw = ""
             payload.truncated = True
-    proto = _repack(proto, payloads)
+    proto = _repack(proto, [*kept, *payloads])
 
     # Deepest trace first, so the budget is reclaimed from whichever detail is
     # actually responsible for the overflow.
@@ -285,17 +395,18 @@ def _trim_to_budget(proto: RpcStatus) -> RpcStatus:
             break
         deepest.traces.pop()
         deepest.truncated = True
-        proto = _repack(proto, payloads)
+        proto = _repack(proto, [*kept, *payloads])
 
     if len(bytes(proto)) > MAX_DETAILS_BYTES:
         # A single hint or message is itself enormous, past what the C++
-        # per-string cap should allow. Send the type-bearing status message
-        # alone rather than risk a protocol error that loses the error entirely.
-        return RpcStatus(code=proto.code, message=proto.message)
+        # per-string cap should allow. Send the identity and the status
+        # message alone rather than risk a protocol error that loses the
+        # error entirely.
+        return _repack(proto, kept)
     return proto
 
 
-def _repack(proto: RpcStatus, payloads: list[NixErrorInfo]) -> RpcStatus:
+def _repack(proto: RpcStatus, payloads: Sequence[Message]) -> RpcStatus:
     return RpcStatus(
         code=proto.code,
         message=proto.message,
