@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from nanopynix_bindings import expr as nanopynix_expr
-from pytest_agent import note
 
 import nanopynix
+from tests.support.notes import note
 
 if TYPE_CHECKING:
     from collections.abc import Callable

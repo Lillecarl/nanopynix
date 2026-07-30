@@ -16,13 +16,13 @@ import pytest
 from anyio import Path as AnyioPath
 from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
 from nanopynix_proto.nix.store import GcAction
-from pytest_agent import note
 
 import nanopynix
 from nanopynix import Derivation, GcResult, MissingInfo, NixType, StorePath, inproc, yaml_primops
 from nanopynix.settings import NixEvalSettings, normalize_nix_path
 from tests.support.git import init_flake_repo
 from tests.support.nix_markers import NIX_GC_ROOTS_BUG
+from tests.support.notes import note
 
 if TYPE_CHECKING:
     from tests.support.nix_environment import InprocSessionFactory, NixTestEnvironment

@@ -20,12 +20,12 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from nanopynix_bindings import store as nanopynix_store
 from pydantic import ValidationError
-from pytest_agent import note
 
 import nanopynix
 from nanopynix import stores
 from nanopynix.namespace import OverlayNamespace
 from nanopynix.settings import NIX_2_34, NixStoreDefaults, field_is_supported, running_nix_version
+from tests.support.notes import note
 
 if TYPE_CHECKING:
     from pathlib import Path
