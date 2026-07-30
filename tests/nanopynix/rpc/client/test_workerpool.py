@@ -4,15 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import Any, cast
+import gc
+import os
+import signal
+from typing import TYPE_CHECKING, Any, cast
 
 import anyio
+import anyio.to_thread
 import pytest
 from grpclib.exceptions import StreamTerminatedError
 
 from nanopynix import LogEvent, StoreClosedError, StoreError
 from nanopynix.rpc import Nix, WorkerDiedError
 from nanopynix.rpc.client import session as session_module
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 
 async def test_single_worker_basics():
@@ -293,3 +300,201 @@ async def test_close_reports_every_failure_it_collected():
 async def _collect(nix: Nix, events: list[LogEvent]) -> None:
     async for event in nix.log_stream():
         events.append(event)  # noqa: PERF401 -- events is a shared list a background caller polls while this loop keeps running; a comprehension would defer visibility until the stream ends
+
+
+# ── Worker death: real signals, not a closed channel ─────────────────
+#
+# Crash isolation is the documented reason this engine exists --
+# docs/nanopynix/architecture.md promises "a worker crash/OOM raises
+# WorkerDiedError -- your process survives" -- and until these tests existed
+# nothing sent the worker a signal. test_worker_death_detection above
+# force-closes the *channel*, and says so itself: "kill via process is not
+# directly exposed". A closed channel is not a dead process. It leaves no
+# half-written pipe, no child to reap, and no finalizer firing after the peer
+# is gone. See issue #12.
+#
+# All four are `forked`, and not `concurrency` as issue #12 asks. Both parts
+# were measured, not chosen. Unmarked, the run of tests/nanopynix/rpc failed
+# twice: once inside test_a_killed_worker_still_lets_the_eval_session_close,
+# and once in test_worker_initializes_nix_on_dedicated_thread -- an unrelated
+# test several files later, with two leaked StreamTerminatedErrors. Adding
+# _tolerating_the_backchannel_leak fixed the first and not the second, because
+# that leak surfaces after the handler is restored. Forking contains it, which
+# is the same conclusion test_worker_death_detection reached about the same
+# backchannel peer. The handler stays as well: it is what keeps the first
+# failure away.
+#
+# `concurrency` is then the marker not to add, because it would put a forked
+# test into the ThreadSanitizer matrix (`-m concurrency` in
+# ci/workflows/lib.nix) and pytest-forked under TSan has never run here.
+# Killing a process is not a data race, so TSan has nothing to find in these
+# four -- it would only add a combination nobody has tried.
+
+# Big enough to keep the worker busy for seconds, and pure, so it needs no
+# build store and no --run-temp-store-builds. The kill lands a fraction of a
+# second in, which is far inside the RPC timeout -- so a TimeoutError can
+# never be what a test below actually caught.
+_SLOW_PURE_EVAL = "builtins.foldl' (a: b: a + b) 0 (builtins.genList (x: x) 40000000)"
+
+
+def _worker_process(nix: Nix) -> Any:
+    """Return this session's worker, as a ``multiprocessing.Process``.
+
+    ``WorkerClient._on_worker_process_start`` keeps the process object rather
+    than only its pid, precisely so that teardown can stop it directly. That
+    makes it reachable here too, which is the whole mechanism these tests
+    needed -- see test_a_cancelled_close_still_stops_the_worker_process for
+    the same reach.
+    """
+    proc = nix._manager._worker_proc  # type: ignore[reportPrivateUsage] -- intentional test of internal transport state
+    assert proc is not None
+    assert proc.is_alive()
+    return proc
+
+
+async def _reaped(proc: Any) -> None:
+    """Wait for a signalled child to be collected, and assert that it was.
+
+    A dead child that is never joined stays a zombie, so "the call raised" is
+    only half of what crash isolation means.
+    """
+    await anyio.to_thread.run_sync(proc.join, 10.0)
+    assert not proc.is_alive()
+    assert proc.exitcode is not None
+
+
+@contextlib.contextmanager
+def _tolerating_the_backchannel_leak() -> Generator[None]:
+    """Ignore the ``StreamTerminatedError`` a dead pipe leaves unretrieved.
+
+    A dead worker breaks the read in
+    ``grpclib_transports.bidi.LogicalRpcPeer._receive_loop``, which belongs to
+    the backchannel control peer riding the same channel. Nothing ever
+    retrieves that exception through normal control flow, so anyio's shared
+    runner collects it and raises it into whichever test is running when it
+    finally surfaces -- sometimes this one, sometimes an unrelated one several
+    tests later. Measured both ways here before this existed.
+
+    ``test_worker_death_detection`` above diagnosed this first, and its
+    docstring is the full account. It inlines the same handler rather than
+    calling this one because its window is deliberately narrower: it starts
+    tolerating only *after* its first successful call, so a
+    ``StreamTerminatedError`` against a live worker still fails it. The tests
+    below cannot draw that line as sharply, and do not need to -- a worker
+    that died before they killed it fails ``_worker_process``'s liveness
+    assertion instead.
+    """
+    loop = asyncio.get_running_loop()
+    previous = loop.get_exception_handler()
+
+    def handler(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        if isinstance(context.get("exception"), StreamTerminatedError):
+            return
+        if previous is not None:
+            previous(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handler)
+    try:
+        yield
+    finally:
+        loop.set_exception_handler(previous)
+
+
+@pytest.mark.forked
+async def test_a_killed_worker_fails_the_call_that_was_in_flight():
+    """SIGKILL during a call raises WorkerDiedError, which is what an OOM does.
+
+    The evaluation is the in-flight work: it is running inside the worker when
+    the signal arrives, so this covers the case the channel test cannot -- a
+    request that was already accepted and can never be answered.
+    """
+    with anyio.fail_after(60), _tolerating_the_backchannel_leak():
+        async with Nix() as nix, nix.store() as store, nix.eval(store) as evaluator:
+            proc = _worker_process(nix)
+            pending = asyncio.ensure_future(evaluator.string(_SLOW_PURE_EVAL))
+            await anyio.sleep(0.5)
+            assert not pending.done(), "the evaluation finished before the kill; make it slower"
+
+            proc.kill()
+
+            with pytest.raises(WorkerDiedError):
+                await pending
+            await _reaped(proc)
+
+
+@pytest.mark.forked
+async def test_a_killed_worker_still_lets_the_eval_session_close():
+    """close() must finish when the handles it would release are already gone.
+
+    ``EvalSession.close`` releases deferred handles and then closes the
+    EvalState, both over RPC. Against a dead worker both used to raise
+    WorkerDiedError -- and the second raised from a ``finally``, so it replaced
+    the first and the caller was told the wrong thing about a session it could
+    do nothing about anyway.
+
+    A dropped ValueProxy is load-bearing here. Its finalizer queues a release
+    rather than making an RPC from GC, so the queue is non-empty when close
+    runs and the release path is really exercised.
+    """
+    with anyio.fail_after(60), _tolerating_the_backchannel_leak():
+        async with Nix() as nix, nix.store() as store:
+            evaluator = nix.eval(store)
+            await evaluator.open()
+            kept = await evaluator.string("{ a = 1; }")
+            dropped = await evaluator.string("2")
+            assert await kept.attr("a").as_int() == 1
+            del dropped
+            gc.collect()
+
+            proc = _worker_process(nix)
+            proc.kill()
+            await _reaped(proc)
+
+            # No raise, and no hang: the deadline above is the hang assertion.
+            await evaluator.close()
+
+
+@pytest.mark.forked
+async def test_a_fresh_session_works_after_a_worker_died():
+    """A badly died child leaves the forkserver, and this process, usable.
+
+    Nix state is process-global and the worker is started through a forkserver
+    that outlives any one worker, so "the next Session still works" is not
+    implied by the two tests above.
+    """
+    with anyio.fail_after(90), _tolerating_the_backchannel_leak():
+        async with Nix() as nix:
+            proc = _worker_process(nix)
+            proc.kill()
+            await _reaped(proc)
+
+        async with Nix() as second, second.store() as store:
+            assert isinstance(await store.uri(), str)
+
+
+@pytest.mark.forked
+async def test_an_aborted_worker_reports_its_signal():
+    """An abort inside the worker is a worker death, and says which one it was.
+
+    ``nanopynix.init_libstore`` documents SIGABRT as the way Nix ends a process
+    that asked for an experimental feature it does not have. At the client
+    boundary that is indistinguishable from a kill -- both are a closed pipe,
+    both raise WorkerDiedError -- so the exit status is the only thing that
+    tells the two apart, and it is what this asserts.
+    """
+    with anyio.fail_after(60), _tolerating_the_backchannel_leak():
+        async with Nix() as nix, nix.store() as store:
+            proc = _worker_process(nix)
+            os.kill(proc.pid, signal.SIGABRT)
+
+            # Reap before calling, not after. A signal is asynchronous, so a
+            # call dispatched immediately could reach a pipe that is still
+            # open and then wait out the RPC timeout instead -- which would
+            # pass for the wrong reason.
+            await _reaped(proc)
+            assert proc.exitcode == -signal.SIGABRT
+
+            with pytest.raises(WorkerDiedError):
+                await store.uri()

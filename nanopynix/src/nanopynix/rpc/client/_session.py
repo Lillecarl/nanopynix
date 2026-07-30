@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import queue
 import threading
 import weakref
@@ -72,6 +73,7 @@ from nanopynix.exceptions import (
     build_error_from_result,
 )
 from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedInput, NixType
+from nanopynix.rpc.client._pool import WorkerDiedError
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
 from nanopynix.settings import (
     DEFAULT_LINE_EDITORS,
@@ -1048,9 +1050,23 @@ class EvalSession:
             return
         try:
             try:
-                await proxy.drain_deferred_releases()
+                # A handle inside a dead worker needs no release, and an
+                # EvalState inside one needs no close. Both of these are RPCs,
+                # so both raise WorkerDiedError when the worker is gone -- and
+                # the second raises from a `finally`, so it used to replace the
+                # first and tell the caller the wrong thing about a session it
+                # could do nothing about. Two neighbours already answer this
+                # the same way: WorkerClient.close swallows the same class
+                # around its Shutdown, and Store.close around its CloseStore.
+                #
+                # Only worker death. Every other failure still reaches the
+                # caller, because every other failure means the worker is
+                # alive and did not do what it was asked.
+                with contextlib.suppress(WorkerDiedError):
+                    await proxy.drain_deferred_releases()
             finally:
-                await proxy.close_eval(CloseEvalRequest())
+                with contextlib.suppress(WorkerDiedError):
+                    await proxy.close_eval(CloseEvalRequest())
         finally:
             proxy.deactivate()
             self._proxy = None
