@@ -181,16 +181,24 @@ class TestTheExemptionDecoratorDoesWhatItClaims:
 # *silently unchecked* -- beartype gives up on the whole callable, not just the
 # offending hint -- so an entry is a real hole and needs a real reason.
 #
-# Both of these annotate `grpclib._typing.IServable`, a third-party protocol
-# that is not `@runtime_checkable`. beartype has to `isinstance` against a hint
-# to check it, `typing` refuses that for a bare protocol, and beartype's only
-# recourse is to skip. Not fixable here: the decorator would have to go on
-# grpclib's declaration. nanopynix's own protocols were in this list until
-# `@runtime_checkable` was added to them; see nanopynix/protocols.py.
-UNDECORATABLE: dict[str, str] = {
-    "nanopynix.rpc.worker._worker.worker_service_factory": "returns grpclib's non-runtime-checkable IServable",
-    "nanopynix.rpc.worker._worker._shutdown_worker": "takes grpclib's non-runtime-checkable IServable",
-}
+# Empty, and it should stay that way.
+#
+# It held two entries until #32: `worker_service_factory` and
+# `_shutdown_worker`, both annotating `grpclib._typing.IServable`, a
+# third-party protocol that is not `@runtime_checkable`. The reason recorded
+# here said "not fixable here: the decorator would have to go on grpclib's
+# declaration". That was wrong, and the mistake is worth keeping visible: the
+# fix was never to make *their* protocol checkable, but to stop naming it. The
+# factory builds three concrete handlers and already cast the list to
+# `list[IServable]`, so the annotation described the caller's contract rather
+# than the code, and the `cast` was the tell. Naming the union of the three
+# handlers is both checkable and more honest, and `Server` still accepts them
+# because they satisfy the protocol structurally.
+#
+# nanopynix's own protocols were in this list too, until `@runtime_checkable`
+# was added to them; see nanopynix/protocols.py. That is the other fix, and it
+# is the right one when the declaration is ours.
+UNDECORATABLE: dict[str, str] = {}
 
 # beartype names the callable in the warning's first line, in one of several
 # phrasings ("Function ...()", "Coroutine factory function ...()").

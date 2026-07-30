@@ -87,7 +87,7 @@ if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncIterator, Callable
 
     from grpclib._typing import (
-        IServable,  # type: ignore[reportPrivateUsage] -- private import required by grpclib protobuf service binding
+        IServable,  # type: ignore[reportPrivateUsage] -- named only in the cast in _stdio_main; see the comment there
     )
     from grpclib_transports import WorkerBackchannel
 
@@ -484,6 +484,24 @@ class WorkerServiceHandler(WorkerServiceBase):
 
 # ── Factory ──────────────────────────────────────────────────────────
 
+# The three handlers this module serves, named as themselves rather than as
+# grpclib's `IServable`.
+#
+# `IServable` is the protocol grpclib's `Server` accepts, and it looks like
+# the right annotation. It is not one that can be checked: it is a `Protocol`
+# without `@runtime_checkable`, so beartype cannot build an `isinstance` test
+# for it, warns, and leaves the function undecorated. Both functions annotated
+# with it were therefore the only ones in `nanopynix` that no test checked at
+# runtime, and each worker subprocess printed the warning into the captured
+# output of whichever test started it.
+#
+# A plain assignment, not a PEP 695 `type` statement: the alias must be a real
+# union object at import time for beartype to compile a check from it.
+#
+# The handlers satisfy `IServable` structurally, so `Server` still accepts
+# them and the `cast` that used to launder the return type is gone.
+WorkerServices = WorkerServiceHandler | StoreServiceHandler | EvalServiceHandler
+
 
 def worker_service_factory(
     backchannel: WorkerBackchannel | None = None,
@@ -491,7 +509,7 @@ def worker_service_factory(
     executor: NixThreadExecutor | None = None,
     store_limiter: anyio.CapacityLimiter | None = None,
     namespace: OverlayNamespace | None = None,
-) -> list[IServable]:
+) -> list[WorkerServices]:
     """Create service handlers with a shared WorkerState.
 
     Must be called *inside* the worker process (before Nix init so that
@@ -535,24 +553,27 @@ def worker_service_factory(
     if backchannel is not None:
         state.rpc_bridge = ThreadedRpcPrimopBridge(backchannel)
 
-    return cast(
-        "list[IServable]",
-        [
-            WorkerServiceHandler(state),
-            StoreServiceHandler(state),
-            EvalServiceHandler(state),
-        ],
-    )
+    return [
+        WorkerServiceHandler(state),
+        StoreServiceHandler(state),
+        EvalServiceHandler(state),
+    ]
 
 
 # ── Async runner (for grpclib-transports multiprocessing mode) ───────
 
 
-async def _shutdown_worker(handlers: list[IServable]) -> None:
+async def _shutdown_worker(handlers: list[WorkerServices]) -> None:
     """Tear down the shared `WorkerState` after a transport closes -- shared
     by both `run_worker` (multiprocessing) and `_stdio_main` (stdio), which
     otherwise hand-repeated this identically."""
-    worker_state: WorkerState = cast("WorkerServiceHandler", handlers[0])._state  # type: ignore[reportPrivateUsage, reportUnknownVariableType, reportUnknownMemberType] -- private attr access, cascade from Any  # noqa: SLF001
+    # All three handlers hold the same state, so the first one will do. The
+    # narrowing is a real check now that the list is typed as the concrete
+    # handlers rather than as grpclib's protocol.
+    first = handlers[0]
+    if not isinstance(first, WorkerServiceHandler):
+        raise TypeError(f"worker_service_factory must build the worker handler first, got {type(first).__name__}")
+    worker_state: WorkerState = first._state  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- cascade from WorkerState Any attributes  # noqa: SLF001
     collector = worker_state.collector  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- cascade from WorkerState Any attributes
     if collector is not None:
         collector.close()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
@@ -606,7 +627,15 @@ def main() -> None:
 async def _stdio_main() -> None:
     handlers = worker_service_factory()
     await serve_stdio(
-        handlers,
+        # The one place the protocol has to be named, because `serve_stdio`
+        # declares `list[IServable]` and `list` is invariant. Its sibling
+        # `serve_multiprocessing_endpoint` declares `Collection[IServable]`,
+        # which is covariant and needs no cast -- so this is an asymmetry in
+        # grpclib-transports rather than anything the handlers lack. A cast
+        # here, and not an annotation, keeps beartype able to check both
+        # functions above; see UNDECORATABLE in
+        # tests/nanopynix/test_beartype_instrumentation.py.
+        cast("list[IServable]", handlers),
         max_concurrency=DEFAULT_WORKER_MAX_CONCURRENCY,
         status_details_codec=NIX_STATUS_DETAILS_CODEC,
     )
