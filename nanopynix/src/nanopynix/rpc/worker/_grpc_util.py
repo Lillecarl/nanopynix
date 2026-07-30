@@ -6,11 +6,10 @@ import functools
 import inspect
 from typing import TYPE_CHECKING, Any, Concatenate, Protocol
 
-from grpclib.const import Status
 from grpclib.exceptions import GRPCError
 
 from nanopynix._typechecking import BEARTYPING
-from nanopynix.rpc._status_details import details_for_exception
+from nanopynix.rpc._status_details import details_for_exception, status_for_exception
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Callable
@@ -18,19 +17,26 @@ if TYPE_CHECKING or BEARTYPING:
 
 
 def convert_handler_errors(func: Callable[..., Any]) -> Callable[..., Any]:
-    """Decorator: convert unhandled exceptions to GRPCError with the original message.
+    """Decorator: convert unhandled exceptions to GRPCError with the original detail.
 
     grpclib's server catches unhandled exceptions and sends a generic
-    ``Status.UNKNOWN / "Internal Server Error"``.  This decorator preserves
-    the original error message so the client can classify it via
-    ``exceptions.from_response()``.
+    ``Status.UNKNOWN / "Internal Server Error"``. This decorator sends what
+    the client needs instead, in three parts:
 
-    A :class:`~nanopynix.NixError`'s ``raw``/``info`` -- the ``nix::ErrorInfo``
-    the bindings recovered from C++ -- go into ``GRPCError.details`` as a
-    ``nix.common.NixErrorInfo``, which rides the ``grpc-status-details-bin``
-    trailer inside a standard ``google.rpc.Status``. That only reaches the
-    client if both ends installed the codec; see
-    :mod:`nanopynix.rpc._status_details`.
+    * a ``nix.common.ErrorIdentity``, naming the exception's class, so the
+      client raises the class the worker raised rather than guessing;
+    * a ``nix.common.NixErrorInfo`` when the exception has one -- the
+      ``nix::ErrorInfo`` the bindings recovered from C++;
+    * the status code for the exception's family, so a client in another
+      language learns something from the code alone.
+
+    Both messages ride the ``grpc-status-details-bin`` trailer inside a
+    standard ``google.rpc.Status``, and reach the client only if both ends
+    installed the codec; see :mod:`nanopynix.rpc._status_details`.
+
+    The ``"TypeName: message"`` prefix stays on the status message. It is what
+    a peer that cannot read the identity detail still recovers, through
+    ``exceptions.from_response()``.
     """
 
     @functools.wraps(func)
@@ -41,7 +47,7 @@ def convert_handler_errors(func: Callable[..., Any]) -> Callable[..., Any]:
             raise
         except Exception as exc:
             details = details_for_exception(exc)
-            raise GRPCError(Status.UNKNOWN, f"{type(exc).__name__}: {exc}", details) from exc
+            raise GRPCError(status_for_exception(exc), f"{type(exc).__name__}: {exc}", details) from exc
 
     return wrapper
 

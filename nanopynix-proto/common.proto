@@ -297,3 +297,27 @@ message NixErrorInfo {
 
   repeated string suggestions = 9;
 }
+
+// Which error this is, as a name rather than as prose.
+//
+// The status message carries "TypeName: text", which is enough for a Python
+// client to recover a Nix C++ class and nothing else. This carries the class
+// as a field, so a client in any language reads it without splitting a
+// string, and a Python client raises the class the worker actually raised.
+//
+// Rides the same status trailer as NixErrorInfo, and is never trimmed: it is
+// a few dozen bytes and it is the most valuable thing in the trailer.
+//
+// The two fields name two different vocabularies, and exactly one is set.
+message ErrorIdentity {
+  // The Nix C++ exception class, when Nix raised the error. e.g.
+  // "EvalError". These are the names nanobind registers in
+  // nanopynix-bindings, and they may be coarser than the message: Nix
+  // reports both a type error and a hash mismatch as plain nix::EvalError,
+  // so a client may narrow this by message but must never widen it.
+  string nix_type = 1;
+
+  // The nanopynix or Python class, when Nix did not raise the error. e.g.
+  // "SettingNotLiveError", "ValueError".
+  string class_name = 2;
+}

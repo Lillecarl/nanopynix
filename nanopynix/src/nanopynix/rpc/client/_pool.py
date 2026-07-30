@@ -40,7 +40,7 @@ from nanopynix_proto.nix.worker import (
 
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import DEFAULT_STORE_URI, WORKER_INIT_STATUS_OK
-from nanopynix.exceptions import SessionClosedError, from_response
+from nanopynix.exceptions import SessionClosedError, exception_from_wire, from_response
 from nanopynix.logging import ACTIVE_LOG_CAPTURES, BusSubscription, CallbackBus
 from nanopynix.namespace import probe_namespace_support
 from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC, unpack_error_details
@@ -101,7 +101,13 @@ class WorkerDiedError(RuntimeError):
 
 
 async def _grpc_call(coro: Any) -> Any:
-    """Execute a gRPC stub call, converting GRPCError to NixError.
+    """Execute a gRPC stub call, converting GRPCError to the worker's exception.
+
+    Two resolvers, best information first. ``exception_from_wire`` reads the
+    ``ErrorIdentity`` the worker put in the status trailer, which names the
+    class as a field. ``from_response`` reads the ``"TypeName: "`` prefix on
+    the status message, which is all a peer without the codec can send, and
+    which recovers a Nix C++ class and nothing else.
 
     Usage::
 
@@ -110,8 +116,18 @@ async def _grpc_call(coro: Any) -> Any:
     try:
         return await coro
     except GRPCError as exc:
-        raw, info = unpack_error_details(exc.details)
-        raise from_response("Unknown", exc.message or str(exc), raw=raw, info=info) from exc
+        message = exc.message or str(exc)
+        received = unpack_error_details(exc.details)
+        resolved = exception_from_wire(
+            nix_type=received.nix_type,
+            class_name=received.class_name,
+            msg=message,
+            raw=received.raw,
+            info=received.info,
+        )
+        if resolved is not None:
+            raise resolved from exc
+        raise from_response("Unknown", message, raw=received.raw, info=received.info) from exc
     except (StreamTerminatedError, ConnectionError) as exc:
         raise WorkerDiedError(str(exc)) from exc
 

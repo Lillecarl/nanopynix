@@ -9,8 +9,12 @@ crosses into Python, and this module has one entry point per case:
 as the bound class's name, so ``exception_for_nix_type`` maps it directly.
 :mod:`nanopynix.inproc` translates at its single call chokepoint.
 
-**B. worker → client (gRPC).** The worker prefixes the type name onto the
-status message, so the client recovers it the same way rather than guessing.
+**B. worker → client (gRPC).** The worker sends the class as a field --
+``nix.common.ErrorIdentity`` in the status trailer -- and
+:func:`exception_from_wire` resolves it against an allowlist. It also keeps
+the older ``"TypeName: message"`` prefix on the status message, which is what
+a peer that cannot read the detail still recovers, and what
+:func:`from_response` reads.
 
 **C. Nix daemon → client (daemon protocol).** **Not ours.** The daemon
 protocol structurally loses detail — upstream downgrades ``HashMismatch`` to
@@ -694,6 +698,123 @@ def from_response(error_type: str, msg: str, *, raw: str = "", info: dict[str, A
     return cls(classified_type, msg, raw=raw, info=info)
 
 
+# ════════════════════════════════════════════════════════════════════
+# Boundary B — the class travels as a field, not as prose
+# ════════════════════════════════════════════════════════════════════
+#
+# `from_response` above recovers a *Nix C++* class, because the worker's
+# status message is the only thing that used to carry a name. Every other
+# exception the worker raises -- `SettingNotLiveError`, and the builtins that
+# `rpc/worker/` and `_core/` raise throughout -- arrived as a plain
+# `NixError`, which is the wrong family for all of them.
+#
+# The worker now also sends a `nix.common.ErrorIdentity` in the status
+# trailer, and `exception_from_wire` below resolves it. The name off the wire
+# selects a key in the table this module builds at import; it never names a
+# module and never reaches an importer.
+
+# Python's own exceptions that the worker raises. Enumerated rather than
+# "any builtin the wire names": an open resolver over `builtins` would let
+# the payload construct `SystemExit` or `KeyboardInterrupt`, neither of which
+# a caller can handle as an ordinary failure. These six are what
+# `rpc/worker/` and `nanopynix/_core/` actually raise.
+_WIRE_BUILTINS: tuple[type[Exception], ...] = (
+    IndexError,
+    KeyError,
+    RuntimeError,
+    TimeoutError,
+    TypeError,
+    ValueError,
+)
+
+# Classes this module defines that must not be rebuilt from the wire.
+_NOT_ON_THE_WIRE: frozenset[str] = frozenset(
+    {
+        # `__init__` is keyword-only (`expected`/`actual`), so a message alone
+        # cannot rebuild it. Nothing in `nanopynix/src` raises it, so the
+        # exclusion costs nothing today; a caller that starts raising it
+        # worker-side needs the fields on the wire, not a guess from prose.
+        "WrongNixTypeError",
+    }
+)
+
+
+def _wire_exception_types() -> dict[str, type[Exception]]:
+    """Build the allowlist: this module's exceptions, plus :data:`_WIRE_BUILTINS`.
+
+    Derived from the class objects rather than from ``__all__``, which is
+    incomplete -- it holds the factory functions and omits
+    ``SettingNotLiveError``, ``MissingAttributeError`` and ``ListIndexError``.
+
+    ``__module__`` is the fence. Walking ``__subclasses__`` reaches whatever
+    has been imported, so a subclass declared in a test or in a consumer would
+    otherwise enter the table and make the resolution depend on import order.
+    """
+    found: dict[str, type[Exception]] = {cls.__name__: cls for cls in _WIRE_BUILTINS}
+    pending: list[type[Exception]] = [NixError, ObjectMisuseError]
+    while pending:
+        cls = pending.pop()
+        pending.extend(cls.__subclasses__())
+        if cls.__module__ == __name__ and cls.__name__ not in _NOT_ON_THE_WIRE:
+            found[cls.__name__] = cls
+    return found
+
+
+_WIRE_EXCEPTION_TYPES: dict[str, type[Exception]] = _wire_exception_types()
+
+
+def _without_type_prefix(msg: str, type_name: str) -> str:
+    """Drop the ``"TypeName: "`` the worker glues onto the status message.
+
+    The prefix stays on the wire for a peer that cannot read the identity
+    detail, so a client that *can* read it has to remove the duplicate. Exact
+    match only: a message that merely begins with a colon-separated word is
+    left alone.
+    """
+    prefix = f"{type_name}: "
+    return msg[len(prefix) :] if type_name and msg.startswith(prefix) else msg
+
+
+def exception_from_wire(
+    *,
+    nix_type: str,
+    class_name: str,
+    msg: str,
+    raw: str = "",
+    info: dict[str, Any] | None = None,
+) -> Exception | None:
+    """Rebuild a worker exception from its ``ErrorIdentity``, or ``None``.
+
+    ``None`` means "this identity says nothing usable" -- an absent detail, or
+    a name the allowlist does not hold. The caller then falls back to
+    :func:`from_response`, which is what every client did before the identity
+    existed. Degradation, never a second failure.
+
+    Takes plain strings rather than the wire message, so this module stays
+    free of the rpc layer. :mod:`nanopynix.rpc._status_details` unpacks.
+    """
+    if nix_type and exception_for_nix_type(nix_type) is not None:
+        # Identical to what `from_response` does with a `"TypeName: "` prefix
+        # it recognises, and deliberately so: the identity replaces the prose
+        # as the *source* of the name, and changes nothing after that. The
+        # refinement inside `from_response` has to stay -- Nix reports both a
+        # type error and a hash mismatch as plain `nix::EvalError`, and only
+        # the message tells them apart.
+        return from_response(nix_type, _without_type_prefix(msg, nix_type), raw=raw, info=info)
+
+    wire_class = _WIRE_EXCEPTION_TYPES.get(class_name) if class_name else None
+    if wire_class is None:
+        return None
+
+    text = _without_type_prefix(msg, class_name)
+    if issubclass(wire_class, NixError):
+        # Worker-side helper code that already translated. Rare, but it must
+        # refine like any other NixError rather than stopping at the base.
+        cls, error_type = refine_within(wire_class, text)
+        return cls(error_type, text, raw=raw, info=info)
+    return wire_class(text)
+
+
 __all__ = [
     "BadStorePathError",
     "BuildError",
@@ -739,6 +860,7 @@ __all__ = [
     "WrongNixTypeError",
     "build_error_from_result",
     "exception_for_nix_type",
+    "exception_from_wire",
     "from_response",
     "split_type_prefix",
 ]
