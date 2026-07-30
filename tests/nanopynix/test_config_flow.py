@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from nanopynix_proto.nix.eval import ConfigureEvalRequest
-from pytest_agent import note
 
 import nanopynix
 from nanopynix import NixEvalSettings, NixFetchSettings, stores
@@ -42,6 +41,7 @@ from nanopynix.settings import (
     reject_construction_time_keys,
 )
 from tests.support.git import init_flake_repo
+from tests.support.notes import note
 
 if TYPE_CHECKING:
     from tests.support.nix_environment import NixTestEnvironment
