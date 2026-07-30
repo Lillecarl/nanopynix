@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import threading
 from types import SimpleNamespace
 from typing import Any, cast
 
+import anyio
 import nanopynix_bindings.store as nanopynix_store
 import pytest
 from nanopynix_proto.nix.eval import OpenEvalRequest
@@ -139,14 +141,26 @@ def test_worker_opens_auto_store_with_explicit_auto_uri(monkeypatch: pytest.Monk
     assert store_dir == "/nix/store"
 
 
-def test_worker_factory_sets_worker_title(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_worker_factory_sets_worker_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Async because the factory starts the log relay, which needs a loop.
+
+    That is a real precondition and not a test artefact: every caller of the
+    factory invokes it from inside ``asyncio.run``. See ``_start_log_relay``.
+    """
     titled: list[None] = []
     monkeypatch.setattr(worker, "set_worker_title", lambda: titled.append(None) or "quiet-otter")
     monkeypatch.setattr(worker.nanopynix_util, "install_logger", lambda _callback: None)  # type: ignore[reportUnknownLambdaType] -- lambda receives Any from setattr
 
-    worker.worker_service_factory()
-
-    assert titled == [None]
+    handlers = worker.worker_service_factory()
+    try:
+        assert titled == [None]
+    finally:
+        # Nothing serves these handlers, so nothing else will stop the relay.
+        state = worker._worker_state_of(handlers)  # type: ignore[reportPrivateUsage] -- test cleans up what the factory started
+        if state.log_task is not None:
+            state.log_task.cancel()
+            with contextlib.suppress(anyio.get_cancelled_exc_class()):
+                await state.log_task
 
 
 def test_worker_title_lists_open_store_uris(monkeypatch: pytest.MonkeyPatch) -> None:

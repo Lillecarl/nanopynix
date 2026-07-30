@@ -52,6 +52,7 @@ from nanopynix.logging import (
     LogCapture,
     LogCollector,
     LogStreamEventKind,
+    events_dropped_event,
 )
 from nanopynix.models import (
     BuildResult,
@@ -416,7 +417,19 @@ class Session:
             raise BaseExceptionGroup("errors closing inproc Session", errors)
 
     async def _forward_logs(self) -> None:
+        """Drain the collector onto the bus. rpc's relay task, without a wire.
+
+        ``CallbackBus.emit`` never blocks, so this always drains and the
+        collector stays near empty -- the same guarantee rpc's
+        ``_relay_logs`` gives, which is why inproc needs no outbox. It can
+        still fall behind when the caller's own event loop is busy, and then
+        the collector discards, so it announces the loss the same way rpc
+        does.
+        """
         async for raw in self._collector.stream():
+            dropped = self._collector.take_dropped()
+            if dropped:
+                self._log_bus.emit(events_dropped_event(dropped))
             kind, request_id, *payload = raw
             if kind == LogStreamEventKind.NIX:
                 action, *args = payload
@@ -620,7 +633,7 @@ class Session:
         """Subscribe a callback to live log events. Call ``.unsubscribe()`` to stop."""
         return self._log_bus.subscribe(callback)
 
-    def capture_logs(self) -> LogCapture:
+    def capture_logs(self, *, max_events: int | None = None, wait_timeout: float | None = None) -> LogCapture:
         """Record typed log events during an async context block.
 
         The same :class:`~nanopynix.logging.LogCapture` rpc returns, over the
@@ -630,8 +643,13 @@ class Session:
         inproc already had every part it needs: the bus, the operation ids,
         and the ``request_finalized`` events that let ``wait()`` know when a
         capture is complete.
+
+        *max_events* caps the recorded events, discarding the oldest.
+        *wait_timeout* bounds how long the block waits on exit for each
+        operation's finalize marker. Both default to ``LogCapture``'s own
+        defaults, which suit a caller that reads its logs.
         """
-        return LogCapture(self)
+        return LogCapture(self, max_events=max_events, wait_timeout=wait_timeout)
 
 
 class Store:

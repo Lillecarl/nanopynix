@@ -95,6 +95,32 @@ The worker keeps the older `"TypeName: message"` prefix on the status message.
 It is what a peer without the codec still recovers, and it is why an absent
 identity degrades rather than fails.
 
+## Logging must not hold Nix back
+
+> A log event may be lost. Nix's progress may not be delayed. Exactly one hop
+> in each process is lossy, it sits at the process boundary, and every hop
+> above it is guaranteed to drain. A control event is never lost.
+
+A *control event* is a `request_finalized` marker or the stream sentinel. A log
+line is diagnostic and a marker is protocol, which is why a full buffer treats
+the two differently: a control event takes the place of the oldest log line
+rather than joining the drop count.
+
+Three rules follow, and each one was a defect before #13.
+
+* **No buffer between Nix and a consumer may be unbounded, and none may block
+  the Nix thread.** `LogCollector.callback` runs on that thread and returns
+  whatever the consumer is doing.
+* **Every hop above the lossy one drains unconditionally.** The worker's relay
+  task exists only for this: it moves events out of the collector into
+  `LogOutbox`, so an HTTP/2 send that parks backs up into a buffer that
+  discards rather than into a queue that stops Nix.
+* **A cap discards the oldest, and says that it did.** The end of a log is the
+  part a reader wants. `LogCapture` reports `truncated` for its own cap and
+  `dropped_events` for what a producer threw away, and the producer sends that
+  count as a `nix.common.EventsDropped` event so a caller in any language can
+  tell that its log is short.
+
 ## Transport-independent domain models
 
 `nanopynix.models` re-exports the betterproto2 messages as the canonical data

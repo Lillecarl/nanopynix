@@ -297,9 +297,15 @@ class Session:
                 continue
             yield LogEvent.from_proto(raw)
 
-    def capture_logs(self) -> LogCapture:
-        """Record typed log events during an async context block."""
-        return LogCapture(self._manager)
+    def capture_logs(self, *, max_events: int | None = None, wait_timeout: float | None = None) -> LogCapture:
+        """Record typed log events during an async context block.
+
+        *max_events* caps the recorded events, discarding the oldest.
+        *wait_timeout* bounds how long the block waits on exit for each
+        operation's finalize marker. inproc takes the same two, and
+        ``test_engine_parity`` compares the parameter names.
+        """
+        return LogCapture(self._manager, max_events=max_events, wait_timeout=wait_timeout)
 
     async def get_verbosity(self) -> LogLevel:
         """Return the worker-side Nix log verbosity."""

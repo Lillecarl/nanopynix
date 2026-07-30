@@ -203,12 +203,26 @@ message NixLogEvent {
 
 message RequestFinalized {}
 
+// How many log events the worker discarded before this point in the stream.
+//
+// The worker drops a log line rather than stall Nix: a caller who stops
+// reading must not stop the evaluation. Without this event the caller reads a
+// short log and cannot tell that it is short.
+//
+// This rides the same stream as the events it replaces, and the worker sends
+// it at the point where the loss happened, so the position in the stream tells
+// the reader which part of the log is incomplete.
+message EventsDropped {
+  uint64 count = 1;
+}
+
 message LogEvent {
   int64 request_id = 1;
 
   oneof payload {
     NixLogEvent nix_log = 2;
     RequestFinalized request_finalized = 3;
+    EventsDropped events_dropped = 4;
   }
 }
 
