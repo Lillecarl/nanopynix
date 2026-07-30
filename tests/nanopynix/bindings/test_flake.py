@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from nanopynix_bindings import flake as nanopynix_flake
+from nanopynix_bindings import errors as nanopynix_errors, flake as nanopynix_flake
 
 import nanopynix
 from tests.support.git import commit_files, init_flake_repo, init_repo
@@ -16,6 +16,16 @@ if TYPE_CHECKING:
 
 def _init_git_flake(tmp_path: Path, outputs_body: str = "val = 1;") -> None:
     init_flake_repo(tmp_path, outputs_body)
+
+
+def _dirty_the_flake(tmp_path: Path) -> None:
+    """Make the working tree differ from the last commit.
+
+    The dirtied file has to be a tracked one. An untracked file leaves the
+    tree clean as far as the git fetcher is concerned.
+    """
+    flake_file = tmp_path / "flake.nix"
+    flake_file.write_text(flake_file.read_text(encoding="utf-8") + "\n# dirtied\n", encoding="utf-8")
 
 
 class TestParseFlakeRef:
@@ -73,6 +83,59 @@ class TestLockFlake:
         ref = nanopynix.parse_flake_ref(str(tmp_path))
         with pytest.raises(RuntimeError, match="unknown setting"):
             nanopynix.lock_flake(eval_state, ref, flake_settings={"not-a-real-setting": "1"})
+
+
+class TestGitFetcherSettings:
+    """Issue #34: a flake reference must own the fetch settings it points at.
+
+    ``parse_flake_ref`` used to build the reference against a ``Settings`` on
+    its own stack. Nix 2.31 keeps a pointer to that object inside the
+    ``Input`` and its git fetcher reads through the pointer, so every lock of
+    a ``git+file://`` reference read freed memory there. Nix 2.34 and 2.35
+    pass ``state.fetchSettings`` to each fetcher call instead, which is why
+    only 2.31 showed it.
+
+    Every other test in this file uses a ``path:`` reference, which reaches no
+    git fetcher at all. That is why nothing here caught it.
+    """
+
+    def test_a_clean_git_flake_locks(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:
+        """The plain case. On Nix 2.31 this raised ``RuntimeError: Invalid argument``.
+
+        Nothing in Nix raised that message. It was ``pthread_mutex_lock``
+        answering ``EINVAL`` for a mutex that had already been destroyed,
+        inside the fetcher cache of the dead ``Settings``.
+        """
+        _init_git_flake(tmp_path, r'val = "clean-git-lock";')
+        ref = nanopynix.parse_flake_ref(f"git+file://{tmp_path}")
+        locked = nanopynix.lock_flake(eval_state, ref, write_lock_file=False)
+        assert isinstance(locked.description(), str)
+
+    def test_the_evaluator_refuses_a_dirty_tree_when_allow_dirty_is_off(
+        self,
+        store: Any,
+        tmp_path: Path,
+    ) -> None:
+        """The evaluator's own fetch settings decide, and Nix authors the refusal."""
+        _init_git_flake(tmp_path, r'val = "dirty-refused";')
+        _dirty_the_flake(tmp_path)
+        eval_state = nanopynix.EvalState(store, [], fetch_settings={"allow-dirty": "false"})
+        ref = nanopynix.parse_flake_ref(f"git+file://{tmp_path}")
+        with pytest.raises(nanopynix_errors.Error, match="dirty"):
+            nanopynix.lock_flake(eval_state, ref, write_lock_file=False)
+
+    def test_the_evaluator_accepts_a_dirty_tree_when_allow_dirty_is_on(
+        self,
+        store: Any,
+        tmp_path: Path,
+    ) -> None:
+        """The other direction, so a setting that never arrives cannot pass both."""
+        _init_git_flake(tmp_path, r'val = "dirty-accepted";')
+        _dirty_the_flake(tmp_path)
+        eval_state = nanopynix.EvalState(store, [], fetch_settings={"allow-dirty": "true"})
+        ref = nanopynix.parse_flake_ref(f"git+file://{tmp_path}")
+        locked = nanopynix.lock_flake(eval_state, ref, write_lock_file=False)
+        assert isinstance(locked.description(), str)
 
 
 class TestGetFlake:
