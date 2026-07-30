@@ -677,3 +677,35 @@ async def test_both_engines_capture_logs_the_same_way(
     expression = 'builtins.trace "nanopynix parity trace" 1'
     assert await _capture_a_trace(inproc_session, expression) == (["msg"], True)
     assert await _capture_a_trace(rpc_session, expression) == (["msg"], True)
+
+
+async def _capture_with_a_tiny_cap(factory: Any) -> tuple[int, bool, int]:
+    """Overrun a capture's own cap, on either engine.
+
+    Returns how many events survived, whether the capture says it truncated,
+    and how many the producer says it discarded before they arrived.
+    """
+    expression = "builtins.foldl' (acc: i: builtins.trace (toString i) acc) 0 (builtins.genList (i: i) 40)"
+    async with factory() as session, session.store() as store, session.eval(store) as evaluator:
+        async with session.capture_logs(max_events=5) as logs:
+            await (await evaluator.string(expression)).to_python()
+        return (len(logs.events), logs.truncated, logs.dropped_events)
+
+
+async def test_both_engines_report_a_capture_that_is_not_complete(
+    inproc_session: InprocSessionFactory,
+    rpc_session: RpcSessionFactory,
+) -> None:
+    """A short log must say that it is short, the same way on both engines.
+
+    ``truncated`` is the capture's own cap. ``dropped_events`` is what the
+    producer threw away to keep Nix running, and it reaches the caller as an
+    ``EventsDropped`` event -- over the wire for rpc, over the bus for inproc.
+    Neither engine drops anything here, so the count is zero on both; the
+    assertion is that they agree, and that a capped capture reports the cap.
+
+    Both halves are part of issue #13's rule: a log event may be lost, and a
+    caller must be able to tell.
+    """
+    assert await _capture_with_a_tiny_cap(inproc_session) == (5, True, 0)
+    assert await _capture_with_a_tiny_cap(rpc_session) == (5, True, 0)

@@ -68,7 +68,7 @@ from nanopynix._wire import (
     WORKER_INIT_STATUS_OK,
     HandleKind,
 )
-from nanopynix.logging import LogCollector, LogStreamEventKind
+from nanopynix.logging import LogCollector, LogOutbox, LogStreamEventKind, events_dropped_event
 from nanopynix.models import PrimOpSpec
 from nanopynix.namespace import enter_overlay_namespace
 from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC
@@ -122,7 +122,7 @@ def _register_primops(
         )
 
 
-def _install_worker_diagnostics(collector: LogCollector) -> None:
+def _install_worker_diagnostics(collector: LogCollector, outbox: LogOutbox) -> None:
     def _dump_worker_diagnostics(signum: int, _frame: Any) -> None:
         timestamp = time.monotonic()
         print(  # noqa: T201 -- SIGUSR1 signal handler; logging framework may be unsafe to call from signal context
@@ -131,6 +131,10 @@ def _install_worker_diagnostics(collector: LogCollector) -> None:
             flush=True,
         )
         print(f"log_collector={collector.stats()}", file=sys.stderr, flush=True)  # noqa: T201 -- same signal-handler reason
+        # Both halves of the log path, because a stall in either is invisible
+        # from the other: a deep collector means the relay task is not running,
+        # a deep outbox means the client is not reading.
+        print(f"log_outbox={outbox.stats()}", file=sys.stderr, flush=True)  # noqa: T201 -- same signal-handler reason
         print("python_threads:", file=sys.stderr, flush=True)  # noqa: T201 -- same signal-handler reason
         faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
         print("=== end nanopynix worker diagnostics ===", file=sys.stderr, flush=True)  # noqa: T201 -- same signal-handler reason
@@ -146,7 +150,9 @@ class WorkerState:
 
     Thread confinement:
       * ``collector`` — both threads (already thread-safe via ``janus.Queue``)
-      * ``log_task`` — unused compatibility slot; parent consumes SubscribeLogs
+      * ``outbox`` — event loop only (a plain deque, no locking)
+      * ``log_task`` — event loop only; the relay that drains ``collector``
+        into ``outbox``. See ``_start_log_relay``.
       * ``handles`` — both threads (locked ``HandleRegistry``); each open
         evaluator lives here as an ``EvalEntry`` (kind ``"eval"``), owning its
         own dedicated Nix thread — see ``_worker_eval.py``.
@@ -163,6 +169,7 @@ class WorkerState:
 
     def __init__(self) -> None:
         self.collector: LogCollector | None = None
+        self.outbox: LogOutbox | None = None
         self.log_task: asyncio.Task[None] | None = None
         self.handles: HandleRegistry = HandleRegistry()
         self.runtime = CoreRuntime()
@@ -429,31 +436,36 @@ class WorkerServiceHandler(WorkerServiceBase):
         set_process_title(subname, project_name="nanopynix")
 
     async def subscribe_logs(self, message: SubscribeLogsRequest) -> AsyncIterator[LogEvent]:
-        """Server-streaming RPC — yield log events as they arrive.
+        """Server-streaming RPC — send the log events the relay has buffered.
 
-        This is the wire-encoding hop from ``LogCollector`` to protobuf, so it
-        is deliberately not built on :class:`nanopynix.logging.CallbackBus`
-        (the in-process pub-sub shared by ``inproc.Session`` and the client's
+        This is the wire hop, and it is the one place in the worker that may
+        wait: each yield becomes an HTTP/2 send, which parks when the client
+        stops reading. It parks over :class:`~nanopynix.logging.LogOutbox`,
+        which discards, so the wait never reaches the collector and never
+        reaches Nix.
+
+        The encoding happens in the relay rather than here, so that a parked
+        send does not also stop the collector from draining.
+
+        Deliberately not built on :class:`nanopynix.logging.CallbackBus` (the
+        in-process pub-sub shared by ``inproc.Session`` and the client's
         ``WorkerClient``) — there is nothing to subscribe/unsubscribe here,
-        only a single collector stream serialized onto a gRPC channel.
+        only a single buffer serialized onto a gRPC channel. One subscriber
+        only, for the same reason.
         """
-        collector = self._state.collector
-        if collector is None:
+        outbox = self._state.outbox
+        if outbox is None:
             return
 
         try:
-            async for event in collector.stream():
+            while True:
+                event = await outbox.get()
                 if event is None:
                     break
-                kind, request_id, *payload = event
-                if kind == LogStreamEventKind.NIX:
-                    action, *args = payload
-                    yield LogEvent(
-                        request_id=request_id,
-                        nix_log=NixLogEvent(action=action, args_json=json.dumps(args, default=str)),
-                    )
-                elif kind == LogStreamEventKind.FINALIZED:
-                    yield LogEvent(request_id=request_id, request_finalized=RequestFinalized())
+                dropped = outbox.take_dropped()
+                if dropped:
+                    yield events_dropped_event(dropped)
+                yield event
         except anyio.get_cancelled_exc_class():
             pass
 
@@ -473,8 +485,11 @@ class WorkerServiceHandler(WorkerServiceBase):
         # its `async for` -- and grpclib logs that as "Failed to handle
         # cancellation" on the worker's stderr, which the parent inherits. The
         # events this drops were already being dropped by that cancellation.
+        #
+        # Into the collector, not the outbox: the sentinel must arrive behind
+        # the events already queued there, and the relay is what moves those.
         if self._state.collector is not None:
-            await self._state.collector.asend_sentinel()
+            self._state.collector.send_sentinel()
         if self._state.rpc_bridge is not None:
             await self._state.rpc_bridge.stop()
         if self._state.owns_executor:
@@ -538,13 +553,15 @@ def worker_service_factory(
         enter_overlay_namespace(namespace)
 
     collector = LogCollector()
+    outbox = LogOutbox()
     nanopynix_util.install_logger(collector.callback)
     with contextlib.suppress(RuntimeError, ValueError):
-        _install_worker_diagnostics(collector)
+        _install_worker_diagnostics(collector, outbox)
 
     state = WorkerState()
     state.worker_subname = set_worker_title()
     state.collector = collector
+    state.outbox = outbox
 
     state.executor = NixThreadExecutor() if executor is None else executor
     state.owns_executor = executor is None
@@ -552,6 +569,10 @@ def worker_service_factory(
 
     if backchannel is not None:
         state.rpc_bridge = ThreadedRpcPrimopBridge(backchannel)
+
+    # Before the handlers exist, so the relay is draining the collector before
+    # anything can serve a request into it.
+    _start_log_relay(state)
 
     return [
         WorkerServiceHandler(state),
@@ -563,17 +584,100 @@ def worker_service_factory(
 # ── Async runner (for grpclib-transports multiprocessing mode) ───────
 
 
+def _worker_state_of(handlers: list[WorkerServices]) -> WorkerState:
+    """Return the state the three handlers share.
+
+    All three hold the same object, so the first one will do. The narrowing is
+    a real check now that the list is typed as the concrete handlers rather
+    than as grpclib's protocol.
+    """
+    first = handlers[0]
+    if not isinstance(first, WorkerServiceHandler):
+        raise TypeError(f"worker_service_factory must build the worker handler first, got {type(first).__name__}")
+    return first._state  # type: ignore[reportPrivateUsage] -- one worker module, three handler classes  # noqa: SLF001
+
+
+async def _relay_logs(collector: LogCollector, outbox: LogOutbox) -> None:
+    """Move every collector event into the outbox, and never wait for the wire.
+
+    The task that makes the rule at the top of ``nanopynix.logging`` true. It
+    encodes each event and hands it on, so the collector stays near empty
+    whatever the client is doing, and the Nix thread never finds a full queue.
+
+    ``SubscribeLogs`` used to consume the collector itself. That put an HTTP/2
+    send between the collector and its drain, so a client that stopped reading
+    stopped Nix. See issue #13.
+    """
+
+    def _announce_drops() -> None:
+        dropped = collector.take_dropped()
+        if dropped:
+            outbox.put(events_dropped_event(dropped))
+
+    try:
+        async for event in collector.stream():
+            if event is None:
+                # `LogCollector.stream` breaks on the sentinel itself and never
+                # yields it. The guard stays because the unpack below would
+                # raise on a collector that behaves differently.
+                break
+            # Before the event, so the notice sits where the loss happened and
+            # the reader can tell which part of the log is incomplete.
+            _announce_drops()
+            kind, request_id, *payload = event
+            if kind == LogStreamEventKind.NIX:
+                action, *args = payload
+                outbox.put(
+                    LogEvent(
+                        request_id=request_id,
+                        nix_log=NixLogEvent(action=action, args_json=json.dumps(args, default=str)),
+                    )
+                )
+            elif kind == LogStreamEventKind.FINALIZED:
+                outbox.put(LogEvent(request_id=request_id, request_finalized=RequestFinalized()))
+    except anyio.get_cancelled_exc_class():
+        raise
+    except Exception:
+        # Nothing awaits this task, so an exception here would otherwise stop
+        # every log event with no other symptom at all. Reported the way the
+        # rest of this module reports: to the stderr the parent inherits.
+        print("nanopynix worker: the log relay failed", file=sys.stderr, flush=True)  # noqa: T201 -- see above
+        traceback.print_exc(file=sys.stderr)
+    finally:
+        # Nothing here awaits, so it also runs under the cancellation that
+        # `_shutdown_worker` delivers. A trailing burst of drops is announced
+        # before the sentinel ends the stream.
+        _announce_drops()
+        outbox.put(None)
+
+
+def _start_log_relay(state: WorkerState) -> None:
+    """Start the relay task and record it on the shared state.
+
+    ``worker_service_factory`` calls this, and that is the only correct place:
+    the factory is the one point every serving path goes through.
+    ``run_worker`` and ``_stdio_main`` are not -- the multiprocessing child
+    runs ``_run_multiprocessing_worker_with_backchannel``, which calls the
+    factory itself, and the in-process L3 transport does the same. Starting
+    the relay in the runners left the real worker with an outbox that nothing
+    ever filled, and ``SubscribeLogs`` delivered nothing at all.
+
+    The factory is synchronous, which the ``BackchannelServiceFactory``
+    contract requires, but every caller invokes it from inside
+    ``asyncio.run``. So a running loop is a precondition, not an assumption to
+    work around: a silent skip is exactly the failure above.
+    """
+    collector, outbox = state.collector, state.outbox
+    if collector is None or outbox is None:
+        raise RuntimeError("worker_service_factory did not build the log collector and outbox")
+    state.log_task = asyncio.create_task(_relay_logs(collector, outbox), name="nanopynix-worker-log-relay")
+
+
 async def _shutdown_worker(handlers: list[WorkerServices]) -> None:
     """Tear down the shared `WorkerState` after a transport closes -- shared
     by both `run_worker` (multiprocessing) and `_stdio_main` (stdio), which
     otherwise hand-repeated this identically."""
-    # All three handlers hold the same state, so the first one will do. The
-    # narrowing is a real check now that the list is typed as the concrete
-    # handlers rather than as grpclib's protocol.
-    first = handlers[0]
-    if not isinstance(first, WorkerServiceHandler):
-        raise TypeError(f"worker_service_factory must build the worker handler first, got {type(first).__name__}")
-    worker_state: WorkerState = first._state  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- cascade from WorkerState Any attributes  # noqa: SLF001
+    worker_state: WorkerState = _worker_state_of(handlers)
     collector = worker_state.collector  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- cascade from WorkerState Any attributes
     if collector is not None:
         collector.close()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes

@@ -194,6 +194,19 @@ class LogEventExt(_LogEventProto):
         return self.request_finalized is not None
 
     @property
+    def is_events_dropped(self) -> bool:
+        return self.events_dropped is not None
+
+    @property
+    def dropped_count(self) -> int:
+        """How many events the producer discarded before this point.
+
+        Zero for every other kind of event, so a consumer can add this without
+        a kind test.
+        """
+        return 0 if self.events_dropped is None else self.events_dropped.count
+
+    @property
     def action(self) -> str | None:
         return None if self.nix_log is None else self.nix_log.action
 
@@ -236,6 +249,7 @@ class LogEventExt(_LogEventProto):
             request_id=proto_event.request_id,
             nix_log=proto_event.nix_log,
             request_finalized=proto_event.request_finalized,
+            events_dropped=proto_event.events_dropped,
         )
 
 

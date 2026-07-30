@@ -9,7 +9,9 @@ _install_worker_diagnostics, none of which had direct unit coverage.
 
 from __future__ import annotations
 
+import contextlib
 import os
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -29,20 +31,22 @@ from nanopynix_proto.nix.worker import (
 
 import nanopynix.rpc.worker._worker as worker  # type: ignore[reportPrivateUsage] -- test imports private module
 from nanopynix._wire import HandleKind
-from nanopynix.logging import LogCollector
+from nanopynix.logging import LogCollector, LogOutbox
 from nanopynix.rpc.worker._worker import (  # type: ignore[reportPrivateUsage] -- test imports private module
     WorkerServiceHandler,
     WorkerState,
     _import_callable,
     _install_worker_diagnostics,
     _register_primops,
+    _relay_logs,
+    _start_log_relay,
 )
 from nanopynix.rpc.worker._worker_nix import (
     NixThreadExecutor,  # type: ignore[reportPrivateUsage] -- test verifies thread confinement
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator, AsyncIterator
 
 
 class _FakeBridge:
@@ -91,7 +95,7 @@ def test_install_worker_diagnostics_dumps_stats_on_signal(
 
     monkeypatch.setattr(worker.signal, "signal", _fake_signal)
 
-    _install_worker_diagnostics(LogCollector())
+    _install_worker_diagnostics(LogCollector(), LogOutbox())
 
     assert len(installed) == 1
     installed[0](0, None)  # simulate the OS delivering SIGUSR1
@@ -99,6 +103,9 @@ def test_install_worker_diagnostics_dumps_stats_on_signal(
     captured = capfd.readouterr()
     assert "nanopynix worker diagnostics" in captured.err
     assert "log_collector=" in captured.err
+    # Both halves of the log path. A deep collector and a deep outbox mean
+    # different things, and the dump is useless if it shows only one.
+    assert "log_outbox=" in captured.err
     assert "end nanopynix worker diagnostics" in captured.err
 
 
@@ -246,7 +253,31 @@ async def test_set_verbosity_requires_an_executor() -> None:
         await handler.set_verbosity(SetVerbosityRequest(request_id=1, verbosity=LogLevel.NOTICE))
 
 
-async def test_subscribe_logs_returns_immediately_without_a_collector() -> None:
+@asynccontextmanager
+async def _worker_with_log_relay() -> AsyncGenerator[tuple[WorkerState, Any]]:
+    """A worker state whose collector is drained by the real relay task.
+
+    ``subscribe_logs`` reads the outbox and only the relay fills it, so a test
+    that feeds the collector needs the relay running. That is also how the
+    worker runs: both runners call ``_start_log_relay`` right after the
+    factory, which is what this calls too.
+    """
+    state = WorkerState()
+    state.collector = LogCollector()
+    state.outbox = LogOutbox()
+    handler = WorkerServiceHandler(state)
+    _start_log_relay(state)
+    try:
+        yield state, handler
+    finally:
+        task = state.log_task
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(anyio.get_cancelled_exc_class()):
+                await task
+
+
+async def test_subscribe_logs_returns_immediately_without_an_outbox() -> None:
     handler = WorkerServiceHandler(WorkerState())
 
     events = [event async for event in handler.subscribe_logs(SubscribeLogsRequest())]
@@ -255,16 +286,15 @@ async def test_subscribe_logs_returns_immediately_without_a_collector() -> None:
 
 
 async def test_subscribe_logs_yields_nix_and_finalized_events() -> None:
-    state = WorkerState()
-    collector = LogCollector()
-    state.collector = collector
-    handler = WorkerServiceHandler(state)
+    async with _worker_with_log_relay() as (state, handler):
+        collector = state.collector
+        assert collector is not None
+        collector.callback(1, "msg", "hello")
+        collector.request_finalized(1)
+        collector.send_sentinel()
 
-    collector.callback(1, "msg", "hello")
-    collector.request_finalized(1)
-    collector.send_sentinel()
-
-    events = [event async for event in handler.subscribe_logs(SubscribeLogsRequest())]
+        with anyio.fail_after(5):
+            events = [event async for event in handler.subscribe_logs(SubscribeLogsRequest())]
 
     assert len(events) == 2
     assert events[0].request_id == 1
@@ -278,21 +308,62 @@ async def test_subscribe_logs_yields_nix_and_finalized_events() -> None:
     assert events[1].request_finalized is not None
 
 
-async def test_subscribe_logs_breaks_on_a_none_sentinel_from_the_stream() -> None:
-    """collector.stream() itself never yields None (it breaks internally first);
-    this defends the same guard directly against a differently-behaved collector."""
+async def test_the_relay_announces_what_the_collector_dropped() -> None:
+    """A drop reaches the caller as an event, not only as a worker-side counter.
 
-    class _SentinelCollector:
-        async def stream(self) -> AsyncIterator[None]:
-            yield None
-
+    Without this the client reads a short log and cannot tell that it is short.
+    The notice comes before the event that follows the loss, so its position in
+    the stream says which part is incomplete.
+    """
     state = WorkerState()
-    state.collector = _SentinelCollector()  # type: ignore[assignment] -- narrow collector fake
+    state.collector = LogCollector(maxsize=2)
+    state.outbox = LogOutbox()
     handler = WorkerServiceHandler(state)
 
-    events = [event async for event in handler.subscribe_logs(SubscribeLogsRequest())]
+    for index in range(6):
+        state.collector.callback(1, "msg", f"line {index}")
+    assert state.collector.stats()["dropped"] == 4
 
-    assert events == []
+    _start_log_relay(state)
+    # The queue is still full, so the sentinel takes the place of one more log
+    # line rather than being lost itself: a control event is never discarded.
+    # That is the fifth drop the relay announces below.
+    state.collector.send_sentinel()
+    assert state.collector.stats()["dropped"] == 5
+
+    with anyio.fail_after(5):
+        events = [event async for event in handler.subscribe_logs(SubscribeLogsRequest())]
+
+    dropped = [event for event in events if event.events_dropped is not None]
+    assert len(dropped) == 1
+    assert dropped[0].events_dropped is not None
+    assert dropped[0].events_dropped.count == 5
+
+
+async def test_the_relay_breaks_on_a_none_sentinel_from_the_stream() -> None:
+    """collector.stream() itself never yields None (it breaks internally first);
+    this defends the same guard directly against a differently-behaved collector.
+
+    The guard moved from ``subscribe_logs`` to ``_relay_logs`` when the relay
+    took over the decoding; without it the tuple unpack raises on the None.
+    """
+
+    class _SentinelCollector(LogCollector):
+        """Yields the None that the real ``stream`` swallows.
+
+        A subclass rather than a stand-in object, because ``_relay_logs``
+        annotates the concrete class and beartype checks that annotation.
+        """
+
+        async def stream(self) -> AsyncIterator[Any]:
+            yield None
+
+    outbox = LogOutbox()
+    with anyio.fail_after(5):
+        await _relay_logs(_SentinelCollector(), outbox)
+
+    # Only the end-of-stream sentinel the relay adds for subscribe_logs.
+    assert await outbox.get() is None
 
 
 async def test_shutdown_requires_an_executor() -> None:
@@ -311,17 +382,14 @@ async def test_shutdown_ends_the_subscribe_logs_stream() -> None:
     Asserting on that race directly would be flaky (it lost about 4 times in
     180 sessions); this pins the mechanism that removes it.
     """
-    state = WorkerState()
-    state.executor = NixThreadExecutor()
-    collector = LogCollector()
-    state.collector = collector
-    handler = WorkerServiceHandler(state)
+    async with _worker_with_log_relay() as (state, handler):
+        state.executor = NixThreadExecutor()
 
-    await handler.shutdown(ShutdownRequest(request_id=1))
+        await handler.shutdown(ShutdownRequest(request_id=1))
 
-    # Terminates rather than hanging: shutdown left a sentinel behind for it.
-    with anyio.fail_after(5):
-        events = [event async for event in handler.subscribe_logs(SubscribeLogsRequest())]
+        # Terminates rather than hanging: shutdown left a sentinel behind for it.
+        with anyio.fail_after(5):
+            events = [event async for event in handler.subscribe_logs(SubscribeLogsRequest())]
 
     # The sentinel goes in *after* shutdown finalizes its own request, so the
     # stream still delivers that boundary before ending. Truncating it would
