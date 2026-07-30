@@ -1,4 +1,6 @@
 #include <filesystem>
+#include <memory>
+#include <utility>
 
 #include <nanobind/nanobind.h>
 
@@ -33,9 +35,22 @@ using namespace nb::literals;
 // =========================================================================
 
 struct PyFlakeRef {
+    /// The settings that `ref.input` points at.
+    ///
+    /// Nix 2.31 keeps a `const fetchers::Settings *` inside `fetchers::Input`,
+    /// and its git fetcher reads through that pointer long after the parse.
+    /// So a flake reference that Python holds must own the settings it was
+    /// parsed against. Before this member the settings were a local of
+    /// `parse_flake_ref`, and every `lock_flake` on 2.31 read freed memory.
+    /// See issue #34.
+    ///
+    /// A `shared_ptr`, because a `PyFlakeRef` is copied and moved while the
+    /// raw pointer inside `ref` stays as it was.
+    std::shared_ptr<nix::fetchers::Settings> settings;
     nix::FlakeRef ref;
 
-    PyFlakeRef(nix::FlakeRef r) : ref(std::move(r)) {}
+    PyFlakeRef(std::shared_ptr<nix::fetchers::Settings> s, nix::FlakeRef r)
+        : settings(std::move(s)), ref(std::move(r)) {}
 
     std::string to_string() const { return ref.to_string(); }
 
@@ -97,14 +112,30 @@ static void apply_settings_overrides(nix::Config &config, const std::map<std::st
 
 static PyFlakeRef parse_flake_ref(const std::string &url,
                                    const std::map<std::string, std::string> &fetch_settings = {}) {
-    nix::fetchers::Settings fetchSettings;
-    apply_settings_overrides(fetchSettings, fetch_settings);
+    // On the heap and owned by the result: see the comment on
+    // `PyFlakeRef::settings`.
+    auto settings = std::make_shared<nix::fetchers::Settings>();
+    apply_settings_overrides(*settings, fetch_settings);
     std::optional<nix::FlakeRef> ref;
     {
         nb::gil_scoped_release release;
-        ref.emplace(nix::parseFlakeRef(fetchSettings, url));
+        ref.emplace(nix::parseFlakeRef(*settings, url));
     }
-    return PyFlakeRef(std::move(*ref));
+    return PyFlakeRef(std::move(settings), std::move(*ref));
+}
+
+/// Re-parse `flakeRef` against the fetch settings of `es`.
+///
+/// Nix 2.34 and Nix 2.35 pass `state.fetchSettings` to each fetcher call, so
+/// an evaluator's own fetch settings already decide there. Nix 2.31 reads the
+/// settings that the reference was parsed against instead. This makes the
+/// three versions agree: the evaluator owns the fetch scope, and a setting
+/// baked into a parsed reference applies to the parse alone.
+///
+/// `es.fetchSettings` outlives `es.state`, which Nix requires of it, so the
+/// result is valid for as long as the evaluator is.
+static nix::FlakeRef bind_to_evaluator(PyEvalState &es, const PyFlakeRef &flakeRef) {
+    return nix::FlakeRef::fromAttrs(es.fetchSettings, flakeRef.ref.toAttrs());
 }
 
 static PyLockedFlake lock_flake(
@@ -146,8 +177,11 @@ static PyLockedFlake lock_flake(
     std::unique_ptr<nix::flake::LockedFlake> locked;
     {
         nb::gil_scoped_release release;
+        // The result points into `es.fetchSettings`, which is why the binding
+        // keeps the evaluator alive.
         locked = std::make_unique<nix::flake::LockedFlake>(
-            nix::flake::lockFlake(flakeSettings, *es.state, flakeRef.ref, lockFlags));
+            nix::flake::lockFlake(flakeSettings, *es.state,
+                                  bind_to_evaluator(es, flakeRef), lockFlags));
     }
 
     std::string desc;
@@ -177,14 +211,20 @@ static PyFlakeRef get_flake(PyEvalState &es, PyFlakeRef &flakeRef,
                              bool useRegistries = true) {
     es.checkThread();
     std::optional<nix::flake::Flake> flake;
+    nix::fetchers::Attrs resolved;
     {
         nb::gil_scoped_release release;
         flake.emplace(nix::flake::getFlake(
-            *es.state, flakeRef.ref,
+            *es.state, bind_to_evaluator(es, flakeRef),
             useRegistries ? nix::fetchers::UseRegistries::All
                           : nix::fetchers::UseRegistries::No));
+        resolved = flake->resolvedRef.toAttrs();
     }
-    return PyFlakeRef(std::move(flake->resolvedRef));
+    // Back onto this reference's own settings, so the result is
+    // self-contained. Every `PyFlakeRef` owns what its `Input` points at, and
+    // no caller has to know which evaluator resolved it.
+    return PyFlakeRef(flakeRef.settings,
+                      nix::FlakeRef::fromAttrs(*flakeRef.settings, resolved));
 }
 
 static PyValue call_flake(PyEvalState &es, PyLockedFlake &lf) {
@@ -225,8 +265,10 @@ static PyValue eval_flake(PyEvalState &es, const std::string &ref,
 // =========================================================================
 
 static void bind_flake_ref(nb::module_ &m) {
+    // No constructor. A `PyFlakeRef` must own the settings that its `Input`
+    // points at, and Python cannot build the two halves. `parse_flake_ref` is
+    // the one door.
     nb::class_<PyFlakeRef>(m, "FlakeRef")
-        .def(nb::init<nix::FlakeRef>(), "ref"_a)
         .def("to_string", &PyFlakeRef::to_string)
         .def("to_attrs", &PyFlakeRef::to_attrs)
         .def("__str__", &PyFlakeRef::to_string)
@@ -267,6 +309,9 @@ void nanopynix_bind_flake(nb::module_ &m) {
           "update_inputs"_a = nb::bool_(false),
           "write_lock_file"_a = true,
           "flake_settings"_a = std::map<std::string, std::string>{},
+          // The LockedFlake points into the evaluator's fetch settings, and
+          // into the arena that its SourcePaths come from.
+          nb::keep_alive<0, 1>(),
           "Lock a flake reference, returning a LockedFlake with description and inputs");
     m.def("get_flake", &get_flake,
           "state"_a, "flake_ref"_a, "use_registries"_a = true,

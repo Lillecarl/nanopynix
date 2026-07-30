@@ -1,9 +1,6 @@
 nanopynix_bindings.flake.__prefix__:
     \from nanopynix_bindings.expr import EvalState, Value
 
-nanopynix_bindings.flake.FlakeRef.__init__:
-    def __init__(self, ref: object) -> None: ...
-
 nanopynix_bindings.flake.FlakeRef.to_attrs:
     def to_attrs(self) -> dict[str, str | int | bool]: ...
 

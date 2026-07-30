@@ -28,7 +28,7 @@ from nanopynix_proto.nix.eval import ConfigureEvalRequest
 
 import nanopynix
 from nanopynix import NixEvalSettings, NixFetchSettings, stores
-from nanopynix.exceptions import EvalError, SettingNotLiveError
+from nanopynix.exceptions import EvalError, NixError, SettingNotLiveError
 from nanopynix.namespace import STORE_DIR
 from nanopynix.settings import (
     NixEvaluatorSettings,
@@ -669,11 +669,20 @@ async def _eval_scope_holds(session: Any, store: Any, **eval_kwargs: Any) -> str
 
 
 async def _fetch_scope_holds(session: Any, store: Any, ref: str, **eval_kwargs: Any) -> str:
-    """Whether the fetcher accepts a dirty git tree."""
+    """Whether the fetcher accepts a dirty git tree.
+
+    Only Nix's own refusal counts, and only the refusal that names the dirty
+    tree. This used to catch every exception. Nix 2.31 crashed inside the git
+    fetcher with ``RuntimeError: Invalid argument`` -- see issue #34 -- so
+    ``test_every_settings_scope_reaches_the_door_that_owns_it`` reported that
+    the fetch scope held while the fetch scope reached nothing at all.
+    """
     async with session.eval(store, **eval_kwargs) as evaluator:
         try:
             await evaluator.lock_flake(ref, write_lock_file=False)
-        except Exception:
+        except NixError as exc:
+            if "dirty" not in exc.msg_without_ansi:
+                raise
             return "refused"
         return "accepted"
 

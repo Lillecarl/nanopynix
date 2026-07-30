@@ -1,3 +1,6 @@
+#include <memory>
+#include <utility>
+
 #include <nanobind/nanobind.h>
 
 #include "nanopynix_modules.hh"
@@ -26,9 +29,21 @@ using namespace nb::literals;
 // =========================================================================
 
 struct PyInput {
+    /// The settings that `input` points at.
+    ///
+    /// Nix 2.31 keeps a `const fetchers::Settings *` inside
+    /// `fetchers::Input`, so an input that Python holds must own the settings
+    /// it was built against. Before this member the settings were a local of
+    /// the function below, and the input pointed at a destroyed object.
+    ///
+    /// No test on a supported version reaches that pointer through a
+    /// `PyInput`, so this half is preventive. `nix_flake.cpp` has the same
+    /// defect, and there it fails. See issue #34.
+    std::shared_ptr<nix::fetchers::Settings> settings;
     nix::fetchers::Input input;
 
-    PyInput(nix::fetchers::Input i) : input(std::move(i)) {}
+    PyInput(std::shared_ptr<nix::fetchers::Settings> s, nix::fetchers::Input i)
+        : settings(std::move(s)), input(std::move(i)) {}
 
     std::string to_string() const { return input.to_string(); }
     std::string to_url_string() const { return input.toURLString(); }
@@ -54,34 +69,35 @@ struct PyInput {
 // =========================================================================
 
 static PyInput input_from_url(const std::string &url) {
-    // Use default fetch settings (global nix::settings provides this)
-    // but Input::fromURL needs fetchers::Settings — we create a local one
-    nix::fetchers::Settings fetchSettings;
+    // Default fetch settings, on the heap and owned by the result: see the
+    // comment on `PyInput::settings`.
+    auto settings = std::make_shared<nix::fetchers::Settings>();
     std::optional<nix::fetchers::Input> input;
     {
         nb::gil_scoped_release release;
-        input.emplace(nix::fetchers::Input::fromURL(fetchSettings, url));
+        input.emplace(nix::fetchers::Input::fromURL(*settings, url));
     }
-    return PyInput(std::move(*input));
+    return PyInput(std::move(settings), std::move(*input));
 }
 
 static PyInput input_from_attrs(const std::map<std::string, std::string> &attrs) {
     nix::fetchers::Attrs a;
     for (auto &[k, v] : attrs) a[k] = v;
-    nix::fetchers::Settings fetchSettings;
+    auto settings = std::make_shared<nix::fetchers::Settings>();
     std::optional<nix::fetchers::Input> input;
     {
         nb::gil_scoped_release release;
-        input.emplace(nix::fetchers::Input::fromAttrs(fetchSettings, std::move(a)));
+        input.emplace(nix::fetchers::Input::fromAttrs(*settings, std::move(a)));
     }
-    return PyInput(std::move(*input));
+    return PyInput(std::move(settings), std::move(*input));
 }
 
 // =========================================================================
 
 static void bind_input(nb::module_ &m) {
+    // No constructor. A `PyInput` must own the settings that it points at,
+    // and Python cannot build the two halves.
     nb::class_<PyInput>(m, "Input")
-        .def(nb::init<nix::fetchers::Input>(), "input"_a)
         .def("to_string", &PyInput::to_string)
         .def("to_url_string", &PyInput::to_url_string)
         .def("to_attrs", &PyInput::to_attrs)
