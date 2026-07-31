@@ -75,6 +75,50 @@ code obey them on both engines:
   correct in `WorkerClient.close` and is the pattern to copy.
 * A worker that outlives its teardown is terminated and then killed
   (`_stop_worker_process`). That path is correct and untested (#12).
+* **A worker ignores the terminal's SIGINT.** A worker is a child of the
+  client, so it shares the client's foreground process group, and Ctrl-C
+  reaches the worker too. `asyncio.Runner` then cancels the main task and
+  re-raises `KeyboardInterrupt`, which ends the worker under a REPL that only
+  wanted to cancel one evaluation. `WorkerClient` is the only thing that may
+  stop a worker, and a terminal is not `WorkerClient`. Cancellation still
+  reaches the worker over the wire, as gRPC handler cancellation.
+
+## Cancellation reaches Nix, or the evaluator is abandoned
+
+* **A cancelled operation must stop the Nix work, and not only free the
+  caller.** `concurrent.futures.Future.cancel()` does nothing once the work has
+  started. `NixThreadExecutor` therefore arms Nix's per-thread interrupt hook
+  (`nix::unix::interruptCheck`) around every call, and a cancel scope sets it.
+* **Compose that hook, and never replace it.** Nix installs its own predicate
+  on the workers of its `ThreadPool`. A scope keeps the previous value, calls
+  it, and restores it on the thread that armed it.
+* **Nix answers only where it polls.** libstore has 33 `checkInterrupt()` calls
+  and libexpr has 4, all in value printing. `eval.cc` has none, and a blocking
+  wait such as `filetransfer`'s reaches none either. So a fetch, a store
+  operation and a build stop; a pure evaluation does not.
+* **What cannot be stopped is abandoned, and says so.** After a bounded grace
+  the executor is poisoned: every later call raises `EvaluatorAbandonedError`
+  at once instead of queueing behind work that will not end, and `close()`
+  stops waiting for the thread. The thread and its stack leak until the
+  operation ends, and for the life of the process if it never does.
+* **A thread must never outlive its Boehm registration.** `close()` on a
+  poisoned executor still *queues* the thread finalizer, behind the operation
+  that would not stop; only the wait is dropped. Skipping the finalizer would
+  let the thread reach the pool's stop marker and exit while Boehm still lists
+  it, and the next collection then calls `pthread_kill` on a dead thread and
+  aborts the process with "pthread_kill failed at suspend".
+* **An abandoned thread is a load an application must survive, not a free
+  resource.** It keeps allocating, so it enlarges every later collection, and
+  Boehm stops the world by signalling each registered thread and waiting about
+  0.45s in total for all of them. A machine that swaps under the extra heap can
+  miss that budget, and Boehm aborts with "Signals delivery fails constantly".
+  Sizing the grace is therefore a real decision, not a formality.
+* **The RPC worker may end its own process; nanopynix may not end the
+  caller's.** A worker calls `os._exit` because a worker is disposable and the
+  client already replaces a dead one. In a host application the process belongs
+  to the caller, so nanopynix documents the limit rather than acting on it.
+  **This asymmetry is forced by process isolation, and is therefore allowed** —
+  see the contract below.
 
 ## Error taxonomy
 
@@ -148,7 +192,16 @@ The two engines must agree on: exception class, exception message where Nix
 authors it, `NixError.info` contents, value laziness, settings acceptance and
 refusal, and resource release timing. They may differ on: timeouts (rpc only —
 an in-process call has no such failure mode), crash isolation, custom primops,
-and the number of concurrently open sessions per process.
+the number of concurrently open sessions per process, and *when* a cancelled
+operation's abandonment becomes visible.
+
+That last one is new with #37, and it is forced. On inproc the grace runs
+inside the cancelled caller, so `EvaluatorAbandonedError` is already in force
+the instant the cancel returns. On rpc the cancel only closes the gRPC stream,
+and the worker runs its own grace in its own process — so a client call made
+during that window is served rather than refused. Same class, and just as
+permanent, one round trip later.
+`test_cancel_engine_parity.py` pins both halves.
 
 `test_engine_parity.py` checks names. `test_engine_parity_semantics.py` checks
 behaviour. Both must keep growing; #11 and #6 are each a semantics entry that

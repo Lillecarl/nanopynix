@@ -75,7 +75,7 @@ from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
 from nanopynix.rpc.worker._handle_registry import HandleRegistry
 from nanopynix.rpc.worker._worker_eval import EvalServiceHandler, close_eval_state, find_evals_by_store
-from nanopynix.rpc.worker._worker_nix import NixThreadExecutor
+from nanopynix.rpc.worker._worker_nix import NixThreadExecutor, abandoned_work_is_running
 from nanopynix.rpc.worker._worker_primop import (
     ThreadedRpcPrimopBridge,
     rpc_primop_callback_factory as rpc_primop_callback_factory,  # type: ignore[reportPrivateUsage] -- internal module, required for primop callback factory
@@ -518,6 +518,36 @@ class WorkerServiceHandler(WorkerServiceBase):
 WorkerServices = WorkerServiceHandler | StoreServiceHandler | EvalServiceHandler
 
 
+def _ignore_terminal_interrupts() -> None:
+    """Take this worker out of the terminal's Ctrl-C.
+
+    A worker is a child of the client, so it shares the client's foreground
+    process group. The terminal driver sends SIGINT to that whole group, and
+    the worker used to die of it: ``asyncio.Runner`` installs a SIGINT handler
+    that cancels the main task and re-raises ``KeyboardInterrupt``, which ends
+    the process.
+
+    Measured in the pynix REPL. Ctrl-C during an evaluation reached both
+    processes. The REPL cancelled the evaluation and returned to its prompt,
+    exactly as intended, and its worker died at the same moment, which left
+    the session unusable and printed a grpclib traceback over the prompt.
+
+    Ignoring the signal is what the ownership rule already says: one Session
+    owns one worker, and ``WorkerClient`` is the only thing that may stop it.
+    A terminal is not ``WorkerClient``. Cancellation still reaches the worker,
+    over the wire, as gRPC handler cancellation -- which is the path that
+    turns into Nix's interrupt hook, and the whole point of #37.
+
+    Installed before ``asyncio.Runner`` can look at the handler, so the runner
+    leaves SIGINT alone. SIGTERM and SIGKILL are untouched: those are how
+    ``_stop_worker_process`` really does stop a worker.
+    """
+    with contextlib.suppress(ValueError, OSError):
+        # ValueError: not the main thread of this process, which only happens
+        # in an embedded test harness. Nothing to protect there.
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
 def worker_service_factory(
     backchannel: WorkerBackchannel | None = None,
     *,
@@ -547,6 +577,8 @@ def worker_service_factory(
       -- this factory must stay synchronous to satisfy grpclib_transports'
       ``BackchannelServiceFactory`` contract)
     """
+    _ignore_terminal_interrupts()
+
     # First, before the logger and before the executor thread: the namespace
     # call needs this process to still be single-threaded.
     if namespace is not None:
@@ -726,6 +758,35 @@ def main() -> None:
     """
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(_stdio_main())
+    _exit_now_if_nix_will_not_stop()
+
+
+def _exit_now_if_nix_will_not_stop() -> None:
+    """End this process at once when an abandoned Nix thread is still running.
+
+    A cancelled operation that Nix never answered leaves its thread inside
+    libexpr, allocating from the Boehm collector. A collection that races
+    Python's finalization aborts with "Signals delivery fails constantly", and
+    a normal exit would instead block for ever joining that thread.
+
+    A worker may do this because a worker is disposable: the client already
+    treats a dead worker as ``WorkerDiedError`` and replaces it. ``nanopynix``
+    itself must never do this, because there the process belongs to the caller.
+    That difference is forced by process isolation, and it is the one place
+    where the RPC engine really can do something the in-process engine cannot.
+    """
+    if not abandoned_work_is_running():
+        return
+    print(  # noqa: T201 -- stderr is this worker's log channel; the logging framework may already be torn down
+        "nanopynix worker: exiting immediately, a cancelled Nix operation never "
+        "stopped. The client will see the worker die and replace it.",
+        file=sys.stderr,
+    )
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # os._exit and not sys.exit: sys.exit unwinds into the teardown that
+    # joins the stuck thread, which is the hang being avoided.
+    os._exit(0)
 
 
 async def _stdio_main() -> None:

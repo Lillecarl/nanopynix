@@ -412,6 +412,26 @@ class EvalSessionClosedError(ObjectLifetimeError):
     """An evaluator, or a value belonging to one, was used after it closed."""
 
 
+class EvaluatorAbandonedError(ObjectLifetimeError):
+    """An operation was cancelled, and Nix did not stop.
+
+    Nix answers a cancellation only where it polls ``checkInterrupt()``. A
+    fetch, a store operation and a build do. A pure evaluation does not:
+    ``eval.cc`` has no such call, so ``let x = x + 1; in x`` runs until the
+    process ends.
+
+    The evaluator's thread is therefore still occupied by work nobody wants,
+    and an ``EvalState`` belongs to one thread, so every later call on this
+    evaluator would queue behind that work for ever. nanopynix abandons the
+    evaluator instead and raises this at once. Build a new one.
+
+    A lifetime error rather than a :class:`NixError`, because the evaluator is
+    gone in the same way a closed one is. The difference is the cause: the
+    caller did not close it, and one thread and its stack stay in use until the
+    process ends.
+    """
+
+
 class ValueReleasedError(ObjectLifetimeError):
     """A value was used after its explicit release."""
 

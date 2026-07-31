@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import os
 import shlex
+import signal
 import sys
 from io import StringIO
 from pathlib import Path
@@ -25,7 +28,7 @@ from tree_sitter import Query, QueryCursor
 
 import nanopynix
 from nanopynix._typechecking import BEARTYPING
-from nanopynix.exceptions import NixError
+from nanopynix.exceptions import EvaluatorAbandonedError, NixError
 from nanopynix.verbosity import normalize_log_level
 from pynix._completion import completion_prefix_at
 from pynix._nix_syntax import NIX_GRAMMAR_PATH, NIX_LANGUAGE, parse_nix
@@ -41,7 +44,7 @@ from pynix.target import (
 )
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Iterable
 
     from prompt_toolkit.document import Document
 
@@ -440,18 +443,75 @@ async def _run_repl_loop(
         if command in {":quit", ":q"}:
             return
 
-        handler = _COMMAND_HANDLERS.get(command)
         try:
-            if handler is not None:
-                await handler(state, argument)
-            elif command.startswith(":"):
-                print_formatted_text(f"unknown command: {command}; try :help")
-            else:
-                value = await repl.line(line)
-                if value is not None:
-                    print_formatted_text(format_json(await value.to_python()))
+            with _interruptible() as scope:
+                await _dispatch(state, repl, command, argument, line)
+            if scope.cancel_called:
+                print_formatted_text("^C")
+        except EvaluatorAbandonedError as exc:
+            # Ctrl-C reached an evaluation that Nix cannot stop, so the
+            # evaluator thread is abandoned. Every later expression raises this
+            # same error, because the evaluator is gone for the life of the
+            # process. A prompt that only repeats the error is worse than no
+            # prompt, so leave, and say what happened.
+            print_formatted_text(f"error: {exc}")
+            print_formatted_text("this evaluator cannot be used again; start pynix again")
+            return
         except (NixError, ReplRunError) as exc:
             _print_error(exc)
+
+
+async def _dispatch(
+    state: _ReplState,
+    repl: ReplSession,
+    command: str,
+    argument: str,
+    line: str,
+) -> None:
+    """Run one REPL input: a command, or an expression to evaluate and print."""
+    handler = _COMMAND_HANDLERS.get(command)
+    if handler is not None:
+        await handler(state, argument)
+    elif command.startswith(":"):
+        print_formatted_text(f"unknown command: {command}; try :help")
+    else:
+        value = await repl.line(line)
+        if value is not None:
+            print_formatted_text(format_json(await value.to_python()))
+
+
+@contextlib.contextmanager
+def _interruptible() -> Generator[anyio.CancelScope]:
+    """Let Ctrl-C stop the running evaluation and return to the prompt.
+
+    Cancelling the scope is all this needs to do. ``NixThreadExecutor`` turns a
+    cancellation into Nix's own per-thread interrupt, so the evaluator thread
+    stops instead of running on unwatched. Before that existed, Ctrl-C here
+    cancelled the REPL's task and left Nix evaluating.
+
+    ``loop.add_signal_handler`` rather than ``signal.signal``, because the
+    handler must run on the event loop and cancel a scope. The arm at
+    ``prompt_async`` above stays: that one covers Ctrl-C while the user types,
+    where prompt_toolkit owns the terminal and no evaluation is in flight.
+
+    Nix answers an interrupt only where it polls ``checkInterrupt()``. A fetch,
+    a store operation and a build stop. A pure evaluation does not, and there
+    the evaluator is abandoned -- so restore the default handler first, and a
+    second Ctrl-C leaves the REPL rather than doing nothing.
+    """
+    loop = asyncio.get_running_loop()
+    with anyio.CancelScope() as scope:
+        try:
+            loop.add_signal_handler(signal.SIGINT, scope.cancel)
+        except NotImplementedError:
+            # No signal handlers on this loop (Windows, or a non-main thread).
+            # The REPL still works; Ctrl-C just keeps its old behaviour.
+            yield scope
+            return
+        try:
+            yield scope
+        finally:
+            loop.remove_signal_handler(signal.SIGINT)
 
 
 def _print_error(exc: NixError | ReplRunError) -> None:

@@ -10,6 +10,7 @@ never blocks on Nix.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -91,9 +92,12 @@ from nanopynix._core._codec import python_to_scalar
 from nanopynix._core._extract import locked_flake as _locked_flake
 from nanopynix._core._objects import CoreLockedFlake, CoreValue
 from nanopynix._wire import HandleKind
+from nanopynix.exceptions import EvaluatorAbandonedError
 from nanopynix.rpc.worker._grpc_util import worker_op, wrap_service_handlers
 from nanopynix.rpc.worker._proto_shape import proto_shape
 from nanopynix.rpc.worker._worker_nix import NIX_EVALUATOR_STACK_SIZE, NixThreadExecutor
+
+logger = logging.getLogger(__name__)
 
 _NIX_TYPE_MAP: dict[str, common_pb.NixType] = {
     "thunk": common_pb.NixType.THUNK,
@@ -168,9 +172,23 @@ def close_eval_state(state: Any, eval_handle: int) -> None:
     except KeyError:
         return
     state.handles.release(eval_handle)
-    entry.executor.run_sync(release_eval_resources, state, eval_handle)
     try:
+        entry.executor.run_sync(release_eval_resources, state, eval_handle)
         entry.executor.run_sync(entry.eval_state.close)
+    except EvaluatorAbandonedError:
+        # The evaluator's thread is inside an operation that never answered its
+        # interrupt, so neither the release nor the close can reach Nix.
+        # Closing still succeeds, for the same reason inproc's
+        # EvalSession.close does: a caller may always close, and refusing here
+        # would leave the owning store unclosable too. The EvalState and the
+        # values under it leak with the thread that owns them. `shutdown` below
+        # queues the thread finalizer behind the runaway operation, so the
+        # thread never outlives its Boehm GC registration.
+        logger.warning(
+            "closing an abandoned evaluator (handle %d) without its Nix teardown; "
+            "its EvalState leaks with the thread that owns it",
+            eval_handle,
+        )
     finally:
         entry.executor.shutdown(wait=True)
 
