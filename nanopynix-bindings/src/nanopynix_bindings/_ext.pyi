@@ -16,6 +16,7 @@ that immediately hand their submodule over to `sys.modules`.
 from types import ModuleType
 
 errors: ModuleType
+signals: ModuleType
 util: ModuleType
 store: ModuleType
 expr: ModuleType

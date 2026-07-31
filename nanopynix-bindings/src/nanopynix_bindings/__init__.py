@@ -1,6 +1,6 @@
 """nanopynix compiled bindings namespace package.
 
-The six binding areas -- ``errors``, ``util``, ``store``, ``expr``,
+The binding areas -- ``errors``, ``signals``, ``util``, ``store``, ``expr``,
 ``fetchers``, ``flake`` -- used to be separate extension modules. They are
 submodules of one, ``_ext``, for the reason set out in
 ``src/nanopynix_modules.hh``: a function-local static in a header is a separate
@@ -29,6 +29,7 @@ from . import (
     expr as expr,
     fetchers as fetchers,
     flake as flake,
+    signals as signals,
     store as store,
     util as util,
 )
@@ -38,6 +39,7 @@ __all__ = [
     "expr",
     "fetchers",
     "flake",
+    "signals",
     "store",
     "util",
 ]
