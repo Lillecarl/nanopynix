@@ -30,6 +30,11 @@ if TYPE_CHECKING:
 # Value printing polls checkInterrupt(), so Nix answers this one.
 INTERRUPTIBLE = "builtins.genList (x: x) 12000000"
 
+# When to cancel the work above. It must land after the work starts and well
+# before the work ends. See the same constant in inproc/test_inproc_cancel.py,
+# which records the CI failure that chose the value.
+CANCEL_AFTER = 0.2
+
 # A fold polls nothing. Sized to outlast the default 2s grace plus the deadline
 # below on both engines, because the worker's grace cannot be reached from this
 # process and both engines must therefore reach the same state by the clock.
@@ -78,8 +83,9 @@ async def test_a_cancelled_interruptible_operation_frees_the_evaluator(
     """Nix stops, and the very next call is answered at once."""
     async with session_factory() as nix, nix.store() as store, nix.eval(store) as evaluator:
         value = await evaluator.string(INTERRUPTIBLE)
-        with anyio.move_on_after(1.0):
+        with anyio.move_on_after(CANCEL_AFTER) as scope:
             await value.to_python()
+        assert scope.cancelled_caught, "the work ended before the deadline, so this test cancelled nothing"
 
         # Without the interrupt this queues behind the whole conversion.
         with anyio.fail_after(5.0):

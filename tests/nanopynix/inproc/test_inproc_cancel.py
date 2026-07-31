@@ -42,8 +42,20 @@ if TYPE_CHECKING:
     from tests.support.nix_environment import InprocSessionFactory
 
 # Value printing calls checkInterrupt() per node (value-to-json.cc:17), so this
-# is interruptible. Big enough that the deadline lands in the middle of it.
+# is interruptible. It takes 2.2s on a 4-core development machine.
 INTERRUPTIBLE = "builtins.genList (x: x) 12000000"
+
+# When to cancel the work above. It must land after the work starts and well
+# before the work ends, on any machine.
+#
+# The evaluator thread already runs and is idle, so the work starts less than a
+# millisecond after the call. The margin at the other end is what matters, and
+# 0.2s against the shortest run yet measured leaves a factor of three. A first
+# version cancelled at 1.0s and CI proved that wrong: `test-local-nix_2_31`
+# finished the work first, so nothing was cancelled and the test reported that
+# Nix ignored the interrupt. Each test below therefore asserts
+# `scope.cancelled_caught`, which says that a cancellation really happened.
+CANCEL_AFTER = 0.2
 
 # A fold has no checkInterrupt() anywhere in its path. This is the case Nix
 # cannot stop, and the one that abandons the evaluator.
@@ -98,8 +110,9 @@ async def test_a_cancelled_interruptible_operation_frees_the_evaluator(
     """The thread stops, and the evaluator is immediately usable again."""
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as evaluator:
         value = await evaluator.string(INTERRUPTIBLE)
-        with anyio.move_on_after(1.0):
+        with anyio.move_on_after(CANCEL_AFTER) as scope:
             await value.to_python()
+        assert scope.cancelled_caught, "the work ended before the deadline, so this test cancelled nothing"
 
         # The assertion that fails without the interrupt: the work is really
         # over, rather than still running on a thread nobody is watching.
@@ -222,8 +235,9 @@ async def test_a_cancelled_operation_raises_operation_cancelled(
     caplog.set_level(logging.DEBUG, logger="nanopynix._core._nix_executor")
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as evaluator:
         value = await evaluator.string(INTERRUPTIBLE)
-        with anyio.move_on_after(1.0):
+        with anyio.move_on_after(CANCEL_AFTER) as scope:
             await value.to_python()
+        assert scope.cancelled_caught, "the work ended before the deadline, so this test cancelled nothing"
         assert evaluator._executor.poisoned is None  # type: ignore[reportPrivateUsage] -- the interrupt has to have worked for this test to mean anything
 
     records = [record for record in caplog.records if record.msg == "cancelled Nix work finished with an exception"]
