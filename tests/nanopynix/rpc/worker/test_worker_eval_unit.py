@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import threading
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -17,7 +18,9 @@ import nanopynix._core._nix_core as nix_core  # type: ignore[reportPrivateUsage]
 import nanopynix.rpc.worker._worker as worker  # type: ignore[reportPrivateUsage] -- test imports private module
 from nanopynix._core._objects import (  # type: ignore[reportPrivateUsage] -- test constructs worker's local runtime
     CoreEvalState,
+    CoreLockedFlake,
     CoreStore,
+    CoreValue,
 )
 from nanopynix._wire import HandleKind
 from nanopynix.rpc.worker._handle_registry import (
@@ -37,29 +40,59 @@ from nanopynix.rpc.worker._worker_nix import (
 )
 
 
+class _UnusedEvalState(CoreEvalState):
+    """A CoreEvalState with no native pointer, for a test that never touches it.
+
+    ``EvalEntry.eval_state`` names the real type, so beartype checks it at run
+    time and ``None`` no longer passes. Subclassing the real class is what the
+    rest of this file already does for a double -- see ``_FakeEvalState``.
+    """
+
+    def __init__(self) -> None:
+        self.raw = None
+
+
+class _InlineDispatchState(WorkerState):
+    """A ``WorkerState`` that runs each operation inline, on the calling task.
+
+    A subclass rather than a stand-in object. ``EvalServiceHandler`` names
+    ``WorkerState``, and beartype checks that at run time, so a duck-typed
+    namespace no longer reaches the constructor.
+    """
+
+    def __init__(self, handles: HandleRegistry) -> None:
+        super().__init__()
+        self.handles = handles
+
+    async def run_request(
+        self,
+        *,
+        request_id: int,
+        operation: Callable[..., Any],
+        args: tuple[Any, ...] = (),
+        executor: NixThreadExecutor | None = None,
+        limiter: anyio.CapacityLimiter | None = None,
+    ) -> Any:
+        _ = (request_id, executor, limiter)
+        return operation(*args)
+
+
 def _handler_with_inline_dispatch(handles: HandleRegistry) -> tuple[EvalServiceHandler, int]:
     """A handler whose RPCs run their body inline, plus an evaluator handle.
 
     The handlers are ``@worker_op``-decorated sync bodies, so an entry point is
     the only way in -- there is no separately addressable ``_do_`` method any
     more. These two tests are about handle ownership rather than dispatch, so
-    the state stands in for ``WorkerState`` with a ``run_request`` that just
-    calls the operation, and the evaluator handle exists only because
-    ``_run`` looks up an executor before dispatching.
+    the state runs each operation inline, and the evaluator handle exists only
+    because ``_run`` looks up an executor before dispatching.
     """
-
-    async def run_request(*, request_id: int, executor: object, operation: Any, args: tuple[Any, ...]) -> Any:
-        _ = (request_id, executor)
-        return operation(*args)
-
     # NixThreadExecutor spawns its worker thread lazily on first submitted
     # task, so constructing one here without ever running work on it is safe.
     eval_handle = handles.allocate(
-        EvalEntry(eval_state=None, executor=NixThreadExecutor(), store_handle=0),  # type: ignore[arg-type] -- eval_state is never touched by these tests
+        EvalEntry(eval_state=_UnusedEvalState(), executor=NixThreadExecutor(), store_handle=0),
         HandleKind.EVAL,
     )
-    handler = EvalServiceHandler(SimpleNamespace(handles=handles, run_request=run_request))
-    return handler, eval_handle
+    return EvalServiceHandler(_InlineDispatchState(handles)), eval_handle
 
 
 class _FakeBridge:
@@ -315,7 +348,13 @@ async def test_open_eval_forwards_the_build_store_handle(
 
 
 async def test_releasing_remote_value_closes_local_value() -> None:
-    class Value:
+    class Value(CoreValue):
+        """Records the close, and holds no native pointer.
+
+        Subclasses the real class because the typed accessor names it, and
+        beartype checks the returned object at run time.
+        """
+
         def __init__(self) -> None:
             self.closed = False
 
@@ -331,11 +370,17 @@ async def test_releasing_remote_value_closes_local_value() -> None:
 
     assert value.closed
     with pytest.raises(KeyError):
-        handles.get_typed(handle, HandleKind.VALUE)
+        handles.get_value(handle)
 
 
 async def test_releasing_locked_flake_closes_local_resource() -> None:
-    class LockedFlake:
+    class LockedFlake(CoreLockedFlake):
+        """Records the close, and holds no native pointer.
+
+        Subclasses the real class because the typed accessor names it, and
+        beartype checks the returned object at run time.
+        """
+
         def __init__(self) -> None:
             self.closed = False
 
@@ -353,4 +398,4 @@ async def test_releasing_locked_flake_closes_local_resource() -> None:
 
     assert locked_flake.closed
     with pytest.raises(KeyError):
-        handles.get_typed(handle, HandleKind.LOCKED_FLAKE)
+        handles.get_locked_flake(handle)

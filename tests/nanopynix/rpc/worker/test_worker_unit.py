@@ -30,6 +30,9 @@ from nanopynix_proto.nix.worker import (
 )
 
 import nanopynix.rpc.worker._worker as worker  # type: ignore[reportPrivateUsage] -- test imports private module
+from nanopynix._core._objects import (
+    CoreStore,  # type: ignore[reportPrivateUsage] -- test double subclasses the real core type
+)
 from nanopynix._wire import HandleKind
 from nanopynix.logging import LogCollector, LogOutbox
 from nanopynix.rpc.worker._worker import (  # type: ignore[reportPrivateUsage] -- test imports private module
@@ -222,9 +225,16 @@ def test_close_store_skips_title_update_for_a_handle_never_opened_via_open_store
     named_store_uris, so _close_store's title-refresh branch must be skipped."""
     titles: list[str] = []
 
-    class _FakeStore:
-        def close(self) -> None:
-            pass
+    class _FakeStore(CoreStore):
+        """A CoreStore with no native pointer.
+
+        ``HandleRegistry.get_store`` names the real type, so beartype checks
+        the returned object. The inherited ``close`` already does nothing when
+        ``raw`` is None, which is all this test needs.
+        """
+
+        def __init__(self) -> None:
+            self.raw = None
 
     def _record_title_update() -> None:
         titles.append("called")

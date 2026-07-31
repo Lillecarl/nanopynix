@@ -60,13 +60,13 @@ from nanopynix_proto.nix.store import (
 )
 
 from nanopynix._typechecking import BEARTYPING
-from nanopynix._wire import HandleKind
 from nanopynix.rpc.worker._grpc_util import worker_op, wrap_service_handlers
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Sequence
 
     from nanopynix._core._objects import CoreStore
+    from nanopynix.rpc.worker._state import WorkerState
 
 
 def _widen_paths(paths: Sequence[str]) -> list[str]:
@@ -94,12 +94,11 @@ class StoreServiceHandler(StoreServiceBase):
     event loop free while allowing independent Store calls to overlap.
     """
 
-    def __init__(self, state: Any) -> None:
-        self._state = state
+    def __init__(self, state: WorkerState) -> None:
+        self._state: WorkerState = state
 
     def _resolve(self, store_handle: int) -> CoreStore:
-        store: CoreStore = self._state.handles.get_typed(store_handle, HandleKind.STORE)
-        return store
+        return self._state.handles.get_store(store_handle)
 
     async def _run(self, message: Any, operation: Any) -> Any:
         """Dispatch one store operation onto the worker's bounded Store pool.
