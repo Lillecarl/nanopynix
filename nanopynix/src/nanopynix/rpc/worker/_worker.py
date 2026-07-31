@@ -32,7 +32,6 @@ import traceback
 from typing import TYPE_CHECKING, Any, cast
 
 import anyio
-import anyio.to_thread
 from grpclib_transports.multiprocessing import serve_multiprocessing_endpoint
 from grpclib_transports.protocol import DEFAULT_TUNING
 from grpclib_transports.stdio import serve_stdio
@@ -59,7 +58,6 @@ from nanopynix_proto.nix.worker import (
     WorkerServiceBase,
 )
 
-from nanopynix._core._objects import CoreRuntime
 from nanopynix._core._primops import import_primop_callable as _import_callable
 from nanopynix._process_title import set_process_title, set_worker_title
 from nanopynix._typechecking import BEARTYPING
@@ -73,7 +71,7 @@ from nanopynix.models import PrimOpSpec
 from nanopynix.namespace import enter_overlay_namespace
 from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
-from nanopynix.rpc.worker._handle_registry import HandleRegistry
+from nanopynix.rpc.worker._state import WorkerState as WorkerState
 from nanopynix.rpc.worker._worker_eval import EvalServiceHandler, close_eval_state, find_evals_by_store
 from nanopynix.rpc.worker._worker_nix import NixThreadExecutor, abandoned_work_is_running
 from nanopynix.rpc.worker._worker_primop import (
@@ -81,10 +79,10 @@ from nanopynix.rpc.worker._worker_primop import (
     rpc_primop_callback_factory as rpc_primop_callback_factory,  # type: ignore[reportPrivateUsage] -- internal module, required for primop callback factory
 )
 from nanopynix.rpc.worker._worker_store import StoreServiceHandler
-from nanopynix.settings import DEFAULT_WORKER_MAX_CONCURRENCY, SettingsProvenance
+from nanopynix.settings import DEFAULT_WORKER_MAX_CONCURRENCY
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator
 
     from grpclib._typing import (
         IServable,  # type: ignore[reportPrivateUsage] -- named only in the cast in _stdio_main; see the comment there
@@ -140,94 +138,6 @@ def _install_worker_diagnostics(collector: LogCollector, outbox: LogOutbox) -> N
         print("=== end nanopynix worker diagnostics ===", file=sys.stderr, flush=True)  # noqa: T201 -- same signal-handler reason
 
     signal.signal(signal.SIGUSR1, _dump_worker_diagnostics)
-
-
-# ── Worker state ─────────────────────────────────────────────────────
-
-
-class WorkerState:
-    """Shared mutable state held by all three service handlers.
-
-    Thread confinement:
-      * ``collector`` — both threads (already thread-safe via ``janus.Queue``)
-      * ``outbox`` — event loop only (a plain deque, no locking)
-      * ``log_task`` — event loop only; the relay that drains ``collector``
-        into ``outbox``. See ``_start_log_relay``.
-      * ``handles`` — both threads (locked ``HandleRegistry``); each open
-        evaluator lives here as an ``EvalEntry`` (kind ``"eval"``), owning its
-        own dedicated Nix thread — see ``_worker_eval.py``.
-      * ``executor`` — event loop only. Process-global Nix operations only
-        (``Init``, ``GetVerbosity``/``SetVerbosity``, the store-close
-        bookkeeping in ``_close_store``) — evaluator work runs on each
-        evaluator's own executor instead.
-      * ``store_limiter`` — event loop only (bounds concurrent Store work
-        dispatched via ``anyio.to_thread.run_sync``; unlike ``executor``, a
-        ``CapacityLimiter`` has no thread-affinity requirement and no
-        shutdown lifecycle of its own to own/release)
-      * ``rpc_bridge`` — Nix thread reads, event loop writes (internal locking)
-    """
-
-    def __init__(self) -> None:
-        self.collector: LogCollector | None = None
-        self.outbox: LogOutbox | None = None
-        self.log_task: asyncio.Task[None] | None = None
-        self.handles: HandleRegistry = HandleRegistry()
-        self.runtime = CoreRuntime()
-        self.executor: NixThreadExecutor | None = None
-        self.store_limiter: anyio.CapacityLimiter | None = None
-        self.owns_executor = True
-        self.rpc_bridge: ThreadedRpcPrimopBridge | None = None
-        self.nix_path: list[str] = []
-        self.worker_subname: str = "worker"
-        self.named_store_uris: dict[int, str] = {}
-        #: Where this worker's configuration came from, recorded by ``Init``.
-        #: Kept so ``GetSettings`` can tell a host value from one this session
-        #: applied, which a caller has no other way to learn across the wire.
-        self.provenance = SettingsProvenance()
-
-    async def run_request(
-        self,
-        *,
-        request_id: int,
-        operation: Callable[..., Any],
-        args: tuple[Any, ...] = (),
-        executor: NixThreadExecutor | None = None,
-        limiter: anyio.CapacityLimiter | None = None,
-    ) -> Any:
-        """Run a unary operation with its request-local logger context installed.
-
-        Exactly one of ``executor`` (a dedicated-thread ``NixThreadExecutor``,
-        for evaluator-affine work) or ``limiter`` (an
-        ``anyio.CapacityLimiter`` bounding ``anyio.to_thread.run_sync`` calls,
-        for Store work) must be given -- these are two distinct dispatch
-        mechanisms, not variants of one shared interface.
-        """
-        collector = self.collector
-        if request_id <= 0:
-            if collector is not None:
-                collector.request_finalized(request_id)
-            raise ValueError("request_id must be positive")
-        if (executor is None) == (limiter is None):
-            raise ValueError("run_request requires exactly one of executor or limiter")
-
-        def _run() -> Any:
-            previous = nanopynix_util.get_logger_request_id()
-            nanopynix_util.set_logger_request_id(request_id)
-            try:
-                return operation(*args)
-            finally:
-                if collector is not None:
-                    collector.request_finalized(request_id)
-                nanopynix_util.set_logger_request_id(previous)
-
-        if executor is not None:
-            return await executor.run(_run)
-        return await anyio.to_thread.run_sync(_run, limiter=limiter)
-
-    def log(self, action: str, *args: object) -> None:
-        """Emit a diagnostic in the current executor thread's request context."""
-        if self.collector is not None:
-            self.collector.callback(nanopynix_util.get_logger_request_id(), action, *args)
 
 
 # ── WorkerService handler ────────────────────────────────────────────
@@ -352,7 +262,7 @@ class WorkerServiceHandler(WorkerServiceBase):
 
     def _close_store(self, store_handle: int, force: bool = False) -> None:
         try:
-            store = self._state.handles.get_typed(store_handle, HandleKind.STORE)
+            store = self._state.handles.get_store(store_handle)
         except KeyError:
             # Store close is idempotent: a client or session teardown may
             # repeat a successful forced close.
@@ -710,18 +620,18 @@ async def _shutdown_worker(handlers: list[WorkerServices]) -> None:
     by both `run_worker` (multiprocessing) and `_stdio_main` (stdio), which
     otherwise hand-repeated this identically."""
     worker_state: WorkerState = _worker_state_of(handlers)
-    collector = worker_state.collector  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- cascade from WorkerState Any attributes
+    collector = worker_state.collector
     if collector is not None:
-        collector.close()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
-    log_task = worker_state.log_task  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- cascade from WorkerState Any attributes
+        collector.close()
+    log_task = worker_state.log_task
     if log_task is not None:
-        log_task.cancel()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
+        log_task.cancel()
         with contextlib.suppress(anyio.get_cancelled_exc_class()):
             await log_task
-    if worker_state.rpc_bridge is not None:  # type: ignore[reportUnknownVariableType] -- cascade from WorkerState Any attributes
-        await worker_state.rpc_bridge.stop()  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
-    if worker_state.executor is not None:  # type: ignore[reportUnknownVariableType] -- cascade from WorkerState Any attributes
-        worker_state.executor.shutdown(wait=True)  # type: ignore[reportUnknownMemberType] -- cascade from WorkerState Any attributes
+    if worker_state.rpc_bridge is not None:
+        await worker_state.rpc_bridge.stop()
+    if worker_state.executor is not None:
+        worker_state.executor.shutdown(wait=True)
 
 
 async def run_worker(

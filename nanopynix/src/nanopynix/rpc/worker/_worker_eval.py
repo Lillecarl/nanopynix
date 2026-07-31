@@ -11,7 +11,6 @@ never blocks on Nix.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Any
 
 import pydantic_core
@@ -90,11 +89,13 @@ from nanopynix_proto.nix.eval import (
 
 from nanopynix._core._codec import python_to_scalar
 from nanopynix._core._extract import locked_flake as _locked_flake
-from nanopynix._core._objects import CoreLockedFlake, CoreValue
+from nanopynix._core._objects import CoreValue
 from nanopynix._wire import HandleKind
 from nanopynix.exceptions import EvaluatorAbandonedError
 from nanopynix.rpc.worker._grpc_util import worker_op, wrap_service_handlers
+from nanopynix.rpc.worker._handle_registry import EvalEntry
 from nanopynix.rpc.worker._proto_shape import proto_shape
+from nanopynix.rpc.worker._state import WorkerState
 from nanopynix.rpc.worker._worker_nix import NIX_EVALUATOR_STACK_SIZE, NixThreadExecutor
 
 logger = logging.getLogger(__name__)
@@ -128,21 +129,12 @@ _AS_SCALAR_ACCESSORS: dict[common_pb.NixType, str] = {
 }
 
 
-@dataclass
-class EvalEntry:
-    """One worker-hosted evaluator: its state, dedicated Nix thread, and owning store."""
-
-    eval_state: Any
-    executor: NixThreadExecutor
-    store_handle: int
-
-
-def find_evals_by_store(state: Any, store_handle: int) -> list[int]:
+def find_evals_by_store(state: WorkerState, store_handle: int) -> list[int]:
     """Return the handles of every open evaluator bound to ``store_handle``."""
-    return [handle for handle, entry in state.handles.iter_kind(HandleKind.EVAL) if entry.store_handle == store_handle]
+    return [handle for handle, entry in state.handles.iter_evals() if entry.store_handle == store_handle]
 
 
-def release_eval_resources(state: Any, eval_handle: int) -> None:
+def release_eval_resources(state: WorkerState, eval_handle: int) -> None:
     """Release all worker handles owned by the evaluator at ``eval_handle``.
 
     Must run on that evaluator's own Nix thread — the ``.close()`` calls
@@ -156,7 +148,7 @@ def release_eval_resources(state: Any, eval_handle: int) -> None:
         state.handles.release(handle)
 
 
-def close_eval_state(state: Any, eval_handle: int) -> None:
+def close_eval_state(state: WorkerState, eval_handle: int) -> None:
     """Close the evaluator at ``eval_handle`` and all resources rooted by it.
 
     A no-op if ``eval_handle`` is already closed (e.g. a force-closed store
@@ -168,7 +160,7 @@ def close_eval_state(state: Any, eval_handle: int) -> None:
     executor via :meth:`NixThreadExecutor.run_sync`.
     """
     try:
-        entry: EvalEntry = state.handles.get_typed(eval_handle, HandleKind.EVAL)
+        entry = state.handles.get_eval_entry(eval_handle)
     except KeyError:
         return
     state.handles.release(eval_handle)
@@ -211,14 +203,14 @@ class EvalServiceHandler(EvalServiceBase):
     executor model.
     """
 
-    def __init__(self, state: Any) -> None:
-        self._state = state
+    def __init__(self, state: WorkerState) -> None:
+        self._state: WorkerState = state
 
     # ── helpers (run on the Nix thread) ──────────────────────────
 
     def _get_entry(self, eval_handle: int) -> EvalEntry:
         try:
-            return self._state.handles.get_typed(eval_handle, HandleKind.EVAL)
+            return self._state.handles.get_eval_entry(eval_handle)
         except KeyError as exc:
             raise RuntimeError("no EvalState is open — call OpenEval before evaluating") from exc
 
@@ -238,16 +230,12 @@ class EvalServiceHandler(EvalServiceBase):
         )
 
     async def open_eval(self, message: OpenEvalRequest) -> OpenEvalResponse:
-        store = self._state.handles.get_typed(message.store_handle, HandleKind.STORE)
+        store = self._state.handles.get_store(message.store_handle)
         # 0 means "none", as everywhere else an optional handle crosses the
         # wire (see _worker_store's eval_store_handle). This used to be a
         # hardcoded None, which is why rpc's Session.eval could not accept the
         # build_store inproc has always taken.
-        build_store = (
-            self._state.handles.get_typed(message.build_store_handle, HandleKind.STORE)
-            if message.build_store_handle
-            else None
-        )
+        build_store = self._state.handles.get_store(message.build_store_handle) if message.build_store_handle else None
         executor = NixThreadExecutor(
             thread_name_prefix="nix-eval",
             thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
@@ -297,10 +285,10 @@ class EvalServiceHandler(EvalServiceBase):
         return common_pb.ValueHandle(handle=handle, type=nix_type)
 
     def _resolve(self, handle: int) -> Any:
-        return self._state.handles.get_typed(handle, HandleKind.VALUE)
+        return self._state.handles.get_value(handle)
 
     def _get_store(self, store_handle: int) -> Any:
-        return self._state.handles.get_typed(store_handle, HandleKind.STORE)
+        return self._state.handles.get_store(store_handle)
 
     def _call_arg_to_python(self, arg: common_pb.CallArg, es: Any) -> Any:  # noqa: PLR0911 -- tracked complexity/arg-count debt, see TODO.md
         if arg.scalar is not None:
@@ -525,20 +513,20 @@ class EvalServiceHandler(EvalServiceBase):
 
     @worker_op
     def call_locked_flake(self, message: CallLockedFlakeRequest) -> ValueHandle:
-        lf: CoreLockedFlake = self._state.handles.get_typed(message.handle, HandleKind.LOCKED_FLAKE)
+        lf = self._state.handles.get_locked_flake(message.handle)
         es = self._get_es(message.eval_handle)
         return self._export(es.call_locked_flake(lf), message.eval_handle)
 
     @worker_op
     def write_lock_file(self, message: WriteLockFileRequest) -> WriteLockFileResponse:
-        lf: CoreLockedFlake = self._state.handles.get_typed(message.handle, HandleKind.LOCKED_FLAKE)
+        lf = self._state.handles.get_locked_flake(message.handle)
         lf.write_lock_file()
         return WriteLockFileResponse()
 
     @worker_op
     def release_locked_flake(self, message: ReleaseLockedFlakeRequest) -> ReleaseLockedFlakeResponse:
         try:
-            locked_flake: CoreLockedFlake = self._state.handles.get_typed(message.handle, HandleKind.LOCKED_FLAKE)
+            locked_flake = self._state.handles.get_locked_flake(message.handle)
         except KeyError:
             return ReleaseLockedFlakeResponse()
         locked_flake.close()

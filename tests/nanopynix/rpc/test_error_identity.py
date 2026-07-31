@@ -91,7 +91,7 @@ async def test_an_absent_handle_arrives_as_key_error(rpc_session: RpcSessionFact
 
 
 async def test_a_handle_of_the_wrong_kind_arrives_as_type_error(rpc_session: RpcSessionFactory) -> None:
-    """``get_typed`` raises ``TypeError`` when the kind does not match.
+    """A typed accessor raises ``TypeError`` when the kind does not match.
 
     The evaluator's own handle is a real handle of the wrong kind, so this
     reaches the branch without inventing a number.
