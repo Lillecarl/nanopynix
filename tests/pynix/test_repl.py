@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import signal
 from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -30,6 +31,7 @@ from pynix.repl import (  # type: ignore[reportPrivateUsage] -- tests intentiona
     _edit,
     _editor_argv,
     _exec_argv,
+    _interruptible,
     _load_initial_target,
     _main_program,
     _nix_input,
@@ -44,7 +46,7 @@ from pynix.repl import (  # type: ignore[reportPrivateUsage] -- tests intentiona
 )
 from pynix.target import EvaluationTarget
 
-from nanopynix.exceptions import NixError
+from nanopynix.exceptions import EvaluatorAbandonedError, NixError
 from nanopynix.models import NixType
 from nanopynix.rpc import ReplSession, Store, ValueProxy
 from nanopynix.settings import NixFlakeSettings
@@ -1035,3 +1037,91 @@ async def test_repl_run_reports_missing_attr_in_initial_target(
         await cmd.astart()
     assert len(output) == 1
     assert output[0].startswith("error: attribute 'missing' not found")
+
+
+class _HangingRepl(_Repl):
+    """An evaluation that never ends on its own, and raises SIGINT once inside it.
+
+    Stands in for `let x = x; in x` at the prompt. The signal has to be raised
+    from here rather than from the test body: `_interruptible` installs its
+    SIGINT handler only for the duration of the dispatch, and a signal raised
+    outside that window would reach Python's default handler instead.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = 0
+
+    async def line(self, text: str, path: str = "<string>", *, timeout: float | None = None) -> _Value | None:
+        self.entered += 1
+        signal.raise_signal(signal.SIGINT)
+        # Gives the loop a chance to run the signal callback, which cancels the
+        # scope around this call.
+        await anyio.sleep_forever()
+        raise AssertionError("the evaluation was not cancelled")
+
+
+async def test_repl_loop_returns_to_the_prompt_when_ctrl_c_stops_an_evaluation(
+    monkeypatch: Any,
+) -> None:
+    """Ctrl-C during an evaluation cancels it; it does not end the REPL.
+
+    Before #37, the loop caught KeyboardInterrupt around `prompt_async` only.
+    Ctrl-C while Nix was working cancelled the main task, the REPL exited, and
+    the evaluator thread ran on unwatched.
+    """
+    output: list[str] = []
+    monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
+    repl = _HangingRepl()
+
+    with anyio.fail_after(10):
+        await _run_repl_loop(repl, _Prompt(["1 + 1", "2 + 2", ":quit"]))
+
+    # Both expressions were entered, so the first Ctrl-C returned to the prompt
+    # rather than leaving the loop.
+    assert repl.entered == 2
+    assert output == [_HELP, "^C", "^C"]
+
+
+class _AbandonedRepl(_Repl):
+    """An evaluator that a Ctrl-C left abandoned.
+
+    Stands in for the state after Nix would not answer its interrupt: the
+    executor is poisoned, so every call raises at once instead of running.
+    """
+
+    async def line(self, text: str, path: str = "<string>", *, timeout: float | None = None) -> _Value | None:
+        raise EvaluatorAbandonedError("a Nix operation did not answer an interrupt within 2.0s")
+
+
+async def test_the_repl_leaves_when_the_evaluator_is_abandoned(monkeypatch: Any) -> None:
+    """An abandoned evaluator ends the REPL with a message, not with a traceback.
+
+    Found in a real REPL under tmux. `EvaluatorAbandonedError` is an
+    `ObjectMisuseError`, so the loop's `except (NixError, ReplRunError)` missed
+    it and pynix died on the next expression after the Ctrl-C.
+    """
+    output: list[str] = []
+    monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
+
+    with anyio.fail_after(10):
+        await _run_repl_loop(_AbandonedRepl(), _Prompt(["1 + 1", "2 + 2"]))
+
+    # Three lines and no more: the help, the error, and the reason for leaving.
+    # A fourth would mean the loop read "2 + 2" and kept going.
+    assert len(output) == 3
+    assert output[1].startswith("error: a Nix operation did not answer an interrupt")
+    assert "cannot be used again" in output[2]
+
+
+async def test_the_repl_leaves_no_sigint_handler_behind() -> None:
+    """The handler belongs to one evaluation, not to the process.
+
+    Inside the scope, SIGINT reaches asyncio and cancels the evaluation.
+    Outside it, Ctrl-C must raise KeyboardInterrupt again -- that is what the
+    arm around `prompt_async` catches, and what a caller of pynix expects of
+    its own process afterwards.
+    """
+    with _interruptible():
+        assert signal.getsignal(signal.SIGINT) is not signal.default_int_handler
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler

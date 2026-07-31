@@ -37,6 +37,7 @@ from nanopynix._wire import (
 )
 from nanopynix.exceptions import (
     EvalSessionClosedError,
+    EvaluatorAbandonedError,
     LockedFlakeReleasedError,
     SessionClosedError,
     StoreClosedError,
@@ -1125,6 +1126,14 @@ class EvalSession:
         try:
             if local is not None:
                 await self._run_closing(local.close)
+        except EvaluatorAbandonedError:
+            # Expected, and the executor already logged why. The thread is
+            # inside an operation that never answered its interrupt, so
+            # `local.close()` cannot run: it would queue behind that operation
+            # for ever. Closing must still succeed, because a caller leaving an
+            # `async with` cannot be made to hang by work it already cancelled.
+            # The EvalState leaks with the thread that owns it.
+            pass
         finally:
             # Must run even if local.close() raised -- otherwise the
             # executor's thread stays GC-registered but is never handed to

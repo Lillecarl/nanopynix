@@ -387,6 +387,10 @@ WIRE_CLASSES = {
     "EvalError",
     "EvalHashMismatchError",
     "EvalSessionClosedError",
+    # On the wire deliberately: an rpc worker abandons its own evaluator when a
+    # cancelled operation will not stop, and the client has to receive that
+    # identity rather than a generic RuntimeError. See issue #37.
+    "EvaluatorAbandonedError",
     "ForeignValueError",
     "HashMismatchError",
     "IndexError",
