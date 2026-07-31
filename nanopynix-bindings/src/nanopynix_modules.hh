@@ -24,6 +24,7 @@
 #include <nanobind/nanobind.h>
 
 void nanopynix_bind_errors(nanobind::module_ &m);
+void nanopynix_bind_signals(nanobind::module_ &m);
 void nanopynix_bind_util(nanobind::module_ &m);
 void nanopynix_bind_store(nanobind::module_ &m);
 void nanopynix_bind_expr(nanobind::module_ &m);

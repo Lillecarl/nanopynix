@@ -50,6 +50,12 @@ NB_MODULE(_ext, m) {
     auto errors = area(m, "errors");
     nanopynix_bind_errors(errors);
 
+    // Before any area that can run Nix work: binding this only creates the
+    // token type, but a caller arms a scope around calls into `store` and
+    // `expr`, so the type has to exist by the time those are usable.
+    auto signals = area(m, "signals");
+    nanopynix_bind_signals(signals);
+
     auto util = area(m, "util");
     nanopynix_bind_util(util);
 

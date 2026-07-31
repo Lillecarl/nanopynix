@@ -55,6 +55,7 @@
 
 #include "nanopynix_errors.hh"
 #include "nix_error_info.hh"
+#include "nix_signals.hh"
 
 namespace nb = nanobind;
 
@@ -84,6 +85,9 @@ struct PyErrorTypes {
     PyObject *unimplemented_error = nullptr;
     PyObject *missing_attribute_error = nullptr;
     PyObject *list_index_error = nullptr;
+    /// Not a Nix class: what a `nix::Interrupted` becomes when the caller
+    /// cancelled rather than pressed Ctrl-C. See the `Interrupted` arm below.
+    PyObject *operation_cancelled = nullptr;
 };
 
 PyErrorTypes &py_types() {
@@ -143,6 +147,11 @@ void nanopynix_bind_errors(nb::module_ &m) {
     // one and a NixError for the other would be the worst of both.
     t.missing_attribute_error = make_error_class<14>(m, "MissingAttributeError", nb::handle(t.eval_error));
     t.list_index_error = make_error_class<15>(m, "ListIndexError", nb::handle(t.eval_error));
+    // BaseException, not Exception, and for the same reason KeyboardInterrupt
+    // is: a caller that cancelled an operation must not have that cancellation
+    // swallowed by an `except Exception` written to handle a Nix failure.
+    // Deliberately not a nix::Error subclass either -- nothing failed.
+    t.operation_cancelled = make_error_class<16>(m, "OperationCancelled", nb::handle(PyExc_BaseException));
 
     nb::detail::register_exception_translator(
         [](const std::exception_ptr &p, void * /*payload*/) {
@@ -158,8 +167,16 @@ void nanopynix_bind_errors(nb::module_ &m) {
             // Exception` correctly does NOT swallow it -- which is the whole
             // point, and is what pynix's repl and the RPC worker already
             // expect to see.
+            //
+            // A cancel and a signal unwind through the *identical* C++
+            // exception, so only the interrupt token says which happened. Ask
+            // it. A deadline that arrived as KeyboardInterrupt would tell
+            // pynix's repl that the user pressed Ctrl-C when the user did
+            // nothing at all.
             catch (nix::Interrupted &e) {
-                PyErr_SetString(PyExc_KeyboardInterrupt, e.what());
+                PyErr_SetString(
+                    nanopynix::active_scope_was_cancelled() ? types.operation_cancelled : PyExc_KeyboardInterrupt,
+                    e.what());
             }
 
             // ── nix::Error subclasses, most-derived first ───────────
