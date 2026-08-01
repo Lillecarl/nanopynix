@@ -385,6 +385,22 @@ class SettingNotLiveError(ObjectMisuseError):
     """
 
 
+class SettingOutOfScopeError(ObjectMisuseError):
+    """A setting was passed to a door that does not own its scope.
+
+    Nix keeps its settings in four registries, and each door of this library
+    writes one or two of them. A parameter is typed for the scope it writes,
+    but a wider settings model is still an instance of that type:
+    :class:`NixSettings` is a :class:`NixEvalSettings`, so ``eval_settings``
+    accepts one. The global fields it carries reach no evaluator.
+
+    Sibling of :class:`SettingNotLiveError`. That one means the wrong
+    *moment*; this one means the wrong *door*. Neither is a :class:`NixError`,
+    because Nix was never consulted. Pass the field to the door that owns its
+    scope, which the message names.
+    """
+
+
 class ObjectLifetimeError(ObjectMisuseError):
     """A nanopynix object was used after it was closed or released.
 

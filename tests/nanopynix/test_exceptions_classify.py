@@ -419,6 +419,11 @@ WIRE_CLASSES = {
     "RuntimeError",
     "SessionClosedError",
     "SettingNotLiveError",
+    # On the wire, although both engines refuse before they send: a worker
+    # reached from another client, or from a hand-built request, is still
+    # entitled to answer this, and the class rebuilds from a message alone.
+    # Same reasoning as `SettingNotLiveError` above it.
+    "SettingOutOfScopeError",
     "StoreClosedError",
     "StoreError",
     "ThrownError",

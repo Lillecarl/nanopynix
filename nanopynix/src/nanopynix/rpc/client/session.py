@@ -46,7 +46,10 @@ from nanopynix.settings import (
     merge_defaults,
     normalize_nix_path,
     normalize_nix_settings,
+    reject_out_of_scope_settings,
     reject_settings_write_while_open,
+    render_for_scope,
+    split_evaluator_settings,
 )
 from nanopynix.stores import StoreConfig, resolve_store_spec
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
@@ -353,12 +356,14 @@ class Session:
 
         Raises:
             SettingNotLiveError: A store or an evaluator is open.
+            SettingOutOfScopeError: A field is not a global setting.
         """
         reject_settings_write_while_open(
             open_stores=sum(1 for store in self._stores if store.is_open),
             open_evaluators=len(self._evals),
         )
-        return dict(await self._manager.set_settings(settings.to_worker_settings(explicit_only=True)))
+        reject_out_of_scope_settings(settings, scopes=(NixGlobalSettings,), target="the session globals")
+        return dict(await self._manager.set_settings(render_for_scope(settings, NixGlobalSettings, explicit_only=True)))
 
     def subscribe(self, callback: Any) -> Any:
         """Subscribe a callback to live log events.
@@ -407,8 +412,16 @@ class Session:
         instances may be open concurrently — each gets its own dedicated Nix
         thread in the worker. Store operations remain available and may run
         concurrently alongside them.
+
+        Either settings parameter takes a ``NixEvaluatorSettings``, which
+        states both scopes at once; each half reaches the registry that owns
+        it.
+
+        Raises:
+            SettingOutOfScopeError: A field belongs to neither evaluator scope.
         """
         self._require_own_stores(store, build_store)
+        eval_scope, fetch_scope = split_evaluator_settings(eval_settings, fetch_settings)
         return EvalSession(
             self._manager,
             self,
@@ -417,8 +430,8 @@ class Session:
             rpc_timeout=self._manager.rpc_timeout,
             store=store,
             build_store=build_store,
-            eval_settings=merge_defaults(eval_settings, self._eval_defaults),
-            fetch_settings=merge_defaults(fetch_settings, self._fetch_defaults),
+            eval_settings=merge_defaults(eval_scope, self._eval_defaults),
+            fetch_settings=merge_defaults(fetch_scope, self._fetch_defaults),
             flake_defaults=self._flake_defaults,
         )
 
@@ -451,8 +464,12 @@ class Session:
         session's ``runtime_settings`` when omitted. It used to be readable
         only from ``runtime_settings``, so a caller wanting two REPLs with
         different editors had to open two workers.
+
+        Raises:
+            SettingOutOfScopeError: A field belongs to neither evaluator scope.
         """
         self._require_own_stores(store, build_store)
+        eval_scope, fetch_scope = split_evaluator_settings(eval_settings, fetch_settings)
         return ReplSession(
             self._manager,
             self,
@@ -462,8 +479,8 @@ class Session:
             line_editors=self.runtime_settings.line_editors if line_editors is None else line_editors,
             store=store,
             build_store=build_store,
-            eval_settings=merge_defaults(eval_settings, self._eval_defaults),
-            fetch_settings=merge_defaults(fetch_settings, self._fetch_defaults),
+            eval_settings=merge_defaults(eval_scope, self._eval_defaults),
+            fetch_settings=merge_defaults(fetch_scope, self._fetch_defaults),
             flake_defaults=self._flake_defaults,
         )
 

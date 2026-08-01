@@ -83,7 +83,9 @@ from nanopynix.settings import (
     NixFetchSettings,
     NixFlakeSettings,
     merge_defaults,
+    narrow_to_scope,
     reject_construction_time_keys,
+    split_evaluator_settings,
 )
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
 
@@ -1029,9 +1031,11 @@ class EvalSession:
             SettingNotLiveError: A setting Nix reads only at construction, such
                 as ``nix_path``, ``pure_eval`` or ``restrict_eval``. Open a new
                 evaluator with it: ``session.eval(store, eval_settings=...)``.
+            SettingOutOfScopeError: A field belongs to neither evaluator scope.
         """
-        rendered_eval = eval_settings.to_worker_settings() if eval_settings is not None else {}
-        rendered_fetch = fetch_settings.to_worker_settings() if fetch_settings is not None else {}
+        eval_scope, fetch_scope = split_evaluator_settings(eval_settings, fetch_settings)
+        rendered_eval = eval_scope.to_worker_settings() if eval_scope is not None else {}
+        rendered_fetch = fetch_scope.to_worker_settings() if fetch_scope is not None else {}
         reject_construction_time_keys(rendered_eval, model=NixEvalSettings, target="evaluator")
         reject_construction_time_keys(rendered_fetch, model=NixFetchSettings, target="evaluator")
         await self._ensure_proxy().configure_eval(
@@ -1139,9 +1143,13 @@ class EvalSession:
 
         ``flake_settings`` is merged over this session's flake defaults, so a
         field named here wins and the rest come from ``Session(settings=...)``.
+
+        Raises:
+            SettingOutOfScopeError: A field is not a flake setting.
         """
         proxy = self._ensure_proxy()
-        rendered_flake = merge_defaults(flake_settings, self._flake_defaults).to_worker_settings()
+        flake_scope = narrow_to_scope(flake_settings, NixFlakeSettings, target="a flake operation")
+        rendered_flake = merge_defaults(flake_scope, self._flake_defaults).to_worker_settings()
         if update_inputs is True:
             locked = await proxy.lock_flake(
                 LockFlakeRequest(
@@ -1231,12 +1239,16 @@ class EvalSession:
 
         ``flake_settings`` is merged over this session's flake defaults, as in
         :meth:`lock_flake`.
+
+        Raises:
+            SettingOutOfScopeError: A field is not a flake setting.
         """
+        flake_scope = narrow_to_scope(flake_settings, NixFlakeSettings, target="a flake operation")
         handle = await self._ensure_proxy().eval_flake(
             EvalFlakeRequest(
                 ref=ref,
                 write_lock_file=write_lock_file,
-                flake_settings=merge_defaults(flake_settings, self._flake_defaults).to_worker_settings(),
+                flake_settings=merge_defaults(flake_scope, self._flake_defaults).to_worker_settings(),
             ),
         )
         return self._proxy_context().value(handle.handle, handle.type)

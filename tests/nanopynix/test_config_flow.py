@@ -28,10 +28,11 @@ from nanopynix_proto.nix.eval import ConfigureEvalRequest
 
 import nanopynix
 from nanopynix import NixEvalSettings, NixFetchSettings, stores
-from nanopynix.exceptions import EvalError, NixError, SettingNotLiveError
+from nanopynix.exceptions import EvalError, NixError, SettingNotLiveError, SettingOutOfScopeError
 from nanopynix.namespace import STORE_DIR
 from nanopynix.settings import (
     NixEvaluatorSettings,
+    NixSettings,
     construction_time_keys,
     field_is_supported,
     list_eval_settings_metadata,
@@ -111,7 +112,15 @@ def test_every_fetch_setting_is_live() -> None:
 
 
 def test_the_evaluator_catch_all_inherits_both_scopes() -> None:
-    """One object configures an evaluator, and narrow parameters still take it."""
+    """The model states both scopes, and renders both in one map.
+
+    This is a statement about the object only. The combined map is not what
+    reaches Nix: each door takes the half it owns, and
+    ``test_one_evaluator_object_reaches_both_registries`` is what pins that.
+    This test used to claim "narrow parameters still take it", which was the
+    type system's answer rather than Nix's -- the parameter accepted the object
+    and then sent the whole map to one registry.
+    """
     # One field from each scope. `warn_dirty` rather than `tarball_ttl`,
     # because every supported Nix keeps `warn-dirty` in the fetcher registry.
     settings = NixEvaluatorSettings(max_call_depth=20, warn_dirty=False)
@@ -796,6 +805,205 @@ async def test_a_per_call_setting_beats_the_session_default(
     assert seen["eval"] == "impure", "eval_settings must beat the session default"
     assert seen["fetch"] == "accepted", "fetch_settings must beat the session default"
     assert seen["flake"] == "refused", "flake_settings must beat the session default"
+
+
+# ── One object states both evaluator scopes (#27) ────────────────────
+
+
+def _session_class(engine: str) -> Any:
+    return nanopynix.rpc.Session if engine == "rpc" else nanopynix.inproc.Session
+
+
+@pytest.mark.parametrize("engine", ["inproc", "rpc"])
+@pytest.mark.parametrize("parameter", ["eval_settings", "fetch_settings"])
+async def test_one_evaluator_object_reaches_both_registries(
+    shared_nix_environment: NixTestEnvironment,
+    engine: str,
+    parameter: str,
+    tmp_path: Path,
+    dirty_flake: str,
+) -> None:
+    """``NixEvaluatorSettings`` states both scopes, and both must take effect.
+
+    The class documents itself as accepted at a narrow parameter "because it
+    really is one". It was not: the whole object went to the one door named,
+    and Nix answered ``unknown eval setting: warn-dirty``. Measured before the
+    fix, on both parameters:
+
+        eval_settings=Evaluator(both) : unknown eval setting: warn-dirty
+        fetch_settings=Evaluator(both): unknown fetch setting: max-call-depth
+
+    Both halves are asserted, because either alone would still pass if the
+    other were dropped rather than routed. The session states the *opposite*
+    of each field, so a session default that silently won would be caught too.
+    """
+    settings = shared_nix_environment.settings.model_copy(update={"pure_eval": False, "allow_dirty": True})
+    both = NixEvaluatorSettings(pure_eval=True, allow_dirty=False)
+
+    seen: dict[str, str] = {}
+    async with (
+        _session_class(engine)(
+            load_config=False,
+            settings=settings,
+            store_uri=stores.Local(root=str(tmp_path / "both-scopes")),
+        ) as session,
+        session.store() as store,
+    ):
+        seen["eval"] = await _eval_scope_holds(session, store, **{parameter: both})
+        seen["fetch"] = await _fetch_scope_holds(session, store, dirty_flake, **{parameter: both})
+
+    note(**{f"{engine}/{parameter}": seen})
+    assert seen["eval"] == "pure", "the eval half must reach the evaluator"
+    assert seen["fetch"] == "refused", "the fetch half must reach the fetcher"
+
+
+@pytest.mark.parametrize("engine", ["inproc", "rpc"])
+async def test_configure_takes_one_object_for_both_scopes(
+    shared_nix_environment: NixTestEnvironment,
+    engine: str,
+    tmp_path: Path,
+    dirty_flake: str,
+) -> None:
+    """The same routing on the live path, where every fetch setting is live.
+
+    ``max_call_depth`` and ``allow_dirty`` are both read at the point of use,
+    so one ``configure`` call can change both on an evaluator that is already
+    open. The depth is 100 rather than 20, because locking the flake below
+    also evaluates, and this test must fail on the recursion alone.
+    """
+    recurse = "let f = n: if n == 0 then 0 else f (n - 1); in f 200"
+    settings = shared_nix_environment.settings.model_copy(update={"allow_dirty": True})
+
+    async with (
+        _session_class(engine)(
+            load_config=False,
+            settings=settings,
+            store_uri=stores.Local(root=str(tmp_path / "configure-both")),
+        ) as session,
+        session.store() as store,
+        session.eval(store) as evaluator,
+    ):
+        assert await (await evaluator.string(recurse)).as_int() == 0, "the baseline must evaluate"
+
+        await evaluator.configure(NixEvaluatorSettings(max_call_depth=100, allow_dirty=False))
+
+        # The fetch half first: the eval half makes every later evaluation
+        # shallower, and locking a flake evaluates.
+        with pytest.raises(NixError, match="dirty"):
+            await evaluator.lock_flake(dirty_flake, write_lock_file=False)
+        with pytest.raises(EvalError, match="max-call-depth"):
+            await evaluator.string(recurse)
+
+
+@pytest.mark.parametrize("engine", ["inproc", "rpc"])
+async def test_the_parameter_that_owns_the_scope_wins(
+    shared_nix_environment: NixTestEnvironment,
+    engine: str,
+    tmp_path: Path,
+    dirty_flake: str,
+) -> None:
+    """Two parameters name one fetch field, and ``fetch_settings`` decides.
+
+    The eval and fetch scopes share no field name, so one object is never
+    ambiguous. Two *parameters* still can be, and this is the rule for that:
+    the parameter that owns the scope wins over the same field carried along
+    by the other one.
+    """
+    settings = shared_nix_environment.settings.model_copy(update={"allow_dirty": False})
+
+    async with (
+        _session_class(engine)(
+            load_config=False,
+            settings=settings,
+            store_uri=stores.Local(root=str(tmp_path / "precedence")),
+        ) as session,
+        session.store() as store,
+    ):
+        held = await _fetch_scope_holds(
+            session,
+            store,
+            dirty_flake,
+            eval_settings=NixEvaluatorSettings(allow_dirty=False),
+            fetch_settings=NixFetchSettings(allow_dirty=True),
+        )
+
+    note(**{f"{engine}/precedence": held})
+    assert held == "accepted", "fetch_settings owns the fetch scope, so its value must win"
+
+
+@pytest.mark.parametrize("engine", ["inproc", "rpc"])
+async def test_a_field_no_door_owns_is_refused(
+    shared_nix_environment: NixTestEnvironment,
+    engine: str,
+    tmp_path: Path,
+) -> None:
+    """A global field at an evaluator door is refused, and the message names it.
+
+    Nix used to answer for this, and it answered badly: ``unknown eval
+    setting: experimental-features`` -- naming a field the caller never set,
+    because ``NixSettings`` gives that one a default.
+
+    ``session.eval`` is not a coroutine, so the refusal happens on the call
+    itself rather than on entering the context manager.
+    """
+    async with (
+        _session_class(engine)(
+            load_config=False,
+            settings=shared_nix_environment.settings,
+            store_uri=stores.Local(root=str(tmp_path / "out-of-scope")),
+        ) as session,
+        session.store() as store,
+    ):
+        with pytest.raises(SettingOutOfScopeError, match="max-jobs"):
+            session.eval(store, eval_settings=NixSettings(max_jobs=3))
+
+        async with session.eval(store) as evaluator:
+            with pytest.raises(SettingOutOfScopeError, match="pure-eval"):
+                await evaluator.lock_flake("nixpkgs", flake_settings=NixSettings(pure_eval=True))
+
+        # A default is not a field the caller named, so it must not trip the
+        # check. `NixSettings()` carries `experimental_features`, which is
+        # exactly the field the old message wrongly blamed.
+        async with session.eval(store, eval_settings=NixSettings()):
+            pass
+
+
+@pytest.mark.parametrize("engine", ["inproc", "rpc"])
+async def test_a_wider_object_writes_only_its_global_half(
+    shared_nix_environment: NixTestEnvironment,
+    engine: str,
+    tmp_path: Path,
+) -> None:
+    """``set_settings`` narrows the rendered map, not the model.
+
+    ``for_scope`` re-validates, and that marks a default as explicitly set.
+    Measured:
+
+        NixSettings(max_jobs=3).to_worker_settings(explicit_only=True)
+          -> {'max-jobs': '3'}
+        NixGlobalSettings.for_scope(that).to_worker_settings(explicit_only=True)
+          -> {'experimental-features': '...', 'max-jobs': '3'}
+
+    ``explicit_only`` exists so a write of one field does not reset the
+    feature list, so narrowing this door by model would undo it. This is the
+    regression guard for that.
+    """
+    async with _session_class(engine)(
+        load_config=False,
+        settings=shared_nix_environment.settings,
+        store_uri=stores.Local(root=str(tmp_path / "global-half")),
+    ) as session:
+        before = (await session.settings())["experimental-features"]
+
+        applied = await session.set_settings(NixSettings(max_jobs=3))
+
+        after = (await session.settings())["experimental-features"]
+        note(**{f"{engine}/globals": {"applied": applied, "before": before, "after": after}})
+        assert applied["max-jobs"] == "3", "the global half must be written"
+        assert after == before, "a field the caller never named must be left alone"
+
+        with pytest.raises(SettingOutOfScopeError, match="pure-eval"):
+            await session.set_settings(NixSettings(pure_eval=True))
 
 
 @pytest.mark.parametrize("engine", ["inproc", "rpc"])

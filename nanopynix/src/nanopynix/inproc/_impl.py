@@ -79,10 +79,14 @@ from nanopynix.settings import (
     NixStoreDefaults,
     SettingsProvenance,
     merge_defaults,
+    narrow_to_scope,
     normalize_nix_path,
     normalize_nix_settings,
     reject_construction_time_keys,
+    reject_out_of_scope_settings,
     reject_settings_write_while_open,
+    render_for_scope,
+    split_evaluator_settings,
 )
 from nanopynix.stores import StoreConfig, resolve_store_spec
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
@@ -511,14 +515,21 @@ class Session:
         concurrently open sessions may use different settings. Each is merged
         over this session's own eval and fetch defaults, so a field named here
         wins and the rest come from ``Session(settings=...)``.
+
+        Either parameter takes a :class:`NixEvaluatorSettings`, which states
+        both scopes at once; each half reaches the registry that owns it.
+
+        Raises:
+            SettingOutOfScopeError: A field belongs to neither evaluator scope.
         """
         self._require_own_stores(store, build_store)
+        eval_scope, fetch_scope = split_evaluator_settings(eval_settings, fetch_settings)
         return EvalSession(
             self,
             store,
             build_store,
-            eval_settings=merge_defaults(eval_settings, self._eval_defaults),
-            fetch_settings=merge_defaults(fetch_settings, self._fetch_defaults),
+            eval_settings=merge_defaults(eval_scope, self._eval_defaults),
+            fetch_settings=merge_defaults(fetch_scope, self._fetch_defaults),
             flake_defaults=self._flake_defaults,
         )
 
@@ -537,14 +548,18 @@ class Session:
         same settings and owns its own dedicated Nix thread. ``line_editors``
         is per-session rather than per-:class:`Session` because it describes
         one interactive front-end, and nothing else in this class consumes it.
+
+        Raises:
+            SettingOutOfScopeError: A field belongs to neither evaluator scope.
         """
         self._require_own_stores(store, build_store)
+        eval_scope, fetch_scope = split_evaluator_settings(eval_settings, fetch_settings)
         return ReplSession(
             self,
             store,
             build_store,
-            eval_settings=merge_defaults(eval_settings, self._eval_defaults),
-            fetch_settings=merge_defaults(fetch_settings, self._fetch_defaults),
+            eval_settings=merge_defaults(eval_scope, self._eval_defaults),
+            fetch_settings=merge_defaults(fetch_scope, self._fetch_defaults),
             flake_defaults=self._flake_defaults,
             line_editors=line_editors,
         )
@@ -609,12 +624,19 @@ class Session:
 
         Raises:
             SettingNotLiveError: A store or an evaluator is open.
+            SettingOutOfScopeError: A field is not a global setting.
         """
         reject_settings_write_while_open(
             open_stores=sum(1 for store in self._stores if store.is_open),
             open_evaluators=len(self._evals),
         )
-        applied = dict(await self.run(self._runtime.apply_settings, settings.to_worker_settings(explicit_only=True)))
+        reject_out_of_scope_settings(settings, scopes=(NixGlobalSettings,), target="the session globals")
+        applied = dict(
+            await self.run(
+                self._runtime.apply_settings,
+                render_for_scope(settings, NixGlobalSettings, explicit_only=True),
+            )
+        )
         self._provenance = self._provenance.model_copy(
             update={"applied": {**self._provenance.applied, **applied}},
         )
@@ -1106,9 +1128,11 @@ class EvalSession:
             SettingNotLiveError: A setting Nix reads only at construction, such
                 as ``nix_path``, ``pure_eval`` or ``restrict_eval``. Open a new
                 evaluator with it: ``session.eval(store, eval_settings=...)``.
+            SettingOutOfScopeError: A field belongs to neither evaluator scope.
         """
-        rendered_eval = eval_settings.to_worker_settings() if eval_settings is not None else {}
-        rendered_fetch = fetch_settings.to_worker_settings() if fetch_settings is not None else {}
+        eval_scope, fetch_scope = split_evaluator_settings(eval_settings, fetch_settings)
+        rendered_eval = eval_scope.to_worker_settings() if eval_scope is not None else {}
+        rendered_fetch = fetch_scope.to_worker_settings() if fetch_scope is not None else {}
         reject_construction_time_keys(rendered_eval, model=NixEvalSettings, target="evaluator")
         reject_construction_time_keys(rendered_fetch, model=NixFetchSettings, target="evaluator")
         await self.run(self._require_core().configure, rendered_eval, rendered_fetch)
@@ -1233,14 +1257,18 @@ class EvalSession:
 
         ``flake_settings`` is merged over this session's flake defaults, so a
         field named here wins and the rest come from ``Session(settings=...)``.
+
+        Raises:
+            SettingOutOfScopeError: A field is not a flake setting.
         """
+        flake_scope = narrow_to_scope(flake_settings, NixFlakeSettings, target="a flake operation")
         local = await self.run(
             partial(
                 self._require_core().lock_flake,
                 ref,
                 update_inputs=update_inputs,
                 write_lock_file=write_lock_file,
-                flake_settings=merge_defaults(flake_settings, self._flake_defaults).to_worker_settings(),
+                flake_settings=merge_defaults(flake_scope, self._flake_defaults).to_worker_settings(),
             ),
         )
         proto = await self.run(_locked_flake_proto, local.require_raw())
@@ -1259,13 +1287,17 @@ class EvalSession:
 
         ``flake_settings`` is merged over this session's flake defaults, as in
         :meth:`lock_flake`.
+
+        Raises:
+            SettingOutOfScopeError: A field is not a flake setting.
         """
+        flake_scope = narrow_to_scope(flake_settings, NixFlakeSettings, target="a flake operation")
         local = await self.run(
             partial(
                 self._require_core().eval_flake,
                 ref,
                 write_lock_file=write_lock_file,
-                flake_settings=merge_defaults(flake_settings, self._flake_defaults).to_worker_settings(),
+                flake_settings=merge_defaults(flake_scope, self._flake_defaults).to_worker_settings(),
             ),
         )
         return self._track_value(local)
