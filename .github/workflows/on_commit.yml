@@ -56,6 +56,11 @@ jobs:
           commits=$(git rev-list --no-merges -1 "$after")
         fi
 
+        # Say how many, so that a pass is auditable. A range with no
+        # commits also exits 0, and a gate that quietly checks nothing
+        # reads exactly like a gate that checked everything.
+        echo "checking $(printf '%s\n' "$commits" | grep -c .) commit subject(s)"
+
         status=0
         for sha in $commits; do
           subject=$(git log -1 --format=%s "$sha")
