@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
-from nanopynix.exceptions import SettingNotLiveError
+from nanopynix.exceptions import SettingNotLiveError, SettingOutOfScopeError
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Iterator, Mapping, Sequence
@@ -627,7 +627,10 @@ class NixEvaluatorSettings(NixEvalSettings, NixFetchSettings):
     registries share no setting name, so nothing is ambiguous here.
 
     A narrow parameter typed :class:`NixEvalSettings` accepts one of these,
-    because it really is one.
+    because it really is one. :func:`split_evaluator_settings` is what makes
+    that true at run time: it sends each half to the registry that owns it. The
+    parameter used to render the whole object into one map, and Nix answered
+    ``unknown eval setting: warn-dirty``.
     """
 
 
@@ -662,6 +665,133 @@ class NixSettingsEnv(NixSettings, BaseSettings):
         env_nested_delimiter="__",
         extra="forbid",
     )
+
+
+#: Which scope owns each field, and where a caller must send it. Built from the
+#: five scope classes, so a field added to one of them is routed by that fact
+#: alone. The order matters only for the message: the first scope that claims a
+#: name wins, and ``test_the_four_settings_registries_are_disjoint`` is what
+#: keeps a name from being claimed twice.
+_SCOPE_DOORS: tuple[tuple[type[NixConfigModel], str], ...] = (
+    (NixGlobalSettings, "a global setting; pass it to Session(settings=...)"),
+    (NixStoreDefaults, "a store setting; pass it to the store model, or to Session(settings=...)"),
+    (NixEvalSettings, "an eval setting; pass it as eval_settings"),
+    (NixFetchSettings, "a fetch setting; pass it as fetch_settings"),
+    (NixFlakeSettings, "a flake setting; pass it as flake_settings"),
+)
+
+
+def _door_of(field_name: str) -> str:
+    for scope, door in _SCOPE_DOORS:
+        if field_name in scope.model_fields:
+            return door
+    return "not a setting this library routes"
+
+
+def reject_out_of_scope_settings(
+    settings: NixConfigModel | None,
+    *,
+    scopes: Sequence[type[NixConfigModel]],
+    target: str,
+) -> None:
+    """Raise if ``settings`` names a field that none of ``scopes`` owns.
+
+    A parameter is typed for the scope it writes, and a wider model is still an
+    instance of that type. ``NixSettings`` is a ``NixEvalSettings``, so
+    ``eval_settings`` accepts one, and its global fields reach no evaluator.
+    Nix used to answer for this, and it answered badly: the message named
+    ``experimental-features``, a field the caller never set, because
+    ``NixSettings`` gives that one a default.
+
+    It reads ``model_fields_set`` rather than the non-``None`` fields, so a
+    default never trips it. Call it *before* any merge with the session
+    defaults: :func:`fill_unset_fields` copies with ``model_copy(update=...)``,
+    and that marks a filled default as set.
+
+    Raises:
+        SettingOutOfScopeError: One or more fields belong to another door.
+    """
+    if settings is None:
+        return
+    owned = {name for scope in scopes for name in scope.model_fields}
+    strays = sorted(settings.model_fields_set - owned)
+    if not strays:
+        return
+    fields = type(settings).model_fields
+    detail = "; ".join(f"{field_key(name, fields[name])} is {_door_of(name)}" for name in strays)
+    raise SettingOutOfScopeError(f"cannot apply these settings to {target}: {detail}")
+
+
+def render_for_scope(
+    settings: NixConfigModel,
+    scope: type[NixConfigModel],
+    *,
+    explicit_only: bool = False,
+) -> dict[str, str]:
+    """Render ``settings``, keeping only the keys ``scope`` owns.
+
+    It filters the *rendered mapping* rather than narrowing the model, because
+    :meth:`NixConfigModel.for_scope` re-validates and so marks a default as
+    explicitly set. That would defeat ``explicit_only``, whose whole purpose is
+    to write one field without resetting the others.
+    """
+    keys = {field_key(name, field) for name, field in scope.model_fields.items()}
+    return {
+        key: value for key, value in settings.to_worker_settings(explicit_only=explicit_only).items() if key in keys
+    }
+
+
+def narrow_to_scope[M: NixConfigModel](
+    settings: NixConfigModel | None,
+    scope: type[M],
+    *,
+    target: str,
+) -> M | None:
+    """Refuse a field ``scope`` does not own, then keep only that scope.
+
+    For a door that writes exactly one registry. The evaluator writes two and
+    has to re-route between them, which is :func:`split_evaluator_settings`.
+
+    Raises:
+        SettingOutOfScopeError: A field belongs to another door.
+    """
+    reject_out_of_scope_settings(settings, scopes=(scope,), target=target)
+    return scope.for_scope(settings) if settings is not None else None
+
+
+def split_evaluator_settings(
+    eval_settings: NixEvalSettings | None,
+    fetch_settings: NixFetchSettings | None,
+) -> tuple[NixEvalSettings | None, NixFetchSettings | None]:
+    """Route each half of an evaluator's settings to the scope that owns it.
+
+    An evaluator owns two of Nix's registries, and :class:`NixEvaluatorSettings`
+    states both in one object. Either parameter accepts one, because it really
+    is one of each. Without this, the whole object went to a single door and
+    Nix answered ``unknown eval setting: warn-dirty``.
+
+    The two scopes share no field name, so splitting one object is never
+    ambiguous. Where both *parameters* name the same field, the one that owns
+    that scope wins: a fetch field on ``fetch_settings`` beats the same field
+    carried along by ``eval_settings``.
+
+    Raises:
+        SettingOutOfScopeError: A field belongs to neither evaluator scope.
+    """
+    evaluator_scopes = (NixEvalSettings, NixFetchSettings)
+    reject_out_of_scope_settings(eval_settings, scopes=evaluator_scopes, target="an evaluator")
+    reject_out_of_scope_settings(fetch_settings, scopes=evaluator_scopes, target="an evaluator")
+    if eval_settings is None and fetch_settings is None:
+        return None, None
+    eval_part = fill_unset_fields(
+        NixEvalSettings.for_scope(eval_settings) if eval_settings is not None else NixEvalSettings(),
+        NixEvalSettings.for_scope(fetch_settings) if fetch_settings is not None else NixEvalSettings(),
+    )
+    fetch_part = fill_unset_fields(
+        NixFetchSettings.for_scope(fetch_settings) if fetch_settings is not None else NixFetchSettings(),
+        NixFetchSettings.for_scope(eval_settings) if eval_settings is not None else NixFetchSettings(),
+    )
+    return eval_part, fetch_part
 
 
 DEFAULT_RPC_TIMEOUT_SECONDS = 300.0
