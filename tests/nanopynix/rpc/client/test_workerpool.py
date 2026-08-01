@@ -498,3 +498,44 @@ async def test_an_aborted_worker_reports_its_signal():
 
             with pytest.raises(WorkerDiedError):
                 await store.uri()
+
+
+async def test_a_terminal_interrupt_does_not_kill_the_worker():
+    """Ctrl-C in the REPL cancels an evaluation; it must not end the worker.
+
+    A worker is a child of its client, so it shares the client's foreground
+    process group, and a terminal sends SIGINT to that whole group.
+    ``asyncio.Runner`` installs a SIGINT handler that cancels the main task and
+    re-raises ``KeyboardInterrupt``, which used to end the worker. The REPL
+    returned to its prompt, exactly as intended, over a grpclib traceback and
+    with a dead worker behind it. ``_ignore_terminal_interrupts`` is the fix,
+    and this is its guard. Removing that call turns this test red.
+
+    Two assertions, because either alone proves little. The first says the
+    worker really is in the blast radius of a terminal Ctrl-C. The second says
+    it survives the blast. Together they are the whole causal chain.
+
+    The signal goes to the worker rather than to the process group. ``killpg``
+    would reach pytest too, and the pair below already covers the chain
+    without that.
+
+    Only ``WorkerClient`` may stop a worker, and a terminal is not
+    ``WorkerClient``. Cancellation still reaches the worker over the wire, as
+    gRPC handler cancellation -- see tests/nanopynix/test_cancel_engine_parity.py.
+    """
+    with anyio.fail_after(60):
+        async with Nix() as nix, nix.store() as store, nix.eval(store) as ev:
+            proc = _worker_process(nix)
+
+            # The precondition. A terminal signals a process group, so this is
+            # what makes surviving a SIGINT the property that matters rather
+            # than a coincidence of how the test delivers it.
+            assert os.getpgid(proc.pid) == os.getpgid(0)
+
+            os.kill(proc.pid, signal.SIGINT)
+
+            # The worker is still there, and still serving. A round trip is
+            # the assertion: a dead pipe would raise WorkerDiedError instead.
+            assert await (await ev.string("1 + 1")).to_python() == 2
+            assert proc.is_alive()
+            assert isinstance(await store.uri(), str)
