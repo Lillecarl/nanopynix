@@ -34,8 +34,50 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',static-checks,')
     runs-on: ubuntu-24.04
+  commit-subjects:
+    steps:
+    - uses: actions/checkout@main
+      with:
+        fetch-depth: 0
+    - name: Check the Conventional Commits subject of each pushed commit
+      run: |
+        set -euo pipefail
+
+        before="${{ github.event.before }}"
+        after="${{ github.sha }}"
+
+        # `before` is the all-zero SHA for a new branch, and it names a
+        # commit that the remote no longer has after a force push. The
+        # range means nothing in either case, so check the head alone.
+        if git cat-file -e "$before^{commit}" 2>/dev/null; then
+          commits=$(git rev-list --no-merges "$before..$after")
+        else
+          echo "no usable base commit; checking $after alone"
+          commits=$(git rev-list --no-merges -1 "$after")
+        fi
+
+        status=0
+        for sha in $commits; do
+          subject=$(git log -1 --format=%s "$sha")
+          # A space is legal inside the parentheses, because this
+          # repository writes a multi-scope subject as `(nanopynix, ekn)`.
+          if ! printf '%s\n' "$subject" | grep -Eq '^[a-z]+(\([a-z0-9._/, -]+\))?!?: .+'; then
+            echo "::error::$sha: not a Conventional Commits subject: $subject"
+            status=1
+          fi
+        done
+
+        if [ "$status" -ne 0 ]; then
+          echo "CLAUDE.md requires the Conventional Commits prefix, for example 'feat(scope):' or 'fix(tests):'."
+        fi
+        exit "$status"
+    timeout-minutes: 5
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',commit-subjects,')
+    runs-on: ubuntu-24.04
   docs-build:
     needs:
+    - commit-subjects
     - static-checks
     - test-daemon-git
     - test-daemon-nix_2_31

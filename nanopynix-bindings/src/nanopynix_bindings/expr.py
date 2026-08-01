@@ -7,6 +7,8 @@ The assignment below is a module swap, not a re-export: CPython re-reads
 this gets `_ext.expr` itself.
 """
 
+from __future__ import annotations
+
 import sys
 
 from . import _ext

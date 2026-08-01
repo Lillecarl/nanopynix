@@ -24,7 +24,7 @@ from tests.support.suppressions import (
     scan_tree as scan_tree,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_scanner_can_see_the_repository():

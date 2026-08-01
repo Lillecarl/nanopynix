@@ -11,14 +11,21 @@ rec {
   withCond = cond: attrs: if cond == null then attrs else attrs // { "if" = cond; };
 
   steps = {
+    # `fetchDepth = 0` fetches the whole history. The default checkout is a
+    # single commit, so a job that reads a range of commits needs this.
     checkout =
       {
         ref ? null,
+        fetchDepth ? null,
       }:
       {
         uses = "actions/checkout@main";
       }
-      // lib.optionalAttrs (ref != null) { "with" = { inherit ref; }; };
+      // lib.optionalAttrs (ref != null || fetchDepth != null) {
+        "with" =
+          lib.optionalAttrs (ref != null) { inherit ref; }
+          // lib.optionalAttrs (fetchDepth != null) { fetch-depth = fetchDepth; };
+      };
 
     installNix = { }: {
       uses = "cachix/install-nix-action@master";

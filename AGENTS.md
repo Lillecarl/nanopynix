@@ -53,8 +53,14 @@ Git, or when a tool needs Git plumbing.
 public APIs of `nanopynix`. If `pynix` needs a library capability of general
 use, add that capability to nanopynix, and do not import a private
 implementation module. A narrow dependency on a private module is acceptable
-only when a redesign is not justified. Document each such dependency at the
-import site.
+only when a redesign is not justified. Record each such dependency in the
+ledger in `tests/meta/test_consumer_surface.py`, with the reason. That test
+fails until you do.
+
+This rule was prose only until then, and 30 import sites in three packages did
+not follow it. A convention that a machine can check belongs in `tests/meta/`,
+which is the home of the self-checks of this repository. Put the next one
+there, rather than in another paragraph of this file.
 
 pytest-agent starts automatically in this environment, because it detects
 `CLAUDECODE` and similar environment variables of an agent harness. Each plain

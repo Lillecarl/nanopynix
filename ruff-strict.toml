@@ -395,6 +395,16 @@ ignorelist = ["eval"]
 
 [lint.isort]
 combine-as-imports = true
+# CLAUDE.md requires `from __future__ import annotations` in every module, and
+# nothing checked it. The `FA` rules are not that check: they fire only when an
+# annotation forces the import, so a module with no annotation passes and then
+# drifts. Measured before this line landed: 16 of 266 files did not have it.
+#
+# This matters more here than in most codebases. beartype resolves annotations
+# at runtime, and the future import is what makes a forward reference legal in
+# the first place -- see the TC001-003 rationale above for what happens when
+# an annotation cannot be resolved.
+required-imports = ["from __future__ import annotations"]
 known-first-party = [
   "nanopynix",
   "nanopynix_expr",

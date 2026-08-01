@@ -13,7 +13,7 @@ anything about the code under test. Both times the local suite was green.
 ``tests/support/notes.py`` is the supported import. This test is the gate that
 keeps callers pointed at it, because pytest is the only check that runs on
 every version and both backends -- the same reasoning as
-``tests/test_suppression_grammar.py``.
+``tests/meta/test_suppression_grammar.py``.
 
 ``tests/support/notes.py`` and ``tests/conftest.py`` are exempt: they are the
 two places that must ask whether the plugin is there.
@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 TESTS_ROOT = REPO_ROOT / "tests"
 
 # The two modules whose job is to detect the plugin. Everything else goes
