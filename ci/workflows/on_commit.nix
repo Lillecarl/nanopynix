@@ -9,7 +9,11 @@ let
   staticChecksJob = {
     static-checks = workflow.mkStaticChecksJob { };
   };
-  allTestJobs = staticChecksJob // testJobs // tsanTestJobs;
+  # Same reasoning, and cheaper still: it installs no Nix.
+  commitSubjectJob = {
+    commit-subjects = workflow.mkCommitSubjectJob { };
+  };
+  allTestJobs = staticChecksJob // commitSubjectJob // testJobs // tsanTestJobs;
   selectedTestJobs = builtins.mapAttrs (
     name: job:
     withCond "github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',${name},')" job

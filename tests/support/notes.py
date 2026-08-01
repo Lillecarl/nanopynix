@@ -11,7 +11,7 @@ than any subject the tests are about.
 its docstring records the first time this happened. A conftest can replace a
 fixture. It cannot replace a module-level import, which is why this module
 exists. Import ``note`` from here, never from ``pytest_agent`` directly --
-``tests/test_agent_note_imports.py`` is the gate that keeps that true.
+``tests/meta/test_agent_note_imports.py`` is the gate that keeps that true.
 """
 
 from __future__ import annotations

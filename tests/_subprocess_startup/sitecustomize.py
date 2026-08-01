@@ -13,6 +13,8 @@ this module is always safe -- including in the many subprocesses tests spawn
 that have nothing to do with either concern.
 """
 
+from __future__ import annotations
+
 import os
 
 import coverage

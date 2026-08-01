@@ -1,5 +1,7 @@
 """Tests for nanopynix_util (settings, init, experimental features)."""
 
+from __future__ import annotations
+
 import pytest
 from nanopynix_bindings import util as nanopynix_util
 

@@ -267,6 +267,79 @@ let
       ];
     };
 
+  # The one part of the commit convention that a machine can check: the
+  # Conventional Commits prefix that CLAUDE.md requires. It checks the *shape*
+  # and not a list of allowed types, because CLAUDE.md gives `feat(scope):` and
+  # `fix(tests):` as examples and never agreed a taxonomy. The shape alone is
+  # enough to catch the subjects that this repository actually produced before
+  # the convention settled -- `fmt`, `ASD-STE100`, `add gdb to devshell`.
+  #
+  # Needs no Nix, so it is the cheapest job in the workflow.
+  #
+  # DELIBERATELY NOT CHECKED. Read the name of this job as the subject line
+  # only, because these two are not machine-decidable:
+  #
+  #   `Closes #<number>` is conditional. A commit completes an issue, or it
+  #   does not, and no machine knows which. A required trailer would train
+  #   people to write `Closes` for partial work -- the exact failure that
+  #   CLAUDE.md warns about, and worse than no check.
+  #
+  #   The `Co-Authored-By` and `Claude-Session` trailers are contextual. A
+  #   commit that a person writes without an agent carries neither, and it must
+  #   not fail for that.
+  mkCommitSubjectJob =
+    {
+      ref ? null,
+      needs ? [ ],
+    }:
+    lib.optionalAttrs (needs != [ ]) { inherit needs; }
+    // {
+      timeout-minutes = 5;
+      steps = [
+        (steps.checkout {
+          inherit ref;
+          # The range below needs the commits themselves, and the default
+          # checkout fetches one.
+          fetchDepth = 0;
+        })
+        {
+          name = "Check the Conventional Commits subject of each pushed commit";
+          run = ''
+            set -euo pipefail
+
+            before="''${{ github.event.before }}"
+            after="''${{ github.sha }}"
+
+            # `before` is the all-zero SHA for a new branch, and it names a
+            # commit that the remote no longer has after a force push. The
+            # range means nothing in either case, so check the head alone.
+            if git cat-file -e "$before^{commit}" 2>/dev/null; then
+              commits=$(git rev-list --no-merges "$before..$after")
+            else
+              echo "no usable base commit; checking $after alone"
+              commits=$(git rev-list --no-merges -1 "$after")
+            fi
+
+            status=0
+            for sha in $commits; do
+              subject=$(git log -1 --format=%s "$sha")
+              # A space is legal inside the parentheses, because this
+              # repository writes a multi-scope subject as `(nanopynix, ekn)`.
+              if ! printf '%s\n' "$subject" | grep -Eq '^[a-z]+(\([a-z0-9._/, -]+\))?!?: .+'; then
+                echo "::error::$sha: not a Conventional Commits subject: $subject"
+                status=1
+              fi
+            done
+
+            if [ "$status" -ne 0 ]; then
+              echo "CLAUDE.md requires the Conventional Commits prefix, for example 'feat(scope):' or 'fix(tests):'."
+            fi
+            exit "$status"
+          '';
+        }
+      ];
+    };
+
   mkDocsBuildJob =
     {
       needs,
@@ -339,6 +412,7 @@ in
     mkRegularTestJob
     mkTsanTestJob
     mkStaticChecksJob
+    mkCommitSubjectJob
     mkDocsBuildJob
     mkDocsDeployJob
     ;

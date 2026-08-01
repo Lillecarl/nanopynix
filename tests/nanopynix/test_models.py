@@ -1,5 +1,7 @@
 """Tests for pydantic models — no Nix/C++ dependency."""
 
+from __future__ import annotations
+
 from nanopynix_proto.nix.common import AttrsMap, AttrsValue
 
 from nanopynix.models import (
