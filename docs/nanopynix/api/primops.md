@@ -14,4 +14,7 @@ Nix >= 2.32. It's broken on Nix 2.31 and not expected to be fixed there.
 ```{eval-rst}
 .. automodule:: nanopynix.primops
    :members:
+
+.. automodule:: nanopynix.primops.yaml
+   :members:
 ```

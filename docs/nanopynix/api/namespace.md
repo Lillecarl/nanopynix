@@ -88,3 +88,17 @@ its own.
 
 This makes a namespace a property of the worker, fixed when the session is
 created. A running worker cannot move into one.
+
+## API
+
+```{eval-rst}
+.. autoclass:: nanopynix.OverlayNamespace
+   :members:
+
+.. autoclass:: nanopynix.NamespaceSupport
+   :members:
+
+.. autofunction:: nanopynix.probe_namespace_support
+
+.. autofunction:: nanopynix.enter_overlay_namespace
+```

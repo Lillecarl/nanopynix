@@ -119,6 +119,8 @@ its own. The more specific value wins:
 .. autofunction:: nanopynix.list_flake_settings_metadata
 .. autofunction:: nanopynix.check_settings_model_drift
 .. autofunction:: nanopynix.check_all_settings_model_drift
+
+.. autodata:: nanopynix.DEFAULT_EXPERIMENTAL_FEATURES
 ```
 
 ## Provenance

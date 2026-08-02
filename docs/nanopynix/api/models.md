@@ -28,4 +28,28 @@ Python-side convenience methods.
 
 .. autoclass:: nanopynix.PrimOpSpec
    :members:
+
+.. autoclass:: nanopynix.DerivedPath
+   :members:
+
+.. autoclass:: nanopynix.BuildResult
+   :members:
+
+.. autoclass:: nanopynix.DerivationOutput
+   :members:
+
+.. autoclass:: nanopynix.DerivationOutputs
+   :members:
+
+.. autoclass:: nanopynix.FlakeRef
+   :members:
+
+.. autoclass:: nanopynix.Input
+   :members:
+
+.. autoclass:: nanopynix.LockedFlake
+   :members:
+
+.. autoclass:: nanopynix.LockedInput
+   :members:
 ```
