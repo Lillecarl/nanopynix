@@ -26,6 +26,7 @@ from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
 from nanopynix._core._codec import deep_value_to_python, python_to_deep_value
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import CALL_ROUTE
+from nanopynix.rpc._primop_wire import reraise_if_primop_failure
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Callable
@@ -108,6 +109,13 @@ class ThreadedRpcPrimopBridge:
             return portal.call(self._invoke_async, name, args)
         except TimeoutError as exc:
             raise TimeoutError(f"manager primop {name!r} timed out after {_RPC_TIMEOUT:.0f}s") from exc
+        except Exception as exc:
+            # A marked failure is the caller's own primop raising, and is
+            # re-raised as a PrimopError so that the C++ bridge renders it the
+            # way it renders a worker-side primop. Anything else is the
+            # backchannel itself failing and propagates as itself.
+            reraise_if_primop_failure(exc)
+            raise
 
 
 def rpc_primop_callback_factory(bridge: ThreadedRpcPrimopBridge, name: str, arity: int) -> Callable[..., Any]:

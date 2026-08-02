@@ -15,6 +15,7 @@ from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
 from nanopynix._core._codec import deep_value_to_python, python_to_deep_value
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import CALL_ROUTE
+from nanopynix.rpc._primop_wire import encode
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Callable, Mapping
@@ -109,6 +110,11 @@ class ManagerPrimopServiceHandler(ManagerPrimopServiceBase):
             if hasattr(result, "__await__"):
                 result = await result
         except Exception as exc:
-            raise grpclib.GRPCError(Status.INTERNAL, str(exc)) from exc
+            # Not a GRPCError. The backchannel frame carries one string, and
+            # the transport fills it with `str()` of whatever is raised, so a
+            # GRPCError's status was dropped and its repr became the message
+            # Nix showed. `encode` puts the text Nix should show in that one
+            # string instead -- see nanopynix.rpc._primop_wire.
+            raise RuntimeError(encode(exc)) from exc
 
         return CallPrimopResponse(value=python_to_deep_value(result))

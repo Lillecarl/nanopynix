@@ -23,6 +23,7 @@ from grpclib.const import Status
 from nanopynix_proto.nix.common import DeepValue, LogEvent, ScalarValue
 from nanopynix_proto.nix.manager import CallPrimopRequest
 
+from nanopynix.rpc._primop_wire import decode
 from nanopynix.rpc.client._manager import (
     ManagerPrimopServiceBase,
     ManagerPrimopServiceHandler,
@@ -113,17 +114,36 @@ async def test_manager_primop_service_handler_call_not_found() -> None:
     assert exc_info.value.status == Status.NOT_FOUND
 
 
-async def test_manager_primop_service_handler_call_wraps_exceptions() -> None:
+async def test_manager_primop_service_handler_encodes_a_caller_exception() -> None:
+    """The handler raises the wire form, not a ``GRPCError`` (#33).
+
+    It used to raise ``GRPCError(Status.INTERNAL, str(exc))``. The backchannel
+    frame carries one ``error: str`` field and the transport fills it with
+    ``str()`` of whatever the handler raised, so the status was discarded and
+    the ``GRPCError``'s repr became the message Nix showed. The assertion on
+    ``Status.INTERNAL`` therefore pinned a value no caller could observe.
+
+    What replaces it is stricter, not looser: the message must decode to the
+    exact text Nix renders. See :mod:`nanopynix.rpc._primop_wire`, and
+    ``tests/nanopynix/primops/test_primop_error_parity.py`` for the end-to-end
+    proof that all three primop paths now read the same.
+
+    The two tests above still expect a ``GRPCError``. Those failures come from
+    the handler itself rather than from the caller's function, they are raised
+    before the call is attempted, and #33 does not cover them.
+    """
+
     def _boom(*_args: object) -> None:
         raise ValueError("kaboom")
 
     handler = ManagerPrimopServiceHandler()
     handler.register("boom", _boom)
 
-    with pytest.raises(grpclib.GRPCError) as exc_info:
+    with pytest.raises(RuntimeError) as exc_info:
         await handler.call(CallPrimopRequest(name="boom"))
-    assert exc_info.value.status == Status.INTERNAL
-    assert "kaboom" in str(exc_info.value)
+    assert not isinstance(exc_info.value, grpclib.GRPCError), "a GRPCError's status does not survive this transport"
+    # A ValueError is a deliberate rejection, so Nix shows the message bare.
+    assert decode(str(exc_info.value)) == "kaboom"
 
 
 async def test_manager_primop_service_handler_register_all_and_awaits_coroutine() -> None:
