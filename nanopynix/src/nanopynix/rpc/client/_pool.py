@@ -15,7 +15,6 @@ import asyncio
 import contextlib
 import functools
 import logging
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -40,8 +39,8 @@ from nanopynix_proto.nix.worker import (
 
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import DEFAULT_STORE_URI, WORKER_INIT_STATUS_OK
-from nanopynix.exceptions import SessionClosedError, exception_from_wire, from_response
-from nanopynix.logging import ACTIVE_LOG_CAPTURES, BusSubscription, CallbackBus
+from nanopynix.exceptions import SessionClosedError, WorkerDiedError, exception_from_wire, from_response
+from nanopynix.logging import ACTIVE_LOG_CAPTURES, BusSubscription, CallbackBus, bus_log_stream
 from nanopynix.namespace import probe_namespace_support
 from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC, unpack_error_details
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
@@ -57,7 +56,8 @@ if TYPE_CHECKING or BEARTYPING:
 
     from nanopynix_proto.nix.common import LogLevel
 
-    from nanopynix.models import PrimOpSpec
+    from nanopynix.logging import LogCallback
+    from nanopynix.models import LogEvent, PrimOpSpec
     from nanopynix.namespace import OverlayNamespace
 
 logger = logging.getLogger(__name__)
@@ -85,25 +85,6 @@ pathology, not anything a caller would tune."""
 
 _WORKER_JOIN_TIMEOUT_SECONDS = 5.0
 """How long _stop_worker_process waits for a terminate before escalating to kill."""
-
-_LOG_STREAM_BUFFER_EVENTS = 10_000
-"""How many events one log_stream() iterator buffers for a caller.
-
-The same order as the worker's own buffers, because it is the same kind of
-buffer one hop further on. It was ``math.inf``, which let a caller who
-iterates slowly grow this process without limit."""
-
-_LOG_STREAM_DROP_REPORT_SECONDS = 30.0
-"""How often a full log_stream() buffer says so. Matches nanopynix.logging."""
-
-# ════════════════════════════════════════════════════════════════════
-# Exceptions
-# ════════════════════════════════════════════════════════════════════
-
-
-class WorkerDiedError(RuntimeError):
-    """Raised when the subprocess worker dies unexpectedly."""
-
 
 # ════════════════════════════════════════════════════════════════════
 # gRPC error helper
@@ -335,8 +316,12 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
             # _WORKER_TEARDOWN_TIMEOUT_SECONDS + two joins.
             with anyio.CancelScope(shield=True):
                 await self._teardown()
-
-        self._log_bus.emit(None)
+                # Inside the `finally`, and not after the whole `try`: this is
+                # what ends every `log_stream` iterator, and a teardown that
+                # raised used to skip it and leave each one waiting for an
+                # event that would never arrive. inproc's `close` says the
+                # same thing in its own `finally`.
+                self._log_bus.emit(None)
 
     async def _teardown(self) -> None:
         """Drain the log stream and dispose of the worker. Runs shielded."""
@@ -395,56 +380,22 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
 
     # ── log access ─────────────────────────────────────────────────
 
-    async def log_stream(self) -> AsyncIterator[object]:
-        """Async iterator over log events.
+    def log_stream(self) -> AsyncIterator[LogEvent]:
+        """Async iterator over log events. inproc's ``log_stream`` is the same call.
 
         Bounded, and it discards the oldest event when the caller does not
-        keep up. The buffer was ``math.inf``, which made a slow reader grow
-        this process without limit -- the same defect the worker's own buffers
-        had, one layer down. See the rule at the top of ``nanopynix.logging``.
+        keep up. See :func:`nanopynix.logging.bus_log_stream`, which holds the
+        one implementation both engines use.
         """
-        send_stream, receive_stream = anyio.create_memory_object_stream[object](
-            max_buffer_size=_LOG_STREAM_BUFFER_EVENTS
-        )
+        return bus_log_stream(self._log_bus)
 
-        dropped = 0
-        last_report = 0.0
-
-        def _on_event(event: object) -> None:
-            nonlocal dropped, last_report
-            try:
-                send_stream.send_nowait(event)
-            except anyio.WouldBlock:
-                pass
-            else:
-                return
-            # `emit` runs on the event loop and must not block, so a full
-            # buffer costs the oldest event rather than the dispatch. Neither
-            # call below can fail: a full buffer always has something to take,
-            # and taking one always leaves room. Both run with no await in
-            # between, so nothing can get in between them.
-            receive_stream.receive_nowait()
-            send_stream.send_nowait(event)
-            dropped += 1
-            now = time.monotonic()
-            if now - last_report >= _LOG_STREAM_DROP_REPORT_SECONDS:
-                last_report = now
-                logger.warning("log_stream buffer is full; discarded %d event(s) so far", dropped)
-
-        sub = self._log_bus.subscribe(_on_event)
-        try:
-            async for event in receive_stream:
-                if event is None:
-                    break
-                yield event
-        finally:
-            sub.unsubscribe()
-
-    def subscribe(self, callback: Callable[..., None]) -> BusSubscription:
+    def subscribe(self, callback: LogCallback) -> BusSubscription:
         """Subscribe a callback to all log events.
 
-        Callback receives ``LogEvent`` proto messages from the worker.
-        Returns a ``BusSubscription`` — call ``.unsubscribe()`` to stop.
+        The callback receives a :class:`~nanopynix.models.LogEvent`, and
+        ``None`` once when the stream ends. The worker sends the bare proto
+        over gRPC, and ``CallbackBus.emit`` normalises it -- see that
+        docstring for why a subscriber never sees the wire type.
         """
         return self._log_bus.subscribe(callback)
 

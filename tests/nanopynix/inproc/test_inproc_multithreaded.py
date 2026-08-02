@@ -122,7 +122,9 @@ async def _measuring_build_dispatch(nix: inproc.Session) -> AsyncGenerator[list[
     """
     starts: list[float] = []
 
-    def _on_event(event: LogEvent) -> None:
+    def _on_event(event: LogEvent | None) -> None:
+        if event is None:  # the teardown marker; the session is closing
+            return
         args = event.args
         if (
             event.action == "start"
@@ -313,7 +315,7 @@ async def test_inproc_store_metadata_and_closure_queries_run_concurrently() -> N
 async def test_inproc_logs_keep_operation_ids_isolated_between_store_threads() -> None:
     """Logger request context is thread-local and restored after each job."""
     async with _session(store_workers=2) as nix:
-        events: asyncio.Queue[LogEvent] = asyncio.Queue()
+        events: asyncio.Queue[LogEvent | None] = asyncio.Queue()
         subscription = nix.subscribe(events.put_nowait)
         try:
             barrier = threading.Barrier(2)
@@ -326,7 +328,7 @@ async def test_inproc_logs_keep_operation_ids_isolated_between_store_threads() -
             messages: dict[str, int] = {}
             while len(messages) != 2:
                 event = await asyncio.wait_for(events.get(), timeout=5)
-                if event.action != "msg":
+                if event is None or event.action != "msg":
                     continue
                 message = event.args[-1]
                 if message in {"first concurrent operation", "second concurrent operation"}:

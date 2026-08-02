@@ -11,14 +11,12 @@ from __future__ import annotations
 import asyncio
 import functools
 import itertools
-import math
 import os
 import threading
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import anyio
 from nanopynix_bindings import expr as nanopynix_expr, store as nanopynix_store, util as nanopynix_util
 from nanopynix_proto.nix.common import LogLevel, RequestFinalized
 
@@ -53,6 +51,7 @@ from nanopynix.logging import (
     LogCapture,
     LogCollector,
     LogStreamEventKind,
+    bus_log_stream,
     events_dropped_event,
 )
 from nanopynix.models import (
@@ -97,6 +96,7 @@ if TYPE_CHECKING or BEARTYPING:
 
     from nanopynix_proto.nix.store import GcAction, StoreDirs
 
+    from nanopynix.logging import LogCallback
     from nanopynix.models import PrimOpSpec
 
 
@@ -403,6 +403,11 @@ class Session:
             self._opened = False
             self._restore_nix_conf_env()
             _process_guard.release(self)
+            # The teardown marker. It ends every `log_stream` iterator, and
+            # inproc did not send it: the forwarding task simply stopped, so
+            # a caller who iterated a closed session waited forever. rpc sends
+            # the same marker from the `finally` of its own `close`.
+            self._log_bus.emit(None)
 
         # Cancellation is not collected, and neither is it collected in
         # `close_resource` above. Collecting it did two things, both wrong. The
@@ -642,18 +647,22 @@ class Session:
         )
         return applied
 
-    async def log_stream(self) -> AsyncIterator[LogEvent]:
-        """Async iterator over log events from this process's Nix logger."""
-        send_stream, receive_stream = anyio.create_memory_object_stream[LogEvent](max_buffer_size=math.inf)
-        subscription = self.subscribe(send_stream.send_nowait)
-        try:
-            async for event in receive_stream:
-                yield event
-        finally:
-            subscription.unsubscribe()
+    def log_stream(self) -> AsyncIterator[LogEvent]:
+        """Async iterator over log events from this process's Nix logger.
 
-    def subscribe(self, callback: Any) -> BusSubscription:
-        """Subscribe a callback to live log events. Call ``.unsubscribe()`` to stop."""
+        Bounded, and it ends when the session closes. rpc's ``log_stream`` is
+        the same call -- see :func:`nanopynix.logging.bus_log_stream`, which
+        records what the two copies of this had drifted into.
+        """
+        return bus_log_stream(self._log_bus)
+
+    def subscribe(self, callback: LogCallback) -> BusSubscription:
+        """Subscribe a callback to live log events. Call ``.unsubscribe()`` to stop.
+
+        The callback receives a :class:`~nanopynix.models.LogEvent`, and
+        ``None`` once when the stream ends. rpc's
+        :meth:`~nanopynix.rpc.Session.subscribe` delivers the same.
+        """
         return self._log_bus.subscribe(callback)
 
     def capture_logs(self, *, max_events: int | None = None, wait_timeout: float | None = None) -> LogCapture:
@@ -1017,16 +1026,6 @@ class Store:
     async def _public_store_paths(self, raw_paths: Sequence[nanopynix_store.StorePath | str]) -> list[StorePath]:
         paths = await self._session.run(_print_store_paths, self._require_raw(), raw_paths)
         return [StorePath(path) for path in paths]
-
-    async def call(self, method: str, /, *args: Any, **kwargs: Any) -> Any:
-        """Call an L1 store method on the session's Nix thread.
-
-        This intentionally keeps the complete L1 store surface available while
-        dedicated ergonomic methods are added above it.
-        """
-        raw = self._require_raw()
-        target = getattr(raw, method)
-        return await self._session.run(_call, target, args, kwargs)
 
 
 class EvalSession:
@@ -1807,10 +1806,6 @@ class Value:
             )
         derivation = await target_store.read_derivation(derived_path)
         return {name: output.path for name, output in derivation.outputs.items() if output.path is not None}
-
-
-def _call(target: Any, args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> Any:
-    return target(*args, **kwargs)
 
 
 def _attr_values(local: Any) -> dict[str, Any]:

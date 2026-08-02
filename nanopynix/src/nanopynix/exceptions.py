@@ -479,6 +479,36 @@ class ForeignValueError(ObjectMisuseError, ValueError):
     """A value from another eval session was used where a local value is required."""
 
 
+# ── Engine failures ──────────────────────────────────────────────────
+
+
+class EngineError(RuntimeError):
+    """The engine that runs Nix failed, and Nix reported nothing.
+
+    The third family, beside :class:`NixError` and
+    :class:`ObjectMisuseError`. Nix did not raise, and the caller did not
+    misuse anything: the machinery underneath both of them stopped working.
+
+    Only rpc can produce one, and that is not an asymmetry to correct. inproc
+    runs Nix in this process, so the failure below is a failure of this
+    process and Python reports it in its own way. A separate worker process is
+    what makes "it is gone, and nothing said why" a state a caller can reach.
+    """
+
+
+class WorkerDiedError(EngineError):
+    """The rpc worker process died while an operation was outstanding.
+
+    inproc never raises it. Read :class:`EngineError` for why that is correct
+    rather than a gap.
+
+    It lived in ``rpc/client/_pool.py`` as a bare ``RuntimeError`` until now,
+    so a caller who wrapped an rpc call in ``except nanopynix.NixError`` was
+    not protected against the one failure the engine exists to produce.
+    ``nanopynix.rpc.WorkerDiedError`` still resolves, and is this class.
+    """
+
+
 # ════════════════════════════════════════════════════════════════════
 # Classification — string-based, matches Nix error message patterns
 # ════════════════════════════════════════════════════════════════════
@@ -858,18 +888,22 @@ __all__ = [
     "BuildTimedOutError",
     "CachedBuildFailureError",
     "DependencyFailedError",
+    "EngineError",
     "EvalError",
     "EvalHashMismatchError",
     "EvalSessionClosedError",
+    "EvaluatorAbandonedError",
     "ForeignValueError",
     "HashMismatchError",
     "InfiniteRecursionError",
     "InputRejectedError",
     "InvalidPathError",
+    "ListIndexError",
     "LockedFlakeReleasedError",
     "LogLimitExceededError",
     "MiscBuildError",
     "MissingArgumentError",
+    "MissingAttributeError",
     "NixAssertionError",
     "NixError",
     "NixSysError",
@@ -883,6 +917,8 @@ __all__ = [
     "PermanentBuildError",
     "RestrictedPathError",
     "SessionClosedError",
+    "SettingNotLiveError",
+    "SettingOutOfScopeError",
     "StoreClosedError",
     "StoreError",
     "ThrownError",
@@ -893,6 +929,7 @@ __all__ = [
     "UnsupportedError",
     "UsageError",
     "ValueReleasedError",
+    "WorkerDiedError",
     "WrongNixTypeError",
     "build_error_from_result",
     "exception_for_nix_type",

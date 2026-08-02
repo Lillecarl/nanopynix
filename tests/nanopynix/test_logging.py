@@ -12,6 +12,7 @@ import logging
 from typing import TYPE_CHECKING, Protocol, cast
 
 import anyio
+import anyio.lowlevel
 import anyio.to_thread
 import pytest
 from nanopynix_bindings import util as nanopynix_util
@@ -23,8 +24,10 @@ from nanopynix.logging import (
     CallbackBus,
     LogCapture,
     LogOutbox,
+    bus_log_stream,
     events_dropped_event,
 )
+from nanopynix.models import LogEvent
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -444,29 +447,74 @@ async def test_a_marker_that_arrives_ends_the_wait():
 # why the worker's own subscribe_logs is not built on this). ──────────────
 
 
+def _ids(seen: list[LogEvent | None]) -> list[int | None]:
+    """Request ids, with `None` kept for the teardown marker."""
+    return [None if event is None else event.request_id for event in seen]
+
+
 def test_callback_bus_dispatches_to_all_subscribers():
     bus = CallbackBus()
-    seen_a: list[object] = []
-    seen_b: list[object] = []
+    seen_a: list[LogEvent | None] = []
+    seen_b: list[LogEvent | None] = []
     bus.subscribe(seen_a.append)
     bus.subscribe(seen_b.append)
 
-    bus.emit("event")
+    bus.emit(_log_event(1))
 
-    assert seen_a == ["event"]
-    assert seen_b == ["event"]
+    assert _ids(seen_a) == [1]
+    assert _ids(seen_b) == [1]
+
+
+def test_callback_bus_normalises_the_wire_event_to_the_model():
+    """Both engines' subscribers see the model, never the proto it subclasses.
+
+    This is the invariant that lets `Session.subscribe` state its type, and
+    that removed ekn's need to import the proto class to narrow against.
+    """
+    bus = CallbackBus()
+    seen: list[LogEvent | None] = []
+    bus.subscribe(seen.append)
+
+    bus.emit(_log_event(1))
+
+    assert type(seen[0]) is LogEvent
+
+
+def test_callback_bus_passes_the_teardown_marker_through() -> None:
+    bus = CallbackBus()
+    seen: list[LogEvent | None] = []
+    bus.subscribe(seen.append)
+
+    bus.emit(None)
+
+    assert seen == [None]
+
+
+def test_callback_bus_drops_a_foreign_object_rather_than_calling_it_teardown() -> None:
+    """A producer bug must not read as "the stream ended".
+
+    `None` means teardown. Coercing an unexpected object into it would tell
+    every subscriber to stop, so `emit` drops and logs instead.
+    """
+    bus = CallbackBus()
+    seen: list[LogEvent | None] = []
+    bus.subscribe(seen.append)
+
+    bus.emit("not an event")
+
+    assert seen == []
 
 
 def test_callback_bus_unsubscribe_stops_dispatch():
     bus = CallbackBus()
-    seen: list[object] = []
+    seen: list[LogEvent | None] = []
     sub = bus.subscribe(seen.append)
 
-    bus.emit("first")
+    bus.emit(_log_event(1))
     sub.unsubscribe()
-    bus.emit("second")
+    bus.emit(_log_event(2))
 
-    assert seen == ["first"]
+    assert _ids(seen) == [1]
 
 
 def test_callback_bus_raising_subscriber_does_not_block_others():
@@ -478,7 +526,7 @@ def test_callback_bus_raising_subscriber_does_not_block_others():
     client's more robust swallow-and-log semantics.
     """
     bus = CallbackBus()
-    seen: list[object] = []
+    seen: list[LogEvent | None] = []
 
     def _raises(_event: object) -> None:
         raise RuntimeError("boom")
@@ -486,9 +534,9 @@ def test_callback_bus_raising_subscriber_does_not_block_others():
     bus.subscribe(_raises)
     bus.subscribe(seen.append)
 
-    bus.emit("event")
+    bus.emit(_log_event(1))
 
-    assert seen == ["event"]
+    assert _ids(seen) == [1]
 
 
 def test_callback_bus_same_callback_subscribed_twice_dispatches_twice():
@@ -498,14 +546,65 @@ def test_callback_bus_same_callback_subscribed_twice_dispatches_twice():
     deduplicated by identity), matching the RPC client's list-based bus.
     """
     bus = CallbackBus()
-    seen: list[object] = []
+    seen: list[LogEvent | None] = []
     first = bus.subscribe(seen.append)
     bus.subscribe(seen.append)
 
-    bus.emit("event")
-    assert seen == ["event", "event"]
+    bus.emit(_log_event(1))
+    assert _ids(seen) == [1, 1]
 
     first.unsubscribe()
     seen.clear()
-    bus.emit("event")
-    assert seen == ["event"]
+    bus.emit(_log_event(1))
+    assert _ids(seen) == [1]
+
+
+# ── bus_log_stream — the one `log_stream` both engines return ────────────
+#
+# It replaced a copy in each engine, and the two copies had drifted: rpc
+# bounded its buffer and stopped on the teardown marker, inproc used
+# `math.inf` and never stopped at all.
+
+
+async def _drain_bus(bus: CallbackBus, events: list[LogEventProto | None]) -> list[int]:
+    """Emit *events* onto *bus* while one `bus_log_stream` iterates it.
+
+    The list must carry the `None` marker, or the iterator never ends.
+    """
+
+    async def _emit() -> None:
+        # One checkpoint first: the bus discards an event that arrives with
+        # nobody subscribed, and the iterator subscribes on its first
+        # `__anext__`. Nothing after it, so the whole list lands before the
+        # reader runs again -- which is what makes the drop test deterministic.
+        await anyio.lowlevel.checkpoint()
+        for event in events:
+            bus.emit(event)
+
+    seen: list[LogEvent] = []
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(_emit)
+        seen.extend([event async for event in bus_log_stream(bus)])
+    return [event.request_id for event in seen]
+
+
+async def test_bus_log_stream_ends_on_the_teardown_marker():
+    """The marker ends the iterator, and nothing after it is delivered."""
+    seen = await _drain_bus(CallbackBus(), [_log_event(1), _log_event(2), None, _log_event(3)])
+    assert seen == [1, 2]
+
+
+async def test_bus_log_stream_discards_the_oldest_when_the_caller_falls_behind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The rule at the top of the module, applied at the last hop.
+
+    A log line is lost and the dispatch that feeds it is not delayed. inproc's
+    copy of this stream buffered without a bound, so a slow caller grew the
+    process instead.
+    """
+    monkeypatch.setattr("nanopynix.logging._LOG_STREAM_BUFFER_EVENTS", 3)
+    seen = await _drain_bus(CallbackBus(), [*(_log_event(i) for i in range(6)), None])
+
+    assert len(seen) < 6, "nothing was discarded, so the buffer is not bounded"
+    assert seen[-2:] == [4, 5], "the newest events are the ones that survived"

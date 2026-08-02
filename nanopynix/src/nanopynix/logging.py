@@ -46,7 +46,10 @@ from nanopynix.models import LogEvent
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncIterator, Callable
 
-    type LogCallback = Callable[..., None]
+    # `LogEvent | None`, and not bare `LogEvent`: `None` is the teardown
+    # marker that tells a consumer the stream has ended. `CallbackBus.emit`
+    # guarantees a subscriber sees nothing else -- see its docstring.
+    type LogCallback = Callable[[LogEvent | None], None]
 
 _logger = logging.getLogger(__name__)
 
@@ -71,6 +74,15 @@ A control event is never discarded to make room for a log line, so a stream
 of nothing but control events could grow past ``maxsize``. That needs one
 outstanding operation for each event, which no real caller produces, but a
 buffer with no bound at all is not something to leave in place."""
+
+_LOG_STREAM_BUFFER_EVENTS = 10_000
+"""How many events one :func:`bus_log_stream` iterator holds for its caller.
+
+The same order as ``LogCollector``'s default, because it is the same kind of
+buffer one hop further on. rpc's copy of this stream used ``math.inf``, which
+let a caller who iterates slowly grow the process without limit, and inproc's
+copy still did after rpc corrected it. One function now, so a correction to
+the rule reaches both engines."""
 
 _CAPTURE_MAX_EVENTS = 100_000
 """How many events one :class:`LogCapture` keeps before it discards the oldest.
@@ -419,6 +431,20 @@ class CallbackBus:
     Zero subscribers -> events are discarded (no buffering, no overhead). A
     subscriber that raises is logged and does not stop dispatch to the
     remaining subscribers.
+
+    **This bus carries** :class:`~nanopynix.models.LogEvent` **, and nothing
+    else but the** ``None`` **teardown marker.** ``emit`` normalises, so a
+    producer may hand it the bare proto and a subscriber never sees one.
+
+    That invariant is new, and it replaces an asymmetry that every consumer
+    used to repeat. inproc emitted the model, rpc emitted the bare proto it
+    subclasses, and ``events_dropped_event`` emitted a bare proto from *both*
+    engines -- so each subscriber began with ``isinstance(raw, LogEventProto)``
+    and ``LogEvent.from_proto(raw)``. That is a workaround, not an API, and it
+    was not one a caller outside this repository could write: nanopynix
+    exports the subclass and not the base, so ``ekn`` reached into
+    ``nanopynix_proto`` to get a class to test against. Normalising once here
+    is what lets :meth:`Session.subscribe` state the type it delivers.
     """
 
     def __init__(self) -> None:
@@ -433,11 +459,30 @@ class CallbackBus:
             self._subscribers.remove(sub._callback)  # type: ignore[reportPrivateUsage] -- required for cross-class callbacks  # noqa: SLF001
 
     def emit(self, event: object) -> None:
+        """Dispatch one event, normalised to the model, to every subscriber.
+
+        Anything that is neither a log event nor the ``None`` marker is
+        dropped and logged. It is **not** turned into ``None``: that is the
+        teardown marker, and coercing an unexpected object into it would tell
+        every subscriber the stream had ended. A producer that emits the wrong
+        thing is a bug, and it should look like one.
+        """
         if not self._subscribers:
+            return
+        if event is None:
+            normalised = None
+        elif isinstance(event, LogEvent):
+            normalised = event
+        elif isinstance(event, LogEventProto):
+            # Normalise once, not once per subscriber: they all want the same
+            # model, and `from_proto` builds a new object each time.
+            normalised = LogEvent.from_proto(event)
+        else:
+            _logger.error("log bus discarded a %s; this bus carries LogEvent", type(event).__name__)
             return
         for callback in tuple(self._subscribers):
             try:
-                callback(event)
+                callback(normalised)
             except Exception:
                 _logger.exception("log bus subscriber failed")
 
@@ -454,12 +499,67 @@ class LogEventBus(Protocol):
 
     Just ``subscribe``. inproc's ``Session`` and rpc's ``WorkerClient`` both
     satisfy it, which is the whole reason ``LogCapture`` can be one class: the
-    events differ only in how they got here, and by the time they reach the bus
-    they are the same :class:`~nanopynix.models.LogEvent` type either way --
-    inproc emits the model directly, rpc's arrive as the proto it subclasses.
+    events differ only in how they got here, and a subscriber receives the
+    same :class:`~nanopynix.models.LogEvent` either way.
+
+    ``CallbackBus.emit`` is what makes that true, and it used to be only
+    half-true -- see its docstring for the asymmetry this replaced.
     """
 
     def subscribe(self, callback: LogCallback) -> BusSubscription: ...
+
+
+async def bus_log_stream(bus: LogEventBus) -> AsyncIterator[LogEvent]:
+    """Iterate one log bus as an async stream. Both engines' ``log_stream``.
+
+    Bounded, and it discards the oldest event when the caller does not keep
+    up. That is the rule at the top of this module, applied at the last hop:
+    the caller loses a log line, and the dispatch that feeds it never blocks.
+
+    The iterator ends when the bus emits the ``None`` teardown marker, so a
+    caller who iterates a session to the end returns instead of waiting for
+    an event that will not arrive.
+
+    Both engines called their own copy of this until now, and the two copies
+    had drifted: rpc bounded its buffer and reported the loss, inproc used
+    ``math.inf`` and reported nothing, and only rpc stopped on the marker.
+    """
+    send_stream, receive_stream = anyio.create_memory_object_stream[LogEvent | None](
+        max_buffer_size=_LOG_STREAM_BUFFER_EVENTS
+    )
+
+    dropped = 0
+    last_report = 0.0
+
+    def _on_event(event: LogEvent | None) -> None:
+        nonlocal dropped, last_report
+        try:
+            send_stream.send_nowait(event)
+        except anyio.WouldBlock:
+            pass
+        else:
+            return
+        # `emit` runs on the event loop and must not block, so a full buffer
+        # costs the oldest event rather than the dispatch. Neither call below
+        # can fail: a full buffer always has something to take, and taking one
+        # always leaves room. Both run with no await in between, so nothing
+        # can get in between them.
+        receive_stream.receive_nowait()
+        send_stream.send_nowait(event)
+        dropped += 1
+        now = time.monotonic()
+        if now - last_report >= _DROP_REPORT_INTERVAL_SECONDS:
+            last_report = now
+            _logger.warning("log_stream buffer is full; discarded %d event(s) so far", dropped)
+
+    sub = bus.subscribe(_on_event)
+    try:
+        async for event in receive_stream:
+            if event is None:
+                break
+            yield event
+    finally:
+        sub.unsubscribe()
 
 
 class LogCapture:
@@ -586,13 +686,12 @@ class LogCapture:
             for request_id in request_ids:
                 tg.start_soon(self._await_request, request_id)
 
-    def _append(self, raw: object) -> None:
-        if not isinstance(raw, LogEventProto):
+    def _append(self, event: LogEvent | None) -> None:
+        # `None` is the teardown marker, and the bus normalises everything
+        # else to the model -- so this no longer converts, and no longer needs
+        # the bare proto class to test against.
+        if event is None:
             return
-        # inproc puts LogEvent (which *is* a LogEventProto subclass) on the bus
-        # and rpc puts the bare proto; from_proto normalises both to the model
-        # whose is_nix_log/is_request_finalized accessors this depends on.
-        event = LogEvent.from_proto(raw)
         if event.is_nix_log:
             if len(self.events) == self._max_events:
                 self._truncated = True

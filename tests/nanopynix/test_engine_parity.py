@@ -192,7 +192,6 @@ LEDGER: dict[str, str] = {
     # more destructive act -- worse than not having it.
     "Session.close:params": "TRANSPORT: inproc must drain threads it cannot kill; rpc terminates a process. wait/timeout/force bound a wait phase rpc does not have.",
     # ── Store ──────────────────────────────────────────────────────
-    "Store.call:inproc-only": "TRANSPORT: runs an L1 store method on the Nix thread.",
     "Store.rpc:rpc-only": "TRANSPORT: the generated StoreService proxy -- the escape hatch to the wire itself.",
     "Store.store_handle:rpc-only": "TRANSPORT: worker-side handle used to wire a store into a remote session.",
     # Nothing else. Every remaining Store operation exists on both engines,
