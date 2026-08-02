@@ -36,12 +36,14 @@ registry of the Nix that nanopynix is linked with.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from types import UnionType
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Union, cast, get_args, get_origin
 from urllib.parse import quote, unquote
 
-from nanopynix_bindings import store as nanopynix_store
+from nanopynix_bindings import errors as nanopynix_errors, store as nanopynix_store
 from pydantic import AliasChoices, Field, model_validator
+from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.settings import (
@@ -58,7 +60,7 @@ from nanopynix.settings import (
 )
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Generator, Iterator, Mapping
 
 
 #: Marks a field that names part of the URI itself rather than a query
@@ -81,6 +83,24 @@ _QUERY_SAFE = "/:"
 #: whatever percent-encoding the URI carried. So :func:`parse` unescapes it,
 #: and these two must stay each other's inverse.
 _AUTHORITY_SAFE = "/:@[]"
+
+
+@contextmanager
+def _nix_uri_errors_as_value_error(uri: str) -> Generator[None]:
+    """Report a URI that Nix cannot read as a :class:`ValueError`.
+
+    Nix's own parser raises ``UsageError``, which is a ``RuntimeError`` from
+    the compiled bindings and carries the terminal colour codes Nix writes for
+    a console. Both :func:`parse` and :meth:`StoreConfig.uri` already answer
+    ``ValueError`` when *this module* rejects a URI -- an unknown scheme, or a
+    parameter the store type does not have. Without this, the same call
+    reports "this URI is bad" as two unrelated exception classes, chosen by
+    which half of the URI is at fault.
+    """
+    try:
+        yield
+    except nanopynix_errors.Error as error:
+        raise ValueError(f"Nix cannot read {uri!r} as a store URI: {strip_ansi(str(error))}") from error
 
 
 def _authority() -> Any:
@@ -180,8 +200,15 @@ class StoreConfig(NixConfigModel):
         The result is normalised by Nix itself, so it is exactly what Nix would
         write for the same store. Parameters come out in Nix's order rather than
         the order they were set.
+
+        Raises:
+            ValueError: Nix cannot read the URI these fields make. An
+                authority that is not authority syntax does this -- see
+                :func:`parse` for the same rule on the way in.
         """
-        return nanopynix_store.render_store_reference(self._render_raw())
+        raw = self._render_raw()
+        with _nix_uri_errors_as_value_error(raw):
+            return nanopynix_store.render_store_reference(raw)
 
     def _render_raw(self) -> str:
         query = "&".join(f"{key}={quote(value, safe=_QUERY_SAFE)}" for key, value in sorted(self.params().items()))
@@ -515,10 +542,13 @@ def parse(uri: str) -> StoreConfig:
         The model for the store type the URI names.
 
     Raises:
-        ValueError: The scheme has no model, or a parameter is not a setting of
-            that store type.
+        ValueError: Nix cannot read the URI, or the scheme has no model, or a
+            parameter is not a setting of that store type. One class for all
+            three, because a caller who has been handed a bad URI does not
+            care which half of it Nix objected to.
     """
-    reference = cast("dict[str, Any]", nanopynix_store.parse_store_reference(uri))  # type: ignore[reportUnknownArgumentType] -- C++ extension without type stubs
+    with _nix_uri_errors_as_value_error(uri):
+        reference = cast("dict[str, Any]", nanopynix_store.parse_store_reference(uri))  # type: ignore[reportUnknownArgumentType] -- C++ extension without type stubs
     params: dict[str, str] = dict(reference["params"])
     kind: str = reference["type"]
     if kind == "Auto":

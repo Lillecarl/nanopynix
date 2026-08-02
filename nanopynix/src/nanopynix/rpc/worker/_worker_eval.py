@@ -212,7 +212,16 @@ class EvalServiceHandler(EvalServiceBase):
         try:
             return self._state.handles.get_eval_entry(eval_handle)
         except KeyError as exc:
-            raise RuntimeError("no EvalState is open — call OpenEval before evaluating") from exc
+            # Two different mistakes, and one message used to cover both.
+            # Handle 0 is the wire's "none", so the caller never opened an
+            # evaluator. Any other number is one this worker did not issue, or
+            # issued and has since released -- and telling that caller to call
+            # OpenEval named the wrong cause and hid the handle.
+            if eval_handle == 0:
+                raise RuntimeError("no EvalState is open — call OpenEval before evaluating") from exc
+            raise RuntimeError(
+                f"evaluator handle {eval_handle} is not open — this worker never issued it, or it is already closed",
+            ) from exc
 
     def _get_es(self, eval_handle: int) -> CoreEvalState:
         return self._get_entry(eval_handle).eval_state
