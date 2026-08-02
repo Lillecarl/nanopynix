@@ -13,7 +13,7 @@ from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 if TYPE_CHECKING or BEARTYPING:
     from pathlib import Path
 
-    from nanopynix.rpc import EvalSession, ReplSession, ValueProxy
+    from nanopynix import AsyncEvalSession, AsyncReplSession, AsyncValue
 
 
 @no_runtime_type_check  # clypi's arg() returns a PartialConfig placeholder at declaration time, not the annotated type -- clypi's own machinery replaces it later; beartype would otherwise flag every call as a type violation
@@ -57,12 +57,12 @@ class EvaluationTarget:
             raise EvaluationTargetError("--attr requires --file or --flake")
 
 
-async def evaluate_target(
+async def evaluate_target[ValueT: AsyncValue](
     target: EvaluationTarget,
-    session: EvalSession,
+    session: AsyncEvalSession[ValueT],
     *,
     auto_call_file: bool = False,
-) -> ValueProxy:
+) -> ValueT:
     """Evaluate *target* in *session* and apply its attribute selectors."""
     target.validate(required=True)
     if target.file is not None:
@@ -82,7 +82,7 @@ async def evaluate_target(
     return value
 
 
-async def load_repl_target(target: EvaluationTarget, repl: ReplSession) -> ValueProxy:
+async def load_repl_target[ValueT: AsyncValue](target: EvaluationTarget, repl: AsyncReplSession[ValueT]) -> ValueT:
     """Load *target* into a REPL, preserving Nix's ``:load`` file semantics."""
     target.validate(required=True)
     if target.file is not None:

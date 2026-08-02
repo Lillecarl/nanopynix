@@ -20,7 +20,8 @@ if TYPE_CHECKING or BEARTYPING:
 
     from nanopynix_helpers import EvaluationTargetError
 
-    from nanopynix.rpc import EvalSession, Session, Store
+    from nanopynix import AsyncEvalSession
+    from nanopynix.rpc import Session, Store
 
 _RESULT_BUILD_LOG_LINE = 101
 _RESULT_POST_BUILD_LOG_LINE = 107
@@ -180,7 +181,7 @@ async def eval_session(
     experimental_features: Sequence[str] | None = None,
     verbosity: nanopynix.LogLevelInput | None = None,
     print_build_logs: bool = False,
-) -> AsyncGenerator[tuple[Session, Store, EvalSession]]:
+) -> AsyncGenerator[tuple[Session, Store, AsyncEvalSession]]:
     """Open a session, store, and eval session, forwarding logs for the duration of the block."""
     async with (
         store_session(

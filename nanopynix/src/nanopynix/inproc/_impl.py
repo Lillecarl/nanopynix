@@ -60,6 +60,7 @@ from nanopynix.models import (
     FlakeRef,
     GcResult,
     GcRoot,
+    JsonValue,
     LockedInput,
     LogEvent,
     MissingInfo,
@@ -1555,7 +1556,7 @@ class Value(AsyncValue):
             raise ValueError("Value belongs to a different inproc EvalSession")
         return await self._resolve()
 
-    async def to_python(self, *, copy_to_store: bool = False) -> Any:
+    async def to_python(self, *, copy_to_store: bool = False) -> JsonValue:
         """Convert the whole value tree to plain Python data, in one C++ pass.
 
         This is Nix's own ``printValueAsJSON`` with ``strict=true``, so the

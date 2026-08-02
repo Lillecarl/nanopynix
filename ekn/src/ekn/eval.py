@@ -29,7 +29,7 @@ from nanopynix.rpc import Session
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncGenerator, Generator
 
-    from nanopynix.rpc import EvalSession, ValueProxy
+    from nanopynix import AsyncEvalSession, AsyncValue
     from nanopynix.verbosity import LogLevelInput
 
 _SESSION_SETTINGS = NixSettings()
@@ -238,12 +238,12 @@ async def _session() -> AsyncGenerator[Session]:
 
 
 async def _resolve_proxy(
-    eval_: EvalSession,
+    eval_: AsyncEvalSession,
     file: str | PathLike[str] | None,
     flake_uri: str | None,
     customer: str | None,
     attr_path: str | None,
-) -> ValueProxy:
+) -> AsyncValue:
     """Resolve --file/--flake[+--customer] into a proxy, then narrow by
     attr_path if given -- the branching prelude duplicated verbatim across
     evaluate_with_fod_update/evaluate_flake_ekn/evaluate_generated_manifests/

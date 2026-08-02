@@ -73,6 +73,7 @@ if TYPE_CHECKING or BEARTYPING:
         FlakeRef,
         GcResult,
         GcRoot,
+        JsonValue,
         LogEvent,
         MissingInfo,
         NixType,
@@ -110,7 +111,7 @@ class AsyncValue(Protocol):
         ...
 
     @abstractmethod
-    async def to_python(self, *, copy_to_store: bool = False) -> Any:
+    async def to_python(self, *, copy_to_store: bool = False) -> JsonValue:
         """Convert the whole value tree to plain Python data, using Nix's toJSON rules."""
         ...
 

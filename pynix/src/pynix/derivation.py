@@ -15,7 +15,7 @@ from nanopynix import NixType
 from nanopynix._typechecking import BEARTYPING
 
 if TYPE_CHECKING or BEARTYPING:
-    from nanopynix.rpc import ValueProxy
+    from nanopynix import AsyncValue
 
 from pynix._util import error_exit, print_json, report_and_exit, store_session
 from pynix.target import (
@@ -67,7 +67,7 @@ class Show(Command):
             print_json(result)
 
     @staticmethod
-    async def _get_drv_path(value: ValueProxy) -> str:
+    async def _get_drv_path(value: AsyncValue) -> str:
         # has_attr() is an attrset question, so ask whether this is an attrset
         # first. It used to answer False for any non-attrset, which made
         # "is this a derivation?" work by accident on a string or a list; it
