@@ -28,6 +28,7 @@ from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util  #
 
 import nanopynix  # noqa: E402 -- see hook install above
 from nanopynix.settings import DEFAULT_EXPERIMENTAL_FEATURES  # noqa: E402 -- see hook install above
+from tests.support.hang_report import hang_report  # noqa: E402 -- see hook install above
 from tests.support.subprocess_output import run_process  # noqa: E402 -- see hook install above
 
 pytest_plugins = (
@@ -53,8 +54,17 @@ _ASYNC_TEST_TIMEOUT = float(os.environ.get("NANOPYNIX_TEST_TIMEOUT", "120"))
 def _with_test_timeout(func: Callable[..., Awaitable[None]]) -> Callable[..., Awaitable[None]]:
     @functools.wraps(func)
     async def wrapper(*args: object, **kwargs: object) -> None:
-        with anyio.fail_after(_ASYNC_TEST_TIMEOUT):
-            await func(*args, **kwargs)
+        try:
+            with anyio.fail_after(_ASYNC_TEST_TIMEOUT):
+                await func(*args, **kwargs)
+        except TimeoutError as exc:
+            # A bare TimeoutError says the test took too long and nothing
+            # about what it waited for. Five of them in one CI job (#44) gave
+            # six lines between them, so the only next step was to run CI
+            # again. The note names the tasks and threads that were still
+            # alive, which is the difference between evidence and a re-run.
+            exc.add_note(hang_report(_ASYNC_TEST_TIMEOUT))
+            raise
 
     return wrapper
 
