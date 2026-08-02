@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package greeter.worker;
+
+import "common.proto";
+
+service GreeterWorker {
+  rpc SayHello (greeter.common.HelloRequest) returns (greeter.common.HelloReply);
+  rpc Upload (stream greeter.common.HelloRequest) returns (greeter.common.HelloReply);
+}
+
+service GreeterManager {
+  rpc Lookup (greeter.common.ManagerLookupRequest) returns (greeter.common.ManagerLookupReply);
+}

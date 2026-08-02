@@ -8,6 +8,16 @@
 # One derivation each rather than one that runs all four, so a failing run
 # names the gate that failed, and so the three cheap ones still report when
 # pyright is the slow one.
+#
+# `grpclib-transports` at the bottom is the one gate here that runs tests
+# rather than a static tool, and it is here because nothing else would run
+# them. That suite used to run by itself: the project came from a separate
+# repository as a nixpkgs `buildPythonPackage`, so `pytestCheckHook` executed
+# it inside every build. Vendoring the project moved it to pyproject.nix's
+# builders, which have no check phase, and the repository's own test runner
+# (nanopynix/tests.nix) collects `tests/` and not this. Without the
+# derivation below, vendoring would have quietly deleted a passing test suite
+# from CI.
 {
   lib,
   runCommand,
@@ -38,6 +48,8 @@ let
       ../nanopynix-bindings
       ../nanopynix-helpers
       ../nanopynix-proto
+      ../greeter-proto
+      ../grpclib-transports
       ../pynix
       ../ekn
       ../pytest-agent
@@ -71,6 +83,19 @@ let
     ];
     ekn = [ ];
     pytest-agent = [ ];
+    # The `test` extra, because pyright reads grpclib-transports' own tests
+    # and benchmarks and they import `greeter`, `asyncssh` and `rich`.
+    grpclib-transports = [ "test" ];
+  };
+
+  # A second venv, holding this one library and its test extra and nothing
+  # else. Not `pythonEnv` above: that one is built for pyright and carries
+  # every project in the repository, so a `grpclib_transports` import
+  # satisfied by some other project's dependency edge would go unnoticed --
+  # which is the failure this suite exists to catch. Small enough that the
+  # separate venv costs nothing.
+  grpclibEnv = pythonSet.mkVirtualEnv "grpclib-transports-test-env" {
+    grpclib-transports = [ "test" ];
   };
 
   mkCheck =
@@ -98,6 +123,22 @@ in
   format = mkCheck "format" [ ruff ] "ruff format --no-cache --check .";
 
   types = mkCheck "types" [ pyright pythonEnv ] "pyright --pythonpath ${pythonEnv}/bin/python";
+
+  # The vendored library's own suite. See this file's header for why it is a
+  # gate here and not a check phase.
+  #
+  # `-p no:cacheprovider`, because the source is a read-only store path.
+  # `grpclib-transports/tests/conftest.py` already knows it is in a sandbox
+  # and skips the `tcp` cases there, so nothing has to be excluded by hand.
+  #
+  # `tests`, spelled out, and not the project directory: an explicit argument
+  # replaces `testpaths`, so naming the directory would also collect
+  # `benchmarks`, which is a measurement run rather than a gate -- and whose
+  # `_bench_utils` writes a dump directory beside itself at import time, in
+  # what is a read-only store path here.
+  grpclib-transports =
+    mkCheck "grpclib-transports" [ grpclibEnv ]
+      "python -m pytest -p no:cacheprovider grpclib-transports/tests";
 
   # No drift gate here, although issue #22 asks for one. Both
   # `check_all_settings_model_drift(include_optional=True)` and

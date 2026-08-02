@@ -9,6 +9,11 @@ _DOCS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_DOCS_DIR))
 sys.path.insert(0, str(_DOCS_DIR.parent / "nanopynix" / "src"))
 sys.path.insert(0, str(_DOCS_DIR.parent / "pynix" / "src"))
+# grpclib-transports is documented on this site too (docs/grpclib-transports),
+# and autodoc has to import it. The docs venv already resolves it as a
+# dependency of nanopynix, so this only matters when conf.py is read outside
+# that venv -- which is what the two lines above are for as well.
+sys.path.insert(0, str(_DOCS_DIR.parent / "grpclib-transports" / "src"))
 
 from _generate_pynix_reference import generate as _generate_pynix_reference  # noqa: E402, I001 -- sys.path must be extended first, and this import cannot be merged into the block above it
 

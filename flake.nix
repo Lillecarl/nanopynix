@@ -2,10 +2,6 @@
   inputs = {
     flake-compatish.url = "github:lillecarl/flake-compatish";
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-    grpclib-transports = {
-      url = "github:lillecarl/grpclib-transports";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     pyproject-nix = {
       url = "github:pyproject-nix/pyproject.nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -13,14 +9,13 @@
     easykubenix = {
       url = "github:Lillecarl/easykubenix";
       inputs.nixpkgs.follows = "nixpkgs";
-      # easykubenix depends on a *published* nanopynix, which drags in its own
-      # grpclib-transports. Without this, the lockfile carries two
-      # grpclib-transports nodes and ours is the one renamed to
-      # `grpclib-transports_2` -- which silently disables the local-checkout
-      # override in nix/compat.nix, because flake-compatish keys overrides by
-      # lockfile node name rather than by input name. Pointing easykubenix at
-      # this tree is also just correct: we *are* nanopynix, and testing ekn
-      # against a months-old published copy of it is not what anyone wants.
+      # easykubenix depends on a *published* nanopynix. Cutting that off is
+      # simply correct: we *are* nanopynix, and testing ekn against a
+      # months-old published copy of it is not what anyone wants. It also
+      # keeps that copy's own inputs -- grpclib-transports among them -- out
+      # of this lockfile entirely, which matters because grpclib-transports
+      # is vendored here now (grpclib-transports/) and a second, published
+      # copy of it in the closure would be a confusing thing to reason about.
       inputs.nanopynix.follows = "";
     };
     # numtide's fork, not nix-community/tree-sitter-nix: numtide's README

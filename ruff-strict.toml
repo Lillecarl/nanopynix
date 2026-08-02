@@ -393,6 +393,96 @@ ignorelist = ["eval"]
 # this tree, which must route output through logging.
 "pytest-agent/**" = ["S101", "S108", "S603", "S607", "PLR2004", "T20"]
 
+# ---------------------------------------------------------------------------
+# grpclib-transports, the vendored subproject.
+#
+# `tests/**` and `docs/**` above are anchored at the repository root and so do
+# not reach this tree; its own test, benchmark and example directories need
+# the same allowances, stated again here.
+#
+# The `TID251` entries are the ones that carry an argument beyond "this is
+# test code", so they are the ones to read. That rule bans the raw `asyncio`
+# primitives in favour of their anyio equivalents, and the ban is right for
+# nanopynix, which is anyio-structured throughout. grpclib-transports is not:
+# it is an asyncio *transport and protocol* layer for grpclib, which is an
+# asyncio library. Its subject matter is `asyncio.Protocol` callbacks,
+# `loop.connect_write_pipe` and `asyncio.StreamWriter`, and a test or
+# benchmark that drives that surface has to speak the same dialect --
+# `asyncio.sleep` between two protocol callbacks is the thing under test, not
+# a lapse. The library's own `src/` is held to the rule and passes it: the two
+# places that had a real anyio equivalent (`limits.py`'s semaphore,
+# `multiprocessing.py`'s thread offload) were converted rather than exempted.
+
+# Same allowances as the repository's own `tests/**`, plus: ANN202 on local
+# helper coroutines defined inside a test, S106 for the literal "password" the
+# demo SSH server authenticates with, and PT017 for one test that asserts on
+# an exception caught by `except` rather than through `pytest.raises`.
+"grpclib-transports/tests/**" = [
+  "SLF001",
+  "S101",
+  "S106",
+  "S108",
+  "ANN201",
+  "ANN202",
+  "PLR2004",
+  "PT017",
+  "TID251",
+]
+# A measurement harness, not a correctness gate. It prints its own result
+# tables (C901/PLR0912 are that table-rendering function), defines its
+# workloads as small local closures, and imports optional transports lazily so
+# a missing one skips instead of failing collection.
+"grpclib-transports/benchmarks/**" = [
+  "S101",
+  "S106",
+  "ANN201",
+  "ANN202",
+  "C901",
+  "PLC0415",
+  "PLR0912",
+  "TID251",
+]
+# Runnable documentation. `print()` is how an example shows its output to a
+# reader, and a standalone script that a reader is meant to copy uses plain
+# `asyncio` rather than importing a structured-concurrency framework to say
+# "sleep". Kept honest by grpclib-transports/tests/test_examples.py, which
+# runs every one of them.
+"grpclib-transports/docs/examples/**" = [
+  "S101",
+  "S106",
+  "ANN202",
+  "PLC0415",
+  "T20",
+  "TID251",
+]
+# Fourteen transport constructors and `serve_*`/`connect_*` factories, spread
+# over six modules. Every argument past the second is keyword-only and is a
+# transport option: `tuning`, `max_concurrency`, `status_details_codec`, `cwd`,
+# `env`, `stderr`. The count is what a transport's configuration surface costs,
+# not an accident, and PLR0913 counts keyword-only parameters the same as
+# positional ones -- so the rule fires on precisely the signatures its
+# readability argument does not apply to.
+#
+# Collapsing them into one options object is the real answer if this ever
+# becomes a burden. That is an API redesign with its own tests, and it was not
+# in scope for vendoring the library, so this records the decision instead of
+# quietly making it.
+"grpclib-transports/src/grpclib_transports/**" = ["PLR0913"]
+# The demo CLI and the demo client that `docs/examples` and the `__main__`
+# entry point share. A hardcoded "password" and a fixed `/tmp` socket path are
+# what a demo is.
+"grpclib-transports/src/grpclib_transports/__main__.py" = ["S108"]
+"grpclib-transports/src/grpclib_transports/example/**" = ["S107"]
+# This module exists to reach into h2's internals: it replaces
+# `H2Connection._receive_frame` with a copy that skips the expensive
+# trace-logging frame reprs, and it reads `_events`, `_transport` and
+# `_connection` off h2 and grpclib objects that expose no public equivalent.
+# SLF001 and PLW0603 (the module-level "patch installed" flag, which has to be
+# process-global because the patch is) are the shape of that job. The patch
+# verifies h2's signature before applying itself and raises if it has changed,
+# which is the real guard here -- a lint rule could not have been one.
+"grpclib-transports/src/grpclib_transports/protocol.py" = ["SLF001", "PLW0603"]
+
 [lint.isort]
 combine-as-imports = true
 # CLAUDE.md requires `from __future__ import annotations` in every module, and

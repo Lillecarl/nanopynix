@@ -6,6 +6,9 @@ docs/_build
 htmlcov
 .pytest-agent
 .terraform
+# Written beside the benchmark modules that produce it, by
+# grpclib-transports/benchmarks/_bench_utils.py.
+.bench-dumps
 
 # Nix / direnv
 .direnv/

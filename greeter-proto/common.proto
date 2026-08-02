@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package greeter.common;
+
+message HelloRequest {
+  string name = 1;
+  bytes payload = 2;
+}
+
+message HelloReply {
+  string message = 1;
+  bytes payload = 2;
+}
+
+message ManagerLookupRequest {
+  string key = 1;
+}
+
+message ManagerLookupReply {
+  string value = 1;
+}
