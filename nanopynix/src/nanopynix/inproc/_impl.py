@@ -545,14 +545,20 @@ class Session:
         build_store: Store | None = None,
         eval_settings: NixEvalSettings | None = None,
         fetch_settings: NixFetchSettings | None = None,
-        line_editors: Sequence[str] = DEFAULT_LINE_EDITORS,
+        line_editors: Sequence[str] | None = None,
     ) -> ReplSession:
         """Return an evaluator that keeps a persistent Nix REPL scope.
 
         A :class:`ReplSession` is an :class:`EvalSession`, so it accepts the
-        same settings and owns its own dedicated Nix thread. ``line_editors``
-        is per-session rather than per-:class:`Session` because it describes
-        one interactive front-end, and nothing else in this class consumes it.
+        same settings and owns its own dedicated Nix thread.
+
+        ``None`` was ``DEFAULT_LINE_EDITORS`` as a literal default until
+        :class:`~nanopynix.protocols.AsyncSession` had to declare one shape for
+        both engines. rpc already took ``None`` and resolved it, so a protocol
+        that said ``Sequence[str]`` would have narrowed rpc's parameter and
+        made it an incompatible override. The resolved value is unchanged.
+        rpc falls back to its session's ``runtime_settings``, which inproc does
+        not carry -- recorded on #15, not corrected here.
 
         Raises:
             SettingOutOfScopeError: A field belongs to neither evaluator scope.
@@ -566,7 +572,7 @@ class Session:
             eval_settings=merge_defaults(eval_scope, self._eval_defaults),
             fetch_settings=merge_defaults(fetch_scope, self._fetch_defaults),
             flake_defaults=self._flake_defaults,
-            line_editors=line_editors,
+            line_editors=DEFAULT_LINE_EDITORS if line_editors is None else line_editors,
         )
 
     def _require_own_stores(self, store: Store, build_store: Store | None) -> None:
