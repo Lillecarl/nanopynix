@@ -27,6 +27,7 @@ is asserted a file away, in
 
 from __future__ import annotations
 
+import inspect
 from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix import inproc
@@ -303,6 +304,63 @@ def test_a_class_that_inherits_nothing_still_conforms() -> None:
     # dunders from the members it checks, so the runtime call is fine.
     assert AsyncLockedFlake not in Outsider.__mro__
     assert isinstance(Outsider(), AsyncLockedFlake)
+
+
+def _own_doc(cls: type, member: str) -> str | None:
+    """The docstring defined on *cls* itself, never one inherited from a protocol.
+
+    ``inspect.getdoc`` is wrong for this question now: the engine classes
+    inherit their protocol, so it walks the MRO and reports the protocol's text
+    for a method that defines none. That is the behaviour we want at runtime
+    and exactly the behaviour that would hide duplication from this test.
+    """
+    for base in cls.__mro__:
+        attr = vars(base).get(member)
+        if attr is None:
+            continue
+        if base.__module__ == "nanopynix.protocols":
+            return None
+        func = attr.fget if isinstance(attr, property) else attr
+        doc = getattr(func, "__doc__", None)
+        return inspect.cleandoc(doc) if doc else None
+    return None
+
+
+def _protocol_doc(protocol: type, member: str) -> str | None:
+    for base in protocol.__mro__:
+        attr = vars(base).get(member)
+        if attr is None:
+            continue
+        func = attr.fget if isinstance(attr, property) else attr
+        doc = getattr(func, "__doc__", None)
+        return inspect.cleandoc(doc) if doc else None
+    return None
+
+
+def test_no_engine_repeats_the_protocol_word_for_word() -> None:
+    """A docstring identical to the protocol's is duplication with no upside.
+
+    Delete it and the method inherits the same text, so the two can never drift
+    apart. 58 methods carried a byte-identical copy before this gate existed.
+
+    This checks *identity* only. An engine that genuinely adds something -- the
+    rpc timeout, inproc's thread confinement -- keeps its docstring and passes.
+    Whether such a docstring *adds to* the protocol text rather than replacing
+    it is the stronger property #36 asks for, and it is not asserted here: 127
+    engine docstrings differ from their protocol today, each for its own
+    reason, and a gate over them needs a ledger this file does not yet have.
+    """
+    repeated = [
+        f"{name}.{member} [{engine}]"
+        for name, protocol, inproc_cls, rpc_cls in PROTOCOL_PAIRS
+        for member in sorted(_public(protocol))
+        for engine, cls in (("inproc", inproc_cls), ("rpc", rpc_cls))
+        if (own := _own_doc(cls, member)) is not None and own == _protocol_doc(protocol, member)
+    ]
+    assert not repeated, (
+        "these engine methods repeat their protocol's docstring word for word. Delete the "
+        f"engine copy -- the method inherits the protocol text: {repeated}"
+    )
 
 
 def test_protocols_declare_the_whole_shared_surface() -> None:

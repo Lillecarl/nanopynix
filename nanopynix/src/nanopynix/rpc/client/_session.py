@@ -615,7 +615,6 @@ class ValueProxy(AsyncValue):
         return list(response.argv)
 
     async def edit_location(self, *, timeout: float | None = None) -> tuple[str, int]:
-        """Return the physical file path and line Nix would open for this value."""
         await self._ensure_resolved(timeout=timeout)
         response = await self._ctx.proxy.edit_location(EditLocationRequest(handle=self.handle))
         return response.path, response.line
@@ -864,12 +863,10 @@ class LockedFlakeHandle(AsyncLockedFlake):
         return await self._session._eval_locked_flake(self, timeout=timeout)  # type: ignore[reportPrivateUsage] -- LockedFlakeHandle is its session's public door onto this private by-handle call  # noqa: SLF001 -- same reason
 
     async def write_lock_file(self, *, timeout: float | None = None) -> None:
-        """Persist this locked flake's lock file to disk."""
         self._check_active()
         await self._session._write_lock_file(self, timeout=timeout)  # type: ignore[reportPrivateUsage] -- LockedFlakeHandle is its session's public door onto this private by-handle call  # noqa: SLF001 -- same reason
 
     async def release(self, *, timeout: float | None = None) -> None:
-        """Release the worker-side handle for this locked flake. Idempotent."""
         if self._released:
             return
         self._released = True
@@ -1104,7 +1101,6 @@ class EvalSession(AsyncEvalSession["ValueProxy"]):
         return releases
 
     async def file(self, path: str, *, timeout: float | None = None) -> ValueProxy:
-        """Evaluate the Nix expression in the file at ``path``."""
         handle = await self._ensure_proxy().eval_file(EvalFileRequest(path=path))
         return self._proxy_context().value(handle.handle, handle.type)
 
@@ -1255,12 +1251,10 @@ class EvalSession(AsyncEvalSession["ValueProxy"]):
         return self._proxy_context().value(handle.handle, handle.type)
 
     async def get_flake(self, ref: str | dict[str, Any], *, timeout: float | None = None) -> FlakeRef:
-        """Parse and resolve a flake reference without evaluating its outputs."""
         ref_str = ref if isinstance(ref, str) else str(ref)
         return await self._ensure_proxy().get_flake(GetFlakeRequest(ref=ref_str))
 
     async def reset_file_cache(self, *, timeout: float | None = None) -> None:
-        """Discard parsed file cache entries before re-evaluating source files."""
         await self._ensure_proxy().reset_file_cache(ResetFileCacheRequest())
 
 
@@ -1273,7 +1267,6 @@ class ReplSession(EvalSession, AsyncReplSession["ValueProxy"]):
 
     @property
     def line_editors(self) -> tuple[str, ...]:
-        """Editor-name substrings that support Nix's ``+LINE`` argument."""
         return self._line_editors
 
     async def __aenter__(self) -> ReplSession:
@@ -1335,7 +1328,6 @@ class ReplSession(EvalSession, AsyncReplSession["ValueProxy"]):
         return self._proxy_context().value(handle.handle, handle.type)
 
     async def add_attrs(self, value: ValueProxy, *, timeout: float | None = None) -> list[str]:
-        """Add all attributes from ``value`` to this REPL's lexical scope."""
         if not self._owner.owns(value):
             raise ForeignValueError("cannot add attributes from another EvalSession")
         await value._ensure_resolved(timeout=timeout)  # type: ignore[reportPrivateUsage] -- session owns the value context  # noqa: SLF001
@@ -1343,6 +1335,5 @@ class ReplSession(EvalSession, AsyncReplSession["ValueProxy"]):
         return response.names
 
     async def scope_names(self, *, timeout: float | None = None) -> list[str]:
-        """Return the identifiers visible in this REPL's lexical scope."""
         response = await self._ensure_proxy().repl_scope_names(ReplScopeNamesRequest())
         return response.names

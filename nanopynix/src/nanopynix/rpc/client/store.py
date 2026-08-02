@@ -192,11 +192,9 @@ class Store(AsyncStore):
         return self._rpc.is_open
 
     async def open(self) -> None:
-        """Open the underlying store."""
         await self._rpc.open()
 
     async def close(self, *, force: bool = False) -> None:
-        """Close the underlying store, optionally closing its evaluator first."""
         await self._rpc.close(force=force)
 
     async def __aenter__(self) -> Store:
@@ -211,24 +209,19 @@ class Store(AsyncStore):
         return (await self.rpc.get_uri(GetUriRequest(with_params=with_params))).uri
 
     async def store_dir(self) -> str:
-        """Return this store's logical store directory."""
         return (await self.rpc.get_store_dir(GetStoreDirRequest())).dir
 
     async def parse_store_path(self, path: str) -> StorePath:
-        """Validate and normalise ``path`` as a Nix store path."""
         response = await self.rpc.parse_store_path(ParseStorePathRequest(path=path))
         return StorePath(response.path)
 
     async def is_valid_path(self, path: str | StorePath) -> bool:
-        """Return whether ``path`` is valid in this store."""
         return (await self.rpc.is_valid_path(IsValidPathRequest(path=str(path)))).valid
 
     async def query_path_info(self, path: str | StorePath) -> PathInfo:
-        """Return metadata for a valid store path."""
         return await self.rpc.query_path_info(QueryPathInfoRequest(path=str(path)))
 
     async def query_all_valid_paths(self) -> list[StorePath]:
-        """Return every valid path registered in this store."""
         response = await self.rpc.query_all_valid_paths(QueryAllValidPathsRequest())
         return [StorePath(path) for path in response.paths]
 
@@ -240,7 +233,6 @@ class Store(AsyncStore):
         include_outputs: bool = False,
         include_derivers: bool = False,
     ) -> list[StorePath]:
-        """Return the filesystem closure of ``path``."""
         response = await self.rpc.compute_fs_closure(
             ComputeFsClosureRequest(
                 path=str(path),
@@ -252,39 +244,32 @@ class Store(AsyncStore):
         return [StorePath(item) for item in response.paths]
 
     async def query_derivation_outputs(self, path: str | StorePath) -> list[StorePath]:
-        """Return output paths declared by a derivation."""
         response = await self.rpc.query_derivation_outputs(QueryDerivationOutputsRequest(path=str(path)))
         return [StorePath(item) for item in response.paths]
 
     async def query_valid_derivers(self, path: str | StorePath) -> list[StorePath]:
-        """Return valid derivations that produced ``path``."""
         response = await self.rpc.query_valid_derivers(QueryValidDeriversRequest(path=str(path)))
         return [StorePath(item) for item in response.paths]
 
     async def query_referrers(self, path: str | StorePath) -> list[StorePath]:
-        """Return valid store paths that reference ``path``."""
         response = await self.rpc.query_referrers(QueryReferrersRequest(path=str(path)))
         return [StorePath(item) for item in response.paths]
 
     async def follow_links_to_store_path(self, path: str) -> StorePath:
-        """Resolve a path that may traverse symlinks to its containing store path."""
         response = await self.rpc.follow_links_to_store_path(FollowLinksToStorePathRequest(path=path))
         return StorePath(response.path)
 
     async def query_path_from_hash_part(self, hash_part: str) -> StorePath | None:
-        """Return the valid store path whose hash component is ``hash_part``, if any."""
         response = await self.rpc.query_path_from_hash_part(QueryPathFromHashPartRequest(hash_part=hash_part))
         return StorePath(response.path) if response.path is not None else None
 
     async def query_substitutable_paths(self, paths: list[str | StorePath]) -> list[StorePath]:
-        """Return the subset of ``paths`` that can be substituted from a binary cache."""
         response = await self.rpc.query_substitutable_paths(
             QuerySubstitutablePathsRequest(paths=[str(path) for path in paths])
         )
         return [StorePath(item) for item in response.paths]
 
     async def get_build_log(self, path: str | StorePath) -> str | None:
-        """Return the build log for ``path``, or ``None`` if no log is available."""
         response = await self.rpc.get_build_log(GetBuildLogRequest(path=str(path)))
         return response.log
 
@@ -293,7 +278,6 @@ class Store(AsyncStore):
         derived_paths: list[str | StorePath],
         /,
     ) -> MissingInfo:
-        """Return which of ``derived_paths`` still need to be built or substituted."""
         return await self.rpc.query_missing(
             QueryMissingRequest(derived_paths=[str(p) for p in derived_paths]),
         )
@@ -323,7 +307,6 @@ class Store(AsyncStore):
         return list(response.results)
 
     async def read_derivation(self, drv_path: str | StorePath, /) -> Derivation:
-        """Parse and return the ``.drv`` file at ``drv_path``."""
         return await self.rpc.read_derivation(ReadDerivationRequest(path=str(drv_path)))
 
     @no_runtime_type_check  # action is validated for untyped callers by pydantic
@@ -371,7 +354,6 @@ class Store(AsyncStore):
         return list(response.roots)
 
     async def store_dirs(self) -> StoreDirs:
-        """Return this store's full set of configured directories."""
         return await self.rpc.get_store_dirs(GetStoreDirsRequest())
 
     async def add_temp_root(self, path: str | StorePath, /) -> None:
@@ -431,7 +413,6 @@ class Store(AsyncStore):
         method: str = DEFAULT_CA_METHOD,
         hash_algo: str = DEFAULT_HASH_ALGO,
     ) -> StorePath:
-        """Compute the store path content-addressing ``path`` without adding it."""
         response = await self.rpc.compute_store_path(
             ComputeStorePathRequest(path=path, name=name, method=method, hash_algo=hash_algo),
         )
