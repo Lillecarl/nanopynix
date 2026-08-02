@@ -14,6 +14,13 @@ can be written as Python with names, types and validation::
 model back into a URI. Both go through Nix's own ``StoreReference``, so the
 strings this module produces are the strings Nix produces.
 
+**Write a value as it is, and not as a URI escapes it.** A field holds the
+value itself, so a cache directory named ``/var/cache/a & b`` goes in with the
+space and the ``&``, and comes back the same way. The one exception is the
+characters Nix reads inside the authority: ``:`` separates a port, ``@``
+separates a user, and ``[]`` bound an IPv6 address. Those reach Nix as
+written, because escaping them would name a different host.
+
 **A store setting is not a global setting.** Nix registers only three of these
 names in ``globalConfig`` -- ``require-sigs``, ``build-dir`` and
 ``system-features``. The rest exist per store and nowhere else, so a URI
@@ -31,7 +38,7 @@ from __future__ import annotations
 import json
 from types import UnionType
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Union, cast, get_args, get_origin
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from nanopynix_bindings import store as nanopynix_store
 from pydantic import AliasChoices, Field, model_validator
@@ -65,6 +72,15 @@ type UriPart = Literal["authority", "scheme"]
 #: holds a path or a nested store URI, and escaping ``/`` or ``:`` makes those
 #: unreadable for no gain -- Nix parses them either way.
 _QUERY_SAFE = "/:"
+
+#: Characters left unescaped in the URI authority. ``/`` because a file cache's
+#: authority is a directory path, and ``:@[]`` because an SSH store's is
+#: ``user@host:port`` or an IPv6 literal.
+#:
+#: Nix does not unescape the authority: ``parse_store_reference`` gives back
+#: whatever percent-encoding the URI carried. So :func:`parse` unescapes it,
+#: and these two must stay each other's inverse.
+_AUTHORITY_SAFE = "/:@[]"
 
 
 def _authority() -> Any:
@@ -173,9 +189,16 @@ class StoreConfig(NixConfigModel):
         return f"{base}?{query}" if query else base
 
     def _base(self) -> str:
-        """Everything before the query: the scheme, and the authority after it."""
+        """Everything before the query: the scheme, and the authority after it.
+
+        The authority is escaped as well as the parameters. Without that, a
+        cache directory named ``a&b`` ends the authority at the ``&`` and turns
+        the rest into a query parameter, and one containing a space or a bare
+        ``%`` makes Nix refuse the whole URI.
+        """
         scheme = self._uri_field("scheme") or type(self).store_scheme
-        return f"{scheme}://{self._uri_field('authority') or ''}"
+        authority = quote(self._uri_field("authority") or "", safe=_AUTHORITY_SAFE)
+        return f"{scheme}://{authority}"
 
     def _uri_field(self, part: UriPart) -> str | None:
         """The value of the field that names ``part`` of the URI, if it is set."""
@@ -512,7 +535,12 @@ def parse(uri: str) -> StoreConfig:
         if part == "authority" and (authority or field.is_required()):
             # An empty authority on an optional field is the absence of one,
             # not the empty string, so the model round-trips equal to itself.
-            data[name] = authority
+            #
+            # Unescaped, because Nix does not do it: the parameters come back
+            # decoded and the authority comes back exactly as written. A file
+            # cache's authority is a directory path, so leaving `%20` in it
+            # would hand the caller a path that does not exist.
+            data[name] = unquote(authority)
         elif part == "scheme" and scheme != model.store_scheme:
             # Only when it is not the type's own scheme: leaving it unset is
             # what renders that scheme back.
