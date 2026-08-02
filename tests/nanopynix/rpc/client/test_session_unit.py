@@ -54,7 +54,6 @@ from nanopynix.settings import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
     from pathlib import Path
 
 # ════════════════════════════════════════════════════════════════════
@@ -896,17 +895,14 @@ class TestWorkerOomScore:
 
 
 class TestLogStreamRequestId:
-    """Verify Session.log_stream() correctly maps worker wire format to LogEvent."""
+    """What ``Session.log_stream()`` delivers, driven through the real bus.
 
-    @staticmethod
-    def _events_to_log_stream(events: list[Any]) -> AsyncIterator[Any]:
-        """Return an async generator that yields the given events."""
-
-        async def _gen() -> AsyncIterator[Any]:
-            for e in events:
-                yield e
-
-        return _gen()
+    These tests used to inject a ``MagicMock`` manager that yielded protos,
+    because ``Session.log_stream`` converted them itself. ``CallbackBus.emit``
+    normalises now and ``Session.log_stream`` is a delegate, so a mocked
+    manager would test the mock. A real ``WorkerClient`` costs nothing here --
+    its bus needs no worker process -- and it covers the whole path.
+    """
 
     @staticmethod
     def _proto_log_event(
@@ -921,26 +917,44 @@ class TestLogStreamRequestId:
             ),
         )
 
-    async def test_worker_request_id_mapped_correctly(self):
-        """Worker emits LogEvent proto — log_stream produces valid LogEvent."""
-        session = object.__new__(Session)
-        manager = MagicMock()
-        manager.log_stream = MagicMock(
-            return_value=self._events_to_log_stream(
-                [
-                    self._proto_log_event(42, "msg", [3, "hello from nix"]),
-                    self._proto_log_event(7, "start", [0, "building"]),
-                    self._proto_log_event(7, "result", [0, 100], result_type=100),
-                ],
-            ),
-        )
-        session._manager = manager  # type: ignore[reportPrivateUsage] -- test injects mock manager
+    async def _drain(self, manager: WorkerClient, events: list[LogEventProto | None]) -> list[LogEvent]:
+        """Emit *events* onto the bus while one ``log_stream`` iterates it.
 
-        events = [e async for e in session.log_stream()]
+        The list must carry the ``None`` marker, or the iterator never stops
+        and the task group waits for it.
+        """
+        session = object.__new__(Session)
+        session._manager = manager  # type: ignore[reportPrivateUsage] -- test injects a real, unopened manager
+
+        async def _emit() -> None:
+            # One checkpoint first: the bus discards an event that arrives
+            # with nobody subscribed, and the iterator below subscribes on its
+            # first `__anext__`.
+            await anyio.lowlevel.checkpoint()
+            for event in events:
+                manager._log_bus.emit(event)  # type: ignore[reportPrivateUsage] -- test accesses internal log bus
+
+        collected: list[LogEvent] = []
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_emit)
+            collected.extend([event async for event in session.log_stream()])
+        return collected
+
+    async def test_worker_request_id_mapped_correctly(self):
+        """The worker emits the proto, and the caller gets the model."""
+        events = await self._drain(
+            WorkerClient(),
+            [
+                self._proto_log_event(42, "msg", [3, "hello from nix"]),
+                self._proto_log_event(7, "start", [0, "building"]),
+                self._proto_log_event(7, "result", [0, 100], result_type=100),
+                None,
+            ],
+        )
 
         assert len(events) == 3
         for e in events:
-            assert isinstance(e, LogEvent)
+            assert type(e) is LogEvent
 
         assert events[0].request_id == 42
         assert events[0].action == "msg"
@@ -954,23 +968,22 @@ class TestLogStreamRequestId:
         assert events[2].action == "result"
         assert events[2].result_type == 100
 
-    async def test_none_sentinel_skipped(self):
-        """None sentinel from log_stream is skipped."""
-        session = object.__new__(Session)
-        manager = MagicMock()
-        manager.log_stream = MagicMock(
-            return_value=self._events_to_log_stream(
-                [
-                    None,
-                    self._proto_log_event(1, "msg", [3, "after sentinel"]),
-                ],
-            ),
-        )
-        session._manager = manager  # type: ignore[reportPrivateUsage] -- test injects mock manager
+    async def test_teardown_marker_ends_the_stream(self):
+        """``None`` means the session closed, so the iterator stops there.
 
-        events = [e async for e in session.log_stream()]
-        assert len(events) == 1
-        assert events[0].request_id == 1
+        It is not skipped. Skipping it left a caller waiting on a session that
+        had already gone away -- see ``bus_log_stream``.
+        """
+        events = await self._drain(
+            WorkerClient(),
+            [
+                self._proto_log_event(1, "msg", [3, "before close"]),
+                None,
+                self._proto_log_event(2, "msg", [3, "after close"]),
+            ],
+        )
+
+        assert [e.request_id for e in events] == [1]
 
 
 class TestLogCapture:

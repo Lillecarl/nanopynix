@@ -15,7 +15,7 @@ import pytest
 from grpclib.exceptions import StreamTerminatedError
 
 from nanopynix import LogEvent, StoreClosedError, StoreError
-from nanopynix.rpc import Nix, WorkerDiedError
+from nanopynix.rpc import Session, WorkerDiedError
 from nanopynix.rpc.client import session as session_module
 
 if TYPE_CHECKING:
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 async def test_single_worker_basics():
     """Basic round-trip with a single worker."""
-    async with Nix() as nix, nix.store() as store:
+    async with Session() as nix, nix.store() as store:
         uri = await store.uri()
         assert isinstance(uri, str)
         d = await store.store_dir()
@@ -33,7 +33,7 @@ async def test_single_worker_basics():
 
 async def test_two_workers_sequential():
     """Sequential calls on a single worker — should all succeed."""
-    async with Nix() as nix, nix.store() as store:
+    async with Session() as nix, nix.store() as store:
         for _ in range(4):
             uri = await store.uri()
             assert isinstance(uri, str)
@@ -42,14 +42,14 @@ async def test_two_workers_sequential():
 @pytest.mark.concurrency
 async def test_store_operation_runs_while_eval_session_is_open():
     """An EvalState owns evaluator state, not the worker's Store API."""
-    async with Nix() as nix, nix.store() as store, nix.eval(store):
+    async with Session() as nix, nix.store() as store, nix.eval(store):
         assert isinstance(await store.uri(), str)
 
 
 @pytest.mark.concurrency
 async def test_session_allows_concurrent_eval_states():
     """N EvalSession/ReplSession instances may be open at once, each independent."""
-    async with Nix() as nix, nix.store() as store:
+    async with Session() as nix, nix.store() as store:
         first = nix.eval(store)
         second = nix.repl(store)
         await first.open()
@@ -74,7 +74,7 @@ async def test_concurrent_log_stream():
     default verbosity.  The request-id mapping is tested in
     ``tests/test_session_unit.py::TestLogStreamRequestId``.
     """
-    async with Nix() as nix:
+    async with Session() as nix:
         events: list[LogEvent] = []
         bg_task = asyncio.ensure_future(_collect(nix, events))
 
@@ -94,7 +94,7 @@ async def test_concurrent_log_stream():
 
 async def test_error_propagation():
     """Worker errors are classified and raised as typed NixError subclasses."""
-    async with Nix() as nix, nix.store() as store:
+    async with Session() as nix, nix.store() as store:
         with pytest.raises(StoreError, match="is not valid"):
             await store.query_path_info(
                 "/nix/store/00000000000000000000000000000000-nonexistent-1.0",
@@ -141,7 +141,7 @@ async def test_worker_death_detection():
         else:
             loop.default_exception_handler(context)
 
-    async with Nix() as nix, nix.store() as store:
+    async with Session() as nix, nix.store() as store:
         # First call works normally
         uri = await store.uri()
         assert isinstance(uri, str)
@@ -164,7 +164,7 @@ async def test_worker_death_detection():
 
 async def test_idle_timeout_resets_with_activity():
     """Multiple fast calls on a single worker — all should succeed."""
-    async with Nix() as nix, nix.store() as store:
+    async with Session() as nix, nix.store() as store:
         for _ in range(3):
             uri = await store.uri()
             assert isinstance(uri, str)
@@ -184,7 +184,7 @@ async def test_a_cancelled_close_still_stops_the_worker_process():
     direction, delivered at the first checkpoint rather than after sixty
     seconds. Removing the shield in ``WorkerClient.close`` turns this red.
     """
-    nix = Nix()
+    nix = Session()
     await nix.open()
     proc = nix._manager._worker_proc  # type: ignore[reportPrivateUsage] -- intentional test of internal transport state
     assert proc is not None
@@ -215,7 +215,7 @@ async def test_close_reports_its_own_deadline_and_still_stops_the_worker(monkeyp
     correctly, since there is then nothing that could have been late.
     """
     monkeypatch.setattr(session_module, "_GRACEFUL_CLOSE_TIMEOUT_SECONDS", 0.0)
-    nix = Nix()
+    nix = Session()
     await nix.open()
     store = nix.store()
     await store.open()
@@ -260,7 +260,7 @@ async def test_one_failing_evaluator_does_not_abandon_the_rest_of_the_close():
     first deliberately -- it is the one that outlives the process if nobody
     checks.
     """
-    nix = Nix()
+    nix = Session()
     await nix.open()
     store = nix.store()
     await store.open()
@@ -283,7 +283,7 @@ async def test_close_reports_every_failure_it_collected():
     the point. A single failure still arrives on its own -- see the test above
     -- because wrapping one exception in a group only makes it harder to catch.
     """
-    nix = Nix()
+    nix = Session()
     await nix.open()
     proc = nix._manager._worker_proc  # type: ignore[reportPrivateUsage] -- intentional test of internal transport state
     assert proc is not None
@@ -297,7 +297,7 @@ async def test_close_reports_every_failure_it_collected():
     assert not proc.is_alive()
 
 
-async def _collect(nix: Nix, events: list[LogEvent]) -> None:
+async def _collect(nix: Session, events: list[LogEvent]) -> None:
     async for event in nix.log_stream():
         events.append(event)  # noqa: PERF401 -- events is a shared list a background caller polls while this loop keeps running; a comprehension would defer visibility until the stream ends
 
@@ -337,7 +337,7 @@ async def _collect(nix: Nix, events: list[LogEvent]) -> None:
 _SLOW_PURE_EVAL = "builtins.foldl' (a: b: a + b) 0 (builtins.genList (x: x) 40000000)"
 
 
-def _worker_process(nix: Nix) -> Any:
+def _worker_process(nix: Session) -> Any:
     """Return this session's worker, as a ``multiprocessing.Process``.
 
     ``WorkerClient._on_worker_process_start`` keeps the process object rather
@@ -411,7 +411,7 @@ async def test_a_killed_worker_fails_the_call_that_was_in_flight():
     request that was already accepted and can never be answered.
     """
     with anyio.fail_after(60), _tolerating_the_backchannel_leak():
-        async with Nix() as nix, nix.store() as store, nix.eval(store) as evaluator:
+        async with Session() as nix, nix.store() as store, nix.eval(store) as evaluator:
             proc = _worker_process(nix)
             pending = asyncio.ensure_future(evaluator.string(_SLOW_PURE_EVAL))
             await anyio.sleep(0.5)
@@ -439,7 +439,7 @@ async def test_a_killed_worker_still_lets_the_eval_session_close():
     runs and the release path is really exercised.
     """
     with anyio.fail_after(60), _tolerating_the_backchannel_leak():
-        async with Nix() as nix, nix.store() as store:
+        async with Session() as nix, nix.store() as store:
             evaluator = nix.eval(store)
             await evaluator.open()
             kept = await evaluator.string("{ a = 1; }")
@@ -465,12 +465,12 @@ async def test_a_fresh_session_works_after_a_worker_died():
     implied by the two tests above.
     """
     with anyio.fail_after(90), _tolerating_the_backchannel_leak():
-        async with Nix() as nix:
+        async with Session() as nix:
             proc = _worker_process(nix)
             proc.kill()
             await _reaped(proc)
 
-        async with Nix() as second, second.store() as store:
+        async with Session() as second, second.store() as store:
             assert isinstance(await store.uri(), str)
 
 
@@ -485,7 +485,7 @@ async def test_an_aborted_worker_reports_its_signal():
     tells the two apart, and it is what this asserts.
     """
     with anyio.fail_after(60), _tolerating_the_backchannel_leak():
-        async with Nix() as nix, nix.store() as store:
+        async with Session() as nix, nix.store() as store:
             proc = _worker_process(nix)
             os.kill(proc.pid, signal.SIGABRT)
 
@@ -524,7 +524,7 @@ async def test_a_terminal_interrupt_does_not_kill_the_worker():
     gRPC handler cancellation -- see tests/nanopynix/test_cancel_engine_parity.py.
     """
     with anyio.fail_after(60):
-        async with Nix() as nix, nix.store() as store, nix.eval(store) as ev:
+        async with Session() as nix, nix.store() as store, nix.eval(store) as ev:
             proc = _worker_process(nix)
 
             # The precondition. A terminal signals a process group, so this is

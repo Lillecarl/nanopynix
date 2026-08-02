@@ -17,7 +17,6 @@ from nanopynix_helpers.fod import (
     find_fod_hash_literal,
     replace_fod_hash,
 )
-from nanopynix_proto.nix.common import LogEvent as LogEventProto
 from pydantic import BaseModel, Field, StringConstraints
 
 from ekn.gitops import load_raw_manifest
@@ -171,10 +170,11 @@ class FlakeEknResult(BaseModel):
     config: _FlakeEknConfig
 
 
-def _print_log_event(raw: object) -> None:
-    if not isinstance(raw, LogEventProto):
+def _print_log_event(event: LogEvent | None) -> None:
+    # `None` is the teardown marker. nanopynix's bus delivers the model on
+    # both engines, so this no longer converts from the wire type.
+    if event is None:
         return
-    event = LogEvent.from_proto(raw)
     if event.result_type is not None and "BUILD_LOG" in event.result_type.name:
         line = event.args[-1] if event.args else None
         if isinstance(line, str):

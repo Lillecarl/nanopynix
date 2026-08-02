@@ -67,17 +67,6 @@ CONSUMER_PRIVATE_IMPORTS: dict[tuple[str, str], str] = {
         "The decorator half of the same instrumentation switch, and it travels "
         "with BEARTYPING. Same waiver, same module docstring."
     ),
-    ("nanopynix_proto.nix.common", "LogEvent"): (
-        "A symptom, not a decision, and it should not survive. ekn narrows a "
-        "subscribe callback argument with `isinstance(raw, LogEventProto)`, and "
-        "it needs the *base* proto because the two engines deliver different "
-        "types over the same public method: inproc emits models.LogEventExt, "
-        "and rpc emits the bare proto that class subclasses. nanopynix exports "
-        "the subclass and not the base, so ekn has no public handle for the "
-        "check. The fix is to make rpc deliver the model too, which deletes "
-        "this entry rather than moving it. Tracked by #15 -- see "
-        "nanopynix/logging.py's LogEventBus docstring for the asymmetry."
-    ),
 }
 
 

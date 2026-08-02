@@ -22,13 +22,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import anyio
-from nanopynix_proto.nix.common import LogEvent as LogEventProto, LogLevel
+from nanopynix_proto.nix.common import LogLevel
 
 from nanopynix._core._primops import to_primop_specs
 from nanopynix._process_title import set_manager_title
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import DEFAULT_STORE_URI
-from nanopynix.logging import LogCapture
+from nanopynix.logging import BusSubscription, LogCapture
 from nanopynix.models import LogEvent
 from nanopynix.namespace import EXPERIMENTAL_FEATURE
 from nanopynix.rpc.client._pool import WorkerClient
@@ -58,6 +58,7 @@ if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
     from os import PathLike
 
+    from nanopynix.logging import LogCallback
     from nanopynix.models import PrimOpSpec
     from nanopynix.namespace import OverlayNamespace
 
@@ -287,18 +288,18 @@ class Session:
     async def __aexit__(self, *args: object) -> None:
         await self.close()
 
-    async def log_stream(self) -> AsyncIterator[LogEvent]:
+    def log_stream(self) -> AsyncIterator[LogEvent]:
         """Async iterator over log events from the worker.
 
-        Each event is a validated ``LogEvent`` model.
+        Each event is a validated ``LogEvent`` model, and the iterator ends
+        when the session closes. inproc's ``log_stream`` is the same call --
+        both reach :func:`nanopynix.logging.bus_log_stream`.
+
+        This method used to convert and filter here, because the bus below it
+        carried the bare proto and the teardown marker. ``CallbackBus.emit``
+        normalises now, so there is nothing left to convert.
         """
-        async for raw in self._manager.log_stream():
-            if raw is None:
-                continue  # worker close sentinel
-            if not isinstance(raw, LogEventProto):
-                logger.warning("nanopynix: ignored unexpected log event %r", raw)
-                continue
-            yield LogEvent.from_proto(raw)
+        return self._manager.log_stream()
 
     def capture_logs(self, *, max_events: int | None = None, wait_timeout: float | None = None) -> LogCapture:
         """Record typed log events during an async context block.
@@ -365,15 +366,21 @@ class Session:
         reject_out_of_scope_settings(settings, scopes=(NixGlobalSettings,), target="the session globals")
         return dict(await self._manager.set_settings(render_for_scope(settings, NixGlobalSettings, explicit_only=True)))
 
-    def subscribe(self, callback: Any) -> Any:
+    def subscribe(self, callback: LogCallback) -> BusSubscription:
         """Subscribe a callback to live log events.
 
-        The callback receives raw ``LogEvent`` proto messages from the worker.
+        The callback receives a :class:`~nanopynix.models.LogEvent`, and
+        ``None`` once when the stream ends. Identical to inproc's
+        :meth:`~nanopynix.inproc.Session.subscribe`, which is the point: this
+        used to deliver the bare proto and say so, and a caller who wanted to
+        narrow the argument had to import the proto class from outside the
+        public API to do it.
+
         Returns a handle — call ``.unsubscribe()`` to stop.
 
         Usage::
 
-            sub = session.subscribe(lambda e: print(e.action))
+            sub = session.subscribe(lambda e: print(e.action) if e else None)
             ...
             sub.unsubscribe()
         """
@@ -500,7 +507,3 @@ class Session:
 
     def release_eval(self, eval_session: EvalSession) -> None:
         self._evals.discard(eval_session)
-
-
-# Backward-compatible alias
-Nix = Session

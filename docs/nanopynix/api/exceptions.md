@@ -15,6 +15,12 @@ Both engines raise the same class for the same situation — inproc used to
 have its own `Inproc*` names for three of these, which no `except` clause
 written against the rpc engine could catch.
 
+`EngineError` is the third family: the machinery that runs Nix failed, and
+Nix reported nothing. Only rpc produces one, and `WorkerDiedError` is the
+only member — a separate worker process is what makes "it is gone, and
+nothing said why" a state a caller can reach. `nanopynix.rpc.WorkerDiedError`
+still resolves and is the same class.
+
 ```{eval-rst}
 .. automodule:: nanopynix.exceptions
    :members:

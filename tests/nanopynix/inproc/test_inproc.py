@@ -821,13 +821,6 @@ async def test_inproc_store_query_path_from_hash_part(
         assert missing is None
 
 
-@pytest.mark.anyio
-async def test_inproc_store_call_generic_l1_method(inproc_session: InprocSessionFactory) -> None:
-    async with inproc_session() as nix, nix.store() as store:
-        uri = await store.call("get_uri")
-        assert isinstance(uri, str)
-
-
 # ── EvalSession: file, lock_flake variants, eval_flake ──────────────────
 
 

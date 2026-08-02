@@ -70,10 +70,10 @@ from nanopynix.exceptions import (
     StoreError,
     UnresolvedValueError,
     ValueReleasedError,
+    WorkerDiedError,
     build_error_from_result,
 )
 from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedInput, NixType
-from nanopynix.rpc.client._pool import WorkerDiedError
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
 from nanopynix.settings import (
     DEFAULT_LINE_EDITORS,

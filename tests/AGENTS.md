@@ -42,6 +42,7 @@ What lives there now:
 | `test_suppression_grammar.py` | every lint or type suppression says why it exists |
 | `test_agent_note_imports.py` | no test module imports `pytest_agent` directly |
 | `test_consumer_surface.py` | consumers use nanopynix's public API, with a ledger for what they may not |
+| `test_public_surface.py` | `__all__` lists every public name the package binds |
 | `test_subcommands.py` | pynix's two subcommand declarations describe the same set |
 | `test_docs_reference.py` | the checked-in CLI reference matches the live command tree |
 
@@ -80,6 +81,11 @@ restated in the test file -- `CONSUMER_PRIVATE_IMPORTS` here, `WIRE_CLASSES` in
 `tests/nanopynix/test_exceptions_classify.py`. The friction is the point: the
 literal cannot update itself, so a new member fails the suite until a person
 decides whether it belongs. Write the reason in the literal, next to the entry.
+
+Use a literal only when the answer is a judgement. `test_public_surface.py`
+compares two derived sets and carries no ledger, because whether a name the
+package already binds belongs in the list it publishes is not a decision.
+A literal there would be a second copy of `__all__`.
 
 Choose what the key is. `CONSUMER_PRIVATE_IMPORTS` keys on `(module, name)` and
 not on the import site, because a further use of an approved name is not a new
