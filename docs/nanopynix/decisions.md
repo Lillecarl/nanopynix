@@ -91,9 +91,15 @@ libraries where a major release breaks callers.
 the code actually uses; leave upper bounds to Nix.*
 
 **Q7 — How much of `inproc`'s cross-class private access is worth removing?**
-The review proposes interfaces and a split. The smaller step — adopting rpc's
-`claim_eval`/`release_eval` spelling — removes the largest group for a fraction
-of the cost.
-*Recommended default: do the smaller step beside #15, and decide on the split
-after seeing how much is left.*
+The review proposes interfaces and a split. The smaller step it named — adopting
+rpc's `claim_eval`/`release_eval` spelling — is gone, and the reason is worth
+recording. #36 asked whether each rpc-only name is API at all, and those two
+were not: they add and discard the session's own set of open evaluators, and a
+caller can do nothing with either. So rpc adopted inproc's direction instead of
+the other way round, and they are `_claim_eval` and `_release_eval` now.
+
+That leaves the question standing with the cheap answer removed. What remains
+is the interfaces and the split.
+*Recommended default: decide on the split on its own evidence, and do not treat
+a spelling change as a step towards it.*
 

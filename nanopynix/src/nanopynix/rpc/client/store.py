@@ -182,8 +182,12 @@ class Store(AsyncStore):
         return self._rpc._session_id  # type: ignore[reportPrivateUsage] -- facade exposes transport ownership internally  # noqa: SLF001
 
     @property
-    def store_handle(self) -> int:
-        """Worker-side handle for internal session integration."""
+    def _store_handle(self) -> int:
+        """Worker-side handle, for wiring this store into a remote evaluator.
+
+        Private: it names a slot in one worker process, so it means nothing to
+        a caller and nothing at all on the inproc engine.
+        """
         return self._rpc.store_handle
 
     @property
@@ -301,7 +305,7 @@ class Store(AsyncStore):
             BuildPathsWithResultsRequest(
                 derived_paths=[str(path) for path in derived_paths],
                 build_mode=build_mode,
-                eval_store_handle=0 if eval_store is None else eval_store.store_handle,
+                eval_store_handle=0 if eval_store is None else eval_store._store_handle,  # noqa: SLF001 -- one Store reads another's worker handle to name the eval store
             ),
         )
         return list(response.results)
@@ -389,7 +393,7 @@ class Store(AsyncStore):
         await self.rpc.copy_closure(
             CopyClosureRequest(
                 paths=[str(path) for path in paths],
-                dest_store_handle=dest_store.store_handle,
+                dest_store_handle=dest_store._store_handle,
                 repair=repair,
                 check_sigs=check_sigs,
                 substitute=substitute,

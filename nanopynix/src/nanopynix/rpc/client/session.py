@@ -433,7 +433,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         return EvalSession(
             self._manager,
             self,
-            store.store_handle,
+            store._store_handle,  # type: ignore[reportPrivateUsage] -- Session wires its own store into the evaluator it builds  # noqa: SLF001
             session_id=self._session_id,
             rpc_timeout=self._manager.rpc_timeout,
             store=store,
@@ -481,7 +481,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         return ReplSession(
             self._manager,
             self,
-            store.store_handle,
+            store._store_handle,  # type: ignore[reportPrivateUsage] -- Session wires its own store into the repl it builds  # noqa: SLF001
             session_id=self._session_id,
             rpc_timeout=self._manager.rpc_timeout,
             line_editors=self.runtime_settings.line_editors if line_editors is None else line_editors,
@@ -503,8 +503,8 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         if build_store is not None and build_store._session_id != self._session_id:  # type: ignore[reportPrivateUsage] -- cross-session guard on internal ID  # noqa: SLF001
             raise ValueError("build_store belongs to a different session")
 
-    def claim_eval(self, eval_session: EvalSession) -> None:
+    def _claim_eval(self, eval_session: EvalSession) -> None:
         self._evals.add(eval_session)
 
-    def release_eval(self, eval_session: EvalSession) -> None:
+    def _release_eval(self, eval_session: EvalSession) -> None:
         self._evals.discard(eval_session)
