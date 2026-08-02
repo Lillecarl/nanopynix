@@ -7,7 +7,7 @@ justified. Measured before this file existed: 30 private import sites across
 ``pynix``, ``ekn`` and ``nanopynix-helpers``, and none of them recorded the
 decision. The rule was clear, it was written down, and nothing looked.
 
-Two gates, and they are not the same kind of thing.
+Three gates, and they are not the same kind of thing.
 
 The public gate is a **regression guard**. Every name that a consumer imports
 from the ``nanopynix`` top level is in ``nanopynix.__all__`` today, so this
@@ -21,6 +21,18 @@ judgement, not a derivation, so the literal below carries the decision and a
 diff against the tree makes a new one visible. This is the same shape as
 ``WIRE_CLASSES`` in ``tests/nanopynix/test_exceptions_classify.py``, and it is
 deliberate friction: the set cannot update itself.
+
+The engine-annotation gate is a **second ledger**, and it asks a different
+question from the first: not may a consumer reach this name, but should it name
+one engine's class where a protocol would do. ``nanopynix.rpc`` is a public
+door, so the private gate says nothing about this, and 52 annotation sites in
+three packages named ``ValueProxy``, ``EvalSession``, ``ReplSession`` or
+``Store``. Each one pinned engine-neutral code to one engine.
+
+That ledger keys by ``(file, class)`` and not by class alone, which is the
+opposite of the private one above. Whether ``BEARTYPING`` may be imported is
+one decision wherever it appears. Whether a module may name ``Store`` depends
+on what that module does with the store, so the file is part of the judgement.
 
 The unit tests below are not decoration. A scanner that quietly matched nothing
 would leave this file passing forever while enforcing nothing, so they pin both
@@ -36,9 +48,12 @@ from tests.support.consumer_imports import (
     CONSUMER_ROOTS as CONSUMER_ROOTS,
     WHOLE_MODULE as WHOLE_MODULE,
     ConsumerImport as ConsumerImport,
+    EngineAnnotation as EngineAnnotation,
     format_report as format_report,
     iter_python_files as iter_python_files,
+    scan_consumer_engine_annotations as scan_consumer_engine_annotations,
     scan_consumers as scan_consumers,
+    scan_engine_annotations as scan_engine_annotations,
     scan_source as scan_source,
 )
 
@@ -66,6 +81,57 @@ CONSUMER_PRIVATE_IMPORTS: dict[tuple[str, str], str] = {
     ("nanopynix._typechecking", "no_runtime_type_check"): (
         "The decorator half of the same instrumentation switch, and it travels "
         "with BEARTYPING. Same waiver, same module docstring."
+    ),
+}
+
+
+_OWN_STORE = (
+    "Paired with a concrete `Session`. `Session.eval` takes `StoreT`, so it "
+    "accepts only its own engine's store, and `AsyncStore` is not "
+    "substitutable there. Declaring the wider type on the protocol makes "
+    "pyright reject both engines for narrowing it."
+)
+_CONSTRUCTS = (
+    "Constructs the session, so the annotation is the constructed type. "
+    "Choosing rpc for its process isolation is a real decision, not drift. "
+    "`AsyncSession` is unsatisfiable bare anyway -- `StoreT` is invariant."
+)
+
+# Each place a consumer names an rpc engine class in an annotation, keyed by
+# (file, class), with the reason the protocol will not do.
+#
+# The default is the protocol: `AsyncValue`, `AsyncStore`, `AsyncEvalSession`,
+# `AsyncReplSession[Any]`. 52 annotation sites moved onto them, and code that
+# reads an attribute off a value has no business naming one engine.
+#
+# Every entry below is one of two constraints, and both are the same shape --
+# an object belongs to the engine that made it. A value builds against its own
+# store, a session evaluates in its own store, a repl adds attributes from its
+# own value. The protocols express this with an invariant type parameter, which
+# is honest and which is exactly what makes them non-substitutable here.
+CONSUMER_ENGINE_ANNOTATIONS: dict[tuple[str, str], str] = {
+    ("ekn/src/ekn/eval.py", "Session"): _CONSTRUCTS,
+    ("pynix/src/pynix/_util.py", "Session"): _CONSTRUCTS,
+    ("pynix/src/pynix/_util.py", "Store"): _OWN_STORE,
+    ("pynix/src/pynix/_lsp/_context.py", "Session"): _CONSTRUCTS,
+    ("pynix/src/pynix/_lsp/_context.py", "Store"): _OWN_STORE,
+    ("pynix/src/pynix/_lsp/_handlers.py", "Session"): _CONSTRUCTS,
+    ("pynix/src/pynix/_lsp/_handlers.py", "Store"): _OWN_STORE,
+    ("nanopynix-helpers/src/nanopynix_helpers/build.py", "Session"): _CONSTRUCTS,
+    ("nanopynix-helpers/src/nanopynix_helpers/build.py", "Store"): _OWN_STORE,
+    ("nanopynix-helpers/src/nanopynix_helpers/build.py", "EvalSession"): (
+        "Travels with the `Session` and the `Store` above; this function holds "
+        "all three of one engine's objects together."
+    ),
+    ("nanopynix-helpers/src/nanopynix_helpers/build.py", "ValueProxy"): (
+        "Calls `root.build(store=build_store)`. `build`'s `store` parameter is "
+        "absent from `AsyncValue` for the reason in that method's docstring: "
+        "each engine accepts only its own `Store`, and expressing it would "
+        "make `AsyncValue` generic over the store type. Until then, the one "
+        "function that pairs a value with a build store names the class."
+    ),
+    ("pynix/src/pynix/build.py", "ValueProxy"): (
+        "Feeds `build_with_fod_update` above, so it inherits that constraint."
     ),
 }
 
@@ -164,6 +230,82 @@ def test_the_private_ledger_is_what_this_file_says_it_is() -> None:
     stale = sorted(declared - derived)
     assert not stale, (
         f"{len(stale)} entr(y/ies) in CONSUMER_PRIVATE_IMPORTS have no importer left. "
+        f"Delete them; a ledger that outlives its subject stops meaning anything: {stale}"
+    )
+
+
+def test_the_engine_scanner_sees_both_spellings() -> None:
+    """The imported name and the written out attribute reach the same class."""
+    imported = scan_engine_annotations("from nanopynix.rpc import Store\ndef f(s: Store) -> None: ...", Path("x.py"))
+    assert [i.cls for i in imported] == ["Store"]
+    qualified = scan_engine_annotations("import nanopynix\ndef f(s: nanopynix.rpc.Store) -> None: ...", Path("x.py"))
+    assert [i.cls for i in qualified] == ["Store"]
+
+
+def test_the_engine_scanner_sees_a_class_nested_in_a_wider_annotation() -> None:
+    """``AsyncGenerator[tuple[Session, Store]]`` is two references, not zero."""
+    found = scan_engine_annotations(
+        "from nanopynix.rpc import Session, Store\ndef f() -> AsyncGenerator[tuple[Session, Store]]: ...",
+        Path("x.py"),
+    )
+    assert sorted(i.cls for i in found) == ["Session", "Store"]
+
+
+def test_the_engine_scanner_ignores_construction() -> None:
+    """Choosing an engine to run is a decision; refusing the other is drift.
+
+    This is the distinction the whole gate turns on. Every consumer command
+    builds a ``nanopynix.rpc.Session`` on purpose, because it wants process
+    isolation. Reporting those would bury the annotations that matter under
+    the ones that are simply correct.
+    """
+    assert not scan_engine_annotations(
+        "from nanopynix.rpc import Session\nasync def f():\n    async with Session() as nix:\n        pass",
+        Path("x.py"),
+    )
+    assert not scan_engine_annotations("import nanopynix\nx = nanopynix.rpc.Session()", Path("x.py"))
+
+
+def test_the_engine_scanner_leaves_a_protocol_annotation_alone() -> None:
+    found = scan_engine_annotations(
+        "from nanopynix import AsyncStore, AsyncValue\ndef f(v: AsyncValue, s: AsyncStore) -> None: ...",
+        Path("x.py"),
+    )
+    assert not found
+
+
+def test_the_engine_scanner_ignores_an_unrelated_class_of_the_same_name() -> None:
+    """``Store`` is a common word. Only ``nanopynix.rpc``'s counts."""
+    assert not scan_engine_annotations("from redux import Store\ndef f(s: Store) -> None: ...", Path("x.py"))
+    assert not scan_engine_annotations("import other\ndef f(s: other.rpc.Store) -> None: ...", Path("x.py"))
+
+
+def test_the_engine_annotation_ledger_is_what_this_file_says_it_is() -> None:
+    """A consumer annotates with the protocol unless this file says otherwise.
+
+    The protocols exist so that code which only calls shared methods works
+    with either engine. Naming ``nanopynix.rpc.ValueProxy`` in an annotation
+    gives that up silently: the code still runs, and pyright starts rejecting
+    a value that satisfies every method it calls.
+    """
+    found = scan_consumer_engine_annotations(REPO_ROOT)
+    derived = {i.key for i in found}
+    declared = set(CONSUMER_ENGINE_ANNOTATIONS)
+
+    added = sorted(derived - declared)
+    if added:
+        sites = format_report(i for i in found if i.key in set(added))
+        raise AssertionError(
+            f"{len(added)} consumer annotation(s) name an rpc engine class that is not in "
+            "CONSUMER_ENGINE_ANNOTATIONS.\nUse the protocol -- AsyncValue, AsyncStore, "
+            "AsyncEvalSession, AsyncReplSession[Any] -- unless the engine's own object is "
+            "genuinely required. If it is, record the reason in the ledger in this file.\n\n"
+            f"keys: {added}\n\nsites:\n{sites}"
+        )
+
+    stale = sorted(declared - derived)
+    assert not stale, (
+        f"{len(stale)} entr(y/ies) in CONSUMER_ENGINE_ANNOTATIONS no longer match any annotation. "
         f"Delete them; a ledger that outlives its subject stops meaning anything: {stale}"
     )
 

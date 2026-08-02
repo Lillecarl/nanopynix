@@ -41,8 +41,8 @@ What lives there now:
 |---|---|
 | `test_suppression_grammar.py` | every lint or type suppression says why it exists |
 | `test_agent_note_imports.py` | no test module imports `pytest_agent` directly |
-| `test_consumer_surface.py` | consumers use nanopynix's public API, with a ledger for what they may not |
-| `test_public_surface.py` | `__all__` lists every public name the package binds |
+| `test_consumer_surface.py` | consumers use nanopynix's public API, and its protocols rather than one engine's classes; a ledger records each exception |
+| `test_public_surface.py` | `__all__` lists every public name the package binds, protocols included |
 | `test_subcommands.py` | pynix's two subcommand declarations describe the same set |
 | `test_docs_reference.py` | the checked-in CLI reference matches the live command tree |
 
