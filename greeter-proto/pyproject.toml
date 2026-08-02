@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+# `greeter-proto`, matching the directory, because the builders set keys a
+# project by its directory name -- the same convention nanopynix-proto
+# follows. The importable module stays `greeter`, which is what
+# grpclib-transports' tests import.
+name = "greeter-proto"
+version = "0.1.0"
+description = "Demo gRPC protobuf definitions for the grpclib-transports tests (betterproto2 compiled)"
+authors = [{ name = "Carl Andersson", email = "github@lillecarl.com" }]
+requires-python = ">=3.13"
+# Declared here rather than in the Nix package, because a builders project
+# takes its runtime dependencies from this file alone. These are what the
+# generated modules import: betterproto2 and grpclib for the service stubs,
+# pydantic for `pydantic_dataclasses`, protobuf for
+# `google_protobuf_descriptors`.
+dependencies = ["betterproto2", "grpclib", "protobuf", "pydantic"]
+
+[tool.hatch.build.targets.wheel]
+# Explicit, because hatchling would otherwise infer `src/greeter_proto` from
+# the project name and find nothing.
+packages = ["src/greeter"]

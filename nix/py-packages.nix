@@ -18,6 +18,7 @@
 
 let
   protoSrc = callPackage (root + "/nanopynix-proto/generated.nix") { inherit python; };
+  greeterSrc = callPackage (root + "/greeter-proto/generated.nix") { inherit python; };
 
   # Every project that reaches nanopynix-bindings -- directly, or through
   # `nanopynix` -- is built against one specific Nix version's C++ components
@@ -25,9 +26,10 @@ let
   # the version says which one. See nanopynix-bindings/package.nix for why
   # this is a PEP 440 local segment (`+nix...`) and not a plain suffix.
   #
-  # nanopynix-proto and pytest-agent deliberately don't get it: neither
-  # reaches the bindings, so both really are the same package whatever Nix is
-  # linked, and suffixing them would rebuild them once per version for nothing.
+  # nanopynix-proto, greeter-proto, grpclib-transports and pytest-agent
+  # deliberately don't get it: none of them reaches the bindings, so each
+  # really is the same package whatever Nix is linked, and suffixing them
+  # would rebuild them once per version for nothing.
   nixLinked = rendered: { version = "${rendered.version}+nix${version}"; };
 
   # Applied to both the built and the editable form of a project, so a build
@@ -67,6 +69,39 @@ let
 
       meta = rendered.meta // {
         license = lib.licenses.lgpl21Plus;
+        platforms = lib.platforms.unix;
+      };
+    };
+
+    # The same three moves as nanopynix-proto above, for the same three
+    # reasons -- generated `src`, an imports check the builders otherwise
+    # cannot express, and `meta`. Read that entry for the argument.
+    greeter-proto = pySelf: rendered: {
+      src = greeterSrc;
+
+      passthru = rendered.passthru // {
+        tests.imports =
+          runCommand "greeter-proto-imports"
+            {
+              nativeBuildInputs = [
+                (pySelf.mkVirtualEnv "greeter-proto-check-env" { greeter-proto = [ ]; })
+              ];
+            }
+            ''
+              python -c 'import greeter.greeter.common, greeter.greeter.server, greeter.greeter.worker'
+              touch "$out"
+            '';
+      };
+
+      meta = rendered.meta // {
+        license = lib.licenses.mit;
+        platforms = lib.platforms.unix;
+      };
+    };
+
+    grpclib-transports = _pySelf: rendered: {
+      meta = rendered.meta // {
+        license = lib.licenses.mit;
         platforms = lib.platforms.unix;
       };
     };
@@ -140,6 +175,17 @@ let
     nanopynix-proto = {
       editable = false;
     };
+    # `editable = false` for the same reason as nanopynix-proto: there is no
+    # `src/` in the checkout to point an editable install at. Every module
+    # comes out of protoc (greeter-proto/generated.nix).
+    greeter-proto = {
+      editable = false;
+    };
+    # Vendored, and a first-class project of this repo rather than a
+    # third-party dependency -- nanopynix is its only consumer, and it is
+    # meant to be changed for that consumer. Editable like the rest, so a
+    # change to a transport is live in the dev shell without a rebuild.
+    grpclib-transports = { };
     nanopynix = { };
     nanopynix-helpers = { };
     ekn = { };

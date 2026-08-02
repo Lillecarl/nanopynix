@@ -8,6 +8,14 @@ extraPaths = [
   "pynix/src",
   "ekn/src",
   "pytest-agent/src",
+  "grpclib-transports/src",
+  # `_bench_utils`, which the benchmark modules and their conftest import by
+  # bare name -- the directory goes on `sys.path` by pytest's rootdir rule
+  # rather than being a package.
+  "grpclib-transports/benchmarks",
+  # `services`, imported the same way by the example scripts that
+  # grpclib-transports/tests/test_examples.py runs.
+  "grpclib-transports/docs/examples",
   "tests",
   "tests/pynix",
   # Reached by a bare `import beartype_bootstrap` from both the sitecustomize

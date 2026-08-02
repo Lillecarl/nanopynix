@@ -68,42 +68,6 @@
         "type": "github"
       }
     },
-    "flake-compatish_3": {
-      "locked": {
-        "lastModified": 1783977694,
-        "narHash": "sha256-Pa/Q2Cl5PCnJFR8KkwMrkEQuSquMzXVFovZN6pf3f4c=",
-        "owner": "lillecarl",
-        "repo": "flake-compatish",
-        "rev": "c3857835d74a84e47a2d439022ac40e6a87c30f2",
-        "type": "github"
-      },
-      "original": {
-        "owner": "lillecarl",
-        "repo": "flake-compatish",
-        "type": "github"
-      }
-    },
-    "grpclib-transports": {
-      "inputs": {
-        "flake-compatish": "flake-compatish_3",
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1785683893,
-        "narHash": "sha256-1hFk1JnJEl9FYmpW+lA8VDhvlzjp0JfbCJiRbAWu/7E=",
-        "owner": "lillecarl",
-        "repo": "grpclib-transports",
-        "rev": "84e5fcd674c80d090c83d4334613d83ce80d912b",
-        "type": "github"
-      },
-      "original": {
-        "owner": "lillecarl",
-        "repo": "grpclib-transports",
-        "type": "github"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1785141334,
@@ -144,7 +108,6 @@
       "inputs": {
         "easykubenix": "easykubenix",
         "flake-compatish": "flake-compatish_2",
-        "grpclib-transports": "grpclib-transports",
         "nixpkgs": "nixpkgs",
         "pyproject-nix": "pyproject-nix",
         "tree-sitter-nix-numtide": "tree-sitter-nix-numtide"

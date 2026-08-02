@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package greeter.server;
+
+import "common.proto";
+
+service Greeter {
+  rpc SayHello (greeter.common.HelloRequest) returns (greeter.common.HelloReply);
+  rpc Upload (stream greeter.common.HelloRequest) returns (greeter.common.HelloReply);
+}

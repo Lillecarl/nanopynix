@@ -236,11 +236,17 @@ let
       ];
     };
 
-  # The four static gates of nix/checks.nix, in one job. They share a checkout
-  # and a Nix install, they take about a minute between them, and Nix already
-  # builds the four in parallel -- so one job costs one runner and reports
-  # every gate. `--keep-going` is what makes that last part true: without it
-  # the first failing gate hides the other three.
+  # The gates of nix/checks.nix, in one job. They share a checkout and a Nix
+  # install, they take about a minute between them, and Nix already builds
+  # them in parallel -- so one job costs one runner and reports every gate.
+  # `--keep-going` is what makes that last part true: without it the first
+  # failing gate hides the rest.
+  #
+  # `check-grpclib-transports` is the odd one out, being a test run rather
+  # than a static tool. It is here rather than in the `test-*` matrix because
+  # it is version-independent: that matrix exists to run one suite against
+  # each supported Nix version, and this library links no Nix at all, so
+  # three copies of it would be three identical runs. See nix/checks.nix.
   mkStaticChecksJob =
     {
       ref ? null,
@@ -258,10 +264,11 @@ let
         (steps.installNix { })
         (steps.cachix { })
         {
-          name = "Run the static gates (ruff, ruff-strict, ruff format, pyright)";
+          name = "Run the gates (ruff, ruff-strict, ruff format, pyright, grpclib-transports)";
           run = ''
             nix build --no-link --print-build-logs --keep-going \
-              ".#check-lint" ".#check-lint-strict" ".#check-format" ".#check-types"
+              ".#check-lint" ".#check-lint-strict" ".#check-format" ".#check-types" \
+              ".#check-grpclib-transports"
           '';
         }
       ];

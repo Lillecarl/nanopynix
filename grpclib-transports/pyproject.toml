@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "grpclib-transports"
+version = "0.1.0"
+description = "gRPC over custom transports (stdio, SSH, Unix sockets, multiprocessing pipes)"
+authors = [{ name = "Carl Andersson", email = "github@lillecarl.com" }]
+# 3.13, not the 3.12 this project asked for as a standalone repo. nanopynix
+# is the only consumer and requires 3.13, so a lower floor here would claim
+# support that nothing builds or tests.
+requires-python = ">=3.13"
+# `anyio` is a runtime dependency, not just a test one: `limits.py` builds its
+# concurrency semaphore with it and `multiprocessing.py` offloads `proc.join`
+# through its capacity-limited thread pool, both in place of the raw asyncio
+# primitives that nanopynix bans. See ruff-strict.toml, which states where
+# that ban does and does not reach into this project.
+dependencies = ["anyio", "betterproto2", "grpclib", "h2"]
+
+[project.optional-dependencies]
+# `asyncssh` stays optional: nanopynix uses the stdio and multiprocessing
+# transports only, so the SSH transport is imported by the tests and the
+# benchmarks and by nothing that ships.
+ssh = ["asyncssh"]
+# `greeter-proto` is this repo's own generated fixture service, and `asyncssh`
+# is here as well as in `ssh` so that `test_ssh.py` runs from the plain test
+# environment. `rich` is what the benchmarks render their tables with.
+# `anyio` is absent because it is a runtime dependency above; `pytest-anyio`
+# mode comes from pytest.ini.
+test = ["asyncssh", "greeter-proto", "pytest", "rich"]
+
+# No `docs` extra. This project's sphinx pages are part of the one nanopynix
+# site (docs/grpclib-transports/), so the docs toolchain is declared once, in
+# pynix's `docs` extra, and not a second time here.
+
+[project.scripts]
+grpclib-transports = "grpclib_transports.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/grpclib_transports"]

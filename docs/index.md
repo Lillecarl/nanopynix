@@ -9,6 +9,7 @@ of them (`pynix`).
 
 nanopynix/index
 pynix/index
+grpclib-transports/index
 nix-misconceptions
 ```
 

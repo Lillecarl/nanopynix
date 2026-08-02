@@ -41,6 +41,10 @@ editablePythonSet.mkVirtualEnv "nanopynix-dev-env" (
     ];
     ekn = [ ];
     pytest-agent = [ ];
+    # Already in the venv as a dependency of `nanopynix`; named here for its
+    # `test` extra, which is what puts `greeter-proto`, `asyncssh` and `rich`
+    # in reach so `pytest grpclib-transports` runs from the dev shell.
+    grpclib-transports = [ "test" ];
   }
   // extraSpec
 )

@@ -30,11 +30,12 @@ runtime. `ruff-strict.toml` gives the reason and the measurement behind it.
 `--unsafe-fixes` is the mechanism that applies the same damage in bulk to
 another rule.
 
-CI runs those three commands, and `ruff format --check`, in the `static-checks`
-job. Each one is a derivation in `nix/checks.nix`, and each is a package. Build
-them to run a gate the way CI runs it, in a sandbox and not in the dev shell:
+CI runs those three commands, `ruff format --check`, and the test suite of
+`grpclib-transports`, in the `static-checks` job. Each one is a derivation in
+`nix/checks.nix`, and each is a package. Build them to run a gate the way CI
+runs it, in a sandbox and not in the dev shell:
 
-- nix build --no-link --keep-going .#check-lint .#check-lint-strict .#check-format .#check-types
+- nix build --no-link --keep-going .#check-lint .#check-lint-strict .#check-format .#check-types .#check-grpclib-transports
 
 Do not use `nix flake check` for this. That command evaluates every package,
 and `packages.shell` cannot evaluate in a pure flake evaluation.
@@ -61,6 +62,52 @@ This rule was prose only until then, and 30 import sites in three packages did
 not follow it. A convention that a machine can check belongs in `tests/meta/`,
 which is the home of the self-checks of this repository. Put the next one
 there, rather than in another paragraph of this file.
+
+# grpclib-transports
+
+`grpclib-transports/` is a subproject of this repository, and not a
+third-party dependency. It carries gRPC over four asyncio transports: stdio
+subprocess pipes, multiprocessing pipe pairs, Unix-domain sockets, and SSH
+sessions. The rpc engine of nanopynix uses the first two to speak to each
+worker process.
+
+**nanopynix is its only consumer. Change the library when nanopynix needs a
+different behavior.** It came from its own repository, and it arrived here so
+that a change to a transport and the change to nanopynix that needs it go in
+one commit. The rule above, which tells `pynix` to depend on the public API of
+nanopynix, does not apply in this direction: there is no public API of
+grpclib-transports to protect, and no other consumer to break.
+
+`greeter-proto/` is the generated fixture service that the tests of
+grpclib-transports call over each transport. protoc writes every module of it
+(`greeter-proto/generated.nix`), so there is no `src/` in the checkout. It is
+a test fixture, and no code that ships imports it.
+
+Run the tests, and the benchmarks:
+
+- direnv exec . timeout 60 pytest grpclib-transports # the tests only
+- direnv exec . timeout 300 pytest grpclib-transports/benchmarks # the measurement run
+
+The subproject has its own `pytest.ini`, so `rootdir` is
+`grpclib-transports/` and none of the nanopynix-specific configuration
+applies. The `benchmark` directory is not a correctness gate, and `testpaths`
+leaves it out.
+
+CI runs the tests as `check-grpclib-transports`, in the `static-checks` job.
+Build that gate the way CI builds it:
+
+- nix build --no-link .#check-grpclib-transports
+
+**That gate exists because the tests would otherwise run nowhere.** The
+project was a nixpkgs `buildPythonPackage` in its own repository, so
+`pytestCheckHook` ran the suite inside each build. It is a pyproject.nix
+builders package here, and those have no check phase.
+
+`ruff-strict.toml` gives this subproject its own per-file ignores, and the
+`TID251` entry gives the reason to read: the ban on the raw `asyncio`
+primitives is right for nanopynix, which is anyio-structured, and it does not
+reach a library whose subject is `asyncio.Protocol` callbacks. The `src/` of
+the library still meets the rule.
 
 **`tests/AGENTS.md` maps every directory under `tests/`.** Read it before you
 add a test module. It gives the rule that picks the directory, the shape a

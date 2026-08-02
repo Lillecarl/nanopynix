@@ -35,14 +35,20 @@ let
   # derivation itself untouched.
   pythonBase = pkgs.python3.override {
     packageOverrides = pySelf: _pyPrev: {
-      # Built by their own repo against plain `pkgs.python3Packages`. Same
-      # interpreter, and we only add names, so there is no second instance
-      # of anything to collide.
-      inherit (pkgs.callPackage inputs.grpclib-transports { })
-        grpclib-transports
-        betterproto2
-        betterproto2-compiler
-        ;
+      # The protobuf runtime, and the protoc plugin that writes the modules
+      # `nanopynix-proto` and `greeter-proto` are made of. Neither is in
+      # nixpkgs. Both used to arrive through the `grpclib-transports` flake
+      # input; that input is gone and the project it named is vendored, so
+      # its two private dependencies are vendored here beside it.
+      #
+      # These stay in the interpreter's own set rather than moving to the
+      # builders set with `grpclib-transports` itself, because both are
+      # reached the nixpkgs way: `python.withPackages` builds the protoc
+      # plugin environment in each `generated.nix`, and pyproject.nix's
+      # builders deliberately do not propagate, which is the whole reason
+      # that generation happens outside the package.
+      betterproto2 = pySelf.callPackage ./nix/betterproto2.nix { };
+      betterproto2-compiler = pySelf.callPackage ./nix/betterproto2-compiler.nix { };
 
       clypi = pySelf.callPackage ./nix/clypi.nix { };
 
