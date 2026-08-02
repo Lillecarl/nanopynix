@@ -48,18 +48,23 @@ from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
 
 if TYPE_CHECKING or BEARTYPING:
+    from collections.abc import AsyncIterator, Sequence
+
+    from nanopynix.logging import BusSubscription, LogCallback, LogCapture
     from nanopynix.models import (
         BuildResult,
         Derivation,
         FlakeRef,
         GcResult,
         GcRoot,
+        LogEvent,
         MissingInfo,
         NixType,
         PathInfo,
         StorePath,
     )
-    from nanopynix.settings import NixEvalSettings, NixFetchSettings
+    from nanopynix.settings import NixEvalSettings, NixFetchSettings, NixGlobalSettings, SettingsProvenance
+    from nanopynix.stores import StoreConfig
     from nanopynix.verbosity import LogLevelInput
 
 VerbosityT_co = TypeVar("VerbosityT_co", covariant=True)
@@ -550,10 +555,136 @@ class AsyncReplSession[ValueT: AsyncValue = AsyncValue](AsyncEvalSession[ValueT]
         ...
 
 
+@runtime_checkable
+class AsyncSession[
+    StoreT: AsyncStore = AsyncStore,
+    EvalT: AsyncEvalSession[Any] = AsyncEvalSession[Any],
+    ReplT: AsyncReplSession[Any] = AsyncReplSession[Any],
+](AsyncVerbosityController[LogLevel], Protocol):
+    """The entry point of an engine: what a caller opens, and what it hands out.
+
+    The last shared class to get a protocol, and the gap was not eight
+    scattered omissions. ``capture_logs``, ``log_stream``, ``repl``,
+    ``set_settings``, ``settings``, ``settings_provenance``, ``store`` and
+    ``subscribe`` are carried by both engines and declared by nothing, and
+    every one of them belongs to this class and to no other. One missing
+    protocol, eight symptoms.
+
+    Generic in the three types an engine hands back, for the reason
+    :class:`AsyncEvalSession` is generic in its value type: ``inproc.Session``
+    yields ``inproc.Store``, not "some :class:`AsyncStore`".
+
+    Two consequences of that, and both are load-bearing rather than incidental.
+
+    ``StoreT`` is invariant of necessity: :meth:`eval` takes a store and
+    :meth:`store` returns one. So a *bare* ``AsyncSession`` means
+    ``AsyncSession[AsyncStore, ...]``, and neither engine is one -- correctly,
+    because an engine's ``eval`` must reject the other engine's store. Annotate
+    with the parameters solved, as ``tests/nanopynix/test_protocols.py`` does,
+    and not with the bare name.
+
+    The evaluator bounds are ``[Any]`` and not the bare protocol names.
+    ``AsyncEvalSession``'s own value parameter is invariant too, so the bare
+    name would mean ``AsyncEvalSession[AsyncValue]`` and exclude every engine,
+    each of which yields its own value type. Parameterising ``AsyncSession`` by
+    the value as well would say it more precisely, at the cost of a fourth
+    parameter that every caller would have to spell.
+
+    Extends :class:`AsyncVerbosityController` for the same reason
+    :class:`AsyncEvalSession` does: the verbosity is process-wide, and a
+    session is one door onto it rather than the owner of its own.
+    """
+
+    async def __aenter__(self) -> Self: ...
+
+    async def __aexit__(self, *args: object) -> None: ...
+
+    async def open(self) -> None:
+        """Start the engine. Called automatically by ``async with``."""
+        ...
+
+    async def close(self) -> None:
+        """Release everything this session owns, and stop the engine.
+
+        Declared with no parameters, which is the shape both engines answer
+        to. inproc also accepts ``wait``, ``timeout`` and ``force``, because
+        it must drain threads it cannot kill where rpc terminates a process --
+        the engine parity ledger records that under ``Session.close:params``.
+        Widening an override with keyword arguments that all default is
+        compatible, so the ledger entry and this declaration agree.
+        """
+        ...
+
+    def store(self, uri: StoreConfig | str | None = None) -> StoreT:
+        """Return a store for this session, not yet open."""
+        ...
+
+    def eval(
+        self,
+        store: StoreT,
+        *,
+        build_store: StoreT | None = None,
+        eval_settings: NixEvalSettings | None = None,
+        fetch_settings: NixFetchSettings | None = None,
+    ) -> EvalT:
+        """Return an evaluator bound to ``store``, not yet open."""
+        ...
+
+    def repl(
+        self,
+        store: StoreT,
+        *,
+        build_store: StoreT | None = None,
+        eval_settings: NixEvalSettings | None = None,
+        fetch_settings: NixFetchSettings | None = None,
+        line_editors: Sequence[str] | None = None,
+    ) -> ReplT:
+        """Return an evaluator that keeps a persistent Nix REPL scope.
+
+        ``line_editors`` is per-call rather than per-session, because it
+        describes one interactive front-end and nothing else consumes it.
+        ``None`` means "use the engine's default".
+        """
+        ...
+
+    async def settings(self, *, overridden_only: bool = False) -> dict[str, str]:
+        """Read the Nix settings this session's engine currently holds."""
+        ...
+
+    async def set_settings(self, settings: NixGlobalSettings) -> dict[str, str]:
+        """Apply global Nix settings, and return the values that took effect."""
+        ...
+
+    async def settings_provenance(self) -> SettingsProvenance:
+        """Report where each setting this session applied came from."""
+        ...
+
+    def log_stream(self) -> AsyncIterator[LogEvent]:
+        """Iterate this session's Nix log events until it closes.
+
+        Bounded: a caller that iterates slowly loses the oldest events rather
+        than delaying Nix. Both engines return
+        :func:`nanopynix.logging.bus_log_stream`.
+        """
+        ...
+
+    def subscribe(self, callback: LogCallback) -> BusSubscription:
+        """Call ``callback`` with each log event, and once with ``None`` at the end.
+
+        Returns a handle -- call ``.unsubscribe()`` to stop.
+        """
+        ...
+
+    def capture_logs(self, *, max_events: int | None = None, wait_timeout: float | None = None) -> LogCapture:
+        """Record typed log events for the duration of an ``async with`` block."""
+        ...
+
+
 __all__ = [
     "AsyncEvalSession",
     "AsyncLockedFlake",
     "AsyncReplSession",
+    "AsyncSession",
     "AsyncStore",
     "AsyncValue",
     "AsyncVerbosityController",

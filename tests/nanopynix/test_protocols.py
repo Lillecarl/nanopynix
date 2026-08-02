@@ -27,18 +27,20 @@ is asserted a file away, in
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix import inproc
 from nanopynix.protocols import (
     AsyncEvalSession,
     AsyncLockedFlake,
     AsyncReplSession,
+    AsyncSession,
     AsyncStore,
     AsyncValue,
     AsyncVerbosityController,
 )
 from nanopynix.rpc.client import _session as rpc_private
+from nanopynix.rpc.client.session import Session as RpcSessionImpl
 from nanopynix.rpc.client.store import Store as RpcStoreImpl
 
 if TYPE_CHECKING:
@@ -84,6 +86,22 @@ def _accept_async_verbosity_controller[VerbosityT](controller: AsyncVerbosityCon
     del controller
 
 
+def _accept_async_session[StoreT: AsyncStore, EvalT: AsyncEvalSession[Any], ReplT: AsyncReplSession[Any]](
+    session: AsyncSession[StoreT, EvalT, ReplT],
+) -> None:
+    """Generic, because ``StoreT`` is invariant and a bare ``AsyncSession`` is unsatisfiable.
+
+    ``eval`` and ``repl`` take a store *and* ``store`` returns one, so the
+    parameter cannot be covariant. A bare ``AsyncSession`` therefore means
+    ``AsyncSession[AsyncStore, ...]``, and an engine whose ``eval`` demands its
+    own concrete ``Store`` is not that -- correctly, since it would reject the
+    other engine's store. Solving the parameters from the argument asks the
+    question that is actually useful: is this class *some* ``AsyncSession``?
+    The same reason ``_accept_async_repl_session`` is generic in its value.
+    """
+    del session
+
+
 def test_protocol_static_conformance() -> None:
     """Keep structural compatibility checked by pyright without constructing Nix."""
     if TYPE_CHECKING:
@@ -109,6 +127,8 @@ def test_protocol_static_conformance() -> None:
         _accept_async_repl_session(inproc_repl_session)
         _accept_async_verbosity_controller(rpc_session)
         _accept_async_verbosity_controller(inproc_session)
+        _accept_async_session(rpc_session)
+        _accept_async_session(inproc_session)
         _accept_async_locked_flake(inproc_locked_flake)
         _accept_async_locked_flake(locked_flake)
 
@@ -127,6 +147,10 @@ PROTOCOL_PAIRS: list[tuple[str, type, type, type]] = [
     ("AsyncEvalSession", AsyncEvalSession, inproc.EvalSession, rpc_private.EvalSession),
     ("AsyncReplSession", AsyncReplSession, inproc.ReplSession, rpc_private.ReplSession),
     ("AsyncLockedFlake", AsyncLockedFlake, inproc.LockedFlake, rpc_private.LockedFlakeHandle),
+    # Last to arrive, and the omission was the reason 13 shared `Session`
+    # members went undeclared: the surface gate below only looks at the pairs
+    # in this list, so a class absent from it is a class nothing measures.
+    ("AsyncSession", AsyncSession, inproc.Session, RpcSessionImpl),
 ]
 
 
