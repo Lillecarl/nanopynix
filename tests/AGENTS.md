@@ -111,6 +111,12 @@ restated in the test file -- `CONSUMER_PRIVATE_IMPORTS` here, `WIRE_CLASSES` in
 literal cannot update itself, so a new member fails the suite until a person
 decides whether it belongs. Write the reason in the literal, next to the entry.
 
+The shape is not only for `tests/meta/`. `URI_PART_STRATEGIES` in
+`tests/nanopynix/test_stores_properties.py` is the same thing in an ordinary
+test: it derives every field that names part of a store URI, and holds that set
+against a literal that says what each field may hold. Use the shape wherever a
+test needs a judgement that the code cannot supply.
+
 Use a literal only when the answer is a judgement. `test_public_surface.py`
 compares two derived sets and carries no ledger, because whether a name the
 package already binds belongs in the list it publishes is not a decision.

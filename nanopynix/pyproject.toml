@@ -37,6 +37,7 @@ test = [
   "pytest-xdist",
   "pygit2",
   "beartype",
+  "hypothesis",
 ]
 
 [project.scripts]
