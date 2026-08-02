@@ -26,7 +26,7 @@ import inspect
 from types import ModuleType
 
 import nanopynix
-from nanopynix import exceptions
+from nanopynix import exceptions, protocols
 
 # `from __future__ import annotations` leaves this binding behind on every
 # module that uses it. It is a `__future__._Feature`, not an export, and it is
@@ -124,4 +124,23 @@ def test_every_exception_class_reaches_the_top_level() -> None:
     assert not missing, (
         f"{len(missing)} exception class(es) are public in nanopynix.exceptions but not exported "
         f"by the nanopynix package, so a caller cannot catch them by name: {missing}"
+    )
+
+
+def test_every_protocol_reaches_the_top_level() -> None:
+    """A protocol a caller cannot reach is a protocol a caller does not use.
+
+    ``AsyncSession`` was absent here when this test landed, one commit after
+    the protocol itself. Six siblings were re-exported and the seventh was
+    not, so the omission looked like nothing.
+
+    The cost is not a missing import. A protocol is the name that engine-neutral
+    code writes in its annotations, and a caller who cannot reach it annotates
+    the concrete engine class instead -- which pins that code to one engine and
+    is exactly what this repository built the protocols to avoid.
+    """
+    missing = sorted(set(protocols.__all__) - set(nanopynix.__all__))
+    assert not missing, (
+        f"{len(missing)} protocol(s) are public in nanopynix.protocols but not exported by the "
+        f"nanopynix package, so engine-neutral code cannot name them: {missing}"
     )

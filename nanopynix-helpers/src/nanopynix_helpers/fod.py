@@ -14,7 +14,8 @@ from nanopynix._typechecking import BEARTYPING
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Iterable
 
-    from nanopynix.rpc import Store, ValueProxy
+    from nanopynix import AsyncValue
+    from nanopynix.rpc import Store
 
 _HASH_ATTRIBUTES = frozenset({"hash", "sha256", "outputHash"})
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
@@ -127,7 +128,7 @@ async def fixed_output_derivations_in_closure(store: Store, root_drv_path: str) 
     return fixed_output
 
 
-async def evaluated_derivation_path(value: ValueProxy) -> str | None:
+async def evaluated_derivation_path(value: AsyncValue) -> str | None:
     """Return an evaluated derivation value's ``drvPath``, if it has one."""
     if not await value.has_attr("type"):
         return None
@@ -141,7 +142,7 @@ async def evaluated_derivation_path(value: ValueProxy) -> str | None:
     return drv_path
 
 
-async def mismatch_is_target_fod(store: Store, root: ValueProxy, mismatch: FodHashMismatch) -> bool:
+async def mismatch_is_target_fod(store: Store, root: AsyncValue, mismatch: FodHashMismatch) -> bool:
     """Whether a daemon-reported FOD mismatch belongs to the evaluated target.
 
     ``builtins.fetchurl`` reports no derivation path, so it cannot be related

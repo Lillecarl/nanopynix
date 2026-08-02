@@ -48,7 +48,7 @@ if TYPE_CHECKING or BEARTYPING:
 
     from prompt_toolkit.document import Document
 
-    from nanopynix.rpc import ReplSession
+    from nanopynix import AsyncReplSession
 
 _DEFAULT_STORE = "auto"
 _PROMPT = "pynix> "
@@ -232,7 +232,7 @@ class _NixLexer(Lexer):
 class _ReplCompleter(Completer):
     """Complete REPL commands and names from the current Nix lexical scope."""
 
-    def __init__(self, repl: ReplSession) -> None:
+    def __init__(self, repl: AsyncReplSession[Any]) -> None:
         self._repl = repl
 
     def get_completions(self, document: Document, complete_event: CompleteEvent) -> Iterable[Completion]:
@@ -282,7 +282,7 @@ class _ReplState:
 
     def __init__(
         self,
-        repl: ReplSession,
+        repl: AsyncReplSession[Any],
         line_editors: tuple[str, ...],
         loaded: list[tuple[str, str]],
         last_loaded: list[str],
@@ -410,7 +410,7 @@ _COMMAND_HANDLERS: dict[str, Callable[[_ReplState, str], Awaitable[None]]] = {
 
 
 async def _run_repl_loop(
-    repl: ReplSession,
+    repl: AsyncReplSession[Any],
     prompt: Any,
     *,
     initial_loaded: list[str] | None = None,
@@ -463,7 +463,7 @@ async def _run_repl_loop(
 
 async def _dispatch(
     state: _ReplState,
-    repl: ReplSession,
+    repl: AsyncReplSession[Any],
     command: str,
     argument: str,
     line: str,
@@ -522,7 +522,7 @@ def _print_error(exc: NixError | ReplRunError) -> None:
         print_formatted_text(f"error: {exc}")
 
 
-async def _load_initial_target(repl: ReplSession, target: EvaluationTarget) -> list[str]:
+async def _load_initial_target(repl: AsyncReplSession[Any], target: EvaluationTarget) -> list[str]:
     """Load a command-line target into the persistent REPL scope."""
     if target.file is None and target.flake is None:
         return []

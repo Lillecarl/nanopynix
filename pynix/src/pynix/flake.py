@@ -16,7 +16,7 @@ from nanopynix._typechecking import BEARTYPING
 from pynix._util import eval_session, print_json
 
 if TYPE_CHECKING or BEARTYPING:
-    from nanopynix.rpc import ValueProxy
+    from nanopynix import AsyncValue
 
 logger = structlog.get_logger(__name__)
 console = Console()
@@ -82,7 +82,7 @@ class Info(Command):
         await _print_flake_metadata(self.flake_ref, store_uri=self.store)
 
 
-def _navigate(root: ValueProxy, attrpath: str) -> ValueProxy:
+def _navigate(root: AsyncValue, attrpath: str) -> AsyncValue:
     for part in attrpath.split("."):
         root = root.attr(part)
     return root
@@ -90,7 +90,7 @@ def _navigate(root: ValueProxy, attrpath: str) -> ValueProxy:
 
 async def _build_tree(  # noqa: C901 -- tracked complexity/arg-count debt, see TODO.md
     tree: Tree,
-    value: ValueProxy,
+    value: AsyncValue,
     nix_type_enum: type[nanopynix.NixType],
     *,
     depth: int = 0,

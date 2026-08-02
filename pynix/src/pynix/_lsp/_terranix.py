@@ -206,7 +206,7 @@ class TerranixDialect(Dialect):
         for name in names:
             context.roots.setdefault(name, config_root.attr(name))
 
-    async def _resource_output(self, entry: nanopynix.rpc.ValueProxy, attr_name: str) -> str | None:
+    async def _resource_output(self, entry: nanopynix.AsyncValue, attr_name: str) -> str | None:
         try:
             outputs = await entry.attr(attr_name).build()
         except NixError:
@@ -329,7 +329,7 @@ class TerranixDialect(Dialect):
         self,
         context: FileContext,
         path: list[str],
-    ) -> nanopynix.rpc.ValueProxy | None:
+    ) -> nanopynix.AsyncValue | None:
         if path[0] not in context.roots:
             return None
         value = context.roots[path[0]]

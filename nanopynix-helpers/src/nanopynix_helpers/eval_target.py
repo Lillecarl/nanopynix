@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from nanopynix._typechecking import BEARTYPING
 
 if TYPE_CHECKING or BEARTYPING:
-    from nanopynix.rpc import ValueProxy
+    from nanopynix import AsyncValue
 
 
 class EvaluationTargetError(RuntimeError):
@@ -17,7 +17,7 @@ class EvaluationTargetError(RuntimeError):
 _MAX_SUGGESTED_ATTRS = 10
 
 
-async def select_attr(value: ValueProxy, attrpath: str) -> ValueProxy:
+async def select_attr[ValueT: AsyncValue](value: ValueT, attrpath: str) -> ValueT:
     """Select a dot-separated attribute path with useful missing-attribute errors."""
     for part in attrpath.split("."):
         if not part:

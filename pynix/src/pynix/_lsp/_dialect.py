@@ -37,7 +37,7 @@ class Dialect:
         """
         return
 
-    async def extra_hover_sections(self, value: nanopynix.rpc.ValueProxy) -> list[str] | None:
+    async def extra_hover_sections(self, value: nanopynix.AsyncValue) -> list[str] | None:
         """Extra Markdown sections for a resolved *value*, replacing the generic type/JSON dump.
 
         Returns None to mean "nothing to add here, use the generic renderer."

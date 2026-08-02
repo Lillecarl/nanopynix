@@ -58,7 +58,7 @@ def derive_module_roots(context: FileContext) -> None:
     context.roots.setdefault(OPTIONS_NAME, module_entry.attr(OPTIONS_NAME))
 
 
-async def resolve_module_arg(context: FileContext, name: str) -> nanopynix.rpc.ValueProxy | None:
+async def resolve_module_arg(context: FileContext, name: str) -> nanopynix.AsyncValue | None:
     """Resolve *name* as a NixOS module-system top-level argument (e.g. ``pkgs``).
 
     Requires a ``moduleEntry`` root. A real module receives each of its own
@@ -83,7 +83,7 @@ async def resolve_module_arg(context: FileContext, name: str) -> nanopynix.rpc.V
     return None
 
 
-async def resolve_formal_arg(context: FileContext, source: str, name: str) -> nanopynix.rpc.ValueProxy | None:
+async def resolve_formal_arg(context: FileContext, source: str, name: str) -> nanopynix.AsyncValue | None:
     """Resolve *name* as a module argument, gated on the file's own lambda declaring it.
 
     Combines ``top_level_lambda_formals`` (does this file's own top-level
@@ -97,7 +97,7 @@ async def resolve_formal_arg(context: FileContext, source: str, name: str) -> na
     return await resolve_module_arg(context, name)
 
 
-async def is_option_declaration(value: nanopynix.rpc.ValueProxy) -> bool:
+async def is_option_declaration(value: nanopynix.AsyncValue) -> bool:
     """True if *value* looks like an ``mkOption``-produced option declaration.
 
     These attrsets implement nixpkgs' ``__toString`` (returning their dotted
@@ -113,7 +113,7 @@ async def is_option_declaration(value: nanopynix.rpc.ValueProxy) -> bool:
     return marker == "option"
 
 
-async def render_option_declaration(value: nanopynix.rpc.ValueProxy) -> list[str]:
+async def render_option_declaration(value: nanopynix.AsyncValue) -> list[str]:
     sections: list[str] = []
     try:
         description = await value.attr("description").to_python()
@@ -159,7 +159,7 @@ def _position_from_json(entry: object) -> types.Location | None:
     return types.Location(uri=uri, range=types.Range(position, position))
 
 
-async def _option_declaration_locations(value: nanopynix.rpc.ValueProxy) -> list[types.Location] | None:
+async def _option_declaration_locations(value: nanopynix.AsyncValue) -> list[types.Location] | None:
     """Every declaration site of an ``mkOption``-produced *value*, from its own ``declarationPositions``.
 
     nixpkgs' ``lib/options.nix`` already tracks this explicitly (an option
@@ -197,12 +197,12 @@ class ModuleSystemDialect(Dialect):
     async def derive_roots(self, context: FileContext) -> None:
         derive_module_roots(context)
 
-    async def extra_hover_sections(self, value: nanopynix.rpc.ValueProxy) -> list[str] | None:
+    async def extra_hover_sections(self, value: nanopynix.AsyncValue) -> list[str] | None:
         if await is_option_declaration(value):
             return await render_option_declaration(value)
         return None
 
-    async def _resolve(self, context: FileContext, source: str, path: list[str]) -> nanopynix.rpc.ValueProxy | None:
+    async def _resolve(self, context: FileContext, source: str, path: list[str]) -> nanopynix.AsyncValue | None:
         if path and path[0] in context.roots:
             return None
         if path:
@@ -247,7 +247,7 @@ class ModuleSystemDialect(Dialect):
 
         Only attempted when *path* has a parent to look the last segment up
         in, and only when this context has a ``moduleEntry``-backed eval
-        session to run it in (a ``ValueProxy`` and the function it's passed
+        session to run it in (a ``AsyncValue`` and the function it's passed
         to must share the same ``EvalSession`` -- see
         ``FileContext.eval_session``'s docstring). Returns None on any
         failure, including nixpkgs' own composed package sets (built via

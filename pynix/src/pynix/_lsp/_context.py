@@ -83,8 +83,8 @@ def parse_directives(source: str) -> list[ContextDirective]:
 class _SharedEval:
     """One (expr, path) directive's shared evaluation outcome, plus how many open files currently depend on it."""
 
-    session: nanopynix.rpc.EvalSession
-    value: nanopynix.rpc.ValueProxy | None = None
+    session: nanopynix.AsyncEvalSession
+    value: nanopynix.AsyncValue | None = None
     error: NixError | None = None
     refcount: int = 0
 
@@ -127,7 +127,7 @@ class SharedEvalCache:
 
     async def acquire(
         self, expr: str, path: str
-    ) -> tuple[nanopynix.rpc.EvalSession, nanopynix.rpc.ValueProxy | None, NixError | None]:
+    ) -> tuple[nanopynix.AsyncEvalSession, nanopynix.AsyncValue | None, NixError | None]:
         """Evaluate *expr* (against base directory *path*) on first use, or hand back the already-evaluated result.
 
         Increments the entry's refcount either way -- callers must pair this
@@ -190,9 +190,9 @@ class FileContext:
         self._shared = shared
         self.directives = directives
         self._file_dir = file_dir
-        self._evals: dict[str, nanopynix.rpc.EvalSession] = {}
+        self._evals: dict[str, nanopynix.AsyncEvalSession] = {}
         self._acquired_keys: list[tuple[str, str]] = []
-        self.roots: dict[str, nanopynix.rpc.ValueProxy] = {}
+        self.roots: dict[str, nanopynix.AsyncValue] = {}
         self.errors: dict[str, NixError] = {}
 
     async def reload(self) -> None:
@@ -218,13 +218,13 @@ class FileContext:
         """
         return await self._shared.store_exec_prefix()
 
-    def eval_session(self, root_name: str) -> nanopynix.rpc.EvalSession | None:
+    def eval_session(self, root_name: str) -> nanopynix.AsyncEvalSession | None:
         """The ``EvalSession`` that produced ``roots[root_name]``, if any.
 
         For auxiliary lookups against a value already known to live in that
         root's own evaluation graph (e.g. calling ``builtins.
-        unsafeGetAttrPos`` with an existing ``ValueProxy`` as an argument) --
-        a ``ValueProxy`` and the function it's passed to must come from the
+        unsafeGetAttrPos`` with an existing ``AsyncValue`` as an argument) --
+        a ``AsyncValue`` and the function it's passed to must come from the
         *same* ``EvalSession`` (each has its own independent ``EvalState``
         in the underlying worker, so value handles aren't interchangeable
         across sessions even within the same ``FileContext``).
@@ -241,7 +241,7 @@ class FileContext:
         self.errors.clear()
 
 
-async def resolve_root_path(context: FileContext, path: list[str]) -> nanopynix.rpc.ValueProxy | None:
+async def resolve_root_path(context: FileContext, path: list[str]) -> nanopynix.AsyncValue | None:
     """Walk *path* through one of *context*'s bound roots by name (``path[0]``).
 
     Works for any name a directive bound directly, or a ``Dialect.derive_roots``

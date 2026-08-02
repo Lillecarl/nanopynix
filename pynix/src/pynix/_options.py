@@ -6,7 +6,7 @@ a handful of RPC round trips per option -- fine for a single hover lookup,
 but a real ``nixosConfigurations.<host>`` can expose 10,000-20,000 options,
 so that approach would take tens of thousands of round trips to index in
 bulk. ``fetch_option_doc_list`` instead runs the whole recursive walk *inside*
-the running Nix evaluator via ``ValueProxy.call()`` (which passes the
+the running Nix evaluator via ``AsyncValue.call()`` (which passes the
 already-evaluated options attrset by RPC handle, not by re-expressing it as
 source text) -- two RPC round trips total, independent of how many options
 exist.
@@ -43,7 +43,7 @@ from nanopynix._typechecking import BEARTYPING
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Mapping
 
-    from nanopynix.rpc import EvalSession, ValueProxy
+    from nanopynix import AsyncEvalSession, AsyncValue
 
 _COLLECT_OPTION_METADATA = """
 lib: options:
@@ -75,9 +75,9 @@ class OptionRecord:
 
 
 async def fetch_option_doc_list(
-    session: EvalSession,
-    options_value: ValueProxy,
-    lib_value: ValueProxy,
+    session: AsyncEvalSession,
+    options_value: AsyncValue,
+    lib_value: AsyncValue,
 ) -> list[OptionRecord]:
     """Bulk-extract every visible, non-internal option under *options_value*.
 
