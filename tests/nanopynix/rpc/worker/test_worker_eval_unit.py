@@ -121,6 +121,19 @@ class _FakeEvalState(nix_core.nanopynix_expr.EvalState):
         self.fetch_settings = fetch_settings
 
 
+def _fake_raw(eval_state: CoreEvalState) -> _FakeEvalState:
+    """The double behind a ``CoreEvalState``, narrowed for the assertions below.
+
+    ``_get_es`` was annotated ``Any``, which is what let these assertions reach
+    ``.store`` on a binding class that has no such attribute. #16 typed it, so
+    the narrowing has to be written down -- and asserting that the double is
+    really in place says more than a cast does.
+    """
+    raw = eval_state.raw
+    assert isinstance(raw, _FakeEvalState)
+    return raw
+
+
 class _StoreId(nanopynix_store.Store):
     """A store stand-in that is only ever compared by an identity string.
 
@@ -303,7 +316,7 @@ async def test_open_eval_allows_concurrent_eval_states(monkeypatch: pytest.Monke
     second_response = await handler.open_eval(OpenEvalRequest(store_handle=first_handle, request_id=2))
     assert second_response.eval_handle != response.eval_handle
     second_selected = handler._get_es(second_response.eval_handle)  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
-    assert second_selected.raw.store == "first-store"
+    assert _fake_raw(second_selected).store == "first-store"
     assert second_selected is not selected
 
     close_eval_state(state, response.eval_handle)
@@ -336,12 +349,12 @@ async def test_open_eval_forwards_the_build_store_handle(
         OpenEvalRequest(store_handle=eval_store, build_store_handle=build_store, request_id=1),
     )
     selected = handler._get_es(with_build.eval_handle)  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
-    assert selected.raw.store == "eval-store"
-    assert selected.raw.build_store == "build-store", "the build store did not reach the evaluator"
+    assert _fake_raw(selected).store == "eval-store"
+    assert _fake_raw(selected).build_store == "build-store", "the build store did not reach the evaluator"
 
     # 0 is the wire's "none", as for every other optional handle.
     without_build = await handler.open_eval(OpenEvalRequest(store_handle=eval_store, request_id=2))
-    assert handler._get_es(without_build.eval_handle).raw.build_store is None  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
+    assert _fake_raw(handler._get_es(without_build.eval_handle)).build_store is None  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
 
     close_eval_state(state, with_build.eval_handle)
     close_eval_state(state, without_build.eval_handle)
