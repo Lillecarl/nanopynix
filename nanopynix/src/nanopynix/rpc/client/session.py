@@ -31,6 +31,7 @@ from nanopynix._wire import DEFAULT_STORE_URI
 from nanopynix.logging import BusSubscription, LogCapture
 from nanopynix.models import LogEvent
 from nanopynix.namespace import EXPERIMENTAL_FEATURE
+from nanopynix.protocols import AsyncSession
 from nanopynix.rpc.client._pool import WorkerClient
 from nanopynix.rpc.client._session import EvalSession, ReplSession
 from nanopynix.rpc.client.store import Store, StoreHandle
@@ -81,7 +82,7 @@ tests/nanopynix/test_engine_parity.py for why rpc's close takes no parameters
 where inproc's takes three."""
 
 
-class Session:
+class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
     """Session runtime — manages a single subprocess worker.
 
     A Session owns one thread-confined EvalState at a time. Its Store facade is

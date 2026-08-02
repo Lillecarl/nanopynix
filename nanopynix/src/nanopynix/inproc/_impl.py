@@ -67,6 +67,14 @@ from nanopynix.models import (
     PathInfo,
     StorePath,
 )
+from nanopynix.protocols import (
+    AsyncEvalSession,
+    AsyncLockedFlake,
+    AsyncReplSession,
+    AsyncSession,
+    AsyncStore,
+    AsyncValue,
+)
 from nanopynix.settings import (
     DEFAULT_LINE_EDITORS,
     NIX_PATH_SETTING_KEY,
@@ -191,7 +199,7 @@ def _run_with_log_context[T](operation_id: int, func: Callable[..., T], args: tu
         nanopynix_util.set_logger_request_id(previous)
 
 
-class Session:
+class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
     """Own one asynchronous, pointer-backed in-process Nix runtime.
 
     Nix library initialization and logger installation are process-global. To
@@ -690,7 +698,7 @@ class Session:
         return LogCapture(self, max_events=max_events, wait_timeout=wait_timeout)
 
 
-class Store:
+class Store(AsyncStore):
     """Async façade over one direct ``nanopynix_store.Store`` pointer."""
 
     def __init__(self, session: Session, uri: str) -> None:
@@ -1034,7 +1042,7 @@ class Store:
         return [StorePath(path) for path in paths]
 
 
-class EvalSession:
+class EvalSession(AsyncEvalSession["Value"]):
     """Own one thread-confined direct ``EvalState`` pointer."""
 
     def __init__(  # noqa: PLR0913 -- two stores and one settings object for each of Nix's three evaluator-facing scopes; grouping them would hide which scope a field belongs to, which is the whole point of the split
@@ -1316,7 +1324,7 @@ class EvalSession:
         await self.run(self._require_raw().reset_file_cache)
 
 
-class ReplSession(EvalSession):
+class ReplSession(EvalSession, AsyncReplSession["Value"]):
     """An :class:`EvalSession` with a persistent Nix lexical scope.
 
     Bindings submitted with :meth:`line` are available to later calls to
@@ -1434,7 +1442,7 @@ class ReplSession(EvalSession):
         return self._track_value(local)
 
 
-class LockedFlake:
+class LockedFlake(AsyncLockedFlake):
     """Async façade over one thread-confined in-memory flake lock."""
 
     def __init__(
@@ -1477,7 +1485,7 @@ class LockedFlake:
             await self._eval_session._run_closing(local.close)  # type: ignore[reportPrivateUsage] -- flake teardown follows evaluator close ordering  # noqa: SLF001
 
 
-class Value:
+class Value(AsyncValue):
     """Async façade over a thread-confined :class:`CoreValue`.
 
     A value is in one of two states. A *resolved* value holds a rooted

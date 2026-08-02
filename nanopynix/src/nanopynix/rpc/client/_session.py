@@ -74,6 +74,7 @@ from nanopynix.exceptions import (
     build_error_from_result,
 )
 from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedInput, NixType
+from nanopynix.protocols import AsyncEvalSession, AsyncLockedFlake, AsyncReplSession, AsyncValue
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
 from nanopynix.settings import (
     DEFAULT_LINE_EDITORS,
@@ -380,7 +381,7 @@ class _EvalProxyContext:
 type NixArg = ValueProxy | JsonScalar | list[NixArg] | dict[str, NixArg]
 
 
-class ValueProxy:
+class ValueProxy(AsyncValue):
     """Proxy for a Nix Value exported on the remote worker.
 
     Lifetime is tied to the ``EvalSession`` that created it — all gRPC
@@ -824,7 +825,7 @@ _ChildProxy = ValueProxy
 
 
 @dataclass
-class LockedFlakeHandle:
+class LockedFlakeHandle(AsyncLockedFlake):
     """Session-bound handle for an in-memory locked flake."""
 
     _session: EvalSession = field(repr=False)
@@ -883,7 +884,7 @@ class LockedFlakeHandle:
             raise
 
 
-class EvalSession:
+class EvalSession(AsyncEvalSession["ValueProxy"]):
     """Own the parent Session's one live EvalState.
 
     All ``ValueProxy`` instances created through this session become
@@ -1263,7 +1264,7 @@ class EvalSession:
         await self._ensure_proxy().reset_file_cache(ResetFileCacheRequest())
 
 
-class ReplSession(EvalSession):
+class ReplSession(EvalSession, AsyncReplSession["ValueProxy"]):
     """An :class:`EvalSession` with a persistent Nix lexical scope.
 
     Bindings submitted with :meth:`line` are available to later calls to

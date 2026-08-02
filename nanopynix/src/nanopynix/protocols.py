@@ -25,15 +25,31 @@ from :mod:`typing`: ``AsyncReplSession`` has a non-method member
 (``line_editors``), so ``isinstance`` works against it but ``issubclass`` does
 not.
 
-Protocols rather than ABCs, deliberately. The two engines share no construction
-or lifetime mechanics, so there is no base worth inheriting, and structural
-typing lets an implementation outside this repository conform without importing
-anything from it. An ABC would trade that away for a nominal check that the
-conformance tests already make statically.
+Every member is ``@abstractmethod``, and each engine class names its protocol
+as a base. That is not a move to ABCs, and it gives up nothing: ``Protocol``'s
+metaclass **is** ``ABCMeta``, so an abstract member enforces itself on an
+explicit subclass while a class that inherits nothing still conforms
+structurally. A ``Protocol`` with abstract members is a superset of an ABC.
+
+``@abstractmethod`` is required rather than decorative. An explicit subclass
+that omits a **non**-abstract member inherits the ``...`` body, so the call
+returns ``None`` and the omission is silent -- a missing ``close`` would leak
+rather than raise. Abstract turns that into a ``TypeError`` at instantiation.
+
+Each protocol declares ``__slots__ = ()`` **in its own body**, and that line is
+load-bearing. A ``__slots__``-based class that subclasses a protocol whose body
+omits it gains a ``__dict__`` per instance -- measured at 40 bytes to 56 on
+Python 3.14, plus the dict. rpc's ``Store``, ``ValueProxy``, ``EvalSession``
+and ``ReplSession`` are all ``__slots__``-based, and one ``ValueProxy`` exists
+per Nix value. The check is easy to get wrong:
+``getattr(protocol, "__slots__")`` answers ``()`` from ``Protocol`` itself even
+when the body omits it, so ``tests/nanopynix/test_protocols.py`` asks
+``vars(protocol)`` instead.
 """
 
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar, runtime_checkable
 
 from nanopynix_bindings.store import BuildMode
@@ -74,10 +90,15 @@ VerbosityT_co = TypeVar("VerbosityT_co", covariant=True)
 class AsyncValue(Protocol):
     """The common asynchronous value lifecycle and forcing interface."""
 
+    __slots__ = ()  # in the body, and load-bearing -- see the module docstring
+
+    @abstractmethod
     async def __aenter__(self) -> Self: ...
 
+    @abstractmethod
     async def __aexit__(self, *args: object) -> None: ...
 
+    @abstractmethod
     async def get_type(self) -> NixType:
         """Evaluate to weak head normal form and return the resulting Nix type.
 
@@ -88,22 +109,27 @@ class AsyncValue(Protocol):
         """
         ...
 
+    @abstractmethod
     async def to_python(self, *, copy_to_store: bool = False) -> Any:
         """Convert the whole value tree to plain Python data, using Nix's toJSON rules."""
         ...
 
+    @abstractmethod
     async def realise_string(self) -> str:
         """Coerce to a string and realise its Nix string context."""
         ...
 
+    @abstractmethod
     async def realise_argv(self) -> list[str]:
         """Coerce a Nix list to argv and realise all string contexts."""
         ...
 
+    @abstractmethod
     async def edit_location(self) -> tuple[str, int]:
         """Return the physical file path and line Nix would open for this value."""
         ...
 
+    @abstractmethod
     async def release(self) -> None:
         """Release the underlying worker-side handle. Idempotent."""
         ...
@@ -114,40 +140,49 @@ class AsyncValue(Protocol):
     # returns is what keeps an engine's values homogeneous: indexing an
     # inproc list yields an inproc Value, not "some AsyncValue".
 
+    @abstractmethod
     async def as_int(self) -> int:
         """Return this value as a Nix integer, or raise if it is not one."""
         ...
 
+    @abstractmethod
     async def as_float(self) -> float:
         """Return this value as a Nix float, or raise if it is not one."""
         ...
 
+    @abstractmethod
     async def as_bool(self) -> bool:
         """Return this value as a Nix boolean, or raise if it is not one."""
         ...
 
+    @abstractmethod
     async def as_string(self) -> str:
         """Return this value as a Nix string, or raise if it is not one."""
         ...
 
+    @abstractmethod
     async def as_list(self) -> list[Self]:
         """Return this value's elements, or raise if it is not a list."""
         ...
 
+    @abstractmethod
     async def as_dict(self) -> dict[str, Self]:
         """Return this value's attributes, or raise if it is not an attrset."""
         ...
 
     # ── Structure ──────────────────────────────────────────────────
 
+    @abstractmethod
     async def has_attr(self, name: str, /) -> bool:
         """Return whether this attrset has the attribute ``name``."""
         ...
 
+    @abstractmethod
     async def attr_names(self) -> list[str]:
         """Return this attrset's attribute names."""
         ...
 
+    @abstractmethod
     async def list_length(self) -> int:
         """Return the number of elements in this list."""
         ...
@@ -166,28 +201,34 @@ class AsyncValue(Protocol):
     # carried them as Value.attr:async, Value.list_get:async and
     # Value.call:params.
 
+    @abstractmethod
     def attr(self, name: str, /) -> Self:
         """Select attribute ``name``, without forcing anything yet."""
         ...
 
+    @abstractmethod
     def list_get(self, index: int, /) -> Self:
         """Select element ``index``, without forcing anything yet."""
         ...
 
     # ── Application and realisation ────────────────────────────────
 
+    @abstractmethod
     async def call(self, *args: Any) -> Self:
         """Call this value as a curried Nix function with ``args``."""
         ...
 
+    @abstractmethod
     async def apply(self, function: str | Self, /) -> Self:
         """Apply ``function`` to this value, returning the unforced result."""
         ...
 
+    @abstractmethod
     async def auto_call(self) -> Self:
         """Auto-call a function using its default arguments, as ``nix-build`` does."""
         ...
 
+    @abstractmethod
     async def build(self, *, build_mode: BuildMode | int | None = None) -> dict[str, str]:
         """Realise this derivation, returning output name to store path.
 
@@ -203,11 +244,16 @@ class AsyncValue(Protocol):
 class AsyncStore(Protocol):
     """The common asynchronous Store lifecycle and path-query interface."""
 
+    __slots__ = ()  # in the body, and load-bearing -- see the module docstring
+
+    @abstractmethod
     async def __aenter__(self) -> Self: ...
 
+    @abstractmethod
     async def __aexit__(self, *args: object) -> None: ...
 
     @property
+    @abstractmethod
     def is_open(self) -> bool:
         """Whether this store holds an open Nix store.
 
@@ -217,38 +263,47 @@ class AsyncStore(Protocol):
         """
         ...
 
+    @abstractmethod
     async def open(self) -> None:
         """Open the underlying store."""
         ...
 
+    @abstractmethod
     async def close(self, *, force: bool = False) -> None:
         """Close the underlying store, optionally closing its evaluator first."""
         ...
 
+    @abstractmethod
     async def uri(self) -> str:
         """Return the canonical URI of this store."""
         ...
 
+    @abstractmethod
     async def store_dir(self) -> str:
         """Return this store's logical store directory."""
         ...
 
+    @abstractmethod
     async def parse_store_path(self, path: str, /) -> StorePath:
         """Validate and normalise ``path`` as a Nix store path."""
         ...
 
+    @abstractmethod
     async def is_valid_path(self, path: str | StorePath, /) -> bool:
         """Return whether ``path`` is valid in this store."""
         ...
 
+    @abstractmethod
     async def query_path_info(self, path: str | StorePath, /) -> PathInfo:
         """Return metadata for a valid store path."""
         ...
 
+    @abstractmethod
     async def query_all_valid_paths(self) -> list[StorePath]:
         """Return every valid path registered in this store."""
         ...
 
+    @abstractmethod
     async def compute_fs_closure(
         self,
         path: str | StorePath,
@@ -261,34 +316,42 @@ class AsyncStore(Protocol):
         """Return the filesystem closure of ``path``."""
         ...
 
+    @abstractmethod
     async def query_derivation_outputs(self, path: str | StorePath, /) -> list[StorePath]:
         """Return output paths declared by a derivation."""
         ...
 
+    @abstractmethod
     async def query_valid_derivers(self, path: str | StorePath, /) -> list[StorePath]:
         """Return valid derivations that produced ``path``."""
         ...
 
+    @abstractmethod
     async def query_referrers(self, path: str | StorePath, /) -> list[StorePath]:
         """Return valid store paths that reference ``path``."""
         ...
 
+    @abstractmethod
     async def follow_links_to_store_path(self, path: str, /) -> StorePath:
         """Resolve a path that may traverse symlinks to its containing store path."""
         ...
 
+    @abstractmethod
     async def query_path_from_hash_part(self, hash_part: str, /) -> StorePath | None:
         """Return the valid store path whose hash component is ``hash_part``, if any."""
         ...
 
+    @abstractmethod
     async def query_substitutable_paths(self, paths: list[str | StorePath], /) -> list[StorePath]:
         """Return the subset of ``paths`` that can be substituted from a binary cache."""
         ...
 
+    @abstractmethod
     async def get_build_log(self, path: str | StorePath, /) -> str | None:
         """Return the build log for ``path``, or ``None`` if no log is available."""
         ...
 
+    @abstractmethod
     async def query_missing(
         self,
         derived_paths: list[str | StorePath],
@@ -297,6 +360,7 @@ class AsyncStore(Protocol):
         """Return which of ``derived_paths`` still need to be built or substituted."""
         ...
 
+    @abstractmethod
     async def build_paths_with_results(
         self,
         derived_paths: list[str | StorePath],
@@ -330,10 +394,12 @@ class AsyncStore(Protocol):
         """
         ...
 
+    @abstractmethod
     async def read_derivation(self, drv_path: str | StorePath, /) -> Derivation:
         """Parse and return the ``.drv`` file at ``drv_path``."""
         ...
 
+    @abstractmethod
     async def collect_garbage(
         self,
         action: GcAction,
@@ -346,22 +412,27 @@ class AsyncStore(Protocol):
         """Run a garbage-collection pass; see :meth:`nanopynix.store.Store.collect_garbage`."""
         ...
 
+    @abstractmethod
     async def add_temp_root(self, path: str | StorePath, /) -> None:
         """Keep ``path`` alive against the collector for as long as this process holds the store."""
         ...
 
+    @abstractmethod
     async def add_perm_root(self, path: str | StorePath, gc_root: str, /) -> str:
         """Create the symlink ``gc_root`` -> ``path`` and return its resolved path."""
         ...
 
+    @abstractmethod
     async def add_indirect_root(self, path: str, /) -> None:
         """Register an existing user-facing symlink as an indirect root."""
         ...
 
+    @abstractmethod
     async def find_roots(self, *, censor: bool = False) -> list[GcRoot]:
         """Return the garbage collector's roots."""
         ...
 
+    @abstractmethod
     async def compute_store_path(
         self,
         path: str,
@@ -373,6 +444,7 @@ class AsyncStore(Protocol):
         """Compute the store path content-addressing ``path`` without adding it."""
         ...
 
+    @abstractmethod
     async def add_to_store(
         self,
         path: str,
@@ -384,14 +456,17 @@ class AsyncStore(Protocol):
         """Add a file or directory to this store, returning its store path."""
         ...
 
+    @abstractmethod
     async def store_dirs(self) -> StoreDirs:
         """Return this store's full set of configured directories."""
         ...
 
+    @abstractmethod
     async def ensure_path(self, path: str | StorePath, /) -> None:
         """Make ``path`` valid in this store, substituting it if necessary."""
         ...
 
+    @abstractmethod
     async def copy_closure(
         self,
         paths: list[str | StorePath],
@@ -411,10 +486,12 @@ class AsyncStore(Protocol):
         """
         ...
 
+    @abstractmethod
     async def optimise_store(self) -> None:
         """Reclaim disk space by hard-linking identical files in this store."""
         ...
 
+    @abstractmethod
     async def verify_store(self, *, check_contents: bool = False, repair: bool = False) -> bool:
         """Check this store's consistency, returning whether errors were found."""
         ...
@@ -424,14 +501,19 @@ class AsyncStore(Protocol):
 class AsyncLockedFlake(Protocol):
     """The common lifecycle for an in-memory flake lock."""
 
+    __slots__ = ()  # in the body, and load-bearing -- see the module docstring
+
+    @abstractmethod
     async def eval(self) -> AsyncValue:
         """Evaluate this locked flake's outputs."""
         ...
 
+    @abstractmethod
     async def write_lock_file(self) -> None:
         """Persist this locked flake's lock file to disk."""
         ...
 
+    @abstractmethod
     async def release(self) -> None:
         """Release the worker-side handle for this locked flake. Idempotent."""
         ...
@@ -445,10 +527,14 @@ class AsyncVerbosityController(Protocol[VerbosityT_co]):
     :class:`AsyncEvalSession` extends it.
     """
 
+    __slots__ = ()  # in the body, and load-bearing -- see the module docstring
+
+    @abstractmethod
     async def get_verbosity(self) -> VerbosityT_co:
         """Return the current Nix log verbosity."""
         ...
 
+    @abstractmethod
     async def set_verbosity(self, verbosity: LogLevelInput) -> VerbosityT_co:
         """Set the Nix log verbosity and return the resulting level."""
         ...
@@ -470,18 +556,25 @@ class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](AsyncVerbosityController
     ``:verbosity`` command holds a repl session and nothing else.
     """
 
+    __slots__ = ()  # in the body, and load-bearing -- see the module docstring
+
+    @abstractmethod
     async def __aenter__(self) -> Self: ...
 
+    @abstractmethod
     async def __aexit__(self, *args: object) -> None: ...
 
+    @abstractmethod
     async def open(self) -> None:
         """Create this session's evaluator. Called automatically by ``async with``."""
         ...
 
+    @abstractmethod
     async def close(self) -> None:
         """Release all values exported from this session and free the evaluator."""
         ...
 
+    @abstractmethod
     async def configure(
         self,
         eval_settings: NixEvalSettings | None = None,
@@ -490,18 +583,22 @@ class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](AsyncVerbosityController
         """Apply live-mutable eval and fetch settings to the open evaluator."""
         ...
 
+    @abstractmethod
     async def file(self, path: str, /) -> ValueT:
         """Evaluate the Nix expression in the file at ``path``."""
         ...
 
+    @abstractmethod
     async def string(self, expr: str, path: str = "<string>", /) -> ValueT:
         """Evaluate the Nix expression ``expr``."""
         ...
 
+    @abstractmethod
     async def reset_file_cache(self) -> None:
         """Discard parsed file cache entries before re-evaluating source files."""
         ...
 
+    @abstractmethod
     async def lock_flake(
         self,
         ref: str,
@@ -513,10 +610,12 @@ class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](AsyncVerbosityController
         """Lock a flake, optionally updating inputs; see :meth:`nanopynix.rpc.EvalSession.lock_flake`."""
         ...
 
+    @abstractmethod
     async def eval_flake(self, ref: str, /, *, write_lock_file: bool = True) -> ValueT:
         """Lock and evaluate a flake in one step, returning its outputs."""
         ...
 
+    @abstractmethod
     async def get_flake(self, ref: str, /) -> FlakeRef:
         """Parse and resolve a flake reference without evaluating its outputs."""
         ...
@@ -533,23 +632,30 @@ class AsyncReplSession[ValueT: AsyncValue = AsyncValue](AsyncEvalSession[ValueT]
     are one interface.
     """
 
+    __slots__ = ()  # in the body, and load-bearing -- see the module docstring
+
     @property
+    @abstractmethod
     def line_editors(self) -> tuple[str, ...]:
         """Editor-name substrings that support Nix's ``+LINE`` argument."""
         ...
 
+    @abstractmethod
     async def line(self, text: str, path: str = "<string>", /) -> ValueT | None:
         """Process one Nix REPL line. Bindings return ``None``; expressions return a value."""
         ...
 
+    @abstractmethod
     async def load_file(self, path: str, /) -> ValueT:
         """Load a Nix expression file as ``nix repl :load`` does."""
         ...
 
+    @abstractmethod
     async def add_attrs(self, value: ValueT, /) -> list[str]:
         """Add all attributes from ``value`` to this REPL's lexical scope."""
         ...
 
+    @abstractmethod
     async def scope_names(self) -> list[str]:
         """Return the identifiers visible in this REPL's lexical scope."""
         ...
@@ -595,14 +701,20 @@ class AsyncSession[
     session is one door onto it rather than the owner of its own.
     """
 
+    __slots__ = ()  # in the body, and load-bearing -- see the module docstring
+
+    @abstractmethod
     async def __aenter__(self) -> Self: ...
 
+    @abstractmethod
     async def __aexit__(self, *args: object) -> None: ...
 
+    @abstractmethod
     async def open(self) -> None:
         """Start the engine. Called automatically by ``async with``."""
         ...
 
+    @abstractmethod
     async def close(self) -> None:
         """Release everything this session owns, and stop the engine.
 
@@ -615,10 +727,12 @@ class AsyncSession[
         """
         ...
 
+    @abstractmethod
     def store(self, uri: StoreConfig | str | None = None) -> StoreT:
         """Return a store for this session, not yet open."""
         ...
 
+    @abstractmethod
     def eval(
         self,
         store: StoreT,
@@ -630,6 +744,7 @@ class AsyncSession[
         """Return an evaluator bound to ``store``, not yet open."""
         ...
 
+    @abstractmethod
     def repl(
         self,
         store: StoreT,
@@ -647,18 +762,22 @@ class AsyncSession[
         """
         ...
 
+    @abstractmethod
     async def settings(self, *, overridden_only: bool = False) -> dict[str, str]:
         """Read the Nix settings this session's engine currently holds."""
         ...
 
+    @abstractmethod
     async def set_settings(self, settings: NixGlobalSettings) -> dict[str, str]:
         """Apply global Nix settings, and return the values that took effect."""
         ...
 
+    @abstractmethod
     async def settings_provenance(self) -> SettingsProvenance:
         """Report where each setting this session applied came from."""
         ...
 
+    @abstractmethod
     def log_stream(self) -> AsyncIterator[LogEvent]:
         """Iterate this session's Nix log events until it closes.
 
@@ -668,6 +787,7 @@ class AsyncSession[
         """
         ...
 
+    @abstractmethod
     def subscribe(self, callback: LogCallback) -> BusSubscription:
         """Call ``callback`` with each log event, and once with ``None`` at the end.
 
@@ -675,6 +795,7 @@ class AsyncSession[
         """
         ...
 
+    @abstractmethod
     def capture_logs(self, *, max_events: int | None = None, wait_timeout: float | None = None) -> LogCapture:
         """Record typed log events for the duration of an ``async with`` block."""
         ...
