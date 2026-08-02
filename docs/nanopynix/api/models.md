@@ -35,6 +35,13 @@ Python-side convenience methods.
 .. autoclass:: nanopynix.BuildResult
    :members:
 
+.. autoclass:: nanopynix.ResultType
+   :members:
+   :undoc-members:
+
+.. autoclass:: nanopynix.GcRoot
+   :members:
+
 .. autoclass:: nanopynix.DerivationOutput
    :members:
 

@@ -30,7 +30,6 @@ from nanopynix_bindings.util import (
 )
 from nanopynix_proto.nix.common import LogLevel
 from nanopynix_proto.nix.store import GcAction as GcAction
-from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 from nanopynix import inproc as inproc, rpc as rpc, stores as stores
 from nanopynix._process_title import set_manager_title as set_manager_title
@@ -105,7 +104,6 @@ from nanopynix.models import (
     PrimOpSpec,
     ResultType,
     StorePath,
-    ValueHandle,
 )
 from nanopynix.namespace import (
     NamespaceSupport as NamespaceSupport,
@@ -284,7 +282,6 @@ __all__ = [
     "UnsupportedError",
     "UsageError",
     "Value",
-    "ValueHandle",
     "ValueReleasedError",
     "WorkerDiedError",
     "WrongNixTypeError",
@@ -326,7 +323,6 @@ __all__ = [
     "set_verbosity",
     "store_exec_prefix",
     "stores",
-    "strip_ansi",
     "to_yaml",
     "yaml_primops",
 ]
