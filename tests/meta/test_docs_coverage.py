@@ -9,17 +9,22 @@ lines long. See ``tests/support/docs_directives.py`` -- a substring test reports
 scores of false absences, because ``:members:`` documents a name without
 writing it down.
 
-The ledger is what makes the gate landable today. Without it the test could not
-go green until every page existed, so it would not have been added at all, and
-the drift would have gone on being invisible. It runs both ways: a new
-undocumented name fails, and a ledger entry that has been documented fails so
-the entry gets deleted. The list can only get shorter.
+The ledger is what made the gate landable. Without it the test could not go
+green until every page existed, so it would not have been added at all, and the
+drift would have gone on being invisible. It runs both ways: a new undocumented
+name fails, and a ledger entry that has been documented fails so the entry gets
+deleted. The list can only get shorter.
 
 **Where a name deserves to live is a judgement, and this file does not make
 it.** It reports that no page renders the name. Choosing the page, and deciding
-whether the name should be public at all, stay with a person -- which is why
-each entry below carries a reason and an issue number rather than a ``# TODO``.
-The list started at 32 and is now 9, because #43 wrote ``bindings.md``.
+whether the name should be public at all, stay with a person -- which is why an
+entry carries a reason and an issue number rather than a ``# TODO``.
+
+**The list is empty, and the empty list is the point.** It ran 44, then 32 when
+#43 wrote ``bindings.md``, then 9, and #15 ruled on the last nine: seven got a
+page and two left ``__all__``. An entry added here from now on is a name whose
+status nobody has decided yet, and it needs the same treatment -- not a longer
+list.
 """
 
 from __future__ import annotations
@@ -40,55 +45,12 @@ from tests.support.docs_directives import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 API_DIR = REPO_ROOT / DOCS_API_DIR
 
-_IS_IT_PUBLIC = (
-    "A public name whose home raises the question of whether it should be "
-    "public. #15 owns that question, and a page cannot be written before it "
-    "is answered -- documenting the name would settle it by accident."
-)
-
 # Each name in `nanopynix.__all__` that no directive renders, with the reason.
 #
-# One group is left, and it is the one that needs a decision rather than a
-# page. Everything that only needed a directive has one: the namespace API,
-# `StoreImpl`, `LogCollector`, `normalize_log_level`, `LogLevelInput`,
-# `DerivedPath`, `DEFAULT_EXPERIMENTAL_FEATURES`, the six yaml primops, and the
-# seven proto-derived data models that `models.md` already existed to hold.
-# The 23 compiled-binding names left in #43, which wrote `bindings.md`.
-UNDOCUMENTED: dict[str, str] = {
-    # -- Is it public? (9). #15. ------------------------------------------
-    "DISPATCHABLE_METHODS": ("A tuple with no `__module__`, so there is no page it belongs to. " + _IS_IT_PUBLIC),
-    "GcRoot": (
-        "A generated proto message. The seven that a caller receives joined "
-        "`models.md`. This one is a store internal a caller does not "
-        "construct. " + _IS_IT_PUBLIC
-    ),
-    "LogLevel": (
-        "A generated proto enum. `normalize_log_level` and `LogLevelInput` "
-        "are the documented way in, so a page here asserts the raw enum is "
-        "also a name to reach for. " + _IS_IT_PUBLIC
-    ),
-    "ResultType": ("The enum inside `BuildResult`, and reachable through that documented class. " + _IS_IT_PUBLIC),
-    "ValueHandle": (
-        "An rpc wire type -- an integer handle for a worker-side value, and "
-        "an implementation detail of one engine's transport. " + _IS_IT_PUBLIC
-    ),
-    "init_libstore": (
-        "Defined on the `nanopynix` package itself rather than in a module, "
-        "so no `automodule` reaches it. " + _IS_IT_PUBLIC
-    ),
-    "rpc": (
-        "The submodule, exported as a name. Its contents are documented "
-        "across `session.md`, `store.md` and `eval.md`; the module object "
-        "itself is not a thing autodoc renders. " + _IS_IT_PUBLIC
-    ),
-    "set_manager_title": (
-        "Lives in `nanopynix._process_title`, a private module. A public name with a private home. " + _IS_IT_PUBLIC
-    ),
-    "strip_ansi": (
-        "Re-exported from the third-party package of the same name. "
-        "Documenting it would promise a function this project does not own. " + _IS_IT_PUBLIC
-    ),
-}
+# Empty. Every name the package publishes has a page. See the module docstring
+# for what an entry here would mean, and `docs/nanopynix/api/` for where the
+# last nine landed.
+UNDOCUMENTED: dict[str, str] = {}
 
 
 def test_the_directive_scanner_finds_the_docs() -> None:

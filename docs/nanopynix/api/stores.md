@@ -78,4 +78,6 @@ rather than what Nix documents.
 
 .. autoclass:: nanopynix.StoreImpl
    :members:
+
+.. autodata:: nanopynix.store_impl.DISPATCHABLE_METHODS
 ```

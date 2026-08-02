@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from anyio import Path as AnyioPath
+from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 from nanopynix import (
     EvalSessionClosedError,
@@ -20,7 +21,6 @@ from nanopynix import (
     NixType,
     NixTypeError,
     ValueReleasedError,
-    strip_ansi,
     yaml_primops,
 )
 from tests.support.git import init_flake_repo

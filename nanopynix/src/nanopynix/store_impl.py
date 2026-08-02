@@ -72,11 +72,17 @@ if TYPE_CHECKING:
 
     from nanopynix_bindings.store import Store
 
-# The store operations the C++ trampoline (`PyStoreImpl`) dispatches into
-# Python, taken from the trampoline itself rather than restated here. Listing a
-# method this class defines but `py_store_impl.cpp` never calls would be silent
-# -- the method would simply never run -- so the list is not ours to write.
 DISPATCHABLE_METHODS: tuple[str, ...] = STORE_DISPATCH_METHODS
+"""The store operations the C++ trampoline dispatches into Python.
+
+Read from ``PyStoreImpl`` itself rather than restated here. A method this class
+defines but ``py_store_impl.cpp`` never calls would fail in silence -- the
+method would simply never run -- so the list is not ours to write.
+
+Override one of these names in your :class:`StoreImpl` subclass and Nix calls
+it. Override any other name and nothing happens, which is what
+:meth:`~object.__init_subclass__` checks the class body against.
+"""
 
 # Where `__init_subclass__` records the answer, and the name `py_store_impl.cpp`
 # reads to find it. Changing it means changing the C++ side in lockstep.

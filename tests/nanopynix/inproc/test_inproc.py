@@ -16,6 +16,7 @@ import pytest
 from anyio import Path as AnyioPath
 from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
 from nanopynix_proto.nix.store import GcAction
+from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 import nanopynix
 from nanopynix import Derivation, GcResult, MissingInfo, NixType, StorePath, inproc, yaml_primops
@@ -655,7 +656,7 @@ async def test_inproc_ensure_path_accepts_a_valid_path_and_raises_for_an_absent_
     # The path assertion is what keeps this from going vacuous: without it,
     # any NixError at all -- a closed store, a bad session -- would satisfy
     # the test. Naming the path proves the error is about *this* lookup.
-    message = nanopynix.strip_ansi(str(caught.value))
+    message = strip_ansi(str(caught.value))
     assert "nanopynix-absent" in message, message
 
 

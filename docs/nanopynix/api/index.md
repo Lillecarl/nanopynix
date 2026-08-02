@@ -9,6 +9,7 @@ they compare.
 
 Worker (L3) <worker>
 Inproc (L2) <inproc>
+process
 namespace
 settings
 stores

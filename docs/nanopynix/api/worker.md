@@ -11,3 +11,7 @@ session
 store
 eval
 ```
+
+```{eval-rst}
+.. automodule:: nanopynix.rpc
+```
