@@ -171,7 +171,11 @@ def observed_differences() -> list[Difference]:
 #              the drift is counted rather than rediscovered.
 LEDGER: dict[str, str] = {
     # ── Session ────────────────────────────────────────────────────
-    "Session.run:inproc-only": "TRANSPORT: dispatches onto the session's Nix thread; rpc has no such thread to target.",
+    "Session.run:inproc-only": (
+        "TRANSPORT: dispatches onto the session's Nix thread; rpc has no such thread to target. Public on "
+        "purpose -- it is how a caller reaches a binding this facade does not wrap, and running it anywhere "
+        "but that thread is an error the evaluator refuses."
+    ),
     # "Session.capture_logs:rpc-only" retired here. LogCapture was rpc's, in
     # rpc.client.session, over a ContextVar in rpc.client._pool -- but nothing
     # about recording log events depends on where Nix runs, and inproc already
@@ -181,8 +185,13 @@ LEDGER: dict[str, str] = {
     # be built was inproc's end of the ACTIVE_LOG_CAPTURES tagging contract,
     # which lives in _next_operation_id -- the allocation point all four of
     # inproc's dispatch paths share, as WorkerClient.invoke is rpc's.
-    "Session.claim_eval:rpc-only": "TRANSPORT: leases a worker-side evaluator slot. Nothing to lease in-process.",
-    "Session.release_eval:rpc-only": "TRANSPORT: the release half of claim_eval.",
+    # "Session.claim_eval:rpc-only" and "Session.release_eval:rpc-only" retired
+    # here, by #36's criterion 7. Both add or discard the session's own set of
+    # open evaluators. A caller neither calls them nor could do anything with
+    # them, so they were transport bookkeeping that happened to be spelled
+    # without an underscore. They are `_claim_eval` and `_release_eval` now, and
+    # a private name is invisible to this file -- which is the point: a name
+    # that is not API should not need a ledger entry to excuse it.
     # Recorded as a DEFECT until it was looked at properly. All three
     # parameters follow from one fact -- inproc's Nix work runs on threads in
     # this process, and a thread cannot be killed -- so closing has to wait for
@@ -200,16 +209,32 @@ LEDGER: dict[str, str] = {
     # more destructive act -- worse than not having it.
     "Session.close:params": "TRANSPORT: inproc must drain threads it cannot kill; rpc terminates a process. wait/timeout/force bound a wait phase rpc does not have.",
     # ── Store ──────────────────────────────────────────────────────
-    "Store.rpc:rpc-only": "TRANSPORT: the generated StoreService proxy -- the escape hatch to the wire itself.",
-    "Store.store_handle:rpc-only": "TRANSPORT: worker-side handle used to wire a store into a remote session.",
+    "Store.rpc:rpc-only": (
+        "TRANSPORT: the generated StoreService proxy -- the escape hatch to the wire itself. Public on "
+        "purpose, and the class docstring advertises it. This is not inproc's deleted `Store.call`: that "
+        "one was `call(method, *args, **kwargs) -> Any`, and this is a typed generated service."
+    ),
+    # "Store.store_handle:rpc-only" retired here, by #36's criterion 7. Its own
+    # docstring said "for internal session integration", which is the whole
+    # finding: it names a slot in one worker process, so it means nothing to a
+    # caller and nothing at all in-process. It is `_store_handle` now.
     # Nothing else. Every remaining Store operation exists on both engines,
     # and `nanopynix.protocols.AsyncStore` declares them, so a new one added to
     # a single engine fails conformance in tests/nanopynix/test_protocols.py
     # before it can reach this ledger.
     # ── EvalSession ────────────────────────────────────────────────
-    "EvalSession.run:inproc-only": "TRANSPORT: dispatches onto the evaluator's dedicated thread.",
-    "EvalSession.has_pending_work:inproc-only": "TRANSPORT: introspects that same thread's queue.",
-    "EvalSession.release_locked_flake:rpc-only": "TRANSPORT: frees a worker-side handle; inproc's LockedFlake is a local object.",
+    "EvalSession.run:inproc-only": "TRANSPORT: dispatches onto the evaluator's dedicated thread. Public for the same reason as `Session.run`.",
+    "EvalSession.has_pending_work:inproc-only": (
+        "TRANSPORT: introspects that same thread's queue. Public on purpose -- an abandoned operation is "
+        "not awaitable, so this is the only way to observe that it has finished, and two cancellation "
+        "tests have no other means of asking."
+    ),
+    # "EvalSession.release_locked_flake:rpc-only" retired here, by #36's
+    # criterion 7. `LockedFlakeHandle.release` is how a caller releases one,
+    # and it exists on both engines; the session-level twin was duplicate
+    # surface only rpc could offer. Its two siblings, `_eval_locked_flake` and
+    # `_write_lock_file`, were already private for that exact reason -- this
+    # was the one the rule missed. It is `_release_locked_flake` now.
     # get_verbosity/set_verbosity were here as rpc-only. inproc's EvalSession
     # has them now, delegating to its Session: verbosity is process-wide, so
     # this is one setting reachable from two places rather than two settings.
@@ -257,7 +282,13 @@ LEDGER: dict[str, str] = {
     # and inproc's `close()` alias for `release()`. All resolved by deleting
     # the odd one out rather than by adding its twin to the other engine.
     "Value.nix_type:rpc-only": "TRANSPORT: a sync property peeking at the type already known locally, no round trip. In-process there is no round trip to avoid, so `type` is always cheap and a separate peek would mean nothing.",
-    "Value.handle:rpc-only": "TRANSPORT: the worker-side value handle this proxy stands for.",
+    "Value.handle:rpc-only": (
+        "TRANSPORT: the worker-side value handle this proxy stands for. Public on purpose, and the one "
+        "entry here that a caller genuinely reaches for: it is the identity of the value, so a walk over "
+        "an attrset can keep a visited set. `id(proxy)` cannot stand in -- two proxies for one worker "
+        "value share a handle and not an id. inproc has no equivalent because it has no handle, which is "
+        "the one place this ledger records a caller need that only one engine can meet."
+    ),
     # Three more retired here, the last of the Value cluster. `attr` and
     # `list_get` were "Value.attr:async"/"Value.list_get:async": inproc awaited
     # them, rpc returned a lazy child synchronously, so chained selection had

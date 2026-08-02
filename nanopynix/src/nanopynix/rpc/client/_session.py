@@ -105,9 +105,9 @@ if TYPE_CHECKING or BEARTYPING:
 # `EvalSession.__init__` entirely rather than checking its owner argument.
 @runtime_checkable
 class _EvalSessionOwner(Protocol):
-    def claim_eval(self, eval_session: EvalSession) -> None: ...
+    def _claim_eval(self, eval_session: EvalSession) -> None: ...
 
-    def release_eval(self, eval_session: EvalSession) -> None: ...
+    def _release_eval(self, eval_session: EvalSession) -> None: ...
 
 
 def _parse_nix_type(value: Any) -> NixType | None:
@@ -635,7 +635,7 @@ class ValueProxy(AsyncValue):
             return self._ctx.store_handle
         if store._session_id != self._ctx.session_id:  # type: ignore[reportPrivateUsage] -- cross-class access  # noqa: SLF001
             raise ValueError("Store belongs to a different session")
-        return store.store_handle
+        return store._store_handle  # type: ignore[reportPrivateUsage] -- the evaluator names the store it builds in  # noqa: SLF001
 
     async def _build_evaluated_value(
         self,
@@ -875,7 +875,7 @@ class LockedFlakeHandle(AsyncLockedFlake):
         if ref is None:
             return
         try:
-            await self._session.release_locked_flake(self, timeout=timeout)
+            await self._session._release_locked_flake(self, timeout=timeout)  # type: ignore[reportPrivateUsage] -- the handle asks its own session to free it  # noqa: SLF001
         except BaseException:
             self._session._deferred_releases().defer(ref)  # type: ignore[reportPrivateUsage] -- session owns cleanup retry queue  # noqa: SLF001
             raise
@@ -958,7 +958,7 @@ class EvalSession(AsyncEvalSession["ValueProxy"]):
         if self._proxy is not None:
             return
         if self._owner_session is not None:
-            self._owner_session.claim_eval(self)
+            self._owner_session._claim_eval(self)  # type: ignore[reportPrivateUsage] -- an evaluator registers itself with the session that owns it  # noqa: SLF001
         releases = _DeferredReleases()
         proxy = EvalProxy(self._worker, releases, self._rpc_timeout)
         rendered_eval = self._eval_settings.to_worker_settings() if self._eval_settings is not None else {}
@@ -981,7 +981,9 @@ class EvalSession(AsyncEvalSession["ValueProxy"]):
                 OpenEvalRequest(
                     store_handle=self._store_handle,
                     # 0 is the wire's "none" for an optional handle
-                    build_store_handle=0 if self._build_store is None else self._build_store.store_handle,
+                    build_store_handle=(
+                        0 if self._build_store is None else self._build_store._store_handle  # type: ignore[reportPrivateUsage] -- as above  # noqa: SLF001
+                    ),
                     eval_settings=rendered_eval,
                     fetch_settings=rendered_fetch,
                     **request_nix_path,
@@ -992,7 +994,7 @@ class EvalSession(AsyncEvalSession["ValueProxy"]):
             proxy.deactivate()
             releases.close()
             if self._owner_session is not None:
-                self._owner_session.release_eval(self)
+                self._owner_session._release_eval(self)  # type: ignore[reportPrivateUsage] -- the release half of _claim_eval above  # noqa: SLF001
             raise
         self._active = [True]
         self._owner = _EvalOwner(_EvalOwnerToken(), self._active)
@@ -1080,7 +1082,7 @@ class EvalSession(AsyncEvalSession["ValueProxy"]):
             if self._store is not None:
                 self._store.rpc._unregister_dependent_eval(self)  # type: ignore[reportPrivateUsage] -- Store owns the public force-close lifecycle hook  # noqa: SLF001
             if self._owner_session is not None:
-                self._owner_session.release_eval(self)
+                self._owner_session._release_eval(self)  # type: ignore[reportPrivateUsage] -- the release half of _claim_eval above  # noqa: SLF001
 
     def _ensure_proxy(self) -> EvalProxy:
         p = self._proxy
@@ -1213,8 +1215,14 @@ class EvalSession(AsyncEvalSession["ValueProxy"]):
         """
         await self._ensure_proxy().write_lock_file(WriteLockFileRequest(handle=self._locked_flake_id(locked)))
 
-    async def release_locked_flake(self, locked: LockedFlakeHandle, *, timeout: float | None = None) -> None:
-        """Release the worker-side handle for a locked flake. Prefer ``locked.release()``."""
+    async def _release_locked_flake(self, locked: LockedFlakeHandle, *, timeout: float | None = None) -> None:
+        """Release the worker-side handle for a locked flake. Backs ``LockedFlakeHandle.release``.
+
+        Private for the same reason as :meth:`_eval_locked_flake` and
+        :meth:`_write_lock_file`: ``LockedFlakeHandle.release`` is the way a
+        caller releases one, and it exists on both engines. A session-level
+        twin is duplicate surface that only the rpc engine could offer.
+        """
         await self._ensure_proxy().release_locked_flake(ReleaseLockedFlakeRequest(handle=self._locked_flake_id(locked)))
 
     async def eval_flake(
