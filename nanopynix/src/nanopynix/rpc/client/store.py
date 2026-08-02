@@ -46,6 +46,7 @@ from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
 from nanopynix.exceptions import SessionClosedError, StoreClosedError, WorkerDiedError
 from nanopynix.models import BuildResult, Derivation, GcResult, MissingInfo, StorePath
+from nanopynix.protocols import AsyncStore
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
 from nanopynix.settings import DEFAULT_RPC_TIMEOUT_SECONDS
 
@@ -156,7 +157,7 @@ class StoreHandle(RpcProxyMixin, StoreServiceBase, rpc_service_base=StoreService
         return await self._pool.invoke(method, message, timeout=self._rpc_timeout)
 
 
-class Store:
+class Store(AsyncStore):
     """Ergonomic asynchronous facade for one opened Nix store.
 
     The complete generated request/response API remains available through

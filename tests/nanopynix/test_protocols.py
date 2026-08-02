@@ -211,6 +211,100 @@ def test_both_engines_pass_the_runtime_conformance_check() -> None:
         assert _conforms_at_runtime(rpc_cls, protocol), f"rpc {rpc_cls.__name__} fails {name} at runtime"
 
 
+def test_every_protocol_member_is_abstract() -> None:
+    """A non-abstract member turns a forgotten method into a silent no-op.
+
+    This is why ``@abstractmethod`` is required and not decoration. An engine
+    class now *inherits* its protocol, so a member it omits is inherited
+    instead -- and the inherited body is ``...``, which returns ``None``. A
+    forgotten ``close`` would leak rather than raise. Abstract makes it a
+    ``TypeError`` at instantiation.
+    """
+    not_abstract: list[str] = []
+    for name, protocol, _, _ in PROTOCOL_PAIRS:
+        abstract: frozenset[str] = getattr(protocol, "__abstractmethods__", frozenset())
+        not_abstract.extend(f"{name}.{member}" for member in sorted(_public(protocol) - abstract))
+    assert not not_abstract, (
+        "these protocol members are not @abstractmethod, so an engine that omits one "
+        f"inherits a `...` body and returns None instead of failing: {not_abstract}"
+    )
+
+
+def test_every_protocol_declares_slots_in_its_own_body() -> None:
+    """``vars``, not ``getattr``: ``Protocol`` supplies an inherited ``()`` that lies.
+
+    A ``__slots__``-based class that subclasses a protocol whose *body* omits
+    ``__slots__`` gains a ``__dict__`` per instance. rpc's ``Store``,
+    ``ValueProxy`` and ``EvalSession`` are all ``__slots__``-based, and one
+    ``ValueProxy`` exists per Nix value, so the cost is per value.
+
+    ``getattr(protocol, "__slots__")`` answers ``()`` from ``typing.Protocol``
+    whether or not the body declares it, which makes the obvious check useless.
+    """
+    missing = [name for name, protocol, _, _ in PROTOCOL_PAIRS if "__slots__" not in vars(protocol)]
+    assert not missing, (
+        "these protocols do not declare __slots__ = () in their own body, so every "
+        f"__slots__-based engine class inheriting them gains a __dict__: {missing}"
+    )
+
+
+def test_no_slotted_engine_class_gained_a_dict() -> None:
+    """The consequence of the rule above, asserted on the classes that pay for it.
+
+    ``rpc.ReplSession`` is deliberately absent: it declares no ``__slots__`` of
+    its own, so it had a ``__dict__`` before any of this and still does.
+    """
+    for cls in (RpcStoreImpl, rpc_private.ValueProxy, rpc_private.EvalSession):
+        assert not hasattr(object.__new__(cls), "__dict__"), (
+            f"{cls.__name__} gained a __dict__; a protocol in its MRO is missing __slots__ = ()"
+        )
+
+
+def test_every_engine_class_inherits_its_protocol() -> None:
+    """Structural conformance was already checked. This pins the *nominal* link.
+
+    Inheritance is what makes the docstring inheritable and what arms
+    ``@abstractmethod``. Both are lost silently if a class stops naming its
+    protocol, and every other check in this file keeps passing when it does.
+
+    The check is ``__mro__`` and deliberately not ``issubclass``: against a
+    ``@runtime_checkable`` protocol ``issubclass`` is *structural*, so it
+    answers True for a class that inherits nothing and would report a detached
+    class as fine. That is the exact failure this test exists to catch.
+    """
+    detached = [
+        f"{name}: {cls.__name__}"
+        for name, protocol, inproc_cls, rpc_cls in PROTOCOL_PAIRS
+        for cls in (inproc_cls, rpc_cls)
+        if protocol not in cls.__mro__
+    ]
+    assert not detached, f"these engine classes no longer name their protocol as a base: {detached}"
+
+
+def test_a_class_that_inherits_nothing_still_conforms() -> None:
+    """The property an ABC would have cost, kept and pinned.
+
+    ``Protocol``'s metaclass is ``ABCMeta``, so abstract members enforce on an
+    explicit subclass -- but structural conformance survives for a class that
+    imports nothing from this repository. That is the whole reason these stayed
+    protocols instead of becoming ABCs, so it is asserted rather than assumed.
+    """
+
+    class Outsider:
+        async def eval(self) -> object: ...
+        async def write_lock_file(self) -> None: ...
+        async def release(self) -> None: ...
+
+    # The MRO is the nominal question. `issubclass` is *not*: against a
+    # runtime-checkable protocol it is structural too, so it answers True here
+    # and cannot tell inheritance from conformance. It is not asserted because
+    # pyright refuses the call statically -- `__slots__ = ()` in each protocol
+    # body makes these *data* protocols to its eyes, though `typing` excludes
+    # dunders from the members it checks, so the runtime call is fine.
+    assert AsyncLockedFlake not in Outsider.__mro__
+    assert isinstance(Outsider(), AsyncLockedFlake)
+
+
 def test_protocols_declare_the_whole_shared_surface() -> None:
     """Every member both engines share must be declared, or excused in UNDECLARED.
 
