@@ -194,7 +194,15 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
     # ── lifecycle ──────────────────────────────────────────────────
 
     async def open(self) -> None:
-        """Spawn the worker via multiprocessing forkserver and initialise Nix."""
+        """Spawn the worker via multiprocessing forkserver and initialise Nix.
+
+        A failure here closes what it already opened, and then raises. Nothing
+        else can: ``Session.__aenter__`` is the only caller, and Python does
+        not run ``__aexit__`` for a ``__aenter__`` that raised. Without this,
+        a settings value Nix refuses left the channel open, the log task
+        running, and the worker process alive -- an orphan holding a Nix store
+        connection that nothing in this process remembered.
+        """
         if self._namespace is not None:
             # Ask before spawning. The namespace is set up inside the
             # forkserver child, so a host that cannot do it kills the child
@@ -206,8 +214,24 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
             if not support:
                 raise RuntimeError(f"cannot start an overlay store worker: {support.reason}")
 
-        self._stack = contextlib.AsyncExitStack()
+        stack = contextlib.AsyncExitStack()
+        self._stack = stack
+        try:
+            await self._open_worker(stack)
+        except BaseException:
+            # BaseException, not Exception: a cancellation between the spawn
+            # and the Init reply leaves the same orphan a refused setting
+            # does. close() shields its own teardown, so it finishes either
+            # way, and re-raising keeps the reason the caller needs.
+            await self.close()
+            raise
 
+    async def _open_worker(self, stack: contextlib.AsyncExitStack) -> None:
+        """Bring up the channel, the log task and Nix. ``open()`` owns the failure path.
+
+        The stack is a parameter rather than ``self._stack``, which ``close()``
+        clears: one caller, and it hands over the stack it is about to close.
+        """
         self._primop_handler = ManagerPrimopServiceHandler()
         self._primop_handler.register_all(self._primop_callables)
 
@@ -222,7 +246,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
             else functools.partial(worker_service_factory, namespace=self._namespace)
         )
 
-        self._channel = await self._stack.enter_async_context(
+        self._channel = await stack.enter_async_context(
             multiprocessing_worker_with_backchannel(
                 service_factory,
                 [

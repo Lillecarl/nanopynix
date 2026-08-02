@@ -91,11 +91,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1784980039,
-        "narHash": "sha256-+kofvslJN7vAICTDf7xlWnakqajMtSMAg3aGYJGu6fM=",
+        "lastModified": 1785683893,
+        "narHash": "sha256-1hFk1JnJEl9FYmpW+lA8VDhvlzjp0JfbCJiRbAWu/7E=",
         "owner": "lillecarl",
         "repo": "grpclib-transports",
-        "rev": "b234acc4076219a6610e55cef7c31fd8d527e971",
+        "rev": "84e5fcd674c80d090c83d4334613d83ce80d912b",
         "type": "github"
       },
       "original": {
