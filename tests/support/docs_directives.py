@@ -29,8 +29,13 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 # The directives that render an object. `autodata` and `autoattribute` are
-# included because a module constant is a public name like any other.
-DIRECTIVE = re.compile(r"^\.\.\s+(automodule|autoclass|autofunction|autodata|autoattribute)::\s+(?P<target>\S+)\s*$")
+# included because a module constant is a public name like any other, and
+# `autoexception` because Sphinx renders an exception class with its own
+# directive -- a page that used it was invisible here and reported the class
+# as undocumented.
+DIRECTIVE = re.compile(
+    r"^\.\.\s+(automodule|autoclass|autoexception|autofunction|autodata|autoattribute)::\s+(?P<target>\S+)\s*$"
+)
 
 # `:members:` on an `automodule` pulls in the module's public attributes. Only
 # an option line may follow the directive, so a short lookahead is enough.

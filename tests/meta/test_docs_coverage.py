@@ -18,8 +18,8 @@ the entry gets deleted. The list can only get shorter.
 **Where a name deserves to live is a judgement, and this file does not make
 it.** It reports that no page renders the name. Choosing the page, and deciding
 whether the name should be public at all, stay with a person -- which is why
-the 32 entries below carry a reason and an issue number rather than a
-``# TODO``.
+each entry below carries a reason and an issue number rather than a ``# TODO``.
+The list started at 32 and is now 9, because #43 wrote ``bindings.md``.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from pathlib import Path
 
 import nanopynix
 from tests.support.docs_directives import (
+    DIRECTIVE as DIRECTIVE,
     DOCS_API_DIR as DOCS_API_DIR,
     Directive as Directive,
     Documented as Documented,
@@ -39,11 +40,6 @@ from tests.support.docs_directives import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 API_DIR = REPO_ROOT / DOCS_API_DIR
 
-_BINDINGS = (
-    "Defined in the compiled `nanopynix_bindings` extension, which has no "
-    "reference page at all. #43 owns that page, because these need written "
-    "text and not a directive: the docstrings come from nanobind signatures."
-)
 _IS_IT_PUBLIC = (
     "A public name whose home raises the question of whether it should be "
     "public. #15 owns that question, and a page cannot be written before it "
@@ -52,36 +48,13 @@ _IS_IT_PUBLIC = (
 
 # Each name in `nanopynix.__all__` that no directive renders, with the reason.
 #
-# Two groups, and no third. Everything that only needed a directive has one
-# now: the namespace API, `StoreImpl`, `LogCollector`, `normalize_log_level`,
-# `LogLevelInput`, `DerivedPath`, `DEFAULT_EXPERIMENTAL_FEATURES`, the six
-# yaml primops, and the seven proto-derived data models that `models.md`
-# already existed to hold.
+# One group is left, and it is the one that needs a decision rather than a
+# page. Everything that only needed a directive has one: the namespace API,
+# `StoreImpl`, `LogCollector`, `normalize_log_level`, `LogLevelInput`,
+# `DerivedPath`, `DEFAULT_EXPERIMENTAL_FEATURES`, the six yaml primops, and the
+# seven proto-derived data models that `models.md` already existed to hold.
+# The 23 compiled-binding names left in #43, which wrote `bindings.md`.
 UNDOCUMENTED: dict[str, str] = {
-    # -- The compiled bindings (23). #43. ------------------------------
-    "BuildMode": _BINDINGS,
-    "EvalState": _BINDINGS,
-    "PrimopError": _BINDINGS,
-    "Value": _BINDINGS,
-    "build_info": _BINDINGS,
-    "current_system": _BINDINGS,
-    "enable_experimental_feature": _BINDINGS,
-    "eval_file": _BINDINGS,
-    "get_flake": _BINDINGS,
-    "get_verbosity": _BINDINGS,
-    "init_libexpr": _BINDINGS,
-    "input_from_attrs": _BINDINGS,
-    "input_from_url": _BINDINGS,
-    "install_logger": _BINDINGS,
-    "list_settings": _BINDINGS,
-    "lock_flake": _BINDINGS,
-    "open_store": _BINDINGS,
-    "parse_flake_ref": _BINDINGS,
-    "process_connection": _BINDINGS,
-    "register_primop": _BINDINGS,
-    "register_store_implementation": _BINDINGS,
-    "remove_logger": _BINDINGS,
-    "set_verbosity": _BINDINGS,
     # -- Is it public? (9). #15. ------------------------------------------
     "DISPATCHABLE_METHODS": ("A tuple with no `__module__`, so there is no page it belongs to. " + _IS_IT_PUBLIC),
     "GcRoot": (
@@ -155,6 +128,19 @@ def test_the_resolver_reads_directives_and_not_text() -> None:
     rendered = documented(API_DIR)
     assert "nanopynix.NixError" not in rendered.names
     assert "nanopynix.exceptions.NixError" in rendered.names
+
+
+def test_the_scanner_reads_every_directive_that_renders_an_object() -> None:
+    """A directive absent from the pattern reports its subject as undocumented.
+
+    ``autoexception`` was the one that got away, and ``bindings.md`` uses it
+    for ``PrimopError``. Both directions, so the pattern cannot pass by
+    matching everything: a directive that renders nothing must stay unmatched.
+    """
+    for kind in ("automodule", "autoclass", "autoexception", "autofunction", "autodata", "autoattribute"):
+        assert DIRECTIVE.match(f".. {kind}:: nanopynix.Thing"), f"{kind} is missing from the pattern"
+    assert DIRECTIVE.match(".. toctree:: nanopynix.Thing") is None
+    assert DIRECTIVE.match(".. note:: something") is None
 
 
 def test_every_public_name_has_a_page_or_a_reason() -> None:
