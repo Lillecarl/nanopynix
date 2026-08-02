@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import asyncio
 
-from nanopynix import NixSettings, list_settings_metadata
+import nanopynix
+from nanopynix import NixGlobalSettings, NixSettings, list_settings_metadata
 from nanopynix.rpc import Session
 
 
@@ -38,6 +39,26 @@ async def main() -> None:
     print("extended features:", extended.experimental_features)
 
     # --- pass settings into a Session -----------------------------------
+
+    # One object carries every scope, so a session takes one argument rather
+    # than one per registry.
+    # region: one-object
+    async with nanopynix.rpc.Session(
+        settings=NixSettings(max_jobs=4, trusted=True, pure_eval=True),
+    ) as nix:
+        ...
+    # endregion: one-object
+
+    # --- read and write the global settings of the session ---------------
+
+    # region: globals
+    async with nanopynix.rpc.Session(settings=NixSettings(max_jobs=4)) as nix:
+        await nix.settings()  # every setting, with its value
+        await nix.settings(overridden_only=True)  # only what something has set
+        await nix.settings_provenance()  # host values against ours
+
+        await nix.set_settings(NixGlobalSettings(max_jobs=8))
+    # endregion: globals
 
     async with Session(settings=NixSettings(max_jobs=2)):
         print("session opened with max_jobs=2")
