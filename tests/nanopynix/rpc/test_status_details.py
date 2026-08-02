@@ -203,6 +203,49 @@ def test_traces_are_trimmed_from_the_tail_when_info_alone_is_oversize() -> None:
     assert info["truncated"] is True
 
 
+def test_a_thousand_frame_trace_still_fits_and_still_says_it_was_cut() -> None:
+    """The trimmer at five times the depth the other tests use (#19).
+
+    A trace this deep is what an infinite recursion produces, so it is the
+    realistic worst case rather than an invented one. Three things must hold
+    at any depth, and each has its own way of going wrong:
+
+    * the payload fits, or gRPC rejects the whole response;
+    * ``truncated`` is set, or the caller reads a short trace as the complete
+      one;
+    * the frames kept are the **head**, because the innermost frames are the
+      ones that say where the recursion turned.
+
+    It also guards the cost, and that is what it was written for. The trimmer
+    dropped one frame per pass and re-encoded the whole ``Status`` each time,
+    which is quadratic: this test took 8.3s. A binary search over the cap
+    gives the same answer in 0.08s.
+    """
+    original = _info(traces=1000)
+    encoded = _encode(info=original)
+
+    assert len(encoded) <= MAX_DETAILS_BYTES
+    info = _decode(encoded).info
+    assert info is not None
+    kept = info["traces"]
+    assert 0 < len(kept) < 1000
+    assert kept == original["traces"][: len(kept)]
+    assert info["truncated"] is True
+    assert _decode(encoded).nix_type == "EvalError"
+
+    # The cap is the largest that fits, not merely one that fits. A binary
+    # search that stopped a frame early would satisfy every assertion above
+    # while quietly throwing away trace the budget had room for.
+    exact = _decode(_encode(info=_info(traces=len(kept)))).info
+    assert exact is not None
+    assert len(exact["traces"]) == len(kept), "the kept count does not survive being sent on its own"
+    assert exact["truncated"] is False, "the kept count was itself trimmed, so the cap is too high"
+
+    one_more = _decode(_encode(info=_info(traces=len(kept) + 1))).info
+    assert one_more is not None
+    assert len(one_more["traces"]) == len(kept), "one more frame fits, so the cap is not maximal"
+
+
 def test_the_identity_survives_a_trim_that_empties_the_nix_detail() -> None:
     """The budget must never reclaim the class.
 

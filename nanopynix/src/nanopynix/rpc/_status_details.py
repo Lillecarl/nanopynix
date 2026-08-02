@@ -387,14 +387,29 @@ def _trim_to_budget(proto: RpcStatus) -> RpcStatus:
             payload.truncated = True
     proto = _repack(proto, [*kept, *payloads])
 
-    # Deepest trace first, so the budget is reclaimed from whichever detail is
-    # actually responsible for the overflow.
-    while len(bytes(proto)) > MAX_DETAILS_BYTES:
-        deepest = max(payloads, key=lambda payload: len(payload.traces))
-        if not deepest.traces:
-            break
-        deepest.traces.pop()
-        deepest.truncated = True
+    # Cap every trace at the longest length that fits, found by binary search.
+    #
+    # Dropping the deepest frame one at a time and re-encoding after each is
+    # the same answer and quadratic in the number of frames: the result of
+    # that loop is always `min(len(traces), cap)` for one shared `cap`,
+    # because each pass removes one frame from whichever payload is currently
+    # longest. Measured at 1000 frames -- an infinite recursion, so not a
+    # hypothetical depth -- the loop took 8.3s against 0.44s for 200.
+    original = [list(payload.traces) for payload in payloads]
+    longest = max((len(frames) for frames in original), default=0)
+    if longest and len(bytes(proto)) > MAX_DETAILS_BYTES:
+        # `low` is the largest cap known to fit, `high` the smallest known not
+        # to. `longest` is the untrimmed state, which the check above proved
+        # does not fit.
+        low, high = 0, longest
+        while low < high:
+            mid = (low + high + 1) // 2
+            _cap_traces(payloads, original, mid)
+            if len(bytes(_repack(proto, [*kept, *payloads]))) <= MAX_DETAILS_BYTES:
+                low = mid
+            else:
+                high = mid - 1
+        _cap_traces(payloads, original, low)
         proto = _repack(proto, [*kept, *payloads])
 
     if len(bytes(proto)) > MAX_DETAILS_BYTES:
@@ -404,6 +419,23 @@ def _trim_to_budget(proto: RpcStatus) -> RpcStatus:
         # error entirely.
         return _repack(proto, kept)
     return proto
+
+
+def _cap_traces(
+    payloads: Sequence[NixErrorInfo],
+    original: Sequence[list[ErrorTrace]],
+    cap: int,
+) -> None:
+    """Keep the first ``cap`` frames of each payload, and flag what was cut.
+
+    Reads from ``original`` rather than from the payload, so a smaller cap
+    followed by a larger one restores frames instead of losing them. The
+    binary search above goes both ways, so this must too.
+    """
+    for payload, frames in zip(payloads, original, strict=True):
+        payload.traces = list(frames[:cap])
+        if len(frames) > cap:
+            payload.truncated = True
 
 
 def _repack(proto: RpcStatus, payloads: Sequence[Message]) -> RpcStatus:
