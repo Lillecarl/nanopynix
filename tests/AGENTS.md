@@ -13,6 +13,7 @@ here and to read the results. This file only says where a file belongs.
 | directory | holds | scope of one test |
 |---|---|---|
 | `tests/meta/` | self-checks: the repository examined as text and structure | the repository |
+| `tests/harness/` | the test machinery itself, which no other test asserts | one harness behaviour |
 | `tests/nanopynix/` | the library, by subsystem | one behaviour of nanopynix |
 | `tests/pynix/` | the CLI and the LSP server | one command or one editor request |
 | `tests/ekn/` | the ekn deployment tool | one ekn behaviour |
@@ -25,6 +26,22 @@ here and to read the results. This file only says where a file belongs.
 helpers, `inproc/` and `rpc/` for the two engines, `primops/` for the Nix
 primops, and the top level for what crosses those layers -- settings routing,
 engine parity, the error taxonomy.
+
+## The rule for `tests/harness/`
+
+**A harness test asserts a thing every other test depends on, and that no
+other test would notice was broken.**
+
+`tests/support/` is full of helpers, and most of them need no test of their
+own: the test that uses a helper fails when the helper breaks. A few do not
+have that property, and they are what this directory is for. The first one is
+`hang_report.py`, which runs only when a test has already hit its deadline. If
+it returned an empty string, every run would stay green and the report would
+be silently useless at the one moment it matters.
+
+Ask whether a bug in the helper makes some other test fail. When the answer is
+yes, write no test here. When the answer is "no, it just stops helping", the
+helper needs its own test, and this is where the test goes.
 
 ## The rule for `tests/meta/`
 
