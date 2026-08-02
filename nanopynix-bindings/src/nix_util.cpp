@@ -255,7 +255,10 @@ void nanopynix_bind_util(nb::module_ &m) {
 
     m.def("install_logger", &install_logger, "callback"_a,
           "Install a Python callback as the Nix logger.\n"
-          "The callback receives (action: str, *args). "
+          // Double backticks make this an RST literal. Without them the `*` of
+          // `*args` opens inline emphasis, and the docs build fails on the
+          // warning because sphinx-build runs with -W.
+          "The callback receives ``(action: str, *args)``. "
           "Exceptions crash the process.");
     m.def("remove_logger", &remove_logger,
           "Restore the default Nix simple logger.");
