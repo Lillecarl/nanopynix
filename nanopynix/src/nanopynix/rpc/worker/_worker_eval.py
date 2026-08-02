@@ -89,7 +89,7 @@ from nanopynix_proto.nix.eval import (
 
 from nanopynix._core._codec import python_to_scalar
 from nanopynix._core._extract import locked_flake as _locked_flake
-from nanopynix._core._objects import CoreValue
+from nanopynix._core._objects import CoreEvalState, CoreValue
 from nanopynix._wire import HandleKind
 from nanopynix.exceptions import EvaluatorAbandonedError
 from nanopynix.rpc.worker._grpc_util import worker_op, wrap_service_handlers
@@ -214,7 +214,7 @@ class EvalServiceHandler(EvalServiceBase):
         except KeyError as exc:
             raise RuntimeError("no EvalState is open — call OpenEval before evaluating") from exc
 
-    def _get_es(self, eval_handle: int) -> Any:
+    def _get_es(self, eval_handle: int) -> CoreEvalState:
         return self._get_entry(eval_handle).eval_state
 
     def _get_executor(self, eval_handle: int) -> NixThreadExecutor:

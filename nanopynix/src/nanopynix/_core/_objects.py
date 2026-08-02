@@ -416,16 +416,6 @@ class CoreEvalState:
             raise RuntimeError("local evaluator has been closed")
         return self.raw
 
-    def __getattr__(self, name: str) -> Any:
-        """Forward any unlisted name to the L1 binding, untyped.
-
-        The equivalent on ``CoreStore`` is gone -- every store call it used to
-        absorb now has a typed method -- and this one is on the same path. It
-        is what pyright cannot check about the evaluator, so it is worth
-        keeping visible rather than quietly relying on.
-        """
-        return getattr(self.require_raw(), name)
-
     def wrap_value(self, raw: nanopynix_expr.Value) -> CoreValue:
         value = CoreValue(self, raw)
         self._values.add(value)
@@ -455,6 +445,18 @@ class CoreEvalState:
 
     def repl_add_attrs(self, value: CoreValue) -> list[str]:
         return self.require_raw().repl_add_attrs(value.require_raw())
+
+    def repl_active(self) -> bool:
+        return self.require_raw().repl_active()
+
+    def begin_repl(self) -> None:
+        self.require_raw().begin_repl()
+
+    def repl_scope_names(self) -> list[str]:
+        return self.require_raw().repl_scope_names()
+
+    def reset_file_cache(self) -> None:
+        self.require_raw().reset_file_cache()
 
     def value_from_python(self, value: Any) -> CoreValue:
         return self.wrap_value(self.require_raw().value_from_python(_unwrap_local_values(value)))
