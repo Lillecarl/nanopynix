@@ -67,6 +67,17 @@ CONSUMER_PRIVATE_IMPORTS: dict[tuple[str, str], str] = {
         "The decorator half of the same instrumentation switch, and it travels "
         "with BEARTYPING. Same waiver, same module docstring."
     ),
+    ("nanopynix_proto.nix.common", "LogEvent"): (
+        "A symptom, not a decision, and it should not survive. ekn narrows a "
+        "subscribe callback argument with `isinstance(raw, LogEventProto)`, and "
+        "it needs the *base* proto because the two engines deliver different "
+        "types over the same public method: inproc emits models.LogEventExt, "
+        "and rpc emits the bare proto that class subclasses. nanopynix exports "
+        "the subclass and not the base, so ekn has no public handle for the "
+        "check. The fix is to make rpc deliver the model too, which deletes "
+        "this entry rather than moving it. Tracked by #15 -- see "
+        "nanopynix/logging.py's LogEventBus docstring for the asymmetry."
+    ),
 }
 
 
@@ -122,6 +133,27 @@ def test_the_scanner_ignores_a_mention_that_is_not_an_import() -> None:
 def test_the_scanner_ignores_a_package_with_a_similar_name() -> None:
     """``nanopynix_helpers`` is a separate distribution, not a submodule."""
     assert not scan_source("from nanopynix_helpers import build", Path("x.py"))
+
+
+def test_the_scanner_sees_an_internal_module_with_a_public_looking_name() -> None:
+    """``nanopynix.rpc.client`` has no underscore, and is internal anyway.
+
+    This and the test below are what the retired
+    ``tests/pynix/test_import_boundaries.py`` used to cover on its own. The
+    underscore rule sees neither shape, so deleting that guard without
+    ``INTERNAL_PREFIXES`` would have lost the coverage.
+    """
+    found = scan_source("from nanopynix.rpc.client import WorkerClient", Path("x.py"))
+    assert found[0].is_private
+    # The public door of the same subsystem stays public.
+    assert not any(i.is_private for i in scan_source("from nanopynix.rpc import Session", Path("x.py")))
+
+
+def test_the_scanner_sees_the_generated_proto_package() -> None:
+    """``nanopynix_proto`` is a build product of the wire format, not an API."""
+    found = scan_source("import nanopynix_proto", Path("x.py"))
+    assert found[0].key == ("nanopynix_proto", WHOLE_MODULE)
+    assert found[0].is_private
 
 
 def test_the_private_ledger_is_what_this_file_says_it_is() -> None:

@@ -62,6 +62,10 @@ not follow it. A convention that a machine can check belongs in `tests/meta/`,
 which is the home of the self-checks of this repository. Put the next one
 there, rather than in another paragraph of this file.
 
+**`tests/AGENTS.md` maps every directory under `tests/`.** Read it before you
+add a test module. It gives the rule that picks the directory, the shape a
+self-check must have, and the reason each part of that shape exists.
+
 pytest-agent starts automatically in this environment, because it detects
 `CLAUDECODE` and similar environment variables of an agent harness. Each plain
 `pytest ...` invocation therefore writes the full detail of each test to

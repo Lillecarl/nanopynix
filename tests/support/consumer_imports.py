@@ -14,12 +14,22 @@ import graph and not about the text. A regular expression cannot tell
 and it cannot see that ``from nanopynix import _wire`` is also a private
 import although the module named is public.
 
-Two kinds of privacy, and this module reports both:
+Three kinds of internal, and this module reports all three:
 
 * a private **module**, where a component after ``nanopynix`` starts with an
   underscore, for example ``nanopynix._core._objects``;
 * a private **name** out of a public module, for example
-  ``from nanopynix import _wire``.
+  ``from nanopynix import _wire``;
+* a module on ``INTERNAL_PREFIXES``, which is internal although every
+  component of its name looks public.
+
+The third kind is why this module absorbed the older
+``tests/pynix/test_import_boundaries.py`` rather than replacing it. That guard
+named ``nanopynix.rpc.client`` and ``nanopynix_proto``, and the underscore rule
+alone sees neither: the first has no underscore in it, and the second is a
+different distribution. The underscore rule is the wider net, the denylist
+catches what a naming convention cannot express, and the two together are what
+the old guard plus this one covered separately.
 
 ``tests/`` is deliberately not a consumer. The suite is white-box by design: it
 imports 38 private names over 17 modules to reach worker state and handle
@@ -49,6 +59,19 @@ CONSUMER_ROOTS = (
     "docs",
 )
 
+# Modules that are internal although no component of the name says so, and
+# which the underscore rule therefore cannot catch. Each entry matches the
+# module itself and everything under it.
+INTERNAL_PREFIXES = (
+    # The rpc client's implementation modules. `nanopynix.rpc` is the public
+    # door, and it re-exports what a caller needs.
+    "nanopynix.rpc.client",
+    # The generated protobuf package. It is a build product of the wire
+    # format, not an API, and it is a separate distribution -- so it is not
+    # under `nanopynix` at all and needs naming here to be seen.
+    "nanopynix_proto",
+)
+
 # The name that stands in for `import nanopynix._core`, which imports the whole
 # module rather than a name out of it.
 WHOLE_MODULE = "*"
@@ -70,20 +93,39 @@ class ConsumerImport:
 
     @property
     def is_private(self) -> bool:
-        return _module_is_private(self.module) or self.name.startswith("_")
+        """True for any of the three kinds of internal -- see the docstring."""
+        return _module_is_internal(self.module) or self.name.startswith("_")
 
     def __str__(self) -> str:
         target = self.module if self.name == WHOLE_MODULE else f"{self.module}.{self.name}"
         return f"{self.path}:{self.line}: {target}"
 
 
-def _module_is_private(module: str) -> bool:
-    """True when any component after ``nanopynix`` starts with an underscore."""
+def _under(module: str, prefix: str) -> bool:
+    """True when ``module`` is ``prefix`` itself, or a module under it."""
+    return module == prefix or module.startswith(f"{prefix}.")
+
+
+def _module_is_internal(module: str) -> bool:
+    """True for an underscore component after ``nanopynix``, or a denylisted module."""
+    if any(_under(module, prefix) for prefix in INTERNAL_PREFIXES):
+        return True
     return any(part.startswith("_") for part in module.split(".")[1:])
 
 
 def _is_nanopynix(module: str | None) -> bool:
-    return module == "nanopynix" or (module is not None and module.startswith("nanopynix."))
+    """True for a module this scanner tracks at all.
+
+    ``nanopynix_proto`` is not under ``nanopynix``, so the prefix test alone
+    would not see it. It is tracked because it is on ``INTERNAL_PREFIXES``.
+    A package that merely starts with the same letters, such as
+    ``nanopynix_helpers``, is a separate distribution and is not tracked.
+    """
+    if module is None:
+        return False
+    if _under(module, "nanopynix"):
+        return True
+    return any(_under(module, prefix) for prefix in INTERNAL_PREFIXES)
 
 
 def scan_source(source: str, path: Path) -> list[ConsumerImport]:

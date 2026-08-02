@@ -4,7 +4,7 @@ Regenerated on every Sphinx build (see ``docs/conf.py``'s ``setup()``), so the
 *rendered* site can never drift from the actual commands, arguments, and help
 text. The checked-in ``reference.md`` is a different matter -- it only refreshes
 when someone runs the generator and commits the result, and it had silently
-drifted 252 lines behind before ``tests/pynix/test_docs_reference.py`` started
+drifted 252 lines behind before ``tests/meta/test_docs_reference.py`` started
 gating it. Run standalone with::
 
     python docs/_generate_pynix_reference.py
@@ -103,7 +103,7 @@ def render() -> str:
 
     Split out from :func:`generate` so a test can compare it against the
     checked-in file without writing anything -- see
-    ``tests/pynix/test_docs_reference.py``.
+    ``tests/meta/test_docs_reference.py``.
     """
     lines = [
         "# CLI reference",
