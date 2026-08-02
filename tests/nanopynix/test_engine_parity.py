@@ -7,13 +7,21 @@ absent on the other -- or present on both under different names, or with its
 parameters in a different order -- is invisible to it. Every such difference
 found here was invisible there.
 
-How weak that is, concretely: :class:`~nanopynix.protocols.AsyncValue`
-declares eight members, all lifecycle and forcing (``force``, ``to_python``,
-``realise_string``, ``realise_argv``, ``edit_location``, ``release``, and the
-two context-manager hooks). Attribute access, coercion,
-calling, list indexing and building -- the entire surface a caller actually
-reaches for -- sit outside it, which is exactly where the divergences below
-are concentrated.
+This paragraph used to measure how weak that is:
+:class:`~nanopynix.protocols.AsyncValue` declared eight members, all lifecycle
+and forcing, and attribute access, coercion, calling, list indexing and
+building all sat outside it -- which was exactly where the divergences were
+concentrated. #36 closed that gap. Every member both engines share is now
+declared, on all six protocols, and ``test_protocols.py`` measures it.
+
+The claim above survives the repair, because it is about kind and not about
+count. A protocol pins the members it declares. It does not see a member on
+one engine and not the other, and it does not see the *return* type disagree:
+``to_python`` returned ``JsonValue`` on rpc and ``Any`` on inproc while both
+engines satisfied ``AsyncValue``. This file does not see that one either --
+:func:`_compare_member` compares parameter names and async-ness, and 17 of the
+18 members whose return annotations differ are correct ``Self`` and ``ValueT``
+specialisations, so a naive return check would report 17 false differences.
 
 The rule this encodes is the project's own: **process isolation is the only
 thing rpc has that inproc does not, so an asymmetry is a defect unless

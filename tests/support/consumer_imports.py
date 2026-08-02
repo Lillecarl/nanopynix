@@ -31,6 +31,12 @@ different distribution. The underscore rule is the wider net, the denylist
 catches what a naming convention cannot express, and the two together are what
 the old guard plus this one covered separately.
 
+A second question rides on the same walk, and ``scan_engine_annotations``
+answers it: which consumer annotations name an rpc engine class rather than the
+protocol both engines satisfy. That is not about privacy -- ``nanopynix.rpc``
+is a public door -- so the two scanners stay separate. It is about whether the
+code works with either engine, and 52 annotation sites did not.
+
 ``tests/`` is deliberately not a consumer. The suite is white-box by design: it
 imports 38 private names over 17 modules to reach worker state and handle
 registries, and ``ruff-strict.toml`` already grants ``tests/**`` the ``SLF001``
@@ -48,7 +54,7 @@ from typing import TYPE_CHECKING
 from tests.support.suppressions import iter_python_files as iter_python_files
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
 
 # The packages that consume nanopynix as a library, relative to the repository
 # root. `tests/` is absent on purpose -- see the module docstring.
@@ -75,6 +81,12 @@ INTERNAL_PREFIXES = (
 # The name that stands in for `import nanopynix._core`, which imports the whole
 # module rather than a name out of it.
 WHOLE_MODULE = "*"
+
+# The rpc engine's concrete classes, each of which has a protocol in
+# `nanopynix.protocols` that both engines satisfy. A consumer that names one of
+# these in an annotation pins that code to one engine -- see
+# `scan_engine_annotations`.
+ENGINE_CLASSES = frozenset({"Session", "Store", "EvalSession", "ReplSession", "ValueProxy", "LockedFlakeHandle"})
 
 
 @dataclass(frozen=True)
@@ -161,6 +173,100 @@ def scan_consumers(repo_root: Path, roots: Iterable[str] = CONSUMER_ROOTS) -> li
     return found
 
 
-def format_report(imports: Iterable[ConsumerImport]) -> str:
-    """Render imports one per line, for a test failure."""
+@dataclass(frozen=True)
+class EngineAnnotation:
+    """One place a consumer names an rpc engine class in a type annotation."""
+
+    path: Path
+    line: int
+    cls: str
+
+    @property
+    def key(self) -> tuple[str, str]:
+        """The ledger key: the file, and the class it names.
+
+        By file, and not by class alone. Whether a consumer may name
+        ``Store`` is not one decision -- it depends on what that module does
+        with the store. The private-import ledger keys by name because the
+        judgement there is about the name itself.
+        """
+        return (str(self.path), self.cls)
+
+    def __str__(self) -> str:
+        return f"{self.path}:{self.line}: nanopynix.rpc.{self.cls}"
+
+
+def _annotation_nodes(tree: ast.AST) -> Iterator[ast.expr]:
+    """Every annotation expression in ``tree``.
+
+    Annotations only. A call to ``nanopynix.rpc.Session(...)`` is a consumer
+    choosing an engine to run, which is a real decision and not a defect. A
+    parameter typed ``Session`` is a consumer refusing the other engine.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AnnAssign):
+            yield node.annotation
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            args = node.args
+            for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg):
+                if arg is not None and arg.annotation is not None:
+                    yield arg.annotation
+            if node.returns is not None:
+                yield node.returns
+
+
+def _rpc_aliases(tree: ast.AST) -> dict[str, str]:
+    """Local name to engine class, for each ``from nanopynix.rpc import X``."""
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "nanopynix.rpc":
+            for alias in node.names:
+                if alias.name in ENGINE_CLASSES:
+                    aliases[alias.asname or alias.name] = alias.name
+    return aliases
+
+
+def _is_rpc_attribute(node: ast.Attribute) -> bool:
+    """True for the fully written ``nanopynix.rpc.<Class>``."""
+    value = node.value
+    return (
+        isinstance(value, ast.Attribute)
+        and value.attr == "rpc"
+        and isinstance(value.value, ast.Name)
+        and value.value.id == "nanopynix"
+    )
+
+
+def scan_engine_annotations(source: str, path: Path) -> list[EngineAnnotation]:
+    """Return every annotation in ``source`` that names an rpc engine class.
+
+    Both spellings reach the same class and both are found: the imported name
+    after ``from nanopynix.rpc import Store``, and the written out
+    ``nanopynix.rpc.Store``. An import on its own is not reported, because a
+    module may import a class to construct it and never annotate with it.
+    """
+    tree = ast.parse(source)
+    aliases = _rpc_aliases(tree)
+    found: list[EngineAnnotation] = []
+    for annotation in _annotation_nodes(tree):
+        for node in ast.walk(annotation):
+            if isinstance(node, ast.Name) and node.id in aliases:
+                found.append(EngineAnnotation(path, node.lineno, aliases[node.id]))
+            elif isinstance(node, ast.Attribute) and node.attr in ENGINE_CLASSES and _is_rpc_attribute(node):
+                found.append(EngineAnnotation(path, node.lineno, node.attr))
+    return found
+
+
+def scan_consumer_engine_annotations(repo_root: Path, roots: Iterable[str] = CONSUMER_ROOTS) -> list[EngineAnnotation]:
+    """Return every engine-class annotation that a consumer package writes."""
+    found: list[EngineAnnotation] = []
+    for root in roots:
+        base = repo_root / root
+        for path in iter_python_files(base):
+            found.extend(scan_engine_annotations(path.read_text(encoding="utf-8"), path.relative_to(repo_root)))
+    return found
+
+
+def format_report(imports: Iterable[ConsumerImport] | Iterable[EngineAnnotation]) -> str:
+    """Render findings one per line, for a test failure."""
     return "\n".join(str(i) for i in sorted(imports, key=str))

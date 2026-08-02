@@ -14,8 +14,7 @@ from nanopynix._typechecking import BEARTYPING
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Iterable
 
-    from nanopynix import AsyncValue
-    from nanopynix.rpc import Store
+    from nanopynix import AsyncStore, AsyncValue
 
 _HASH_ATTRIBUTES = frozenset({"hash", "sha256", "outputHash"})
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
@@ -105,7 +104,7 @@ def replace_fod_hash(source: str, literal: FodHashLiteral, got: str) -> str:
     return (encoded[: literal.start_byte] + f'"{got}"'.encode() + encoded[literal.end_byte :]).decode()
 
 
-async def fixed_output_derivations_in_closure(store: Store, root_drv_path: str) -> set[str]:
+async def fixed_output_derivations_in_closure(store: AsyncStore, root_drv_path: str) -> set[str]:
     """Return fixed-output derivations in *root_drv_path*'s input closure.
 
     Nix's evaluated derivation values intentionally expose their own
@@ -142,7 +141,7 @@ async def evaluated_derivation_path(value: AsyncValue) -> str | None:
     return drv_path
 
 
-async def mismatch_is_target_fod(store: Store, root: AsyncValue, mismatch: FodHashMismatch) -> bool:
+async def mismatch_is_target_fod(store: AsyncStore, root: AsyncValue, mismatch: FodHashMismatch) -> bool:
     """Whether a daemon-reported FOD mismatch belongs to the evaluated target.
 
     ``builtins.fetchurl`` reports no derivation path, so it cannot be related
@@ -165,7 +164,7 @@ async def mismatch_is_target_fod(store: Store, root: AsyncValue, mismatch: FodHa
     return await is_fixed_output_derivation_in_closure(store, root_drv_path, mismatch.drv_path)
 
 
-async def is_fixed_output_derivation_in_closure(store: Store, root_drv_path: str, candidate_drv_path: str) -> bool:
+async def is_fixed_output_derivation_in_closure(store: AsyncStore, root_drv_path: str, candidate_drv_path: str) -> bool:
     """Verify *candidate_drv_path* is a CAFixed member of *root_drv_path*'s closure.
 
     The build diagnostic normally provides the exact candidate path.  Empty
