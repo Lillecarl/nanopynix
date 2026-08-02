@@ -603,7 +603,6 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         return LogLevel(await self.run(self._runtime.get_verbosity))
 
     async def set_verbosity(self, verbosity: LogLevelInput) -> LogLevel:
-        """Set the Nix log verbosity and return the resulting level."""
         level = normalize_log_level(verbosity)
         return LogLevel(await self.run(self._runtime.set_verbosity, int(level)))
 
@@ -714,12 +713,10 @@ class Store(AsyncStore):
         await self.close()
 
     async def open(self) -> None:
-        """Open the underlying store."""
         if self._core is None:
             self._core = await self._session.run(self._session._runtime.open_store, self._uri)  # type: ignore[reportPrivateUsage] -- session owns local runtime  # noqa: SLF001
 
     async def close(self, *, force: bool = False) -> None:
-        """Close the underlying store, optionally closing its evaluator first."""
         evals = tuple(eval_session for eval_session in self._session._evals if eval_session._store is self)  # type: ignore[reportPrivateUsage] -- Session owns evaluator lifetime tracking  # noqa: SLF001
         if evals:
             if not force:
@@ -759,23 +756,18 @@ class Store(AsyncStore):
         )
 
     async def store_dir(self) -> str:
-        """Return this store's logical store directory."""
         return await self._session.run(self._require_core().get_store_dir)
 
     async def parse_store_path(self, path: str) -> StorePath:
-        """Validate and normalise ``path`` as a Nix store path."""
         return await self._session.run(self._require_core().parse_store_path, path)
 
     async def is_valid_path(self, path: str | StorePath) -> bool:
-        """Return whether ``path`` is valid in this store."""
         return await self._session.run(self._require_core().is_valid_path, str(path))
 
     async def query_path_info(self, path: str | StorePath) -> PathInfo:
-        """Return metadata for a valid store path."""
         return await self._session.run(self._require_core().query_path_info, str(path))
 
     async def query_all_valid_paths(self) -> list[StorePath]:
-        """Return every valid path registered in this store."""
         return await self._session.run(self._require_core().query_all_valid_paths)
 
     async def compute_fs_closure(
@@ -786,7 +778,6 @@ class Store(AsyncStore):
         include_outputs: bool = False,
         include_derivers: bool = False,
     ) -> list[StorePath]:
-        """Return the filesystem closure of ``path``."""
         return await self._session.run(
             functools.partial(
                 self._require_core().compute_fs_closure,
@@ -798,34 +789,27 @@ class Store(AsyncStore):
         )
 
     async def query_derivation_outputs(self, path: str | StorePath) -> list[StorePath]:
-        """Return output paths declared by a derivation."""
         return await self._session.run(self._require_core().query_derivation_outputs, str(path))
 
     async def query_valid_derivers(self, path: str | StorePath) -> list[StorePath]:
-        """Return valid derivations that produced ``path``."""
         return await self._session.run(self._require_core().query_valid_derivers, str(path))
 
     async def query_referrers(self, path: str | StorePath) -> list[StorePath]:
-        """Return valid store paths that reference ``path``."""
         return await self._session.run(self._require_core().query_referrers, str(path))
 
     async def follow_links_to_store_path(self, path: str) -> StorePath:
-        """Resolve a path that may traverse symlinks to its containing store path."""
         return await self._session.run(self._require_core().follow_links_to_store_path, path)
 
     async def query_path_from_hash_part(self, hash_part: str) -> StorePath | None:
-        """Return the valid store path whose hash component is ``hash_part``, if any."""
         return await self._session.run(self._require_core().query_path_from_hash_part, hash_part)
 
     async def query_substitutable_paths(self, paths: list[str | StorePath]) -> list[StorePath]:
-        """Return the subset of ``paths`` that can be substituted from a binary cache."""
         return await self._session.run(
             self._require_core().query_substitutable_paths,
             [str(path) for path in paths],
         )
 
     async def get_build_log(self, path: str | StorePath) -> str | None:
-        """Return the build log for ``path``, or ``None`` if no log is available."""
         return await self._session.run(self._require_core().get_build_log, str(path))
 
     async def query_missing(
@@ -872,7 +856,6 @@ class Store(AsyncStore):
         drv_path: str | StorePath,
         /,
     ) -> Derivation:
-        """Parse and return the ``.drv`` file at ``drv_path``."""
         return await self._session.run(self._require_core().read_derivation, str(drv_path))
 
     @no_runtime_type_check  # action validates its own membership in the shared
@@ -888,7 +871,6 @@ class Store(AsyncStore):
         paths_to_delete: list[str | StorePath] | tuple[()] = (),
         max_freed: int = NO_GC_LIMIT,
     ) -> GcResult:
-        """Run a garbage-collection pass; see :meth:`nanopynix.store.Store.collect_garbage`."""
         return await self._session.run(
             functools.partial(
                 self._require_core().collect_garbage,
@@ -928,7 +910,6 @@ class Store(AsyncStore):
         await self._session.run(self._require_core().add_indirect_root, path)
 
     async def find_roots(self, *, censor: bool = False) -> list[GcRoot]:
-        """Return the garbage collector's roots."""
         return await self._session.run(functools.partial(self._require_core().find_roots, censor=censor))
 
     async def compute_store_path(
@@ -1024,7 +1005,6 @@ class Store(AsyncStore):
         )
 
     async def optimise_store(self) -> None:
-        """Reclaim disk space by hard-linking identical files in this store."""
         await self._session.run(self._require_core().optimise_store)
 
     async def verify_store(self, *, check_contents: bool = False, repair: bool = False) -> bool:
@@ -1251,7 +1231,6 @@ class EvalSession(AsyncEvalSession["Value"]):
         return self._track_value(local)
 
     async def file(self, path: str) -> Value:
-        """Evaluate the Nix expression in the file at ``path``."""
         local = await self.run(self._require_core().eval_file, path)
         return self._track_value(local)
 
@@ -1316,11 +1295,9 @@ class EvalSession(AsyncEvalSession["Value"]):
         return self._track_value(local)
 
     async def get_flake(self, ref: str) -> FlakeRef:
-        """Parse and resolve a flake reference without evaluating its outputs."""
         return await self.run(self._require_core().get_flake, ref)
 
     async def reset_file_cache(self) -> None:
-        """Discard parsed file cache entries before re-evaluating source files."""
         await self.run(self._require_raw().reset_file_cache)
 
 
@@ -1363,7 +1340,6 @@ class ReplSession(EvalSession, AsyncReplSession["Value"]):
 
     @property
     def line_editors(self) -> tuple[str, ...]:
-        """Editor-name substrings that support Nix's ``+LINE`` argument."""
         return self._line_editors
 
     async def __aenter__(self) -> ReplSession:
@@ -1407,17 +1383,14 @@ class ReplSession(EvalSession, AsyncReplSession["Value"]):
         return None if local is None else self._track_value(local)
 
     async def load_file(self, path: str) -> Value:
-        """Load a Nix expression file as ``nix repl :load`` does."""
         local = await self.run(self._require_core().repl_load_file, path)
         return self._track_value(local)
 
     async def add_attrs(self, value: Value) -> list[str]:
-        """Add all attributes from ``value`` to this REPL's lexical scope."""
         local_value = await value._resolve_for(self)  # type: ignore[reportPrivateUsage] -- same-evaluator guard  # noqa: SLF001
         return await self.run(self._require_core().repl_add_attrs, local_value)
 
     async def scope_names(self) -> list[str]:
-        """Return the identifiers visible in this REPL's lexical scope."""
         return await self.run(self._require_raw().repl_scope_names)
 
     async def string(self, expr: str, path: str = "<string>") -> Value:
@@ -1464,7 +1437,6 @@ class LockedFlake(AsyncLockedFlake):
         return self._core
 
     async def eval(self) -> Value:
-        """Evaluate this locked flake's outputs."""
         evaluator = self._eval_session._require_core()  # type: ignore[reportPrivateUsage] -- parent owns the local evaluator  # noqa: SLF001
         local = await self._eval_session.run(
             evaluator.call_locked_flake,
@@ -1473,7 +1445,6 @@ class LockedFlake(AsyncLockedFlake):
         return self._eval_session._track_value(local)  # type: ignore[reportPrivateUsage] -- parent owns rooted value tracking  # noqa: SLF001
 
     async def write_lock_file(self) -> None:
-        """Persist this locked flake's lock file to disk."""
         await self._eval_session.run(self._local_for().write_lock_file)
 
     async def release(self) -> None:
@@ -1677,7 +1648,6 @@ class Value(AsyncValue):
         return await self._eval_session.run((await self._resolve()).realise_argv)
 
     async def edit_location(self) -> tuple[str, int]:
-        """Return the physical file path and line Nix would open for this value."""
         location = await self._eval_session.run((await self._resolve()).edit_location)
         return location["path"], location["line"]
 
