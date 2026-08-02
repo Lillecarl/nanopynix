@@ -63,6 +63,7 @@ What lives there now:
 | `test_subcommands.py` | pynix's two subcommand declarations describe the same set |
 | `test_docs_reference.py` | the checked-in CLI reference matches the live command tree |
 | `test_docs_coverage.py` | every `__all__` name has an autodoc directive, with a ledger for the rest |
+| `test_doc_snippets.py` | every published Python block mirrors a region of an example that runs |
 | `test_core_has_no_getattr.py` | no `_core/` class forwards an unlisted name to a binding, untyped |
 
 `tests/nanopynix/test_examples.py` is the case that clarifies the rule. Its

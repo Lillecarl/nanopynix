@@ -36,6 +36,7 @@ settings rather than a copy, so there is no snapshot to go stale.
 {class}`~nanopynix.NixSettings` inherits every scope, so it is the one object
 to hand to a session:
 
+<!-- example: settings_example.py#one-object -->
 ```python
 async with nanopynix.rpc.Session(
     settings=NixSettings(max_jobs=4, trusted=True, pure_eval=True),
@@ -138,11 +139,12 @@ that process is the worker, not yours. A module-level setter therefore changes
 the wrong copy, and the worker never learns. So the read and the write are both
 methods of the session, on both engines:
 
+<!-- example: settings_example.py#globals -->
 ```python
 async with nanopynix.rpc.Session(settings=NixSettings(max_jobs=4)) as nix:
-    await nix.settings()                       # every setting, with its value
-    await nix.settings(overridden_only=True)   # only what something has set
-    await nix.settings_provenance()            # host values against ours
+    await nix.settings()  # every setting, with its value
+    await nix.settings(overridden_only=True)  # only what something has set
+    await nix.settings_provenance()  # host values against ours
 
     await nix.set_settings(NixGlobalSettings(max_jobs=8))
 ```

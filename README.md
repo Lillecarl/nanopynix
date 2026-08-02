@@ -8,19 +8,23 @@ nanobind-based Python bindings for Nix.
 The high-level API runs Nix inside an isolated worker subprocess and talks to it
 over gRPC:
 
+<!-- example: quickstart_example.py#quickstart -->
 ```python
-import nanopynix
-from nanopynix_proto.nix.store import GetStoreDirRequest
+async with (
+    nanopynix.rpc.Session(settings=NixSettings(max_jobs=4)) as session,
+    session.store() as store,
+    session.eval(store) as evaluator,
+):
+    store_dir = await store.store_dir()
+    root = await evaluator.string('{ name = "hello"; }')
+    name = await root.attr("name").as_string()
 
-async with nanopynix.rpc.Session(config={"max-jobs": "4"}) as session:
-    async with session.store() as store:
-        store_dir = (await store.get_store_dir(GetStoreDirRequest())).dir
-
-        async with session.eval(store) as eval:
-            root = await eval.string('{ name = "hello"; }')
-            attrs = await root.force()
-            name = await attrs["name"].force()
+print(store_dir, name)
 ```
+
+The whole program, with its imports, is
+[`docs/examples/quickstart_example.py`](docs/examples/quickstart_example.py),
+which the test suite runs.
 
 Open multiple `Session` instances to run differently configured Nix instances in
 parallel.

@@ -4,17 +4,19 @@ Typed models for every store type the linked Nix can open. A store is
 configured by its URI: the scheme picks the implementation, and the query
 parameters set that implementation's settings.
 
+<!-- example: stores_example.py#model -->
 ```python
-from nanopynix import stores
-
-async with nanopynix.rpc.Session() as nix:
-    async with nix.store(stores.Local(root="/tmp/x", require_sigs=False)) as store:
-        ...
+async with (
+    nanopynix.rpc.Session() as nix,
+    nix.store(stores.Local(root=root, require_sigs=False)) as store,
+):
+    print(await store.uri())
 ```
 
-That is the same store as `nix.store("local://?require-sigs=false&root=/tmp/x")`,
-and {meth}`~nanopynix.stores.StoreConfig.uri` renders exactly that string.
-A URI string still works everywhere a model does.
+That is the same store as
+`nix.store(f"local://?require-sigs=false&root={root}")`, and
+{meth}`~nanopynix.stores.StoreConfig.uri` renders exactly that string. A URI
+string still works everywhere a model does.
 
 ## Why a store setting is not a global setting
 
