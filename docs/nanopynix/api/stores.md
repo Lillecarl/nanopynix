@@ -73,4 +73,7 @@ rather than what Nix documents.
    :members:
    :undoc-members:
    :member-order: bysource
+
+.. autoclass:: nanopynix.StoreImpl
+   :members:
 ```

@@ -12,4 +12,11 @@ share it. `Nix` is a backward-compatible alias for `Session`.
 
 .. autoclass:: nanopynix.rpc.LogCapture
    :members:
+
+.. autoclass:: nanopynix.LogCollector
+   :members:
+
+.. autofunction:: nanopynix.normalize_log_level
+
+.. autodata:: nanopynix.LogLevelInput
 ```

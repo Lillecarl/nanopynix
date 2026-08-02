@@ -45,6 +45,7 @@ What lives there now:
 | `test_public_surface.py` | `__all__` lists every public name the package binds, protocols included |
 | `test_subcommands.py` | pynix's two subcommand declarations describe the same set |
 | `test_docs_reference.py` | the checked-in CLI reference matches the live command tree |
+| `test_docs_coverage.py` | every `__all__` name has an autodoc directive, with a ledger for the rest |
 
 `tests/nanopynix/test_examples.py` is the case that clarifies the rule. Its
 purpose is a staleness gate on the documentation, which sounds like a meta
@@ -70,9 +71,18 @@ decoration:
 3. **The conformance test.** The assertion itself, with a failure message that
    names the offending file and line and says what to do about it.
 
-Put the scanner in `tests/support/` and the test in `tests/meta/`. The two
-existing scanners are `suppressions.py` and `consumer_imports.py`; reuse
-`iter_python_files` from the first rather than writing another tree walk.
+Put the scanner in `tests/support/` and the test in `tests/meta/`. The existing
+scanners are `suppressions.py`, `consumer_imports.py` and `docs_directives.py`;
+reuse `iter_python_files` from the first rather than writing another tree walk.
+
+**Read the structure, not the text, and read what the tool reads.**
+`consumer_imports.py` walks the AST because a regular expression cannot tell an
+import from the same words in a docstring. `docs_directives.py` resolves each
+Sphinx directive because `:members:` documents a name that appears nowhere in
+the Markdown, so a substring search reports scores of false absences. It also
+mirrors what Sphinx renders rather than what is reachable: `:members:` skips an
+imported member, and reading `dir()` instead made one answer depend on whether
+beartype was on.
 
 ## Derived against declared
 
@@ -87,9 +97,16 @@ compares two derived sets and carries no ledger, because whether a name the
 package already binds belongs in the list it publishes is not a decision.
 A literal there would be a second copy of `__all__`.
 
-Choose what the key is. `CONSUMER_PRIVATE_IMPORTS` keys on `(module, name)` and
-not on the import site, because a further use of an approved name is not a new
-decision and thirty identical failures teach nothing.
+Choose what the key is, and the answer differs per ledger. Key on the unit the
+*judgement* covers. `CONSUMER_PRIVATE_IMPORTS` keys on `(module, name)`, because
+whether a name may be reached is one decision wherever it appears, and thirty
+identical failures teach nothing. `CONSUMER_ENGINE_ANNOTATIONS`, in the same
+file, keys on `(file, class)` instead: whether a module may name one engine's
+`Store` depends on what that module does with the store.
+
+A ledger must also be able to get shorter. Assert both directions, so an entry
+whose subject is gone fails and gets deleted, rather than sitting there as a
+rubber stamp.
 
 ## What a meta test must not claim to check
 
