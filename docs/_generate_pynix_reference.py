@@ -108,9 +108,11 @@ def render() -> str:
     lines = [
         "# CLI reference",
         "",
-        "Generated from pynix's live `clypi` command tree — see"
-        " `docs/_generate_pynix_reference.py`. Every command also accepts"
-        " `--help` for the same information at the terminal.",
+        (
+            "Generated from pynix's live `clypi` command tree — see"
+            " `docs/_generate_pynix_reference.py`. Every command also accepts"
+            " `--help` for the same information at the terminal."
+        ),
         "",
     ]
     lines += _render_command(Pynix, [])

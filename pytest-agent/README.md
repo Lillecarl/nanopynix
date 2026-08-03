@@ -295,15 +295,16 @@ come from five frames inside the code under test. That's what notes are for.
 
 ```python
 def test_resolution(agent_notes):
-    agent_notes.note(store=store_path, backend=backend)   # structured, queryable
-    agent_notes.attach("payload.json", raw_response)      # too big for a line
-    (agent_notes.dir / "dump.bin").write_bytes(blob)      # or write files yourself
+    agent_notes.note(store=store_path, backend=backend)  # structured, queryable
+    agent_notes.attach("payload.json", raw_response)  # too big for a line
+    (agent_notes.dir / "dump.bin").write_bytes(blob)  # or write files yourself
 ```
 
 ```python
 from pytest_agent import note  # no fixture; callable from anywhere at all
 
-def resolve(digest):           # ...including the code under test
+
+def resolve(digest):  # ...including the code under test
     note(resolving=digest)
 ```
 
