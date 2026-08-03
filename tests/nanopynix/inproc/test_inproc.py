@@ -30,6 +30,17 @@ if TYPE_CHECKING:
 
 requires_dynamic_primops = pytest.mark.nix_capability("dynamic_primop_registration")
 
+requires_boehm_gc = pytest.mark.nix_capability("boehm_gc")
+"""Skip a test that measures the Nix heap, on a build that has no collector.
+
+The AddressSanitizer variant builds libexpr with ``-Dgc=disabled``, because
+libexpr refuses ASAN together with a conservative collector. ``_root_bytes``
+below reads counters that such a build does not have, and the behaviour it
+measures -- a root coming back -- does not exist there either. The Python-side
+claim above it, ``test_a_collected_value_releases_its_nix_root``, counts
+``CoreValue`` objects instead and therefore still runs everywhere.
+"""
+
 
 @pytest.mark.anyio
 @requires_dynamic_primops
@@ -250,6 +261,7 @@ async def test_a_collected_value_releases_its_nix_root(inproc_session: InprocSes
         assert _tracked_values(evaluator) == 1, "a collected value never released its Nix root"
 
 
+@requires_boehm_gc
 @pytest.mark.anyio
 async def test_a_collected_value_gives_its_root_back_to_the_collector(
     inproc_session: InprocSessionFactory,
@@ -281,6 +293,7 @@ async def test_a_collected_value_gives_its_root_back_to_the_collector(
         assert released - before < (rooted - before) // 10, "the Nix roots were not given back"
 
 
+@requires_boehm_gc
 @pytest.mark.anyio
 async def test_a_dropped_parent_gives_its_root_back_while_a_child_lives(
     inproc_session: InprocSessionFactory,

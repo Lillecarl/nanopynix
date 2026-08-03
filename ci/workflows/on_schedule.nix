@@ -72,6 +72,43 @@ let
           };
         };
       };
+
+    # The two builds against a libexpr with no collector. Scheduled only, and
+    # `ci/workflows/lib.nix` says why: neither has run yet, so the caps are
+    # guesses and issue #35 asks that the per-commit workflow wait for a
+    # number. `test-nogc` is what tells a red `test-asan` apart from an
+    # evaluator that does not work without the collector.
+    test-nogc =
+      workflow.mkNoGCTestJob {
+        version = "\${{ matrix.version }}";
+        ref = branch;
+        inherit lockArtifact;
+        needs = [ updateJob ];
+      }
+      // {
+        strategy = {
+          fail-fast = false;
+          matrix = {
+            version = versionExpression "nogc_versions";
+          };
+        };
+      };
+
+    test-asan =
+      workflow.mkAsanTestJob {
+        version = "\${{ matrix.version }}";
+        ref = branch;
+        inherit lockArtifact;
+        needs = [ updateJob ];
+      }
+      // {
+        strategy = {
+          fail-fast = false;
+          matrix = {
+            version = versionExpression "asan_versions";
+          };
+        };
+      };
   };
 in
 workflow.evalWorkflow {
@@ -82,11 +119,11 @@ workflow.evalWorkflow {
   };
   jobs = {
     update-lockfile = mkJob {
-      outputs = {
-        regular_versions = "\${{ steps.versions.outputs.regular_versions }}";
-        tsan_versions = "\${{ steps.versions.outputs.tsan_versions }}";
-        ubsan_versions = "\${{ steps.versions.outputs.ubsan_versions }}";
-      };
+      # One output for each variant suffix, plus the regular matrix.
+      # `ci/workflows/lib.nix` builds both this and the step that fills it
+      # from one list, so a new variant reaches the scheduled workflow without
+      # an edit here.
+      outputs = workflow.versionMatrixOutputs;
       steps = [
         (steps.checkout { ref = branch; })
         (steps.installNix { })
@@ -100,11 +137,10 @@ workflow.evalWorkflow {
           id = "versions";
           name = "Compute Nix version matrices";
           timeout-minutes = caps.versionMatrix;
-          run = ''
-            echo "regular_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-(tsan|ubsan)" n == null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
-            echo "tsan_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-tsan" n != null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
-            echo "ubsan_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-ubsan" n != null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
-          '';
+          # The trailing newline keeps the rendered block a plain `|` rather
+          # than a `|-`. Same shell either way; a stable render is what the
+          # staleness gate in tests/nanopynix/test_ci_workflows.py compares.
+          run = builtins.concatStringsSep "\n" (workflow.versionMatrixLines ++ [ "" ]);
         }
         (steps.uploadArtifact {
           name = null;

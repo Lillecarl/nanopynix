@@ -21,6 +21,12 @@ def test_build_info_reports_compile_time_compatibility() -> None:
         "eval_state_mem",
         "dynamic_primop_registration",
         "store_impl_read_derivation",
+        # The one capability here that the Nix version does not decide. It
+        # comes from `-Dgc=disabled`, which the AddressSanitizer variant
+        # builds because libexpr refuses ASAN together with a conservative
+        # collector. So this key is true on four of the five variants that
+        # `default.nix` builds, and the Nix version says nothing about it.
+        "boehm_gc",
     }
     assert all(isinstance(value, bool) for value in info["capabilities"].values())
 

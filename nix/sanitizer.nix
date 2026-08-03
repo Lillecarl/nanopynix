@@ -3,24 +3,26 @@
 #
 # `name` picks the variant, and nothing else here differs between them: the
 # reason each library needs its own override is the same whichever sanitizer
-# is asking. See `sanitizers` in `default.nix` for the two call sites.
+# is asking. See `sanitizers` in `default.nix` for the three call sites.
 {
   lib,
   stdenv,
-  # "thread" or "undefined". Not a free-form flag string: the runtime library,
-  # the shadow-memory rules and the set of libraries to instrument all follow
-  # from which sanitizer this is.
+  # "thread", "undefined" or "address". Not a free-form flag string: the
+  # runtime library, the shadow-memory rules and the set of libraries to
+  # instrument all follow from which sanitizer this is.
   name,
 }:
 let
   isThread = name == "thread";
+  isAddress = name == "address";
+  isUndefined = name == "undefined";
 
-  # ThreadSanitizer keeps shadow memory, so its runtime must be loaded before
-  # any other allocation happens in the process (LD_PRELOAD). Otherwise the
-  # setup of that memory silently fails to intercept everything. This bites us
-  # specifically because the instrumented code is a native extension
-  # dlopen()'d into a plain, non-instrumented CPython interpreter, not a
-  # from-scratch instrumented executable.
+  # ThreadSanitizer and AddressSanitizer both keep shadow memory, so the
+  # runtime must be loaded before any other allocation happens in the process
+  # (LD_PRELOAD). Otherwise the setup of that memory silently fails to
+  # intercept everything. This bites us specifically because the instrumented
+  # code is a native extension dlopen()'d into a plain, non-instrumented
+  # CPython interpreter, not a from-scratch instrumented executable.
   #
   # UndefinedBehaviorSanitizer keeps no shadow memory. Its runtime supplies the
   # `__ubsan_handle_*` reporters that the instrumented code calls, and the link
@@ -31,10 +33,18 @@ let
   # LD_PRELOAD reaches every child process, and Nix runs `git` off PATH. A
   # preloaded library from this closure gives the host git the glibc of this
   # closure beside its own, and git then fails with
-  # "version `GLIBC_ABI_DT_X86_64_PLT' not found". Measured, in the ASAN job
-  # this variant replaces. `nanopynix/tests.nix` now supplies its own git,
-  # which answers that for the TSAN variant too.
-  runtime = if isThread then "${stdenv.cc.cc.lib}/lib/libtsan.so" else null;
+  # "version `GLIBC_ABI_DT_X86_64_PLT' not found". Measured, in the first ASAN
+  # job, which never reported anything usable and was withdrawn.
+  # `nanopynix/tests.nix` supplies its own git and its own coreutils, which
+  # answers that for every variant here -- and the comment on `git` there
+  # names this job as the reason it exists.
+  runtime =
+    if isThread then
+      "${stdenv.cc.cc.lib}/lib/libtsan.so"
+    else if isAddress then
+      "${stdenv.cc.cc.lib}/lib/libasan.so"
+    else
+      null;
 
   # The compile flags of this variant.
   #
@@ -68,7 +78,7 @@ let
     "-fno-omit-frame-pointer"
     "-g"
   ]
-  ++ lib.optional (!isThread) "-fno-sanitize=vptr";
+  ++ lib.optional isUndefined "-fno-sanitize=vptr";
   sanitizerFlagsStr = toString sanitizerFlags;
 
   # The value for meson's own `b_sanitize` option, or null to leave the option
@@ -77,11 +87,19 @@ let
   #
   # The TSAN variant gets no value. `NIX_UBSAN_ENABLED` tests for `undefined`
   # alone, so a value of `thread` gives that build nothing.
-  mesonSanitize = if isThread then null else "undefined";
+  #
+  # **The ASAN variant needs this one, and needs nothing else from it.**
+  # libexpr reads `b_sanitize` to decide whether it may use the collector, and
+  # it reads nothing else. The first ASAN variant of this file passed the flag
+  # through `NIX_CFLAGS_COMPILE` alone, which meson never reads, so libexpr
+  # built with ASAN *and* the collector -- and then reported a tag read of a
+  # `Value` the collector had already freed. That report was not evidence of
+  # anything. See `requiresNoGC` below.
+  mesonSanitize = if isThread then null else name;
 
   # Whether sqlite and boehmgc get the flags too.
   #
-  # **TSAN instruments them and UBSan does not, and the asymmetry is the
+  # **TSAN instruments them and the other two do not, and the asymmetry is the
   # point.** A data race that straddles nix and one of these two libraries is
   # a defect of the way nanopynix uses the library, so it is ours to correct,
   # and an uninstrumented sqlite would hide it. Undefined behaviour inside
@@ -94,6 +112,10 @@ let
   # third-party library turns this job red for a defect that nobody here can
   # correct. The gate would then say nothing. Instrument the code that we own,
   # and read a report from it as a defect of ours.
+  #
+  # The ASAN variant says the same for sqlite, and does not reach boehmgc at
+  # all: that build has no collector, so `sanitizeBoehmGC` below is never
+  # called for it.
   instrumentDependencies = isThread;
 
   # Flags for a dependency that is not one of the meson components.
@@ -113,7 +135,22 @@ in
   inherit name runtime;
   # The attribute-name suffix each variant gets in `nanopynixVersions`,
   # and therefore the job name in CI.
-  suffix = if isThread then "tsan" else "ubsan";
+  suffix =
+    if isThread then
+      "tsan"
+    else if isAddress then
+      "asan"
+    else
+      "ubsan";
+
+  # Whether this variant forces `enableGC = false` on nix-expr.
+  #
+  # **Only ASAN, and libexpr is what decides it.** `mesonFlags` below quotes
+  # the test. `default.nix` asserts on this rather than letting the
+  # combination reach a build, because meson refuses an *enabled* `gc` feature
+  # with an error rather than by disabling it, and that error arrives twenty
+  # minutes into a from-source rebuild of the whole instrumented closure.
+  requiresNoGC = isAddress;
   flags = sanitizerFlagsStr;
   # One token, no spaces. The compile flags go through NIX_CFLAGS_COMPILE,
   # which takes a string, but CMake's linker-flag variables have to arrive as
@@ -166,18 +203,18 @@ in
       # and the frame pointer, the debug info and the `vptr` exception come
       # from `NIX_CFLAGS_COMPILE`. A repeated `-fsanitize=` does no harm.
       #
-      # **This option must never name `address` here.** libexpr refuses that
-      # combination:
+      # **`address` here is legal only against a `-Dgc=disabled` libexpr.**
+      # libexpr makes the test itself:
       #
       #   bdw_gc_required = get_option('gc').disable_if(
       #     'address' in get_option('b_sanitize'),
       #     error_message : 'Building with Boehm GC and ASAN is not supported')
       #
       # A conservative collector cannot see through the allocator of ASAN, so
-      # the collector can free an object that is still live. An ASAN variant
-      # of this file therefore reported a tag read of a freed `Value` and
-      # called it a finding. Issue #47 gives the supported route to ASAN,
-      # which is a worker process that runs without the collector.
+      # the collector can free an object that is still live. `disable_if`
+      # turns an *auto* `gc` feature off by itself, and fails an *enabled* one
+      # with that message -- and nixpkgs writes `-Dgc=enabled`, never `auto`.
+      # `requiresNoGC` above is how `default.nix` keeps the two in step.
       mesonFlags = (prevAttrs.mesonFlags or [ ]) ++ [ (lib.mesonOption "b_sanitize" mesonSanitize) ];
     };
 

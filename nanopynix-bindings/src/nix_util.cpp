@@ -5,6 +5,10 @@
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/map.h>
 
+// For `NIX_USE_BOEHMGC`, which `build_info` publishes as a capability. The
+// only libexpr header this file needs, and it holds macros alone.
+#include <nix/expr/config.hh>
+
 #include <nix/store/globals.hh>
 #include <nix/util/config-global.hh>
 #include <nix/util/configuration.hh>
@@ -211,6 +215,18 @@ static nb::dict build_info() {
     capabilities["dynamic_primop_registration"] = true;
     capabilities["store_impl_read_derivation"] = true;
 #endif
+
+    // Whether libexpr in this build has the Boehm collector.
+    //
+    // The one capability here that a Nix version does not decide. It comes
+    // from `-Dgc=disabled`, which nanopynix builds on purpose for the
+    // AddressSanitizer variant: libexpr refuses ASAN together with a
+    // conservative collector. Without the collector the evaluator allocates
+    // and never releases, and the process is the unit of reclamation.
+    //
+    // `_gc_collect` and `_gc_stats` raise in such a build, so a caller that
+    // measures the Nix heap asks this first.
+    capabilities["boehm_gc"] = static_cast<bool>(NIX_USE_BOEHMGC);
 
     nb::dict info;
     info["nix_version"] = NANOPYNIX_NIX_VERSION;

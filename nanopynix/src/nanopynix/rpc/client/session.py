@@ -170,6 +170,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
             worker_oom_score_adj=worker_oom_score_adj,
             rpc_timeout=nanopynix_settings.rpc_timeout,
             shutdown_timeout=nanopynix_settings.shutdown_timeout,
+            worker_preload=nanopynix_settings.worker_preload,
             namespace=namespace,
         )
         self._session_id = uuid.uuid4().hex

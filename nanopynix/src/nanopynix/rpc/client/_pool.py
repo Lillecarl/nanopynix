@@ -49,6 +49,7 @@ from nanopynix.settings import (
     DEFAULT_RPC_TIMEOUT_SECONDS,
     DEFAULT_SHUTDOWN_TIMEOUT_SECONDS,
     DEFAULT_WORKER_MAX_CONCURRENCY,
+    DEFAULT_WORKER_PRELOAD,
 )
 
 if TYPE_CHECKING or BEARTYPING:
@@ -164,6 +165,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         worker_oom_score_adj: int | None = None,
         rpc_timeout: float = DEFAULT_RPC_TIMEOUT_SECONDS,
         shutdown_timeout: float = DEFAULT_SHUTDOWN_TIMEOUT_SECONDS,
+        worker_preload: Sequence[str] = DEFAULT_WORKER_PRELOAD,
         namespace: OverlayNamespace | None = None,
     ) -> None:
         self._store_uri = store_uri
@@ -176,6 +178,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         self._primops = primops or []
         self._primop_callables = primop_callables or {}
         self._worker_oom_score_adj = worker_oom_score_adj
+        self._worker_preload = list(worker_preload)
         self._namespace = namespace
         self.rpc_timeout = rpc_timeout
         self._shutdown_timeout = shutdown_timeout
@@ -253,7 +256,11 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
                     self._primop_handler,
                 ],
                 on_process_start=self._on_worker_process_start,
-                preload=["nanopynix.rpc.worker._worker"],
+                # One list for the whole process, whoever asks first. The
+                # forkserver is a `multiprocessing` singleton, and it copies
+                # its preload list, its environment and its `sys.path` when it
+                # starts. See NanopynixSettings.worker_preload.
+                preload=self._worker_preload,
                 max_concurrency=DEFAULT_WORKER_MAX_CONCURRENCY,
                 # Installs the codec on *both* ends: the channel yielded here,
                 # and -- because grpclib_transports forwards it through the

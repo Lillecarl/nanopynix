@@ -23,7 +23,16 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-#include <gc/gc.h>
+// For `NIX_USE_BOEHMGC`, which decides whether the collector exists at all in
+// this build. Included before <gc/gc.h> because the macro is what gates that
+// header: a `-Dgc=disabled` libexpr installs no Boehm headers, so an
+// unconditional include does not compile. See `enter_evaluator_thread` below
+// for what this build does instead.
+#include <nix/expr/config.hh>
+
+#if NIX_USE_BOEHMGC
+#  include <gc/gc.h>
+#endif
 
 #include <nix/expr/eval.hh>
 #include <nix/expr/eval-error.hh>
@@ -1474,7 +1483,9 @@ static void bind_eval_state(nb::module_ &m) {
 // Python owns evaluator threads. Nix enables manual Boehm registration during
 // initGC(), but it does not register embedding-created threads itself.
 static thread_local bool evaluator_thread_registered = false;
-static thread_local bool evaluator_thread_registered_by_nanopynix = false;
+// `maybe_unused` because a `-Dgc=disabled` build never writes it: there is no
+// registration to own, and therefore nothing to undo.
+[[maybe_unused]] static thread_local bool evaluator_thread_registered_by_nanopynix = false;
 
 // DIAGNOSTIC (temporary): logs every GC register/unregister call with its OS
 // thread id, gated behind NANOPYNIX_GC_THREAD_DEBUG=1, to correlate against a
@@ -1560,12 +1571,23 @@ static void warm_up_ctype_facet() {
     });
 }
 
+// A build with `-Dgc=disabled` has no collector, so there is no thread to
+// register and nothing to collect. **The bookkeeping below stays, and only the
+// `GC_*` calls go.** `evaluator_thread_registered` is what makes a second
+// `enter` and an unpaired `exit` raise, and those two exceptions are part of
+// the contract that `NixThreadExecutor` and its tests hold to. A build that
+// dropped them would answer differently for a reason that has nothing to do
+// with the collector.
 static void enter_evaluator_thread() {
     gc_thread_debug_log("enter_evaluator_thread:begin");
     warm_up_ctype_facet();
     if (evaluator_thread_registered)
         throw std::runtime_error("evaluator thread is already registered with Boehm GC");
 
+#if !NIX_USE_BOEHMGC
+    evaluator_thread_registered = true;
+    gc_thread_debug_log("enter_evaluator_thread:no-collector");
+#else
     GC_stack_base stack_base;
     auto stack_base_result = GC_get_stack_base(&stack_base);
     if (stack_base_result != GC_SUCCESS)
@@ -1585,17 +1607,36 @@ static void enter_evaluator_thread() {
     evaluator_thread_registered = true;
     evaluator_thread_registered_by_nanopynix = true;
     gc_thread_debug_log("enter_evaluator_thread:registered");
+#endif
+}
+
+// What the two probes below say when this build has no collector.
+//
+// A distinct message, and not an error from somewhere else. Issue #47 asks for
+// exactly this: a caller that reads a counter which is not there must learn
+// that the counter is absent, and not that some unrelated call failed. A test
+// asks `build_info()["capabilities"]["boehm_gc"]` first and skips; this is the
+// answer for a caller that did not ask.
+[[maybe_unused]] static std::runtime_error no_collector_in_this_build(const char *what) {
+    return std::runtime_error(
+        std::string(what) + ": this build of nanopynix has no Boehm collector. "
+        "libexpr was built with `-Dgc=disabled`, so the evaluator allocates and "
+        "never releases, and the process is the unit of reclamation.");
 }
 
 // `GC_gcollect` from a thread Boehm does not know about is not an error return
 // -- it is ABORT("Collecting from unknown thread"), which core-dumps the
 // process. Measured, before this guard existed. Refuse first.
 static void gc_collect() {
+#if !NIX_USE_BOEHMGC
+    throw no_collector_in_this_build("cannot collect");
+#else
     if (!GC_thread_is_registered())
         throw std::runtime_error(
             "cannot collect from a thread that Boehm GC does not know; "
             "run this on an evaluator thread");
     GC_gcollect();
+#endif
 }
 
 // The Boehm counters. `GC_get_heap_size` and its neighbours are unsynchronized
@@ -1610,6 +1651,11 @@ static void gc_collect() {
 // went. As unsigned that arrives in Python as 2^64 - 32, which reads as a leak
 // of 18 exabytes. The drift is the honest number.
 static std::map<std::string, int64_t> gc_stats() {
+#if !NIX_USE_BOEHMGC
+    // An empty map, or a map of zeros, would both read as a measurement. There
+    // is nothing to measure.
+    throw no_collector_in_this_build("cannot read the collector counters");
+#else
     return {
         {"gc_no", static_cast<int64_t>(GC_get_gc_no())},
         {"heap_size", static_cast<int64_t>(GC_get_heap_size())},
@@ -1617,17 +1663,20 @@ static std::map<std::string, int64_t> gc_stats() {
         {"memory_use", static_cast<int64_t>(GC_get_memory_use())},
         {"non_gc_bytes", static_cast<int64_t>(GC_get_non_gc_bytes())},
     };
+#endif
 }
 
 static void exit_evaluator_thread() {
     gc_thread_debug_log("exit_evaluator_thread:begin");
     if (!evaluator_thread_registered)
         throw std::runtime_error("evaluator thread is not registered with Boehm GC");
+#if NIX_USE_BOEHMGC
     if (evaluator_thread_registered_by_nanopynix) {
         auto unregister_result = GC_unregister_my_thread();
         if (unregister_result != GC_SUCCESS)
             throw std::runtime_error("could not unregister evaluator thread from Boehm GC");
     }
+#endif
     evaluator_thread_registered = false;
     evaluator_thread_registered_by_nanopynix = false;
     gc_thread_debug_log("exit_evaluator_thread:unregistered");
@@ -1662,14 +1711,18 @@ void nanopynix_bind_expr(nb::module_ &m) {
           "Call it through `EvalSession.run`. `nix::initGC` runs on the session's "
           "Nix thread, so the Python main thread is not registered with Boehm, and "
           "Boehm aborts the process on a collection from an unregistered thread. "
-          "This refuses first, with an exception.");
+          "This refuses first, with an exception.\n\n"
+          "A build with no collector raises as well. Ask "
+          "`build_info()['capabilities']['boehm_gc']` before calling this.");
     m.def("_gc_stats", &gc_stats,
           "Internal: the Boehm counters, for a test that must measure the Nix heap.\n\n"
           "`non_gc_bytes` is the interesting one. Every `nix::allocRootValue` is one "
           "GC_MALLOC_UNCOLLECTABLE block, so this number moves with the count of live "
           "root values -- including a root that Python bookkeeping cannot see.\n\n"
           "It counts every uncollectable allocation in the process, not only root "
-          "values. Compare a delta across one operation, never an absolute.");
+          "values. Compare a delta across one operation, never an absolute.\n\n"
+          "A build with no collector raises. Ask "
+          "`build_info()['capabilities']['boehm_gc']` before calling this.");
     m.def("parse_nix_path", [](std::optional<std::string> raw) -> std::vector<std::string> {
         std::string value;
         if (raw) {

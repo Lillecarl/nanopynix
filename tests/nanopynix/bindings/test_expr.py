@@ -18,6 +18,17 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+requires_boehm_gc = pytest.mark.nix_capability("boehm_gc")
+"""Skip a test whose subject is the collector, on a build that has none.
+
+nanopynix builds libexpr with ``-Dgc=disabled`` for the AddressSanitizer
+variant, because libexpr refuses ASAN together with a conservative collector.
+``_gc_stats`` and ``_gc_collect`` raise in such a build, and the behaviour
+these tests measure -- a root coming back -- does not exist there. Every other
+variant keeps the collector, so each of these still runs four ways.
+"""
+
+
 class TestEvalString:
     def test_eval_int(self, eval_state: nanopynix.EvalState):
         v = eval_state.eval_string("1 + 2")
@@ -418,6 +429,7 @@ class TestThreadConfinement:
         with pytest.raises(RuntimeError, match="belongs to thread"):
             built[0].eval_string("7")
 
+    @requires_boehm_gc
     def test_a_value_dropped_on_a_foreign_thread_still_frees_its_root(self, store: Any, init_expr: object) -> None:
         """The destructor is exempt, on purpose.
 

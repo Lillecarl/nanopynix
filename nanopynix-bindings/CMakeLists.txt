@@ -114,6 +114,12 @@ target_link_libraries(_ext PRIVATE
 # nix-expr propagates bdw-gc. Its public thread-registration declarations are
 # intentionally visible only to consumers defining GC_THREADS. Only
 # src/nix_expr.cpp includes <gc/gc.h>, but the define is per-target.
+#
+# Unconditional, and safe against a `-Dgc=disabled` libexpr: that build
+# installs no Boehm headers, and src/nix_expr.cpp guards its include with
+# NIX_USE_BOEHMGC, so nothing here reads the define. A define that reaches no
+# header costs nothing, and one CMake branch fewer is one place fewer for the
+# two builds to drift.
 target_compile_definitions(_ext PRIVATE GC_THREADS)
 target_compile_options(_ext PRIVATE -std=c++23)
 nanopynix_target_uses_nix_compat(_ext)

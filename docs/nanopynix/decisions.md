@@ -74,6 +74,19 @@ events into a stalled consumer currently stops.
 **Q4 — Does the stdio worker have a future?**
 It has an entry point, no client, a stale docstring and no test. Keeping it
 means giving it a protocol version and a compatibility rule (Q5).
+
+Issue #47 said it would supply the client this question waits for: a worker
+without the Boehm collector needs its own environment, and a stdio worker
+execs a fresh process, so the choice could differ for each worker. **That is
+not how the non-GC build works, and the reason removes the argument.** The
+extension a worker loads comes from the `sys.path` of the parent process,
+which the forkserver copies once when it starts. A forkserver child imports
+`nanopynix.rpc.worker._worker` while it unpickles the process target, before
+any code of ours runs there, and `multiprocessing` keeps one forkserver for
+each process. So the venv decides, and a build with no collector is a separate
+scope in `default.nix` rather than a runtime choice. The forkserver needed no
+change at all, and the stdio worker gained no client.
+
 *Recommended default: delete it; add it back with a client when one exists.*
 
 **Q5 — Is the RPC protocol a public interface?**
