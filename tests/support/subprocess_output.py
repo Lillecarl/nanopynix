@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, NamedTuple
 import anyio
 
 if TYPE_CHECKING:
+    import os
     from collections.abc import Sequence
 
     from anyio.abc import ByteReceiveStream
@@ -48,9 +49,15 @@ class CompletedProcess(NamedTuple):
         return f"exited {self.returncode}\n--- stdout ---\n{self.stdout}\n--- stderr ---\n{self.stderr}"
 
 
-async def run_process(command: Sequence[str]) -> CompletedProcess:
-    """Run ``command``, draining both pipes concurrently, and return its output."""
-    process = await anyio.open_process(list(command))
+async def run_process(command: Sequence[str], cwd: str | os.PathLike[str] | None = None) -> CompletedProcess:
+    """Run ``command``, draining both pipes concurrently, and return its output.
+
+    ``cwd`` runs the child in that directory. A tool that finds its own
+    configuration by walking up from the working directory needs this, and
+    rewriting the command with explicit paths instead would no longer be the
+    command that CI runs.
+    """
+    process = await anyio.open_process(list(command), cwd=cwd)
     captured: dict[str, bytes] = {"stdout": b"", "stderr": b""}
 
     async def drain(name: str, stream: ByteReceiveStream | None) -> None:

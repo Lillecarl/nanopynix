@@ -14,6 +14,7 @@ here and to read the results. This file only says where a file belongs.
 |---|---|---|
 | `tests/meta/` | self-checks: the repository examined as text and structure | the repository |
 | `tests/harness/` | the test machinery itself, which no other test asserts | one harness behaviour |
+| `tests/gates/` | the static gates of CI, run as tools | one gate |
 | `tests/nanopynix/` | the library, by subsystem | one behaviour of nanopynix |
 | `tests/pynix/` | the CLI and the LSP server | one command or one editor request |
 | `tests/ekn/` | the ekn deployment tool | one ekn behaviour |
@@ -42,6 +43,31 @@ be silently useless at the one moment it matters.
 Ask whether a bug in the helper makes some other test fail. When the answer is
 yes, write no test here. When the answer is "no, it just stops helping", the
 helper needs its own test, and this is where the test goes.
+
+## The rule for `tests/gates/`
+
+**A gate test runs a tool that CI already runs, and it never fails the run.**
+
+This directory exists because of the rule below it. A meta test reads the
+repository and finishes in milliseconds, and `ruff` and `pyright` are
+subprocesses that take seconds, so they cannot go in `tests/meta/` without
+taking that property away from every test in it.
+
+Three things hold for each test here:
+
+- **The gate is a copy, and not the authority.** `nix/checks.nix` builds each
+  gate as a derivation, and the `static-checks` job of CI refuses the merge.
+  Run the same command, so that a finding here is the finding there.
+- **`xfail(strict=False)`, always.** A failing tool must not stop a developer
+  from running the suite, and CI already refuses. A clean tool reports `xpass`
+  and a failing one reports `xfail`, and the run stays green either way.
+- **Skip when the tool is absent.** The packaged runner carries no dev shell
+  tool, so `shutil.which` returns `None` there and the test skips. Do not add
+  the tool to `nanopynix/tests.nix` to make it run: that job builds the
+  derivation instead, and running it twice only costs time.
+
+The order comes from `pytest_collection_modifyitems` in `tests/conftest.py`,
+which puts these items after the forked tests and before everything else.
 
 ## The rule for `tests/meta/`
 
