@@ -93,6 +93,19 @@ async def test_a_cancelled_interruptible_operation_frees_the_evaluator(
             assert await result.to_python() == 2
 
 
+# **A build with no collector cannot run this test, and the reason is the
+# subject of the test itself.** It abandons an evaluator in the middle of
+# `UNINTERRUPTIBLE`, which is a fold over 40 million elements that Nix will
+# not stop. On rpc the worker process ends and the operating system takes the
+# memory back. On inproc the abandoned work keeps allocating in the pytest
+# process, and without a collector nothing ever reclaims it: a measured run
+# against nix_2_34-nogc grew past 6 GB here and the kernel killed it. Forking
+# the test does not help, because the child is what grows.
+#
+# The marker skips both engines, and the rpc half would in fact pass. Marking
+# one parametrisation is not available here: `session_factory` requests both
+# engine fixtures, so nothing in the fixture closure tells the two apart.
+@pytest.mark.nix_capability("boehm_gc")
 @pytest.mark.anyio
 async def test_a_cancelled_evaluation_abandons_the_evaluator(
     session_factory: Any,

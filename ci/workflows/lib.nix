@@ -132,7 +132,9 @@ let
     # that job takes the plain `build` cap.
     asanBuild = 60;
     # The full suite. It takes 8 to 13 minutes on every version and backend,
-    # and 9.7 to 13 under UBSan (run 30782379867).
+    # and 9.7 to 13 under UBSan (run 30782379867). The no-collector job takes
+    # the same cap, and it measured 12 minutes locally: a fork for each
+    # in-process test costs about half again as much as one process.
     suite = 30;
     # The same suite under ASAN. Generous rather than measured, because this
     # job has never run: ASAN keeps shadow memory for every allocation, and
@@ -482,23 +484,23 @@ let
   # apart. It is also the answer to acceptance criterion 2 of issue #47, which
   # asks that an RPC worker run the suite against such a build.
   #
-  # **The suite skips every test that builds an evaluator in the pytest
-  # process, and that is the design rather than a gap.** Such a build leaks by
+  # **Every test that builds an evaluator in the pytest process runs in a fork
+  # of it, and that is what makes this job possible.** Such a build leaks by
   # design, and Nix's own package option gives the condition that makes the
   # leak acceptable: evaluation takes place within short-lived processes. An
-  # RPC worker is one, and it returns every byte when it exits. The pytest
-  # process outlives the whole suite.
+  # RPC worker is one. A forked child is another, and it gives its memory back
+  # when the test ends, so the pytest process stops accumulating.
   #
-  # The measurements against nix_2_34-nogc say how large the difference is.
-  # The rpc share of the suite peaked at 553 MB. The in-process share demanded
-  # about 10 GB -- 2 GB resident against a 2 GB cap, and 8.1 GB pushed to swap
-  # -- and the whole suite in one process reached 5 GB resident with 14.6 GB
-  # of swap before the kernel killed it. No process boundary, no reclaim.
+  # The measurements against nix_2_34-nogc say how much that is worth. The
+  # same in-process subset needs about 10 GB in one process and 297 MB forked,
+  # and it runs in 16 seconds rather than 86. The whole suite forked: 2077
+  # passed, 13 skipped, 3 GB peak, 12 minutes.
   #
   # `tests/support/nix_runtime.py` holds the rule, and
-  # `tests/meta/test_no_collector_rule.py` keeps it from going stale. The
-  # three tests whose subject is the collector skip separately, through the
-  # `boehm_gc` capability that `build_info` publishes.
+  # `tests/meta/test_no_collector_rule.py` keeps it from going stale. Four
+  # tests skip separately, through the `boehm_gc` capability that `build_info`
+  # publishes: three measure the collector, and one abandons an evaluator in
+  # the middle of work that Nix will not stop, which no fork can bound.
   mkNoGCTestJob =
     {
       version,
@@ -534,9 +536,10 @@ let
       }
     );
 
-  # The suite under AddressSanitizer, against one Nix version, in two runs.
-  # `mkNoGCTestJob` above says why there are two, and this job inherits that
-  # split because it builds against the same libexpr.
+  # The suite under AddressSanitizer, against one Nix version. `mkNoGCTestJob`
+  # above says how a build with no collector runs the whole suite, and this job
+  # inherits that rule because it builds against the same libexpr: every test
+  # that builds an evaluator in the pytest process runs in a fork of it.
   #
   # **The build has no collector, and that is not a tuning choice.** libexpr
   # refuses ASAN together with the Boehm collector, because a conservative
@@ -585,34 +588,12 @@ let
                 set -o pipefail
                 LOGFILE="''${{ github.workspace }}/asan-output-${bareVersion}.log"
                 status=0
-                run_suite() {
-                  run_status=0
-                  env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=120 NANOPYNIX_TEST_SANITIZER=asan PYTHONDONTWRITEBYTECODE=1 \
-                    ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
-                    "$@" 2>&1 | tee -a "$LOGFILE" || run_status=$?
-                  if [ "$run_status" -ne 0 ]; then status=$run_status; fi
-                }
-                # Two processes, and the second one is why this job still
-                # covers the in-process engine at all. Without the collector
-                # an evaluator in the pytest process never releases memory, so
-                # `tests/support/nix_runtime.py` skips those tests by default.
-                # The acceptance test of issue #35 is one of them, and a run
-                # that skipped it would report success and prove nothing.
-                #
-                # **The second run takes one file, and not the whole
-                # in-process subset.** That subset was measured against
-                # nix_2_34-nogc and it demands about 10 GB in one process --
-                # 2 GB resident against a 2 GB cap, and 8.1 GB pushed to swap.
-                # `test_flake.py` holds the stack-use-after-return of issue
-                # #34, which is the defect shape this job exists for. The rest
-                # of the in-process engine has no ASAN cover until an
-                # evaluator can be recycled inside one process (issue #50).
-                #
-                # Both runs happen whatever the first one reports. A red first
-                # run does not say whether the second one finds a report, and
-                # a report is what this job is for.
-                run_suite
-                run_suite --in-process-evaluator=run tests/nanopynix/bindings/test_flake.py
+                # The whole suite, and that includes the in-process engine. A test that
+                # builds an evaluator in the pytest process runs in a fork of it, so the
+                # acceptance test of issue #35 gets ASAN cover here.
+                env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=120 NANOPYNIX_TEST_SANITIZER=asan PYTHONDONTWRITEBYTECODE=1 \
+                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
+                  2>&1 | tee -a "$LOGFILE" || status=$?
                 # A sanitizer report is the finding, so read the log rather
                 # than trusting the exit status alone: `halt_on_error=1` kills
                 # the process that reports, but a report raised inside a
