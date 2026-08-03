@@ -170,10 +170,23 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     # thread), the pytest process is "multithreading-dirty" and forking it is
     # a deadlock risk, not just slow. Run every @pytest.mark.forked test
     # first, before anything else has a chance to spawn those threads.
-    forked = [item for item in items if item.get_closest_marker("forked") is not None]
-    if forked:
-        rest = [item for item in items if item.get_closest_marker("forked") is None]
-        items[:] = forked + rest
+    # The static gates run second. A lint error or a type error is the cheapest
+    # finding in the run and needs no Nix, so it belongs near the front rather
+    # than behind several minutes of store work.
+    #
+    # After the forked tests, and not before them: each gate runs a tool
+    # through `anyio.open_process`, and the asyncio child watcher gives that
+    # child a thread of its own. The fork rule above keeps the first word.
+    def rank(item: pytest.Item) -> int:
+        if item.get_closest_marker("forked") is not None:
+            return 0
+        if item.get_closest_marker("static_gate") is not None:
+            return 1
+        return 2
+
+    # `sorted` is stable, so every group keeps the order collection gave it,
+    # including the shuffle that pytest-randomly applies.
+    items.sort(key=rank)
 
 
 def _save_coverage_before_hard_exit() -> None:
