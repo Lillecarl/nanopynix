@@ -36,6 +36,22 @@ let
         };
       };
 
+    test-asan =
+      workflow.mkAsanTestJob {
+        version = "\${{ matrix.version }}";
+        ref = branch;
+        inherit lockArtifact;
+        needs = [ updateJob ];
+      }
+      // {
+        strategy = {
+          fail-fast = false;
+          matrix = {
+            version = versionExpression "asan_versions";
+          };
+        };
+      };
+
     test-tsan =
       workflow.mkTsanTestJob {
         version = "\${{ matrix.version }}";
@@ -64,6 +80,7 @@ workflow.evalWorkflow {
       outputs = {
         regular_versions = "\${{ steps.versions.outputs.regular_versions }}";
         tsan_versions = "\${{ steps.versions.outputs.tsan_versions }}";
+        asan_versions = "\${{ steps.versions.outputs.asan_versions }}";
       };
       steps = [
         (steps.checkout { ref = branch; })
@@ -77,8 +94,9 @@ workflow.evalWorkflow {
           id = "versions";
           name = "Compute Nix version matrices";
           run = ''
-            echo "regular_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-tsan" n == null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
+            echo "regular_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-(tsan|asan)" n == null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
             echo "tsan_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-tsan" n != null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
+            echo "asan_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-asan" n != null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
           '';
         }
         (steps.uploadArtifact {

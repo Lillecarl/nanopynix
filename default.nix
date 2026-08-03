@@ -93,11 +93,19 @@ let
     pyprojectUtil = pkgs.callPackage pyproject-nix.build.util { };
   };
 
-  tsan = pkgs.callPackage ./nix/tsan.nix { };
+  # One entry per sanitizer variant that gets its own set of Nix builds.
+  # ASan and TSan cannot be combined -- measured, `cc1plus: error:
+  # '-fsanitize=thread' is incompatible with '-fsanitize=address'` -- so each
+  # is a separate rebuild of nix, sqlite and boehmgc rather than one build
+  # carrying both.
+  sanitizers = {
+    tsan = pkgs.callPackage ./nix/sanitizer.nix { name = "thread"; };
+    asan = pkgs.callPackage ./nix/sanitizer.nix { name = "address"; };
+  };
 
   # A confirmed data race in nix::Bindings::emptyBindings (a process-wide
   # shared static that ExprAttrs::eval unconditionally writes to -- see the
-  # patch's own commentary) found via ThreadSanitizer (see enableTsan below).
+  # patch's own commentary) found via ThreadSanitizer (see `sanitizers` above).
   # thread_local gives each evaluator OS thread its own instance, fixing the
   # race without any behavior change for single-threaded use.
   emptyBindingsPatch = ./nix/patches/nix-thread-local-empty-bindings.patch;
@@ -145,7 +153,12 @@ let
   # needed: isNixScope only matches modular component scopes, never the
   # "stable"/"latest" plain-derivation aliases that could otherwise collide.
   nanopynixForNixVersions =
-    { enableTsan }:
+    # `null` for the plain build, or one of `sanitizers` above. The variants
+    # are separate attribute sets rather than an option on one build, because
+    # every C and C++ library in the process has to agree.
+    {
+      sanitizer ? null,
+    }:
     let
       isNixScope =
         _name: v:
@@ -174,7 +187,7 @@ let
           lib.extends (
             final: _prev:
             let
-              tsanRuntime = if enableTsan then tsan.tsanRuntime else null;
+              sanitizerRuntime = if sanitizer == null then null else sanitizer.runtime;
 
               # `pythonBase` unchanged. There used to be a per-version overlay
               # here adding our own projects to the interpreter's set, but
@@ -209,13 +222,13 @@ let
               # the builders set below instead -- which is exactly what
               # `hacks.nixpkgsPrebuilt` exists for.
               nanopynix-bindings = callPythonPackage ./nanopynix-bindings/package.nix {
-                inherit enableTsan tsanRuntime;
+                inherit sanitizer sanitizerRuntime;
               };
 
               # Everything above the bindings is a pyproject.nix builders
               # package. The set is built once per Nix version and holds both
               # the built and the editable form of each project.
-              # No enableTsan/tsanRuntime: nothing in these pure-Python
+              # No sanitizer: nothing in these pure-Python
               # builds loads the instrumented extension, and preloading the
               # TSAN runtime here only instrumented `uv` -- see the comment
               # on the `nanopynix` override in that file.
@@ -264,7 +277,7 @@ let
                 test = final.callPackage ./nanopynix/tests.nix {
                   inherit (final.nanopynix) version;
                   inherit (inputs) nixpkgs;
-                  inherit tsanRuntime;
+                  inherit sanitizer sanitizerRuntime;
                   inherit (final) pythonSet;
                   # The same tools the `pynix` app above puts on its PATH, for
                   # the same reason -- the LSP tests drive the real handlers,
@@ -324,17 +337,17 @@ let
         );
 
       # nix-store's sqlite buildInput + every meson-based nix-* library get
-      # consistent -fsanitize=thread instrumentation (see nix/tsan.nix) --
+      # consistent instrumentation (see nix/sanitizer.nix) --
       # applied after extendNixScope (rather than on the raw nixComponents_X
       # scope) since overrideScope/overrideAllMesonComponents both survive
       # onto the extended scope, so nanopynix-bindings/nanopynix end up built
       # against the *same* instrumented nix-store/nix-expr/etc via the shared
       # `final` fixpoint.
-      applyTsanOverrides =
+      applySanitizerOverrides =
         scope:
         (scope.overrideScope (
           _final: prev: {
-            nix-store = prev.nix-store.override { sqlite = tsan.sanitizeSqlite pkgs.sqlite; };
+            nix-store = prev.nix-store.override { sqlite = sanitizer.sanitizeSqlite pkgs.sqlite; };
             # pkgs.nixDependencies.boehmgc, not prev.boehmgc or pkgs.boehmgc:
             # nixComponents_X's own scope never contains a `boehmgc` attribute
             # at all -- nixpkgs builds each nixComponents_X via a *separate*
@@ -348,11 +361,11 @@ let
             # the kind of undersized-mark-stack condition its own comment
             # warns about, right where we're chasing a GC crash.
             nix-expr = prev.nix-expr.override {
-              boehmgc = tsan.sanitizeBoehmGC pkgs.nixDependencies.boehmgc;
+              boehmgc = sanitizer.sanitizeBoehmGC pkgs.nixDependencies.boehmgc;
             };
           }
         )).overrideAllMesonComponents
-          tsan.mesonComponentOverrides;
+          sanitizer.mesonComponentOverrides;
 
       # nixComponents_2_34 -> nix_2_34, nixComponents_git -> git (matching
       # the names the previous hand-written patchedNixVersions used), plus a
@@ -362,7 +375,7 @@ let
         let
           bare = lib.removePrefix "nixComponents_" name;
           versionName = if bare == "git" then "git" else "nix_${bare}";
-          suffix = if enableTsan then "-tsan" else "";
+          suffix = if sanitizer == null then "" else "-${sanitizer.suffix}";
         in
         lib.nameValuePair "${versionName}${suffix}" value;
     in
@@ -377,19 +390,25 @@ let
       # races on this version alone, so TSAN just reports/aborts on
       # long-since-fixed bugs rather than anything actionable. Skip building
       # a TSAN variant for it entirely instead of chasing that noise.
-      ++ lib.optional enableTsan (
+      # TSAN only. ASan keeps 2.31, and needs it: the ownership rules that
+      # differ between versions -- `fetchers::Settings` living inside
+      # `fetchers::Input` on 2.31 and not after -- are exactly what it is
+      # there to check.
+      ++ lib.optional (sanitizer != null && sanitizer.name == "thread") (
         lib.filterAttrs (_: scope: lib.versions.majorMinor scope.version != "2.31")
       )
       ++ [
         (lib.mapAttrs (_: patchNixScope))
         (lib.mapAttrs (_: extendNixScope))
       ]
-      ++ lib.optional enableTsan (lib.mapAttrs (_: applyTsanOverrides))
+      ++ lib.optional (sanitizer != null) (lib.mapAttrs (_: applySanitizerOverrides))
       ++ [ (lib.mapAttrs' rename) ]
     );
 
   nanopynixVersionsInternal =
-    nanopynixForNixVersions { enableTsan = false; } // nanopynixForNixVersions { enableTsan = true; };
+    nanopynixForNixVersions { }
+    // nanopynixForNixVersions { sanitizer = sanitizers.tsan; }
+    // nanopynixForNixVersions { sanitizer = sanitizers.asan; };
 
   nanopynixVersions = nanopynixVersionsInternal // {
     stable = getByVersion pkgs.nixVersions.stable.version;

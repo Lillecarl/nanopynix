@@ -9,7 +9,8 @@
   tofuCoreSchemaTool,
   storeExecTool,
   version,
-  tsanRuntime ? null,
+  sanitizer ? null,
+  sanitizerRuntime ? null,
 }:
 let
   # A venv over the whole repo, with every project's test extra enabled.
@@ -83,13 +84,15 @@ in
     # edit-run loop, not in the run that decides whether a change is good.
     export NANOPYNIX_TEST_FAITHFUL_SESSIONS=1
   ''
-  + lib.optionalString (tsanRuntime != null) ''
-    # ThreadSanitizer's runtime must be loaded before any other allocation in
-    # the process happens, or its shadow-memory interception silently misses
+  + lib.optionalString (sanitizerRuntime != null) ''
+    # The sanitizer runtime must be loaded before any other allocation in the
+    # process happens, or its shadow-memory interception silently misses
     # things -- this matters here because the instrumented code is a native
     # extension dlopen()'d into a plain, non-instrumented CPython interpreter,
     # not a from-scratch instrumented executable.
-    export LD_PRELOAD="${tsanRuntime}''${LD_PRELOAD:+:$LD_PRELOAD}"
+    export LD_PRELOAD="${sanitizerRuntime}''${LD_PRELOAD:+:$LD_PRELOAD}"
+  ''
+  + lib.optionalString (sanitizer != null && sanitizer.name == "thread") ''
     # halt_on_error=1: without it, a race hit deep in a loop (e.g. every
     # empty-attrset evaluation) gets re-reported on every single occurrence
     # instead of just the first, producing multi-million-line, unusable logs.
@@ -103,6 +106,32 @@ in
     # multi-threaded fork is not supported"). This is normal daemon behavior,
     # not a bug, so tell TSAN to tolerate it instead of aborting the child.
     export TSAN_OPTIONS="halt_on_error=1 history_size=7 second_deadlock_stack=1 die_after_fork=0 suppressions=${tsanSuppressions}"
+  ''
+  + lib.optionalString (sanitizer != null && sanitizer.name == "address") ''
+    # detect_leaks=0: nix allocates from the Boehm collector, which does not
+    # free by design, and CPython keeps interned objects to exit. Both are
+    # leaks to LeakSanitizer and neither is a defect. This job is for a memory
+    # error, not for a leak.
+    #
+    # detect_stack_use_after_return is NOT set here, on purpose. bdwgc returns
+    # "detect_stack_use_after_return=0" from its own __asan_default_options()
+    # hook, with the comment "Do not to use fake stacks" -- the option moves
+    # locals into a heap fake stack, and a conservative collector scanning the
+    # real stack then cannot see a pointer held only in a local. It would free
+    # a live object, and the crash would look like one of ours. ASAN_OPTIONS
+    # overrides that hook, so setting it here would silently undo a deliberate
+    # choice by the collector. Use-after-*scope* needs no fake stack and is
+    # compiled in by default, so the class of defect this job exists for is
+    # still covered.
+    #
+    # halt_on_error is ASan's default. UBSan rides along in the same build and
+    # is made fatal at compile time instead, by -fno-sanitize-recover.
+    export ASAN_OPTIONS="detect_leaks=0 abort_on_error=1"
+    export UBSAN_OPTIONS="print_stacktrace=1 halt_on_error=1"
+    # ASan cannot see through pymalloc's arenas, so a report would name the
+    # arena rather than the object. This is the documented way to get CPython
+    # to allocate through libc malloc.
+    export PYTHONMALLOC=malloc
   ''
   + ''
     # Coverage is measured by `coverage run` and combined *after* pytest has

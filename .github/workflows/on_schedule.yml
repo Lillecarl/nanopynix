@@ -36,6 +36,7 @@ jobs:
   docs-build:
     needs:
     - static-checks
+    - test-asan
     - test-regular
     - test-tsan
     steps:
@@ -186,6 +187,63 @@ jobs:
         backend:
         - daemon
         - local
+  test-asan:
+    needs:
+    - update-lockfile
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: develop
+    - uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Build ASAN nanopynix test runner (${{ matrix.version }})
+      run: nix build ".#nanopynix-tests-${{ matrix.version }}" --out-link result --print-build-logs
+        --print-out-paths
+    - name: Enable Nix sandbox namespaces
+      run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo sysctl -w kernel.unprivileged_userns_clone=1
+        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+    - name: Run ASAN/UBSAN-instrumented suite (${{ matrix.version }}, local backend)
+      run: |
+        set -o pipefail
+        LOGFILE="${{ github.workspace }}/asan-output-${{ matrix.version }}.log"
+        status=0
+        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=60 NANOPYNIX_TEST_SANITIZER=asan PYTHONDONTWRITEBYTECODE=1 \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
+          2>&1 | tee -a "$LOGFILE" || status=$?
+        # A sanitizer report is the finding, so grep for it rather than
+        # trusting the exit status alone: abort_on_error=1 makes ASan
+        # kill the process, but a report raised inside a forkserver
+        # worker can still be reaped into a plain test failure.
+        if grep -qE "(AddressSanitizer|UndefinedBehaviorSanitizer|runtime error):" "$LOGFILE"; then
+          echo "::error::sanitizer report on ${{ matrix.version }} -- see the log above"
+          exit 1
+        fi
+        exit "$status"
+    - name: Upload ASAN output (${{ matrix.version }})
+      uses: actions/upload-artifact@main
+      with:
+        name: asan-report-${{ matrix.version }}
+        path: ${{ github.workspace }}/asan-output-${{ matrix.version }}.log
+      if: ${{ !cancelled() }}
+    timeout-minutes: 60
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.update-lockfile.outputs.asan_versions) }}
   test-tsan:
     needs:
     - update-lockfile
@@ -278,6 +336,7 @@ jobs:
     outputs:
       regular_versions: ${{ steps.versions.outputs.regular_versions }}
       tsan_versions: ${{ steps.versions.outputs.tsan_versions }}
+      asan_versions: ${{ steps.versions.outputs.asan_versions }}
     steps:
     - uses: actions/checkout@main
       with:
@@ -295,8 +354,9 @@ jobs:
       run: nix flake update
     - name: Compute Nix version matrices
       run: |
-        echo "regular_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-tsan" n == null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
+        echo "regular_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-(tsan|asan)" n == null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
         echo "tsan_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-tsan" n != null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
+        echo "asan_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-asan" n != null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
       id: versions
     - uses: actions/upload-artifact@main
       with:
