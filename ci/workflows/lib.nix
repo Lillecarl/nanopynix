@@ -621,12 +621,12 @@ let
           (steps.installNix { })
           (steps.cachix { })
           {
-            name = "Run the gates (ruff, ruff-strict, ruff format, pyright, grpclib-transports)";
+            name = "Run the gates (ruff, ruff-strict, ruff format, pyright, shellcheck, grpclib-transports)";
             timeout-minutes = caps.staticChecks;
             run = ''
               nix build --no-link --print-build-logs --keep-going \
                 ".#check-lint" ".#check-lint-strict" ".#check-format" ".#check-types" \
-                ".#check-grpclib-transports"
+                ".#check-shell" ".#check-grpclib-transports"
             '';
           }
         ];

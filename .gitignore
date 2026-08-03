@@ -12,3 +12,8 @@ htmlcov
 
 # Nix / direnv
 .direnv/
+
+# Logs of scripts/run-tests.sh. Inside the repository so that a run is easy to
+# find, and ignored so that it stays out of the source that every
+# nanopynix-tests-* derivation reads with `cd ${../.}`.
+.test-runs/

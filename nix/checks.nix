@@ -1,13 +1,13 @@
 # The static gates, as derivations, so CI can fail on them.
 #
-# Four commands that every contributor is asked to keep clean and that nothing
+# Commands that every contributor is asked to keep clean and that nothing
 # enforced. `ruff-strict.toml` in particular is a large, considered
 # configuration whose whole value is that it reports nothing, and until this
 # existed the only thing keeping it at zero was habit.
 #
-# One derivation each rather than one that runs all four, so a failing run
-# names the gate that failed, and so the three cheap ones still report when
-# pyright is the slow one.
+# One derivation each rather than one that runs all of them, so a failing run
+# names the gate that failed, and so the cheap ones still report when pyright
+# is the slow one.
 #
 # `grpclib-transports` at the bottom is the one gate here that runs tests
 # rather than a static tool, and it is here because nothing else would run
@@ -23,6 +23,7 @@
   runCommand,
   ruff,
   pyright,
+  shellcheck,
   pythonSet,
 }:
 let
@@ -57,6 +58,10 @@ let
       ../tools
       ../docs
       ../ci
+      # `scripts/` holds hand-written shell, which no gate read until
+      # `check-shell` below. `writeShellApplication` shellchecks only the
+      # scripts that it generates, and none of these is one of those.
+      ../scripts
       # Tracked, and therefore in scope, although it holds one module and no
       # project of its own. With it the gate reads 259 Python files, which is
       # what `ruff format --check .` reads in the dev shell. Without it the
@@ -123,6 +128,12 @@ in
   format = mkCheck "format" [ ruff ] "ruff format --no-cache --check .";
 
   types = mkCheck "types" [ pyright pythonEnv ] "pyright --pythonpath ${pythonEnv}/bin/python";
+
+  # `scripts/` was covered by nothing. `writeShellApplication` runs shellcheck
+  # over the script it builds, which covers the test runner of
+  # nanopynix/tests.nix and no hand-written file, so these three grew without a
+  # gate. `-x` follows a `source`, and the scripts are the only shell here.
+  shell = mkCheck "shell" [ shellcheck ] "shellcheck -x scripts/*.sh";
 
   # The vendored library's own suite. See this file's header for why it is a
   # gate here and not a check phase.
