@@ -36,6 +36,8 @@ let
   # which answers that for the TSAN variant too.
   runtime = if isThread then "${stdenv.cc.cc.lib}/lib/libtsan.so" else null;
 
+  # The compile flags of this variant.
+  #
   # `vptr` is off because the check needs every class of a hierarchy
   # instrumented, and CPython is not.
   #
@@ -51,16 +53,22 @@ let
   # gates the wrong thing. The test runner sets `UBSAN_OPTIONS=halt_on_error=1`
   # instead, which puts the fatal boundary around the process under test and
   # leaves third-party build tooling alone.
-  undefinedFlags = [
-    "-fsanitize=undefined"
-    "-fno-sanitize=vptr"
-  ];
-
+  #
+  # **Keep this order.** The list becomes a string, the string goes into
+  # `NIX_CFLAGS_COMPILE`, and that string is an input of every nix-* component.
+  # A different order is the same compile line and a different derivation, so
+  # it rebuilds the whole instrumented closure from source. That is 25 minutes
+  # for the TSAN variant, and the cap of the TSAN job is 30, so a reorder alone
+  # timed out two of the three TSAN jobs once. Measured, in run 30782379867.
+  #
+  # `-fno-sanitize=vptr` has to follow `-fsanitize=undefined`, so it goes last
+  # rather than beside it.
   sanitizerFlags = [
+    "-fsanitize=${name}"
     "-fno-omit-frame-pointer"
     "-g"
   ]
-  ++ (if isThread then [ "-fsanitize=thread" ] else undefinedFlags);
+  ++ lib.optional (!isThread) "-fno-sanitize=vptr";
   sanitizerFlagsStr = toString sanitizerFlags;
 
   # The value for meson's own `b_sanitize` option, or null to leave the option
@@ -78,7 +86,7 @@ let
   # a defect of the way nanopynix uses the library, so it is ours to correct,
   # and an uninstrumented sqlite would hide it. Undefined behaviour inside
   # sqlite or inside boehmgc is upstream code that we cannot correct. sqlite
-  # already proved this: its own build tool trips UBSan (see `undefinedFlags`
+  # already proved this: its own build tool trips UBSan (see `sanitizerFlags`
   # above). boehmgc is a conservative collector, so it reads memory as
   # pointers by design, and that design is what UBSan asks about.
   #
@@ -118,53 +126,60 @@ in
   # library (nix-util, nix-store, nix-expr, nix-fetchers, nix-cmd, ...) gets
   # consistent instrumentation -- a defect straddling two of these libraries
   # would be invisible if only one side were instrumented.
-  mesonComponentOverrides = _finalAttrs: prevAttrs: {
-    env = (prevAttrs.env or { }) // {
-      NIX_CFLAGS_COMPILE = toString [
-        (prevAttrs.env.NIX_CFLAGS_COMPILE or "")
-        sanitizerFlagsStr
-      ];
+  mesonComponentOverrides =
+    _finalAttrs: prevAttrs:
+    {
+      env = (prevAttrs.env or { }) // {
+        NIX_CFLAGS_COMPILE = toString [
+          (prevAttrs.env.NIX_CFLAGS_COMPILE or "")
+          sanitizerFlagsStr
+        ];
+      };
+      dontStrip = true;
+      # "release"/"minsize" mesonBuildType auto-enables LTO (see nixpkgs'
+      # nix modular packaging/components.nix), which both slows down TSAN's
+      # instrumentation pass and makes reported stacks harder to read via
+      # cross-TU inlining. "debugoptimized" keeps -O2 -g without LTO.
+      mesonBuildType = "debugoptimized";
+    }
+    # **The attribute is absent, and not empty, when there is nothing to add.**
+    # `mesonFlags = prev ++ [ ]` writes the attribute even when the list does
+    # not change, and a component that declared none then gains an empty one.
+    # That is a different derivation, and a rebuild of the whole instrumented
+    # closure. See `sanitizerFlags` above for what such a rebuild cost once.
+    // lib.optionalAttrs (mesonSanitize != null) {
+      # Nix decides the macro `NIX_UBSAN_ENABLED` from meson's own
+      # `b_sanitize` option, and not from the compile flags above
+      # (`src/libutil/meson.build`). That macro picks what
+      # `nixUnreachableWhenHardened` means, in
+      # `src/libutil/include/nix/util/error.hh`. Three sites use the macro,
+      # and all three read the type tag of a `Value` in `value.hh`.
+      #
+      # With the macro off, each site stays `std::unreachable()`, and UBSan
+      # reports a trap against `<utility>:232` with no Nix source location
+      # and no stack. With the macro on, each site becomes
+      # `nix::unreachable()`, which prints the file and the line through
+      # `std::source_location`. This is the reason upstream added the macro,
+      # and an instrumented build is the case it exists for.
+      #
+      # The compile flags above stay. `b_sanitize` gives `-fsanitize=` only,
+      # and the frame pointer, the debug info and the `vptr` exception come
+      # from `NIX_CFLAGS_COMPILE`. A repeated `-fsanitize=` does no harm.
+      #
+      # **This option must never name `address` here.** libexpr refuses that
+      # combination:
+      #
+      #   bdw_gc_required = get_option('gc').disable_if(
+      #     'address' in get_option('b_sanitize'),
+      #     error_message : 'Building with Boehm GC and ASAN is not supported')
+      #
+      # A conservative collector cannot see through the allocator of ASAN, so
+      # the collector can free an object that is still live. An ASAN variant
+      # of this file therefore reported a tag read of a freed `Value` and
+      # called it a finding. Issue #47 gives the supported route to ASAN,
+      # which is a worker process that runs without the collector.
+      mesonFlags = (prevAttrs.mesonFlags or [ ]) ++ [ (lib.mesonOption "b_sanitize" mesonSanitize) ];
     };
-    dontStrip = true;
-    # "release"/"minsize" mesonBuildType auto-enables LTO (see nixpkgs'
-    # nix modular packaging/components.nix), which both slows down TSAN's
-    # instrumentation pass and makes reported stacks harder to read via
-    # cross-TU inlining. "debugoptimized" keeps -O2 -g without LTO.
-    mesonBuildType = "debugoptimized";
-
-    # Nix decides the macro `NIX_UBSAN_ENABLED` from meson's own `b_sanitize`
-    # option, and not from the compile flags above (`src/libutil/meson.build`).
-    # That macro picks what `nixUnreachableWhenHardened` means, in
-    # `src/libutil/include/nix/util/error.hh`. Three sites use the macro, and
-    # all three read the type tag of a `Value` in `value.hh`.
-    #
-    # With the macro off, each site stays `std::unreachable()`, and UBSan
-    # reports a trap against `<utility>:232` with no Nix source location and
-    # no stack. With the macro on, each site becomes `nix::unreachable()`,
-    # which prints the file and the line through `std::source_location`. This
-    # is the reason upstream added the macro, and an instrumented build is the
-    # case it exists for.
-    #
-    # The compile flags above stay. `b_sanitize` gives `-fsanitize=` only, and
-    # the frame pointer, the debug info and the `vptr` exception come from
-    # `NIX_CFLAGS_COMPILE`. A repeated `-fsanitize=` does no harm.
-    #
-    # **This option must never name `address` here.** libexpr refuses that
-    # combination:
-    #
-    #   bdw_gc_required = get_option('gc').disable_if(
-    #     'address' in get_option('b_sanitize'),
-    #     error_message : 'Building with Boehm GC and ASAN is not supported')
-    #
-    # A conservative collector cannot see through the allocator of ASAN, so
-    # the collector can free an object that is still live. An ASAN variant of
-    # this file therefore reported a tag read of a freed `Value` and called it
-    # a finding. Issue #47 gives the supported route to ASAN, which is a
-    # worker process that runs without the collector.
-    mesonFlags =
-      (prevAttrs.mesonFlags or [ ])
-      ++ lib.optional (mesonSanitize != null) (lib.mesonOption "b_sanitize" mesonSanitize);
-  };
 
   # sqlite is a plain buildInput of nix-store (from outside the nix
   # component scope), not one of the meson components above, so it needs
