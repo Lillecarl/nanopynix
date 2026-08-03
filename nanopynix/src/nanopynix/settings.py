@@ -801,6 +801,20 @@ DEFAULT_WORKER_MAX_CONCURRENCY = 32
 client's dispatch limiter (rpc.client._pool) -- the client must not exceed
 what the worker's transport is configured to serve concurrently."""
 
+DEFAULT_WORKER_PRELOAD = ("nanopynix.rpc.worker._worker",)
+"""The modules the forkserver imports once, before it forks any worker.
+
+One import of nanopynix, its bindings and grpclib, shared by every worker of
+the process through copy-on-write. Without it each worker pays that import
+itself.
+
+**This does not decide which build of the extension a worker gets, and no
+setting can.** The forkserver child imports this module while it unpickles the
+process target, before any code of ours runs there, and ``multiprocessing``
+keeps one forkserver for each process, started from the parent's ``sys.path``.
+So the venv decides, once, and a build with no Boehm collector is a different
+venv. See ``nanopynixVersions`` in ``default.nix``."""
+
 
 class NanopynixSettings(BaseSettings):
     """Runtime settings for nanopynix itself, never forwarded to Nix."""
@@ -810,6 +824,17 @@ class NanopynixSettings(BaseSettings):
     rpc_timeout: float = Field(default=DEFAULT_RPC_TIMEOUT_SECONDS, gt=0)
     shutdown_timeout: float = Field(default=DEFAULT_SHUTDOWN_TIMEOUT_SECONDS, gt=0)
     line_editors: list[str] = Field(default_factory=lambda: list(DEFAULT_LINE_EDITORS))
+    worker_preload: list[str] = Field(default_factory=lambda: list(DEFAULT_WORKER_PRELOAD))
+    """Which modules the forkserver preloads. An empty list preloads nothing.
+
+    A setting rather than the constant it used to be, because the forkserver
+    is process-global and the list was written into a library. Two consumers
+    in one process cannot ask for different lists, and the first one to open a
+    session silently decides for both. Naming it makes that visible, and gives
+    a consumer with a different module layout, or one that wants the
+    instrumented extension kept out of the forkserver, somewhere to say so.
+
+    See :data:`DEFAULT_WORKER_PRELOAD` for what it costs to empty it."""
 
 
 @no_runtime_type_check  # settings validates its own type at runtime for untyped

@@ -21,16 +21,67 @@ let
   ];
 
   nanopynixVersionNames = map (lib.removePrefix "nanopynix-tests-") flakeTestOutputs;
-  sanitizerSuffixes = [
+  # Every suffix that `default.nix` gives a variant scope.
+  #
+  # **A new variant falls into the regular matrix until it is listed here.**
+  # `regularVersionNames` is the complement of this list and nothing else, so a
+  # suffix that is missing does not fail: it quietly adds a slow, uncovered
+  # build to the per-commit matrix. `ci/workflows/on_schedule.nix` writes the
+  # same set as a regular expression, and both have to agree.
+  variantSuffixes = [
     "-tsan"
     "-ubsan"
+    "-asan"
+    "-nogc"
   ];
-  isSanitized = name: lib.any (suffix: lib.hasSuffix suffix name) sanitizerSuffixes;
-  # A sanitized variant is a separate job, never part of the regular matrix:
-  # both are far slower, and neither collects coverage.
-  regularVersionNames = builtins.filter (name: !isSanitized name) nanopynixVersionNames;
+  isVariant = name: lib.any (suffix: lib.hasSuffix suffix name) variantSuffixes;
+  # A variant is a separate job, never part of the regular matrix: each is far
+  # slower, and none collects coverage.
+  regularVersionNames = builtins.filter (name: !isVariant name) nanopynixVersionNames;
   tsanVersionNames = builtins.filter (lib.hasSuffix "-tsan") nanopynixVersionNames;
   ubsanVersionNames = builtins.filter (lib.hasSuffix "-ubsan") nanopynixVersionNames;
+  asanVersionNames = builtins.filter (lib.hasSuffix "-asan") nanopynixVersionNames;
+  nogcVersionNames = builtins.filter (lib.hasSuffix "-nogc") nanopynixVersionNames;
+
+  # "tsan", "ubsan", "asan", "nogc" -- the suffixes without their hyphen.
+  variantNames = map (lib.removePrefix "-") variantSuffixes;
+
+  # `update-lockfile`'s version-matrix step, in `on_schedule.nix`.
+  #
+  # **Built here rather than written there, so one list decides both sides.**
+  # The scheduled workflow runs `nix flake update` before it tests anything,
+  # so the set of Nix versions is not knowable at render time: a bumped
+  # nixpkgs can add or drop one. Each line therefore asks the *updated* flake
+  # which `nanopynix-tests-*` packages exist, and sorts them by suffix. Those
+  # filters used to be four hand-written copies of one long expression, beside
+  # `variantSuffixes` above, which is two places to remember when a variant
+  # arrives -- and a forgotten one does not fail. It quietly runs a slow,
+  # uncovered build in the regular matrix.
+  versionMatrixLine =
+    { output, keep }:
+    ''echo "${output}=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && ${keep}) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"'';
+
+  versionMatrixLines = [
+    (versionMatrixLine {
+      output = "regular_versions";
+      keep = ''builtins.match ".*-(${lib.concatStringsSep "|" variantNames})" n == null'';
+    })
+  ]
+  ++ map (
+    variant:
+    versionMatrixLine {
+      output = "${variant}_versions";
+      keep = ''builtins.match ".*-${variant}" n != null'';
+    }
+  ) variantNames;
+
+  # The `outputs` of that job, one for each line above.
+  versionMatrixOutputs = builtins.listToAttrs (
+    map (output: {
+      name = "${output}_versions";
+      value = "\${{ steps.versions.outputs.${output}_versions }}";
+    }) ([ "regular" ] ++ variantNames)
+  );
 
   # Coverage-collecting backends run as separate matrix jobs (test-daemon-*,
   # test-local-*) rather than serially inside one job, so covering both stays
@@ -74,9 +125,20 @@ let
     # the only thing that makes it cold.
     tsanBuild = 45;
     ubsanBuild = 60;
+    # The ASAN build instruments the same closure as the UBSan one, so it
+    # takes the same cap until this job has produced a number of its own.
+    # There is no `nogcBuild`: `-Dgc=disabled` rebuilds nix-expr, nix-flake
+    # and the bindings and nothing else -- measured, three derivations -- so
+    # that job takes the plain `build` cap.
+    asanBuild = 60;
     # The full suite. It takes 8 to 13 minutes on every version and backend,
     # and 9.7 to 13 under UBSan (run 30782379867).
     suite = 30;
+    # The same suite under ASAN. Generous rather than measured, because this
+    # job has never run: ASAN keeps shadow memory for every allocation, and
+    # UBSan keeps none, so the UBSan number is a floor and not an estimate.
+    # Bring it down to a measurement once this job has one.
+    asanSuite = 60;
     # Five repeated runs of the tsan_stress selection, about 4 minutes
     # together, and one pass over the concurrency selection.
     tsanStress = 25;
@@ -348,9 +410,8 @@ let
   # The TSAN matrix skips 2.31, and 2.31 is the one version where the
   # ownership rules that UBSan is here to check differ. See nix/sanitizer.nix.
   #
-  # There is no AddressSanitizer job, and Nix decides that: libexpr refuses
-  # the combination of ASAN and the collector. Issue #47 holds the supported
-  # route to ASAN, which is a worker process that runs without the collector.
+  # The AddressSanitizer job is `mkAsanTestJob` below, and it needs a libexpr
+  # with no collector. `mkNoGCTestJob` is that build without the sanitizer.
   #
   # No coverage, and the `local` backend only. Coverage instrumentation costs
   # time this job has none of, and the daemon backend forks a handler process
@@ -407,6 +468,126 @@ let
             name = "Upload UBSAN output (${bareVersion})";
             artifactName = "ubsan-report-${bareVersion}";
             path = "\${{ github.workspace }}/ubsan-output-${bareVersion}.log";
+          })
+        ];
+      }
+    );
+
+  # The full suite against a libexpr with no collector, and no sanitizer.
+  #
+  # **This job exists to keep a failure attributable.** The ASAN job below
+  # runs against the same libexpr, so a red ASAN job has two possible causes:
+  # a memory error, or an evaluator that does not work without the collector.
+  # This one costs a plain build and a plain suite, and it tells the two
+  # apart. It is also the answer to acceptance criterion 2 of issue #47, which
+  # asks that an RPC worker run the whole suite against such a build.
+  #
+  # The suite skips the three tests whose subject is the collector, through
+  # the `boehm_gc` capability that `build_info` publishes. Nothing else in the
+  # suite changes.
+  mkNoGCTestJob =
+    {
+      version,
+      ref ? null,
+      lockArtifact ? null,
+      needs ? [ ],
+    }:
+    let
+      bareVersion = lib.removeSuffix "-nogc" version;
+    in
+    mkJob (
+      lib.optionalAttrs (needs != [ ]) { inherit needs; }
+      // {
+        steps = mkTestSetup { inherit ref lockArtifact; } ++ [
+          {
+            name = "Build no-collector nanopynix test runner (${bareVersion})";
+            # The plain cap, not a sanitizer one. `-Dgc=disabled` rebuilds
+            # nix-expr, nix-flake and the bindings, and leaves nix-util,
+            # nix-store and nix-fetchers alone -- measured, three derivations.
+            timeout-minutes = caps.build;
+            run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
+          }
+          (steps.enableSandboxNamespaces { })
+          {
+            name = "Run the suite without a collector (${bareVersion}, local backend)";
+            timeout-minutes = caps.suite;
+            run = ''
+              env NANOPYNIX_CORE_DEBUG=1 PYTHONDONTWRITEBYTECODE=1 \
+                ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local
+            '';
+          }
+        ];
+      }
+    );
+
+  # The full suite under AddressSanitizer, against one Nix version.
+  #
+  # **The build has no collector, and that is not a tuning choice.** libexpr
+  # refuses ASAN together with the Boehm collector, because a conservative
+  # collector cannot see through the allocator of ASAN and will free an object
+  # that is still live. The first ASAN variant of this repository passed the
+  # flag through `NIX_CFLAGS_COMPILE`, which meson never reads, and it then
+  # reported exactly that -- a tag read of a freed `Value`, which was not
+  # evidence of anything. See `requiresNoGC` in nix/sanitizer.nix.
+  #
+  # `detect_leaks=0` is not a workaround. Without the collector the evaluator
+  # allocates and never releases, so a leak checker reports the design of the
+  # build. This job is here for a memory error.
+  #
+  # `detect_stack_use_after_return=1` is not the default, and it is the shape
+  # of the defect of issue #34 -- a stack-local `nix::fetchers::Settings` whose
+  # address outlived the frame. That defect is the acceptance test of issue
+  # #35: restore it, and this job must go red.
+  #
+  # `PYTHONMALLOC=malloc` gives ASAN the allocations of CPython itself. Without
+  # it a report names the arena rather than the caller.
+  mkAsanTestJob =
+    {
+      version,
+      ref ? null,
+      lockArtifact ? null,
+      needs ? [ ],
+    }:
+    let
+      bareVersion = lib.removeSuffix "-asan" version;
+    in
+    mkJob (
+      lib.optionalAttrs (needs != [ ]) { inherit needs; }
+      // {
+        steps = mkTestSetup { inherit ref lockArtifact; } ++ [
+          {
+            name = "Build ASAN nanopynix test runner (${bareVersion})";
+            timeout-minutes = caps.asanBuild;
+            run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
+          }
+          (steps.enableSandboxNamespaces { })
+          {
+            name = "Run ASAN-instrumented suite (${bareVersion}, local backend)";
+            timeout-minutes = caps.asanSuite;
+            run = # bash
+              ''
+                set -o pipefail
+                LOGFILE="''${{ github.workspace }}/asan-output-${bareVersion}.log"
+                status=0
+                env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=120 NANOPYNIX_TEST_SANITIZER=asan PYTHONDONTWRITEBYTECODE=1 \
+                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
+                  2>&1 | tee -a "$LOGFILE" || status=$?
+                # A sanitizer report is the finding, so read the log rather
+                # than trusting the exit status alone: `halt_on_error=1` kills
+                # the process that reports, but a report raised inside a
+                # forkserver worker can still be reaped into a plain test
+                # failure. mkUbsanTestJob says the same thing.
+                if grep -qE "AddressSanitizer|LeakSanitizer" "$LOGFILE"; then
+                  echo "::error::sanitizer report on ${bareVersion} -- see the log above"
+                  exit 1
+                fi
+                exit "$status"
+              '';
+          }
+          (steps.uploadArtifact {
+            name = "Upload ASAN output (${bareVersion})";
+            artifactName = "asan-report-${bareVersion}";
+            path = "\${{ github.workspace }}/asan-output-${bareVersion}.log";
           })
         ];
       }
@@ -612,9 +793,15 @@ in
     regularBackends
     tsanVersionNames
     ubsanVersionNames
+    asanVersionNames
+    nogcVersionNames
+    versionMatrixLines
+    versionMatrixOutputs
     mkRegularTestJob
     mkTsanTestJob
     mkUbsanTestJob
+    mkAsanTestJob
+    mkNoGCTestJob
     mkStaticChecksJob
     mkCommitSubjectJob
     mkDocsBuildJob
@@ -637,6 +824,13 @@ in
   # one id with eight legs. Both mechanisms are load-bearing, so the rule is
   # that every *kind* of test job exists on both sides -- regular, tsan, ubsan
   # -- and only the expansion differs.
+  #
+  # **The `nogc` and `asan` kinds are scheduled-only, and break that rule on
+  # purpose.** Issue #35 asks for exactly that: "Do not put it in the
+  # per-commit workflow until the run time is known." Neither job has ever
+  # run, so `caps.asanSuite` is a guess rather than a measurement. Add
+  # `mkStaticAsanTestJobs` and `mkStaticNoGCTestJobs` here, in the shape of
+  # the two below, once a scheduled run has produced that number.
   mkStaticTestJobs =
     {
       ref ? null,

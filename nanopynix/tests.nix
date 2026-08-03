@@ -135,6 +135,26 @@ in
     # says whose defect it is.
     export UBSAN_OPTIONS="print_stacktrace=1 halt_on_error=1"
   ''
+  + lib.optionalString (sanitizer != null && sanitizer.name == "address") ''
+    # detect_leaks=0: this build has no Boehm collector, because libexpr
+    # refuses ASAN together with one. The evaluator therefore allocates and
+    # never releases, on purpose, and the process is the unit of reclamation.
+    # A leak checker here reports the design of the build rather than a
+    # defect. This job is for a memory error.
+    #
+    # detect_stack_use_after_return=1 is not the default, and it is the exact
+    # shape of the defect this job exists to catch: issue #34 was a
+    # stack-local `nix::fetchers::Settings` whose address outlived its frame.
+    #
+    # halt_on_error=1: ASAN continues after a report by default, so without
+    # this the job goes green with the finding sitting in its log. mkUbsanTestJob
+    # in ci/workflows/lib.nix reads the log as well, for the case of a report
+    # inside a forkserver worker that is reaped into a plain test failure.
+    export ASAN_OPTIONS="detect_leaks=0 detect_stack_use_after_return=1 halt_on_error=1 print_stacktrace=1"
+    # CPython allocates through its own arenas by default, and ASAN cannot see
+    # inside one. A report then names the arena and not the caller.
+    export PYTHONMALLOC=malloc
+  ''
   + ''
     # Coverage is measured by `coverage run` and combined *after* pytest has
     # exited, rather than by pytest-cov. pytest-cov combines inside its

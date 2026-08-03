@@ -123,13 +123,14 @@ let
 
   # One entry per sanitizer variant that gets its own set of Nix builds.
   #
-  # **There is no ASAN variant, and Nix decides that.** libexpr refuses the
-  # combination of ASAN and the collector, and `nix/sanitizer.nix` gives the
-  # test that libexpr makes. An earlier variant reached a build only because
-  # the flag arrived in an environment variable that meson never reads, and
-  # what that build reported was a tag read of a `Value` that the collector
-  # had already freed. Issue #47 holds the supported route to ASAN, which is a
-  # worker process that runs without the collector.
+  # **The ASAN variant runs against a libexpr with no collector, and it is the
+  # only one that must.** libexpr refuses the combination of ASAN and the
+  # collector, and `nix/sanitizer.nix` gives the test that libexpr makes. An
+  # earlier variant reached a build only because the flag arrived in an
+  # environment variable that meson never reads, and what that build reported
+  # was a tag read of a `Value` that the collector had already freed.
+  # `sanitizer.requiresNoGC` now carries that rule, and
+  # `nanopynixForNixVersions` asserts on it.
   #
   # UBSan runs on its own rather than beside TSAN, although the two combine.
   # The TSAN matrix skips 2.31 (see `nanopynixForNixVersions` below), and 2.31
@@ -138,6 +139,7 @@ let
   sanitizers = {
     tsan = pkgs.callPackage ./nix/sanitizer.nix { name = "thread"; };
     ubsan = pkgs.callPackage ./nix/sanitizer.nix { name = "undefined"; };
+    asan = pkgs.callPackage ./nix/sanitizer.nix { name = "address"; };
   };
 
   # A confirmed data race in nix::Bindings::emptyBindings (a process-wide
@@ -195,7 +197,32 @@ let
     # every C and C++ library in the process has to agree.
     {
       sanitizer ? null,
+      # Whether libexpr keeps the Boehm collector.
+      #
+      # **A whole scope, and never a runtime choice.** `EvalState` carries a
+      # `baseEnvP` member only when the collector is present, so the two builds
+      # are not ABI-compatible and one process must load exactly one of them.
+      # Nothing in Python can pick: a forkserver child imports
+      # `nanopynix.rpc.worker._worker` while it unpickles the process target,
+      # before any code of ours runs there, and `multiprocessing` keeps one
+      # forkserver for each process, started from the parent's `sys.path`. So
+      # the venv decides, and a non-GC deployment is a different venv.
+      #
+      # Without the collector the evaluator allocates and never releases. Nix's
+      # own `libexpr/package.nix` says why that is tolerable: "this is not as
+      # bad as it sounds so long as evaluation just takes place within
+      # short-lived processes". An RPC worker is such a process.
+      gc ? true,
     }:
+    assert lib.assertMsg (!(sanitizer.requiresNoGC or false) || !gc) ''
+      The ${sanitizer.name} sanitizer needs `gc = false`.
+
+      libexpr fails the build outright on the combination, rather than
+      disabling the collector by itself, because nixpkgs writes
+      `-Dgc=enabled` and `disable_if` only demotes an `auto` feature. That
+      error arrives after a from-source rebuild of the whole instrumented
+      closure, so it is caught here instead.
+    '';
     let
       isNixScope =
         _name: v:
@@ -385,34 +412,71 @@ let
         (scope.overrideScope (
           _final: prev: {
             nix-store = prev.nix-store.override { sqlite = sanitizer.sanitizeSqlite pkgs.sqlite; };
-            # pkgs.nixDependencies.boehmgc, not prev.boehmgc or pkgs.boehmgc:
-            # nixComponents_X's own scope never contains a `boehmgc` attribute
-            # at all -- nixpkgs builds each nixComponents_X via a *separate*
-            # `nixDependencies` scope (`nixDependencies.callPackage
-            # ./modular/packages.nix {...}` in nix/default.nix), and that
-            # nixDependencies scope (packaging/dependencies.nix in nix's own
-            # source) is where boehmgc's enableLargeConfig + 1MiB initial
-            # mark stack tuning actually lives -- confirmed by `prev.boehmgc`
-            # failing eval with "attribute 'boehmgc' missing". Sanitizing a
-            # fresh pkgs.boehmgc would silently drop that tuning -- exactly
-            # the kind of undersized-mark-stack condition its own comment
-            # warns about, right where we're chasing a GC crash.
-            nix-expr = prev.nix-expr.override {
-              boehmgc = sanitizer.sanitizeBoehmGC pkgs.nixDependencies.boehmgc;
-            };
           }
+          # Absent from a build with no collector, and not merely unused
+          # there. `enableGC = false` drops boehmgc from libexpr's inputs
+          # entirely, so this would name a patched, instrumented library that
+          # nothing links -- one more thing for a reader to reconcile against
+          # a closure that does not contain it.
+          //
+            lib.optionalAttrs gc {
+              # pkgs.nixDependencies.boehmgc, not prev.boehmgc or pkgs.boehmgc:
+              # nixComponents_X's own scope never contains a `boehmgc` attribute
+              # at all -- nixpkgs builds each nixComponents_X via a *separate*
+              # `nixDependencies` scope (`nixDependencies.callPackage
+              # ./modular/packages.nix {...}` in nix/default.nix), and that
+              # nixDependencies scope (packaging/dependencies.nix in nix's own
+              # source) is where boehmgc's enableLargeConfig + 1MiB initial
+              # mark stack tuning actually lives -- confirmed by `prev.boehmgc`
+              # failing eval with "attribute 'boehmgc' missing". Sanitizing a
+              # fresh pkgs.boehmgc would silently drop that tuning -- exactly
+              # the kind of undersized-mark-stack condition its own comment
+              # warns about, right where we're chasing a GC crash.
+              nix-expr = prev.nix-expr.override {
+                boehmgc = sanitizer.sanitizeBoehmGC pkgs.nixDependencies.boehmgc;
+              };
+            }
         )).overrideAllMesonComponents
           sanitizer.mesonComponentOverrides;
 
+      # Drop the collector from libexpr, and from everything above it in the
+      # scope. One override, applied at the same point and for the same reason
+      # as `applySanitizerOverrides`: the scope fixpoint carries it to
+      # nanopynix-bindings, so the extension links against the libexpr that
+      # this scope built and not some other one.
+      #
+      # nixpkgs' own `libexpr/package.nix` turns `enableGC` into
+      # `lib.mesonEnable "gc" enableGC` and drops `boehmgc` from
+      # `propagatedBuildInputs`, so nothing else here has to know.
+      applyNoGCOverrides =
+        scope:
+        scope.overrideScope (
+          _final: prev: {
+            nix-expr = prev.nix-expr.override { enableGC = false; };
+          }
+        );
+
       # nixComponents_2_34 -> nix_2_34, nixComponents_git -> git (matching
       # the names the previous hand-written patchedNixVersions used), plus a
-      # "-tsan" suffix for the ThreadSanitizer variant.
+      # suffix for each variant axis: "-tsan"/"-ubsan"/"-asan" for a sanitizer,
+      # "-nogc" for a build with no collector.
+      #
+      # The ASAN variant takes "-asan" alone, although it is also a build with
+      # no collector. `requiresNoGC` makes the two inseparable, so a
+      # "-asan-nogc" name would repeat one fact twice and give CI a suffix that
+      # two filters have to strip.
       rename =
         name: value:
         let
           bare = lib.removePrefix "nixComponents_" name;
           versionName = if bare == "git" then "git" else "nix_${bare}";
-          suffix = if sanitizer == null then "" else "-${sanitizer.suffix}";
+          suffix =
+            if sanitizer != null then
+              "-${sanitizer.suffix}"
+            else if !gc then
+              "-nogc"
+            else
+              "";
         in
         lib.nameValuePair "${versionName}${suffix}" value;
     in
@@ -439,13 +503,32 @@ let
         (lib.mapAttrs (_: extendNixScope))
       ]
       ++ lib.optional (sanitizer != null) (lib.mapAttrs (_: applySanitizerOverrides))
+      # After the sanitizer, so this is the last word on nix-expr. The two
+      # overrides do not collide -- `applySanitizerOverrides` no longer names
+      # nix-expr when `gc` is false -- and the order still says which one wins
+      # if a third ever arrives.
+      ++ lib.optional (!gc) (lib.mapAttrs (_: applyNoGCOverrides))
       ++ [ (lib.mapAttrs' rename) ]
     );
 
+  # Five variants of every supported Nix version. Nix evaluates each one
+  # lazily, so the cost here is evaluation and not a build: CI names the
+  # `nanopynix-tests-<variant>` package it wants, and nothing else realises.
   nanopynixVersionsInternal =
     nanopynixForNixVersions { }
     // nanopynixForNixVersions { sanitizer = sanitizers.tsan; }
-    // nanopynixForNixVersions { sanitizer = sanitizers.ubsan; };
+    // nanopynixForNixVersions { sanitizer = sanitizers.ubsan; }
+    # The collector build and the ASAN build, both of which run against a
+    # libexpr with `-Dgc=disabled`. The plain one proves that the evaluator
+    # works without the collector; the ASAN one is what that build exists for.
+    # Separating them keeps a failure attributable: an ASAN job that goes red
+    # while `-nogc` stays green is a memory error, and both red together is a
+    # build without a collector that does not work.
+    // nanopynixForNixVersions { gc = false; }
+    // nanopynixForNixVersions {
+      sanitizer = sanitizers.asan;
+      gc = false;
+    };
 
   nanopynixVersions = nanopynixVersionsInternal // {
     stable = getByVersion pkgs.nixVersions.stable.version;

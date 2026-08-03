@@ -10,6 +10,7 @@ from nanopynix.rpc import Session
 from nanopynix.settings import (
     DEFAULT_EXPERIMENTAL_FEATURES,
     DEFAULT_LINE_EDITORS,
+    DEFAULT_WORKER_PRELOAD,
     NanopynixSettings,
     NixEvalSettings,
     NixFetchSettings,
@@ -93,10 +94,29 @@ def test_nanopynix_settings_defaults_line_editors() -> None:
     assert NanopynixSettings().line_editors == list(DEFAULT_LINE_EDITORS)
 
 
+def test_nanopynix_settings_defaults_worker_preload() -> None:
+    assert NanopynixSettings().worker_preload == list(DEFAULT_WORKER_PRELOAD)
+
+
 def test_session_uses_nanopynix_rpc_timeout() -> None:
     session = Session(runtime_settings=NanopynixSettings(rpc_timeout=12))
 
     assert session._manager.rpc_timeout == 12  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
+
+
+@pytest.mark.parametrize("preload", [[], ["nanopynix.rpc.worker._worker", "json"]])
+def test_session_forwards_worker_preload_to_its_worker(preload: list[str]) -> None:
+    """The list the caller sets is the list the forkserver gets.
+
+    An empty list included, because that is the case the setting exists for:
+    it is how a caller keeps a module out of the forkserver, and a falsy value
+    is easy to drop on the way through. ``multiprocessing_pipe_pair`` only
+    calls ``set_forkserver_preload`` when the list is non-empty, so an empty
+    one leaves the default of the interpreter, which preloads nothing.
+    """
+    session = Session(runtime_settings=NanopynixSettings(worker_preload=preload))
+
+    assert session._manager._worker_preload == preload  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
 
 
 def test_settings_drift_reports_missing_and_extra() -> None:
