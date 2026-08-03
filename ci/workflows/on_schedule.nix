@@ -73,11 +73,15 @@ let
         };
       };
 
-    # The two builds against a libexpr with no collector. Scheduled only, and
-    # `ci/workflows/lib.nix` says why: neither has run yet, so the caps are
-    # guesses and issue #35 asks that the per-commit workflow wait for a
-    # number. `test-nogc` is what tells a red `test-asan` apart from an
-    # evaluator that does not work without the collector.
+    # The two builds against a libexpr with no collector. `test-nogc` runs on
+    # every commit as well, because it has the measurement that issue #35 asks
+    # for; `test-asan` is scheduled only, because it has none.
+    # `ci/workflows/lib.nix` carries both halves of that reasoning.
+    #
+    # It stays here beside `test-asan` even so, and not only for symmetry: the
+    # scheduled run tests a freshly updated flake, and it is what tells a red
+    # `test-asan` apart from an evaluator that does not work without the
+    # collector at all.
     test-nogc =
       workflow.mkNoGCTestJob {
         version = "\${{ matrix.version }}";

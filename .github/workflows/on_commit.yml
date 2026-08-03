@@ -99,6 +99,10 @@ jobs:
     - test-local-nix_2_31
     - test-local-nix_2_34
     - test-local-nix_2_35
+    - test-nogc-git
+    - test-nogc-nix_2_31
+    - test-nogc-nix_2_34
+    - test-nogc-nix_2_35
     - test-tsan-git
     - test-tsan-nix_2_34
     - test-tsan-nix_2_35
@@ -156,6 +160,146 @@ jobs:
       group: pages
       cancel-in-progress: false
     if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-24.04
+  test-nogc-git:
+    steps:
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Build no-collector nanopynix test runner (git)
+      timeout-minutes: 30
+      run: nix build ".#nanopynix-tests-git-nogc" --out-link result --print-build-logs
+        --print-out-paths
+    - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
+      run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo sysctl -w kernel.unprivileged_userns_clone=1
+        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+    - name: Run the suite without a collector (git, local backend)
+      timeout-minutes: 30
+      run: |
+        env NANOPYNIX_CORE_DEBUG=1 PYTHONDONTWRITEBYTECODE=1 \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local
+    timeout-minutes: 120
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-nogc-git,')
+    runs-on: ubuntu-24.04
+  test-nogc-nix_2_31:
+    steps:
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Build no-collector nanopynix test runner (nix_2_31)
+      timeout-minutes: 30
+      run: nix build ".#nanopynix-tests-nix_2_31-nogc" --out-link result --print-build-logs
+        --print-out-paths
+    - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
+      run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo sysctl -w kernel.unprivileged_userns_clone=1
+        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+    - name: Run the suite without a collector (nix_2_31, local backend)
+      timeout-minutes: 30
+      run: |
+        env NANOPYNIX_CORE_DEBUG=1 PYTHONDONTWRITEBYTECODE=1 \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local
+    timeout-minutes: 120
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-nogc-nix_2_31,')
+    runs-on: ubuntu-24.04
+  test-nogc-nix_2_34:
+    steps:
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Build no-collector nanopynix test runner (nix_2_34)
+      timeout-minutes: 30
+      run: nix build ".#nanopynix-tests-nix_2_34-nogc" --out-link result --print-build-logs
+        --print-out-paths
+    - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
+      run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo sysctl -w kernel.unprivileged_userns_clone=1
+        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+    - name: Run the suite without a collector (nix_2_34, local backend)
+      timeout-minutes: 30
+      run: |
+        env NANOPYNIX_CORE_DEBUG=1 PYTHONDONTWRITEBYTECODE=1 \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local
+    timeout-minutes: 120
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-nogc-nix_2_34,')
+    runs-on: ubuntu-24.04
+  test-nogc-nix_2_35:
+    steps:
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Build no-collector nanopynix test runner (nix_2_35)
+      timeout-minutes: 30
+      run: nix build ".#nanopynix-tests-nix_2_35-nogc" --out-link result --print-build-logs
+        --print-out-paths
+    - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
+      run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo sysctl -w kernel.unprivileged_userns_clone=1
+        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+    - name: Run the suite without a collector (nix_2_35, local backend)
+      timeout-minutes: 30
+      run: |
+        env NANOPYNIX_CORE_DEBUG=1 PYTHONDONTWRITEBYTECODE=1 \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local
+    timeout-minutes: 120
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-nogc-nix_2_35,')
     runs-on: ubuntu-24.04
   test-ubsan-git:
     steps:
