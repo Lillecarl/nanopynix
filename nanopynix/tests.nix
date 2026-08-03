@@ -124,8 +124,13 @@ in
     # compiled in by default, so the class of defect this job exists for is
     # still covered.
     #
-    # halt_on_error is ASan's default. UBSan rides along in the same build and
-    # is made fatal at compile time instead, by -fno-sanitize-recover.
+    # halt_on_error is ASan's default. UBSan's is *not*: it prints the
+    # violation and carries on, so without this the job goes green with the
+    # report sitting in its log. It is set here rather than compiled in with
+    # -fno-sanitize-recover because the compile-time form also reaches
+    # sqlite's build-time code generator, where upstream UB killed the build
+    # -- see nix/sanitizer.nix. This puts the fatal boundary around the
+    # process under test, which is the thing being gated.
     export ASAN_OPTIONS="detect_leaks=0 abort_on_error=1"
     export UBSAN_OPTIONS="print_stacktrace=1 halt_on_error=1"
     # ASan cannot see through pymalloc's arenas, so a report would name the

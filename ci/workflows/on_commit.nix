@@ -4,6 +4,7 @@ let
 
   testJobs = workflow.mkStaticTestJobs { };
   tsanTestJobs = workflow.mkStaticTsanTestJobs { };
+  asanTestJobs = workflow.mkStaticAsanTestJobs { };
   # Named alongside the test jobs so the `jobs` dispatch input can select it,
   # and so a docs deploy waits for it. It is the cheapest job in the workflow.
   staticChecksJob = {
@@ -13,7 +14,7 @@ let
   commitSubjectJob = {
     commit-subjects = workflow.mkCommitSubjectJob { };
   };
-  allTestJobs = staticChecksJob // commitSubjectJob // testJobs // tsanTestJobs;
+  allTestJobs = staticChecksJob // commitSubjectJob // testJobs // tsanTestJobs // asanTestJobs;
   selectedTestJobs = builtins.mapAttrs (
     name: job:
     withCond "github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',${name},')" job

@@ -260,6 +260,66 @@ let
   # it is version-independent: that matrix exists to run one suite against
   # each supported Nix version, and this library links no Nix at all, so
   # three copies of it would be three identical runs. See nix/checks.nix.
+  # AddressSanitizer, and UndefinedBehaviorSanitizer riding along in the same
+  # build. See nix/sanitizer.nix for why UBSan attaches here and not to TSAN.
+  #
+  # Scheduled only, deliberately. #35 says not to put this in the per-commit
+  # workflow until the run time is known, and it is not known: ASan roughly
+  # doubles a suite that already takes 8-13 minutes, so the cap below is twice
+  # the regular one. The first scheduled run is the measurement.
+  #
+  # No coverage, and the `local` backend only. Coverage instrumentation costs
+  # time this job has none of, and the daemon backend forks a handler process
+  # per connection -- a shape worth a separate decision once the run time of
+  # the simple case is a number rather than a guess.
+  mkAsanTestJob =
+    {
+      version,
+      ref ? null,
+      lockArtifact ? null,
+      needs ? [ ],
+    }:
+    let
+      bareVersion = lib.removeSuffix "-asan" version;
+    in
+    lib.optionalAttrs (needs != [ ]) { inherit needs; }
+    // {
+      timeout-minutes = asanTimeoutMinutes;
+      steps = mkTestSetup { inherit ref lockArtifact; } ++ [
+        {
+          name = "Build ASAN nanopynix test runner (${bareVersion})";
+          run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
+        }
+        (steps.enableSandboxNamespaces { })
+        {
+          name = "Run ASAN/UBSAN-instrumented suite (${bareVersion}, local backend)";
+          run = # bash
+            ''
+              set -o pipefail
+              LOGFILE="''${{ github.workspace }}/asan-output-${bareVersion}.log"
+              status=0
+              env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=60 NANOPYNIX_TEST_SANITIZER=asan PYTHONDONTWRITEBYTECODE=1 \
+                ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
+                2>&1 | tee -a "$LOGFILE" || status=$?
+              # A sanitizer report is the finding, so grep for it rather than
+              # trusting the exit status alone: abort_on_error=1 makes ASan
+              # kill the process, but a report raised inside a forkserver
+              # worker can still be reaped into a plain test failure.
+              if grep -qE "(AddressSanitizer|UndefinedBehaviorSanitizer|runtime error):" "$LOGFILE"; then
+                echo "::error::sanitizer report on ${bareVersion} -- see the log above"
+                exit 1
+              fi
+              exit "$status"
+            '';
+        }
+        (steps.uploadArtifact {
+          name = "Upload ASAN output (${bareVersion})";
+          artifactName = "asan-report-${bareVersion}";
+          path = "\${{ github.workspace }}/asan-output-${bareVersion}.log";
+        })
+      ];
+    };
+
   mkStaticChecksJob =
     {
       ref ? null,
@@ -427,66 +487,6 @@ let
     };
 in
 {
-  # AddressSanitizer, and UndefinedBehaviorSanitizer riding along in the same
-  # build. See nix/sanitizer.nix for why UBSan attaches here and not to TSAN.
-  #
-  # Scheduled only, deliberately. #35 says not to put this in the per-commit
-  # workflow until the run time is known, and it is not known: ASan roughly
-  # doubles a suite that already takes 8-13 minutes, so the cap below is twice
-  # the regular one. The first scheduled run is the measurement.
-  #
-  # No coverage, and the `local` backend only. Coverage instrumentation costs
-  # time this job has none of, and the daemon backend forks a handler process
-  # per connection -- a shape worth a separate decision once the run time of
-  # the simple case is a number rather than a guess.
-  mkAsanTestJob =
-    {
-      version,
-      ref ? null,
-      lockArtifact ? null,
-      needs ? [ ],
-    }:
-    let
-      bareVersion = lib.removeSuffix "-asan" version;
-    in
-    lib.optionalAttrs (needs != [ ]) { inherit needs; }
-    // {
-      timeout-minutes = asanTimeoutMinutes;
-      steps = mkTestSetup { inherit ref lockArtifact; } ++ [
-        {
-          name = "Build ASAN nanopynix test runner (${bareVersion})";
-          run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
-        }
-        (steps.enableSandboxNamespaces { })
-        {
-          name = "Run ASAN/UBSAN-instrumented suite (${bareVersion}, local backend)";
-          run = # bash
-            ''
-              set -o pipefail
-              LOGFILE="''${{ github.workspace }}/asan-output-${bareVersion}.log"
-              status=0
-              env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=60 NANOPYNIX_TEST_SANITIZER=asan PYTHONDONTWRITEBYTECODE=1 \
-                ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
-                2>&1 | tee -a "$LOGFILE" || status=$?
-              # A sanitizer report is the finding, so grep for it rather than
-              # trusting the exit status alone: abort_on_error=1 makes ASan
-              # kill the process, but a report raised inside a forkserver
-              # worker can still be reaped into a plain test failure.
-              if grep -qE "(AddressSanitizer|UndefinedBehaviorSanitizer|runtime error):" "$LOGFILE"; then
-                echo "::error::sanitizer report on ${bareVersion} -- see the log above"
-                exit 1
-              fi
-              exit "$status"
-            '';
-        }
-        (steps.uploadArtifact {
-          name = "Upload ASAN output (${bareVersion})";
-          artifactName = "asan-report-${bareVersion}";
-          path = "\${{ github.workspace }}/asan-output-${bareVersion}.log";
-        })
-      ];
-    };
-
   inherit
     evalWorkflow
     steps
@@ -497,12 +497,29 @@ in
     asanVersionNames
     mkRegularTestJob
     mkTsanTestJob
+    mkAsanTestJob
     mkStaticChecksJob
     mkCommitSubjectJob
     mkDocsBuildJob
     mkDocsDeployJob
     ;
 
+  # Why these expand statically here, and through a GHA matrix in
+  # `on_schedule.nix`, for the same jobs.
+  #
+  # The names come from `nanopynixVersionNames`, which this file reads out of
+  # the flake at *render* time. The scheduled workflow runs `nix flake update`
+  # before it tests anything, so its version list is not knowable until the
+  # run is under way -- a bumped nixpkgs can add or drop a Nix version, and a
+  # statically rendered list would silently never test the new one. That is
+  # the whole of the difference, and it is why the scheduled side computes the
+  # list in a step and feeds it to `strategy.matrix`.
+  #
+  # The per-commit side cannot use a matrix in exchange: the `jobs` dispatch
+  # input selects by exact job name, and a matrix collapses eight jobs into
+  # one id with eight legs. Both mechanisms are load-bearing, so the rule is
+  # that every *kind* of test job exists on both sides -- regular, tsan, asan
+  # -- and only the expansion differs.
   mkStaticTestJobs =
     {
       ref ? null,
@@ -525,6 +542,26 @@ in
           };
         }) regularVersionNames
       ) regularBackends
+    );
+
+  mkStaticAsanTestJobs =
+    {
+      ref ? null,
+      lockArtifact ? null,
+      needs ? [ ],
+    }:
+    builtins.listToAttrs (
+      map (version: {
+        name = "test-asan-${lib.removeSuffix "-asan" version}";
+        value = mkAsanTestJob {
+          inherit
+            version
+            ref
+            lockArtifact
+            needs
+            ;
+        };
+      }) asanVersionNames
     );
 
   mkStaticTsanTestJobs =
