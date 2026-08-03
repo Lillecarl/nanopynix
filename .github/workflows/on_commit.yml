@@ -1,5 +1,5 @@
 # GENERATED FILE -- do not edit by hand.
-# Edit ci/workflows/on_commit.nix and run `direnv exec . python ci/render.py`.
+# Edit ci/workflows/on_commit.nix; a pytest run renders this file again.
 
 name: On commit
 'on':
@@ -16,31 +16,37 @@ name: On commit
 jobs:
   static-checks:
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Run the gates (ruff, ruff-strict, ruff format, pyright, grpclib-transports)
+      timeout-minutes: 20
       run: |
         nix build --no-link --print-build-logs --keep-going \
           ".#check-lint" ".#check-lint-strict" ".#check-format" ".#check-types" \
           ".#check-grpclib-transports"
-    timeout-minutes: 20
+    timeout-minutes: 75
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',static-checks,')
     runs-on: ubuntu-24.04
   commit-subjects:
     steps:
-    - uses: actions/checkout@main
+    - timeout-minutes: 10
+      uses: actions/checkout@main
       with:
         fetch-depth: 0
     - name: Check the Conventional Commits subject of each pushed commit
+      timeout-minutes: 5
       run: |
         set -euo pipefail
 
@@ -77,7 +83,7 @@ jobs:
           echo "CLAUDE.md requires the Conventional Commits prefix, for example 'feat(scope):' or 'fix(tests):'."
         fi
         exit "$status"
-    timeout-minutes: 5
+    timeout-minutes: 30
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',commit-subjects,')
     runs-on: ubuntu-24.04
@@ -101,35 +107,45 @@ jobs:
     - test-ubsan-nix_2_34
     - test-ubsan-nix_2_35
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build documentation
+      timeout-minutes: 30
       run: nix build .#nanopynix-docs --out-link result --print-build-logs --print-out-paths
     - name: Verify docs closure
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     - name: Prepare Pages artifact
+      timeout-minutes: 5
       run: |
         mkdir -p public
         cp -r --no-preserve=mode,ownership result/. public/
-    - uses: actions/upload-pages-artifact@main
+    - timeout-minutes: 15
+      uses: actions/upload-pages-artifact@main
       with:
         path: public
+    timeout-minutes: 120
     if: github.ref == 'refs/heads/develop'
     runs-on: ubuntu-24.04
   docs-deploy:
     needs: docs-build
     steps:
     - name: Deploy to GitHub Pages
+      timeout-minutes: 20
       uses: actions/deploy-pages@main
       id: deployment
+    timeout-minutes: 35
     permissions:
       pages: write
       id-token: write
@@ -143,26 +159,32 @@ jobs:
     runs-on: ubuntu-24.04
   test-ubsan-git:
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build UBSAN nanopynix test runner (git)
+      timeout-minutes: 60
       run: nix build ".#nanopynix-tests-git-ubsan" --out-link result --print-build-logs
         --print-out-paths
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Run UBSAN-instrumented suite (git, local backend)
+      timeout-minutes: 30
       run: |
         set -o pipefail
         LOGFILE="${{ github.workspace }}/ubsan-output-git.log"
@@ -185,37 +207,44 @@ jobs:
         fi
         exit "$status"
     - name: Upload UBSAN output (git)
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: ubsan-report-git
         path: ${{ github.workspace }}/ubsan-output-git.log
       if: ${{ !cancelled() }}
-    timeout-minutes: 60
+    timeout-minutes: 165
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-ubsan-git,')
     runs-on: ubuntu-24.04
   test-ubsan-nix_2_31:
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build UBSAN nanopynix test runner (nix_2_31)
+      timeout-minutes: 60
       run: nix build ".#nanopynix-tests-nix_2_31-ubsan" --out-link result --print-build-logs
         --print-out-paths
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Run UBSAN-instrumented suite (nix_2_31, local backend)
+      timeout-minutes: 30
       run: |
         set -o pipefail
         LOGFILE="${{ github.workspace }}/ubsan-output-nix_2_31.log"
@@ -238,37 +267,44 @@ jobs:
         fi
         exit "$status"
     - name: Upload UBSAN output (nix_2_31)
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: ubsan-report-nix_2_31
         path: ${{ github.workspace }}/ubsan-output-nix_2_31.log
       if: ${{ !cancelled() }}
-    timeout-minutes: 60
+    timeout-minutes: 165
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-ubsan-nix_2_31,')
     runs-on: ubuntu-24.04
   test-ubsan-nix_2_34:
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build UBSAN nanopynix test runner (nix_2_34)
+      timeout-minutes: 60
       run: nix build ".#nanopynix-tests-nix_2_34-ubsan" --out-link result --print-build-logs
         --print-out-paths
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Run UBSAN-instrumented suite (nix_2_34, local backend)
+      timeout-minutes: 30
       run: |
         set -o pipefail
         LOGFILE="${{ github.workspace }}/ubsan-output-nix_2_34.log"
@@ -291,37 +327,44 @@ jobs:
         fi
         exit "$status"
     - name: Upload UBSAN output (nix_2_34)
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: ubsan-report-nix_2_34
         path: ${{ github.workspace }}/ubsan-output-nix_2_34.log
       if: ${{ !cancelled() }}
-    timeout-minutes: 60
+    timeout-minutes: 165
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-ubsan-nix_2_34,')
     runs-on: ubuntu-24.04
   test-ubsan-nix_2_35:
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build UBSAN nanopynix test runner (nix_2_35)
+      timeout-minutes: 60
       run: nix build ".#nanopynix-tests-nix_2_35-ubsan" --out-link result --print-build-logs
         --print-out-paths
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Run UBSAN-instrumented suite (nix_2_35, local backend)
+      timeout-minutes: 30
       run: |
         set -o pipefail
         LOGFILE="${{ github.workspace }}/ubsan-output-nix_2_35.log"
@@ -344,37 +387,44 @@ jobs:
         fi
         exit "$status"
     - name: Upload UBSAN output (nix_2_35)
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: ubsan-report-nix_2_35
         path: ${{ github.workspace }}/ubsan-output-nix_2_35.log
       if: ${{ !cancelled() }}
-    timeout-minutes: 60
+    timeout-minutes: 165
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-ubsan-nix_2_35,')
     runs-on: ubuntu-24.04
   test-tsan-git:
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build TSAN nanopynix test runner (git)
+      timeout-minutes: 45
       run: nix build ".#nanopynix-tests-git-tsan" --out-link result --print-build-logs
         --print-out-paths
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Run TSAN-instrumented stress tests (repeated, local+daemon backends)
+      timeout-minutes: 25
       run: |
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-git.log"
@@ -403,6 +453,7 @@ jobs:
         fi
         exit 0
     - name: Run TSAN-instrumented concurrency tests (single pass, local+daemon backends)
+      timeout-minutes: 20
       run: |
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-broad-git.log"
@@ -421,6 +472,7 @@ jobs:
         fi
         exit 0
     - name: Upload TSAN output (git)
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: tsan-race-report-git
@@ -428,32 +480,38 @@ jobs:
           ${{ github.workspace }}/tsan-output-git.log
           ${{ github.workspace }}/tsan-output-broad-git.log
       if: ${{ !cancelled() }}
-    timeout-minutes: 30
+    timeout-minutes: 165
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan-git,')
     runs-on: ubuntu-24.04
   test-tsan-nix_2_34:
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build TSAN nanopynix test runner (nix_2_34)
+      timeout-minutes: 45
       run: nix build ".#nanopynix-tests-nix_2_34-tsan" --out-link result --print-build-logs
         --print-out-paths
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Run TSAN-instrumented stress tests (repeated, local+daemon backends)
+      timeout-minutes: 25
       run: |
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-nix_2_34.log"
@@ -482,6 +540,7 @@ jobs:
         fi
         exit 0
     - name: Run TSAN-instrumented concurrency tests (single pass, local+daemon backends)
+      timeout-minutes: 20
       run: |
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-broad-nix_2_34.log"
@@ -500,6 +559,7 @@ jobs:
         fi
         exit 0
     - name: Upload TSAN output (nix_2_34)
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: tsan-race-report-nix_2_34
@@ -507,32 +567,38 @@ jobs:
           ${{ github.workspace }}/tsan-output-nix_2_34.log
           ${{ github.workspace }}/tsan-output-broad-nix_2_34.log
       if: ${{ !cancelled() }}
-    timeout-minutes: 30
+    timeout-minutes: 165
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan-nix_2_34,')
     runs-on: ubuntu-24.04
   test-tsan-nix_2_35:
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build TSAN nanopynix test runner (nix_2_35)
+      timeout-minutes: 45
       run: nix build ".#nanopynix-tests-nix_2_35-tsan" --out-link result --print-build-logs
         --print-out-paths
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Run TSAN-instrumented stress tests (repeated, local+daemon backends)
+      timeout-minutes: 25
       run: |
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-nix_2_35.log"
@@ -561,6 +627,7 @@ jobs:
         fi
         exit 0
     - name: Run TSAN-instrumented concurrency tests (single pass, local+daemon backends)
+      timeout-minutes: 20
       run: |
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-broad-nix_2_35.log"
@@ -579,6 +646,7 @@ jobs:
         fi
         exit 0
     - name: Upload TSAN output (nix_2_35)
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: tsan-race-report-nix_2_35
@@ -586,34 +654,41 @@ jobs:
           ${{ github.workspace }}/tsan-output-nix_2_35.log
           ${{ github.workspace }}/tsan-output-broad-nix_2_35.log
       if: ${{ !cancelled() }}
-    timeout-minutes: 30
+    timeout-minutes: 165
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan-nix_2_35,')
     runs-on: ubuntu-24.04
   test-daemon-git:
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build nanopynix test runner for Nix git
+      timeout-minutes: 30
       run: nix build ".#nanopynix-tests-git" --out-link result --print-build-logs
         --print-out-paths
     - name: Verify test runner closure after build
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Test nanopynix against Nix git (full suite, daemon backend)
+      timeout-minutes: 30
       run: |
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
@@ -649,18 +724,21 @@ jobs:
         fi
         exit "$status"
     - name: Upload test output
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: test-output-daemon-git
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload Boehm GC thread registration log
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: gc-thread-debug-daemon-git
         path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -668,6 +746,7 @@ jobs:
         flags: daemon-git
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -676,35 +755,43 @@ jobs:
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    timeout-minutes: 30
+    timeout-minutes: 200
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-git,')
     runs-on: ubuntu-24.04
   test-daemon-nix_2_31:
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build nanopynix test runner for Nix nix_2_31
+      timeout-minutes: 30
       run: nix build ".#nanopynix-tests-nix_2_31" --out-link result --print-build-logs
         --print-out-paths
     - name: Verify test runner closure after build
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Test nanopynix against Nix nix_2_31 (full suite, daemon backend)
+      timeout-minutes: 30
       run: |
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
@@ -740,18 +827,21 @@ jobs:
         fi
         exit "$status"
     - name: Upload test output
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: test-output-daemon-nix_2_31
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload Boehm GC thread registration log
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: gc-thread-debug-daemon-nix_2_31
         path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -759,6 +849,7 @@ jobs:
         flags: daemon-nix_2_31
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -767,35 +858,43 @@ jobs:
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    timeout-minutes: 30
+    timeout-minutes: 200
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-nix_2_31,')
     runs-on: ubuntu-24.04
   test-daemon-nix_2_34:
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build nanopynix test runner for Nix nix_2_34
+      timeout-minutes: 30
       run: nix build ".#nanopynix-tests-nix_2_34" --out-link result --print-build-logs
         --print-out-paths
     - name: Verify test runner closure after build
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Test nanopynix against Nix nix_2_34 (full suite, daemon backend)
+      timeout-minutes: 30
       run: |
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
@@ -831,18 +930,21 @@ jobs:
         fi
         exit "$status"
     - name: Upload test output
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: test-output-daemon-nix_2_34
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload Boehm GC thread registration log
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: gc-thread-debug-daemon-nix_2_34
         path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -850,6 +952,7 @@ jobs:
         flags: daemon-nix_2_34
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -858,35 +961,43 @@ jobs:
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    timeout-minutes: 30
+    timeout-minutes: 200
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-nix_2_34,')
     runs-on: ubuntu-24.04
   test-daemon-nix_2_35:
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build nanopynix test runner for Nix nix_2_35
+      timeout-minutes: 30
       run: nix build ".#nanopynix-tests-nix_2_35" --out-link result --print-build-logs
         --print-out-paths
     - name: Verify test runner closure after build
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Test nanopynix against Nix nix_2_35 (full suite, daemon backend)
+      timeout-minutes: 30
       run: |
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
@@ -922,18 +1033,21 @@ jobs:
         fi
         exit "$status"
     - name: Upload test output
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: test-output-daemon-nix_2_35
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload Boehm GC thread registration log
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: gc-thread-debug-daemon-nix_2_35
         path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -941,6 +1055,7 @@ jobs:
         flags: daemon-nix_2_35
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -949,35 +1064,43 @@ jobs:
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    timeout-minutes: 30
+    timeout-minutes: 200
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-nix_2_35,')
     runs-on: ubuntu-24.04
   test-local-git:
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build nanopynix test runner for Nix git
+      timeout-minutes: 30
       run: nix build ".#nanopynix-tests-git" --out-link result --print-build-logs
         --print-out-paths
     - name: Verify test runner closure after build
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Test nanopynix against Nix git (full suite, local backend)
+      timeout-minutes: 30
       run: |
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
@@ -1013,18 +1136,21 @@ jobs:
         fi
         exit "$status"
     - name: Upload test output
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: test-output-local-git
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload Boehm GC thread registration log
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: gc-thread-debug-local-git
         path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -1032,6 +1158,7 @@ jobs:
         flags: local-git
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -1040,35 +1167,43 @@ jobs:
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    timeout-minutes: 30
+    timeout-minutes: 200
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-git,')
     runs-on: ubuntu-24.04
   test-local-nix_2_31:
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build nanopynix test runner for Nix nix_2_31
+      timeout-minutes: 30
       run: nix build ".#nanopynix-tests-nix_2_31" --out-link result --print-build-logs
         --print-out-paths
     - name: Verify test runner closure after build
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Test nanopynix against Nix nix_2_31 (full suite, local backend)
+      timeout-minutes: 30
       run: |
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
@@ -1104,18 +1239,21 @@ jobs:
         fi
         exit "$status"
     - name: Upload test output
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: test-output-local-nix_2_31
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload Boehm GC thread registration log
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: gc-thread-debug-local-nix_2_31
         path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -1123,6 +1261,7 @@ jobs:
         flags: local-nix_2_31
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -1131,35 +1270,43 @@ jobs:
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    timeout-minutes: 30
+    timeout-minutes: 200
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-nix_2_31,')
     runs-on: ubuntu-24.04
   test-local-nix_2_34:
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build nanopynix test runner for Nix nix_2_34
+      timeout-minutes: 30
       run: nix build ".#nanopynix-tests-nix_2_34" --out-link result --print-build-logs
         --print-out-paths
     - name: Verify test runner closure after build
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Test nanopynix against Nix nix_2_34 (full suite, local backend)
+      timeout-minutes: 30
       run: |
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
@@ -1195,18 +1342,21 @@ jobs:
         fi
         exit "$status"
     - name: Upload test output
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: test-output-local-nix_2_34
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload Boehm GC thread registration log
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: gc-thread-debug-local-nix_2_34
         path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -1214,6 +1364,7 @@ jobs:
         flags: local-nix_2_34
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -1222,35 +1373,43 @@ jobs:
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    timeout-minutes: 30
+    timeout-minutes: 200
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-nix_2_34,')
     runs-on: ubuntu-24.04
   test-local-nix_2_35:
     steps:
-    - uses: actions/checkout@main
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build nanopynix test runner for Nix nix_2_35
+      timeout-minutes: 30
       run: nix build ".#nanopynix-tests-nix_2_35" --out-link result --print-build-logs
         --print-out-paths
     - name: Verify test runner closure after build
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Test nanopynix against Nix nix_2_35 (full suite, local backend)
+      timeout-minutes: 30
       run: |
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
@@ -1286,18 +1445,21 @@ jobs:
         fi
         exit "$status"
     - name: Upload test output
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: test-output-local-nix_2_35
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload Boehm GC thread registration log
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: gc-thread-debug-local-nix_2_35
         path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -1305,6 +1467,7 @@ jobs:
         flags: local-nix_2_35
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -1313,8 +1476,9 @@ jobs:
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    timeout-minutes: 30
+    timeout-minutes: 200
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-nix_2_35,')
     runs-on: ubuntu-24.04
