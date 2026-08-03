@@ -18,6 +18,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+# Every test here drives the compiled evaluator directly, so the whole module
+# is in-process. Most tests reach it through the `eval_state` fixture, which
+# the no-collector rule already finds; a few build an `EvalState` themselves,
+# which it cannot. See tests/support/nix_runtime.py.
+pytestmark = pytest.mark.evaluator_in_process
+
 requires_boehm_gc = pytest.mark.nix_capability("boehm_gc")
 """Skip a test whose subject is the collector, on a build that has none.
 

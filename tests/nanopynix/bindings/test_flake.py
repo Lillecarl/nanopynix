@@ -14,6 +14,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+# Locking a flake needs an evaluator, and this module builds one in the pytest
+# process for every test -- through the `eval_state` fixture, and directly
+# where a test needs its own fetch settings. See tests/support/nix_runtime.py.
+pytestmark = pytest.mark.evaluator_in_process
+
+
 def _init_git_flake(tmp_path: Path, outputs_body: str = "val = 1;") -> None:
     init_flake_repo(tmp_path, outputs_body)
 
