@@ -55,6 +55,64 @@ class TestCurrentSystem:
                 nanopynix_util.set_setting("eval-system", previous_eval_system)
 
 
+class TestFilterAnsiEscapes:
+    """``nix::filterANSIEscapes``, which replaced the ``strip-ansi`` package.
+
+    Each case below is a shape that the pattern in that package left behind.
+    ``nanopynix/_ansi.py`` gives the measurement and the reason.
+    """
+
+    def test_strips_the_colours_that_nix_writes(self):
+        assert nanopynix_util.filter_ansi_escapes("\x1b[31;1merror\x1b[0m", filter_all=True) == "error"
+
+    def test_strips_an_osc_8_hyperlink(self):
+        # Both terminators, because gcc writes BEL and the standard writes
+        # ESC backslash. Nix tests both as well.
+        assert nanopynix_util.filter_ansi_escapes("\x1b]8;;http://x\x1b\\a\x1b]8;;\x1b\\", filter_all=True) == "a"
+        assert nanopynix_util.filter_ansi_escapes("\x1b]8;;http://x\aa\x1b]8;;\a", filter_all=True) == "a"
+
+    def test_strips_a_24_bit_colour(self):
+        # Five parameters. A pattern that allows three leaves the opening
+        # sequence in the result.
+        assert nanopynix_util.filter_ansi_escapes("\x1b[38;2;255;0;0mred\x1b[0m", filter_all=True) == "red"
+
+    def test_strips_a_sequence_that_does_not_end_in_m(self):
+        assert nanopynix_util.filter_ansi_escapes("\x1b[2Kgone", filter_all=True) == "gone"
+
+    def test_keeps_a_colour_when_filter_all_is_false(self):
+        # The default, and the reason `strip_ansi` passes True. A colour
+        # sequence stays and counts for no width.
+        text = "\x1b[31;1merror\x1b[0m"
+        assert nanopynix_util.filter_ansi_escapes(text) == text
+
+    def test_expands_a_tab_and_drops_a_carriage_return(self):
+        # Nix's behaviour, and a difference from the package this replaced.
+        assert nanopynix_util.filter_ansi_escapes("a\tb\rc", filter_all=True) == "a       bc"
+
+    def test_width_truncates_and_none_does_not(self):
+        assert nanopynix_util.filter_ansi_escapes("abcdef", filter_all=True, width=3) == "abc"
+        assert nanopynix_util.filter_ansi_escapes("abcdef", filter_all=True, width=None) == "abcdef"
+        assert nanopynix_util.filter_ansi_escapes("abcdef", filter_all=True, width=0) == ""
+
+    def test_a_negative_width_is_refused(self):
+        # Nix takes an unsigned int, and -1 as an unsigned int is "do not
+        # truncate" -- the opposite of what the caller asked for. Pinned here
+        # because only the parameter type refuses it.
+        with pytest.raises(TypeError):
+            nanopynix_util.filter_ansi_escapes("abcdef", filter_all=True, width=-1)
+
+    def test_needs_no_initialisation(self):
+        """The function reads no configuration, so it runs before any init.
+
+        This asserts the property that lets `nanopynix._ansi.strip_ansi` sit
+        in a pydantic validator and in an exception accessor, which both run
+        wherever the caller happens to be. It cannot assert that no init has
+        happened in this process, because another test may have run first.
+        """
+        assert "filter_ansi_escapes" in dir(nanopynix_util)
+        assert nanopynix_util.filter_ansi_escapes("plain") == "plain"
+
+
 class TestUrlUtilities:
     def test_percent_encode_default(self):
         assert nanopynix_util.percent_encode("hello world") == "hello%20world"

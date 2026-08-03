@@ -45,7 +45,8 @@ import re
 from typing import Any, cast
 
 from nanopynix_proto.nix.common import NixType
-from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
+
+from nanopynix._ansi import strip_ansi
 
 # ════════════════════════════════════════════════════════════════════
 # Exception hierarchy

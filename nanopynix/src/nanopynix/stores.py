@@ -43,8 +43,8 @@ from urllib.parse import quote, unquote
 
 from nanopynix_bindings import errors as nanopynix_errors, store as nanopynix_store
 from pydantic import AliasChoices, Field, model_validator
-from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
+from nanopynix._ansi import strip_ansi
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.settings import (
     NIX_2_34,

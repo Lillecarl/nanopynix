@@ -12,11 +12,13 @@
 #include <nix/util/experimental-features.hh>
 #include <nix/util/hash.hh>
 #include <nix/util/logging.hh>
+#include <nix/util/terminal.hh>
 #include <nix/util/url.hh>
 
 #include "nix_error_info.hh"
 #include "nix_compat.hh"
 
+#include <limits>
 #include <memory>
 #include <nlohmann/json.hpp>
 
@@ -273,6 +275,26 @@ void nanopynix_bind_util(nb::module_ &m) {
           "4=Talkative, 5=Chatty, 6=Debug, 7=Vomit.");
     m.def("get_verbosity", &get_verbosity,
           "Get the current Nix log verbosity level.");
+
+    // ── Terminal utilities (no init required) ───────────────────
+    //
+    // Nix writes the escape sequences that reach us, so Nix owns the answer to
+    // which byte is an escape sequence. `filterANSIEscapes` is that answer, it
+    // lives in libutil, and it reads no configuration and no global state.
+    m.def("filter_ansi_escapes",
+          [](const std::string &s, bool filter_all, std::optional<unsigned int> width) -> std::string {
+            return nix::filterANSIEscapes(s, filter_all,
+                                          width.value_or(std::numeric_limits<unsigned int>::max()));
+          },
+          "s"_a, "filter_all"_a = false, "width"_a = nb::none(),
+          "Filter the ANSI escape sequences out of *s*, the way Nix does.\n\n"
+          "With *filter_all* false, a colour sequence stays and counts for no "
+          "width. With *filter_all* true, every sequence goes, which includes "
+          "the OSC 8 hyperlinks that a plain SGR pattern leaves behind. A tab "
+          "becomes spaces to the next multiple of eight either way, and a "
+          "carriage return and a bell go.\n\n"
+          "*width* truncates the result to that many printable characters, "
+          "which counts a wide character as two. None does not truncate.");
 
     // ── URL utilities (no init required) ────────────────────────
     m.def("percent_encode", [](const std::string &s, const std::string &keep) -> std::string {

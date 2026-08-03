@@ -19,7 +19,6 @@ dependencies = [
   "pydantic",
   "pydantic-settings",
   "pyyaml",
-  "strip-ansi",
   "setproctitle",
 ]
 
