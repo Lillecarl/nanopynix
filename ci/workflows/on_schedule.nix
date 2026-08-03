@@ -1,6 +1,11 @@
 let
   workflow = import ./lib.nix { };
-  inherit (workflow) steps;
+  inherit (workflow)
+    steps
+    caps
+    mkJob
+    withTimeout
+    ;
 
   branch = "develop";
   lockArtifact = "flake-lock";
@@ -76,7 +81,7 @@ workflow.evalWorkflow {
     workflow_dispatch = null;
   };
   jobs = {
-    update-lockfile = {
+    update-lockfile = mkJob {
       outputs = {
         regular_versions = "\${{ steps.versions.outputs.regular_versions }}";
         tsan_versions = "\${{ steps.versions.outputs.tsan_versions }}";
@@ -88,11 +93,13 @@ workflow.evalWorkflow {
         (steps.cachix { })
         {
           name = "Update flake inputs";
+          timeout-minutes = caps.flakeUpdate;
           run = "nix flake update";
         }
         {
           id = "versions";
           name = "Compute Nix version matrices";
+          timeout-minutes = caps.versionMatrix;
           run = ''
             echo "regular_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-(tsan|ubsan)" n == null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
             echo "tsan_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-tsan" n != null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
@@ -116,7 +123,7 @@ workflow.evalWorkflow {
       inherit lockArtifact;
     };
     docs-deploy = workflow.mkDocsDeployJob { needs = "docs-build"; };
-    update-lockfile-commit = {
+    update-lockfile-commit = mkJob {
       needs = "docs-deploy";
       permissions = {
         contents = "write";
@@ -124,12 +131,12 @@ workflow.evalWorkflow {
       steps = [
         (steps.checkout { ref = branch; })
         (steps.downloadArtifact { artifactName = lockArtifact; })
-        {
+        (withTimeout caps.autoCommit {
           uses = "step-security/git-auto-commit-action@main";
           "with" = {
             commit_message = "nix flake update";
           };
-        }
+        })
       ];
     };
   };

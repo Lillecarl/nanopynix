@@ -68,6 +68,19 @@ let
         default = null;
         description = "Environment variables scoped to this step.";
       };
+      timeout-minutes = mkOption {
+        type = types.nullOr types.int;
+        default = null;
+        description = ''
+          Minutes GitHub waits before killing this step.
+
+          A job-level cap answers "the job stopped". A step-level cap answers
+          "which part of the job stopped", and it lets a long step sit beside
+          a short one without giving the short one the slack of the long one:
+          a 40-minute build and a 10-minute test suite under one 50-minute job
+          cap let a hung suite run for 40 minutes.
+        '';
+      };
     };
   };
 
