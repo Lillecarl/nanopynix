@@ -27,13 +27,23 @@ let
   # this is meant to catch differ. Attached here it runs everywhere.
   #
   # `vptr` is off because the check needs every class of a hierarchy
-  # instrumented and CPython is not. `-fno-sanitize-recover` is what makes
-  # UBSan a gate at all: by default it prints the violation and continues, so
-  # the job would go green with the report sitting in its log.
+  # instrumented and CPython is not.
+  #
+  # **UBSan is deliberately not fatal at compile time.** `-fno-sanitize-recover`
+  # was the first thing tried, and it broke the build rather than the tests:
+  # these flags reach sqlite, whose build compiles a host code generator, and
+  #
+  #   tool/lemon.c:1795:3: runtime error: null pointer passed as argument 1,
+  #   which is declared to never be null
+  #
+  # killed the sqlite derivation on every version. That is upstream UB in a
+  # program that runs at build time and never at test time, so making it fatal
+  # gates the wrong thing. The test runner sets `UBSAN_OPTIONS=halt_on_error=1`
+  # instead, which puts the fatal boundary around the process under test and
+  # leaves third-party build tooling alone.
   undefinedFlags = [
     "-fsanitize=undefined"
     "-fno-sanitize=vptr"
-    "-fno-sanitize-recover=undefined"
   ];
 
   sanitizerFlags = [
