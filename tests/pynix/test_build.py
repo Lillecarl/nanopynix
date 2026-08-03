@@ -12,9 +12,9 @@ from pynix.build import (
     _build_target,  # pyright: ignore[reportPrivateUsage] -- test drives the private build step directly to exercise FOD-update/dry-run paths
 )
 from pynix.target import EvaluationTarget
-from strip_ansi import strip_ansi  # type: ignore[reportMissingTypeStubs] -- strip_ansi has no PEP 561 stubs
 
 import nanopynix
+from nanopynix._ansi import strip_ansi
 from nanopynix.exceptions import StoreError
 from pynix import Pynix
 from tests.support.git import init_flake_repo
