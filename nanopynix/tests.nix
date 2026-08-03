@@ -121,36 +121,19 @@ in
     # not a bug, so tell TSAN to tolerate it instead of aborting the child.
     export TSAN_OPTIONS="halt_on_error=1 history_size=7 second_deadlock_stack=1 die_after_fork=0 suppressions=${tsanSuppressions}"
   ''
-  + lib.optionalString (sanitizer != null && sanitizer.name == "address") ''
-    # detect_leaks=0: nix allocates from the Boehm collector, which does not
-    # free by design, and CPython keeps interned objects to exit. Both are
-    # leaks to LeakSanitizer and neither is a defect. This job is for a memory
-    # error, not for a leak.
+  + lib.optionalString (sanitizer != null && sanitizer.name == "undefined") ''
+    # halt_on_error: UBSan prints a violation and carries on by default, so
+    # without this the job goes green with the report sitting in its log. It is
+    # set here rather than compiled in with -fno-sanitize-recover because the
+    # compile-time form also reaches sqlite's build-time code generator, where
+    # upstream UB killed the build -- see nix/sanitizer.nix. This puts the
+    # fatal boundary around the process under test, which is the thing being
+    # gated.
     #
-    # detect_stack_use_after_return is NOT set here, on purpose. bdwgc returns
-    # "detect_stack_use_after_return=0" from its own __asan_default_options()
-    # hook, with the comment "Do not to use fake stacks" -- the option moves
-    # locals into a heap fake stack, and a conservative collector scanning the
-    # real stack then cannot see a pointer held only in a local. It would free
-    # a live object, and the crash would look like one of ours. ASAN_OPTIONS
-    # overrides that hook, so setting it here would silently undo a deliberate
-    # choice by the collector. Use-after-*scope* needs no fake stack and is
-    # compiled in by default, so the class of defect this job exists for is
-    # still covered.
-    #
-    # halt_on_error is ASan's default. UBSan's is *not*: it prints the
-    # violation and carries on, so without this the job goes green with the
-    # report sitting in its log. It is set here rather than compiled in with
-    # -fno-sanitize-recover because the compile-time form also reaches
-    # sqlite's build-time code generator, where upstream UB killed the build
-    # -- see nix/sanitizer.nix. This puts the fatal boundary around the
-    # process under test, which is the thing being gated.
-    export ASAN_OPTIONS="detect_leaks=0 abort_on_error=1"
+    # print_stacktrace: a UBSan report names one source line. The line that a
+    # header gives is the line of the header, so the caller is the part that
+    # says whose defect it is.
     export UBSAN_OPTIONS="print_stacktrace=1 halt_on_error=1"
-    # ASan cannot see through pymalloc's arenas, so a report would name the
-    # arena rather than the object. This is the documented way to get CPython
-    # to allocate through libc malloc.
-    export PYTHONMALLOC=malloc
   ''
   + ''
     # Coverage is measured by `coverage run` and combined *after* pytest has
