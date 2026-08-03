@@ -29,12 +29,36 @@ let
   # against the plain set and `clypi` seen from this one would be two
   # derivations of one source.
   #
-  # Strictly additive -- every name is this repo's own or vendored under
-  # nix/, never an override of an existing nixpkgs attribute -- so it forces
-  # no rebuild of nixpkgs' own Python packages and leaves the interpreter
-  # derivation itself untouched.
+  # Additive, with one exception that says why it is here and when it goes.
+  # Every other name is this repo's own or vendored under nix/, so this set
+  # forces no rebuild of nixpkgs' own Python packages and leaves the
+  # interpreter derivation itself untouched.
   pythonBase = pkgs.python3.override {
-    packageOverrides = pySelf: _pyPrev: {
+    packageOverrides = pySelf: pyPrev: {
+      # THE ONE OVERRIDE. Delete it when nixpkgs PR #548078 reaches the
+      # nixpkgs this repo pins.
+      #
+      # datamodel-code-generator runs ruff over the code it generates and
+      # compares the result against a checked-in expectation. A newer ruff
+      # writes a blank line after `from __future__ import annotations`, so
+      # five of its tests fail, and nixpkgs ships the package with a failing
+      # test suite. It reaches this repo through tree-sitter-config, which
+      # nix/tree-sitter-nix.nix needs, so the failure took out the whole
+      # scheduled build: 18 of 19 jobs, three nights running.
+      #
+      # The list is upstream's list, and not the two failures that were
+      # visible. nixpkgs passes --maxfail=2, so the run stopped at the second
+      # one and the other three were never reported.
+      datamodel-code-generator = pyPrev.datamodel-code-generator.overridePythonAttrs (old: {
+        disabledTests = (old.disabledTests or [ ]) ++ [
+          "test_no_use_type_checking_imports"
+          "test_ruff_batch_formatting_directory"
+          "test_ruff_check_and_format_combined"
+          "test_ruff_check_only"
+          "test_type_checking_imports_default_to_runtime_imports_for_modular_pydantic_ruff"
+        ];
+      });
+
       # The protobuf runtime, and the protoc plugin that writes the modules
       # `nanopynix-proto` and `greeter-proto` are made of. Neither is in
       # nixpkgs. Both used to arrive through the `grpclib-transports` flake
@@ -55,6 +79,10 @@ let
       kr8s = pySelf.callPackage ./nix/kr8s.nix { };
 
       tree-sitter-nix = pySelf.callPackage ./nix/tree-sitter-nix.nix {
+        # This set, and not `python.pkgs`, which is the set from before
+        # these overrides ran. nix/tree-sitter-nix.nix gives the
+        # measurement.
+        pythonPackages = pySelf;
         # `pkgs.path` (the nixpkgs source tree) would otherwise be shadowed
         # by the Python set's own PyPI package literally named "path" --
         # passing `pkgs.path` explicitly sidesteps that entirely.

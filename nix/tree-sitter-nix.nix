@@ -1,5 +1,16 @@
 {
-  python,
+  # The Python package set that this package is a member of, passed
+  # explicitly by the caller.
+  #
+  # **Not `python.pkgs`.** Measured: `pythonBase.pkgs.datamodel-code-generator`
+  # is the overridden derivation, and
+  # `pythonBase.pkgs.python.pkgs.datamodel-code-generator` is the plain
+  # nixpkgs one. The interpreter carries the set it was built with, so a
+  # round trip out to `python` and back in reaches the set from *before*
+  # `packageOverrides` ran. Everything below this file resolved from that
+  # earlier set, so an override of any dependency of tree-sitter-config
+  # silently did nothing. That cost a day of the scheduled build.
+  pythonPackages,
   treeSitterCli,
   nixpkgsPath,
   treeSitterNixSrc,
@@ -31,7 +42,7 @@ let
     '';
   };
 in
-(python.pkgs.callPackage "${nixpkgsPath}/pkgs/development/python-modules/tree-sitter-grammars" {
+(pythonPackages.callPackage "${nixpkgsPath}/pkgs/development/python-modules/tree-sitter-grammars" {
   name = "tree-sitter-nix";
   inherit grammarDrv;
 }).overridePythonAttrs
