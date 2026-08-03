@@ -106,6 +106,17 @@ in
     # not a from-scratch instrumented executable.
     export LD_PRELOAD="${sanitizerRuntime}''${LD_PRELOAD:+:$LD_PRELOAD}"
   ''
+  + lib.optionalString (sanitizer != null) ''
+    # A sanitizer reports on file descriptor 2, and the default `--capture=fd`
+    # of pytest points that descriptor at a temporary file. `halt_on_error=1`
+    # aborts the process before pytest prints the buffer, so the run says
+    # nothing at all. `--capture=sys` keeps the descriptor. `tests/conftest.py`
+    # refuses the `fd` method under a sanitizer, and gives the whole reason.
+    #
+    # PYTEST_ADDOPTS goes before the command line, so a job that passes
+    # `--capture=no` still gets `no`.
+    export PYTEST_ADDOPTS="--capture=sys''${PYTEST_ADDOPTS:+ $PYTEST_ADDOPTS}"
+  ''
   + lib.optionalString (sanitizer != null && sanitizer.name == "thread") ''
     # halt_on_error=1: without it, a race hit deep in a loop (e.g. every
     # empty-attrset evaluation) gets re-reported on every single occurrence
