@@ -473,18 +473,32 @@ let
       }
     );
 
-  # The full suite against a libexpr with no collector, and no sanitizer.
+  # The suite against a libexpr with no collector, and no sanitizer.
   #
   # **This job exists to keep a failure attributable.** The ASAN job below
   # runs against the same libexpr, so a red ASAN job has two possible causes:
   # a memory error, or an evaluator that does not work without the collector.
   # This one costs a plain build and a plain suite, and it tells the two
   # apart. It is also the answer to acceptance criterion 2 of issue #47, which
-  # asks that an RPC worker run the whole suite against such a build.
+  # asks that an RPC worker run the suite against such a build.
   #
-  # The suite skips the three tests whose subject is the collector, through
-  # the `boehm_gc` capability that `build_info` publishes. Nothing else in the
-  # suite changes.
+  # **The suite skips every test that builds an evaluator in the pytest
+  # process, and that is the design rather than a gap.** Such a build leaks by
+  # design, and Nix's own package option gives the condition that makes the
+  # leak acceptable: evaluation takes place within short-lived processes. An
+  # RPC worker is one, and it returns every byte when it exits. The pytest
+  # process outlives the whole suite.
+  #
+  # The measurements against nix_2_34-nogc say how large the difference is.
+  # The rpc share of the suite peaked at 553 MB. The in-process share demanded
+  # about 10 GB -- 2 GB resident against a 2 GB cap, and 8.1 GB pushed to swap
+  # -- and the whole suite in one process reached 5 GB resident with 14.6 GB
+  # of swap before the kernel killed it. No process boundary, no reclaim.
+  #
+  # `tests/support/nix_runtime.py` holds the rule, and
+  # `tests/meta/test_no_collector_rule.py` keeps it from going stale. The
+  # three tests whose subject is the collector skip separately, through the
+  # `boehm_gc` capability that `build_info` publishes.
   mkNoGCTestJob =
     {
       version,
@@ -520,7 +534,9 @@ let
       }
     );
 
-  # The full suite under AddressSanitizer, against one Nix version.
+  # The suite under AddressSanitizer, against one Nix version, in two runs.
+  # `mkNoGCTestJob` above says why there are two, and this job inherits that
+  # split because it builds against the same libexpr.
   #
   # **The build has no collector, and that is not a tuning choice.** libexpr
   # refuses ASAN together with the Boehm collector, because a conservative
@@ -569,9 +585,34 @@ let
                 set -o pipefail
                 LOGFILE="''${{ github.workspace }}/asan-output-${bareVersion}.log"
                 status=0
-                env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=120 NANOPYNIX_TEST_SANITIZER=asan PYTHONDONTWRITEBYTECODE=1 \
-                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
-                  2>&1 | tee -a "$LOGFILE" || status=$?
+                run_suite() {
+                  run_status=0
+                  env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=120 NANOPYNIX_TEST_SANITIZER=asan PYTHONDONTWRITEBYTECODE=1 \
+                    ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
+                    "$@" 2>&1 | tee -a "$LOGFILE" || run_status=$?
+                  if [ "$run_status" -ne 0 ]; then status=$run_status; fi
+                }
+                # Two processes, and the second one is why this job still
+                # covers the in-process engine at all. Without the collector
+                # an evaluator in the pytest process never releases memory, so
+                # `tests/support/nix_runtime.py` skips those tests by default.
+                # The acceptance test of issue #35 is one of them, and a run
+                # that skipped it would report success and prove nothing.
+                #
+                # **The second run takes one file, and not the whole
+                # in-process subset.** That subset was measured against
+                # nix_2_34-nogc and it demands about 10 GB in one process --
+                # 2 GB resident against a 2 GB cap, and 8.1 GB pushed to swap.
+                # `test_flake.py` holds the stack-use-after-return of issue
+                # #34, which is the defect shape this job exists for. The rest
+                # of the in-process engine has no ASAN cover until an
+                # evaluator can be recycled inside one process (issue #50).
+                #
+                # Both runs happen whatever the first one reports. A red first
+                # run does not say whether the second one finds a report, and
+                # a report is what this job is for.
+                run_suite
+                run_suite --in-process-evaluator=run tests/nanopynix/bindings/test_flake.py
                 # A sanitizer report is the finding, so read the log rather
                 # than trusting the exit status alone: `halt_on_error=1` kills
                 # the process that reports, but a report raised inside a

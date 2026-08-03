@@ -21,7 +21,7 @@
 #
 #   scripts/run-tests.sh tests/gates
 #   scripts/run-tests.sh --wait tests/nanopynix/bindings -x
-#   scripts/run-tests.sh --label nogc --raw ./result/bin/nanopynix-tests tests
+#   scripts/run-tests.sh --label nogc --memory-max 4G --raw ./result/bin/nanopynix-tests tests
 #
 # `--wait` blocks and exits with the status of the run. The unit still owns the
 # work, so a kill of this script leaves the run alive; reattach with --status.
@@ -34,6 +34,7 @@ log_dir=${NANOPYNIX_RUN_LOG_DIR:-$repo_root/.test-runs}
 label=""
 wait_for_it=0
 raw=0
+memory_max=""
 cpu_weight=${NANOPYNIX_RUN_CPU_WEIGHT:-50}
 
 usage() {
@@ -47,9 +48,19 @@ options:
   --label NAME   name the unit and the log (default: derived from the arguments)
   --wait         block until the run finishes, and exit with its status
   --raw          run the command as given, rather than pytest in the dev shell
-  --status       show the state of a run, and the tail of its log
+  --memory-max N cap the run at N (for example 2G), and forbid swap
+  --status       show the state of a run, its peak memory, and the tail of its log
   --stop         stop a run, and everything it started
 EOF
+}
+
+# systemd reports the peak of a unit when the unit stops, and it reports the
+# peak to the journal rather than to the output of the run. A transient unit
+# that succeeded is already unloaded by then, so `systemctl show -p MemoryPeak`
+# answers `[not set]` and the number is gone. The journal keeps it.
+show_peak() {
+    journalctl --user --no-pager --since "-1day" 2>/dev/null |
+        grep "$1.service: Consumed" | tail -n 1 >&2 || true
 }
 
 # `--status` and `--stop` take the label of an earlier run, so they are handled
@@ -66,6 +77,7 @@ case "${1:-}" in
     fi
     systemctl --user show "$unit.service" \
         -p ActiveState -p SubState -p Result -p ExecMainStatus -p ExecMainStartTimestamp >&2
+    show_peak "$unit"
     echo "--- tail of $log_dir/$unit.log ---" >&2
     tail -n "${NANOPYNIX_RUN_TAIL:-40}" "$log_dir/$unit.log" >&2 || true
     exit 0
@@ -90,6 +102,10 @@ while (($#)); do
         raw=1
         shift
         break
+        ;;
+    --memory-max)
+        memory_max=$2
+        shift 2
         ;;
     -h | --help)
         usage
@@ -144,6 +160,15 @@ systemd_args=(
     --property=StandardOutput=file:"$log"
     --property=StandardError=inherit
 )
+if [[ -n $memory_max ]]; then
+    # `MemorySwapMax=0` with it, because a cap without one is not a cap. A run
+    # capped at 2G with swap available stayed under the cap and pushed 8.1G to
+    # swap instead, which reported success and hid a demand of ten gigabytes.
+    systemd_args+=(
+        --property=MemoryMax="$memory_max"
+        --property=MemorySwapMax=0
+    )
+fi
 if [[ -n ${CLAUDECODE:-} ]]; then
     systemd_args+=(--setenv=CLAUDECODE="$CLAUDECODE")
 fi
@@ -159,6 +184,7 @@ systemd-run "${systemd_args[@]}" -- "${command[@]}" || status=$?
 
 if ((wait_for_it)); then
     tail -n "${NANOPYNIX_RUN_TAIL:-40}" "$log" >&2 || true
+    show_peak "$unit"
     exit "$status"
 fi
 

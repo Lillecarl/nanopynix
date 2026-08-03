@@ -41,7 +41,10 @@ if TYPE_CHECKING:
 
     from tests.support.nix_environment import NixTestEnvironment
 
-pytestmark = pytest.mark.l3_inproc
+# The L3 worker of this module runs in the pytest process, which is the whole
+# point of the module, so its evaluator has no process to die with. See the
+# no-collector rule in tests/support/nix_runtime.py.
+pytestmark = [pytest.mark.l3_inproc, pytest.mark.evaluator_in_process]
 
 
 @dataclass

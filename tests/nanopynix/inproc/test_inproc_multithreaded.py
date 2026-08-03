@@ -16,7 +16,10 @@ from nanopynix_bindings import util as nanopynix_util
 
 from nanopynix import EvalSessionClosedError, NixSettings, inproc
 
-pytestmark = pytest.mark.concurrency
+# `_session` below builds an `inproc.Session` directly rather than through the
+# `inproc_session` fixture, so the no-collector rule in
+# tests/support/nix_runtime.py cannot see it in the fixture closure.
+pytestmark = [pytest.mark.concurrency, pytest.mark.evaluator_in_process]
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator

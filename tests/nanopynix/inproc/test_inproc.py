@@ -28,6 +28,12 @@ from tests.support.notes import note
 if TYPE_CHECKING:
     from tests.support.nix_environment import InprocSessionFactory, NixTestEnvironment
 
+# The whole module is the in-process engine, and several tests build an
+# `inproc.Session` directly rather than through the `inproc_session` fixture.
+# Marking the module rather than those tests keeps the rule from going stale
+# when the next direct one arrives. See tests/support/nix_runtime.py.
+pytestmark = pytest.mark.evaluator_in_process
+
 requires_dynamic_primops = pytest.mark.nix_capability("dynamic_primop_registration")
 
 requires_boehm_gc = pytest.mark.nix_capability("boehm_gc")
