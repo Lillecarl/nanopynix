@@ -236,6 +236,11 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         Raises :class:`TimeoutError` instead if handing those resources back
         runs past :data:`_GRACEFUL_CLOSE_TIMEOUT_SECONDS`.
 
+        Raises :class:`~nanopynix.WorkerSignaledError`, alone or in that
+        group, when a signal killed the worker and nothing here asked it to
+        stop. That is the only failure this method reports which the caller
+        did not cause -- see the block that collects it.
+
         The worker process is gone in all three cases. It is stopped in a
         ``finally``, outside the deadline, by a ``WorkerClient.close`` that
         shields its own teardown -- so every failure here means "shutdown was
@@ -271,6 +276,21 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
             # would only mean an expired scope cancelling the polite half of a
             # shutdown that is about to happen the impolite way instead.
             await self._manager.close()
+
+        # **A worker that died on its own is reported here, and nowhere else.**
+        # Three teardown paths suppress WorkerDiedError -- this method's own
+        # resources, Store.close and EvalSession.close -- and each is right to:
+        # an RPC into a dead worker cannot succeed, and a caller can do nothing
+        # about a handle that died with its process. Together they meant a
+        # crashed worker closed as quietly as a healthy one, so a run reported
+        # success with a core dump inside it. See issue #55.
+        #
+        # After the `finally`, so it joins whatever the resources reported
+        # rather than replacing it, and reported through the list this method
+        # already raises from.
+        death = self._manager.unexpected_death
+        if death is not None:
+            errors.append(death)
 
         # Cancellation is not collected, unlike inproc, which catches
         # BaseException here. Wrapping it would strip its meaning: the scope it

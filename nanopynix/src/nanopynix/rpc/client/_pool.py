@@ -39,7 +39,14 @@ from nanopynix_proto.nix.worker import (
 
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import DEFAULT_STORE_URI, WORKER_INIT_STATUS_OK
-from nanopynix.exceptions import SessionClosedError, WorkerDiedError, exception_from_wire, from_response
+from nanopynix.exceptions import (
+    SessionClosedError,
+    WorkerDiedError,
+    WorkerSignaledError,
+    exception_from_wire,
+    from_response,
+    signal_name,
+)
 from nanopynix.logging import ACTIVE_LOG_CAPTURES, BusSubscription, CallbackBus, bus_log_stream
 from nanopynix.namespace import probe_namespace_support
 from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC, unpack_error_details
@@ -86,6 +93,19 @@ pathology, not anything a caller would tune."""
 
 _WORKER_JOIN_TIMEOUT_SECONDS = 5.0
 """How long _stop_worker_process waits for a terminate before escalating to kill."""
+
+_WORKER_REAP_TIMEOUT_SECONDS = 2.0
+"""How long _reap_worker waits for the exit status of a worker that just died.
+
+The pipe breaks when the child's file descriptors close, which is the instant
+it dies. The exit status arrives later: the forkserver reaps the child, calls
+``os.waitstatus_to_exitcode`` and writes the signed value to this process, and
+``Process.exitcode`` returns ``None`` until then. So the two events are
+genuinely ordered, and reading the status without waiting would usually get
+nothing.
+
+Two seconds because a worker death is not a hot path. It happens once per
+session at most, and only when something already went wrong."""
 
 # ════════════════════════════════════════════════════════════════════
 # gRPC error helper
@@ -184,6 +204,13 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         self._shutdown_timeout = shutdown_timeout
         self._worker_pid: int | None = None
         self._worker_proc: Any = None
+        # How the worker went away, and whether anybody wanted it to. Read
+        # once and cached, because the process object is dropped during
+        # teardown and the forkserver only reports the status once.
+        self._worker_exit_status: int | None = None
+        self._unexpected_death: WorkerSignaledError | None = None
+        self._expected_worker_death = False
+        self._stopping_the_worker = False
         self._channel = None
         self._worker_service_stub: WorkerServiceStub | None = None
         self._store_service_stub: StoreServiceStub | None = None
@@ -317,7 +344,16 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
 
         Everything inside the shield is separately bounded, so the shield
         cannot become a hang of its own.
+
+        **This method records a worker that died on its own, and does not
+        raise it.** ``Session.close`` reads :attr:`unexpected_death` and
+        reports it there, because this runs from that method's ``finally``
+        and an exception here would replace whatever sent it.
         """
+        # Before anything asks the worker to stop, so this process's own
+        # SIGTERM can never be read back as the crash. Non-blocking: a live
+        # worker gives None and costs nothing.
+        self._note_worker_death(self._read_worker_exit_status(self._worker_proc))
         try:
             if self._worker_service_stub is not None:
                 try:
@@ -337,8 +373,19 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
                     # ever producing a TimeoutError. The teardown is shielded,
                     # so letting it through costs nothing and is the only way
                     # the caller hears about it.
+                    #
+                    # `invoke` already reaped and recorded, if what it caught
+                    # was a death. That is what closes the one window the
+                    # check above cannot see: a worker that was alive when
+                    # this method began and aborted while serving Shutdown.
                     logger.debug("worker shutdown failed (expected during teardown)", exc_info=True)
         finally:
+            # From here on the worker's exit status is this process's own
+            # doing, whether the transport terminates it or this class kills
+            # it. `_note_worker_death` reads the flag and stops recording, so
+            # neither the rest of this close nor a second one can report our
+            # SIGTERM as a crash.
+            self._stopping_the_worker = True
             # One shield over the whole teardown, not just the part that stops
             # the process. Every await below is a place an outer cancellation
             # would otherwise re-fire and skip the rest -- and the rest is what
@@ -407,7 +454,23 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         request.request_id = request_id
         for capture in ACTIVE_LOG_CAPTURES.get():
             capture._register_request(request_id)  # type: ignore[reportPrivateUsage] -- the ACTIVE_LOG_CAPTURES dispatch contract; inproc does the same  # noqa: SLF001
-        return await _grpc_call(method(request, timeout=timeout))
+        try:
+            return await _grpc_call(method(request, timeout=timeout))
+        except WorkerDiedError as exc:
+            # The one seam that answers "how". `_grpc_call` knows the stream
+            # broke and nothing else; only this class holds the process. It
+            # stays module-private and single-subject, and this catches what
+            # it raised.
+            raise await self._worker_death_error(exc) from exc
+
+    async def _worker_death_error(self, disconnect: WorkerDiedError) -> WorkerDiedError:
+        """Name the signal that broke this call, or keep what the transport said.
+
+        The upgrade is the whole point: an abort, a segmentation fault and an
+        OOM kill are one closed pipe at this boundary, and the exit status is
+        the only thing that tells them apart.
+        """
+        return self._note_worker_death(await self._reap_worker()) or disconnect
 
     # ── log access ─────────────────────────────────────────────────
 
@@ -447,6 +510,90 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         self._worker_proc = proc
         self._set_worker_oom_score_adj(self._worker_oom_score_adj)
 
+    # ── worker exit status ─────────────────────────────────────────
+    #
+    # **A worker that aborts used to be indistinguishable from one that
+    # stopped**, because nothing here read the exit status the parent already
+    # holds. The three methods below are the whole repair, and issue #55 is
+    # the account of what it costs to be without them: a run of the suite
+    # reported success while a worker core-dumped inside it.
+    #
+    # `multiprocessing` reports the status as a negative number for a signal,
+    # because the forkserver passes the child's wait status through
+    # `os.waitstatus_to_exitcode`.
+
+    def _read_worker_exit_status(self, proc: Any) -> int | None:
+        """Cache and return the exit status, without waiting for it.
+
+        ``None`` means the worker is still running, or that the forkserver has
+        not reported yet. Both are indistinguishable here and neither is worth
+        waiting for at a point where waiting is not allowed -- see
+        :meth:`_reap_worker` for the point where it is.
+        """
+        if self._worker_exit_status is None and proc is not None:
+            self._worker_exit_status = proc.exitcode
+        return self._worker_exit_status
+
+    async def _reap_worker(self) -> int | None:
+        """Wait a bounded time for the exit status of a worker that just died.
+
+        Shielded, because every caller runs while an exception is already on
+        its way out of a scope that may be about to be cancelled. An
+        unshielded await there would raise the cancellation instead, and the
+        caller would never hear how its worker died.
+        """
+        if self._worker_exit_status is not None:
+            return self._worker_exit_status
+        proc = self._worker_proc
+        if proc is None:
+            return None
+        with anyio.CancelScope(shield=True):
+            await anyio.to_thread.run_sync(proc.join, _WORKER_REAP_TIMEOUT_SECONDS)
+        return self._read_worker_exit_status(proc)
+
+    def _note_worker_death(self, status: int | None) -> WorkerSignaledError | None:
+        """Record a death by signal, and return the exception that names it.
+
+        A positive status is an exit and not a crash, and ``None`` is a worker
+        that is still running or has not been reported yet. Neither is a
+        signal, so neither produces this class.
+
+        **Nothing is recorded once teardown has begun, and a measurement is
+        what put that rule here.** The transport stops a worker that did not
+        exit on its own with ``SIGTERM``, so a session holding an open store
+        at close ends at status ``-15`` on the ordinary path. The status is
+        cached, a second ``close()`` read it back, and 99 LSP tests then
+        failed with "this process did not signal it" about a signal this
+        process had sent. See ``close()``, which sets the flag.
+        """
+        if self._stopping_the_worker or status is None or status >= 0:
+            return None
+        error = WorkerSignaledError(
+            f"rpc worker {self._worker_pid} was killed by {signal_name(-status)} (exit status {status}); "
+            "this process did not signal it",
+            exit_status=status,
+        )
+        if self._unexpected_death is None:
+            self._unexpected_death = error
+        return error
+
+    @property
+    def unexpected_death(self) -> WorkerSignaledError | None:
+        """The signal that killed this worker, when nothing asked it to stop.
+
+        ``Session.close`` reads this and reports it, because the three places
+        that suppress a ``WorkerDiedError`` during teardown are each right to
+        suppress it and together mean nobody hears about a crash.
+
+        ``None`` when the worker is alive, when it exited normally, or when a
+        caller declared the death expected -- see
+        ``_expected_worker_death``, which is how a test that kills its own
+        worker says that it meant to.
+        """
+        if self._expected_worker_death:
+            return None
+        return self._unexpected_death
+
     async def _stop_worker_process(self) -> None:
         """Terminate, then kill, the worker if it is somehow still running.
 
@@ -458,14 +605,25 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         """
         proc = self._worker_proc
         self._worker_proc = None
-        if proc is None or not proc.is_alive():
+        if proc is None:
             return
-        logger.warning("nanopynix: worker %s outlived its teardown; stopping it", proc.pid)
-        proc.terminate()
-        await anyio.to_thread.run_sync(proc.join, _WORKER_JOIN_TIMEOUT_SECONDS)
-        if proc.is_alive():
-            proc.kill()
+        try:
+            if not proc.is_alive():
+                return
+            logger.warning("nanopynix: worker %s outlived its teardown; stopping it", proc.pid)
+            proc.terminate()
             await anyio.to_thread.run_sync(proc.join, _WORKER_JOIN_TIMEOUT_SECONDS)
+            if proc.is_alive():
+                proc.kill()
+                await anyio.to_thread.run_sync(proc.join, _WORKER_JOIN_TIMEOUT_SECONDS)
+        finally:
+            # The last moment the process object exists. Whatever it says now
+            # is all this client will ever know, so cache it -- including for
+            # the terminate above, whose SIGTERM is this process's own doing
+            # and is what `_read_worker_exit_status` must not mistake for a
+            # crash. It cannot: the death was already recorded before teardown
+            # began. See close().
+            self._read_worker_exit_status(proc)
 
     def _set_worker_oom_score_adj(self, value: int | None) -> None:
         if value is None:

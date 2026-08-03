@@ -83,6 +83,7 @@ from nanopynix.exceptions import (
     UsageError,
     ValueReleasedError,
     WorkerDiedError,
+    WorkerSignaledError,
     WrongNixTypeError,
 )
 from nanopynix.logging import LogCapture, LogCollector
@@ -285,6 +286,7 @@ __all__ = [
     "Value",
     "ValueReleasedError",
     "WorkerDiedError",
+    "WorkerSignaledError",
     "WrongNixTypeError",
     "build_info",
     "check_all_settings_model_drift",
