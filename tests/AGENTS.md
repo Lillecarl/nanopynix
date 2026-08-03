@@ -71,6 +71,13 @@ purpose is a staleness gate on the documentation, which sounds like a meta
 test, but it *executes* each example against a real store. It is an
 integration test, and it stays out.
 
+`tests/nanopynix/test_ci_workflows.py` is the same case, and it goes one step
+further: it is a staleness gate on `.github/workflows/*.yml` that *rewrites*
+the stale file before it fails. It evaluates the flake to render, so it is not
+a meta test. Copy that shape for a generated file whose generator needs Nix,
+and guard the write: the packaged runner is read-only, and there the
+comparison alone is the result.
+
 ## The shape of a meta test
 
 Copy `test_suppression_grammar.py`. Three parts, and the first two are not

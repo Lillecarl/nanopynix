@@ -1,5 +1,5 @@
 # GENERATED FILE -- do not edit by hand.
-# Edit ci/workflows/on_schedule.nix and run `direnv exec . python ci/render.py`.
+# Edit ci/workflows/on_schedule.nix; a pytest run renders this file again.
 
 name: On schedule
 'on':
@@ -11,27 +11,32 @@ jobs:
     needs:
     - update-lockfile
     steps:
-    - uses: actions/checkout@main
+    - timeout-minutes: 10
+      uses: actions/checkout@main
       with:
         ref: develop
-    - uses: actions/download-artifact@main
+    - timeout-minutes: 10
+      uses: actions/download-artifact@main
       with:
         name: flake-lock
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Run the gates (ruff, ruff-strict, ruff format, pyright, grpclib-transports)
+      timeout-minutes: 20
       run: |
         nix build --no-link --print-build-logs --keep-going \
           ".#check-lint" ".#check-lint-strict" ".#check-format" ".#check-types" \
           ".#check-grpclib-transports"
-    timeout-minutes: 20
+    timeout-minutes: 85
     runs-on: ubuntu-24.04
   docs-build:
     needs:
@@ -40,39 +45,50 @@ jobs:
     - test-tsan
     - test-ubsan
     steps:
-    - uses: actions/checkout@main
+    - timeout-minutes: 10
+      uses: actions/checkout@main
       with:
         ref: develop
-    - uses: actions/download-artifact@main
+    - timeout-minutes: 10
+      uses: actions/download-artifact@main
       with:
         name: flake-lock
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build documentation
+      timeout-minutes: 30
       run: nix build .#nanopynix-docs --out-link result --print-build-logs --print-out-paths
     - name: Verify docs closure
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     - name: Prepare Pages artifact
+      timeout-minutes: 5
       run: |
         mkdir -p public
         cp -r --no-preserve=mode,ownership result/. public/
-    - uses: actions/upload-pages-artifact@main
+    - timeout-minutes: 15
+      uses: actions/upload-pages-artifact@main
       with:
         path: public
+    timeout-minutes: 130
     runs-on: ubuntu-24.04
   docs-deploy:
     needs: docs-build
     steps:
     - name: Deploy to GitHub Pages
+      timeout-minutes: 20
       uses: actions/deploy-pages@main
       id: deployment
+    timeout-minutes: 35
     permissions:
       pages: write
       id-token: write
@@ -87,27 +103,34 @@ jobs:
     needs:
     - update-lockfile
     steps:
-    - uses: actions/checkout@main
+    - timeout-minutes: 10
+      uses: actions/checkout@main
       with:
         ref: develop
-    - uses: actions/download-artifact@main
+    - timeout-minutes: 10
+      uses: actions/download-artifact@main
       with:
         name: flake-lock
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build nanopynix test runner for Nix ${{ matrix.version }}
+      timeout-minutes: 30
       run: nix build ".#nanopynix-tests-${{ matrix.version }}" --out-link result --print-build-logs
         --print-out-paths
     - name: Verify test runner closure after build
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
@@ -115,6 +138,7 @@ jobs:
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Test nanopynix against Nix ${{ matrix.version }} (full suite, ${{ matrix.backend
         }} backend)
+      timeout-minutes: 30
       run: |
         set -o pipefail
         paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
@@ -150,18 +174,21 @@ jobs:
         fi
         exit "$status"
     - name: Upload test output
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: test-output-${{ matrix.backend }}-${{ matrix.version }}
         path: ${{ github.workspace }}/test-gdb-output.log
       if: ${{ !cancelled() }}
     - name: Upload Boehm GC thread registration log
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: gc-thread-debug-${{ matrix.backend }}-${{ matrix.version }}
         path: ${{ github.workspace }}/gc-thread-debug.log
       if: ${{ !cancelled() }}
     - name: Upload coverage reports to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -169,6 +196,7 @@ jobs:
         flags: ${{ matrix.backend }}-${{ matrix.version }}
       if: ${{ !cancelled() }}
     - name: Upload test results to Codecov
+      timeout-minutes: 10
       uses: codecov/codecov-action@main
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -177,8 +205,9 @@ jobs:
         report_type: test_results
       if: ${{ !cancelled() }}
     - name: Verify test runner closure after tests
+      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    timeout-minutes: 30
+    timeout-minutes: 210
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -191,31 +220,38 @@ jobs:
     needs:
     - update-lockfile
     steps:
-    - uses: actions/checkout@main
+    - timeout-minutes: 10
+      uses: actions/checkout@main
       with:
         ref: develop
-    - uses: actions/download-artifact@main
+    - timeout-minutes: 10
+      uses: actions/download-artifact@main
       with:
         name: flake-lock
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build UBSAN nanopynix test runner (${{ matrix.version }})
+      timeout-minutes: 60
       run: nix build ".#nanopynix-tests-${{ matrix.version }}" --out-link result --print-build-logs
         --print-out-paths
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Run UBSAN-instrumented suite (${{ matrix.version }}, local backend)
+      timeout-minutes: 30
       run: |
         set -o pipefail
         LOGFILE="${{ github.workspace }}/ubsan-output-${{ matrix.version }}.log"
@@ -238,12 +274,13 @@ jobs:
         fi
         exit "$status"
     - name: Upload UBSAN output (${{ matrix.version }})
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: ubsan-report-${{ matrix.version }}
         path: ${{ github.workspace }}/ubsan-output-${{ matrix.version }}.log
       if: ${{ !cancelled() }}
-    timeout-minutes: 60
+    timeout-minutes: 175
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -253,31 +290,38 @@ jobs:
     needs:
     - update-lockfile
     steps:
-    - uses: actions/checkout@main
+    - timeout-minutes: 10
+      uses: actions/checkout@main
       with:
         ref: develop
-    - uses: actions/download-artifact@main
+    - timeout-minutes: 10
+      uses: actions/download-artifact@main
       with:
         name: flake-lock
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Build TSAN nanopynix test runner (${{ matrix.version }})
+      timeout-minutes: 45
       run: nix build ".#nanopynix-tests-${{ matrix.version }}" --out-link result --print-build-logs
         --print-out-paths
     - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
       run: |
         sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
     - name: Run TSAN-instrumented stress tests (repeated, local+daemon backends)
+      timeout-minutes: 25
       run: |
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-${{ matrix.version }}.log"
@@ -306,6 +350,7 @@ jobs:
         fi
         exit 0
     - name: Run TSAN-instrumented concurrency tests (single pass, local+daemon backends)
+      timeout-minutes: 20
       run: |
         set -o pipefail
         LOGFILE="${{ github.workspace }}/tsan-output-broad-${{ matrix.version }}.log"
@@ -324,6 +369,7 @@ jobs:
         fi
         exit 0
     - name: Upload TSAN output (${{ matrix.version }})
+      timeout-minutes: 15
       uses: actions/upload-artifact@main
       with:
         name: tsan-race-report-${{ matrix.version }}
@@ -331,7 +377,7 @@ jobs:
           ${{ github.workspace }}/tsan-output-${{ matrix.version }}.log
           ${{ github.workspace }}/tsan-output-broad-${{ matrix.version }}.log
       if: ${{ !cancelled() }}
-    timeout-minutes: 30
+    timeout-minutes: 175
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -343,43 +389,54 @@ jobs:
       tsan_versions: ${{ steps.versions.outputs.tsan_versions }}
       ubsan_versions: ${{ steps.versions.outputs.ubsan_versions }}
     steps:
-    - uses: actions/checkout@main
+    - timeout-minutes: 10
+      uses: actions/checkout@main
       with:
         ref: develop
-    - uses: cachix/install-nix-action@master
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - uses: cachix/cachix-action@master
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
     - name: Update flake inputs
+      timeout-minutes: 20
       run: nix flake update
     - name: Compute Nix version matrices
+      timeout-minutes: 20
       run: |
         echo "regular_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-(tsan|ubsan)" n == null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
         echo "tsan_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-tsan" n != null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
         echo "ubsan_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-ubsan" n != null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
       id: versions
-    - uses: actions/upload-artifact@main
+    - timeout-minutes: 15
+      uses: actions/upload-artifact@main
       with:
         name: flake-lock
         path: flake.lock
+    timeout-minutes: 110
     runs-on: ubuntu-24.04
   update-lockfile-commit:
     needs: docs-deploy
     steps:
-    - uses: actions/checkout@main
+    - timeout-minutes: 10
+      uses: actions/checkout@main
       with:
         ref: develop
-    - uses: actions/download-artifact@main
+    - timeout-minutes: 10
+      uses: actions/download-artifact@main
       with:
         name: flake-lock
-    - uses: step-security/git-auto-commit-action@main
+    - timeout-minutes: 10
+      uses: step-security/git-auto-commit-action@main
       with:
         commit_message: nix flake update
+    timeout-minutes: 45
     permissions:
       contents: write
     runs-on: ubuntu-24.04
