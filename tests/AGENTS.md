@@ -71,21 +71,27 @@ which puts these items after the forked tests and before everything else.
 
 ## The rule for a build with no collector
 
-**On a build with no collector, no test may build an evaluator in the pytest
-process.** The `-nogc` and `-asan` variants build libexpr with
+**On a build with no collector, a test that builds an evaluator runs in a fork
+of the pytest process.** The `-nogc` and `-asan` variants build libexpr with
 `-Dgc=disabled`, and such a build leaks by design. Nix's own package option
 gives the condition that makes the leak acceptable: evaluation takes place
 within short-lived processes. An RPC worker is one, and it returns every byte
-when it exits. The pytest process outlives the whole suite.
+when it exits. The pytest process outlives the whole suite, so it must hand
+the evaluator to a child that does not.
 
 The measurements against `nix_2_34-nogc` give the size of the difference. The
 rpc share of the suite peaked at 553 MB. The in-process share demanded about
-10 GB. The whole suite in one process reached 5 GB resident with 14.6 GB of
-swap, and then the kernel killed it.
+10 GB in one process, and 297 MB forked. The whole suite in one process
+reached 5 GB resident with 14.6 GB of swap, and then the kernel killed it;
+forked, it passed 2077 tests at a 3 GB peak.
 
-`tests/support/nix_runtime.py` holds the rule, and it finds most tests through
-the fixture closure that pytest already computes. Two things follow for a new
-test module:
+**No flag selects this, and none should.** `build_info` publishes a `boehm_gc`
+capability, and `tests/support/nix_runtime.py` reads it at collection time. A
+build with a collector marks nothing and skips nothing.
+
+That module holds the rule, and it finds most tests through the fixture
+closure that pytest already computes. Three things follow for a new test
+module:
 
 - **A test that reaches an evaluator through `eval_state` or `inproc_session`
   needs nothing.** The rule reads `item.fixturenames`, which is transitive.
@@ -93,10 +99,14 @@ test module:
   `pytestmark = pytest.mark.evaluator_in_process`.** Nothing in the fixture
   graph records a direct call, so `tests/meta/test_no_collector_rule.py`
   scans for one and fails until the marker is there.
+- **A test that builds an `EvalState` itself must also take `init_expr`.** In
+  a forked child that construction aborts unless `init_libexpr` ran in the
+  parent, because `EvalState` asserts that `initGC` ran and an assert is not
+  catchable. Issue #54 carries the correction.
 
-`--in-process-evaluator=run` overrides the rule for a bounded run, and `=only`
-selects that subset alone. The ASAN job uses `run` on one file, because the
-acceptance test of issue #35 lives there and the rule would otherwise skip it.
+`--in-process-evaluator` overrides the rule for a deliberate run: `=skip` is
+the escape hatch when forking itself breaks, `=run` tells a fork failure apart
+from a collector failure, and `=only` selects the subset for a measurement.
 
 ## The rule for `tests/meta/`
 

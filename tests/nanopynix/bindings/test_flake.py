@@ -121,6 +121,7 @@ class TestGitFetcherSettings:
         self,
         store: Any,
         tmp_path: Path,
+        init_expr: object,  # ordering-only: nanopynix.EvalState below asserts that initGC ran
     ) -> None:
         """The evaluator's own fetch settings decide, and Nix authors the refusal."""
         _init_git_flake(tmp_path, r'val = "dirty-refused";')
@@ -134,6 +135,7 @@ class TestGitFetcherSettings:
         self,
         store: Any,
         tmp_path: Path,
+        init_expr: object,  # ordering-only: nanopynix.EvalState below asserts that initGC ran
     ) -> None:
         """The other direction, so a setting that never arrives cannot pass both."""
         _init_git_flake(tmp_path, r'val = "dirty-accepted";')

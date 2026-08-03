@@ -74,27 +74,35 @@ IN_PROCESS_EVALUATOR_FIXTURES = frozenset({"eval_state", "inproc_session"})
 # in-process share demanded about 10 GB, and the whole suite in one process
 # reached 5 GB resident with 14.6 GB of swap before the kernel killed it.
 #
-# **`--in-process-evaluator=fork` gives each of these tests a process of its
-# own, and it does not work yet.** The mode adds `pytest.mark.forked`, so the
-# child exits when the test ends and the operating system takes the memory
-# back. That is the same trade the RPC worker makes, applied to the one engine
-# that has no worker, and 73 of 75 tests of a measured subset pass under it.
+# **The default forks each of these tests, and that is what lets a
+# no-collector build run the whole suite.** The mode adds `pytest.mark.forked`,
+# so the child exits when the test ends and the operating system takes the
+# memory back. That is the trade the RPC worker already makes, applied to the
+# one engine that has no worker. Measured against nix_2_34-nogc: the whole
+# suite passed 2077 tests at a 3 GB peak in 12 minutes, and the in-process
+# subset alone fell from about 10 GB to 297 MB.
 #
-# The two that fail are the two that matter. Both construct an `EvalState`
-# with their own `fetch_settings`, and in a forked child that construction
-# aborts with an uncaught C++ exception. The same two pass on the same build
-# with `=run`, so the fork is the cause and not the missing collector. They
-# are `TestGitFetcherSettings`, which is the acceptance test of issue #35.
-# Issue #54 carries it.
+# A forked child that constructs its own `EvalState` aborts unless
+# `init_libexpr` ran in the parent first, because `EvalState` asserts that
+# `initGC` ran and an assert is not catchable. `TestGitFetcherSettings` is the
+# one place that does this, and it takes the `init_expr` fixture for the
+# ordering. Issue #54 carries the library-side correction.
 #
-# Until then the default skips. A forked test also pays for every
-# session-scoped fixture again, because a fixture built in a child dies with
-# the child, so the mode is not free even once it works.
+# Forking is not free. A forked test pays for every session-scoped fixture
+# again, because a fixture built in a child dies with the child.
 NO_COLLECTOR_SKIP_REASON = "the build has no collector, so an evaluator in the pytest process never releases memory"
 
-# `fork` and `skip` both leave the decision to the build: a collector present
-# means every test runs in the pytest process, and a collector absent means
-# the rule above applies. `run` and `only` are for a bounded, deliberate run.
+# **Nothing here needs a flag to find out which build it is running on.**
+# `build_info` publishes `boehm_gc`, the hook below reads it, and a build with
+# a collector never reaches any of these modes: every test runs in the pytest
+# process, as it always did. The option decides only what happens when the
+# collector is absent.
+#
+# `fork` is that answer. `skip` is the escape hatch for a build where forking
+# itself breaks, and it was the default until it did not have to be. `run` and
+# `only` are for a bounded, deliberate run: `run` tells a fork failure apart
+# from a collector failure, which is how issue #54 was found, and `only`
+# selects the subset for a measurement.
 IN_PROCESS_EVALUATOR_MODES = frozenset({"fork", "skip", "run", "only"})
 
 NOT_IN_PROCESS_SKIP_REASON = "--in-process-evaluator=only selected the in-process tests, and this is not one"
@@ -146,11 +154,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
     parser.addoption(
         "--in-process-evaluator",
-        default="skip",
+        default="fork",
         choices=sorted(IN_PROCESS_EVALUATOR_MODES),
         help="what to do with a test that builds an evaluator in the pytest process, on a build with no collector: "
-        "skip it (the default), fork it into a child (issue #54), run it in this process anyway, or run only "
-        "those tests. See NO_COLLECTOR_SKIP_REASON",
+        "fork it into a child (the default), skip it, run it in this process anyway, or run only those tests. "
+        "See NO_COLLECTOR_SKIP_REASON",
     )
 
 
