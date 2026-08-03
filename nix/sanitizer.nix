@@ -1,35 +1,73 @@
+# One sanitizer variant, applied to every C and C++ library that nanopynix's
+# instrumented extension shares a process with.
+#
+# `name` picks the variant, and nothing else here differs between them: the
+# reason each library needs its own override is the same whichever sanitizer
+# is asking. See `sanitizers` in `default.nix` for the two call sites.
 {
   lib,
   stdenv,
+  # "thread" or "address". Not a free-form flag string: the runtime library
+  # name and the shadow-memory rules follow from which sanitizer this is.
+  name,
 }:
 let
-  # ThreadSanitizer's runtime must be loaded before any other allocation
-  # happens in the process (LD_PRELOAD), or its shadow-memory setup silently
-  # fails to intercept everything -- this bites us specifically because the
+  # The runtime must be loaded before any other allocation happens in the
+  # process (LD_PRELOAD), or its shadow-memory setup silently fails to
+  # intercept everything -- this bites us specifically because the
   # instrumented code is a native extension dlopen()'d into a plain,
   # non-instrumented CPython interpreter, not a from-scratch instrumented
   # executable.
-  tsanRuntime = "${stdenv.cc.cc.lib}/lib/libtsan.so";
+  runtime = "${stdenv.cc.cc.lib}/lib/lib${if name == "address" then "asan" else "tsan"}.so";
 
-  tsanFlags = [
-    "-fsanitize=thread"
+  # UndefinedBehaviorSanitizer rides along with ASan and not with TSan,
+  # deliberately. A UB finding is not thread-dependent, so running it under
+  # both would report the same defect twice; and the TSan matrix skips 2.31
+  # (see `default.nix`), which is the one version where the ownership rules
+  # this is meant to catch differ. Attached here it runs everywhere.
+  #
+  # `vptr` is off because the check needs every class of a hierarchy
+  # instrumented and CPython is not. `-fno-sanitize-recover` is what makes
+  # UBSan a gate at all: by default it prints the violation and continues, so
+  # the job would go green with the report sitting in its log.
+  undefinedFlags = [
+    "-fsanitize=undefined"
+    "-fno-sanitize=vptr"
+    "-fno-sanitize-recover=undefined"
+  ];
+
+  sanitizerFlags = [
+    "-fsanitize=${name}"
     "-fno-omit-frame-pointer"
     "-g"
-  ];
-  tsanFlagsStr = toString tsanFlags;
+  ]
+  ++ lib.optionals (name == "address") undefinedFlags;
+  sanitizerFlagsStr = toString sanitizerFlags;
+
 in
 {
-  inherit tsanRuntime;
+  inherit name runtime;
+  # The attribute-name suffix each variant gets in `nanopynixVersions`,
+  # and therefore the job name in CI.
+  suffix = if name == "address" then "asan" else "tsan";
+  flags = sanitizerFlagsStr;
+  # One token, no spaces. The compile flags go through
+  # NIX_CFLAGS_COMPILE, which takes a string, but CMake's linker-flag
+  # variables have to arrive as a single `-D...=` argument -- see
+  # nanopynix-bindings/package.nix for what re-splits them otherwise.
+  # Only the `-fsanitize=` list matters at link time; the rest is
+  # instrumentation and debug info.
+  linkFlag = "-fsanitize=${name}" + lib.optionalString (name == "address") ",undefined";
 
   # Applied via `nixComponents.overrideAllMesonComponents` so every nix-*
   # library (nix-util, nix-store, nix-expr, nix-fetchers, nix-cmd, ...) gets
-  # consistent instrumentation -- a race straddling two of these libraries
-  # would be invisible to TSAN if only one side were instrumented.
+  # consistent instrumentation -- a defect straddling two of these libraries
+  # would be invisible if only one side were instrumented.
   mesonComponentOverrides = _finalAttrs: prevAttrs: {
     env = (prevAttrs.env or { }) // {
       NIX_CFLAGS_COMPILE = toString [
         (prevAttrs.env.NIX_CFLAGS_COMPILE or "")
-        tsanFlagsStr
+        sanitizerFlagsStr
       ];
     };
     dontStrip = true;
@@ -52,7 +90,7 @@ in
       env = (old.env or { }) // {
         NIX_CFLAGS_COMPILE = toString [
           (old.env.NIX_CFLAGS_COMPILE or "")
-          tsanFlagsStr
+          sanitizerFlagsStr
         ];
       };
       dontStrip = true;
@@ -84,7 +122,7 @@ in
       env = (old.env or { }) // {
         NIX_CFLAGS_COMPILE = toString [
           (old.env.NIX_CFLAGS_COMPILE or "")
-          tsanFlagsStr
+          sanitizerFlagsStr
         ];
       };
       patches = (old.patches or [ ]) ++ [ ./patches/boehmgc-tolerate-suspend-thread-exit-race.patch ];

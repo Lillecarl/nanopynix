@@ -16,8 +16,16 @@ let
   ];
 
   nanopynixVersionNames = map (lib.removePrefix "nanopynix-tests-") flakeTestOutputs;
-  regularVersionNames = builtins.filter (name: !lib.hasSuffix "-tsan" name) nanopynixVersionNames;
+  sanitizerSuffixes = [
+    "-tsan"
+    "-asan"
+  ];
+  isSanitized = name: lib.any (suffix: lib.hasSuffix suffix name) sanitizerSuffixes;
+  # A sanitized variant is a separate job, never part of the regular matrix:
+  # both are far slower, and neither collects coverage.
+  regularVersionNames = builtins.filter (name: !isSanitized name) nanopynixVersionNames;
   tsanVersionNames = builtins.filter (lib.hasSuffix "-tsan") nanopynixVersionNames;
+  asanVersionNames = builtins.filter (lib.hasSuffix "-asan") nanopynixVersionNames;
 
   # Coverage-collecting backends run as separate matrix jobs (test-daemon-*,
   # test-local-*) rather than serially inside one job, so covering both stays
@@ -37,6 +45,11 @@ let
   # hang that runs to a timeout is still a failed job, but it fails in half an
   # hour and it fails visibly.
   testTimeoutMinutes = 30;
+
+  # ASan roughly doubles the work, and this job builds nix, sqlite and
+  # boehmgc instrumented before it runs anything. Twice the regular cap,
+  # so the first scheduled run reports a number instead of a timeout.
+  asanTimeoutMinutes = 60;
 
   # A single cachix/install-nix-action (multi-user) install suffices for every
   # job now: the test suite owns its own daemon and local store paths
@@ -414,6 +427,66 @@ let
     };
 in
 {
+  # AddressSanitizer, and UndefinedBehaviorSanitizer riding along in the same
+  # build. See nix/sanitizer.nix for why UBSan attaches here and not to TSAN.
+  #
+  # Scheduled only, deliberately. #35 says not to put this in the per-commit
+  # workflow until the run time is known, and it is not known: ASan roughly
+  # doubles a suite that already takes 8-13 minutes, so the cap below is twice
+  # the regular one. The first scheduled run is the measurement.
+  #
+  # No coverage, and the `local` backend only. Coverage instrumentation costs
+  # time this job has none of, and the daemon backend forks a handler process
+  # per connection -- a shape worth a separate decision once the run time of
+  # the simple case is a number rather than a guess.
+  mkAsanTestJob =
+    {
+      version,
+      ref ? null,
+      lockArtifact ? null,
+      needs ? [ ],
+    }:
+    let
+      bareVersion = lib.removeSuffix "-asan" version;
+    in
+    lib.optionalAttrs (needs != [ ]) { inherit needs; }
+    // {
+      timeout-minutes = asanTimeoutMinutes;
+      steps = mkTestSetup { inherit ref lockArtifact; } ++ [
+        {
+          name = "Build ASAN nanopynix test runner (${bareVersion})";
+          run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
+        }
+        (steps.enableSandboxNamespaces { })
+        {
+          name = "Run ASAN/UBSAN-instrumented suite (${bareVersion}, local backend)";
+          run = # bash
+            ''
+              set -o pipefail
+              LOGFILE="''${{ github.workspace }}/asan-output-${bareVersion}.log"
+              status=0
+              env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=60 NANOPYNIX_TEST_SANITIZER=asan PYTHONDONTWRITEBYTECODE=1 \
+                ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
+                2>&1 | tee -a "$LOGFILE" || status=$?
+              # A sanitizer report is the finding, so grep for it rather than
+              # trusting the exit status alone: abort_on_error=1 makes ASan
+              # kill the process, but a report raised inside a forkserver
+              # worker can still be reaped into a plain test failure.
+              if grep -qE "(AddressSanitizer|UndefinedBehaviorSanitizer|runtime error):" "$LOGFILE"; then
+                echo "::error::sanitizer report on ${bareVersion} -- see the log above"
+                exit 1
+              fi
+              exit "$status"
+            '';
+        }
+        (steps.uploadArtifact {
+          name = "Upload ASAN output (${bareVersion})";
+          artifactName = "asan-report-${bareVersion}";
+          path = "\${{ github.workspace }}/asan-output-${bareVersion}.log";
+        })
+      ];
+    };
+
   inherit
     evalWorkflow
     steps
@@ -421,6 +494,7 @@ in
     regularVersionNames
     regularBackends
     tsanVersionNames
+    asanVersionNames
     mkRegularTestJob
     mkTsanTestJob
     mkStaticChecksJob

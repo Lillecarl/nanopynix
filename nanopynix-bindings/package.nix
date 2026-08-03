@@ -14,8 +14,8 @@
   pyproject-nix,
   pyprojectVersionPatchHook,
   version,
-  enableTsan ? false,
-  tsanRuntime ? null,
+  sanitizer ? null,
+  sanitizerRuntime ? null,
 }:
 
 let
@@ -103,29 +103,48 @@ buildPythonPackage (
       "-Dnanobind_ROOT=${nanobind2_13}/${python.sitePackages}/nanobind/cmake"
       "-DPython_EXECUTABLE=${python}/bin/python"
     ]
-    ++ lib.optionals enableTsan [
-      # Each cmakeFlags entry becomes its own -Ccmake.args= token; a single
+    ++ lib.optionals (sanitizer != null) [
+      # Each cmakeFlags entry becomes its own -Ccmake.args= token, and a single
       # entry with embedded spaces gets re-split upstream into bare (invalid)
-      # CMake arguments, so keep every flag space-free. RelWithDebInfo already
-      # implies -g; frame-pointer retention isn't essential for TSAN's
-      # DWARF-based unwinding.
-      "-DCMAKE_CXX_FLAGS=-fsanitize=thread"
-      "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread"
-      "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=thread"
+      # CMake arguments -- so only a space-free flag can go here. That rules
+      # out CMAKE_CXX_FLAGS, which needs the whole space-separated set: it is a
+      # plain string variable, so joining with ";" would put a literal
+      # semicolon on the compile line. The compile flags go through
+      # NIX_CFLAGS_COMPILE below instead, which is a string and takes spaces.
+      #
+      # RelWithDebInfo already implies -g; frame-pointer retention isn't
+      # essential for the DWARF-based unwinding either sanitizer does.
+      "-DCMAKE_EXE_LINKER_FLAGS=${sanitizer.linkFlag}"
+      "-DCMAKE_SHARED_LINKER_FLAGS=${sanitizer.linkFlag}"
       "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
     ];
 
-    dontStrip = enableTsan;
+    dontStrip = sanitizer != null;
 
     # postInstall's stubgen and the pythonImportsCheck phase both dlopen()
-    # these .so's into a fresh, plain python process; TSAN's runtime must be
-    # preloaded before that process does anything else, or its static-TLS
-    # setup fails ("cannot allocate memory in static TLS block") since a
-    # late dlopen() can't grow the TLS block CPython already sized at
+    # these .so's into a fresh, plain python process; the sanitizer runtime
+    # must be preloaded before that process does anything else, or its
+    # static-TLS setup fails ("cannot allocate memory in static TLS block")
+    # since a late dlopen() can't grow the TLS block CPython already sized at
     # startup. Setting it derivation-wide covers both phases uniformly.
-    env = lib.optionalAttrs (enableTsan && tsanRuntime != null) {
-      LD_PRELOAD = tsanRuntime;
-    };
+    #
+    # ASan's leak checker runs at exit and would fail both phases on CPython's
+    # own deliberate never-freed allocations, so it is off here for the same
+    # reason it is off in the test runner.
+    env =
+      lib.optionalAttrs (sanitizer != null) {
+        # The same flags every nix-* component gets (nix/sanitizer.nix), so the
+        # extension and the libraries it calls agree about instrumentation.
+        NIX_CFLAGS_COMPILE = sanitizer.flags;
+      }
+      // lib.optionalAttrs (sanitizerRuntime != null) (
+        {
+          LD_PRELOAD = sanitizerRuntime;
+        }
+        // lib.optionalAttrs (sanitizer.name == "address") {
+          ASAN_OPTIONS = "detect_leaks=0";
+        }
+      );
 
     # One `.pyi` per area, exactly as when each area was its own extension
     # module -- so `nanopynix_bindings.expr` still resolves to `expr.pyi` for a
