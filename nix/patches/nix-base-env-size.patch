@@ -1,0 +1,123 @@
+Give the base environment room, and refuse to write past it.
+
+nix::EvalState allocates the base environment once, at a size that
+src/libexpr/eval.cc fixes as a compile-time constant:
+
+    static constexpr size_t BASE_ENV_SIZE = 128;
+
+EvalState::addConstant and EvalState::addPrimOp then fill it with
+`baseEnv.values[baseEnvDispl++] = v;` and test no bound at all. Nix 2.34
+publishes 119 names under `builtins`, and each one takes a slot, so a stock
+evaluator fits with 9 slots to spare.
+
+nanopynix exposes primop registration (`nanopynix.register_primop`, which
+reaches nix::RegisterPrimOp in nanopynix-bindings/src/nix_expr.cpp), and
+createBaseEnv walks that global registry with no limit. The
+`_register_test_primops` fixture in tests/conftest.py registers 24 primops,
+which gives 143 names against 128 slots. The evaluator then writes 120 bytes
+past the end of the base environment while it constructs itself.
+
+AddressSanitizer, on the nix_2_34-asan build of issue #47, names the write:
+
+    ERROR: AddressSanitizer: heap-buffer-overflow
+    WRITE of size 8
+        #0 nix::EvalState::addPrimOp(nix::PrimOp&&)               eval.cc:550
+        #1 nix::EvalState::createBaseEnv(nix::EvalSettings const&) primops.cc:5427
+        #2 nix::EvalState::EvalState(...)                         eval.cc:349
+    0 bytes after 1032-byte region  <- allocEnv(BASE_ENV_SIZE)
+
+**The collector hides this rather than preventing it.** EvalMemory::allocBytes
+is GC_MALLOC in a normal build, and Boehm rounds a request up to a size class,
+so the extra bytes land in the slack of the block and nothing reports them. A
+build with `-Dgc=disabled` gets a plain calloc, which gives the exact size, so
+glibc aborts with "corrupted size vs. prev_size". Both builds make the same
+out-of-bounds write.
+
+Why the size is a constant at all, which is the part worth reading:
+
+- `Env` is a variable-length struct, `{ Env * up; Value * values[0]; }`. The
+  parser compiles each variable reference into a (level, displacement) pair,
+  and evaluation reads `env->values[displ]`. The array must be one contiguous
+  block with a stable address, and `baseEnv` is a reference member, so an Env
+  cannot grow after it exists.
+- The allocation happens in the member-initialiser list of the constructor
+  (eval.cc:308 and eval.cc:311), which runs before the constructor body.
+  `createBaseEnv` is what knows how many names there are, and the body is what
+  calls it. Nothing has counted at the moment of allocation, so the size is a
+  constant for want of a count, and not for a property of the evaluator.
+- The size costs nothing but memory. Lookup is an index into a flat array
+  whatever the size is. `allocEnv` carries a hand-written fast path for
+  `size == 1`, which is where the attention to cost went.
+- Registration cannot happen during evaluation. RegisterPrimOp::primOps() is
+  read exactly once, by createBaseEnv. `nanopynix.register_primop` changes
+  that registry at run time, but only an evaluator built afterwards sees the
+  change, which is why tests/conftest.py orders the fixtures. So the count is
+  available at construction, and the correct fix upstream is to move the
+  allocation into the constructor body and take the size from the registry.
+
+**There are two containers of 128, and not one.** `createBaseEnv` also builds
+the `builtins` attribute set with `buildBindings(128)`, and both `addConstant`
+and `addPrimOp` push into it through a `const_cast`, which goes around the
+capacity assert of `BindingsBuilder`. `Bindings::push_back` is
+`attrs[numAttrs++] = attr;` and holds no capacity to test at all. Correcting
+only the base environment moves the report from `EvalMemory::allocEnv` to
+`Bindings::push_back`, and ASAN on the nix_2_34-asan build shows exactly that.
+Both sizes go up together.
+
+This patch does not restructure anything, because it keeps the change to what
+a carried patch should be. It raises both sizes to 512, which gives room for a
+consumer that registers primops and costs about 3 KB for each evaluator, and
+it makes the two base environment writes test the bound, so the next consumer
+to exceed the size gets an error it can read rather than a corrupt heap. The
+`builtins` set gets no such check, because `Bindings` does not record its own
+capacity.
+
+BASE_ENV_SIZE is 128 in 2.31, in 2.34 and in 2.35, and it is neither a meson
+option nor a setting, so no configuration avoids this. The context of all
+three hunks is identical in those three versions, so one patch serves them
+all, and only the line numbers move.
+
+--- a/src/libexpr/eval.cc
++++ b/src/libexpr/eval.cc
+@@ -225,7 +225,7 @@
+     }
+ }
+ 
+-static constexpr size_t BASE_ENV_SIZE = 128;
++static constexpr size_t BASE_ENV_SIZE = 512;
+ 
+ EvalMemory::EvalMemory()
+ {
+@@ -478,6 +478,10 @@
+ 
+         /* Install value the base environment. */
+         staticBaseEnv->vars.emplace_back(symbols.create(name), baseEnvDispl);
++        if (baseEnvDispl >= BASE_ENV_SIZE)
++            throw Error(
++                "the base environment is full: it holds %1% names, and a consumer registered more primops than fit",
++                BASE_ENV_SIZE);
+         baseEnv.values[baseEnvDispl++] = v;
+         const_cast<Bindings *>(getBuiltins().attrs())->push_back(Attr(symbols.create(name2), v));
+     }
+@@ -547,6 +551,10 @@
+         internalPrimOps.emplace(primOp.name, v);
+     else {
+         staticBaseEnv->vars.emplace_back(envName, baseEnvDispl);
++        if (baseEnvDispl >= BASE_ENV_SIZE)
++            throw Error(
++                "the base environment is full: it holds %1% names, and a consumer registered more primops than fit",
++                BASE_ENV_SIZE);
+         baseEnv.values[baseEnvDispl++] = v;
+         const_cast<Bindings *>(getBuiltins().attrs())->push_back(Attr(symbols.create(primOp.name), v));
+     }
+--- a/src/libexpr/primops.cc
++++ b/src/libexpr/primops.cc
+@@ -5148,7 +5148,7 @@
+     Value v;
+ 
+     /* `builtins' must be first! */
+-    v.mkAttrs(buildBindings(128).finish());
++    v.mkAttrs(buildBindings(512).finish());
+     addConstant(
+         "builtins",
+         v,

@@ -156,14 +156,40 @@ let
   # already present from 2.34 on; see the patch header for the provenance.
   valueToJsonCallDepthPatch = ./nix/patches/nix-2.31-value-to-json-call-depth.patch;
 
+  # The base environment of an evaluator holds one slot for each name that
+  # `createBaseEnv` registers, and `BASE_ENV_SIZE` fixes the count at 128 with
+  # no bound check on either write. Nix itself needs 119 of those slots, and
+  # `nanopynix.register_primop` takes one more for each primop a consumer adds
+  # -- 24 of them in `tests/conftest.py` alone, which writes 120 bytes past the
+  # end of the block.
+  #
+  # **Every version gets this, and not only the builds with no collector.**
+  # Boehm rounds an allocation up to a size class, so the collector build makes
+  # the same out-of-bounds write into the slack of the block and reports
+  # nothing. `-Dgc=disabled` gets an exact `calloc`, which is why ASAN found it
+  # (issue #52). The defect is in both builds.
+  #
+  # The patch header gives the measurement, and the reason the size is a
+  # constant at all.
+  baseEnvSizePatch = ./nix/patches/nix-base-env-size.patch;
+
   # Which patches to apply to a given nix version's modular component set,
   # keyed by that version's own major.minor (e.g. "2.34"), with `default`
   # as the fallback for anything without its own entry (git's rolling
   # pre-release version string, any future point release, ...).
   nixPatches = {
-    default = [ emptyBindingsPatch ];
-    "2.34" = [ emptyBindingsPatch ];
-    "2.35" = [ emptyBindingsPatch ];
+    default = [
+      emptyBindingsPatch
+      baseEnvSizePatch
+    ];
+    "2.34" = [
+      emptyBindingsPatch
+      baseEnvSizePatch
+    ];
+    "2.35" = [
+      emptyBindingsPatch
+      baseEnvSizePatch
+    ];
     # 2.31 is the one version that gets neither the same list nor the
     # default. emptyBindingsPatch is absent because 2.31's surrounding
     # attr-set.cc/.hh source doesn't match its hunks (confirmed by trying),
@@ -174,7 +200,13 @@ let
     # valueToJsonCallDepthPatch is 2.31-only in the other direction: 2.34+
     # already carry it upstream, and applying it there would fail on the
     # context it's trying to add.
-    "2.31" = [ valueToJsonCallDepthPatch ];
+    #
+    # baseEnvSizePatch applies to every version. The three hunks have identical
+    # context in 2.31, 2.34 and 2.35, so only the line numbers move.
+    "2.31" = [
+      valueToJsonCallDepthPatch
+      baseEnvSizePatch
+    ];
   };
 
   patchesFor = scope: nixPatches.${lib.versions.majorMinor scope.version} or nixPatches.default;
