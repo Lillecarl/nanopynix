@@ -54,6 +54,10 @@ let
   ++ lib.optionals (name == "address") undefinedFlags;
   sanitizerFlagsStr = toString sanitizerFlags;
 
+  # The value for meson's own `b_sanitize` option. `mesonComponentOverrides`
+  # gives the reason this must exist beside the compile flags above.
+  mesonSanitize = if name == "address" then "address,undefined" else "thread";
+
 in
 {
   inherit name runtime;
@@ -86,6 +90,24 @@ in
     # instrumentation pass and makes reported stacks harder to read via
     # cross-TU inlining. "debugoptimized" keeps -O2 -g without LTO.
     mesonBuildType = "debugoptimized";
+
+    # Nix decides the macro `NIX_UBSAN_ENABLED` from meson's own `b_sanitize`
+    # option, and not from the compile flags above (`src/libutil/meson.build`).
+    # That macro picks what `nixUnreachableWhenHardened` means, in
+    # `src/libutil/include/nix/util/error.hh`. Three sites use the macro, and
+    # all three are tag reads of a `Value` in `value.hh`.
+    #
+    # With the macro off, each site stays `std::unreachable()`, and UBSan
+    # reports a trap against `<utility>:232` with no Nix source location and
+    # no stack. With the macro on, each site becomes `nix::unreachable()`,
+    # which prints the file and the line through `std::source_location`. This
+    # is the reason upstream added the macro, and an instrumented build is the
+    # case it exists for.
+    #
+    # The compile flags above stay. `b_sanitize` gives `-fsanitize=` only, and
+    # the frame pointer, the debug info and the `vptr` exception come from
+    # `NIX_CFLAGS_COMPILE`. A repeated `-fsanitize=` does no harm.
+    mesonFlags = (prevAttrs.mesonFlags or [ ]) ++ [ (lib.mesonOption "b_sanitize" mesonSanitize) ];
   };
 
   # sqlite is a plain buildInput of nix-store (from outside the nix

@@ -6,6 +6,7 @@
   nixpkgs,
   coreutils,
   gdb,
+  git,
   tofuCoreSchemaTool,
   storeExecTool,
   version,
@@ -57,6 +58,19 @@ in
     # should rely on.
     coreutils
     gdb
+    # Nix runs `git` off PATH to fetch a `git+file:` or a dirty `path:` flake
+    # input, so `tests/nanopynix/bindings/test_flake.py` needs one. The host
+    # git worked until the ASAN job, which sets LD_PRELOAD to the sanitizer
+    # runtime. That runtime links against the glibc of this closure, and the
+    # loader then gives the host git a mix of two glibcs:
+    #
+    #   git: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_ABI_DT_X86_64_PLT'
+    #   not found (required by /nix/store/...-glibc-2.42-67/lib/libdl.so.2)
+    #
+    # so `test_eval_flake_writes_lock_file` failed. One git from this closure
+    # answers that, and it removes a dependency on the host that the coreutils
+    # entry above already rejects for the same reason.
+    git
     # `pynix._lsp._tofu_core_schema` resolves `nanopynix-tofu-core-schema`
     # off PATH, so every core (non-provider) meta-argument hover/completion
     # needs it present. The dev shell and the released `pynix` app both
