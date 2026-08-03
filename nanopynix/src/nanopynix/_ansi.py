@@ -37,5 +37,21 @@ from nanopynix_bindings.util import filter_ansi_escapes
 
 
 def strip_ansi(text: str) -> str:
-    """Return *text* with every ANSI escape sequence removed."""
+    r"""Return *text* with every ANSI escape sequence removed.
+
+    This is ``nix::filterANSIEscapes`` with ``filter_all`` on, so it reads the
+    same bytes as an escape sequence that Nix writes. That includes an OSC 8
+    hyperlink and a sequence that does not end in ``m``, and no pattern in
+    this repository read either one.
+
+    **The function does three more things to the text, and each one is Nix's
+    behaviour.** A tab becomes spaces to the next multiple of eight. A
+    carriage return goes, and a bell goes. So the result is the text that Nix
+    would print to a terminal that has no colour, and not the input with a
+    few bytes deleted. Compare an exact string against the result of this
+    function, and not against a hand-written expectation of what was removed.
+
+    The function reads no configuration and touches no global state, so it
+    needs no ``init_libstore`` and it runs on any thread.
+    """
     return filter_ansi_escapes(text, filter_all=True)

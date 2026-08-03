@@ -230,12 +230,23 @@ class LogEventExt(_LogEventProto):
 
     @property
     def message_without_ansi(self) -> str | None:
-        """Message payload with ANSI color escapes removed."""
+        """:attr:`message` as Nix would print it to a terminal that has no colour.
+
+        This calls :func:`nanopynix.strip_ansi`, which removes every escape
+        sequence and not only a colour. It also expands each tab and drops a
+        carriage return and a bell, so read that function before you compare
+        the result against an exact string.
+        """
         message = self.message
         return None if message is None else _strip_ansi(message)
 
     def without_ansi(self) -> LogEventExt:
-        """Return a new LogEventExt with ANSI escapes removed from string args."""
+        """Return a new LogEventExt, with each string argument filtered.
+
+        See :attr:`message_without_ansi` for what the filter does beside the
+        removal of a colour. A build log carries a carriage return often, and
+        this drops each one.
+        """
         cleaned = [_strip_ansi(a) if isinstance(a, str) else a for a in self.args]
         if self.nix_log is None:
             return self

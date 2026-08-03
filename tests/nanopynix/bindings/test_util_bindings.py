@@ -85,9 +85,17 @@ class TestFilterAnsiEscapes:
         text = "\x1b[31;1merror\x1b[0m"
         assert nanopynix_util.filter_ansi_escapes(text) == text
 
-    def test_expands_a_tab_and_drops_a_carriage_return(self):
+    def test_expands_a_tab_and_drops_a_carriage_return_and_a_bell(self):
         # Nix's behaviour, and a difference from the package this replaced.
+        # `nanopynix.strip_ansi` states each one, because a caller that
+        # compares an exact string meets all three.
         assert nanopynix_util.filter_ansi_escapes("a\tb\rc", filter_all=True) == "a       bc"
+        assert nanopynix_util.filter_ansi_escapes("a\ab", filter_all=True) == "ab"
+
+    def test_keeps_the_other_control_characters(self):
+        # The boundary of the rule above. Nix drops the carriage return and
+        # the bell only, so a backspace and a vertical tab reach the caller.
+        assert nanopynix_util.filter_ansi_escapes("a\x08b\x0bc", filter_all=True) == "a\x08b\x0bc"
 
     def test_width_truncates_and_none_does_not(self):
         assert nanopynix_util.filter_ansi_escapes("abcdef", filter_all=True, width=3) == "abc"
