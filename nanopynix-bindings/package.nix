@@ -132,12 +132,20 @@ buildPythonPackage (
     # preload there. That variant needs none: the link of the extension records
     # its runtime as a dependency, and the loader brings the runtime in.
     # nix/sanitizer.nix gives the whole reason.
+    #
+    # **A preload that reaches every phase also reaches `bash`.** The ASAN
+    # variant needs `ASAN_OPTIONS=detect_leaks=0` for that reason alone, or
+    # LeakSanitizer reports the build shell and the build fails. That value
+    # comes from `sanitizer.buildEnv`, which gives the measurement.
     env =
-      lib.optionalAttrs (sanitizer != null) {
-        # The same flags every nix-* component gets (nix/sanitizer.nix), so the
-        # extension and the libraries it calls agree about instrumentation.
-        NIX_CFLAGS_COMPILE = sanitizer.flags;
-      }
+      lib.optionalAttrs (sanitizer != null) (
+        {
+          # The same flags every nix-* component gets (nix/sanitizer.nix), so the
+          # extension and the libraries it calls agree about instrumentation.
+          NIX_CFLAGS_COMPILE = sanitizer.flags;
+        }
+        // sanitizer.buildEnv
+      )
       // lib.optionalAttrs (sanitizerRuntime != null) {
         LD_PRELOAD = sanitizerRuntime;
       };

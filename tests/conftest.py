@@ -115,12 +115,47 @@ def pytest_addoption(parser: pytest.Parser):
     )
 
 
+def _sanitizer_runtime_loaded() -> bool:
+    """Tell whether this process has a sanitizer runtime mapped.
+
+    The map of the process answers this, and no environment variable does.
+    `nanopynix/tests.nix` preloads the runtime, but a developer can also build
+    a sanitizer venv and call `pytest` in it.
+    """
+    try:
+        maps = Path("/proc/self/maps").read_text()
+    except OSError:
+        # Not Linux, or no procfs. The check below then does nothing, which is
+        # the same behaviour as before this check existed.
+        return False
+    return any(name in maps for name in ("libasan.so", "libtsan.so", "libubsan.so"))
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_configure(config: pytest.Config):
     config.addinivalue_line(
         "markers",
         "live_gc: test performs destructive live Nix garbage collection",
     )
+    # A sanitizer writes its report with `write(2)` on file descriptor 2, and
+    # `--capture=fd` points that descriptor at a temporary file. `halt_on_error=1`
+    # then aborts the process before pytest restores the descriptor and prints
+    # the buffer, so the whole run prints *nothing* and exits 1. Measured on
+    # 2026-08-03, with issue #34 restored on purpose under the ASAN build.
+    #
+    # `--capture=sys` replaces `sys.stderr` alone and leaves the descriptor, so
+    # the report reaches the terminal and every other capture behaviour stays.
+    # This refuses the run rather than correcting it, because the capture method
+    # is fixed before any conftest loads: the capture plugin is a hookwrapper
+    # around `pytest_load_initial_conftests`, and it builds the capture manager
+    # from the command line before the inner hook loads this file.
+    if config.option.capture == "fd" and _sanitizer_runtime_loaded():
+        raise pytest.UsageError(
+            "a sanitizer runtime is loaded, and --capture=fd hides its report: "
+            "the process aborts before pytest prints the captured output, so "
+            "the run reports nothing at all. Pass --capture=sys, which keeps "
+            "file descriptor 2, or --capture=no."
+        )
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:  # noqa: ARG001 -- hookspec signature requires config arg

@@ -143,13 +143,44 @@ in
     else
       "ubsan";
 
+  # Environment for the *build* of nanopynix-bindings, beside the compile
+  # flags. `nanopynix-bindings/package.nix` merges it into `env`.
+  #
+  # **ASAN needs `detect_leaks=0` here, and the `LD_PRELOAD` that `runtime`
+  # above sets is the reason.** That preload is derivation-wide, because
+  # stubgen and the import check both dlopen the extension into a fresh python
+  # and a late dlopen cannot grow the TLS block. So it reaches `bash`, which
+  # runs every phase, and LeakSanitizer runs at the exit of each of them.
+  # Measured, in the first build of this variant: two reports, and every frame
+  # of both was bash's own parser.
+  #
+  #   #1 0x5555555e30d0 in xmalloc  (.../bash-5.3p15/bin/bash+0x8f0d0)
+  #   #2 0x55555558a5f6 in make_command
+  #   #3 0x5555555868e3 in yyparse
+  #   SUMMARY: AddressSanitizer: 2081 byte(s) leaked in 130 allocation(s)
+  #
+  # Only the leak checker goes. A use-after-free or a stack-use-after-return
+  # in the import check still reports, and still fails the build, which is
+  # what that phase is worth here. `nanopynix/tests.nix` sets its own, wider
+  # `ASAN_OPTIONS` for the run of the suite.
+  buildEnv = lib.optionalAttrs isAddress {
+    ASAN_OPTIONS = "detect_leaks=0";
+  };
+
   # Whether this variant forces `enableGC = false` on nix-expr.
   #
-  # **Only ASAN, and libexpr is what decides it.** `mesonFlags` below quotes
-  # the test. `default.nix` asserts on this rather than letting the
-  # combination reach a build, because meson refuses an *enabled* `gc` feature
-  # with an error rather than by disabling it, and that error arrives twenty
-  # minutes into a from-source rebuild of the whole instrumented closure.
+  # **Only ASAN.** `mesonFlags` below quotes the test that libexpr makes, and
+  # `default.nix` asserts on this rather than letting the combination reach a
+  # build: meson refuses an *enabled* `gc` feature with an error rather than
+  # by disabling it, and that error arrives twenty minutes into a from-source
+  # rebuild of the whole instrumented closure.
+  #
+  # **Nix 2.31 makes no such test, and this is where that matters.** Upstream
+  # added `bdw_gc_required` after 2.31; that version's `src/libexpr/meson.build`
+  # reads only `dependency('bdw-gc', required : get_option('gc'))`. So a 2.31
+  # build of ASAN together with the collector *succeeds*, and produces exactly
+  # the configuration whose report is not evidence. On 2.31 this attribute is
+  # the only thing that stops it.
   requiresNoGC = isAddress;
   flags = sanitizerFlagsStr;
   # One token, no spaces. The compile flags go through NIX_CFLAGS_COMPILE,
