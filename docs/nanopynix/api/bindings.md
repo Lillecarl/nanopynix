@@ -96,7 +96,14 @@ process-wide and have no such separation.
 .. autofunction:: nanopynix_bindings.util.set_verbosity
 
 .. autofunction:: nanopynix_bindings.util.get_verbosity
+
+.. autofunction:: nanopynix_bindings.util.filter_ansi_escapes
 ```
+
+`filter_ansi_escapes` is `nix::filterANSIEscapes`, and it keeps the upstream
+signature. It reads no configuration and it touches no global state, so it
+needs no initialisation and it runs on any thread. Most callers want
+`nanopynix.strip_ansi` instead, which is this function with `filter_all` on.
 
 ## Global settings
 

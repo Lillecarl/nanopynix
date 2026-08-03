@@ -42,6 +42,32 @@ def test_extracts_only_the_exact_ansi_colored_nix_fod_shape() -> None:
     assert extract_fod_hash_mismatch("hash mismatch in an unrelated format") is None
 
 
+def test_extracts_through_the_sequences_a_colour_pattern_misses() -> None:
+    """The extractor filters with Nix's own filter, so it sees every sequence.
+
+    This module used to carry its own pattern, and that pattern read a CSI
+    sequence only. Measured: an OSC 8 hyperlink passed it unchanged, so
+    ``drv_path`` came back with the escape bytes still around it. A 24-bit
+    colour carries five parameters, and the ``strip-ansi`` package before that
+    pattern read three, so it left the opening sequence in front of the hash
+    and the two-line shape stopped matching.
+
+    Nix has no reason to write either one today. Nix decides that, this
+    repository does not, and a change in Nix must not become a silent failure
+    to read a hash.
+    """
+    mismatch = extract_fod_hash_mismatch(
+        "error: hash mismatch in fixed-output derivation "
+        "'\x1b]8;;https://example.invalid/drv\x1b\\/nix/store/source.drv\x1b]8;;\x1b\\':\n"
+        "  specified: \x1b[38;2;255;0;0msha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\x1b[0m\n"
+        "     got:    \x1b[38;2;0;255;0msha256-XG19bBLOoknhsnwV5rVaVGB8DYUiNPMklhyNotZNcD4=\x1b[0m",
+    )
+
+    assert mismatch is not None
+    assert mismatch.got == "sha256-XG19bBLOoknhsnwV5rVaVGB8DYUiNPMklhyNotZNcD4="
+    assert mismatch.drv_path == "/nix/store/source.drv"
+
+
 def test_extract_unique_fod_hash_mismatch_rejects_multiple_events() -> None:
     first = (
         "error: hash mismatch in fixed-output derivation '/nix/store/a.drv':\n"
