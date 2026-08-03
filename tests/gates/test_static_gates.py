@@ -50,6 +50,10 @@ _GATES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # view of the first one.
     ("ruff-strict", ("ruff", "check", "--no-fix", "--config", "ruff-strict.toml")),
     ("pyright", ("pyright",)),
+    # `scripts/` holds hand-written shell that no gate read until
+    # `check-shell`. `writeShellApplication` shellchecks the script it
+    # generates, and none of these is one of those.
+    ("shellcheck", ("shellcheck", "-x", *sorted(str(path) for path in (REPO_ROOT / "scripts").glob("*.sh")))),
 )
 
 pytestmark = [

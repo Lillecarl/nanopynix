@@ -30,12 +30,12 @@ runtime. `ruff-strict.toml` gives the reason and the measurement behind it.
 `--unsafe-fixes` is the mechanism that applies the same damage in bulk to
 another rule.
 
-CI runs those three commands, `ruff format --check`, and the test suite of
-`grpclib-transports`, in the `static-checks` job. Each one is a derivation in
-`nix/checks.nix`, and each is a package. Build them to run a gate the way CI
-runs it, in a sandbox and not in the dev shell:
+CI runs those three commands, `ruff format --check`, `shellcheck` over
+`scripts/`, and the test suite of `grpclib-transports`, in the `static-checks`
+job. Each one is a derivation in `nix/checks.nix`, and each is a package. Build
+them to run a gate the way CI runs it, in a sandbox and not in the dev shell:
 
-- nix build --no-link --keep-going .#check-lint .#check-lint-strict .#check-format .#check-types .#check-grpclib-transports
+- nix build --no-link --keep-going .#check-lint .#check-lint-strict .#check-format .#check-types .#check-shell .#check-grpclib-transports
 
 Do not use `nix flake check` for this. That command evaluates every package,
 and `packages.shell` cannot evaluate in a pure flake evaluation.

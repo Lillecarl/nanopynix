@@ -7,6 +7,7 @@
   taplo,
   treefmt,
   actionlint,
+  shellcheck,
   editablePythonSet,
   cachix,
   statix,
@@ -44,6 +45,10 @@ mkShell {
     taplo
     treefmt
     actionlint
+    # `scripts/` holds shell, and `writeShellApplication` only checks the
+    # scripts that it generates. Without this the dev shell cannot run the
+    # `check-shell` gate that nix/checks.nix now builds.
+    shellcheck
     cachix
     statix
     gdb
