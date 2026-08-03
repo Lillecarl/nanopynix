@@ -42,6 +42,7 @@ Usage::
 from __future__ import annotations
 
 import re
+import signal
 from typing import Any, cast
 
 from nanopynix_proto.nix.common import NixType
@@ -520,6 +521,50 @@ class WorkerDiedError(EngineError):
     """
 
 
+def signal_name(number: int) -> str:
+    """Name a signal number, and never raise while doing it.
+
+    ``signal.Signals`` refuses a number the running platform does not know.
+    Every number this module sees comes from the kernel, so that cannot happen
+    in practice -- but it would happen while another exception is already on
+    its way to a caller, and would replace it.
+    """
+    try:
+        return signal.Signals(number).name
+    except ValueError:
+        return f"signal {number}"
+
+
+class WorkerSignaledError(WorkerDiedError):
+    """A signal killed the rpc worker, and this process did not send it.
+
+    A subclass, and not a sibling of :class:`WorkerDiedError`. That class is
+    the documented headline of the engine, so ``except WorkerDiedError`` must
+    keep catching a crash. This one only adds the answer to "how".
+
+    An abort, a segmentation fault and an OOM kill all reach the client as the
+    same closed pipe, so the exit status is the only thing that tells them
+    apart. ``multiprocessing`` reports it as a negative number, because the
+    forkserver passes the child's status through
+    ``os.waitstatus_to_exitcode``.
+
+    A worker that exits with a *positive* status did not crash. It stays a
+    plain :class:`WorkerDiedError`, which carries the status in its message.
+
+    Attributes:
+        exit_status: the value of ``multiprocessing.Process.exitcode``, which
+            is negative and is the negated signal number.
+        signal_number: the signal itself, for example ``signal.SIGABRT``.
+        signal_name: the name of that signal, for example ``"SIGABRT"``.
+    """
+
+    def __init__(self, message: str, *, exit_status: int) -> None:
+        self.exit_status = exit_status
+        self.signal_number = -exit_status
+        self.signal_name = signal_name(self.signal_number)
+        super().__init__(message)
+
+
 # ════════════════════════════════════════════════════════════════════
 # Classification — string-based, matches Nix error message patterns
 # ════════════════════════════════════════════════════════════════════
@@ -941,6 +986,7 @@ __all__ = [
     "UsageError",
     "ValueReleasedError",
     "WorkerDiedError",
+    "WorkerSignaledError",
     "WrongNixTypeError",
     "build_error_from_result",
     "exception_for_nix_type",

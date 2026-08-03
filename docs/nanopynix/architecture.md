@@ -30,7 +30,7 @@ which shows up as a handful of concrete constraints.
 |---|---|---|
 | Process model | subprocess, forkserver-based, gRPC | this process, one dedicated Nix thread |
 | Concurrent instances | any number, each independently configured | at most **one** open per process |
-| Crash isolation | a worker crash/OOM raises `WorkerDiedError` — your process survives | a Nix-side crash takes the whole process down |
+| Crash isolation | a worker crash/OOM raises `WorkerDiedError` — your process survives, and a signal gives `WorkerSignaledError`, which names it | a Nix-side crash takes the whole process down |
 | Custom Python primops | yes — `Session(primops=..., primop_callables=...)` | not supported |
 | Call overhead | gRPC request/response per call | direct call on the Nix thread |
 | Nix library initialization | scoped to each worker subprocess | process-global — a second `inproc.Session` with different settings raises |

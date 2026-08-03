@@ -108,6 +108,25 @@ module:
 the escape hatch when forking itself breaks, `=run` tells a fork failure apart
 from a collector failure, and `=only` selects the subset for a measurement.
 
+## The rule for a test that kills a worker
+
+**A test that signals an rpc worker must call
+`tests.support.worker_death.expect_the_worker_to_die` first.**
+
+`Session.close` raises `WorkerSignaledError` for a worker that a signal killed
+and that nothing in this process asked to stop, so that a crash inside a run
+cannot report success. Issue #55 is the account: a full suite reported 2077
+passed with a core dump inside its own window. A test that sends the signal
+itself is the one case where that report is wrong.
+
+The seam gates the close only. The call that was in flight still fails and
+still raises, so an assertion on what the caller receives keeps its subject.
+
+**No scanner enforces this one, and that is deliberate.** A test that forgets
+fails at its own teardown, with a message that names the signal and the pid.
+The other rules on this page need a scanner because they fail somewhere else,
+or not at all.
+
 ## The rule for `tests/meta/`
 
 **A meta test reads the repository. It does not run it.**

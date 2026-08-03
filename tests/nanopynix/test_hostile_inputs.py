@@ -46,6 +46,7 @@ import nanopynix
 from nanopynix import stores
 from nanopynix.exceptions import EvalSessionClosedError
 from tests.support.notes import note
+from tests.support.worker_death import expect_the_worker_to_die
 
 if TYPE_CHECKING:
     from tests.support.nix_environment import NixTestEnvironment
@@ -400,6 +401,9 @@ async def test_a_value_proxy_says_so_after_the_worker_dies(
 
         proxy = _eval_proxy(evaluator)
         worker: Any = proxy._worker  # type: ignore[reportPrivateUsage] -- killing the worker is the point
+        # This kill is deliberate, and `Session.close` must not report it as a
+        # crash when the block below ends. See tests/support/worker_death.py.
+        expect_the_worker_to_die(session)
         worker._worker_proc.kill()  # type: ignore[reportPrivateUsage] -- as above
 
         with pytest.raises(Exception) as excinfo:  # noqa: PT011 -- the class is what this test measures

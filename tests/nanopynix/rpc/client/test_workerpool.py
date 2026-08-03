@@ -15,8 +15,9 @@ import pytest
 from grpclib.exceptions import StreamTerminatedError
 
 from nanopynix import LogEvent, StoreClosedError, StoreError
-from nanopynix.rpc import Session, WorkerDiedError
+from nanopynix.rpc import Session, WorkerDiedError, WorkerSignaledError
 from nanopynix.rpc.client import session as session_module
+from tests.support.worker_death import expect_the_worker_to_die
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -417,10 +418,15 @@ async def test_a_killed_worker_fails_the_call_that_was_in_flight():
             await anyio.sleep(0.5)
             assert not pending.done(), "the evaluation finished before the kill; make it slower"
 
+            expect_the_worker_to_die(nix)
             proc.kill()
 
-            with pytest.raises(WorkerDiedError):
+            with pytest.raises(WorkerSignaledError) as caught:
                 await pending
+            # The class the caller sees says which signal, and a SIGKILL is
+            # what an OOM looks like. Reading `proc.exitcode` for that is what
+            # this repository did before issue #55.
+            assert caught.value.signal_number == signal.SIGKILL
             await _reaped(proc)
 
 
@@ -449,6 +455,7 @@ async def test_a_killed_worker_still_lets_the_eval_session_close():
             gc.collect()
 
             proc = _worker_process(nix)
+            expect_the_worker_to_die(nix)
             proc.kill()
             await _reaped(proc)
 
@@ -467,6 +474,7 @@ async def test_a_fresh_session_works_after_a_worker_died():
     with anyio.fail_after(90), _tolerating_the_backchannel_leak():
         async with Session() as nix:
             proc = _worker_process(nix)
+            expect_the_worker_to_die(nix)
             proc.kill()
             await _reaped(proc)
 
@@ -480,13 +488,14 @@ async def test_an_aborted_worker_reports_its_signal():
 
     ``nanopynix.init_libstore`` documents SIGABRT as the way Nix ends a process
     that asked for an experimental feature it does not have. At the client
-    boundary that is indistinguishable from a kill -- both are a closed pipe,
-    both raise WorkerDiedError -- so the exit status is the only thing that
-    tells the two apart, and it is what this asserts.
+    boundary that is indistinguishable from a kill -- both are a closed pipe --
+    so the exit status is the only thing that tells the two apart, and the
+    caller now gets it as the class rather than having to read the process.
     """
     with anyio.fail_after(60), _tolerating_the_backchannel_leak():
         async with Session() as nix, nix.store() as store:
             proc = _worker_process(nix)
+            expect_the_worker_to_die(nix)
             os.kill(proc.pid, signal.SIGABRT)
 
             # Reap before calling, not after. A signal is asynchronous, so a
@@ -494,10 +503,79 @@ async def test_an_aborted_worker_reports_its_signal():
             # open and then wait out the RPC timeout instead -- which would
             # pass for the wrong reason.
             await _reaped(proc)
-            assert proc.exitcode == -signal.SIGABRT
 
-            with pytest.raises(WorkerDiedError):
+            with pytest.raises(WorkerSignaledError) as caught:
                 await store.uri()
+            assert caught.value.signal_number == signal.SIGABRT
+            assert caught.value.signal_name == "SIGABRT"
+            assert caught.value.exit_status == -signal.SIGABRT
+            # And it is still what every existing handler catches.
+            assert isinstance(caught.value, WorkerDiedError)
+
+
+@pytest.mark.forked
+async def test_an_abort_nobody_was_waiting_for_fails_the_close():
+    """A worker that dies with no call outstanding must not close quietly.
+
+    **This is the whole subject of issue #55.** Three teardown paths suppress
+    a WorkerDiedError, each of them rightly, so a crashed worker used to close
+    exactly as a healthy one does. A run of the suite reported 2077 passed
+    with a core dump inside its own window.
+
+    Nothing is in flight here, and nothing asks the session anything after the
+    abort. The close is the only place left that can report it.
+    """
+    with anyio.fail_after(60), _tolerating_the_backchannel_leak():
+        nix = Session()
+        await nix.open()
+        proc = _worker_process(nix)
+        os.kill(proc.pid, signal.SIGABRT)
+        await _reaped(proc)
+
+        with pytest.raises(WorkerSignaledError) as caught:
+            await nix.close()
+        assert caught.value.signal_number == signal.SIGABRT
+
+
+async def test_an_orderly_close_reports_nothing():
+    """The regression the test above could cause, asserted directly.
+
+    A worker that shuts down when it is asked exits 0, which is not a signal
+    and must stay silent. Without this, "close now raises for a dead worker"
+    could quietly become "close now raises".
+    """
+    with anyio.fail_after(60):
+        async with Session() as nix, nix.store() as store:
+            assert isinstance(await store.uri(), str)
+        assert nix._manager.unexpected_death is None  # type: ignore[reportPrivateUsage] -- the assertion is the point of the test
+
+
+async def test_closing_twice_does_not_report_our_own_terminate():
+    """The teardown's own SIGTERM is not a crash, on any number of closes.
+
+    A session that still holds an open store when it closes ends at status
+    -15: the worker does not exit by itself, so the transport terminates it.
+    That status is cached, and the second close used to read it back and
+    report it as a death nobody asked for. It failed 99 LSP tests, whose
+    fixture closes the session that way.
+
+    Two closes, and the second is the one that matters. ``Session.close`` is
+    idempotent by contract, so this is a supported call and not an abuse.
+    """
+    with anyio.fail_after(60):
+        nix = Session()
+        await nix.open()
+        store = nix.store()
+        await store.open()
+
+        await nix.close()
+        await nix.close()
+
+        manager = nix._manager  # type: ignore[reportPrivateUsage] -- reading the recorded status is the assertion
+        assert manager._worker_exit_status == -signal.SIGTERM, (
+            "the shape this test is about changed; it no longer ends by terminate"
+        )
+        assert manager.unexpected_death is None
 
 
 async def test_a_terminal_interrupt_does_not_kill_the_worker():
