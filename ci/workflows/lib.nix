@@ -847,12 +847,19 @@ in
   # that every *kind* of test job exists on both sides -- regular, tsan, ubsan
   # -- and only the expansion differs.
   #
-  # **The `nogc` and `asan` kinds are scheduled-only, and break that rule on
-  # purpose.** Issue #35 asks for exactly that: "Do not put it in the
-  # per-commit workflow until the run time is known." Neither job has ever
-  # run, so `caps.asanSuite` is a guess rather than a measurement. Add
-  # `mkStaticAsanTestJobs` and `mkStaticNoGCTestJobs` here, in the shape of
-  # the two below, once a scheduled run has produced that number.
+  # **The `asan` kind is scheduled-only, and breaks that rule on purpose.**
+  # Issue #35 asks for exactly that: "Do not put it in the per-commit workflow
+  # until the run time is known." That job has never run, so `caps.asanSuite`
+  # is a guess rather than a measurement. Add `mkStaticAsanTestJobs` here, in
+  # the shape of the three below, once a scheduled run produces the number.
+  #
+  # **`nogc` is on both sides, and it has the number the rule asks for.** The
+  # whole suite against nix_2_34-nogc measured 12 minutes at a 3 GB peak, so
+  # it takes `caps.suite` with room to spare. It earns the per-commit slot
+  # rather than merely fitting it: it is the only build where an evaluator
+  # cannot hide a leak behind the collector, and where a worker that aborts
+  # has nothing to reclaim its memory. Issue #55 exists because such an abort
+  # happened inside one of these runs and reported success.
   mkStaticTestJobs =
     {
       ref ? null,
@@ -895,6 +902,26 @@ in
             ;
         };
       }) ubsanVersionNames
+    );
+
+  mkStaticNoGCTestJobs =
+    {
+      ref ? null,
+      lockArtifact ? null,
+      needs ? [ ],
+    }:
+    builtins.listToAttrs (
+      map (version: {
+        name = "test-nogc-${lib.removeSuffix "-nogc" version}";
+        value = mkNoGCTestJob {
+          inherit
+            version
+            ref
+            lockArtifact
+            needs
+            ;
+        };
+      }) nogcVersionNames
     );
 
   mkStaticTsanTestJobs =
