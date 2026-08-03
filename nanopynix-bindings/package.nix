@@ -128,23 +128,19 @@ buildPythonPackage (
     # since a late dlopen() can't grow the TLS block CPython already sized at
     # startup. Setting it derivation-wide covers both phases uniformly.
     #
-    # ASan's leak checker runs at exit and would fail both phases on CPython's
-    # own deliberate never-freed allocations, so it is off here for the same
-    # reason it is off in the test runner.
+    # `sanitizerRuntime` is null for the UBSan variant, so neither phase gets a
+    # preload there. That variant needs none: the link of the extension records
+    # its runtime as a dependency, and the loader brings the runtime in.
+    # nix/sanitizer.nix gives the whole reason.
     env =
       lib.optionalAttrs (sanitizer != null) {
         # The same flags every nix-* component gets (nix/sanitizer.nix), so the
         # extension and the libraries it calls agree about instrumentation.
         NIX_CFLAGS_COMPILE = sanitizer.flags;
       }
-      // lib.optionalAttrs (sanitizerRuntime != null) (
-        {
-          LD_PRELOAD = sanitizerRuntime;
-        }
-        // lib.optionalAttrs (sanitizer.name == "address") {
-          ASAN_OPTIONS = "detect_leaks=0";
-        }
-      );
+      // lib.optionalAttrs (sanitizerRuntime != null) {
+        LD_PRELOAD = sanitizerRuntime;
+      };
 
     # One `.pyi` per area, exactly as when each area was its own extension
     # module -- so `nanopynix_bindings.expr` still resolves to `expr.pyi` for a

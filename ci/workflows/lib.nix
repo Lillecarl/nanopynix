@@ -18,14 +18,14 @@ let
   nanopynixVersionNames = map (lib.removePrefix "nanopynix-tests-") flakeTestOutputs;
   sanitizerSuffixes = [
     "-tsan"
-    "-asan"
+    "-ubsan"
   ];
   isSanitized = name: lib.any (suffix: lib.hasSuffix suffix name) sanitizerSuffixes;
   # A sanitized variant is a separate job, never part of the regular matrix:
   # both are far slower, and neither collects coverage.
   regularVersionNames = builtins.filter (name: !isSanitized name) nanopynixVersionNames;
   tsanVersionNames = builtins.filter (lib.hasSuffix "-tsan") nanopynixVersionNames;
-  asanVersionNames = builtins.filter (lib.hasSuffix "-asan") nanopynixVersionNames;
+  ubsanVersionNames = builtins.filter (lib.hasSuffix "-ubsan") nanopynixVersionNames;
 
   # Coverage-collecting backends run as separate matrix jobs (test-daemon-*,
   # test-local-*) rather than serially inside one job, so covering both stays
@@ -46,10 +46,16 @@ let
   # hour and it fails visibly.
   testTimeoutMinutes = 30;
 
-  # ASan roughly doubles the work, and this job builds nix, sqlite and
-  # boehmgc instrumented before it runs anything. Twice the regular cap,
-  # so the first scheduled run reports a number instead of a timeout.
-  asanTimeoutMinutes = 60;
+  # Twice the regular cap, because this job builds every nix-* library
+  # instrumented before it runs a test. That build is the cost, and it lands
+  # only on a change to nix/sanitizer.nix: cachix holds the result of the
+  # build otherwise. Measured on the ASAN variant that came before this one,
+  # where the build alone took 36 minutes on 2.31 and 56 on git.
+  #
+  # UBSan itself is cheap beside that. It adds inline checks and no shadow
+  # memory, so the suite costs about a fifth more rather than the double that
+  # ASAN cost. The first run of this variant gives the real number.
+  ubsanTimeoutMinutes = 60;
 
   # A single cachix/install-nix-action (multi-user) install suffices for every
   # job now: the test suite owns its own daemon and local store paths
@@ -249,6 +255,73 @@ let
       ];
     };
 
+  # The full suite under UndefinedBehaviorSanitizer, against one Nix version.
+  #
+  # UBSan runs on its own rather than beside TSAN, although the two combine.
+  # The TSAN matrix skips 2.31, and 2.31 is the one version where the
+  # ownership rules that UBSan is here to check differ. See nix/sanitizer.nix.
+  #
+  # There is no AddressSanitizer job, and Nix decides that: libexpr refuses
+  # the combination of ASAN and the collector. Issue #47 holds the supported
+  # route to ASAN, which is a worker process that runs without the collector.
+  #
+  # No coverage, and the `local` backend only. Coverage instrumentation costs
+  # time this job has none of, and the daemon backend forks a handler process
+  # per connection -- a shape worth a separate decision once the run time of
+  # the simple case is a number rather than a guess.
+  mkUbsanTestJob =
+    {
+      version,
+      ref ? null,
+      lockArtifact ? null,
+      needs ? [ ],
+    }:
+    let
+      bareVersion = lib.removeSuffix "-ubsan" version;
+    in
+    lib.optionalAttrs (needs != [ ]) { inherit needs; }
+    // {
+      timeout-minutes = ubsanTimeoutMinutes;
+      steps = mkTestSetup { inherit ref lockArtifact; } ++ [
+        {
+          name = "Build UBSAN nanopynix test runner (${bareVersion})";
+          run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
+        }
+        (steps.enableSandboxNamespaces { })
+        {
+          name = "Run UBSAN-instrumented suite (${bareVersion}, local backend)";
+          run = # bash
+            ''
+              set -o pipefail
+              LOGFILE="''${{ github.workspace }}/ubsan-output-${bareVersion}.log"
+              status=0
+              env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=60 NANOPYNIX_TEST_SANITIZER=ubsan PYTHONDONTWRITEBYTECODE=1 \
+                ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
+                2>&1 | tee -a "$LOGFILE" || status=$?
+              # A sanitizer report is the finding, so grep for it rather than
+              # trusting the exit status alone: halt_on_error=1 makes UBSan
+              # kill the process, but a report raised inside a forkserver
+              # worker can still be reaped into a plain test failure.
+              #
+              # "Unexpected condition" is the message of `nix::unreachable`,
+              # which is what `nixUnreachableWhenHardened` becomes once
+              # `NIX_UBSAN_ENABLED` is on. That path never prints the word
+              # "runtime error", so the first two patterns would miss it.
+              if grep -qE "(UndefinedBehaviorSanitizer|runtime error):|Unexpected condition in " "$LOGFILE"; then
+                echo "::error::sanitizer report on ${bareVersion} -- see the log above"
+                exit 1
+              fi
+              exit "$status"
+            '';
+        }
+        (steps.uploadArtifact {
+          name = "Upload UBSAN output (${bareVersion})";
+          artifactName = "ubsan-report-${bareVersion}";
+          path = "\${{ github.workspace }}/ubsan-output-${bareVersion}.log";
+        })
+      ];
+    };
+
   # The gates of nix/checks.nix, in one job. They share a checkout and a Nix
   # install, they take about a minute between them, and Nix already builds
   # them in parallel -- so one job costs one runner and reports every gate.
@@ -260,66 +333,6 @@ let
   # it is version-independent: that matrix exists to run one suite against
   # each supported Nix version, and this library links no Nix at all, so
   # three copies of it would be three identical runs. See nix/checks.nix.
-  # AddressSanitizer, and UndefinedBehaviorSanitizer riding along in the same
-  # build. See nix/sanitizer.nix for why UBSan attaches here and not to TSAN.
-  #
-  # Scheduled only, deliberately. #35 says not to put this in the per-commit
-  # workflow until the run time is known, and it is not known: ASan roughly
-  # doubles a suite that already takes 8-13 minutes, so the cap below is twice
-  # the regular one. The first scheduled run is the measurement.
-  #
-  # No coverage, and the `local` backend only. Coverage instrumentation costs
-  # time this job has none of, and the daemon backend forks a handler process
-  # per connection -- a shape worth a separate decision once the run time of
-  # the simple case is a number rather than a guess.
-  mkAsanTestJob =
-    {
-      version,
-      ref ? null,
-      lockArtifact ? null,
-      needs ? [ ],
-    }:
-    let
-      bareVersion = lib.removeSuffix "-asan" version;
-    in
-    lib.optionalAttrs (needs != [ ]) { inherit needs; }
-    // {
-      timeout-minutes = asanTimeoutMinutes;
-      steps = mkTestSetup { inherit ref lockArtifact; } ++ [
-        {
-          name = "Build ASAN nanopynix test runner (${bareVersion})";
-          run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
-        }
-        (steps.enableSandboxNamespaces { })
-        {
-          name = "Run ASAN/UBSAN-instrumented suite (${bareVersion}, local backend)";
-          run = # bash
-            ''
-              set -o pipefail
-              LOGFILE="''${{ github.workspace }}/asan-output-${bareVersion}.log"
-              status=0
-              env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=60 NANOPYNIX_TEST_SANITIZER=asan PYTHONDONTWRITEBYTECODE=1 \
-                ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
-                2>&1 | tee -a "$LOGFILE" || status=$?
-              # A sanitizer report is the finding, so grep for it rather than
-              # trusting the exit status alone: abort_on_error=1 makes ASan
-              # kill the process, but a report raised inside a forkserver
-              # worker can still be reaped into a plain test failure.
-              if grep -qE "(AddressSanitizer|UndefinedBehaviorSanitizer|runtime error):" "$LOGFILE"; then
-                echo "::error::sanitizer report on ${bareVersion} -- see the log above"
-                exit 1
-              fi
-              exit "$status"
-            '';
-        }
-        (steps.uploadArtifact {
-          name = "Upload ASAN output (${bareVersion})";
-          artifactName = "asan-report-${bareVersion}";
-          path = "\${{ github.workspace }}/asan-output-${bareVersion}.log";
-        })
-      ];
-    };
-
   mkStaticChecksJob =
     {
       ref ? null,
@@ -494,10 +507,10 @@ in
     regularVersionNames
     regularBackends
     tsanVersionNames
-    asanVersionNames
+    ubsanVersionNames
     mkRegularTestJob
     mkTsanTestJob
-    mkAsanTestJob
+    mkUbsanTestJob
     mkStaticChecksJob
     mkCommitSubjectJob
     mkDocsBuildJob
@@ -518,7 +531,7 @@ in
   # The per-commit side cannot use a matrix in exchange: the `jobs` dispatch
   # input selects by exact job name, and a matrix collapses eight jobs into
   # one id with eight legs. Both mechanisms are load-bearing, so the rule is
-  # that every *kind* of test job exists on both sides -- regular, tsan, asan
+  # that every *kind* of test job exists on both sides -- regular, tsan, ubsan
   # -- and only the expansion differs.
   mkStaticTestJobs =
     {
@@ -544,7 +557,7 @@ in
       ) regularBackends
     );
 
-  mkStaticAsanTestJobs =
+  mkStaticUbsanTestJobs =
     {
       ref ? null,
       lockArtifact ? null,
@@ -552,8 +565,8 @@ in
     }:
     builtins.listToAttrs (
       map (version: {
-        name = "test-asan-${lib.removeSuffix "-asan" version}";
-        value = mkAsanTestJob {
+        name = "test-ubsan-${lib.removeSuffix "-ubsan" version}";
+        value = mkUbsanTestJob {
           inherit
             version
             ref
@@ -561,7 +574,7 @@ in
             needs
             ;
         };
-      }) asanVersionNames
+      }) ubsanVersionNames
     );
 
   mkStaticTsanTestJobs =

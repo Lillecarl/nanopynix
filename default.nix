@@ -94,13 +94,22 @@ let
   };
 
   # One entry per sanitizer variant that gets its own set of Nix builds.
-  # ASan and TSan cannot be combined -- measured, `cc1plus: error:
-  # '-fsanitize=thread' is incompatible with '-fsanitize=address'` -- so each
-  # is a separate rebuild of nix, sqlite and boehmgc rather than one build
-  # carrying both.
+  #
+  # **There is no ASAN variant, and Nix decides that.** libexpr refuses the
+  # combination of ASAN and the collector, and `nix/sanitizer.nix` gives the
+  # test that libexpr makes. An earlier variant reached a build only because
+  # the flag arrived in an environment variable that meson never reads, and
+  # what that build reported was a tag read of a `Value` that the collector
+  # had already freed. Issue #47 holds the supported route to ASAN, which is a
+  # worker process that runs without the collector.
+  #
+  # UBSan runs on its own rather than beside TSAN, although the two combine.
+  # The TSAN matrix skips 2.31 (see `nanopynixForNixVersions` below), and 2.31
+  # is the one version where the ownership rules that UBSan is here to check
+  # differ. On its own it runs everywhere.
   sanitizers = {
     tsan = pkgs.callPackage ./nix/sanitizer.nix { name = "thread"; };
-    asan = pkgs.callPackage ./nix/sanitizer.nix { name = "address"; };
+    ubsan = pkgs.callPackage ./nix/sanitizer.nix { name = "undefined"; };
   };
 
   # A confirmed data race in nix::Bindings::emptyBindings (a process-wide
@@ -390,7 +399,7 @@ let
       # races on this version alone, so TSAN just reports/aborts on
       # long-since-fixed bugs rather than anything actionable. Skip building
       # a TSAN variant for it entirely instead of chasing that noise.
-      # TSAN only. ASan keeps 2.31, and needs it: the ownership rules that
+      # TSAN only. UBSan keeps 2.31, and needs it: the ownership rules that
       # differ between versions -- `fetchers::Settings` living inside
       # `fetchers::Input` on 2.31 and not after -- are exactly what it is
       # there to check.
@@ -408,7 +417,7 @@ let
   nanopynixVersionsInternal =
     nanopynixForNixVersions { }
     // nanopynixForNixVersions { sanitizer = sanitizers.tsan; }
-    // nanopynixForNixVersions { sanitizer = sanitizers.asan; };
+    // nanopynixForNixVersions { sanitizer = sanitizers.ubsan; };
 
   nanopynixVersions = nanopynixVersionsInternal // {
     stable = getByVersion pkgs.nixVersions.stable.version;

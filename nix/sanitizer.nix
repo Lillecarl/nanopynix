@@ -7,27 +7,37 @@
 {
   lib,
   stdenv,
-  # "thread" or "address". Not a free-form flag string: the runtime library
-  # name and the shadow-memory rules follow from which sanitizer this is.
+  # "thread" or "undefined". Not a free-form flag string: the runtime library,
+  # the shadow-memory rules and the set of libraries to instrument all follow
+  # from which sanitizer this is.
   name,
 }:
 let
-  # The runtime must be loaded before any other allocation happens in the
-  # process (LD_PRELOAD), or its shadow-memory setup silently fails to
-  # intercept everything -- this bites us specifically because the
-  # instrumented code is a native extension dlopen()'d into a plain,
-  # non-instrumented CPython interpreter, not a from-scratch instrumented
-  # executable.
-  runtime = "${stdenv.cc.cc.lib}/lib/lib${if name == "address" then "asan" else "tsan"}.so";
+  isThread = name == "thread";
 
-  # UndefinedBehaviorSanitizer rides along with ASan and not with TSan,
-  # deliberately. A UB finding is not thread-dependent, so running it under
-  # both would report the same defect twice; and the TSan matrix skips 2.31
-  # (see `default.nix`), which is the one version where the ownership rules
-  # this is meant to catch differ. Attached here it runs everywhere.
+  # ThreadSanitizer keeps shadow memory, so its runtime must be loaded before
+  # any other allocation happens in the process (LD_PRELOAD). Otherwise the
+  # setup of that memory silently fails to intercept everything. This bites us
+  # specifically because the instrumented code is a native extension
+  # dlopen()'d into a plain, non-instrumented CPython interpreter, not a
+  # from-scratch instrumented executable.
   #
+  # UndefinedBehaviorSanitizer keeps no shadow memory. Its runtime supplies the
+  # `__ubsan_handle_*` reporters that the instrumented code calls, and the link
+  # of that code records the library as a dependency. The loader therefore
+  # brings it in by itself, and `null` here says so.
+  #
+  # A preload of `libubsan.so` would also be a defect, and not only redundant.
+  # LD_PRELOAD reaches every child process, and Nix runs `git` off PATH. A
+  # preloaded library from this closure gives the host git the glibc of this
+  # closure beside its own, and git then fails with
+  # "version `GLIBC_ABI_DT_X86_64_PLT' not found". Measured, in the ASAN job
+  # this variant replaces. `nanopynix/tests.nix` now supplies its own git,
+  # which answers that for the TSAN variant too.
+  runtime = if isThread then "${stdenv.cc.cc.lib}/lib/libtsan.so" else null;
+
   # `vptr` is off because the check needs every class of a hierarchy
-  # instrumented and CPython is not.
+  # instrumented, and CPython is not.
   #
   # **UBSan is deliberately not fatal at compile time.** `-fno-sanitize-recover`
   # was the first thing tried, and it broke the build rather than the tests:
@@ -47,49 +57,62 @@ let
   ];
 
   sanitizerFlags = [
-    "-fsanitize=${name}"
     "-fno-omit-frame-pointer"
     "-g"
   ]
-  ++ lib.optionals (name == "address") undefinedFlags;
+  ++ (if isThread then [ "-fsanitize=thread" ] else undefinedFlags);
   sanitizerFlagsStr = toString sanitizerFlags;
 
   # The value for meson's own `b_sanitize` option, or null to leave the option
   # alone. `mesonComponentOverrides` gives the reason this must exist beside
   # the compile flags above.
   #
-  # **This names `undefined` only, and never `address`.** libexpr refuses the
-  # combination of ASAN and the collector:
+  # The TSAN variant gets no value. `NIX_UBSAN_ENABLED` tests for `undefined`
+  # alone, so a value of `thread` gives that build nothing.
+  mesonSanitize = if isThread then null else "undefined";
+
+  # Whether sqlite and boehmgc get the flags too.
   #
-  #   bdw_gc_required = get_option('gc').disable_if(
-  #     'address' in get_option('b_sanitize'),
-  #     error_message : 'Building with Boehm GC and ASAN is not supported')
+  # **TSAN instruments them and UBSan does not, and the asymmetry is the
+  # point.** A data race that straddles nix and one of these two libraries is
+  # a defect of the way nanopynix uses the library, so it is ours to correct,
+  # and an uninstrumented sqlite would hide it. Undefined behaviour inside
+  # sqlite or inside boehmgc is upstream code that we cannot correct. sqlite
+  # already proved this: its own build tool trips UBSan (see `undefinedFlags`
+  # above). boehmgc is a conservative collector, so it reads memory as
+  # pointers by design, and that design is what UBSan asks about.
   #
-  # and `gc` is `enabled` here, so `address` in this option stops the build of
-  # nix-expr. The test of upstream reads this option and not the compile line,
-  # so `-fsanitize=address` continues to arrive through `NIX_CFLAGS_COMPILE`
-  # and the build goes on. Read the comment in `mesonComponentOverrides` for
-  # what that means, because the state it leaves is one upstream rejects.
-  #
-  # The TSAN variant gets no value at all. `NIX_UBSAN_ENABLED` tests for
-  # `undefined` alone, so a value of `thread` gives that build nothing, and
-  # that build is green today.
-  mesonSanitize = if name == "address" then "undefined" else null;
+  # `UBSAN_OPTIONS=halt_on_error=1` makes each report fatal, so an instrumented
+  # third-party library turns this job red for a defect that nobody here can
+  # correct. The gate would then say nothing. Instrument the code that we own,
+  # and read a report from it as a defect of ours.
+  instrumentDependencies = isThread;
+
+  # Flags for a dependency that is not one of the meson components.
+  dependencyEnv =
+    old:
+    lib.optionalAttrs instrumentDependencies {
+      env = (old.env or { }) // {
+        NIX_CFLAGS_COMPILE = toString [
+          (old.env.NIX_CFLAGS_COMPILE or "")
+          sanitizerFlagsStr
+        ];
+      };
+    };
 
 in
 {
   inherit name runtime;
   # The attribute-name suffix each variant gets in `nanopynixVersions`,
   # and therefore the job name in CI.
-  suffix = if name == "address" then "asan" else "tsan";
+  suffix = if isThread then "tsan" else "ubsan";
   flags = sanitizerFlagsStr;
-  # One token, no spaces. The compile flags go through
-  # NIX_CFLAGS_COMPILE, which takes a string, but CMake's linker-flag
-  # variables have to arrive as a single `-D...=` argument -- see
-  # nanopynix-bindings/package.nix for what re-splits them otherwise.
-  # Only the `-fsanitize=` list matters at link time; the rest is
-  # instrumentation and debug info.
-  linkFlag = "-fsanitize=${name}" + lib.optionalString (name == "address") ",undefined";
+  # One token, no spaces. The compile flags go through NIX_CFLAGS_COMPILE,
+  # which takes a string, but CMake's linker-flag variables have to arrive as
+  # a single `-D...=` argument -- see nanopynix-bindings/package.nix for what
+  # re-splits them otherwise. Only the `-fsanitize=` list matters at link
+  # time; the rest is instrumentation and debug info.
+  linkFlag = "-fsanitize=${name}";
 
   # Applied via `nixComponents.overrideAllMesonComponents` so every nix-*
   # library (nix-util, nix-store, nix-expr, nix-fetchers, nix-cmd, ...) gets
@@ -113,7 +136,7 @@ in
     # option, and not from the compile flags above (`src/libutil/meson.build`).
     # That macro picks what `nixUnreachableWhenHardened` means, in
     # `src/libutil/include/nix/util/error.hh`. Three sites use the macro, and
-    # all three are tag reads of a `Value` in `value.hh`.
+    # all three read the type tag of a `Value` in `value.hh`.
     #
     # With the macro off, each site stays `std::unreachable()`, and UBSan
     # reports a trap against `<utility>:232` with no Nix source location and
@@ -126,14 +149,18 @@ in
     # the frame pointer, the debug info and the `vptr` exception come from
     # `NIX_CFLAGS_COMPILE`. A repeated `-fsanitize=` does no harm.
     #
-    # **Upstream rejects the state that this build runs in.** `mesonSanitize`
-    # above gives the test that libexpr makes, and this build passes that test
-    # only because `-fsanitize=address` reaches the compiler through an
-    # environment variable that meson never reads. A conservative collector
-    # cannot see through the allocator of ASAN, so a free of a live object is
-    # a result that this configuration can produce on its own. Read a finding
-    # of the ASAN job against that fact, and prove that the finding is not an
-    # artefact before you call the finding a defect of nanopynix.
+    # **This option must never name `address` here.** libexpr refuses that
+    # combination:
+    #
+    #   bdw_gc_required = get_option('gc').disable_if(
+    #     'address' in get_option('b_sanitize'),
+    #     error_message : 'Building with Boehm GC and ASAN is not supported')
+    #
+    # A conservative collector cannot see through the allocator of ASAN, so
+    # the collector can free an object that is still live. An ASAN variant of
+    # this file therefore reported a tag read of a freed `Value` and called it
+    # a finding. Issue #47 gives the supported route to ASAN, which is a
+    # worker process that runs without the collector.
     mesonFlags =
       (prevAttrs.mesonFlags or [ ])
       ++ lib.optional (mesonSanitize != null) (lib.mesonOption "b_sanitize" mesonSanitize);
@@ -144,23 +171,22 @@ in
   # its own override -- the crash we're chasing is inside sqlite3_step
   # itself, so if the actual race touches sqlite's own internal state
   # rather than just nix's wrapper code, an uninstrumented sqlite would
-  # hide it from TSAN entirely.
+  # hide it from TSAN entirely. `instrumentDependencies` above says why the
+  # UBSan variant takes the flags back off.
   sanitizeSqlite =
     sqlite:
-    sqlite.overrideAttrs (old: {
-      env = (old.env or { }) // {
-        NIX_CFLAGS_COMPILE = toString [
-          (old.env.NIX_CFLAGS_COMPILE or "")
-          sanitizerFlagsStr
-        ];
-      };
-      dontStrip = true;
-      # sqlite's own test suite fails under TSAN instrumentation (unrelated
-      # to the race we're hunting in nix's usage of it) -- skip it rather
-      # than debug sqlite's own tests here.
-      doCheck = false;
-      doInstallCheck = false;
-    });
+    sqlite.overrideAttrs (
+      old:
+      dependencyEnv old
+      // {
+        dontStrip = true;
+        # sqlite's own test suite fails under TSAN instrumentation (unrelated
+        # to the race we're hunting in nix's usage of it) -- skip it rather
+        # than debug sqlite's own tests here.
+        doCheck = false;
+        doInstallCheck = false;
+      }
+    );
 
   # boehmgc is a plain buildInput of nix-expr (pkgs.boehmgc, resolved by
   # nixpkgs' own libexpr/package.nix callPackage, same as sqlite above), not
@@ -177,22 +203,24 @@ in
   # actual fix). Keeping the instrumentation here anyway is still correct
   # in general: a genuine data race straddling boehmgc and nix-expr's own
   # code would otherwise be invisible to TSAN, same reasoning as sqlite.
+  #
+  # **The patch applies to both variants, and the flags do not.** The patch is
+  # the correction to a real abort, so every sanitized build needs it. The
+  # flags are the part that `instrumentDependencies` above takes back off.
   sanitizeBoehmGC =
     boehmgc:
-    boehmgc.overrideAttrs (old: {
-      env = (old.env or { }) // {
-        NIX_CFLAGS_COMPILE = toString [
-          (old.env.NIX_CFLAGS_COMPILE or "")
-          sanitizerFlagsStr
-        ];
-      };
-      patches = (old.patches or [ ]) ++ [ ./patches/boehmgc-tolerate-suspend-thread-exit-race.patch ];
-      dontStrip = true;
-      # gctest is boehmgc's own heavily multithreaded self-test -- exactly
-      # the kind of workload that hits the stop-the-world suspend issue
-      # we're chasing, so it can crash the *build* itself rather than
-      # nanopynix's own test suite. Skip it here; nanopynix's own tests are
-      # what we actually want to observe under TSAN.
-      doCheck = false;
-    });
+    boehmgc.overrideAttrs (
+      old:
+      dependencyEnv old
+      // {
+        patches = (old.patches or [ ]) ++ [ ./patches/boehmgc-tolerate-suspend-thread-exit-race.patch ];
+        dontStrip = true;
+        # gctest is boehmgc's own heavily multithreaded self-test -- exactly
+        # the kind of workload that hits the stop-the-world suspend issue
+        # we're chasing, so it can crash the *build* itself rather than
+        # nanopynix's own test suite. Skip it here; nanopynix's own tests are
+        # what we actually want to observe under TSAN.
+        doCheck = false;
+      }
+    );
 }
