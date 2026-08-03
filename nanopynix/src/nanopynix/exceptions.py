@@ -92,13 +92,23 @@ class NixError(RuntimeError):
 
     @property
     def msg_without_ansi(self) -> str:
-        """Error message with ANSI color escapes removed, preserving other text."""
+        """:attr:`msg` as Nix would print it to a terminal that has no colour.
+
+        This calls :func:`nanopynix.strip_ansi`, which removes every escape
+        sequence and not only a colour. It also expands each tab and drops a
+        carriage return and a bell, so read that function before you compare
+        the result against an exact string.
+        """
 
         return strip_ansi(self.msg)
 
     @property
     def raw_without_ansi(self) -> str:
-        """:attr:`raw` with ANSI color escapes removed."""
+        """:attr:`raw` as Nix would print it to a terminal that has no colour.
+
+        See :attr:`msg_without_ansi` for what the filter does beside the
+        removal of a colour.
+        """
 
         return strip_ansi(self.raw)
 
