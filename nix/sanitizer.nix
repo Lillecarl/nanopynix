@@ -54,9 +54,27 @@ let
   ++ lib.optionals (name == "address") undefinedFlags;
   sanitizerFlagsStr = toString sanitizerFlags;
 
-  # The value for meson's own `b_sanitize` option. `mesonComponentOverrides`
-  # gives the reason this must exist beside the compile flags above.
-  mesonSanitize = if name == "address" then "address,undefined" else "thread";
+  # The value for meson's own `b_sanitize` option, or null to leave the option
+  # alone. `mesonComponentOverrides` gives the reason this must exist beside
+  # the compile flags above.
+  #
+  # **This names `undefined` only, and never `address`.** libexpr refuses the
+  # combination of ASAN and the collector:
+  #
+  #   bdw_gc_required = get_option('gc').disable_if(
+  #     'address' in get_option('b_sanitize'),
+  #     error_message : 'Building with Boehm GC and ASAN is not supported')
+  #
+  # and `gc` is `enabled` here, so `address` in this option stops the build of
+  # nix-expr. The test of upstream reads this option and not the compile line,
+  # so `-fsanitize=address` continues to arrive through `NIX_CFLAGS_COMPILE`
+  # and the build goes on. Read the comment in `mesonComponentOverrides` for
+  # what that means, because the state it leaves is one upstream rejects.
+  #
+  # The TSAN variant gets no value at all. `NIX_UBSAN_ENABLED` tests for
+  # `undefined` alone, so a value of `thread` gives that build nothing, and
+  # that build is green today.
+  mesonSanitize = if name == "address" then "undefined" else null;
 
 in
 {
@@ -107,7 +125,18 @@ in
     # The compile flags above stay. `b_sanitize` gives `-fsanitize=` only, and
     # the frame pointer, the debug info and the `vptr` exception come from
     # `NIX_CFLAGS_COMPILE`. A repeated `-fsanitize=` does no harm.
-    mesonFlags = (prevAttrs.mesonFlags or [ ]) ++ [ (lib.mesonOption "b_sanitize" mesonSanitize) ];
+    #
+    # **Upstream rejects the state that this build runs in.** `mesonSanitize`
+    # above gives the test that libexpr makes, and this build passes that test
+    # only because `-fsanitize=address` reaches the compiler through an
+    # environment variable that meson never reads. A conservative collector
+    # cannot see through the allocator of ASAN, so a free of a live object is
+    # a result that this configuration can produce on its own. Read a finding
+    # of the ASAN job against that fact, and prove that the finding is not an
+    # artefact before you call the finding a defect of nanopynix.
+    mesonFlags =
+      (prevAttrs.mesonFlags or [ ])
+      ++ lib.optional (mesonSanitize != null) (lib.mesonOption "b_sanitize" mesonSanitize);
   };
 
   # sqlite is a plain buildInput of nix-store (from outside the nix
