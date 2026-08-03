@@ -38,12 +38,11 @@ message bare.
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from nanopynix import PrimopError
+from nanopynix import PrimopError, strip_ansi
 from nanopynix.models import PrimOpSpec
 from nanopynix.rpc._primop_wire import MARKER, decode, encode
 
@@ -51,8 +50,6 @@ if TYPE_CHECKING:
     from tests.support.nix_environment import NixTestEnvironment
 
 pytestmark = pytest.mark.nix_version(minimum="2.32")
-
-_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 _HERE = "tests.nanopynix.primops.test_primop_error_parity"
 
@@ -100,7 +97,7 @@ def _primop_line(exc: BaseException) -> str:
     Nix prefixes its own "while calling the builtin" frame and colourises the
     whole thing, and neither is what this file is about.
     """
-    return _ANSI.sub("", str(exc)).rsplit("error:", 1)[-1].strip()
+    return strip_ansi(str(exc)).rsplit("error:", 1)[-1].strip()
 
 
 async def _render(session: Any, name: str) -> str:

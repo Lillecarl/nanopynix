@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 import tree_sitter_nix  # type: ignore[reportMissingTypeStubs] -- tree-sitter-nix does not ship type stubs
 from tree_sitter import Language, Parser
 
+from nanopynix import strip_ansi
 from nanopynix._typechecking import BEARTYPING
 
 if TYPE_CHECKING or BEARTYPING:
@@ -17,7 +18,6 @@ if TYPE_CHECKING or BEARTYPING:
     from nanopynix import AsyncStore, AsyncValue
 
 _HASH_ATTRIBUTES = frozenset({"hash", "sha256", "outputHash"})
-_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _HASH = r"(?:md5|sha1|sha256|sha512)(?::[0-9a-z]+|-[A-Za-z0-9+/]+={0,2})"
 _FOD_MISMATCH = re.compile(
     rf"^\s*(?:error:\s+)?hash mismatch in (?:fixed-output derivation '(?P<drv_path>[^']+)'|file downloaded from '[^']+'):\n"
@@ -63,7 +63,7 @@ def extract_fod_hash_mismatch(message: str) -> FodHashMismatch | None:
     FODs, and building only those in a temporary chroot store where their
     output metadata can be observed directly.
     """
-    matches = list(_FOD_MISMATCH.finditer(_ANSI_ESCAPE.sub("", message)))
+    matches = list(_FOD_MISMATCH.finditer(strip_ansi(message)))
     if len(matches) != 1:
         return None
     match = matches[0]
