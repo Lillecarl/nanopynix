@@ -20,6 +20,7 @@ prefix.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -32,7 +33,24 @@ from tests.support.subprocess_output import run_process
 if TYPE_CHECKING:
     from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
 
-_SCRIPT = "#!/bin/sh\necho store-exec-ok\n"
+# The interpreter of this process, and **not** `/bin/sh`.
+#
+# The script below is only a program to exec: what the test asks is whether a
+# program that lives in a relocated store runs at all. The interpreter is
+# incidental, and a host one costs the test its hermeticity.
+#
+# `/bin/sh` cost it exactly that under ASAN. That build sets `LD_PRELOAD` to
+# the sanitizer runtime, `LD_PRELOAD` reaches every child, and the runtime
+# links against the glibc of this closure, so the host shell got two glibcs:
+#
+#   /bin/sh: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_ABI_DT_X86_64_PLT'
+#   not found (required by /nix/store/...-glibc-2.42-67/...)
+#
+# Both tests below then failed, on every ASAN run. `nix/sanitizer.nix` records
+# the same failure against the host git, and `nanopynix/tests.nix` answers it
+# the same way: take the program from this closure. `sys.executable` is that,
+# with no new input to declare.
+_SCRIPT = f"#!{sys.executable}\nprint('store-exec-ok')\n"
 
 
 async def _check_runs_from_a_relocated_store(store: Any, tmp_path: Path) -> None:
