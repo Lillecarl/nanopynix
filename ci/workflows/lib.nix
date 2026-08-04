@@ -153,6 +153,9 @@ let
     # selection is about 600 tests, and the passing rate of run 30895974566
     # puts that inside 60 minutes. This is the measurement that confirms it.
     asanSuite = 60;
+    # One run of the concurrency soak, in the jobs that are not TSAN. It took
+    # 45 seconds in the TSAN jobs of run 30930842932, which is the slow build.
+    soak = 15;
     # Five runs of the concurrency soak, one per seed. Each run deals every
     # eligible test into eight overlapping lanes -- see tests/support/soak.py.
     # This replaced five repeats of `-m tsan_stress`, which was one test.
@@ -230,6 +233,43 @@ let
       (steps.cachix { })
     ];
 
+  # The concurrency soak, as a step of its own.
+  #
+  # **The soak must not share a process with the rest of the suite.** It
+  # drives eight overlapping lanes of existing tests through one interpreter,
+  # and it reaches the corruption of issue #70, which ends the process with
+  # SIGSEGV. Inside the full-suite invocation that one crash took the results
+  # of about 1700 other tests with it -- measured in run 30931403310, job
+  # `test-daemon-nix_2_34`. Every full-suite step therefore passes
+  # `-m "not soak"`, and this step is where the soak runs instead.
+  #
+  # The step still fails its job. The soak reports a real defect, and a job
+  # that goes green over one is worth nothing. What this changes is the blast
+  # radius, and not the verdict.
+  #
+  # The TSAN jobs do not use this. They run the soak five times, once for each
+  # seed, with the retry budget that issue #69 needs; see `mkTsanTestJob`.
+  # `env` carries the deadlines and the sanitizer name of the job that this
+  # step belongs to. The soak runs the same tests as the suite beside it, so
+  # a deadline that suite needs is a deadline the soak needs.
+  mkSoakStep =
+    {
+      label,
+      backends ? "local",
+      env ? "NANOPYNIX_RPC_TIMEOUT=30",
+    }:
+    {
+      name = "Run the concurrency soak (${label})";
+      timeout-minutes = caps.soak;
+      run = # bash
+        ''
+          set -o pipefail
+          env NANOPYNIX_CORE_DEBUG=1 PYTHONDONTWRITEBYTECODE=1 ${env} \
+            ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends ${backends} \
+            -m soak
+        '';
+    };
+
   mkRegularTestJob =
     {
       version,
@@ -272,6 +312,7 @@ let
                 # job whose tests had all passed. See nanopynix/tests.nix.
                 env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG_FILE="$gc_thread_log" NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=''${{ github.workspace }}/.coverage NANOPYNIX_COVERAGE=1 NANOPYNIX_COVERAGE_XML=''${{ github.workspace }}/coverage.xml NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
                   ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends ${backend} \
+                  -m "not soak" \
                   --junitxml=''${{ github.workspace }}/junit.xml \
                   2>&1 | tee ''${{ github.workspace }}/test-gdb-output.log || status=$?
                 # Only on a crash: this file has one line per evaluator thread
@@ -289,6 +330,10 @@ let
                 exit "$status"
               '';
           }
+          (mkSoakStep {
+            label = "${version}, ${backend} backend";
+            backends = backend;
+          })
           (steps.uploadArtifact {
             name = "Upload test output";
             artifactName = "test-output-${backend}-${version}";
@@ -361,28 +406,103 @@ let
               ''
                 set -o pipefail
                 LOGFILE="''${{ github.workspace }}/tsan-output-${bareVersion}.log"
+                # Boehm suspends every other thread with a signal before it
+                # collects, and TSAN intercepts signal delivery. When Boehm
+                # cannot stop the world it calls `abort`, and the process dies
+                # with status 134 and reports no race. See issue #69, which
+                # carries the measurement: the rate is near one run in four,
+                # and it does not depend on anything this repository sets.
+                #
+                # **Boehm's own answer to this is already in the build.**
+                # `gc_priv.h` suspends a thread with the synchronous `SIGSYS`
+                # when `THREAD_SANITIZER` is defined, and `gcconfig.h` defines
+                # it from `__has_feature(thread_sanitizer)`. GCC 15.3 supports
+                # `__has_feature` and reports the feature, so the collector
+                # this job links already uses `SIGSYS`, and it aborts anyway.
+                # Issue #69 carries the proof. So there is no known correction
+                # yet, and the two lines below are what this job does instead.
+                #
+                # `GC_INITIAL_HEAP_SIZE` gives Boehm a heap it does not have
+                # to grow, and a collection that never happens cannot fail to
+                # stop the world. Nix sets this itself when the variable is
+                # absent, to 25% of RAM capped at 384 MiB
+                # (libexpr/eval-gc.cc), and the soak exhausts that: it holds
+                # 66 tests and their evaluators in one process. The cap is
+                # what this raises, and `GC_expand_hp` takes virtual rather
+                # than resident memory, so the runner pays little for it.
+                # **This lowers the rate, and corrects nothing.** A full
+                # matrix run aborted with it in place.
+                #
+                # The retry is what remains for the aborts that still happen.
+                # An abort says nothing about the code, so retry the seed. A
+                # budget for the whole job, and not N attempts for each seed,
+                # is what keeps the worst case inside `tsanStress`.
+                #
+                # This tolerates only that one signature. A race still fails
+                # the job, and so does any other non-zero status.
+                ABORT_BUDGET=5
+                aborts=0
                 race_found=0
+                real_failure=0
                 for i in $(seq 1 5); do
-                  echo "=== TSAN run $i ===" | tee -a "$LOGFILE"
-                  status=0
-                  unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-                    ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon \
-                    -m soak --soak-seed="$i" \
-                    --soak-report="''${{ github.workspace }}/soak-${bareVersion}-run$i.json" \
-                    2>&1 | tee -a "$LOGFILE" || status=$?
-                  echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
-                  if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
-                    echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
-                    race_found=1
+                  attempt=0
+                  while : ; do
+                    attempt=$((attempt + 1))
+                    echo "=== TSAN run $i attempt $attempt ===" | tee -a "$LOGFILE"
+                    RUNLOG="$(mktemp)"
+                    # Boehm's own log, which the abort branch below reads.
+                    # `GC_PRINT_STATS` turns on `GC_COND_LOG_PRINTF`, and
+                    # `resend_lost_signals` uses it to report how many threads
+                    # still owe an acknowledgement on each pass. That count is
+                    # the first thing issue #69 needs. `GC_LOG_FILE` keeps the
+                    # rest of the collector chatter out of the job log.
+                    GCLOG="$(mktemp)"
+                    status=0
+                    unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 GC_INITIAL_HEAP_SIZE=2147483648 GC_PRINT_STATS=1 GC_LOG_FILE="$GCLOG" \
+                      ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon \
+                      -m soak --soak-seed="$i" \
+                      --soak-report="''${{ github.workspace }}/soak-${bareVersion}-run$i.json" \
+                      2>&1 | tee "$RUNLOG" || status=$?
+                    cat "$RUNLOG" >> "$LOGFILE"
+                    echo "=== TSAN run $i attempt $attempt exit status: $status ===" | tee -a "$LOGFILE"
+                    # Read the attempt, and not the whole log. The log holds
+                    # every earlier attempt, so a match there says nothing
+                    # about this one.
+                    if grep -q "ThreadSanitizer: data race" "$RUNLOG"; then
+                      echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
+                      race_found=1
+                      rm -f "$RUNLOG" "$GCLOG"
+                      break 2
+                    fi
+                    if [ "$status" -eq 134 ] && grep -q "Signals delivery fails" "$RUNLOG"; then
+                      aborts=$((aborts + 1))
+                      rm -f "$RUNLOG"
+                      echo "=== Boehm resend log of run $i attempt $attempt ===" | tee -a "$LOGFILE"
+                      grep -E "Resent|Lost some threads|stop_world" "$GCLOG" | tail -40 | tee -a "$LOGFILE" || true
+                      rm -f "$GCLOG"
+                      echo "Boehm could not stop the world on run $i (issue #69). Tolerated aborts: $aborts of $ABORT_BUDGET." | tee -a "$LOGFILE"
+                      if [ "$aborts" -gt "$ABORT_BUDGET" ]; then
+                        echo "::error::the collector aborted more than $ABORT_BUDGET times -- see issue #69"
+                        real_failure=1
+                        break 2
+                      fi
+                      continue
+                    fi
+                    rm -f "$RUNLOG" "$GCLOG"
+                    if [ "$status" -ne 0 ]; then
+                      echo "::error::run $i failed with status $status -- see log above"
+                      real_failure=1
+                      break 2
+                    fi
                     break
-                  fi
+                  done
                 done
+                echo "=== TSAN soak summary: $aborts tolerated collector abort(s) of a budget of $ABORT_BUDGET ===" | tee -a "$LOGFILE"
                 if [ "$race_found" -eq 1 ]; then
                   echo "::error::genuine ThreadSanitizer data race detected -- see log above"
                   exit 1
                 fi
-                if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
-                  echo "::error::pytest reported a real failure, or the process crashed -- see log above"
+                if [ "$real_failure" -eq 1 ]; then
                   exit 1
                 fi
                 exit 0
@@ -466,6 +586,7 @@ let
                 status=0
                 env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=60 NANOPYNIX_TEST_SANITIZER=ubsan PYTHONDONTWRITEBYTECODE=1 \
                   ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
+                  -m "not soak" \
                   2>&1 | tee -a "$LOGFILE" || status=$?
                 # A sanitizer report is the finding, so grep for it rather than
                 # trusting the exit status alone: halt_on_error=1 makes UBSan
@@ -483,6 +604,10 @@ let
                 exit "$status"
               '';
           }
+          (mkSoakStep {
+            label = "UBSAN, ${bareVersion}";
+            env = "NANOPYNIX_RPC_TIMEOUT=60 NANOPYNIX_TEST_SANITIZER=ubsan";
+          })
           (steps.uploadArtifact {
             name = "Upload UBSAN output (${bareVersion})";
             artifactName = "ubsan-report-${bareVersion}";
@@ -546,9 +671,11 @@ let
             timeout-minutes = caps.suite;
             run = ''
               env NANOPYNIX_CORE_DEBUG=1 PYTHONDONTWRITEBYTECODE=1 \
-                ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local
+                ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local \
+                -m "not soak"
             '';
           }
+          (mkSoakStep { label = "no collector, ${bareVersion}"; })
         ];
       }
     );
@@ -654,6 +781,7 @@ let
                 env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=180 NANOPYNIX_SHUTDOWN_TIMEOUT=60 NANOPYNIX_TEST_TIMEOUT=300 NANOPYNIX_TEST_SANITIZER=asan PYTHONDONTWRITEBYTECODE=1 \
                   ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
                   --ignore=tests/pynix \
+                  -m "not soak" \
                   2>&1 | tee -a "$LOGFILE" || status=$?
                 # A sanitizer report is the finding, so read the log rather
                 # than trusting the exit status alone: `halt_on_error=1` kills
@@ -667,6 +795,10 @@ let
                 exit "$status"
               '';
           }
+          (mkSoakStep {
+            label = "ASAN, ${bareVersion}";
+            env = "NANOPYNIX_RPC_TIMEOUT=180 NANOPYNIX_SHUTDOWN_TIMEOUT=60 NANOPYNIX_TEST_TIMEOUT=300 NANOPYNIX_TEST_SANITIZER=asan";
+          })
           (steps.uploadArtifact {
             name = "Upload ASAN output (${bareVersion})";
             artifactName = "asan-report-${bareVersion}";

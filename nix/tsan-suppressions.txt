@@ -9,3 +9,36 @@
 # Nix or in nanopynix -- suppress the report instead of it drowning out
 # genuine findings in every TSAN run that ever touches an HTTP fetch path.
 thread:Curl_thread_create
+
+# sqlite's write-ahead log synchronises with POSIX byte-range locks on the
+# shared-memory index file, and TSAN models no happens-before edge for a
+# file lock. So TSAN reports every pair of WAL accesses that two threads
+# make, whatever the code does. The report is a property of the tool, and
+# no change to nanopynix or to Nix removes it.
+#
+# The pair that run 30931403310 caught, in `test-tsan-git`:
+#
+#   Atomic read of size 4 ... walTryBeginRead     (sqlite3.c:70654)
+#     nix::SQLite::exec -> nix::LocalStore::openDB -> nix::openStore
+#   Previous write of size 4 ... walIndexRecover  (sqlite3.c:69099)
+#
+# Both frames are in sqlite's own source, and sqlite says what protects the
+# write. `walIndexRecover` (`src/wal.c:1390`) takes an exclusive lock over
+# the whole locking range with `walLockExclusive`, and then writes:
+#
+#   /* Reset the checkpoint-header. This is safe because this thread is
+#   ** currently holding locks that exclude all other writers and
+#   ** checkpointers. ... */
+#   pInfo->nBackfill = 0;
+#
+# `walTryBeginRead` (`src/wal.c:3134`) reads the same field with
+# `AtomicLoad` while it holds a shared lock on the same range. A plain write
+# against an atomic read is exactly what TSAN reports, and the exclusion
+# between them is the `fcntl` lock that TSAN cannot see.
+#
+# **This is scoped to the WAL layer, and not to sqlite.** Every function of
+# that layer is named `wal*` or `sqlite3Wal*`. A race that straddles sqlite
+# and nix-store's own code still reports, which is the reason
+# `nix/sanitizer.nix` instruments sqlite at all.
+race:^wal
+race:^sqlite3Wal

@@ -88,6 +88,78 @@ DENYLIST: dict[str, str] = {
     "tests/nanopynix/inproc/test_inproc.py::test_a_dropped_parent_gives_its_root_back_while_a_child_lives": (
         "forces a Boehm collection through _root_bytes. See the entry above."
     ),
+    # The verbosity is one setting for the whole session, so a lane that sets
+    # it sets it for every peer. The soak found this the moment a second
+    # verbosity test joined the roster: the two below ran side by side and the
+    # one that read back got the other one's level.
+    #
+    # Neither test is wrong, and neither can be fixed while the session is
+    # shared. A test of a per-session setting needs a session of its own, and
+    # a lane never has one.
+    "tests/nanopynix/test_verbosity.py::test_a_change_of_level_reaches_a_thread_that_already_ran": (
+        "writes the verbosity of the borrowed Session and reads it back. A peer that writes the "
+        "same one setting in between makes the read report the peer's level."
+    ),
+    "tests/nanopynix/inproc/test_inproc.py::test_inproc_session_verbosity_roundtrip": (
+        "writes and reads the same session-wide verbosity. See the entry above. It was in the "
+        "roster before the entry above joined it, and it passed only because it was the sole writer."
+    ),
+    # The two below drive Nix to stack exhaustion on purpose. Their own module
+    # says what a regression does: it does not fail the test, it aborts the
+    # whole pytest process. In a lane that blast radius is every peer.
+    #
+    # They pass under a plain build and under TSAN, because the evaluator
+    # thread gets the 60 MiB that `nix::initNix()` asks for. Under ASAN they
+    # do not, and `develop` shows them failing there with no soak involved.
+    # The soak then took all 65 peers of the lane down with them.
+    #
+    # So the rule is not "skip these under ASAN". A test whose failure mode is
+    # a dead process cannot share a lane on any build, and the roster reads
+    # neither the sanitizer nor a skip mark.
+    "tests/nanopynix/test_scalar_accessor_semantics.py::test_inproc_reports_runaway_recursion_at_nixs_default_depth": (
+        "drives the evaluator to Nix's recursion limit. A regression aborts the process rather "
+        "than failing the test, which would end every peer lane too."
+    ),
+    "tests/nanopynix/test_scalar_accessor_semantics.py::test_rpc_reports_runaway_recursion_at_nixs_default_depth": (
+        "drives the worker to Nix's recursion limit. See the entry above. The worker dies rather "
+        "than answering, and a peer that shares the worker gets the same dead connection."
+    ),
+    # This one counts the values of its own evaluator, and the evaluator is
+    # its own, so a peer never adds to the count. What a peer takes away is an
+    # idle event loop.
+    #
+    # The test drops 500 children, collects, and expects the count to come
+    # back to one. Its own comment says what stands between the drop and the
+    # release: asyncio holds a handle on the most recently awaited result, and
+    # `as_dict` awaits a dict of every child. One step of the loop clears that
+    # handle when the loop has nothing else to do. Beside seven other lanes
+    # the loop always has something else to do, so the handle outlives the
+    # step and the roots stay.
+    #
+    # Seen in CI run 30916818149 at seed 5, and again in run 30920512961 at
+    # seed 4 after the entries above changed the roster.
+    "tests/nanopynix/inproc/test_inproc.py::test_a_collected_value_releases_its_nix_root": (
+        "expects one step of the event loop to drop asyncio's handle on the last awaited result. "
+        "A lane never has an idle loop, so the handle outlives the step and the roots stay."
+    ),
+    # The two below call `time.sleep` on the event loop, on purpose:
+    # `test_log_backpressure` is about what a caller who blocks their own loop
+    # pays, so the blocking call is the condition under test rather than a
+    # defect, and the module says so.
+    #
+    # The lanes share one event loop. A test that holds that loop closed for
+    # three seconds holds it closed for all seven peers, so it does not read
+    # its own behaviour under concurrency -- it dictates everybody else's.
+    # This is the same rule as the two runaway recursion entries above: a test
+    # whose method harms its peers cannot share a lane, whatever it measures.
+    "tests/nanopynix/rpc/test_log_backpressure.py::test_the_capture_says_what_the_stall_cost": (
+        "holds the shared event loop closed with `time.sleep`, which stalls every peer lane for "
+        "three seconds. Seen failing in CI run 30925089313."
+    ),
+    "tests/nanopynix/rpc/test_log_backpressure.py::test_a_client_that_stops_reading_does_not_stop_the_evaluation": (
+        "holds the shared event loop closed with `time.sleep`. See the entry above; it is the "
+        "same helper and the same three seconds."
+    ),
 }
 
 
@@ -412,6 +484,23 @@ async def run_soak(
         f"tests={sum(len(lane) for lane in lanes)} roster={result.roster_hash}"
     )
 
+    def _describe(exc: BaseException, depth: int = 0) -> str:
+        """Name the exception, and every exception inside it.
+
+        ``format_exception_only`` of an ``ExceptionGroup`` gives
+        ``ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)``
+        and stops. That names the container and not the defect, and a report
+        that says only the container cannot be read. Any test under
+        ``anyio.create_task_group`` raises through one.
+        """
+        head = "".join(traceback.format_exception_only(exc)).strip()
+        nested = getattr(exc, "exceptions", None)
+        if not nested or depth >= 3:
+            return head
+        indent = "  " * (depth + 1)
+        inner = "\n".join(f"{indent}{_describe(sub, depth + 1)}" for sub in cast("Sequence[BaseException]", nested))
+        return f"{head}\n{inner}"
+
     async def run_one(lane: int, nodeid: str) -> None:
         candidate = by_nodeid[nodeid]
         kwargs: dict[str, Any] = {candidate.factory: session_factory}
@@ -432,7 +521,7 @@ async def run_soak(
                 outcome, detail = "skip", str(exc)
             else:
                 outcome = "fail"
-                detail = "".join(traceback.format_exception_only(exc)).strip()
+                detail = _describe(exc)
         end = time.monotonic() - origin
         _emit(f"SOAK {end:9.3f} lane={lane} END   {nodeid} {outcome}")
         result.events.append(SoakEvent(nodeid, lane, start, end, outcome, detail))
