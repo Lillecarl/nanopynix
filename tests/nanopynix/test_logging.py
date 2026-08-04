@@ -608,3 +608,86 @@ async def test_bus_log_stream_discards_the_oldest_when_the_caller_falls_behind(
 
     assert len(seen) < 6, "nothing was discarded, so the buffer is not bounded"
     assert seen[-2:] == [4, 5], "the newest events are the ones that survived"
+
+
+# =========================================================================
+# The one logger of the process (issue #66)
+# =========================================================================
+#
+# `install_logger` used to put a new `PyLogger` in `nix::logger`, and
+# `remove_logger` used to put Nix's simple logger back, which freed it.
+# `nix::Activity` holds a `Logger &` and calls `logger.stopActivity(id)` when
+# it dies, and Nix's curl file-transfer thread destroys an `Activity` on its
+# own schedule -- with no way to join that thread. ThreadSanitizer named the
+# free and the read.
+#
+# So the binding installs one logger at import and never frees it, and the two
+# calls below only attach and detach a callback. The tests here pin the
+# behaviour that shape must keep. They cannot see the pointer, so each one
+# asserts on what a caller can observe.
+
+
+async def test_removing_the_logger_before_installing_one_is_accepted() -> None:
+    """A caller that closes a session it never opened must not crash.
+
+    The old shape answered this by installing a fresh simple logger, which
+    needed nothing to be there first. The new shape has one object from
+    import, so this asks that the object really does exist that early.
+    """
+    nanopynix_util.remove_logger()
+    nanopynix_util.remove_logger()
+    # Nix's own logger takes the message. Reaching this line is the assertion:
+    # a null or freed logger would take the process down instead.
+    _log_test("no callback is attached")
+
+
+async def test_the_logger_survives_a_detach_and_serves_the_next_session() -> None:
+    """Attach, detach, attach again. The second attach must work.
+
+    Two sessions in one process do exactly this, and the second one arrives
+    after the first has already told the binding it is finished.
+    """
+    first = LogCollector()
+    nanopynix_util.install_logger(first.callback)
+    _log_test("for the first")
+    nanopynix_util.remove_logger()
+    await first.aclose()
+
+    second = LogCollector()
+    nanopynix_util.install_logger(second.callback)
+    try:
+        _log_test("for the second")
+        stream = second.stream()
+        event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
+        assert event[4] == "for the second"
+    finally:
+        nanopynix_util.remove_logger()
+        await second.aclose()
+
+
+async def test_a_detached_logger_delivers_nothing_to_the_old_callback() -> None:
+    """The detach must be a real detach, and not only a swap of ownership.
+
+    A message logged between the detach and the next attach must reach neither
+    the callback that was there before nor the one that comes after.
+    """
+    old = LogCollector()
+    nanopynix_util.install_logger(old.callback)
+    nanopynix_util.remove_logger()
+    _log_test("between the two sessions")
+
+    new = LogCollector()
+    nanopynix_util.install_logger(new.callback)
+    try:
+        _log_test("after the second attach")
+        stream = new.stream()
+        event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
+        assert event[4] == "after the second attach", "the detached message arrived late"
+    finally:
+        nanopynix_util.remove_logger()
+        await new.aclose()
+
+    old.send_sentinel()
+    old_stream = old.stream()
+    assert [event[4] async for event in old_stream] == []
+    await old.aclose()

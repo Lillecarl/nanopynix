@@ -174,26 +174,88 @@ static std::atomic<int> default_verbosity{(int) nix::lvlInfo};
 static thread_local nix::Verbosity thread_verbosity =
     (nix::Verbosity) default_verbosity.load(std::memory_order_relaxed);
 
+// **One `Logger` for the life of the process, and it is never freed.**
+//
+// This class used to be installed and destroyed for each session:
+// `install_logger` put a new one in `nix::logger`, and `remove_logger` put
+// Nix's simple logger back, which freed it. ThreadSanitizer showed why that
+// cannot be right (issue #66):
+//
+//   Write of size 8 ... operator delete(void*, unsigned long)   [_ext]
+//   Previous read of size 8 ... nix::Activity::~Activity()      [curl worker]
+//       nix::curlFileTransfer::TransferItem::~TransferItem()
+//       nix::curlFileTransfer::workerThreadMain()
+//
+// `Activity` holds a `Logger &` and calls `logger.stopActivity(id)` when it
+// dies. Nix starts the curl file-transfer thread inside `curlFileTransfer`'s
+// own constructor, which `getDefaultSubstituters` reaches, and **it gives no
+// way to join that thread**. So the thread outlives the session, and a free
+// of the logger is a free of an object another thread is still reading.
+//
+// Two properties make this safe, and both are structural rather than a
+// tightened window:
+//
+// 1. `nix::logger` is written exactly once, by `nanopynix_bind_util` at module
+//    import, on the main thread, before any Nix thread exists. Every later
+//    read has a happens-before edge to that write.
+// 2. This object is a leaked singleton. `install_logger` and `remove_logger`
+//    only swap the Python callback inside it. There is no `operator delete`
+//    left for a Nix thread to race with.
+//
+// The callback itself needs no separate lock: every method that reads `_cb`
+// holds the GIL, and both swap functions take the GIL to write it. `_active`
+// is the fast path only -- a caller that reads it as true and then loses the
+// race finds `_cb` already `None` under the GIL, and drops the message the
+// same way.
 class PyLogger : public nix::Logger {
+    // GIL-guarded. `None` means no session has installed a callback, and the
+    // fallback below is what gets the message.
     nb::object _cb;
+    // The gate before the GIL. Not the authority -- `_cb` is.
+    std::atomic<bool> _active{false};
+    // Nix's own logger, kept for the life of the process. It is what
+    // `remove_logger` restores, and owning it here is what lets that
+    // restoration leave `nix::logger` alone.
+    std::unique_ptr<nix::Logger> _fallback{nix::makeSimpleLogger()};
 
 public:
-    explicit PyLogger(nb::object cb) : _cb(std::move(cb)) {}
+    PyLogger() = default;
 
-    ~PyLogger() override {
-        nb::gil_scoped_acquire gil;
+    // The one free that is left, and it is not a session's to cause: libutil
+    // constructs `nix::logger` at static-init time, so this runs at process
+    // exit and nowhere else. It drops the reference to the callback rather
+    // than releasing it, because the interpreter may already be finalized and
+    // a `Py_DECREF` there is undefined.
+    ~PyLogger() override { (void) _cb.release(); }
+
+    /// Start forwarding to `cb`. A second call replaces the first.
+    void attach(nb::object cb) {
+        // The caller already holds the GIL: it came from Python.
+        _cb = std::move(cb);
+        _active.store(true, std::memory_order_release);
+    }
+
+    /// Stop forwarding, and give the messages back to Nix's own logger.
+    void detach() {
+        _active.store(false, std::memory_order_release);
         _cb = nb::none();
     }
 
+    bool attached() const { return _active.load(std::memory_order_acquire); }
+
     void log(nix::Verbosity lvl, std::string_view s) override {
         if (lvl > thread_verbosity) return;
+        if (!attached()) { _fallback->log(lvl, s); return; }
         nb::gil_scoped_acquire gil;
+        if (_cb.is_none()) return;
         _cb(nb::int_(logger_request_id), "msg", int(lvl), std::string(s));
     }
 
     void logEI(const nix::ErrorInfo & ei) override {
         if (ei.level > thread_verbosity) return;
+        if (!attached()) { _fallback->logEI(ei); return; }
         nb::gil_scoped_acquire gil;
+        if (_cb.is_none()) return;
         _cb(nb::int_(logger_request_id), "error", int(ei.level), std::string(ei.msg.str()));
     }
 
@@ -202,7 +264,9 @@ public:
         // which we fully override rather than delegate to -- so we must
         // apply the same verbosity gate ourselves.
         if (nix::lvlWarn > thread_verbosity) return;
+        if (!attached()) { _fallback->warn(msg); return; }
         nb::gil_scoped_acquire gil;
+        if (_cb.is_none()) return;
         _cb(nb::int_(logger_request_id), "warn", msg);
     }
 
@@ -218,7 +282,9 @@ public:
         // Even Nix's own CLI renders nothing for these; there is nothing
         // here for any consumer of this callback to use either.
         if (lvl > thread_verbosity || s.empty()) return;
+        if (!attached()) { _fallback->startActivity(id, lvl, type, s, fields, parent); return; }
         nb::gil_scoped_acquire gil;
+        if (_cb.is_none()) return;
         nb::list fl;
         for (auto & f : fields) {
             if (f.type == nix::Logger::Field::tInt)
@@ -239,6 +305,10 @@ public:
         // downstream ever reads them, at any verbosity. Drop before the
         // GIL-acquiring Python callback and the RPC/protobuf/pydantic round
         // trip they'd otherwise pay for.
+        //
+        // No fallback delegation either: `nix::Logger::stopActivity` is an
+        // empty default and `SimpleLogger` does not override it, so a
+        // delegated call would do exactly this.
         (void) id;
     }
 
@@ -252,8 +322,13 @@ public:
         // here. Drop everything else before the GIL-acquiring Python
         // callback and the RPC/protobuf/pydantic round trip they'd
         // otherwise pay for.
+        //
+        // `SimpleLogger::result` does read `resBuildLogLine`, under
+        // `printBuildLogs`, so the detached path delegates rather than drops.
+        if (!attached()) { _fallback->result(id, type, fields); return; }
         if (type != nix::resBuildLogLine && type != nix::resPostBuildLogLine) return;
         nb::gil_scoped_acquire gil;
+        if (_cb.is_none()) return;
         nb::list fl;
         for (auto & f : fields) {
             if (f.type == nix::Logger::Field::tInt)
@@ -265,12 +340,23 @@ public:
     }
 };
 
+// The one `PyLogger` of the process. Leaked on purpose: see the class comment.
+// `nanopynix_bind_util` puts it in `nix::logger` at import, and nothing ever
+// takes it out again.
+static PyLogger * py_logger = nullptr;
+
+static PyLogger & require_py_logger() {
+    if (py_logger == nullptr)
+        throw std::runtime_error("the nanopynix logger is not installed; the extension module did not finish importing");
+    return *py_logger;
+}
+
 static void install_logger(nb::object cb) {
-    nanopynix::nix_compat::install_logger(std::make_unique<PyLogger>(std::move(cb)));
+    require_py_logger().attach(std::move(cb));
 }
 
 static void remove_logger() {
-    nanopynix::nix_compat::restore_simple_logger();
+    require_py_logger().detach();
 }
 
 static void set_logger_request_id(int64_t id) {
@@ -398,6 +484,16 @@ void nanopynix_bind_util(nb::module_ &m) {
     // the day Nix changes it.
     default_verbosity.store((int) nix::verbosity, std::memory_order_relaxed);
     nix::verbosity = (nix::Verbosity) parse_log_ceiling();
+
+    // The same argument, and the same one write. `nix::logger` is a plain
+    // global that a Nix thread reads on every log line, and `nix::Activity`
+    // keeps a `Logger &` past the life of the session that made it. So the
+    // pointer is written here, once, before any Nix thread exists, and the
+    // object it points at is never freed. `install_logger` and
+    // `remove_logger` swap only the callback inside it. Issue #66 gives the
+    // ThreadSanitizer report that this shape answers.
+    py_logger = new PyLogger();
+    nanopynix::nix_compat::install_logger(std::unique_ptr<nix::Logger>(py_logger));
 
     m.def("init_libstore", &nix::initLibStore, nb::call_guard<nb::gil_scoped_release>(),
           "load_config"_a = true,
