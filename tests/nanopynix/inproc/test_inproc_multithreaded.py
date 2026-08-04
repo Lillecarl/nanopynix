@@ -530,12 +530,21 @@ async def test_inproc_parallel_batch_builds_use_multiple_store_workers(
                 store_path_recorder.add(paths_to_delete)
 
 
+# This carried `nix_known_issue(exclude=("2.34", "2.35"), sanitizer="tsan",
+# reason="nix::LocalStore crashes under TSAN in released Nix; fixed on Nix
+# master")`, and the marker did the opposite of what it says. A two-part
+# exclusion never matched a three-part version, so 2.34.8 and 2.35.0 ran it;
+# a Nix built from git reports `2.35pre...`, which parses to exactly two
+# parts, so `"2.35"` matched and the *fixed* build was the one that skipped.
+# `_version_in_exclusions` in tests/support/nix_runtime.py is corrected now.
+#
+# **The marker is gone rather than corrected, because the runs it was hiding
+# say it is obsolete.** With it in place the test ran under TSAN on 2.34 and
+# 2.35 and passed, in runs 30930842932 and 30934106841. A corrected marker
+# would skip all three builds and take the only TSAN coverage of this
+# workload with it. If the crash comes back, the evidence will be a red job
+# and a fresh scope, not this comment.
 @pytest.mark.anyio
-@pytest.mark.nix_known_issue(
-    exclude=("2.34", "2.35"),
-    sanitizer="tsan",
-    reason="nix::LocalStore crashes under TSAN in released Nix; fixed on Nix master",
-)
 async def test_inproc_mixed_evaluation_build_and_store_workloads(
     store_path_recorder: StorePathRecorder,
 ) -> None:

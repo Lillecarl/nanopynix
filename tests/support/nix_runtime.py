@@ -167,7 +167,10 @@ def pytest_configure(config: pytest.Config) -> None:
         "nix_version(minimum=None, maximum=None, exclude=()): require a linked Nix version range",
         "nix_capability(name): require a compiled nanopynix/Nix capability",
         "nix_sanitizer(name): run only under the named sanitizer",
-        "nix_known_issue(exclude=(), sanitizer=None, reason=''): skip an explicitly bounded upstream defect",
+        (
+            "nix_known_issue(exclude=(), sanitizer=None, reason=''): skip an explicitly bounded "
+            "upstream defect. Give `exclude`, or `sanitizer`, or both"
+        ),
         "evaluator_in_process: builds a Nix evaluator in the pytest process, without a fixture",
         "live_gc: test performs destructive garbage collection",
         "concurrency: test intentionally overlaps worker, executor, session, or log operations",
@@ -195,13 +198,58 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
 
 def _version_in_exclusions(version: NixVersion, values: Iterable[object]) -> str | None:
+    """Match an exclusion against a version, at the precision of the exclusion.
+
+    `"2.34"` means the 2.34 series, so it matches 2.34.8. `"2.34.8"` means
+    that release alone. Compare the leading parts, and no more.
+
+    **This used to compare `padded()` on both sides, and `padded` only ever
+    adds parts.** So `"2.34"` gave `(2, 34)` against a version of `(2, 34, 8)`
+    and never matched, while a Nix built from git reports `2.35pre2026...`,
+    which parses to exactly `(2, 35)` and did match `"2.35"`. Every exclusion
+    written as two parts therefore did the opposite of what it says: it spared
+    the git build and skipped nothing else. See the marker on
+    `test_inproc_mixed_evaluation_build_and_store_workloads`, which named
+    2.34 and 2.35 and ran on both.
+    """
     for value in values:
         if not isinstance(value, str):
             raise pytest.UsageError("nix_version exclude entries must be version strings")
         excluded = NixVersion.parse(value)
-        if version.padded(len(excluded.parts)) == excluded.padded(len(excluded.parts)):
+        width = len(excluded.parts)
+        if version.padded(width)[:width] == excluded.parts:
             return value
     return None
+
+
+def known_issue_skip_reason(
+    *,
+    version: NixVersion,
+    sanitizer: str | None,
+    exclude: tuple[object, ...] | list[object],
+    issue_sanitizer: str | None,
+    reason: str,
+) -> str | None:
+    """The skip reason for a `nix_known_issue` marker, or None to run it.
+
+    A pure function, so `tests/meta/test_known_issue_marker.py` can check the
+    decision without driving a pytest collection. The hook below is the only
+    caller, and it does the argument validation that pytest reports as a
+    usage error.
+
+    `exclude` bounds a defect by Nix version, and `issue_sanitizer` bounds it
+    by build. Either alone is a bound. Both together mean the defect needs the
+    two to meet, which is the narrowest claim and the one to prefer.
+    """
+    excluded = _version_in_exclusions(version, exclude)
+    version_matches = excluded is not None if exclude else True
+    sanitizer_matches = issue_sanitizer is None or issue_sanitizer == sanitizer
+    if not (version_matches and sanitizer_matches):
+        return None
+    where = [] if excluded is None else [f"Nix {excluded}"]
+    if issue_sanitizer is not None:
+        where.append(f"under {issue_sanitizer}")
+    return f"{reason}; {' '.join(where)}"
 
 
 # `tryfirst`, and not by accident. This hook adds `pytest.mark.forked` to a
@@ -289,13 +337,20 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
                 raise pytest.UsageError("nix_known_issue sanitizer must be a string or None")
             if not isinstance(excluded_versions, (tuple, list)):
                 raise pytest.UsageError("nix_known_issue exclude must be a tuple or list")
-            excluded = _version_in_exclusions(
-                runtime.version,
-                cast("tuple[object, ...] | list[object]", excluded_versions),
+            # A defect has to be bounded by something. A marker that names
+            # neither a version nor a sanitizer skips the test everywhere, and
+            # that is a deletion written as a mark.
+            if not excluded_versions and issue_sanitizer is None:
+                raise pytest.UsageError("nix_known_issue requires exclude, or sanitizer, or both")
+            skip_reason = known_issue_skip_reason(
+                version=runtime.version,
+                sanitizer=sanitizer,
+                exclude=cast("tuple[object, ...] | list[object]", excluded_versions),
+                issue_sanitizer=issue_sanitizer,
+                reason=reason,
             )
-            if excluded is not None and (issue_sanitizer is None or issue_sanitizer == sanitizer):
-                scope = f" under {issue_sanitizer}" if issue_sanitizer is not None else ""
-                item.add_marker(pytest.mark.skip(reason=f"{reason}; Nix {excluded}{scope}"))
+            if skip_reason is not None:
+                item.add_marker(pytest.mark.skip(reason=skip_reason))
 
 
 @pytest.fixture(scope="session")
