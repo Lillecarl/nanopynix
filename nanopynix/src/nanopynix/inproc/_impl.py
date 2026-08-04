@@ -179,16 +179,25 @@ def _print_store_paths(
     return [_print_store_path(raw_store, path) for path in raw_paths]
 
 
-def _run_with_log_context[T](operation_id: int, func: Callable[..., T], args: tuple[object, ...]) -> T:
+def _run_with_log_context[T](operation_id: int, verbosity: int, func: Callable[..., T], args: tuple[object, ...]) -> T:
     """Run one Nix call on the Nix thread, in this operation's log context.
 
     This is the single chokepoint through which every in-process Nix call
     passes, so it is also where boundary A is translated: the raw nanobind
     exception is replaced by its ``nanopynix.exceptions`` equivalent, giving
     inproc callers the same exception types the rpc engine raises.
+
+    The verbosity travels with the operation for the same reason the request
+    id does. Nix logs on the thread that produced the message, and the
+    bindings hold the level in a thread-local, so a level set on one Nix
+    thread means nothing on the next one. The session owns the level; this
+    function applies it to whichever thread the pool gave this operation, and
+    restores what was there before.
     """
-    previous = nanopynix_util.get_logger_request_id()
+    previous_id = nanopynix_util.get_logger_request_id()
+    previous_verbosity = nanopynix_util.get_verbosity()
     nanopynix_util.set_logger_request_id(operation_id)
+    nanopynix_util.set_verbosity(verbosity)
     try:
         return func(*args)
     except Exception as exc:
@@ -197,7 +206,8 @@ def _run_with_log_context[T](operation_id: int, func: Callable[..., T], args: tu
             raise
         raise translated from exc
     finally:
-        nanopynix_util.set_logger_request_id(previous)
+        nanopynix_util.set_logger_request_id(previous_id)
+        nanopynix_util.set_verbosity(previous_verbosity)
 
 
 class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
@@ -235,6 +245,13 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         self._load_config = load_config
         self._settings = normalize_nix_settings(settings).with_experimental_features(list(experimental_features or []))
         self._verbosity = normalize_log_level(verbosity) if verbosity is not None else None
+        # The live level, which the session owns because the bindings hold it
+        # per thread and a Nix thread only learns it from the dispatch wrapper.
+        # `_verbosity` beside it stays what the caller asked for at
+        # construction: it identifies the session to the process guard, and
+        # `None` there means "leave Nix's own default alone". `open` resolves
+        # this one.
+        self._level = LogLevel.INFO
         self._nix_path = normalize_nix_path(nix_path)
         self._primops = to_primop_specs(primops)
         # One scope for each door Nix opens -- see the same block in
@@ -290,6 +307,12 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
             nanopynix_util.install_logger(self._collector.callback)
             logger_installed = True
             await executor.run(self._init_nix)
+            # Take the level now that `_init_nix` has published it. A session
+            # that named no verbosity gets Nix's own compiled-in level, which
+            # is what `get_default_verbosity` reports before anything sets it.
+            self._level = (
+                self._verbosity if self._verbosity is not None else LogLevel(nanopynix_util.get_default_verbosity())
+            )
             _process_guard.mark_initialized(signature)
             self._opened = True
             self._log_task = asyncio.create_task(self._forward_logs())
@@ -471,7 +494,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
             raise RuntimeError("open inproc Session has no Nix executor")
         operation_id = self._next_operation_id()
         try:
-            return await executor.run(_run_with_log_context, operation_id, func, args)
+            return await executor.run(_run_with_log_context, operation_id, int(self._level), func, args)
         finally:
             self._collector.request_finalized(operation_id)
 
@@ -481,7 +504,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
             raise RuntimeError("open inproc Session has no Nix executor")
         operation_id = self._next_operation_id()
         try:
-            return await executor.run_closing(_run_with_log_context, operation_id, func, args)
+            return await executor.run_closing(_run_with_log_context, operation_id, int(self._level), func, args)
         finally:
             self._collector.request_finalized(operation_id)
 
@@ -600,12 +623,28 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         ``.name`` starts working. Callers written against rpc used ``.name``
         already; ``pynix``'s ``:verbosity`` command is one, and it would have
         raised ``AttributeError`` the moment it was pointed at inproc.
+
+        Read from a Nix thread, and not from the session's own record of the
+        level. The bindings hold the verbosity per thread, so what a Nix
+        thread reports is what Nix would actually filter this session's
+        messages at. The two agree while the dispatch wrapper carries the
+        level, and this door is where a caller would find out that they do
+        not.
         """
         return LogLevel(await self.run(self._runtime.get_verbosity))
 
     async def set_verbosity(self, verbosity: LogLevelInput) -> LogLevel:
+        """Set the verbosity of every operation this session runs from now on.
+
+        The session takes the level first, so the next operation carries it.
+        The dispatched call then publishes the same level to the threads Nix
+        starts for itself, which no operation of this session ever reaches.
+        """
+        self._check_open()
         level = normalize_log_level(verbosity)
-        return LogLevel(await self.run(self._runtime.set_verbosity, int(level)))
+        self._level = level
+        await self.run(self._runtime.set_verbosity, int(level))
+        return level
 
     async def settings(self, *, overridden_only: bool = False) -> dict[str, str]:
         """Return this session's effective Nix settings.
@@ -1175,14 +1214,24 @@ class EvalSession(AsyncEvalSession["Value"]):
         """Run evaluator and Value work on this evaluator's dedicated thread."""
         operation_id = self._session._next_operation_id()  # type: ignore[reportPrivateUsage] -- Session owns operation correlation  # noqa: SLF001
         try:
-            return await self._executor.run(_run_with_log_context, operation_id, func, args)
+            return await self._executor.run(_run_with_log_context, operation_id, self._level, func, args)
         finally:
             self._session._collector.request_finalized(operation_id)  # type: ignore[reportPrivateUsage] -- Session owns the log collector  # noqa: SLF001
+
+    @property
+    def _level(self) -> int:
+        """The level this evaluator's operations log at.
+
+        The session's, because verbosity is one setting with two doors — see
+        :meth:`get_verbosity`. Reading it here rather than holding a copy is
+        what keeps a write through either door visible from the other.
+        """
+        return int(self._session._level)  # type: ignore[reportPrivateUsage] -- Session owns the verbosity  # noqa: SLF001
 
     async def _run_closing[T](self, func: Callable[..., T], *args: object) -> T:
         operation_id = self._session._next_operation_id()  # type: ignore[reportPrivateUsage] -- Session owns operation correlation  # noqa: SLF001
         try:
-            return await self._executor.run_closing(_run_with_log_context, operation_id, func, args)
+            return await self._executor.run_closing(_run_with_log_context, operation_id, self._level, func, args)
         finally:
             self._session._collector.request_finalized(operation_id)  # type: ignore[reportPrivateUsage] -- Session owns the log collector  # noqa: SLF001
 

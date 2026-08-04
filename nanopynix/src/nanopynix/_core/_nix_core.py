@@ -70,6 +70,12 @@ class NixCore:
         applied = dict(nanopynix_util.list_settings(overridden_only=True))
 
         if verbosity is not None:
+            # The default, and not this thread's level: the caller configured
+            # the session, and every Nix thread the session starts must see it.
+            # The dispatch wrapper carries the level onto each Nix thread that
+            # runs an operation, and this covers the threads Nix starts for
+            # itself, which never pass through that wrapper.
+            nanopynix_util.set_default_verbosity(verbosity)
             nanopynix_util.set_verbosity(verbosity)
         nanopynix_expr.init_libexpr()
         return SettingsProvenance(from_config=from_config, applied=applied)
@@ -128,8 +134,27 @@ class NixCore:
         )
 
     def get_verbosity(self) -> int:
+        """Return the Nix log verbosity of the calling thread.
+
+        The bindings hold the level per thread, because Nix logs on the thread
+        that produced the message and the process-wide global it used to read
+        is not safe to write while other threads read it. A caller that runs
+        this through a session's executor therefore reads the level that the
+        session's dispatch wrapper set for this operation.
+        """
         return nanopynix_util.get_verbosity()
 
     def set_verbosity(self, verbosity: int) -> int:
+        """Set the level for the calling thread and for every new Nix thread.
+
+        Both, because this is the door a caller uses to change the verbosity
+        of a whole session. The session holds the level of its own operations,
+        so this call is what reaches the threads Nix starts for itself.
+        """
+        nanopynix_util.set_default_verbosity(verbosity)
         nanopynix_util.set_verbosity(verbosity)
         return nanopynix_util.get_verbosity()
+
+    def get_default_verbosity(self) -> int:
+        """Return the level that a new Nix thread starts at."""
+        return nanopynix_util.get_default_verbosity()

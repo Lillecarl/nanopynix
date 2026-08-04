@@ -22,8 +22,13 @@
 #include "nix_error_info.hh"
 #include "nix_compat.hh"
 
+#include <atomic>
+#include <cctype>
+#include <cstdlib>
 #include <limits>
+#include <map>
 #include <memory>
+#include <string>
 #include <nlohmann/json.hpp>
 
 namespace nb = nanobind;
@@ -87,6 +92,88 @@ static void enable_experimental_feature(const std::string &name) {
 // therefore thread-local operation context, not mutable global logger state.
 static thread_local int64_t logger_request_id = 0;
 
+// The same argument applies to the verbosity, and here it is a correctness
+// argument rather than a design preference.
+//
+// `nix::verbosity` (logging.hh) is a plain non-atomic global. Every `debug()`
+// and `printInfo()` call site reads it on its own thread, through the
+// `printMsg` macro, while a caller that changes the level writes it from
+// whichever Nix thread serves that call. ThreadSanitizer reports the race,
+// and the race is real: the type gives no atomicity, and patching a public
+// Nix header that hundreds of call sites read is not an option.
+//
+// So the global stops being a variable. `nanopynix_bind_util` writes it once,
+// at import, and pins it wide open. The filter moves here, to a thread-local
+// that only its own thread reads and writes. A caller therefore gets a level
+// per operation, and no thread can observe another thread's write.
+//
+// The price is that Nix's own `printMsg` gate stops rejecting a message
+// before it costs anything, so every call site at or under the ceiling
+// formats its message before `PyLogger` drops it.
+//
+// **The ceiling is `chatty`, and that is a measured choice.** Two workloads
+// disagree about the price, and the second one is why the ceiling is not
+// `vomit`.
+//
+// Evaluation and store work pay nothing. Five rounds for each cell, median
+// wall clock, and every run repeated to show the noise:
+//
+//   through the daemon, and the evaluator in this process
+//   ceiling  eval fold   2000 query_path_info   200-root closure walk
+//   vomit    0.043 s     0.542 s                0.919 s
+//   chatty   0.044 s     0.560 s                0.911 s
+//   error    0.043 s     0.565 s                0.938 s
+//
+//   LocalStore in this process, which is where the 139 libstore `debug()`
+//   sites are, so it is the cell that had to be filled separately
+//   ceiling  300 query_path_info   300 is_valid_path
+//   vomit    0.078 / 0.073 s       0.069 / 0.067 s
+//   chatty   0.070 / 0.085 s       0.061 / 0.067 s
+//   error    0.089 / 0.078 s       0.081 / 0.071 s
+//
+// Flake work does not. `pynix flake show` of a git flake, on Nix 2.31,
+// through the rpc engine with a cold fetch cache and the 30 second deadline
+// that CI gives an rpc call:
+//
+//   ceiling  outcome of the five tests
+//   error    5 passed
+//   chatty   5 passed
+//   debug    5 failed, each on DEADLINE_EXCEEDED in `eval_flake`
+//   vomit    5 failed, the same way
+//
+// A flake evaluation fetches, and the fetch path logs far more than a store
+// query does. `debug` fails exactly as `vomit` does, because `printMsg`
+// compares `lvl <= nix::verbosity`: a ceiling of `debug` already admits all
+// 208 `debug` sites, and the 5 `vomit` sites above them add nothing. So the
+// cliff is between `chatty` and `debug`, and `chatty` is the highest ceiling
+// that costs nothing.
+//
+// Two facts explain why the levels at or under `chatty` are free. The
+// high-volume path never had a gate: `Activity::Activity`
+// (libutil/logging.cc) calls `startActivity` unconditionally, and the free
+// function `warn()` calls `logger->warn` unconditionally. And libexpr, which
+// is the evaluation hot loop, holds 19 `printMsg` sites in the whole of Nix
+// 2.34, against 208 `debug` sites across the tree.
+//
+// **What the ceiling costs a caller.** `set_verbosity(DEBUG)` is accepted and
+// changes what this thread would print, but Nix drops a `debug` message
+// before the filter ever sees it, so no `debug` message arrives. Read the
+// ceiling with `get_log_ceiling` to learn this, and raise it with
+// `NANOPYNIX_LOG_CEILING` at import when a workload wants `debug` more than
+// it wants the fetch path to be fast.
+
+// The level a thread starts at. Nix starts threads of its own -- a
+// substituter, a build hook reader -- and those never pass through the
+// dispatch wrapper that sets the thread-local below, so they need a default.
+// An atomic, because `set_default_verbosity` publishes to it from a Nix
+// thread while another thread's thread-local initializer reads it.
+static std::atomic<int> default_verbosity{(int) nix::lvlInfo};
+
+// The level this thread filters at. The initializer runs once per thread, on
+// the thread's first log call or first `set_verbosity`.
+static thread_local nix::Verbosity thread_verbosity =
+    (nix::Verbosity) default_verbosity.load(std::memory_order_relaxed);
+
 class PyLogger : public nix::Logger {
     nb::object _cb;
 
@@ -99,13 +186,13 @@ public:
     }
 
     void log(nix::Verbosity lvl, std::string_view s) override {
-        if (lvl > nix::verbosity) return;
+        if (lvl > thread_verbosity) return;
         nb::gil_scoped_acquire gil;
         _cb(nb::int_(logger_request_id), "msg", int(lvl), std::string(s));
     }
 
     void logEI(const nix::ErrorInfo & ei) override {
-        if (ei.level > nix::verbosity) return;
+        if (ei.level > thread_verbosity) return;
         nb::gil_scoped_acquire gil;
         _cb(nb::int_(logger_request_id), "error", int(ei.level), std::string(ei.msg.str()));
     }
@@ -114,7 +201,7 @@ public:
         // Matches nix::Logger::warn's own default impl (log(lvlWarn, ...)),
         // which we fully override rather than delegate to -- so we must
         // apply the same verbosity gate ourselves.
-        if (nix::lvlWarn > nix::verbosity) return;
+        if (nix::lvlWarn > thread_verbosity) return;
         nb::gil_scoped_acquire gil;
         _cb(nb::int_(logger_request_id), "warn", msg);
     }
@@ -130,7 +217,7 @@ public:
         // empty message and no fields, one per derivation/path processed.
         // Even Nix's own CLI renders nothing for these; there is nothing
         // here for any consumer of this callback to use either.
-        if (lvl > nix::verbosity || s.empty()) return;
+        if (lvl > thread_verbosity || s.empty()) return;
         nb::gil_scoped_acquire gil;
         nb::list fl;
         for (auto & f : fields) {
@@ -235,15 +322,82 @@ static nb::dict build_info() {
 }
 
 static void set_verbosity(int lvl) {
-    nix::verbosity = (nix::Verbosity) lvl;
+    thread_verbosity = (nix::Verbosity) lvl;
 }
 
 static int get_verbosity() {
+    return (int) thread_verbosity;
+}
+
+// The level a Nix thread starts at. A caller reads this to learn Nix's own
+// compiled-in level, which is what an unconfigured session reports.
+static int get_default_verbosity() {
+    return default_verbosity.load(std::memory_order_relaxed);
+}
+
+// Deliberately separate from `set_verbosity`. A caller that runs one
+// operation at one level saves the thread level, sets it, and restores it,
+// and that restore must not undo a session-wide change that happened while
+// the operation ran. So the two levels move independently.
+static void set_default_verbosity(int lvl) {
+    default_verbosity.store(lvl, std::memory_order_relaxed);
+}
+
+// The pinned level that Nix's own `printMsg` gate compares against. A caller
+// that asks why a workload is slow, or why a message it expected never
+// reached the filter, reads this.
+static int get_log_ceiling() {
     return (int) nix::verbosity;
+}
+
+// The default ceiling. `chatty` is the highest level that costs nothing --
+// read the measurement at the top of this file, which shows `debug` losing
+// the flake tests to a deadline and `chatty` keeping them.
+static const nix::Verbosity default_log_ceiling = nix::lvlChatty;
+
+// Read `NANOPYNIX_LOG_CEILING` once, at import. A name, as `LogLevel` accepts
+// ("debug"), or a number. An unusable value keeps the default rather than
+// failing the import: a mistyped environment variable must not stop the
+// library from loading, and `get_log_ceiling()` reports what took effect.
+static int parse_log_ceiling() {
+    const char *raw = std::getenv("NANOPYNIX_LOG_CEILING");
+    if (raw == nullptr || *raw == '\0') return (int) default_log_ceiling;
+
+    static const std::map<std::string, nix::Verbosity> names = {
+        {"error", nix::lvlError},         {"warn", nix::lvlWarn},
+        {"notice", nix::lvlNotice},       {"info", nix::lvlInfo},
+        {"talkative", nix::lvlTalkative}, {"chatty", nix::lvlChatty},
+        {"debug", nix::lvlDebug},         {"vomit", nix::lvlVomit},
+    };
+    std::string key(raw);
+    for (auto &c : key) c = (char) std::tolower((unsigned char) c);
+    auto it = names.find(key);
+    if (it != names.end()) return (int) it->second;
+
+    try {
+        int lvl = std::stoi(key);
+        if (lvl >= (int) nix::lvlError && lvl <= (int) nix::lvlVomit) return lvl;
+    } catch (const std::exception &) {
+        // Not a number either. Fall through to the default below.
+    }
+    return (int) default_log_ceiling;
 }
 
 void nanopynix_bind_util(nb::module_ &m) {
     m.doc() = "nanopynix: Nix util bindings (settings, init)";
+
+    // Pin the global, here and nowhere else. This runs on the import thread,
+    // before the process holds an executor or any other Nix thread, so thread
+    // creation gives every later read a happens-before edge to this write.
+    // That property is what removes the race, and a second write anywhere
+    // would give it back. Read `thread_verbosity` above for the whole
+    // argument.
+    //
+    // Capture Nix's compiled-in level first: it is what an unconfigured
+    // session reports, and hardcoding a constant here would make that a lie
+    // the day Nix changes it.
+    default_verbosity.store((int) nix::verbosity, std::memory_order_relaxed);
+    nix::verbosity = (nix::Verbosity) parse_log_ceiling();
 
     m.def("init_libstore", &nix::initLibStore, nb::call_guard<nb::gil_scoped_release>(),
           "load_config"_a = true,
@@ -287,10 +441,33 @@ void nanopynix_bind_util(nb::module_ &m) {
     m.def("_log_test", &_log_test, "msg"_a,
           "(Internal) Emit a test log message directly via nix::logger->log().");
     m.def("set_verbosity", &set_verbosity, "level"_a,
-          "Set Nix log verbosity. 0=Error, 1=Warn, 2=Notice, 3=Info (default), "
-          "4=Talkative, 5=Chatty, 6=Debug, 7=Vomit.");
+          "Set the Nix log verbosity of the calling thread.\n\n"
+          "0=Error, 1=Warn, 2=Notice, 3=Info (default), 4=Talkative, 5=Chatty, "
+          "6=Debug, 7=Vomit.\n\n"
+          "The level is thread-local, because Nix invokes the logger on the "
+          "thread that produced the message. A caller that wants one level for "
+          "one operation sets it on the thread that runs that operation, and "
+          "restores it afterwards.");
     m.def("get_verbosity", &get_verbosity,
-          "Get the current Nix log verbosity level.");
+          "Get the Nix log verbosity of the calling thread.");
+    m.def("get_default_verbosity", &get_default_verbosity,
+          "Return the level that a new Nix thread starts at.\n\n"
+          "Before anything calls set_default_verbosity this is Nix's own "
+          "compiled-in level, which is what an unconfigured session reports. "
+          "Threads that Nix starts for itself, such as a substituter, log at "
+          "this level.");
+    m.def("set_default_verbosity", &set_default_verbosity, "level"_a,
+          "Set the level that a new Nix thread starts at.\n\n"
+          "Separate from set_verbosity, so that restoring one thread's level "
+          "after an operation cannot undo a change meant for the whole "
+          "process.");
+    m.def("get_log_ceiling", &get_log_ceiling,
+          "Return the level that Nix itself filters at.\n\n"
+          "This is pinned at import and never changes. Nix therefore hands "
+          "every message up to this level to the logger, and the logger drops "
+          "what the calling thread did not ask for. NANOPYNIX_LOG_CEILING "
+          "lowers the pin, which makes Nix drop the message earlier and saves "
+          "the cost of formatting it.");
 
     // ── Terminal utilities (no init required) ───────────────────
     //
