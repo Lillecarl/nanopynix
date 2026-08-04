@@ -31,6 +31,10 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from pathlib import Path
 
+    # pytest exports `param` but not the type it returns, so the annotation of
+    # `_params` below has to name the private module.
+    from _pytest.mark.structures import ParameterSet
+
     from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
 
 
@@ -173,6 +177,15 @@ class Case:
     name: str
     expression: str
     operation: Callable[[Any], Awaitable[Any]]
+    # Marks for this case alone. The matrix is one test for each entry, so a
+    # case that a build cannot run needs its own gate rather than a gate on
+    # the whole matrix.
+    marks: tuple[pytest.MarkDecorator, ...] = ()
+
+
+def _params(cases: list[Case]) -> list[ParameterSet]:
+    """Give each case its name as an id, and its own marks."""
+    return [pytest.param(case, id=case.name, marks=case.marks) for case in cases]
 
 
 SUCCESS_CASES: list[Case] = [
@@ -247,7 +260,20 @@ FAILURE_CASES: list[Case] = [
     Case("parse_error", "let in in", lambda v: v.to_python()),
     Case("missing_attr_in_nix", "{ a = 1; }.nonexistent", lambda v: v.to_python()),
     Case("infinite_recursion", "let x = x; in x", lambda v: v.to_python()),
-    Case("runaway_recursion", "let f = n: f (n + 1); in f 0", lambda v: v.to_python()),
+    # ASAN fails a CHECK of its own while this one unwinds; see #71 and the
+    # sweep recorded beside RUNAWAY_RECURSION in
+    # tests/nanopynix/test_scalar_accessor_semantics.py.
+    Case(
+        "runaway_recursion",
+        "let f = n: f (n + 1); in f 0",
+        lambda v: v.to_python(),
+        marks=(
+            pytest.mark.nix_known_issue(
+                sanitizer="asan",
+                reason="ASAN fails a CHECK of its own while unwinding max-call-depth (#71)",
+            ),
+        ),
+    ),
     # The absence pair, forced: both must be Nix errors *and* Python ones,
     # identically on both engines. Their unforced halves live in SUCCESS_CASES
     # and assert the opposite -- that neither engine raises before forcing.
@@ -305,7 +331,7 @@ async def _run(factory: Any, case: Case) -> Outcome:
             return ("raise", type(exc).__name__)
 
 
-@pytest.mark.parametrize("case", SUCCESS_CASES, ids=lambda case: case.name)
+@pytest.mark.parametrize("case", _params(SUCCESS_CASES))
 async def test_engines_agree_on_success(
     case: Case,
     inproc_session: InprocSessionFactory,
@@ -330,7 +356,7 @@ async def test_engines_agree_on_success(
     assert inproc_outcome == rpc_outcome
 
 
-@pytest.mark.parametrize("case", FAILURE_CASES, ids=lambda case: case.name)
+@pytest.mark.parametrize("case", _params(FAILURE_CASES))
 async def test_engines_agree_on_failure(
     case: Case,
     inproc_session: InprocSessionFactory,
