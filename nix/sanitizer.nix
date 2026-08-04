@@ -73,12 +73,64 @@ let
   #
   # `-fno-sanitize=vptr` has to follow `-fsanitize=undefined`, so it goes last
   # rather than beside it.
+
+  # **The two boost defines tell ASAN that Nix switches stacks.** Nix dumps a
+  # path on a coroutine, and ASAN knows nothing about the stack that coroutine
+  # runs on. It then reads the bounds of the *thread* stack, subtracts, and
+  # gets a negative size:
+  #
+  #   WARNING: ASan is ignoring requested __asan_handle_no_return:
+  #     stack type: default top: 0x7ba812bd4f00; bottom 0x7fa828da3000;
+  #     size: 0xfffffbffe9e31f00 (-4398417502464)
+  #   False positive error reports may follow
+  #
+  # It then writes across that range, in `PlatformUnpoisonStacks`, and reports
+  # its own write as a `stack-buffer-overflow` in `archive.cc`. Every frame of
+  # the report belongs to `libasan.so`, and the address is a wild pointer. See
+  # issue #60, which carries the measurement.
+  #
+  # ASAN supplies `__sanitizer_start_switch_fiber` and
+  # `__sanitizer_finish_switch_fiber` for this, and boost calls both under
+  # `BOOST_USE_ASAN`. **It calls them in one implementation only.**
+  # `boost/context/fiber_ucontext.hpp` has 14 such sites and
+  # `boost/context/fiber_fcontext.hpp` has none, and `boost/context/fiber.hpp`
+  # picks `fcontext` unless `BOOST_USE_UCONTEXT` says otherwise. So both
+  # defines are necessary, and neither is sufficient alone.
+  #
+  # The route is `src/libutil/serialise.cc` -> `boost/coroutine2/coroutine.hpp`
+  # -> `pull_control_block_cc.ipp` -> `boost/context/fiber.hpp`. Two files of
+  # Nix include boost this way, `serialise.cc` and `src/libexpr/eval-gc.cc`,
+  # and both are meson components, so the flags below reach both. That matters:
+  # the two implementations give `boost::context::fiber` a different layout, so
+  # a build that used each in a different file would break the one-definition
+  # rule. No header of Nix includes boost this way, so nanopynix-bindings needs
+  # nothing.
+  #
+  # **The defines alone do not link, and `sanitizeBoost` below is the other
+  # half.** `fiber_activation_record::current()` is `BOOST_CONTEXT_DECL`, so it
+  # lives in the compiled library. nixpkgs builds boost.context with the
+  # `fcontext` backend, and its `libboost_context.so` exports eight symbols:
+  # five of `stack_traits`, and `jump_fcontext`, `make_fcontext` and
+  # `ontop_fcontext`. None of `ucontext`. The first build with these defines
+  # failed with ten undefined references to `current()`, and nothing else.
+  #
+  # `ucontext` costs a `sigprocmask` system call for each switch, which
+  # `fcontext` does not make. Only this variant pays it.
+  boostFiberFlags = [
+    "-DBOOST_USE_UCONTEXT"
+    "-DBOOST_USE_ASAN"
+  ];
+
   sanitizerFlags = [
     "-fsanitize=${name}"
     "-fno-omit-frame-pointer"
     "-g"
   ]
-  ++ lib.optional isUndefined "-fno-sanitize=vptr";
+  ++ lib.optional isUndefined "-fno-sanitize=vptr"
+  # Last, and only for this variant. The order rule above is about a rebuild of
+  # the whole instrumented closure, and an append that reaches one variant
+  # leaves the string of the other two byte-identical.
+  ++ lib.optionals isAddress boostFiberFlags;
   sanitizerFlagsStr = toString sanitizerFlags;
 
   # The value for meson's own `b_sanitize` option, or null to leave the option
@@ -270,6 +322,42 @@ in
         doInstallCheck = false;
       }
     );
+
+  # Whether the nix components need a boost with the `ucontext` backend.
+  # `boostFiberFlags` above holds the whole reason, and issue #60 holds the
+  # measurement.
+  needsUcontextBoost = isAddress;
+
+  # boost is a plain buildInput of nix-util, nix-store and nix-expr, and all
+  # three resolve it to `pkgs.boost`: this nixpkgs has no `boost` in the
+  # `nixDependencies` scope, unlike `boehmgc` below.
+  #
+  # **All three take the same one, and that is not tidiness.** `BOOST_USE_ASAN`
+  # adds three members to `fiber_activation_record`, and `BOOST_USE_UCONTEXT`
+  # picks a different definition of it. A build where one library saw one
+  # layout and another library saw the other breaks the one-definition rule,
+  # and the two libraries share a process. `boostFiberFlags` above reaches
+  # every meson component for the same reason.
+  #
+  # `define=BOOST_USE_ASAN` therefore goes to boost's own build as well. The
+  # library compiles `fiber_activation_record_initializer`, which constructs
+  # the struct, so the size has to agree with what the header gave nix.
+  #
+  # `linkflags=-fsanitize=address` links the ASAN runtime into
+  # `libboost_context.so`, which the `__sanitizer_start_switch_fiber` and
+  # `__sanitizer_finish_switch_fiber` calls of that header need. There is no
+  # matching `cxxflags`, and the asymmetry is the point: boost gets the runtime
+  # and not the instrumentation. `instrumentDependencies` above gives the
+  # reason a report from third-party code is worth nothing here.
+  sanitizeBoost =
+    boost:
+    boost.override {
+      extraB2Args = [
+        "context-impl=ucontext"
+        "define=BOOST_USE_ASAN"
+        "linkflags=-fsanitize=address"
+      ];
+    };
 
   # boehmgc is a plain buildInput of nix-expr (pkgs.boehmgc, resolved by
   # nixpkgs' own libexpr/package.nix callPackage, same as sqlite above), not

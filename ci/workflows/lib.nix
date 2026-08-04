@@ -125,8 +125,12 @@ let
     # the only thing that makes it cold.
     tsanBuild = 45;
     ubsanBuild = 60;
-    # The ASAN build instruments the same closure as the UBSan one, so it
-    # takes the same cap until this job has produced a number of its own.
+    # The ASAN build has two numbers now, and they answer a question this
+    # comment used to guess at: 26 minutes cold in run 30860160011, and 25
+    # minutes in run 30883251498, which builds boost as well. `sanitizeBoost`
+    # in nix/sanitizer.nix gives the reason that variant needs its own boost,
+    # and the second number says that boost costs nothing next to the nix
+    # closure. The cap stays at the UBSan one.
     # There is no `nogcBuild`: `-Dgc=disabled` rebuilds nix-expr, nix-flake
     # and the bindings and nothing else -- measured, three derivations -- so
     # that job takes the plain `build` cap.
@@ -136,10 +140,13 @@ let
     # the same cap, and it measured 12 minutes locally: a fork for each
     # in-process test costs about half again as much as one process.
     suite = 30;
-    # The same suite under ASAN. Generous rather than measured, because this
-    # job has never run: ASAN keeps shadow memory for every allocation, and
-    # UBSan keeps none, so the UBSan number is a floor and not an estimate.
-    # Bring it down to a measurement once this job has one.
+    # The same suite under ASAN. **This cap is not enough, and the number is
+    # measured now: 686 tests in 43 minutes, and then the cap.** Runs
+    # 30860160011 and 30883251498 both stopped here, at about a third of the
+    # suite. Raising the cap alone is the wrong correction, because 17 of the
+    # tests it reaches fail on a 2.0 second interrupt deadline that an
+    # instrumented build cannot meet, and each one waits out that deadline.
+    # #61 carries the whole account and the three ways to answer it.
     asanSuite = 60;
     # Five repeated runs of the tsan_stress selection, about 4 minutes
     # together, and one pass over the concurrency selection.
