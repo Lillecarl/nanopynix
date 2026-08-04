@@ -1595,11 +1595,34 @@ static void enter_evaluator_thread() {
 
     auto register_result = GC_register_my_thread(&stack_base);
     if (register_result == GC_DUPLICATE) {
-        // Some Python runtimes register extension-created threads with the
-        // process collector. That registration is valid, but belongs to the
-        // runtime that created it and must not be undone by nanopynix.
+        // **A duplicate is a stale entry for this same thread, and this thread
+        // takes it over.** It used to be left alone, on the belief that some
+        // Python runtime had registered the thread and owned that
+        // registration. CPython links no collector and registers nothing, and
+        // `GC_register_my_thread` in bdwgc 8.2.12 returns `GC_DUPLICATE` in
+        // one case alone: `GC_lookup_thread(pthread_self())` finds an entry
+        // without the `FINISHED` flag.
+        //
+        // That entry cannot belong to a live evaluator. `enter` above refuses
+        // a second registration on a thread that already has one, so a live
+        // evaluator never reaches this line. And `GC_register_my_thread` marks
+        // every thread it registers `DETACHED`, so `GC_unregister_my_thread`
+        // calls `GC_delete_thread` and removes the entry. What is left is a
+        // thread that registered, exited without unregistering, and had its
+        // `pthread_t` handed to this thread by glibc, which caches and reuses
+        // thread stacks.
+        //
+        // Leaving it is never right. `GC_suspend_all` signals every entry that
+        // is neither the caller nor `FINISHED`, so a stale entry means
+        // `pthread_kill` on a thread that is gone -- issue #72 when glibc
+        // answers `EINVAL`, and issue #53 when it faults instead. Unregistering
+        // at exit is safe whoever made the entry, because the entry names this
+        // thread: `GC_unregister_my_thread` looks up `pthread_self()`.
+        //
+        // Issue #73 gives the whole argument.
         evaluator_thread_registered = true;
-        gc_thread_debug_log("enter_evaluator_thread:duplicate");
+        evaluator_thread_registered_by_nanopynix = true;
+        gc_thread_debug_log("enter_evaluator_thread:duplicate-taken-over");
         return;
     }
     if (register_result != GC_SUCCESS)

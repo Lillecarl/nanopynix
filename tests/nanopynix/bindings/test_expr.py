@@ -466,3 +466,72 @@ class TestThreadConfinement:
         # tests left behind, so this is a ceiling and not an equality.
         assert after <= before
         assert eval_state.eval_string("1").as_int() == 1
+
+
+class TestEvaluatorThreadRegistration:
+    """`_enter_evaluator_thread` and `_exit_evaluator_thread` must always pair.
+
+    Boehm stops the world by signalling every thread in its own `GC_threads`
+    table. An entry that names a thread which has exited is a `pthread_kill`
+    on a dead thread, which is issue #72 when glibc answers `EINVAL` and issue
+    #53 when it faults instead. So the invariant the collector needs is that
+    a registration never outlives the thread it names.
+
+    The tests below drive the two hooks directly, on threads of their own,
+    rather than through an evaluator. `NixThreadExecutor` calls them as its
+    pool initializer and its thread finalizer, and a defect there would look
+    like a defect of the whole executor.
+    """
+
+    def test_a_thread_registers_and_unregisters(self) -> None:
+        """The pair works on a fresh thread, and leaves nothing behind."""
+
+        def body() -> str:
+            nanopynix_expr._enter_evaluator_thread()  # type: ignore[reportPrivateUsage] -- the hook under test
+            nanopynix_expr._exit_evaluator_thread()  # type: ignore[reportPrivateUsage] -- the hook under test
+            return "paired"
+
+        assert _off_thread(body) == "paired"
+
+    def test_the_pair_works_again_on_the_next_thread(self) -> None:
+        """Ten threads in turn, each registering and unregistering.
+
+        glibc caches thread stacks, so these threads share `pthread_t` values.
+        A registration that survived its thread would make the next thread see
+        `GC_DUPLICATE`, and the run would end with a collection signalling a
+        thread that is gone. Reaching the assertion is what says it did not.
+        """
+
+        def body() -> str:
+            nanopynix_expr._enter_evaluator_thread()  # type: ignore[reportPrivateUsage] -- the hook under test
+            nanopynix_expr._exit_evaluator_thread()  # type: ignore[reportPrivateUsage] -- the hook under test
+            return "paired"
+
+        assert [_off_thread(body) for _ in range(10)] == ["paired"] * 10
+
+    def test_registering_twice_on_one_thread_is_refused(self) -> None:
+        """The guard that keeps two evaluators off one thread.
+
+        It is also why a `GC_DUPLICATE` can never mean a live evaluator: an
+        evaluator whose thread is already registered never reaches the
+        collector call at all.
+        """
+
+        def body() -> None:
+            nanopynix_expr._enter_evaluator_thread()  # type: ignore[reportPrivateUsage] -- the hook under test
+            try:
+                with pytest.raises(RuntimeError, match="already registered"):
+                    nanopynix_expr._enter_evaluator_thread()  # type: ignore[reportPrivateUsage] -- the hook under test
+            finally:
+                nanopynix_expr._exit_evaluator_thread()  # type: ignore[reportPrivateUsage] -- the hook under test
+
+        _off_thread(body)
+
+    def test_unregistering_without_registering_is_refused(self) -> None:
+        """An unpaired exit says so, rather than unregistering someone else."""
+
+        def body() -> None:
+            with pytest.raises(RuntimeError, match="not registered"):
+                nanopynix_expr._exit_evaluator_thread()  # type: ignore[reportPrivateUsage] -- the hook under test
+
+        _off_thread(body)
