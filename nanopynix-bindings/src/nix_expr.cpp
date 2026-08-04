@@ -1662,6 +1662,20 @@ static void gc_collect() {
 #endif
 }
 
+// Whether Boehm knows the calling thread.
+//
+// This is the probe for the invariant that `nanopynix_bind_expr` sets up: the
+// collector comes up at import, so Boehm's `first_thread` is the process's
+// main thread, and that thread never exits. A test asks this on the main
+// thread before it opens anything.
+static bool gc_thread_is_registered() {
+#if !NIX_USE_BOEHMGC
+    throw no_collector_in_this_build("cannot ask whether Boehm GC knows a thread");
+#else
+    return GC_thread_is_registered() != 0;
+#endif
+}
+
 // The Boehm counters. `GC_get_heap_size` and its neighbours are unsynchronized
 // getters, which is why they are read one after the other rather than through
 // GC_get_prof_stats: a caller must already quiesce the evaluator to get a
@@ -1710,6 +1724,43 @@ static void exit_evaluator_thread() {
 void nanopynix_bind_expr(nb::module_ &m) {
     m.doc() = "nanopynix: Nix expr bindings (EvalState, Value)";
 
+    // **Boehm's first thread must outlive every collection, so the collector
+    // comes up here, at import.** The thread that imports this module is the
+    // process's main thread, and that thread lives as long as the process.
+    //
+    // `GC_thr_init` gives its one statically allocated `GC_thread` --
+    // `first_thread` -- to whichever thread reaches it first, and marks that
+    // entry `DETACHED | MAIN_THREAD`. Nothing removes the entry: bdwgc never
+    // frees `first_thread`, and no thread exit clears its flags. Every later
+    // `GC_suspend_all` walks `GC_threads` and signals each entry that is
+    // neither the caller nor `FINISHED`. An entry that names a thread which
+    // has exited therefore means `pthread_kill` on a dead thread.
+    //
+    // `Session.open` used to reach `GC_INIT()` on a `nix-store` executor
+    // thread, through `init_libexpr`, and that pool shuts down with the
+    // session. One selection, one build, measured both ways: 3 crashes in 4
+    // runs that way, and 0 crashes in 6 runs with the collector brought up
+    // here. Issues #53, #69 and #72 are that one condition with three
+    // outcomes -- a fault inside `pthread_kill`, an `EINVAL` return, and the
+    // 150-retry `resend_lost_signals` abort.
+    //
+    // **The whole of `initGC` moves, and not the `GC_INIT()` inside it.** A
+    // first attempt did only Boehm's own bring-up here, and left the rest of
+    // `initGC` to run later. That made `initGC` call
+    // `GC_set_all_interior_pointers(0)` with `GC_is_initialized` already true,
+    // which resets the valid offsets and runs `GC_bl_init_no_interiors()` over
+    // a heap that is in use. Four evaluators then read a value as the wrong
+    // type: 6 failures in 6 runs against 0 in 6, on one selection.
+    //
+    // `init_libexpr` still calls `nix::initGC`, which returns at its own
+    // `gcInitialised` guard. It reaches the experimental feature it enables.
+    //
+    // The `nix-path` override that `initGC` applies keeps its meaning here.
+    // `AbstractConfig::applyConfig` skips `nix-path` and `extra-nix-path`
+    // whenever `NIX_PATH` is set, so `loadConfFile` does not overwrite the
+    // value, whichever of the two runs first.
+    nix::initGC();
+
     // No flake-primop registration here. There used to be one, duplicating
     // nix_flake.cpp's, because PyEvalState::evalSettingsConfigurators() is a
     // function-local static in a header and each hidden-visibility .so
@@ -1731,12 +1782,17 @@ void nanopynix_bind_expr(nb::module_ &m) {
           "Internal: run one full Boehm collection now, on an evaluator thread.\n\n"
           "Python's gc.collect() does not reach the Nix heap. A test that drops a "
           "value and wants to see the effect must run both collectors.\n\n"
-          "Call it through `EvalSession.run`. `nix::initGC` runs on the session's "
-          "Nix thread, so the Python main thread is not registered with Boehm, and "
-          "Boehm aborts the process on a collection from an unregistered thread. "
-          "This refuses first, with an exception.\n\n"
+          "Call it through `EvalSession.run`. Boehm aborts the process on a "
+          "collection from a thread it does not know, so this refuses first, with "
+          "an exception.\n\n"
           "A build with no collector raises as well. Ask "
           "`build_info()['capabilities']['boehm_gc']` before calling this.");
+    m.def("_gc_thread_is_registered", &gc_thread_is_registered,
+          "Internal: whether Boehm GC knows the calling thread.\n\n"
+          "The collector comes up while this module imports, so the main thread "
+          "answers True from then on. That is the invariant of issues #53, #69 "
+          "and #72: Boehm's first thread must outlive every collection.\n\n"
+          "A build with no collector raises.");
     m.def("_gc_stats", &gc_stats,
           "Internal: the Boehm counters, for a test that must measure the Nix heap.\n\n"
           "`non_gc_bytes` is the interesting one. Every `nix::allocRootValue` is one "

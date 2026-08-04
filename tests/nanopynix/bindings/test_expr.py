@@ -535,3 +535,37 @@ class TestEvaluatorThreadRegistration:
                 nanopynix_expr._exit_evaluator_thread()  # type: ignore[reportPrivateUsage] -- the hook under test
 
         _off_thread(body)
+
+    @requires_boehm_gc
+    def test_boehm_starts_on_the_main_thread(self) -> None:
+        """The collector comes up while the module imports, on the main thread.
+
+        Boehm gives its one static `first_thread` entry to whichever thread
+        reaches `GC_thr_init`, and it never removes that entry. So the thread
+        that starts the collector must outlive every collection, and the main
+        thread is the only thread that does.
+
+        `Session.open` used to start the collector on a `nix-store` executor
+        thread, which exits with the session. That left an entry naming a dead
+        thread, and every later stop-the-world signalled it: issues #53, #69
+        and #72. Measured on one selection, one build: 3 crashes in 4 runs
+        that way, and 0 crashes in 6 runs with the collector started at
+        import.
+
+        Nothing else registers the main thread, so this assertion holds if and
+        only if the import did it.
+        """
+        assert nanopynix_expr._gc_thread_is_registered() is True  # type: ignore[reportPrivateUsage] -- the probe under test
+
+    @requires_boehm_gc
+    def test_a_plain_thread_is_not_registered(self) -> None:
+        """The probe above reports the thread, and not the process.
+
+        Without this, a probe that always answered True would pass the test
+        above and say nothing.
+        """
+
+        def body() -> bool:
+            return nanopynix_expr._gc_thread_is_registered()  # type: ignore[reportPrivateUsage] -- the probe under test
+
+        assert _off_thread(body) is False
