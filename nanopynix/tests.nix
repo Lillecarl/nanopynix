@@ -6,7 +6,7 @@
   nixpkgs,
   coreutils,
   gdb,
-  git,
+  gitMinimal,
   tofuCoreSchemaTool,
   storeExecTool,
   version,
@@ -70,7 +70,15 @@ in
     # so `test_eval_flake_writes_lock_file` failed. One git from this closure
     # answers that, and it removes a dependency on the host that the coreutils
     # entry above already rejects for the same reason.
-    git
+    #
+    # **Minimal, because the other half of git is perl.** `pkgs.git` carries a
+    # 384.2 MiB closure over 87 store paths, and 40 of those paths are perl.
+    # `pkgs.gitMinimal` carries 159.3 MiB over 34 paths, and none of them is
+    # perl. What the minimal build drops is `git svn`, `git send-email`,
+    # `git cvs*`, gitweb and the gui, and Nix calls none of them: the only
+    # subcommand its fetcher names is `symbolic-ref`, and every core command
+    # is present either way.
+    gitMinimal
     # `pynix._lsp._tofu_core_schema` resolves `nanopynix-tofu-core-schema`
     # off PATH, so every core (non-provider) meta-argument hover/completion
     # needs it present. The dev shell and the released `pynix` app both
