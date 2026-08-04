@@ -153,8 +153,9 @@ let
     # selection is about 600 tests, and the passing rate of run 30895974566
     # puts that inside 60 minutes. This is the measurement that confirms it.
     asanSuite = 60;
-    # Five repeated runs of the tsan_stress selection, about 4 minutes
-    # together, and one pass over the concurrency selection.
+    # Five runs of the concurrency soak, one per seed. Each run deals every
+    # eligible test into eight overlapping lanes -- see tests/support/soak.py.
+    # This replaced five repeats of `-m tsan_stress`, which was one test.
     tsanStress = 25;
     tsanBroad = 20;
     # `nix build` of five gates, which take about a minute between them.
@@ -354,7 +355,7 @@ let
           }
           (steps.enableSandboxNamespaces { })
           {
-            name = "Run TSAN-instrumented stress tests (repeated, local+daemon backends)";
+            name = "Run TSAN-instrumented concurrency soak (five seeds, local+daemon backends)";
             timeout-minutes = caps.tsanStress;
             run = # bash
               ''
@@ -366,7 +367,8 @@ let
                   status=0
                   unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
                     ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon \
-                    -m tsan_stress \
+                    -m soak --soak-seed="$i" \
+                    --soak-report="''${{ github.workspace }}/soak-${bareVersion}-run$i.json" \
                     2>&1 | tee -a "$LOGFILE" || status=$?
                   echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
                   if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
@@ -412,7 +414,10 @@ let
           (steps.uploadArtifact {
             name = "Upload TSAN output (${bareVersion})";
             artifactName = "tsan-race-report-${bareVersion}";
-            path = "\${{ github.workspace }}/tsan-output-${bareVersion}.log\n\${{ github.workspace }}/tsan-output-broad-${bareVersion}.log\n";
+            # The soak manifests travel with the log. The log says which tests
+            # were in flight when a race fired; a manifest replays that exact
+            # composition with `--soak-manifest`.
+            path = "\${{ github.workspace }}/tsan-output-${bareVersion}.log\n\${{ github.workspace }}/tsan-output-broad-${bareVersion}.log\n\${{ github.workspace }}/soak-${bareVersion}-run*.json\n";
           })
         ];
       }

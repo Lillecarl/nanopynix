@@ -171,7 +171,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "evaluator_in_process: builds a Nix evaluator in the pytest process, without a fixture",
         "live_gc: test performs destructive garbage collection",
         "concurrency: test intentionally overlaps worker, executor, session, or log operations",
-        "tsan_stress: concurrency test repeated by the ThreadSanitizer workflow",
+        "soak: runs the existing tests concurrently, for the ThreadSanitizer workflow",
         "l3_inproc: real in-process L3 worker tests with worker-side lifecycle inspection",
     ):
         config.addinivalue_line("markers", marker)
