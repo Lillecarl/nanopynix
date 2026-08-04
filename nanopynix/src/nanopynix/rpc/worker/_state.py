@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 import anyio
 import anyio.to_thread
 from nanopynix_bindings import util as nanopynix_util
+from nanopynix_proto.nix.common import LogLevel
 
 from nanopynix._core._objects import CoreRuntime
 from nanopynix._typechecking import BEARTYPING
@@ -69,6 +70,11 @@ class WorkerState:
         #: Kept so ``GetSettings`` can tell a host value from one this session
         #: applied, which a caller has no other way to learn across the wire.
         self.provenance = SettingsProvenance()
+        #: The level every request of this worker logs at. The bindings hold
+        #: the verbosity per thread, and Store work runs on anyio's shared
+        #: thread pool, so a thread carries no level of its own that would
+        #: survive to the next request. ``Init`` resolves this.
+        self.verbosity: int = int(LogLevel.INFO)
 
     async def run_request(
         self,
@@ -95,15 +101,22 @@ class WorkerState:
         if (executor is None) == (limiter is None):
             raise ValueError("run_request requires exactly one of executor or limiter")
 
+        # Read before the closure runs, so the request logs at the level that
+        # was in force when it was dispatched.
+        verbosity = self.verbosity
+
         def _run() -> Any:
-            previous = nanopynix_util.get_logger_request_id()
+            previous_id = nanopynix_util.get_logger_request_id()
+            previous_verbosity = nanopynix_util.get_verbosity()
             nanopynix_util.set_logger_request_id(request_id)
+            nanopynix_util.set_verbosity(verbosity)
             try:
                 return operation(*args)
             finally:
                 if collector is not None:
                     collector.request_finalized(request_id)
-                nanopynix_util.set_logger_request_id(previous)
+                nanopynix_util.set_logger_request_id(previous_id)
+                nanopynix_util.set_verbosity(previous_verbosity)
 
         if executor is not None:
             return await executor.run(_run)

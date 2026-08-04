@@ -771,3 +771,6 @@ class CoreRuntime:
 
     def set_verbosity(self, verbosity: int) -> int:
         return self._core.set_verbosity(verbosity)
+
+    def get_default_verbosity(self) -> int:
+        return self._core.get_default_verbosity()

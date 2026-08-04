@@ -207,6 +207,12 @@ class WorkerServiceHandler(WorkerServiceBase):
             # nothing about running in a subprocess required.
             verbosity=None if message.verbosity is None else int(message.verbosity),
         )
+        # Take the level now that `initialize` has published it. A worker that
+        # was given no verbosity gets Nix's own compiled-in level, which is
+        # what `get_default_verbosity` reports before anything sets it.
+        self._state.verbosity = (
+            int(message.verbosity) if message.verbosity is not None else self._state.runtime.get_default_verbosity()
+        )
         self._state.nix_path = list(message.nix_path)
 
         primops_raw = [
@@ -279,7 +285,14 @@ class WorkerServiceHandler(WorkerServiceBase):
             self._update_store_title()
 
     async def get_verbosity(self, message: GetVerbosityRequest) -> GetVerbosityResponse:
-        """Return the worker's current Nix logger verbosity."""
+        """Return the worker's current Nix logger verbosity.
+
+        Read from a Nix thread, and not from the worker's own record of the
+        level. The bindings hold the verbosity per thread, so what a Nix
+        thread reports is what Nix would actually filter this worker's
+        messages at. The two agree while ``run_request`` carries the level,
+        and this door is where a caller would find out that they do not.
+        """
         if self._state.executor is None:
             raise RuntimeError("worker executor is unavailable")
         verbosity = await self._state.run_request(
@@ -288,16 +301,23 @@ class WorkerServiceHandler(WorkerServiceBase):
         return GetVerbosityResponse(verbosity=LogLevel(verbosity))
 
     async def set_verbosity(self, message: SetVerbosityRequest) -> SetVerbosityResponse:
-        """Update Nix logger verbosity on the Nix thread."""
+        """Update this worker's Nix logger verbosity.
+
+        The worker takes the level first, so the next request carries it. The
+        dispatched call then publishes the same level to the threads Nix
+        starts for itself, which no request ever reaches.
+        """
         if self._state.executor is None:
             raise RuntimeError("worker executor is unavailable")
-        verbosity = await self._state.run_request(
+        level = int(message.verbosity)
+        self._state.verbosity = level
+        await self._state.run_request(
             request_id=message.request_id,
             executor=self._state.executor,
             operation=self._state.runtime.set_verbosity,
-            args=(int(message.verbosity),),
+            args=(level,),
         )
-        return SetVerbosityResponse(verbosity=LogLevel(verbosity))
+        return SetVerbosityResponse(verbosity=LogLevel(level))
 
     async def get_settings(self, message: GetSettingsRequest) -> GetSettingsResponse:
         """Return the worker's effective Nix configuration, and where it came from.

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from nanopynix_bindings import util as nanopynix_util
 
 from nanopynix import LogLevel, normalize_log_level
 from nanopynix.rpc import Session
@@ -128,6 +130,87 @@ async def test_verbosity_is_one_process_wide_setting_with_two_doors(
     """
     await _both_doors_agree(inproc_session)
     await _both_doors_agree(rpc_session)
+
+
+async def test_a_change_of_level_reaches_a_thread_that_already_ran(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    """A session's level reaches every Nix thread of the session, not one.
+
+    The bindings hold the verbosity in a thread-local, because the Nix global
+    is not safe to write while other threads read it. So no thread learns a
+    new level of its own accord: ``set_verbosity`` reaches the one thread it
+    is dispatched to, and every other thread takes the level from the
+    dispatch wrapper, once per operation.
+
+    One evaluator, held open across all three legs, is what gives the test
+    its teeth. An evaluator owns a dedicated thread, that thread is not the
+    Store thread ``set_verbosity`` runs on, and the first leg makes it take a
+    level before the change. Measured: with ``_run_with_log_context`` no
+    longer applying the level, this fails at the second assertion. The same
+    test written with a fresh evaluator per leg passes either way, because a
+    new thread takes the new level from the published default and so hides
+    the defect.
+
+    inproc only. The rpc worker runs the same wrapper, in
+    ``rpc.worker._state.run_request``, but its threads live in another
+    process and reading one directly would need a message on the wire that
+    nothing outside this test would ever send. What both engines share is
+    covered by ``test_verbosity_is_one_process_wide_setting_with_two_doors``.
+    """
+    async with inproc_session() as session, session.store() as store, session.eval(store) as evaluator:
+        original = await session.get_verbosity()
+
+        async def evaluator_thread_level() -> LogLevel:
+            return LogLevel(await evaluator.run(nanopynix_util.get_verbosity))
+
+        try:
+            await session.set_verbosity("info")
+            assert await evaluator_thread_level() == LogLevel.INFO
+            for level in (LogLevel.DEBUG, LogLevel.WARN, LogLevel.VOMIT):
+                await session.set_verbosity(level)
+                assert await evaluator_thread_level() == level, "the change never reached the evaluator's thread"
+        finally:
+            await session.set_verbosity(original)
+
+
+async def test_nix_filters_at_a_pinned_ceiling_that_no_call_moves(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    """``nix::verbosity`` is written once, at import, and never again.
+
+    That single write is the whole fix for the data race ThreadSanitizer found
+    on it: the global is a plain ``Verbosity``, every ``debug()`` call site
+    reads it on its own thread, and ``set_verbosity`` used to write it from
+    whichever Nix thread served the call. A write before any Nix thread exists
+    has a happens-before edge to every later read, and a second write anywhere
+    gives the race back. This test is what fails if somebody adds one.
+
+    inproc only. The rpc worker pins the same global at its own import, but it
+    does so in another process, and reaching it would mean a new message on
+    the wire that nothing but this test would ever send.
+    """
+    ceiling = nanopynix_util.get_log_ceiling()
+    if os.environ.get("NANOPYNIX_LOG_CEILING"):
+        # The caller moved the ceiling at import, which is what that variable
+        # is for. The level below is then not the default, and only the part
+        # of this test that no call may move still applies.
+        pytest.skip("NANOPYNIX_LOG_CEILING overrides the default ceiling")
+    assert ceiling == LogLevel.CHATTY, (
+        f"the ceiling is {LogLevel(ceiling).name}, and the default is CHATTY. "
+        "Raising it makes every `debug()` site format a message that the filter then drops, "
+        "which costs a flake evaluation its RPC deadline. Lowering it drops messages the "
+        "filter never sees. `nix_util.cpp` carries the measurement."
+    )
+
+    async with inproc_session() as session:
+        original = await session.get_verbosity()
+        try:
+            for level in ("error", "debug", "vomit", "notice"):
+                await session.set_verbosity(level)
+                assert nanopynix_util.get_log_ceiling() == ceiling, f"set_verbosity({level!r}) moved the ceiling"
+        finally:
+            await session.set_verbosity(original)
 
 
 async def test_verbosity_accessors_return_a_LogLevel_not_a_bare_int(  # noqa: N802 -- LogLevel is a type name
