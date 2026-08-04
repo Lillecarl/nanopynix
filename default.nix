@@ -442,34 +442,48 @@ let
       applySanitizerOverrides =
         scope:
         (scope.overrideScope (
-          _final: prev: {
-            nix-store = prev.nix-store.override { sqlite = sanitizer.sanitizeSqlite pkgs.sqlite; };
+          _final: prev:
+          let
+            # One boost for the three components that take it. `sanitizeBoost`
+            # in nix/sanitizer.nix gives the one-definition-rule reason that
+            # makes "the same one" load-bearing rather than tidy.
+            boost = sanitizer.sanitizeBoost pkgs.boost;
+            ucontextBoost = lib.optionalAttrs sanitizer.needsUcontextBoost { inherit boost; };
+          in
+          {
+            nix-util = prev.nix-util.override ucontextBoost;
+            nix-store = prev.nix-store.override (
+              { sqlite = sanitizer.sanitizeSqlite pkgs.sqlite; } // ucontextBoost
+            );
+            # boost reaches nix-expr whatever the collector does, and boehmgc
+            # does not. The comment below gives the reason boehmgc is absent
+            # from a build with no collector, and that reason does not reach
+            # boost: libexpr links boost in both builds.
+            nix-expr = prev.nix-expr.override (ucontextBoost // boehmgcOverride);
           }
-          # Absent from a build with no collector, and not merely unused
-          # there. `enableGC = false` drops boehmgc from libexpr's inputs
-          # entirely, so this would name a patched, instrumented library that
-          # nothing links -- one more thing for a reader to reconcile against
-          # a closure that does not contain it.
-          //
-            lib.optionalAttrs gc {
-              # pkgs.nixDependencies.boehmgc, not prev.boehmgc or pkgs.boehmgc:
-              # nixComponents_X's own scope never contains a `boehmgc` attribute
-              # at all -- nixpkgs builds each nixComponents_X via a *separate*
-              # `nixDependencies` scope (`nixDependencies.callPackage
-              # ./modular/packages.nix {...}` in nix/default.nix), and that
-              # nixDependencies scope (packaging/dependencies.nix in nix's own
-              # source) is where boehmgc's enableLargeConfig + 1MiB initial
-              # mark stack tuning actually lives -- confirmed by `prev.boehmgc`
-              # failing eval with "attribute 'boehmgc' missing". Sanitizing a
-              # fresh pkgs.boehmgc would silently drop that tuning -- exactly
-              # the kind of undersized-mark-stack condition its own comment
-              # warns about, right where we're chasing a GC crash.
-              nix-expr = prev.nix-expr.override {
-                boehmgc = sanitizer.sanitizeBoehmGC pkgs.nixDependencies.boehmgc;
-              };
-            }
         )).overrideAllMesonComponents
           sanitizer.mesonComponentOverrides;
+
+      # Absent from a build with no collector, and not merely unused there.
+      # `enableGC = false` drops boehmgc from libexpr's inputs entirely, so
+      # this would name a patched, instrumented library that nothing links --
+      # one more thing for a reader to reconcile against a closure that does
+      # not contain it.
+      # pkgs.nixDependencies.boehmgc, not prev.boehmgc or pkgs.boehmgc:
+      # nixComponents_X's own scope never contains a `boehmgc` attribute at
+      # all -- nixpkgs builds each nixComponents_X via a *separate*
+      # `nixDependencies` scope (`nixDependencies.callPackage
+      # ./modular/packages.nix {...}` in nix/default.nix), and that
+      # nixDependencies scope (packaging/dependencies.nix in nix's own source)
+      # is where boehmgc's enableLargeConfig + 1MiB initial mark stack tuning
+      # actually lives -- confirmed by `prev.boehmgc` failing eval with
+      # "attribute 'boehmgc' missing". Sanitizing a fresh pkgs.boehmgc would
+      # silently drop that tuning -- exactly the kind of undersized-mark-stack
+      # condition its own comment warns about, right where we're chasing a GC
+      # crash.
+      boehmgcOverride = lib.optionalAttrs gc {
+        boehmgc = sanitizer.sanitizeBoehmGC pkgs.nixDependencies.boehmgc;
+      };
 
       # Drop the collector from libexpr, and from everything above it in the
       # scope. One override, applied at the same point and for the same reason
