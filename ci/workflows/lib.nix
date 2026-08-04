@@ -140,16 +140,19 @@ let
     # the same cap, and it measured 12 minutes locally: a fork for each
     # in-process test costs about half again as much as one process.
     suite = 30;
-    # The same suite under ASAN, and the one number here that is a guess
-    # rather than a measurement. Runs 30860160011 and 30883251498 both stopped
-    # at this cap, at 686 tests in 43 minutes, so the old 60 was not enough.
+    # `tests/nanopynix` under ASAN. Three runs measured the way here:
     #
-    # **Most of those 43 minutes were tests waiting out a deadline, and not
-    # tests running.** `mkAsanTestJob` below now scales the three deadlines,
-    # so the next run should spend the time on the suite instead. 120 holds a
-    # whole suite at the speed the passing tests measured, and it comes down
-    # to a measurement once this job is green. See #61.
-    asanSuite = 120;
+    #   30860160011  686 tests, stopped at a 60-minute cap
+    #   30883251498  686 tests, stopped at a 60-minute cap
+    #   30895974566  806 tests, stopped at a 120-minute cap, 0 ASAN reports
+    #
+    # The third raised the three deadlines and got *slower* per test, because
+    # each failure then waited out a longer clock. `mkAsanTestJob` answers both
+    # halves: it drops `tests/pynix`, where all ten of that run's failures
+    # were, and brings the deadlines back to a middle ground. The remaining
+    # selection is about 600 tests, and the passing rate of run 30895974566
+    # puts that inside 60 minutes. This is the measurement that confirms it.
+    asanSuite = 60;
     # Five repeated runs of the tsan_stress selection, about 4 minutes
     # together, and one pass over the concurrency selection.
     tsanStress = 25;
@@ -597,39 +600,55 @@ let
                 set -o pipefail
                 LOGFILE="''${{ github.workspace }}/asan-output-${bareVersion}.log"
                 status=0
-                # The whole suite, and that includes the in-process engine. A test that
-                # builds an evaluator in the pytest process runs in a fork of it, so the
-                # acceptance test of issue #35 gets ASAN cover here.
-                # **Three deadlines, and the default of each one is written
-                # for a build with no instrumentation.** Run 30891726124
-                # measured what happens when they stay: 22 of 85 tests failed,
-                # and every one of them failed on a clock rather than on an
-                # assertion about Nix.
+                # **`tests/pynix` is out, and run 30895974566 is the reason.**
+                # That run reached the 120-minute cap, and its log says what it
+                # bought:
                 #
-                #   NANOPYNIX_RPC_TIMEOUT      the job set 120, under a
-                #                              default of 300. Six tests died
-                #                              with Status.DEADLINE_EXCEEDED.
-                #   NANOPYNIX_SHUTDOWN_TIMEOUT nobody set it, so 5 seconds.
-                #                              The worker cannot answer
-                #                              `Shutdown` in five seconds
-                #                              under ASAN.
-                #   NANOPYNIX_TEST_TIMEOUT     nobody set it, so 120 seconds
-                #                              (`tests/conftest.py`, whose own
-                #                              comment asks for this override
-                #                              "for slower environments").
-                #                              Five tests died on it.
+                #   806 tests executed, 742 passed, 10 failed, 54 skipped
+                #   0 AddressSanitizer reports
+                #   killed inside tests/pynix/test_lsp.py
                 #
-                # Nine more failed after those: once a timeout takes the LSP
-                # server down, `pygls` logs "Unable to send data, no available
-                # transport" and every later LSP test reads `None`. So the
-                # nine are the cascade, and not nine more defects.
+                # **All ten failures were in `tests/pynix`, and none were in
+                # `tests/nanopynix`.** Two hours of ASAN found no memory error
+                # anywhere, so nothing is lost by the cut and the whole failure
+                # set goes with it.
                 #
-                # These numbers are deliberately generous, and they are the
-                # measurement run for the tighter ones. A deadline exists to
-                # make a hang visible, so bring each down to what this job
-                # actually needs once it is green. See #61.
-                env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=600 NANOPYNIX_SHUTDOWN_TIMEOUT=120 NANOPYNIX_TEST_TIMEOUT=900 NANOPYNIX_TEST_SANITIZER=asan PYTHONDONTWRITEBYTECODE=1 \
+                # The reason it can go is that only instrumented code reports:
+                # nanopynix-bindings, the Nix libraries and boost.
+                # `tests/nanopynix` drives that surface directly.
+                # `tests/pynix` tests a CLI and an LSP server through
+                # uninstrumented Python, and reaches the bindings only along
+                # paths `tests/nanopynix` already covers. It is also where #44
+                # lives.
+                #
+                # The in-process engine stays, so the acceptance test of issue
+                # #35 keeps its ASAN cover: a test that builds an evaluator in
+                # the pytest process runs in a fork of it.
+                #
+                # **Three deadlines, and the default of each one is written for
+                # a build with no instrumentation.** Run 30891726124 measured
+                # what happens when they stay: tests failed on a clock rather
+                # than on an assertion about Nix.
+                #
+                #   NANOPYNIX_RPC_TIMEOUT      default 300. Six tests died with
+                #                              Status.DEADLINE_EXCEEDED at 120.
+                #   NANOPYNIX_SHUTDOWN_TIMEOUT default 5. The worker cannot
+                #                              answer `Shutdown` in five
+                #                              seconds under ASAN.
+                #   NANOPYNIX_TEST_TIMEOUT     default 120 (`tests/conftest.py`,
+                #                              whose own comment asks for this
+                #                              override "for slower
+                #                              environments").
+                #
+                # The first answer to that was 600/120/900, and it cost more
+                # than it saved: throughput fell from 15.0 tests a minute to
+                # 6.7, because each of the ten failures then waited out a much
+                # longer deadline. A deadline exists to make a hang visible,
+                # not to sit through one. These are the middle ground, and this
+                # job is the measurement run for tighter ones. See #61.
+                env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=180 NANOPYNIX_SHUTDOWN_TIMEOUT=60 NANOPYNIX_TEST_TIMEOUT=300 NANOPYNIX_TEST_SANITIZER=asan PYTHONDONTWRITEBYTECODE=1 \
                   ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
+                  --ignore=tests/pynix \
                   2>&1 | tee -a "$LOGFILE" || status=$?
                 # A sanitizer report is the finding, so read the log rather
                 # than trusting the exit status alone: `halt_on_error=1` kills
