@@ -322,7 +322,7 @@ jobs:
         sudo sysctl -w kernel.unprivileged_userns_clone=1
         sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
         unshare --user --map-root-user --mount --pid --fork --mount-proc true
-    - name: Run TSAN-instrumented stress tests (repeated, local+daemon backends)
+    - name: Run TSAN-instrumented concurrency soak (five seeds, local+daemon backends)
       timeout-minutes: 25
       run: |
         set -o pipefail
@@ -333,7 +333,8 @@ jobs:
           status=0
           unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
             ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon \
-            -m tsan_stress \
+            -m soak --soak-seed="$i" \
+            --soak-report="${{ github.workspace }}/soak-${{ matrix.version }}-run$i.json" \
             2>&1 | tee -a "$LOGFILE" || status=$?
           echo "=== TSAN run $i exit status: $status ===" | tee -a "$LOGFILE"
           if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
@@ -378,6 +379,7 @@ jobs:
         path: |
           ${{ github.workspace }}/tsan-output-${{ matrix.version }}.log
           ${{ github.workspace }}/tsan-output-broad-${{ matrix.version }}.log
+          ${{ github.workspace }}/soak-${{ matrix.version }}-run*.json
       if: ${{ !cancelled() }}
     timeout-minutes: 175
     runs-on: ubuntu-24.04

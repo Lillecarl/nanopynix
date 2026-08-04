@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 #
 # Reproduce the released-Nix LocalStore ThreadSanitizer workload in the same
-# process order as CI: five independent stress processes followed by the
-# mixed build/evaluation/query workload.  Each pytest process is sequential;
-# they share one writable LocalStore root so its SQLite and store-path state is
-# retained between processes.
+# process order as CI: five concurrency-soak processes, one per seed, followed
+# by the mixed build/evaluation/query workload.  Each soak deals every eligible
+# test into overlapping lanes, so a process is not sequential inside itself;
+# the five processes are.  They share one writable LocalStore root so its
+# SQLite and store-path state is retained between processes.
+#
+# A seed fixes which tests overlap, so a run that finds a race can be run
+# again.  See tests/support/soak.py.
 
 set -euo pipefail
 
@@ -27,10 +31,11 @@ failure_status=0
 
 run_selection() {
     local selection=$1
+    shift
     local runner_status
     local -a pipeline_status
 
-    echo "=== pytest selection: $selection ===" | tee -a "$log_file"
+    echo "=== pytest selection: $selection $* ===" | tee -a "$log_file"
 
     # Fabric's analysis exit status is intentionally separate from pytest's:
     # it is diagnostic output, while the runner status determines success.
@@ -43,7 +48,7 @@ run_selection() {
             NANOPYNIX_RPC_TIMEOUT=30 \
             PYTHONDONTWRITEBYTECODE=1 \
             "$runner" --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds \
-            -m "$selection" \
+            -m "$selection" "$@" \
         2>&1 | tee -a "$log_file" | fabric --pattern analyze_logs; then
         pipeline_status=("${PIPESTATUS[@]}")
     else
@@ -57,10 +62,11 @@ run_selection() {
     fi
 }
 
-for _ in 1 2 3 4 5; do
-    run_selection tsan_stress
+for seed in 1 2 3 4 5; do
+    run_selection soak --soak-seed="$seed" --soak-report="$work_dir/soak-run$seed.json"
 done
 run_selection known_nix_tsan_localstore_bug
+
 
 echo "preserved pytest output: $log_file"
 exit "$failure_status"

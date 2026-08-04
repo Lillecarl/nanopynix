@@ -45,7 +45,9 @@ catches a Nix release adding or renaming a setting.
 ## Merge to the default branch — the expensive matrix
 
 * `--nix-test-backends local,daemon` under Nix 2.31, 2.34 and 2.35.
-* The ThreadSanitizer jobs, over the `concurrency` and `tsan_stress` markers.
+* The ThreadSanitizer jobs: the `concurrency` marker, and the `soak`, which
+  runs every eligible test in overlapping lanes under five seeds. A seed fixes
+  which tests overlap, so a race that a job finds can be run again.
 * Coverage, with the forkserver instrumentation already configured in
   `pyproject.toml`.
 

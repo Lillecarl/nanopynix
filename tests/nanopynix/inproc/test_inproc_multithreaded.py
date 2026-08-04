@@ -476,7 +476,6 @@ async def test_inproc_one_evaluator_extracts_and_builds_fifty_derivations(
 
 
 @pytest.mark.anyio
-@pytest.mark.tsan_stress
 async def test_inproc_parallel_batch_builds_use_multiple_store_workers(
     store_path_recorder: StorePathRecorder,
 ) -> None:

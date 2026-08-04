@@ -113,6 +113,29 @@ def pytest_addoption(parser: pytest.Parser):
         default=False,
         help="run tests that perform destructive live Nix garbage collection",
     )
+    # The concurrency soak. See tests/support/soak.py for what these drive.
+    parser.addoption(
+        "--soak-seed",
+        type=int,
+        default=0,
+        help="seed that picks the soak schedule; the same seed replays the same composition",
+    )
+    parser.addoption(
+        "--soak-lanes",
+        type=int,
+        default=8,
+        help="how many soak tests run at once",
+    )
+    parser.addoption(
+        "--soak-report",
+        default=None,
+        help="write the soak schedule and outcomes to this JSON file",
+    )
+    parser.addoption(
+        "--soak-manifest",
+        default=None,
+        help="replay the composition recorded in this JSON file, ignoring --soak-seed",
+    )
 
 
 def _sanitizer_runtime_loaded() -> bool:
