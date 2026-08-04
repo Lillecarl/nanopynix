@@ -401,9 +401,24 @@ async def test_max_call_depth_is_a_nix_error_with_error_info(inproc_session: Inp
 # The evaluator thread now gets the 60 MiB `nix::initNix()` asks for; see
 # NIX_EVALUATOR_STACK_SIZE. A regression here does not fail these tests, it
 # aborts the whole pytest process -- which is exactly why they exist.
+#
+# **ASAN cannot run them, and more stack does not help.** Issue #71 carries
+# the sweep: from 60 to 400 MiB the failure moves and never goes away. Below
+# about 120 MiB the instrumented frames exhaust the stack before the counter
+# fires. At or above it the counter does fire, and then the `max-call-depth`
+# exception unwinds through `__asan_handle_no_return`, where ASAN reports
+# "ASan is ignoring requested __asan_handle_no_return" and fails its own
+# CHECK in `asan_thread.cpp:369`. That failure is inside libasan, so no
+# behaviour of Nix or of nanopynix decides it.
 RUNAWAY_RECURSION = "let f = n: f (n + 1); in f 0"
 
+_ASAN_CANNOT_UNWIND = pytest.mark.nix_known_issue(
+    sanitizer="asan",
+    reason="ASAN fails a CHECK of its own while unwinding max-call-depth (#71)",
+)
 
+
+@_ASAN_CANNOT_UNWIND
 async def test_inproc_reports_runaway_recursion_at_nixs_default_depth(
     inproc_session: InprocSessionFactory,
 ) -> None:
@@ -414,6 +429,7 @@ async def test_inproc_reports_runaway_recursion_at_nixs_default_depth(
         assert excinfo.value.info is not None
 
 
+@_ASAN_CANNOT_UNWIND
 async def test_rpc_reports_runaway_recursion_at_nixs_default_depth(
     rpc_session: RpcSessionFactory,
 ) -> None:

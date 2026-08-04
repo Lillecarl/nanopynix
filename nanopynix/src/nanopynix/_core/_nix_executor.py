@@ -71,6 +71,13 @@ def abandoned_work_is_running() -> bool:
 # is less than the desired 62914560") and falls back to its SIGSEGV handler. A
 # pthread stack is mmap'd and not bound by `RLIMIT_STACK`, so this succeeds
 # where Nix's own mechanism does not.
+#
+# **Raising this does not make the runaway-recursion tests pass under ASAN,
+# and issue #71 carries the measurement.** A sweep from 60 to 400 MiB moves
+# the failure rather than removing it: below about 120 MiB the C stack runs
+# out first, and at or above it Nix's counter fires, the `max-call-depth`
+# exception unwinds, and ASAN's own `__asan_handle_no_return` fails a CHECK
+# in `asan_thread.cpp`. The second failure is inside libasan.
 NIX_EVALUATOR_STACK_SIZE = 62914560
 
 # `threading.stack_size()` is process-global: it must be held only across the
