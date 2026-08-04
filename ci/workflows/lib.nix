@@ -854,11 +854,13 @@ in
   # that every *kind* of test job exists on both sides -- regular, tsan, ubsan
   # -- and only the expansion differs.
   #
-  # **The `asan` kind is scheduled-only, and breaks that rule on purpose.**
-  # Issue #35 asks for exactly that: "Do not put it in the per-commit workflow
-  # until the run time is known." That job has never run, so `caps.asanSuite`
-  # is a guess rather than a measurement. Add `mkStaticAsanTestJobs` here, in
-  # the shape of the three below, once a scheduled run produces the number.
+  # **`asan` is on both sides now, and it has the number issue #35 asked
+  # for.** That issue said "Do not put it in the per-commit workflow until the
+  # run time is known". Run 30905635880 knows it: 1622 tests in 18m30s, and
+  # 19m42s for the whole job. It earns the slot rather than merely fitting it,
+  # because it is the only build that reports a use-after-free or a
+  # stack-use-after-return -- which is how the defect of #34 was caught, as a
+  # `stack-use-after-return` in `warnDirty`.
   #
   # **`nogc` is on both sides, and it has the number the rule asks for.** The
   # whole suite against nix_2_34-nogc measured 12 minutes at a 3 GB peak, so
@@ -929,6 +931,36 @@ in
             ;
         };
       }) nogcVersionNames
+    );
+
+  # The per-commit expansion of the `asan` kind, in the shape of the three
+  # above. The comment on `mkStaticTestJobs` asked for the number before this
+  # existed, and run 30905635880 produced it:
+  #
+  #   1622 passed, 93 skipped, 1 xfailed, in 18m30s
+  #   whole job 19m42s, against caps.asanSuite = 60
+  #
+  # That 19m42s carries a 36-second build, because the derivation was already
+  # in the cache. A commit that changes the bindings pays `caps.asanBuild` on
+  # top, which is why that cap stays at 60.
+  mkStaticAsanTestJobs =
+    {
+      ref ? null,
+      lockArtifact ? null,
+      needs ? [ ],
+    }:
+    builtins.listToAttrs (
+      map (version: {
+        name = "test-asan-${lib.removeSuffix "-asan" version}";
+        value = mkAsanTestJob {
+          inherit
+            version
+            ref
+            lockArtifact
+            needs
+            ;
+        };
+      }) asanVersionNames
     );
 
   mkStaticTsanTestJobs =
