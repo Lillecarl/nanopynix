@@ -142,6 +142,11 @@ let
     asan = pkgs.callPackage ./nix/sanitizer.nix { name = "address"; };
   };
 
+  # Every build with a collector links this one. `nix/boehmgc.nix` gives the
+  # abort it corrects, and the reason the correction is not a sanitizer
+  # concern.
+  boehmgc = pkgs.callPackage ./nix/boehmgc.nix { };
+
   # A confirmed data race in nix::Bindings::emptyBindings (a process-wide
   # shared static that ExprAttrs::eval unconditionally writes to -- see the
   # patch's own commentary) found via ThreadSanitizer (see `sanitizers` above).
@@ -482,8 +487,25 @@ let
       # condition its own comment warns about, right where we're chasing a GC
       # crash.
       boehmgcOverride = lib.optionalAttrs gc {
-        boehmgc = sanitizer.sanitizeBoehmGC pkgs.nixDependencies.boehmgc;
+        boehmgc = sanitizer.sanitizeBoehmGC patchedBoehmGC;
       };
+
+      # The collector every build gets, whether or not a sanitizer is asking.
+      # `applyBoehmGCPatch` below puts it in place for a build with no
+      # sanitizer; `boehmgcOverride` above is what the sanitized builds add
+      # their instrumentation to.
+      patchedBoehmGC = boehmgc.patchBoehmGC pkgs.nixDependencies.boehmgc;
+
+      # The patch, and nothing else. This runs before
+      # `applySanitizerOverrides`, so a sanitized build still ends up with the
+      # instrumented collector: both write `boehmgc`, and the later one wins.
+      applyBoehmGCPatch =
+        scope:
+        scope.overrideScope (
+          _final: prev: {
+            nix-expr = prev.nix-expr.override { boehmgc = patchedBoehmGC; };
+          }
+        );
 
       # Drop the collector from libexpr, and from everything above it in the
       # scope. One override, applied at the same point and for the same reason
@@ -548,6 +570,9 @@ let
         (lib.mapAttrs (_: patchNixScope))
         (lib.mapAttrs (_: extendNixScope))
       ]
+      # Before the sanitizer, so an instrumented build still gets the
+      # instrumented collector rather than this plain patched one.
+      ++ lib.optional gc (lib.mapAttrs (_: applyBoehmGCPatch))
       ++ lib.optional (sanitizer != null) (lib.mapAttrs (_: applySanitizerOverrides))
       # After the sanitizer, so this is the last word on nix-expr. The two
       # overrides do not collide -- `applySanitizerOverrides` no longer names

@@ -375,16 +375,18 @@ in
   # in general: a genuine data race straddling boehmgc and nix-expr's own
   # code would otherwise be invisible to TSAN, same reasoning as sqlite.
   #
-  # **The patch applies to both variants, and the flags do not.** The patch is
-  # the correction to a real abort, so every sanitized build needs it. The
-  # flags are the part that `instrumentDependencies` above takes back off.
+  # **The patch is not here any more, and it never belonged here.** It reached
+  # the sanitized builds alone while it lived in this file, so the collector
+  # that ships was the one collector with the abort still in it. It is in
+  # `nix/boehmgc.nix` now, applied to every build with a collector, and that
+  # file carries the reproduction from a plain dev shell. This function takes
+  # an already patched collector and adds the instrumentation to it.
   sanitizeBoehmGC =
     boehmgc:
     boehmgc.overrideAttrs (
       old:
       dependencyEnv old
       // {
-        patches = (old.patches or [ ]) ++ [ ./patches/boehmgc-tolerate-suspend-thread-exit-race.patch ];
         dontStrip = true;
         # gctest is boehmgc's own heavily multithreaded self-test -- exactly
         # the kind of workload that hits the stop-the-world suspend issue
