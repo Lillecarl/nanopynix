@@ -269,6 +269,35 @@ async def test_a_collected_value_releases_its_nix_root(inproc_session: InprocSes
 
 @requires_boehm_gc
 @pytest.mark.anyio
+async def test_the_collector_owner_thread_outlives_the_session(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    """The thread that started the collector is still running after a close.
+
+    This is the invariant of issues #53, #69 and #72, measured end to end.
+    Boehm keeps its one static `first_thread` entry for whichever thread
+    called `GC_INIT()`, and it never removes that entry. `GC_suspend_all`
+    signals the entry on every later collection, so the thread must not exit
+    while the process lives.
+
+    A session's own pools do exit. Starting the collector on one of them left
+    an entry naming a dead thread: 3 crashes in 4 runs, against 0 in 6 with an
+    immortal thread.
+    """
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as evaluator:
+        assert (await evaluator.string("1 + 1")) is not None
+
+    # The session and both of its pools are gone here. The owner is not.
+    owner = nanopynix_expr._gc_owner_thread_id()
+    note(collector_owner_thread=owner)
+    assert owner != 0, "a session ran, so the collector has an owner thread"
+    assert await AnyioPath(f"/proc/self/task/{owner}").exists(), (
+        f"the collector's owner thread {owner} exited with the session"
+    )
+
+
+@requires_boehm_gc
+@pytest.mark.anyio
 async def test_a_collected_value_gives_its_root_back_to_the_collector(
     inproc_session: InprocSessionFactory,
 ) -> None:

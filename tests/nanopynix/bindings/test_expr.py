@@ -5,6 +5,7 @@ from __future__ import annotations
 import gc
 import re
 import threading
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -15,7 +16,6 @@ from tests.support.notes import note
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 
 # Every test here drives the compiled evaluator directly, so the whole module
@@ -537,35 +537,61 @@ class TestEvaluatorThreadRegistration:
         _off_thread(body)
 
     @requires_boehm_gc
-    def test_boehm_starts_on_the_main_thread(self) -> None:
-        """The collector comes up while the module imports, on the main thread.
+    def test_the_collector_has_an_owner_thread(self, eval_state: nanopynix.EvalState) -> None:
+        """One thread starts the collector, and that thread is still running.
 
         Boehm gives its one static `first_thread` entry to whichever thread
         reaches `GC_thr_init`, and it never removes that entry. So the thread
-        that starts the collector must outlive every collection, and the main
-        thread is the only thread that does.
+        that starts the collector must outlive every collection.
 
-        `Session.open` used to start the collector on a `nix-store` executor
-        thread, which exits with the session. That left an entry naming a dead
-        thread, and every later stop-the-world signalled it: issues #53, #69
-        and #72. Measured on one selection, one build: 3 crashes in 4 runs
-        that way, and 0 crashes in 6 runs with the collector started at
-        import.
+        `Session.open` used to start it on a `nix-store` executor thread,
+        which exits with the session. That left an entry naming a dead thread,
+        and every later stop-the-world signalled it: issues #53, #69 and #72.
+        Measured on one selection, one build: 3 crashes in 4 runs that way,
+        and 0 crashes in 6 runs with an immortal thread.
 
-        Nothing else registers the main thread, so this assertion holds if and
-        only if the import did it.
+        The owner belongs to the bindings, and not to any Python object. This
+        fixture builds an `EvalState` directly, without a `Session`, and it
+        must be as safe as the engines are.
         """
-        assert nanopynix_expr._gc_thread_is_registered() is True  # type: ignore[reportPrivateUsage] -- the probe under test
+        assert eval_state is not None
+        owner = nanopynix_expr._gc_owner_thread_id()  # type: ignore[reportPrivateUsage] -- the probe under test
+        assert owner != 0, "the collector is up, so it has an owner thread"
+        assert Path(f"/proc/self/task/{owner}").exists(), f"the collector's owner thread {owner} has exited"
 
     @requires_boehm_gc
-    def test_a_plain_thread_is_not_registered(self) -> None:
+    def test_the_main_thread_does_not_own_the_collector(self, eval_state: nanopynix.EvalState) -> None:
+        """The collector does not come up at import, and must not.
+
+        bdwgc installs no atfork handlers unless something calls
+        `GC_set_handle_fork` before `GC_INIT`, and the default is off. A
+        forkserver parent that only imports nanopynix must therefore not bring
+        the collector up, or every worker child inherits a thread table that
+        nothing fixes up.
+
+        Nothing registers the main thread with Boehm except starting the
+        collector on it, so this fails if the initialisation moves to import.
+        """
+        assert eval_state is not None
+        assert nanopynix_expr._gc_thread_is_registered() is False  # type: ignore[reportPrivateUsage] -- the probe under test
+
+    @requires_boehm_gc
+    def test_a_plain_thread_is_not_registered(self, eval_state: nanopynix.EvalState) -> None:
         """The probe above reports the thread, and not the process.
 
-        Without this, a probe that always answered True would pass the test
+        Without this, a probe that always answered False would pass the test
         above and say nothing.
         """
 
-        def body() -> bool:
+        def registered_here() -> bool:
+            nanopynix_expr._enter_evaluator_thread()  # type: ignore[reportPrivateUsage] -- the hook that must flip the probe
+            try:
+                return nanopynix_expr._gc_thread_is_registered()  # type: ignore[reportPrivateUsage] -- the probe under test
+            finally:
+                nanopynix_expr._exit_evaluator_thread()  # type: ignore[reportPrivateUsage] -- the hook that must flip the probe
+
+        def registered_nowhere() -> bool:
             return nanopynix_expr._gc_thread_is_registered()  # type: ignore[reportPrivateUsage] -- the probe under test
 
-        assert _off_thread(body) is False
+        assert _off_thread(registered_here) is True
+        assert _off_thread(registered_nowhere) is False
