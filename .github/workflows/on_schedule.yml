@@ -372,14 +372,28 @@ jobs:
         # **This lowers the rate, and corrects nothing.** A full
         # matrix run aborted with it in place.
         #
-        # The retry is what remains for the aborts that still happen.
-        # An abort says nothing about the code, so retry the seed. A
-        # budget for the whole job, and not N attempts for each seed,
-        # is what keeps the worst case inside `tsanStress`.
+        # **The budget is zero, and an abort fails the job.** It was 5
+        # while #69 was open, when the abort was frequent and had no
+        # known cause. The cause is known now, and it is corrected:
+        # `99f74d82` registers the thread that builds an evaluator with
+        # Boehm, and #72 gives the mechanism -- the collector signalled
+        # a `pthread_t` that glibc had already handed on.
         #
-        # This tolerates only that one signature. A race still fails
-        # the job, and so does any other non-zero status.
-        ABORT_BUDGET=5
+        # Every `test-tsan-*` job since that commit reports zero
+        # aborts: 18 jobs, six runs, three Nix versions, five seeds
+        # against two backends each. A budget above zero therefore
+        # tolerates nothing that happens, and hides a regression of
+        # `99f74d82` up to five times over.
+        #
+        # The loop below stays, so raising the budget again is one
+        # character. The 134 branch still prints the Boehm resend log
+        # of the attempt before the job fails, which is the forensics
+        # that #69 asked for.
+        #
+        # This branch reads only that one signature. A race fails the
+        # job through its own branch, which runs first, and so does any
+        # other non-zero status.
+        ABORT_BUDGET=0
         aborts=0
         race_found=0
         real_failure=0
