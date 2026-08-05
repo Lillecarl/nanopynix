@@ -191,6 +191,30 @@ Each of these has evidence, and needs new evidence to reopen.
 - **Multiple evaluators plus frequent collections, on their own.** The two
   multi-evaluator modules with `GC_FREE_SPACE_DIVISOR=64`: 0 failures in 10
   runs. Something else in the suite is a necessary ingredient.
+- **A teardown that is mistimed against the registration.** The report of #70
+  puts a concurrent `EvalSession.close` first, and the ordering it suspects is
+  not there. Two facts, and both are in the code rather than in a rate:
+  1. The main thread in that report is not running `~EvalState`.
+     `_nix_executor.py:430` is `self._pool.submit(finalizer).result()`, so
+     that thread is blocked and the finalizer runs on the **closing
+     evaluator's own thread**. The operation that races the two live
+     evaluators is `GC_unregister_my_thread`, on the thread that owns the
+     registration.
+  2. The evaluator is torn down while its thread is still a root.
+     `EvalSession.close` (`inproc/_impl.py:1223`) awaits `local.close`
+     through `_run_closing`, which goes to the evaluator's own one-worker
+     pool, and only then runs `self._executor.shutdown(wait=True)` in its
+     `finally`. `_objects.py:440` gives the reason the handle drops there:
+     otherwise `nix::EvalState` outlives `executor.shutdown` and its AST
+     arena and symbol table are destroyed on whichever thread drops the
+     handle last.
+
+  So no window exists in which an evaluator's `EvalState` is destroyed, or
+  its values freed, after its thread stopped being a GC root. The one path
+  that skips step 1 is `EvaluatorAbandonedError`, and the report is not that
+  path: the close completed, so the thread was answering. This excludes the
+  ordering, and **not** the teardown: `GC_unregister_my_thread` itself, and
+  the collection a teardown makes likely, are both still open.
 
 ## Not yet explained
 
@@ -214,6 +238,15 @@ The one failure in run 30966905346 was the unknown-thread abort above, and
 not this issue. So #70 has not reproduced once since the collector gained an
 owner thread, and no arm of any size can now measure whether the registration
 helped. **Reopening #70 needs a reproduction first, not another soak.**
+
+The registration (`99f74d82`) landed after that measurement, and the streak
+continues on code that carries it. Run 31050794050 is a full matrix on
+`develop` at `7ec0114a`, and each of its four UBSAN jobs passed:
+`test-ubsan-nix_2_31`, `test-ubsan-nix_2_34`, `test-ubsan-nix_2_35` and
+`test-ubsan-git`. UBSAN is the job that caught #70 the one time anything did,
+so a green one is the only routine signal this issue has. It is a weak signal
+at a rate of 5 percent, and it is recorded here to keep the streak countable
+rather than to argue that the registration fixed anything.
 
 **The unregistered main thread is a mechanism that fits every measurement of
 #70, and it is not yet proven to be the cause.** The shape agrees: an
