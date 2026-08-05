@@ -31,14 +31,21 @@ runtime. `ruff-strict.toml` gives the reason and the measurement behind it.
 another rule.
 
 CI runs those three commands, `ruff format --check`, `shellcheck` over
-`scripts/`, and the test suite of `grpclib-transports`, in the `static-checks`
-job. Each one is a derivation in `nix/checks.nix`, and each is a package. Build
-them to run a gate the way CI runs it, in a sandbox and not in the dev shell:
+`scripts/`, the test suite of `grpclib-transports`, and one run of `ekn` with
+no trust store, in the `static-checks` job. Each one is a derivation in
+`nix/checks.nix`, and each is a package. Build them to run a gate the way CI
+runs it, in a sandbox and not in the dev shell:
 
-- nix build --no-link --keep-going .#check-lint .#check-lint-strict .#check-format .#check-types .#check-shell .#check-grpclib-transports
+- nix build --no-link --keep-going .#check-lint .#check-lint-strict .#check-format .#check-types .#check-shell .#check-grpclib-transports .#check-ekn-sandbox
 
 Do not use `nix flake check` for this. That command evaluates every package,
 and `packages.shell` cannot evaluate in a pure flake evaluation.
+
+**`.github/workflows/*.yml` is generated. Do not edit it.** `ci/render.py`
+writes each file from `ci/workflows/on_*.nix`. Change the Nix source, then run
+`direnv exec . python ci/render.py` and commit both. A hand edit passes every
+static gate and then fails `test_checked_in_workflows_are_current` in each job
+of the test matrix, which costs a whole CI run to learn.
 
 - nix build --file . pkgs.nixVersions.nix_2_34.src --no-link --print-out-paths # Download the source code of a Nix package and print the path to it.
 

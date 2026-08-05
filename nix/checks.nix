@@ -25,6 +25,7 @@
   pyright,
   shellcheck,
   pythonSet,
+  ekn,
 }:
 let
   # Only the trees the gates read. `${../.}` -- what the test runner uses --
@@ -150,6 +151,26 @@ in
   grpclib-transports =
     mkCheck "grpclib-transports" [ grpclibEnv ]
       "python -m pytest -p no:cacheprovider grpclib-transports/tests";
+
+  # `ekn` runs inside a Nix build sandbox from three easykubenix derivations
+  # (`_yamlToJson`, `_jsonToYAML` and `split-manifest`), and a sandbox has no
+  # ambient trust store. `ekn` could not start in one until the CA bundle
+  # moved onto the program itself -- see nix/mk-app.nix and issue #62. This
+  # derivation is that sandbox, so the crash cannot come back unseen.
+  #
+  # A gate here for the same reason `grpclib-transports` above is one: nothing
+  # else runs `ekn` where there are no certificates. A test under `tests/`
+  # could not, because `ekn` on the dev shell's PATH is the editable venv's own
+  # console script and not the wrapped application.
+  #
+  # The YAML 1.1 case is deliberate. `0644` reads as octal 420 there, which is
+  # the scalar semantics that this out-of-process fallback exists to keep.
+  ekn-sandbox = runCommand "nanopynix-check-ekn-sandbox" { nativeBuildInputs = [ ekn ]; } ''
+    printf 'a: 1\n---\nb: 0644\n' | ekn _yamlToJson --yaml-version yaml11 >got.json
+    printf '%s' '[{"a":1},{"b":420}]' >want.json
+    diff -u want.json got.json
+    touch "$out"
+  '';
 
   # No drift gate here, although issue #22 asks for one. Both
   # `check_all_settings_model_drift(include_optional=True)` and

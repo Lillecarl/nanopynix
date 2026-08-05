@@ -402,6 +402,13 @@ let
                 name = "ekn";
                 inherit (final) pythonSet;
                 completions.var = "_EKN_COMPLETE";
+                # `ekn` imports pygit2, which initialises OpenSSL at import
+                # and refuses to start where there is no trust store. Three
+                # easykubenix derivations run `ekn` inside a build sandbox,
+                # which is exactly that. See issue #62. `pynix` needs no
+                # bundle: it imports no OpenSSL consumer at start-up, and Nix
+                # itself holds the certificates for the fetching it drives.
+                caBundle = true;
               };
 
               pynix = mkApp {
