@@ -221,36 +221,6 @@ static nb::list compute_fs_closure(nix::Store &s, const nix::StorePath &path,
 
 // --- MissingInfo ---
 
-// What a `.drv` means to `build_paths`, which is now this function's only
-// caller. `parse_derived_paths` below used to call it too, and stopped: a
-// function that maps a Nix one has to keep Nix's answer, and Nix reads a bare
-// `.drv` as `Opaque`. That convenience lives in Python now
-// (`models.DerivedPath.for_build`).
-//
-// It stays here because `build_paths` takes `StorePath`, which cannot carry a
-// `^` selector at all -- so `Opaque` would leave that entry point with no way
-// to build anything, rather than with Nix's semantics. It has no Python
-// caller and no test; issue #74 tracks that, and it is not this function's
-// business.
-//
-// This is byte-for-byte `StorePathWithOutputs::toDerivedPath()`
-// (`path-with-outputs.cc:15-31`) and is deliberately *not* routed through it:
-// that type's own header calls it "a deprecated old type just for use by the
-// old CLI [...] In new code don't use it; you want `DerivedPath` instead"
-// (`path-with-outputs.hh:11-17`, identical on 2.31, 2.34 and 2.35). Reusing it
-// would trade ten lines of duplication for a dependency Nix tells new code not
-// to take, and would mean materialising a `StringSet` we do not have.
-static nix::DerivedPath derived_path_for_build_input(const nix::StorePath &path) {
-    if (path.isDerivation()) {
-        return nix::DerivedPath::Built{
-            .drvPath = nix::make_ref<const nix::SingleDerivedPath>(
-                nix::SingleDerivedPath::Opaque{path}),
-            .outputs = nix::OutputsSpec::All{},
-        };
-    }
-    return nix::DerivedPath::Opaque{path};
-}
-
 // Accept either spelling Python has for a store path: the plain string a
 // caller typed, or a StorePath the bindings previously handed back. Only the
 // string form can carry a ^ output selector, but making callers stringify
@@ -533,17 +503,6 @@ static nb::list build_paths_with_results(
         evalStore);
 }
 
-static void build_paths(
-        nix::Store &s,
-        const std::vector<nix::StorePath> &paths,
-        nix::BuildMode buildMode = nix::bmNormal,
-        std::shared_ptr<nix::Store> evalStore = nullptr) {
-    nix::DerivedPaths dps;
-    for (auto &p : paths) dps.push_back(derived_path_for_build_input(p));
-    nb::gil_scoped_release release;
-    s.buildPaths(dps, buildMode, evalStore);
-}
-
 static void copy_closure(
         nix::Store &s,
         const std::vector<nix::StorePath> &paths,
@@ -774,8 +733,15 @@ static void bind_store(nb::module_ &m) {
              [](nix::Store &s, const std::string &p) { return s.followLinksToStorePath(p); },
              nb::call_guard<nb::gil_scoped_release>(), "path"_a)
         .def("get_build_log", &get_build_log, "path"_a)
-        // Build
-        .def("build_paths", &build_paths, "paths"_a, "build_mode"_a = nix::bmNormal, "eval_store"_a = nullptr)
+        // Build. `nix::Store::buildPaths` had a binding here too, and it went:
+        // no caller in any of the three packages, and no test. It also took
+        // `StorePath`, which cannot carry a `^` selector, so its bare `.drv`
+        // meant every output while the entry point beside it kept Nix's
+        // `Opaque`. Two readings of one argument, in one file. Issue #74.
+        //
+        // What went with it is `buildPaths`'s throw-on-failure: this one
+        // returns a `BuildResult` for each path and reports a failure there.
+        // Bring the binding back with a test if a caller ever wants the throw.
         .def(
             "build_paths_with_results",
             &build_paths_with_results,

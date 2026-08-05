@@ -32,10 +32,10 @@ The rule is that whatever you can *call* on a
 of Nix store operations are deliberately absent:
 
 * Anything needing a stream or a build result -- ``add_to_store``,
-  ``nar_from_path``, ``build_paths``. Those take a C++ ``Source &``/``Sink &``
-  or return a ``BuildResult``, and this protocol's whole shape is "return a
-  dict, a string, or a list of strings". They are excluded permanently, not
-  pending.
+  ``nar_from_path``, ``build_paths_with_results``. Those take a C++
+  ``Source &``/``Sink &`` or return a ``BuildResult``, and this protocol's
+  whole shape is "return a dict, a string, or a list of strings". They are
+  excluded permanently, not pending.
 * Operations that are not ``nix::Store`` virtuals at all -- ``find_roots``,
   ``get_build_log``, ``collect_garbage``, ``add_perm_root``,
   ``add_indirect_root``. Those live on Nix's ``GcStore``, ``LogStore`` and
