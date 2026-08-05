@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from anyio import Path as AnyioPath, run_process
 from pynix._dev_env import BuildEnvironment, make_rc_script, quote
-from pynix.develop import compose_shell_script, take_unparsed
+from pynix.develop import InteractiveShell, compose_shell_script, take_unparsed
 
 from pynix import Pynix
 from tests.support.nix_environment import with_nixpkgs
@@ -388,6 +388,58 @@ def test_an_interactive_script_reads_bashrc_first(tmp_path: Path) -> None:
     assert script.startswith('[ -n "$PS1" ] && [ -e ~/.bashrc ] && source ~/.bashrc;\n')
     assert script.endswith("shopt -s expand_aliases\n")
     assert "exec " not in script
+
+
+# --- the interactive shell, and the two lines it adds -----------------------
+
+
+def _nixpkgs_shell() -> InteractiveShell:
+    return InteractiveShell(path="/nix/store/bbbb-bash-interactive/bin/bash", from_nixpkgs=True, exec_prefix=[])
+
+
+def test_an_interactive_script_overrides_shell_and_path(tmp_path: Path) -> None:
+    """Otherwise the build's bash, which has no readline, becomes ``$SHELL``.
+
+    ``develop.cc:688`` and ``:690``. The ``PATH`` line puts the chosen bash
+    ahead of the build's, so ``command -v bash`` agrees with ``$SHELL``.
+    """
+    script = compose_shell_script(
+        _environment(),
+        command=[],
+        outputs_dir=tmp_path / "outputs",
+        shell=_nixpkgs_shell(),
+    )
+    assert 'SHELL="/nix/store/bbbb-bash-interactive/bin/bash"\n' in script
+    assert 'PATH="/nix/store/bbbb-bash-interactive/bin${PATH:+:$PATH}"\n' in script
+
+
+def test_the_fallback_shell_does_not_touch_path(tmp_path: Path) -> None:
+    """``develop.cc:689`` guards the PATH line on the lookup succeeding.
+
+    A bash found on PATH is on PATH already, so prepending its directory would
+    reorder the caller's PATH for nothing.
+    """
+    shell = InteractiveShell(path="/usr/bin/bash", from_nixpkgs=False, exec_prefix=[])
+    script = compose_shell_script(_environment(), command=[], outputs_dir=tmp_path / "outputs", shell=shell)
+    assert 'SHELL="/usr/bin/bash"\n' in script
+    assert 'PATH="/usr/bin${PATH:+:$PATH}"\n' not in script
+
+
+def test_a_command_gets_no_shell_line(tmp_path: Path) -> None:
+    """Nix appends its SHELL line after ``exec``, where nothing runs it.
+
+    So ``nix develop --command`` leaves ``$SHELL`` at the build's bash, and
+    matching that is what keeps the two commands the same. Measured: both
+    report the build's ``bash-5.3p15`` for a command.
+    """
+    script = compose_shell_script(
+        _environment(),
+        command=["true"],
+        outputs_dir=tmp_path / "outputs",
+        shell=_nixpkgs_shell(),
+    )
+    assert "SHELL=" not in script
+    assert script.endswith("exec 'true'\n")
 
 
 def test_an_output_path_is_rewritten_to_the_outputs_directory(tmp_path: Path) -> None:
