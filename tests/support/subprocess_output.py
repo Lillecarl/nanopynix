@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     import os
     from collections.abc import Sequence
 
-    from anyio.abc import ByteReceiveStream
+    from anyio.abc import ByteReceiveStream, ByteSendStream
 
 
 class CompletedProcess(NamedTuple):
@@ -49,13 +49,27 @@ class CompletedProcess(NamedTuple):
         return f"exited {self.returncode}\n--- stdout ---\n{self.stdout}\n--- stderr ---\n{self.stderr}"
 
 
-async def run_process(command: Sequence[str], cwd: str | os.PathLike[str] | None = None) -> CompletedProcess:
+async def run_process(
+    command: Sequence[str],
+    cwd: str | os.PathLike[str] | None = None,
+    stdin: bytes | None = None,
+) -> CompletedProcess:
     """Run ``command``, draining both pipes concurrently, and return its output.
 
     ``cwd`` runs the child in that directory. A tool that finds its own
     configuration by walking up from the working directory needs this, and
     rewriting the command with explicit paths instead would no longer be the
     command that CI runs.
+
+    ``stdin`` writes those bytes to the child and then closes the pipe, so a
+    child that reads to end of file sees one. This exists to keep a shell out
+    of the command: ``sh -c 'cmd < file'`` is a host program, and a host
+    program cannot load under the ``LD_PRELOAD`` of the sanitizer runtime
+    (``test_store_exec.py`` gives the whole failure). The write goes in the
+    same task group as the two drains, and not before them, for the reason
+    this module exists: a child that fills its stdout pipe stops reading its
+    stdin, and a parent that writes stdin first would then never drain the
+    stdout that unblocks it.
     """
     process = await anyio.open_process(list(command), cwd=cwd)
     captured: dict[str, bytes] = {"stdout": b"", "stderr": b""}
@@ -69,10 +83,18 @@ async def run_process(command: Sequence[str], cwd: str | os.PathLike[str] | None
             except anyio.EndOfStream:
                 return
 
+    async def feed(payload: bytes, stream: ByteSendStream | None) -> None:
+        if stream is None:
+            return
+        async with stream:
+            await stream.send(payload)
+
     async with process:
         async with anyio.create_task_group() as task_group:
             task_group.start_soon(drain, "stdout", process.stdout)
             task_group.start_soon(drain, "stderr", process.stderr)
+            if stdin is not None:
+                task_group.start_soon(feed, stdin, process.stdin)
         await process.wait()
 
     return CompletedProcess(
