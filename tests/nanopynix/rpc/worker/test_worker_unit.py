@@ -31,10 +31,14 @@ from nanopynix_proto.nix.worker import (
 
 import nanopynix.rpc.worker._worker as worker  # type: ignore[reportPrivateUsage] -- test imports private module
 from nanopynix._core._objects import (
+    CoreEvalState,  # type: ignore[reportPrivateUsage] -- test double subclasses the real core type
     CoreStore,  # type: ignore[reportPrivateUsage] -- test double subclasses the real core type
 )
 from nanopynix._wire import HandleKind
 from nanopynix.logging import LogCollector, LogOutbox
+from nanopynix.rpc.worker._handle_registry import (
+    EvalEntry,  # type: ignore[reportPrivateUsage] -- test imports private module
+)
 from nanopynix.rpc.worker._worker import (  # type: ignore[reportPrivateUsage] -- test imports private module
     WorkerServiceHandler,
     WorkerState,
@@ -42,6 +46,7 @@ from nanopynix.rpc.worker._worker import (  # type: ignore[reportPrivateUsage] -
     _install_worker_diagnostics,
     _register_primops,
     _relay_logs,
+    _shutdown_worker,
     _start_log_relay,
 )
 from nanopynix.rpc.worker._worker_nix import (
@@ -418,3 +423,53 @@ async def test_shutdown_tolerates_no_bridge_and_no_store_limiter() -> None:
     response = await handler.shutdown(ShutdownRequest(request_id=1))
 
     assert response is not None
+
+
+class _RecordingEvalState(CoreEvalState):
+    """Records its close, and holds no native pointer.
+
+    Subclasses the real class because ``EvalEntry.eval_state`` names it, and
+    beartype checks that at run time. The same double as the ones in
+    ``test_worker_eval_unit.py``.
+    """
+
+    def __init__(self) -> None:
+        self.raw = None
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+async def test_shutdown_worker_closes_an_evaluator_the_client_left_open() -> None:
+    """The teardown closes every evaluator, and not only the shared executor.
+
+    Each evaluator owns a thread that ``_enter_evaluator_thread`` registered
+    with the Boehm collector, and ``close_eval_state`` is the only thing that
+    runs the matching ``_exit_evaluator_thread`` on it. A client that closes
+    politely sends ``CloseEval`` and that happens; a client that is cancelled,
+    times out or dies sends nothing, and this is what runs instead.
+
+    ``_shutdown_worker`` shut down ``WorkerState.executor`` alone, which is
+    the *shared* executor and carries no thread finalizer at all. So the
+    evaluator threads were left to Python's own atexit join, and they exited
+    still registered. See ``_core/_nix_executor.py``.
+
+    Three assertions, one for each half of "closed": the evaluator's Nix
+    teardown ran, its handle is gone, and its thread is not accepting work.
+    """
+    state = WorkerState()
+    eval_state = _RecordingEvalState()
+    executor = NixThreadExecutor()
+    eval_handle = state.handles.allocate(
+        EvalEntry(eval_state=eval_state, executor=executor, store_handle=0),
+        HandleKind.EVAL,
+    )
+
+    await _shutdown_worker([WorkerServiceHandler(state)])
+
+    assert eval_state.closed
+    with pytest.raises(KeyError):
+        state.handles.get_eval_entry(eval_handle)
+    with pytest.raises(RuntimeError, match="closing"):
+        executor.run_sync(lambda: None)

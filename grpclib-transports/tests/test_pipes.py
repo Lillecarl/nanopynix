@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import multiprocessing as mp
 import os
+from collections.abc import Collection
+from pathlib import Path
 from typing import Any
 
+import anyio
 import greeter.greeter.common as common_pb2
 import greeter.greeter.server as server_grpc
 import greeter.greeter.worker as worker_grpc
@@ -21,6 +25,20 @@ from grpclib_transports.protocol import serve_h2
 
 def _worker_services() -> list[WorkerGreeter]:
     return [WorkerGreeter()]
+
+
+async def _record_teardown(marker: str, services: Collection[Any]) -> None:
+    """A ``child_teardown`` that leaves proof it ran, and what it received.
+
+    Module-level, because the forkserver pickles this the way it pickles the
+    factory. ``functools.partial`` carries the path: an environment variable
+    would not arrive, because the forkserver copies the environment once, when
+    it starts.
+
+    A file, because the child has no other way to report to the parent at this
+    point. Its channel is closed -- that is what makes the teardown run.
+    """
+    await anyio.Path(marker).write_text(f"{len(services)} {type(next(iter(services))).__name__}", encoding="utf-8")
 
 
 async def _assert_pipe_round_trip(
@@ -138,3 +156,35 @@ async def test_multiprocessing_worker_reports_started_process() -> None:
     assert response.message == "Hello, Worker!"
     assert isinstance(seen_pid, int)
     assert seen_pid > 0
+
+
+async def test_multiprocessing_worker_runs_its_child_teardown(tmp_path: Path) -> None:
+    """The child gets a hook after ``serve_h2`` returns, and it runs.
+
+    There was no hook at all, so a worker had nowhere to put the teardown it
+    owns, and nothing it did after serving ever ran. ``child_teardown`` is
+    that place. It runs inside the child's event loop, because a worker's
+    teardown awaits the tasks it started there.
+
+    The hook receives what the factory built, and not the tuple that was
+    served: the backchannel service belongs to this transport, and the
+    teardown is the worker's own. The marker records the count and the type,
+    so this holds both halves.
+
+    ``exitcode`` is asserted beside it. A hook that ran but pushed the child
+    past ``_PROCESS_EXIT_GRACE`` would be signalled, and 0 says it was not.
+    """
+    marker = tmp_path / "teardown.marker"
+    seen: list[Any] = []
+
+    async with multiprocessing_worker(
+        _worker_services,
+        on_process_start=seen.append,
+        preload=["greeter"],
+        child_teardown=functools.partial(_record_teardown, str(marker)),
+    ) as channel:
+        stub = worker_grpc.GreeterWorkerStub(channel)
+        await stub.say_hello(common_pb2.HelloRequest(name="Worker"))
+
+    assert marker.read_text(encoding="utf-8") == "1 WorkerGreeter"
+    assert seen[0].exitcode == 0, f"the child was signalled rather than left to run its teardown: {seen[0].exitcode}"

@@ -16,7 +16,7 @@ import contextlib
 import functools
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import anyio
 import anyio.to_thread
@@ -51,7 +51,7 @@ from nanopynix.logging import ACTIVE_LOG_CAPTURES, BusSubscription, CallbackBus,
 from nanopynix.namespace import probe_namespace_support
 from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC, unpack_error_details
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
-from nanopynix.rpc.worker._worker import worker_service_factory
+from nanopynix.rpc.worker._worker import worker_child_teardown, worker_service_factory
 from nanopynix.settings import (
     DEFAULT_RPC_TIMEOUT_SECONDS,
     DEFAULT_SHUTDOWN_TIMEOUT_SECONDS,
@@ -62,6 +62,7 @@ from nanopynix.settings import (
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 
+    from grpclib_transports.multiprocessing import ChildTeardown
     from nanopynix_proto.nix.common import LogLevel
 
     from nanopynix.logging import LogCallback
@@ -283,6 +284,19 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
                     self._primop_handler,
                 ],
                 on_process_start=self._on_worker_process_start,
+                # What the child does after its transport closes. Nothing ran
+                # there before, so a worker that the client never asked to
+                # shut down politely -- a cancelled close, a `Shutdown` that
+                # timed out, a parent that died -- left every open evaluator's
+                # thread to exit still registered with the Boehm collector.
+                # See `worker_child_teardown`. Pickled through the forkserver,
+                # like the factory above.
+                #
+                # The cast is contravariance and nothing else: the transport
+                # declares `Collection[IServable]`, and the worker annotates
+                # the concrete handlers so that beartype can check them. See
+                # that function's docstring.
+                child_teardown=cast("ChildTeardown", worker_child_teardown),
                 # One list for the whole process, whoever asks first. The
                 # forkserver is a `multiprocessing` singleton, and it copies
                 # its preload list, its environment and its `sys.path` when it

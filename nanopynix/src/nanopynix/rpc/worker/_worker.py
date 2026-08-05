@@ -32,8 +32,7 @@ import traceback
 from typing import TYPE_CHECKING, Any, cast
 
 import anyio
-from grpclib_transports.multiprocessing import serve_multiprocessing_endpoint
-from grpclib_transports.protocol import DEFAULT_TUNING
+import anyio.to_thread
 from grpclib_transports.stdio import serve_stdio
 from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
 from nanopynix_proto.nix.common import LogEvent, LogLevel, NixLogEvent, RequestFinalized
@@ -82,7 +81,7 @@ from nanopynix.rpc.worker._worker_store import StoreServiceHandler
 from nanopynix.settings import DEFAULT_WORKER_MAX_CONCURRENCY
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Collection
 
     from grpclib._typing import (
         IServable,  # type: ignore[reportPrivateUsage] -- named only in the cast in _stdio_main; see the comment there
@@ -92,7 +91,7 @@ if TYPE_CHECKING or BEARTYPING:
     from nanopynix.namespace import OverlayNamespace
 
 # Re-export for the multiprocessing runner in _pool.py
-__all__ = ["main", "run_worker", "worker_service_factory"]
+__all__ = ["main", "worker_child_teardown", "worker_service_factory"]
 
 _STORE_WORKERS = 4
 
@@ -636,10 +635,34 @@ def _start_log_relay(state: WorkerState) -> None:
 
 
 async def _shutdown_worker(handlers: list[WorkerServices]) -> None:
-    """Tear down the shared `WorkerState` after a transport closes -- shared
-    by both `run_worker` (multiprocessing) and `_stdio_main` (stdio), which
-    otherwise hand-repeated this identically."""
+    """Tear down the shared `WorkerState` after a transport closes -- shared by
+    `worker_child_teardown` (multiprocessing) and `_stdio_main` (stdio), which
+    otherwise hand-repeated this identically.
+
+    Every step is idempotent, because the polite path already ran most of them:
+    a client that closes cleanly sends `CloseEval` for each evaluator and then
+    `Shutdown`, and those handlers do this work themselves. This function is
+    what runs when the client asked for none of it -- a cancelled close, a
+    `Shutdown` that timed out, a parent that died.
+    """
     worker_state: WorkerState = _worker_state_of(handlers)
+
+    # First, and the reason this function has to run at all. Each evaluator
+    # owns a dedicated thread that `_enter_evaluator_thread` registered with
+    # the Boehm collector, and `close_eval_state` is the only thing that runs
+    # the matching `_exit_evaluator_thread` on it. Without this, the thread is
+    # joined by `concurrent.futures`'s own atexit hook and exits still
+    # registered, and a later collection then signals a dead tid. See the
+    # account in `_core/_nix_executor.py`.
+    #
+    # `anyio.to_thread`, and not the shared executor: `close_eval_state`
+    # blocks on the evaluator's thread, so it can run on neither the event
+    # loop nor that thread. The shared executor would serve, but `Shutdown`
+    # may already have closed it, and then this teardown would work only for
+    # the client that did not need it.
+    for eval_handle, _entry in worker_state.handles.iter_evals():
+        await anyio.to_thread.run_sync(close_eval_state, worker_state, eval_handle)
+
     collector = worker_state.collector
     if collector is not None:
         collector.close()
@@ -654,27 +677,31 @@ async def _shutdown_worker(handlers: list[WorkerServices]) -> None:
         worker_state.executor.shutdown(wait=True)
 
 
-async def run_worker(
-    endpoint: Any,
-    tuning: Any = None,
-    max_concurrency: int | None = DEFAULT_WORKER_MAX_CONCURRENCY,
-) -> None:
-    """Serve gRPC over a multiprocessing pipe endpoint.
+async def worker_child_teardown(handlers: Collection[WorkerServices]) -> None:
+    """End a multiprocessing worker child, after ``serve_h2`` returns.
 
-    Called by the forkserver child process via ``_run_multiprocessing_worker``
-    in grpclib_transports.
+    ``_pool.py`` hands this to ``multiprocessing_worker_with_backchannel`` as
+    its ``child_teardown``, which is the only hook the child has after the
+    transport closes. The forkserver pickles it, so it is module-level.
+
+    This replaces ``run_worker``, which said the same thing and had no caller:
+    it wrapped the serve as well, but the transport owns that.
+
+    ``Collection[WorkerServices]`` and not the transport's
+    ``Collection[IServable]``: that protocol is not ``@runtime_checkable``, so
+    naming it would leave this whole function silently unchecked by beartype.
+    The ledger in ``tests/nanopynix/test_beartype_instrumentation.py`` records
+    the same mistake, and the same correction. The call site carries the one
+    cast this costs, because a parameter is contravariant.
+
+    ``Collection``, because the transport passes a tuple and ``_stdio_main``
+    passes a list.
     """
-
-    tuning = tuning or DEFAULT_TUNING
-    handlers = worker_service_factory()
-    await serve_multiprocessing_endpoint(
-        endpoint,
-        handlers,
-        tuning=tuning,
-        max_concurrency=max_concurrency,
-        status_details_codec=NIX_STATUS_DETAILS_CODEC,
-    )
-    await _shutdown_worker(handlers)
+    await _shutdown_worker(list(handlers))
+    # After the teardown, not before: an evaluator that answers its interrupt
+    # is closed properly above, and only a thread that never stopped reaches
+    # this. See the docstring for why a worker may end itself this way.
+    _exit_now_if_nix_will_not_stop()
 
 
 # ── Stdio entry point (console_script / ``python -m nanopynix._worker``) ──
