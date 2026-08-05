@@ -96,6 +96,38 @@ async def test_multiprocessing_worker_pool_reports_started_processes() -> None:
     assert all(isinstance(pid, int) and pid > 0 for pid in seen_pids)
 
 
+async def test_a_worker_ends_itself_rather_than_dying_of_a_signal() -> None:
+    """The parent waits for the child before it signals it.
+
+    A worker does its own teardown after ``serve_h2`` returns, and the parent
+    reached ``terminate()`` about 3 ms after it closed the channel. So every
+    healthy worker died of SIGTERM, and ``exitcode`` was -15 with that teardown
+    unrun. ``_stop_process`` gives the child a grace period now, and the signal
+    is the fallback it was meant to be.
+
+    ``exitcode`` is the whole assertion: 0 says the child ended itself, and -15
+    says the signal got there first.
+    """
+    started: list[Any] = []
+
+    def on_process_start(proc: Any) -> None:
+        started.append(proc)
+
+    async with Server() as server:
+        host = server.endpoint([GreeterManager()]).for_workers()
+
+        async with host.multiprocessing_channels(
+            _worker_services_with_manager,
+            client_factory=worker_grpc.GreeterWorkerStub,
+            count=2,
+            on_process_start=on_process_start,
+            preload=["greeter"],
+        ) as pool:
+            await pool[0].client.say_hello(common_pb2.HelloRequest(name="alpha"))
+
+    assert [proc.exitcode for proc in started] == [0, 0]
+
+
 async def test_inproc_worker_can_call_parent_services() -> None:
     async with Server() as server:
         host = server.endpoint([GreeterManager()]).for_workers()
