@@ -44,6 +44,14 @@ service EvalService {
   rpc EvalFlake(EvalFlakeRequest) returns (nix.common.ValueHandle);
   rpc GetFlake(GetFlakeRequest) returns (nix.common.FlakeRef);
   rpc Release(ReleaseRequest) returns (ReleaseResponse);
+
+  // Verbosity, scoped to one evaluator. WorkerService carries the same pair
+  // for the whole worker, and this is not a duplicate of it: an evaluator
+  // owns its level, and the worker's is what an evaluator falls back to. The
+  // pair lives on EvalService so that the request carries an eval_handle --
+  // the client's proxy stamps one on every request of this service.
+  rpc GetEvalVerbosity(GetEvalVerbosityRequest) returns (GetEvalVerbosityResponse);
+  rpc SetEvalVerbosity(SetEvalVerbosityRequest) returns (SetEvalVerbosityResponse);
 }
 
 message OpenEvalRequest {
@@ -321,3 +329,20 @@ message ReleaseRequest {
   int64 eval_handle = 100;
 }
 message ReleaseResponse {}
+
+message GetEvalVerbosityRequest {
+  int64 request_id = 1000;
+  int64 eval_handle = 100;
+}
+message GetEvalVerbosityResponse {
+  nix.common.LogLevel verbosity = 1;
+}
+
+message SetEvalVerbosityRequest {
+  int64 request_id = 1000;
+  nix.common.LogLevel verbosity = 1;
+  int64 eval_handle = 100;
+}
+message SetEvalVerbosityResponse {
+  nix.common.LogLevel verbosity = 1;
+}

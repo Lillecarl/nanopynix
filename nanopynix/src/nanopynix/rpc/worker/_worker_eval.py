@@ -55,6 +55,8 @@ from nanopynix_proto.nix.eval import (
     EvalStringRequest,
     ForceJsonRequest,
     ForceJsonResponse,
+    GetEvalVerbosityRequest,
+    GetEvalVerbosityResponse,
     GetFlakeRequest,
     HasAttrRequest,
     HasAttrResponse,
@@ -81,6 +83,8 @@ from nanopynix_proto.nix.eval import (
     ReplScopeNamesResponse,
     ResetFileCacheRequest,
     ResetFileCacheResponse,
+    SetEvalVerbosityRequest,
+    SetEvalVerbosityResponse,
     TypeNameRequest,
     TypeNameResponse,
     WriteLockFileRequest,
@@ -226,16 +230,18 @@ class EvalServiceHandler(EvalServiceBase):
     def _get_es(self, eval_handle: int) -> CoreEvalState:
         return self._get_entry(eval_handle).eval_state
 
-    def _get_executor(self, eval_handle: int) -> NixThreadExecutor:
-        return self._get_entry(eval_handle).executor
-
     async def _run(self, message: Any, operation: Any, *, executor: NixThreadExecutor | None = None) -> Any:
-        selected_executor = executor or self._get_executor(message.eval_handle)
+        # One lookup for both the thread and the level, because an evaluator
+        # that holds a level of its own logs at that level on that thread. An
+        # `executor` given here belongs to an evaluator this registry does not
+        # know yet, which is `open_eval` only, so it follows the worker.
+        entry = None if executor is not None else self._get_entry(message.eval_handle)
         return await self._state.run_request(
             request_id=message.request_id,
-            executor=selected_executor,
+            executor=executor if entry is None else entry.executor,
             operation=operation,
             args=(message,),
+            verbosity=None if entry is None else entry.verbosity,
         )
 
     async def open_eval(self, message: OpenEvalRequest) -> OpenEvalResponse:
@@ -555,6 +561,39 @@ class EvalServiceHandler(EvalServiceBase):
     @worker_op
     def get_flake(self, message: GetFlakeRequest) -> FlakeRef:
         return self._get_es(message.eval_handle).get_flake(message.ref)
+
+    @worker_op
+    def get_eval_verbosity(self, message: GetEvalVerbosityRequest) -> GetEvalVerbosityResponse:
+        """Return the level this evaluator logs at.
+
+        Read from this evaluator's own Nix thread, and not from
+        ``EvalEntry.verbosity``. The bindings hold the verbosity per thread,
+        so what that thread reports is what Nix would actually filter this
+        evaluator's messages at. ``WorkerService.GetVerbosity`` uses the same
+        honest door for the worker.
+
+        An evaluator that never set a level of its own reports the worker's,
+        because ``_run`` passes ``None`` and ``run_request`` falls back.
+        """
+        return GetEvalVerbosityResponse(verbosity=common_pb.LogLevel(self._state.runtime.get_verbosity()))
+
+    async def set_eval_verbosity(self, message: SetEvalVerbosityRequest) -> SetEvalVerbosityResponse:
+        """Pin the level this evaluator logs at, and return it.
+
+        Stored rather than dispatched, and deliberately not a ``worker_op``.
+        ``run_request`` applies the level to the Nix thread at the start of
+        every request, so the next request of this evaluator carries it, and a
+        dispatch here would only set it on a thread that the next request
+        overwrites.
+
+        This writes no process-wide default, so it does not reach the threads
+        Nix starts for itself. ``WorkerService.SetVerbosity`` is the door that
+        does.
+        """
+        entry = self._get_entry(message.eval_handle)
+        level = common_pb.LogLevel(message.verbosity)
+        entry.verbosity = int(level)
+        return SetEvalVerbosityResponse(verbosity=level)
 
     @worker_op
     def release(self, message: ReleaseRequest) -> ReleaseResponse:

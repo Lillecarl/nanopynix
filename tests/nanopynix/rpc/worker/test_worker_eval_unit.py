@@ -64,7 +64,7 @@ class _InlineDispatchState(WorkerState):
         super().__init__()
         self.handles = handles
 
-    async def run_request(
+    async def run_request(  # noqa: PLR0913 -- the signature it overrides, which the type checker requires it to match in full
         self,
         *,
         request_id: int,
@@ -72,8 +72,9 @@ class _InlineDispatchState(WorkerState):
         args: tuple[Any, ...] = (),
         executor: NixThreadExecutor | None = None,
         limiter: anyio.CapacityLimiter | None = None,
+        verbosity: int | None = None,
     ) -> Any:
-        _ = (request_id, executor, limiter)
+        _ = (request_id, executor, limiter, verbosity)
         return operation(*args)
 
 

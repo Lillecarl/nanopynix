@@ -338,7 +338,13 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         return await self._manager.get_verbosity()
 
     async def set_verbosity(self, verbosity: LogLevelInput) -> LogLevel:
-        """Set the worker-side Nix log verbosity for this session."""
+        """Set the worker-side Nix log verbosity for this session.
+
+        This also moves every evaluator that never called
+        :meth:`EvalSession.set_verbosity`, because such an evaluator falls
+        back to this level. An evaluator that holds a level of its own keeps
+        it.
+        """
         return await self._manager.set_verbosity(normalize_log_level(verbosity))
 
     async def settings(self, *, overridden_only: bool = False) -> dict[str, str]:
