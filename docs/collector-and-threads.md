@@ -159,6 +159,17 @@ to `GC_malloc_kind_global` → `GC_generic_malloc_inner` → `GC_collect_or_expa
 `PyEvalState::init` now calls `nanopynix_ensure_gc_thread_registered`, so a
 caller that never touches the executor is covered.
 
+**The differential is one line, and it needs no statistics.** Comment that one
+call out, rebuild, and build an evaluator on the main thread:
+
+| that one line | `_gc_thread_is_registered()` | `_gc_collect()` from the main thread |
+|---|---|---|
+| absent | `False` | refused: "a thread that Boehm GC does not know" |
+| present | `True` | succeeds |
+
+Two runs decide it. Prefer this over a rate: the soak below could not
+reproduce the failure often enough to measure either side.
+
 ## Excluded
 
 Each of these has evidence, and needs new evidence to reopen.
@@ -186,16 +197,42 @@ Each of these has evidence, and needs new evidence to reopen.
 **#70.** A `Value` reads as the wrong type during evaluation. The shape fits a
 live object that the collector reclaims and then hands out again.
 
-The reproduction is the **whole** test suite, at about 1 failure in 5 runs of
-8 minutes. The baseline before the collector change: 0 in 3. A narrower
-selection does not reproduce, even with collections forced.
+The reproduction used to be the **whole** test suite, at about 1 failure in 5
+runs of 8 minutes, measured locally. A narrower selection does not reproduce,
+even with collections forced.
+
+**That rate is stale, and CI says so.** The collector-owner change (7f6ef4e7)
+sits between that measurement and today. On code that carries it and still
+lacks the thread registration, the whole suite ran 30 times in CI:
+
+| run | ref | full-suite runs | #70 failures |
+|---|---|---|---|
+| 30966905346 | `9b28f36d` | 15 | 0 |
+| 30969557667 | `develop` | 15 | 0 |
+
+The one failure in run 30966905346 was the unknown-thread abort above, and
+not this issue. So #70 has not reproduced once since the collector gained an
+owner thread, and no arm of any size can now measure whether the registration
+helped. **Reopening #70 needs a reproduction first, not another soak.**
 
 **The unregistered main thread is a mechanism that fits every measurement of
 #70, and it is not yet proven to be the cause.** The shape agrees: an
 unscanned stack loses exactly the values that only it refers to, and the rate
-follows the collection rate. The test is the rate after the registration
-lands. CI run 30966905346 gives the number to beat, and that number is weak:
-0 failures in 5 control runs, which measured no rate at all.
+follows the collection rate.
+
+**The amplified arm cannot decide it, and this is measured.** The whole
+amplified evidence, on code that has the defect:
+
+| run | ref | amplified runs | failures |
+|---|---|---|---|
+| 30966905346 | `9b28f36d` | 5 | 1 |
+| 30969557667 | `develop` | 15 | 0 |
+
+One failure in 20 is about 5 percent, and 15 runs of a 5 percent event expect
+0.75 failures. So an arm of 15 that comes back clean says nothing about
+whether the registration helped. **Do not report a clean amplified arm as
+evidence for a fix.** Find an amplifier that reproduces, or use the one-line
+differential above, which decides in two runs.
 
 ## The instruments, and what each one cannot see
 
