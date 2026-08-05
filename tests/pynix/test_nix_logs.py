@@ -14,7 +14,12 @@ class _Session:
     async def log_stream(self) -> AsyncIterator[LogEvent]:
         yield LogEvent(action="stop", args=[42])
         yield LogEvent(action="result", args=[42, 1, [123]])
-        yield LogEvent(action="msg", args=["useful message"])
+        # `[level, text]`, which is what `PyLogger::log` sends: `_cb(id,
+        # "msg", int(lvl), s)`. The level was missing here, and the event
+        # still reported a message because `LogEvent.message` read `args[-1]`.
+        # It reads the position the action puts the text in now, so a `msg`
+        # without a level is the malformed event it always was.
+        yield LogEvent(action="msg", args=[3, "useful message"])
 
 
 class _Logger:

@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import anyio
 import anyio.lowlevel
@@ -28,11 +28,13 @@ from nanopynix.logging import (
     events_dropped_event,
 )
 from nanopynix.models import LogEvent
+from tests.support.notes import note
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from nanopynix.logging import BusSubscription
+    from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
 
 
 class _LogTestModule(Protocol):
@@ -691,3 +693,85 @@ async def test_a_detached_logger_delivers_nothing_to_the_old_callback() -> None:
     old_stream = old.stream()
     assert [event[4] async for event in old_stream] == []
     await old.aclose()
+
+
+# ── The structured payload of an error event ─────────────────────────
+
+
+_WARN_EXPRESSION = 'builtins.warn "a warning from the expression" 1'
+
+#: What ``errinfo::to_dict`` builds, and so what an ``error`` event carries.
+_ERROR_INFO_KEYS = {
+    "level",
+    "msg",
+    "pos",
+    "is_from_expr",
+    "status",
+    "suggestions",
+    "traces",
+    "truncated",
+}
+
+
+async def _warn_payload(factory: Callable[[], Any]) -> dict[str, object] | None:
+    """Evaluate a ``builtins.warn`` and return the payload of its error event.
+
+    The factory is typed loosely on purpose. The two engines are separate
+    concrete classes with the same shape, and a union of them types every
+    call below as an error even though the point of this helper is that
+    either one answers it.
+    """
+    events: list[LogEvent] = []
+
+    def record(event: LogEvent | None) -> None:
+        if event is not None:
+            events.append(event)
+
+    async with factory() as nix:
+        subscription = nix.subscribe(record)
+        try:
+            async with nix.store() as store:
+                evaluator = nix.eval(store)
+                await evaluator.open()
+                value = await evaluator.string(_WARN_EXPRESSION)
+                await value.as_int()
+                await evaluator.close()
+        finally:
+            subscription.unsubscribe()
+    return next((event.error_info for event in events if event.action == "error"), None)
+
+
+async def test_an_error_event_carries_the_same_payload_on_both_engines(
+    inproc_session: InprocSessionFactory,
+    rpc_session: RpcSessionFactory,
+) -> None:
+    """``PyLogger::logEI`` sends Nix's structured detail, and rpc keeps it.
+
+    ``logEI`` used to send ``ei.msg.str()`` alone, so the position, the trace,
+    the suggestions and ``isFromExpr`` were dropped at that line. The log path
+    of this library was therefore less structured than Nix's own
+    ``JSONLogger::logEI``, while its error path was more. Issue #48, item 3.
+
+    The two engines are compared against each other because the payload
+    crosses a process boundary on one of them and not on the other. Process
+    isolation is the only thing rpc has that inproc does not, and an error's
+    contents are not that, so a difference here would be a defect.
+
+    **What this does not assert is a position.** ``prim_warn`` sets one from
+    ``state.positions[pos]``, and measured on Nix 2.34.8 that position is
+    ``noPos`` for every shape tried -- top level, inside an addition, through a
+    function, inside a list. So ``pos`` is ``None`` here, and the key being
+    present is what this pins. ``TestLogEvent`` in ``test_models.py`` carries a
+    populated position through the same accessors.
+    """
+    inproc_payload = await _warn_payload(inproc_session)
+    rpc_payload = await _warn_payload(rpc_session)
+
+    note(inproc_error_info=inproc_payload, rpc_error_info=rpc_payload)
+
+    assert inproc_payload is not None, "inproc sent no structured payload with its error event"
+    assert set(inproc_payload) == _ERROR_INFO_KEYS
+    assert inproc_payload["msg"] == "a warning from the expression"
+    assert inproc_payload["is_from_expr"] is True, "builtins.warn sets isFromExpr, and it must survive"
+
+    assert rpc_payload == inproc_payload, "the payload must not change by crossing a process boundary"
