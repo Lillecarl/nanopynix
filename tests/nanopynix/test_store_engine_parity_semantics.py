@@ -501,14 +501,14 @@ async def test_a_bare_drv_round_trips_through_its_own_reply(
 ) -> None:
     """Feeding a reply's ``drv_path`` back in must ask for the same build.
 
-    Inbound (``derived_path_for_build_input``) and outbound
-    (``derived_path_parts``) are the two halves of the same boundary, in a
-    C++ header and a C++ source file with nothing tying them together. This is
-    the property that makes them inverses: a bare ``.drv`` is read as "build
-    every output" and reported as ``outputs == ["*"]``, and sending the
-    reported ``drv_path`` -- which is bare again -- must land on that same
-    request rather than on an opaque fetch. Two rules that could disagree
-    instead compose into a fixed point.
+    Inbound (``models.DerivedPath.for_build``, in Python) and outbound
+    (``derived_path_parts``, in a C++ header) are the two halves of the same
+    boundary, and now in two different languages with nothing tying them
+    together. This is the property that makes them inverses: a bare ``.drv``
+    is read as "build every output" and reported as ``outputs == ["*"]``, and
+    sending the reported ``drv_path`` -- which is bare again -- must land on
+    that same request rather than on an opaque fetch. Two rules that could
+    disagree instead compose into a fixed point.
     """
     async with inproc_session() as session, session.store() as store:
         first = await _build_paths_with_results(store, "")
@@ -519,6 +519,37 @@ async def test_a_bare_drv_round_trips_through_its_own_reply(
 
     assert first[0][1] == ["*"]
     assert second == first
+
+
+async def test_a_bare_drv_means_every_output_on_both_engines(
+    inproc_session: InprocSessionFactory,
+    rpc_session: RpcSessionFactory,
+) -> None:
+    """The convenience half of the split that issue #67 is about.
+
+    ``models.DerivedPath.for_build`` lives in Python and each engine's
+    ``Store`` calls it, so this asks whether *both* of them do. The bindings
+    deliberately do not --
+    ``test_a_bare_derivation_is_opaque_here_and_selects_no_outputs`` in
+    ``tests/nanopynix/bindings/test_l1_store_bindings.py`` is that half --
+    which means nothing below this layer would catch an engine that dropped
+    the call.
+
+    ``query_missing`` is tested beside ``build_paths_with_results`` because
+    the two have to agree. A caller asks the first whether the second would do
+    any work, and an opaque ``.drv`` answers "nothing to build" for a
+    derivation that was never built: a confident wrong answer in the dangerous
+    direction, which is what the issue reported.
+    """
+    outcomes: dict[str, tuple[list[str], dict[str, list[str]], dict[str, list[str]]]] = {}
+    for name, factory in (("inproc", inproc_session), ("rpc", rpc_session)):
+        async with factory() as session, session.store() as store:
+            built = await _build_paths_with_results(store, "")
+            outcomes[name] = (built[0][1], await _query_missing(store, ""), await _query_missing(store, "^*"))
+
+    for name, (outputs, bare, explicit) in outcomes.items():
+        assert outputs == ["*"], f"{name}: a bare .drv did not select every output, got {outputs!r}"
+        assert bare == explicit, f"{name}: a bare .drv disagreed with ^* in query_missing: {bare!r} != {explicit!r}"
 
 
 def test_the_malformed_table_covers_the_paths_that_used_to_diverge() -> None:

@@ -57,6 +57,7 @@ from nanopynix.logging import (
 from nanopynix.models import (
     BuildResult,
     Derivation,
+    DerivedPath,
     FlakeRef,
     GcResult,
     GcRoot,
@@ -871,12 +872,14 @@ class Store(AsyncStore):
     ) -> MissingInfo:
         """Return which of ``derived_paths`` still need to be built or substituted.
 
-        A plain derivation path means all outputs. A ``^`` separator opts into
-        Nix's explicit canonical DerivedPath output-selection syntax.
+        A plain derivation path means all outputs -- see
+        :meth:`~nanopynix.models.DerivedPath.for_build`, which applies that
+        here rather than in the bindings. A ``^`` separator opts into Nix's
+        explicit canonical DerivedPath output-selection syntax.
         """
         return await self._session.run(
             self._require_core().query_missing,
-            [str(p) for p in derived_paths],
+            [DerivedPath(str(p)).for_build() for p in derived_paths],
         )
 
     async def build_paths_with_results(
@@ -889,15 +892,17 @@ class Store(AsyncStore):
     ) -> list[BuildResult]:
         """Build derived paths and return one result per Nix build outcome.
 
-        A plain derivation path means all outputs. A ``^`` separator opts into
-        Nix's explicit canonical DerivedPath output-selection syntax.
+        A plain derivation path means all outputs -- see
+        :meth:`~nanopynix.models.DerivedPath.for_build`, which applies that
+        here rather than in the bindings. A ``^`` separator opts into Nix's
+        explicit canonical DerivedPath output-selection syntax.
         """
         if eval_store is not None and eval_store._session is not self._session:  # type: ignore[reportPrivateUsage] -- session ownership guard  # noqa: SLF001
             raise ValueError("eval_store belongs to a different inproc Session")
         return await self._session.run(
             functools.partial(
                 self._require_core().build_paths_with_results,
-                [str(path) for path in derived_paths],
+                [DerivedPath(str(path)).for_build() for path in derived_paths],
                 build_mode=build_mode_value(build_mode),
                 eval_store=None if eval_store is None else eval_store._require_core(),  # noqa: SLF001 -- same-session sibling Store, guarded above
             ),

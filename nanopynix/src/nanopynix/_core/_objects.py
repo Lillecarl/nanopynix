@@ -178,9 +178,15 @@ class CoreStore:
     def query_missing(self, derived_paths: Sequence[str | nanopynix_store.StorePath]) -> MissingInfo:
         """Return which of ``derived_paths`` still need building or substituting.
 
-        Derived paths, not store paths: a plain ``.drv`` means all of that
-        derivation's outputs, and Nix's ``^`` separator selects specific ones.
-        Both spellings are parsed in C++ by ``parse_derived_paths``.
+        Derived paths, not store paths, and Nix's own reading of them: a
+        plain ``.drv`` is an opaque fetch and selects **no** outputs, while
+        Nix's ``^`` separator selects them. ``parse_derived_paths`` in C++
+        hands both straight to ``nix::DerivedPath::parse``.
+
+        The async ``Store`` of each engine is the layer that reads a bare
+        ``.drv`` as every output, through
+        :meth:`~nanopynix.models.DerivedPath.for_build`. This layer maps Nix
+        and does not, so a caller here gets what ``nix build`` would give.
         """
         result = self.require_raw().query_missing([str(path) for path in derived_paths])
         return MissingInfo(**result)
@@ -192,7 +198,11 @@ class CoreStore:
         build_mode: int,
         eval_store: CoreStore | None = None,
     ) -> list[BuildResult]:
-        """Build ``derived_paths`` and return one result per Nix build outcome."""
+        """Build ``derived_paths`` and return one result per Nix build outcome.
+
+        Nix's reading of a derived path, as in :meth:`query_missing` above: a
+        bare ``.drv`` here builds nothing.
+        """
         results = self.require_raw().build_paths_with_results(
             [str(path) for path in derived_paths],
             build_mode,
