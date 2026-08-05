@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from clypi import arg
 from nanopynix_helpers import EvaluationTargetError as EvaluationTargetError, select_attr as select_attr
@@ -14,7 +14,7 @@ from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 if TYPE_CHECKING or BEARTYPING:
     from pathlib import Path
 
-    from nanopynix import AsyncEvalSession, AsyncReplSession, AsyncValue
+    from nanopynix import AsyncEvalSession, AsyncLockedFlake, AsyncReplSession, AsyncValue
 
 
 @no_runtime_type_check  # clypi's arg() returns a PartialConfig placeholder at declaration time, not the annotated type -- clypi's own machinery replaces it later; beartype would otherwise flag every call as a type violation
@@ -65,7 +65,35 @@ async def evaluate_target[ValueT: AsyncValue](
     auto_call_file: bool = False,
 ) -> ValueT:
     """Evaluate *target* in *session* and apply its attribute selectors."""
+    value, locked = await evaluate_target_locked(target, session, auto_call_file=auto_call_file)
+    if locked is not None:
+        await locked.release()
+    return value
+
+
+async def evaluate_target_locked[ValueT: AsyncValue](
+    target: EvaluationTarget,
+    session: AsyncEvalSession[ValueT],
+    *,
+    auto_call_file: bool = False,
+) -> tuple[ValueT, AsyncLockedFlake | None]:
+    """Evaluate *target*, and also hand back the flake lock when there is one.
+
+    A caller that only wants the value calls :func:`evaluate_target`, which
+    releases the lock for it. This form exists for ``pynix develop``, which has
+    a second question to ask: which ``nixpkgs`` does the target flake lock?
+    ``nix develop`` asks the same question, of the same lock
+    (``InstallableFlake::nixpkgsFlakeRef``).
+
+    The lock is ``None`` for a ``--file`` target, which has no flake and no
+    lock file.
+
+    The flake branch is ``lock_flake`` and then ``eval``, where it used to be
+    ``eval_flake``. Those two do the same work with the same flags --
+    ``eval_flake`` is the pair in one call, and it throws the lock away.
+    """
     target.validate(required=True)
+    locked: AsyncLockedFlake | None = None
     if target.file is not None:
         value = await session.file(str(target.file))
         if auto_call_file:
@@ -74,13 +102,14 @@ async def evaluate_target[ValueT: AsyncValue](
         if target.flake is None:
             raise EvaluationTargetError("either --file or --flake is required")
         ref, _, flake_attr = target.flake.partition("#")
-        value = await session.eval_flake(ref)
+        locked = await session.lock_flake(ref)
+        value = cast("ValueT", await locked.eval())
         if flake_attr:
             value = await select_attr(value, flake_attr)
 
     if target.attr:
         value = await select_attr(value, target.attr)
-    return value
+    return value, locked
 
 
 async def derivation_path(value: AsyncValue) -> str:

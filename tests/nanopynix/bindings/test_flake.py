@@ -59,12 +59,38 @@ class TestLockFlake:
         desc = locked.description()
         assert isinstance(desc, str)
 
-    def test_lock_flake_inputs(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:
+    def test_find_input_answers_none_for_a_flake_with_no_inputs(
+        self,
+        eval_state: nanopynix.EvalState,
+        tmp_path: Path,
+    ) -> None:
+        """A name that no input carries must be nothing, and not an empty node.
+
+        This replaces a test of ``locked.inputs()``, a flat map of the inputs
+        the ``flake.nix`` *declared*. That map reported the original reference
+        under a name that said locked, and it had nowhere to put a transitive
+        node or a ``follows`` edge.
+        """
         _init_git_flake(tmp_path)
         ref = nanopynix.parse_flake_ref(str(tmp_path))
         locked = nanopynix.lock_flake(eval_state, ref)
-        inputs = locked.inputs()
-        assert isinstance(inputs, dict)
+        assert locked.find_input(["nixpkgs"]) is None
+
+    def test_find_input_answers_none_for_the_root(
+        self,
+        eval_state: nanopynix.EvalState,
+        tmp_path: Path,
+    ) -> None:
+        """The empty path names the root, which is a Node and not a LockedNode.
+
+        Nix's own caller casts with ``dynamic_pointer_cast`` for exactly this
+        reason: the root carries no locked reference, so there is nothing to
+        report about it.
+        """
+        _init_git_flake(tmp_path)
+        ref = nanopynix.parse_flake_ref(str(tmp_path))
+        locked = nanopynix.lock_flake(eval_state, ref)
+        assert locked.find_input([]) is None
 
     def test_lock_flake_repr(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:
         _init_git_flake(tmp_path)

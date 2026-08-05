@@ -64,6 +64,6 @@ failure carries a trace.
 .. autoclass:: nanopynix.LockedFlake
    :members:
 
-.. autoclass:: nanopynix.LockedInput
+.. autoclass:: nanopynix.LockedNode
    :members:
 ```

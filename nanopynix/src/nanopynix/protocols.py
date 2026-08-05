@@ -74,6 +74,7 @@ if TYPE_CHECKING or BEARTYPING:
         GcResult,
         GcRoot,
         JsonValue,
+        LockedNode,
         LogEvent,
         MissingInfo,
         NixType,
@@ -571,6 +572,12 @@ class AsyncLockedFlake(Protocol):
 
     __slots__ = ()  # in the body, and load-bearing -- see the module docstring
 
+    # `description` is deliberately not declared here, though both engines
+    # carry it. A non-method member has to be a `@property` to stay abstract
+    # and to keep `issubclass` usable, as `AsyncReplSession.line_editors` is,
+    # and both engines hold `description` as a plain attribute -- rpc's as a
+    # dataclass field. Converting them buys no caller anything.
+
     @abstractmethod
     async def eval(self) -> AsyncValue:
         """Evaluate this locked flake's outputs."""
@@ -579,6 +586,48 @@ class AsyncLockedFlake(Protocol):
     @abstractmethod
     async def write_lock_file(self) -> None:
         """Persist this locked flake's lock file to disk."""
+        ...
+
+    @abstractmethod
+    async def metadata_json(self) -> str:
+        """Return the JSON that ``nix flake metadata --json`` prints, as text.
+
+        The whole object, and not one part of it: ``description``,
+        ``originalUrl``, ``original``, ``resolvedUrl``, ``resolved``, ``url``,
+        ``locked``, ``path``, ``locks``, ``fingerprint``, and the ``revision``,
+        ``dirtyRevision``, ``revCount`` and ``lastModified`` of the flake when
+        it has them.
+
+        ``locks`` is the lock graph, which is the reason this exists. A flake
+        lock is a graph: one node can be an input of an input, and a
+        ``follows`` edge points at a path in the graph rather than at a
+        reference. Nix writes that graph itself, through
+        ``LockFile::toJSON()``.
+
+        Text, and not a parsed object, because the text is what fidelity is
+        claimed about. Nix builds it, and nothing here takes it apart. Call
+        :func:`json.loads` on the result.
+
+        Use :meth:`find_input` instead to ask about one input, which is a
+        question about the graph rather than a rendering of it.
+        """
+        ...
+
+    @abstractmethod
+    async def find_input(self, path: Sequence[str], /) -> LockedNode | None:
+        """Return the locked node at *path*, or ``None`` when there is none.
+
+        *path* is an attribute path into the lock graph, so ``["nixpkgs"]``
+        names a direct input and ``["mid", "leaf"]`` names an input of an
+        input. A ``follows`` edge on the way is resolved, as Nix resolves it.
+
+        This is the question ``InstallableFlake::nixpkgsFlakeRef`` asks to find
+        out which ``nixpkgs`` a flake locks. ``pynix develop`` asks it for the
+        same reason.
+
+        ``None`` for a path that names no input, and also for one that names
+        the root of the graph. The root carries no locked reference.
+        """
         ...
 
     @abstractmethod

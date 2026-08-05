@@ -116,16 +116,23 @@ message FlakeRef {
   map<string, AttrsValue> attrs = 1;
 }
 
-message LockedInput {
-  AttrsMap attrs = 1;
-  bool is_flake = 2;
-  repeated string follows = 3;
+// One node of the lock graph, as `LockFile::findInput` returns it. The name is
+// Nix's own name for this node.
+//
+// This replaces a `LockedInput` message that held the inputs a `flake.nix`
+// *declares*. That map could not carry a `rev`, a transitive node, or a
+// `follows` edge, so it reported the original reference under a name that said
+// locked. The lock graph itself now travels as the JSON of
+// `LockFile::toJSON()`, inside the metadata object.
+message LockedNode {
+  string locked_ref = 1;
+  string original_ref = 2;
+  bool is_flake = 3;
 }
 
 message LockedFlake {
   int64 handle = 1;
   string description = 2;
-  map<string, LockedInput> inputs = 3;
 }
 
 // ── Scalar value (JSON scalar: str|int|float|bool|None) ──

@@ -45,6 +45,8 @@ from nanopynix.rpc.client.session import Session as RpcSessionImpl
 from nanopynix.rpc.client.store import Store as RpcStoreImpl
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from nanopynix.inproc import (
         EvalSession as InprocEvalSession,
         LockedFlake,
@@ -294,6 +296,8 @@ def test_a_class_that_inherits_nothing_still_conforms() -> None:
     class Outsider:
         async def eval(self) -> object: ...
         async def write_lock_file(self) -> None: ...
+        async def metadata_json(self) -> str: ...
+        async def find_input(self, path: Sequence[str], /) -> object: ...
         async def release(self) -> None: ...
 
     # The MRO is the nominal question. `issubclass` is *not*: against a

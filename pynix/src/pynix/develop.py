@@ -55,7 +55,7 @@ from pynix.target import (
     EvaluationTargetError,
     attr_option,
     derivation_path,
-    evaluate_target,
+    evaluate_target_locked,
     file_option,
     flake_option,
     select_attr,
@@ -64,7 +64,7 @@ from pynix.target import (
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Callable
 
-    from nanopynix.protocols import AsyncStore
+    from nanopynix.protocols import AsyncLockedFlake, AsyncStore
 
 logger = structlog.get_logger(__name__)
 
@@ -318,13 +318,22 @@ async def build_dev_env(
 
         shell: InteractiveShell | None = None
         async with nix.eval(eval_store) as session:
+            # The lock is kept past the evaluation because the interactive
+            # shell needs it: it decides which nixpkgs `bashInteractive` comes
+            # from. One `finally` covers every way out, including the
+            # `report_and_exit` above, which raises.
+            locked: AsyncLockedFlake | None = None
             try:
-                root = await evaluate_target(target, session, auto_call_file=True)
-                drv_path = await derivation_path(root)
-            except EvaluationTargetError as exc:
-                report_and_exit(exc)
-            if resolve_shell:
-                shell = await _resolve_interactive_shell(session, eval_store, build_store)
+                try:
+                    root, locked = await evaluate_target_locked(target, session, auto_call_file=True)
+                    drv_path = await derivation_path(root)
+                except EvaluationTargetError as exc:
+                    report_and_exit(exc)
+                if resolve_shell:
+                    shell = await _resolve_interactive_shell(session, eval_store, build_store, locked)
+            finally:
+                if locked is not None:
+                    await locked.release()
 
         raw = await _read_dev_env(
             eval_store,
@@ -373,27 +382,45 @@ async def _read_dev_env(
     return error_exit(f"the build environment of {drv_path} is empty")
 
 
+async def _nixpkgs_flake_ref(locked: AsyncLockedFlake | None) -> str:
+    """Return the flake reference that ``bashInteractive`` comes from.
+
+    ``InstallableFlake::nixpkgsFlakeRef`` (``installable-flake.cc:194``): the
+    ``nixpkgs`` that the target flake locks, when the target is a flake that
+    locks one and that input is itself a flake. That is the reference the
+    ``flake.lock`` of the target pins, so the dev shell of a flake gets the
+    bash of the same nixpkgs the flake was built against, whatever the registry
+    of the machine says.
+
+    Otherwise the indirect ``nixpkgs``, which is exactly
+    ``defaultNixpkgsFlakeRef()`` (``installable-flake.hh:85``). A ``--file``
+    target has no lock, and a flake need not declare ``nixpkgs`` at all.
+    """
+    if locked is None:
+        return _NIXPKGS_FLAKE_REF
+    node = await locked.find_input([_NIXPKGS_FLAKE_REF])
+    if node is None or not node.is_flake:
+        return _NIXPKGS_FLAKE_REF
+    return node.locked_ref
+
+
 async def _resolve_interactive_shell(
     session: Any,
     eval_store: AsyncStore,
     build_store: AsyncStore,
+    locked: AsyncLockedFlake | None,
 ) -> InteractiveShell:
     """Pick the bash an interactive dev shell runs, as ``develop.cc:645`` does.
 
-    ``nixpkgs#bashInteractive``, built, because the bash of the build
-    environment is stdenv's and carries no readline. Nix wraps the whole lookup
-    in a ``try`` and falls back to the bare word ``bash`` on failure
-    (``develop.cc:679``), so an evaluation error, a missing registry entry or
-    an offline machine costs the readline, not the shell.
-
-    ``flake:nixpkgs`` through the registry, which is
-    ``defaultNixpkgsFlakeRef()``. Nix prefers the ``nixpkgs`` input of the
-    target flake when the target is one (``InstallableFlake::nixpkgsFlakeRef``,
-    ``installable-flake.cc:194``); that needs the lock graph of the flake,
-    which nanopynix does not expose, so this takes the default in every case.
+    ``bashInteractive``, built, because the bash of the build environment is
+    stdenv's and carries no readline. :func:`_nixpkgs_flake_ref` decides which
+    nixpkgs it comes from. Nix wraps the whole lookup in a ``try`` and falls
+    back to the bare word ``bash`` on failure (``develop.cc:679``), so an
+    evaluation error, a missing registry entry or an offline machine costs the
+    readline, not the shell.
     """
     try:
-        found = await _nixpkgs_bash(session, eval_store, build_store)
+        found = await _nixpkgs_bash(session, eval_store, build_store, locked)
     except (NixError, EvaluationTargetError, RuntimeError) as exc:
         # Never fatal, as at develop.cc:679: the shell still starts, and only
         # its line editing is the poorer for it. RuntimeError covers the
@@ -411,13 +438,14 @@ async def _nixpkgs_bash(
     session: Any,
     eval_store: AsyncStore,
     build_store: AsyncStore,
+    locked: AsyncLockedFlake | None,
 ) -> InteractiveShell | None:
-    """Build ``nixpkgs#bashInteractive`` and find its ``bin/bash``.
+    """Build ``bashInteractive`` from nixpkgs, and find its ``bin/bash``.
 
     ``None`` when the build produced no ``bin/bash``, which
     ``develop.cc:676`` treats the same as a failed lookup.
     """
-    outputs = await session.eval_flake(_NIXPKGS_FLAKE_REF, write_lock_file=False)
+    outputs = await session.eval_flake(await _nixpkgs_flake_ref(locked), write_lock_file=False)
     attrpath = f"legacyPackages.{nanopynix.current_system()}.{_INTERACTIVE_BASH_ATTR}"
     value = await select_attr(outputs, attrpath)
     drv_path = await derivation_path(value)

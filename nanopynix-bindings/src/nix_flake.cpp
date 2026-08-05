@@ -18,6 +18,7 @@
 #include <nix/fetchers/fetchers.hh>
 #include <nix/store/store-api.hh>
 #include <nix/util/configuration.hh>
+#include <nix/util/hash.hh>
 
 #include <nlohmann/json.hpp>
 
@@ -66,17 +67,51 @@ struct PyFlakeRef {
 struct PyLockedFlake {
     std::unique_ptr<nix::flake::LockedFlake> locked;
     std::string description;
-    nb::dict inputs;
 
     PyLockedFlake(
         std::unique_ptr<nix::flake::LockedFlake> lf,
-        std::string desc,
-        nb::dict inps)
-        : locked(std::move(lf)), description(std::move(desc)), inputs(std::move(inps))
+        std::string desc)
+        : locked(std::move(lf)), description(std::move(desc))
     {}
 
     std::string get_description() const { return description; }
-    nb::typed<nb::dict, nb::str> get_inputs() const { return inputs; }
+
+    nix::flake::LockedFlake &require_locked() const {
+        if (!locked)
+            throw std::runtime_error("LockedFlake has been released");
+        return *locked;
+    }
+
+    /// One node of the lock graph, found the way Nix finds it.
+    ///
+    /// This is `InstallableFlake::nixpkgsFlakeRef` (`installable-flake.cc`):
+    /// `findInput`, then a cast to `LockedNode`. `find_input` is bound rather
+    /// than walked in Python because `doFind` (`lockfile.cc`) is not a plain
+    /// lookup. It resolves a `follows` edge by recursion from the root, and it
+    /// raises on a follow cycle. A walk over the serialised graph would have to
+    /// derive both again.
+    ///
+    /// Returns nothing when the path names no input, and also when it names the
+    /// root, which is a `Node` and not a `LockedNode`. The root carries no
+    /// locked reference, so there is nothing to report about it.
+    std::optional<nb::typed<nb::dict, nb::str, nb::object>>
+    find_input(const std::vector<std::string> &path) const {
+        auto &lf = require_locked();
+        std::shared_ptr<const nix::flake::LockedNode> node;
+        {
+            nb::gil_scoped_release release;
+            nix::flake::InputAttrPath attrPath(path.begin(), path.end());
+            node = std::dynamic_pointer_cast<const nix::flake::LockedNode>(
+                lf.lockFile.findInput(attrPath));
+        }
+        if (!node)
+            return std::nullopt;
+        nb::dict result;
+        result["locked_ref"] = nb::str(node->lockedRef.to_string().c_str());
+        result["original_ref"] = nb::str(node->originalRef.to_string().c_str());
+        result["is_flake"] = nb::bool_(node->isFlake);
+        return result;
+    }
 
     void write_lock_file() const {
         if (!locked)
@@ -119,7 +154,18 @@ static PyFlakeRef parse_flake_ref(const std::string &url,
     std::optional<nix::FlakeRef> ref;
     {
         nb::gil_scoped_release release;
-        ref.emplace(nix::parseFlakeRef(*settings, url));
+        // The base directory is the working directory, as `eval_flake` below
+        // already passes and as the Nix command line uses.
+        //
+        // It is not optional. `parsePathFlakeRefWithFragment` (`flakeref.cc`)
+        // keeps its whole path branch inside `if (baseDir)`: the search upward
+        // for a `.git` directory, and the rewrite of the reference to
+        // `git+file://`. Without a base directory a path always parses as
+        // `path:`, so a git working tree that Nix calls `git+file:///w` was
+        // called `path:/w` here, and `lock_flake` disagreed with `eval_flake`
+        // about the same string. A relative path did not parse at all -- the
+        // `else` branch of that function rejects one.
+        ref.emplace(nix::parseFlakeRef(*settings, url, std::filesystem::current_path()));
     }
     return PyFlakeRef(std::move(settings), std::move(*ref));
 }
@@ -188,23 +234,75 @@ static PyLockedFlake lock_flake(
     if (locked->flake.description)
         desc = *locked->flake.description;
 
-    nb::dict inputs;
-    for (auto &[id, input] : locked->flake.inputs) {
-        nb::dict inp;
-        if (input.ref) {
-            inp["ref"] = nb::str(input.ref->to_string().c_str());
-            inp["is_flake"] = nb::bool_(input.isFlake);
-        }
-        if (input.follows) {
-            nb::list follows;
-            for (auto &f : *input.follows)
-                follows.append(nb::str(f.c_str()));
-            inp["follows"] = follows;
-        }
-        inputs[nb::str(id.c_str())] = inp;
-    }
+    return PyLockedFlake(std::move(locked), std::move(desc));
+}
 
-    return PyLockedFlake(std::move(locked), std::move(desc), std::move(inputs));
+/// The object that `nix flake metadata --json` prints.
+///
+/// This is `CmdFlakeMetadata::run` (`src/nix/flake.cc`), copied line for line.
+/// Nix builds the whole object from one `LockedFlake` and one `Store`, so this
+/// binding does too. The alternative was to bind `getFingerprint`,
+/// `toStorePath`, `getRev`, `getRevCount`, `getLastModified` and the three
+/// reference accessors on their own, and to assemble the object again in
+/// Python. Nothing is assembled here, so there is no faithfulness question to
+/// prove.
+///
+/// The store is the build store when there is one, which is the rule in
+/// `nix_expr.cpp`. Nix uses the store of the command, and not the evaluation
+/// store.
+static std::string metadata_json(PyEvalState &es, PyLockedFlake &lf) {
+    es.checkThread();
+    auto &lockedFlake = lf.require_locked();
+    auto &flake = lockedFlake.flake;
+    auto store = es.build_store ? es.build_store : es.store;
+    if (!store)
+        throw std::runtime_error("the evaluator has no store");
+
+    std::string out;
+    // A block, and not a release for the whole function: `out` is converted to
+    // a Python string after this returns, and the GIL is held again by then
+    // either way. Every other release in this file is scoped the same, so the
+    // rule is one rule.
+    {
+        nb::gil_scoped_release release;
+
+        nlohmann::json j;
+        if (flake.description)
+            j["description"] = *flake.description;
+        j["originalUrl"] = flake.originalRef.to_string();
+        j["original"] = nix::fetchers::attrsToJSON(flake.originalRef.toAttrs());
+        j["resolvedUrl"] = flake.resolvedRef.to_string();
+        j["resolved"] = nix::fetchers::attrsToJSON(flake.resolvedRef.toAttrs());
+        j["url"] = flake.lockedRef.to_string();
+        j["locked"] = nix::fetchers::attrsToJSON(flake.lockedRef.toAttrs());
+        if (auto rev = flake.lockedRef.input.getRev())
+            j["revision"] = rev->to_string(nix::HashFormat::Base16, false);
+        if (auto dirtyRev = nix::fetchers::maybeGetStrAttr(flake.lockedRef.toAttrs(), "dirtyRev"))
+            j["dirtyRevision"] = *dirtyRev;
+        if (auto revCount = flake.lockedRef.input.getRevCount())
+            j["revCount"] = *revCount;
+        if (auto lastModified = flake.lockedRef.input.getLastModified())
+            j["lastModified"] = *lastModified;
+        // Nix 2.35 splits these two calls across the assignment and the JSON line.
+        // The expression is the same in every supported version, so one line covers
+        // all three.
+        j["path"] = store->printStorePath(store->toStorePath(flake.path.path.abs()).first);
+        j["locks"] = lockedFlake.lockFile.toJSON().first;
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+        // getFingerprint took a `ref<Store>` until Nix 2.32, and takes a `Store &`
+        // from that version on. This is the only version difference in the whole
+        // lock-file surface: `InputAttrPath`, `Node::Edge`, `findInput` and
+        // `toJSON` are identical in Nix 2.31, 2.34 and 2.35.
+        auto fingerprint = lockedFlake.getFingerprint(nix::ref<nix::Store>(store), es.fetchSettings);
+#else
+        auto fingerprint = lockedFlake.getFingerprint(*store, es.fetchSettings);
+#endif
+        if (fingerprint)
+            j["fingerprint"] = fingerprint->to_string(nix::HashFormat::Base16, false);
+
+        out = j.dump();
+    }
+    return out;
 }
 
 static PyFlakeRef get_flake(PyEvalState &es, PyFlakeRef &flakeRef,
@@ -280,7 +378,8 @@ static void bind_flake_ref(nb::module_ &m) {
 static void bind_locked_flake(nb::module_ &m) {
     nb::class_<PyLockedFlake>(m, "LockedFlake")
         .def("description", &PyLockedFlake::get_description)
-        .def("inputs", &PyLockedFlake::get_inputs)
+        .def("find_input", &PyLockedFlake::find_input, "path"_a,
+             "Find one node of the lock graph, as InstallableFlake::nixpkgsFlakeRef does")
         .def("write_lock_file", &PyLockedFlake::write_lock_file,
              "Write the in-memory lock file to the flake's flake.lock on disk")
         .def("__repr__", [](const PyLockedFlake &lf) {
@@ -312,7 +411,7 @@ void nanopynix_bind_flake(nb::module_ &m) {
           // The LockedFlake points into the evaluator's fetch settings, and
           // into the arena that its SourcePaths come from.
           nb::keep_alive<0, 1>(),
-          "Lock a flake reference, returning a LockedFlake with description and inputs");
+          "Lock a flake reference, returning a LockedFlake");
     m.def("get_flake", &get_flake,
           "state"_a, "flake_ref"_a, "use_registries"_a = true,
           "Resolve a flake reference (without locking)");
@@ -320,6 +419,9 @@ void nanopynix_bind_flake(nb::module_ &m) {
           "state"_a, "locked_flake"_a,
           nb::keep_alive<0, 1>(),
           "Call a locked flake's outputs function, returning a Value");
+    m.def("metadata_json", &metadata_json,
+          "state"_a, "locked_flake"_a,
+          "The JSON object that `nix flake metadata --json` prints");
     m.def("eval_flake", &eval_flake,
           "state"_a, "ref"_a,
           "write_lock_file"_a = true,

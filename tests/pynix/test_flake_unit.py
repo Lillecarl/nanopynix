@@ -1,10 +1,10 @@
 """Direct unit tests for pynix.flake's private rendering helpers.
 
 test_flake_show.py only exercises these through real flake evaluation, which
-never produces Nix INT/FLOAT/BOOL/NULL attrs, list values, unresolved thunks,
-or lock-file inputs without extra attrs at the top level of the test fixture
-flake. These "dumb coverage" tests pin those branches down directly with
-small fakes instead of contriving a real flake to expose them.
+never produces Nix INT/FLOAT/BOOL/NULL attrs, list values, or unresolved
+thunks at the top level of the test fixture flake. These "dumb coverage"
+tests pin those branches down directly with small fakes instead of contriving
+a real flake to expose them.
 """
 
 # ruff: noqa: ASYNC109
@@ -15,15 +15,10 @@ small fakes instead of contriving a real flake to expose them.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from typing import Any
-
 from nanopynix_proto.nix.common import NixType
 from pynix.flake import (
-    _attrs_value_to_json,  # pyright: ignore[reportPrivateUsage] -- test unit-tests pynix.flake's private rendering helpers directly, see module docstring
     _build_tree,  # pyright: ignore[reportPrivateUsage] -- test unit-tests pynix.flake's private rendering helpers directly, see module docstring
     _format_attr,  # pyright: ignore[reportPrivateUsage] -- test unit-tests pynix.flake's private rendering helpers directly, see module docstring
-    _locked_input_to_json,  # pyright: ignore[reportPrivateUsage] -- test unit-tests pynix.flake's private rendering helpers directly, see module docstring
     _TreeBudget,  # pyright: ignore[reportPrivateUsage] -- test unit-tests pynix.flake's private rendering helpers directly, see module docstring
 )
 from rich.tree import Tree
@@ -131,21 +126,3 @@ def test_format_attr_covers_the_remaining_scalar_types() -> None:
     assert "<float>" in _format_attr("n", NixType.FLOAT, NixType)
     assert "<bool>" in _format_attr("n", NixType.BOOL, NixType)
     assert "<null>" in _format_attr("n", NixType.NULL, NixType)
-
-
-def test_locked_input_to_json_omits_attrs_key_when_attrs_is_none() -> None:
-    input_ = SimpleNamespace(is_flake=True, follows=[], attrs=None)
-
-    assert _locked_input_to_json(input_) == {"isFlake": True, "follows": []}
-
-
-def test_attrs_value_to_json_checks_bool_then_int_then_string_then_null() -> None:
-    defaults: dict[str, Any] = {"bool_value": None, "int_value": None, "string_value": None}
-
-    def value(**overrides: Any) -> SimpleNamespace:
-        return SimpleNamespace(**{**defaults, **overrides})
-
-    assert _attrs_value_to_json(value(bool_value=False)) is False
-    assert _attrs_value_to_json(value(int_value=7)) == 7
-    assert _attrs_value_to_json(value(string_value="s")) == "s"
-    assert _attrs_value_to_json(value()) is None

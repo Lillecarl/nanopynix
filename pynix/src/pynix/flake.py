@@ -3,8 +3,9 @@ from __future__ import annotations
 # pyright: reportUnknownMemberType=false
 # nanopynix / nanopynix_proto are C++ nanobind extensions without type stubs.
 import contextlib
+import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, override
 
 import structlog
 from clypi import Command, Positional, arg
@@ -168,46 +169,19 @@ def _format_attr(name: str, nix_type: nanopynix.NixType, nix_type_enum: type[nan
 
 
 async def _print_flake_metadata(flake_ref: str, *, store_uri: str) -> None:
+    """Print what ``nix flake metadata --json`` prints for *flake_ref*.
+
+    Nix writes the whole object itself, in C++, so nothing here assembles it.
+    That is what makes the two commands agree, ``locks`` included: the lock
+    graph is a graph, and a flat map of the top level could never carry a
+    transitive node or a ``follows`` edge.
+    """
     async with eval_session(store_uri) as (_nix, _store, session):
         locked = await session.lock_flake(flake_ref, write_lock_file=False)
         try:
-            print_json(_locked_flake_to_json(flake_ref, locked))
+            print_json(json.loads(await locked.metadata_json()))
         finally:
             await locked.release()
-
-
-def _locked_flake_to_json(flake_ref: str, locked: Any) -> dict[str, Any]:
-    return {
-        "resolvedRef": flake_ref,
-        "description": locked.description,
-        "inputs": {
-            name: _locked_input_to_json(input_)
-            for name, input_ in sorted(locked.inputs.items(), key=lambda item: item[0])
-        },
-    }
-
-
-def _locked_input_to_json(input_: Any) -> dict[str, Any]:
-    result: dict[str, Any] = {
-        "isFlake": input_.is_flake,
-        "follows": list(input_.follows),
-    }
-    attrs = input_.attrs
-    if attrs is not None:
-        result["attrs"] = {
-            name: _attrs_value_to_json(value) for name, value in sorted(attrs.entries.items(), key=lambda item: item[0])
-        }
-    return result
-
-
-def _attrs_value_to_json(value: Any) -> str | int | bool | None:
-    if value.bool_value is not None:
-        return value.bool_value
-    if value.int_value is not None:
-        return value.int_value
-    if value.string_value is not None:
-        return value.string_value
-    return None
 
 
 class Flake(Command):

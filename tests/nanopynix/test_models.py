@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nanopynix_proto.nix.common import AttrsMap, AttrsValue
+from nanopynix_proto.nix.common import AttrsValue
 
 from nanopynix.models import (
     BuildResult,
@@ -11,7 +11,7 @@ from nanopynix.models import (
     FlakeRef,
     Input,
     LockedFlake,
-    LockedInput,
+    LockedNode,
     LogEvent,
     MissingInfo,
     PathInfo,
@@ -191,109 +191,48 @@ class TestFlakeRef:
         assert fr.attrs == {}
 
 
-# ── LockedInput / LockedFlake ────────────────────────────────────────
+# ── LockedNode / LockedFlake ─────────────────────────────────────────
 
 
-class TestLockedInput:
-    def test_with_direct_ref(self):
-        li = LockedInput(
-            attrs=AttrsMap(
-                entries={
-                    "type": AttrsValue(string_value="github"),
-                    "owner": AttrsValue(string_value="NixOS"),
-                    "repo": AttrsValue(string_value="nixpkgs"),
-                    "ref": AttrsValue(string_value="nixos-24.11"),
-                    "rev": AttrsValue(string_value="abc123"),
-                },
-            ),
+class TestLockedNode:
+    """One node of a lock graph, as ``LockFile::findInput`` returns it.
+
+    This replaced a ``LockedInput`` message that carried the inputs a
+    ``flake.nix`` *declares*, under a name that said locked. The graph now
+    travels as Nix's own JSON, inside the metadata object.
+    """
+
+    def test_a_locked_node_carries_both_references(self):
+        node = LockedNode(
+            locked_ref="github:NixOS/nixpkgs/abc123",
+            original_ref="github:NixOS/nixpkgs/nixos-24.11",
             is_flake=True,
         )
-        assert li.attrs is not None
-        assert li.attrs.entries["rev"].string_value == "abc123"
-        assert li.is_flake
-        assert li.follows == []
+        assert node.locked_ref == "github:NixOS/nixpkgs/abc123"
+        assert node.original_ref == "github:NixOS/nixpkgs/nixos-24.11"
+        assert node.is_flake
 
-    def test_follows_another_input(self):
-        li = LockedInput(follows=["nixpkgs", "flake-utils"])
-        assert li.attrs is None
-        assert li.follows == ["nixpkgs", "flake-utils"]
-
-    def test_not_a_flake(self):
-        li = LockedInput(
-            attrs=AttrsMap(
-                entries={
-                    "type": AttrsValue(string_value="tarball"),
-                    "url": AttrsValue(string_value="https://..."),
-                },
-            ),
-            is_flake=False,
-        )
-        assert not li.is_flake
+    def test_a_node_that_is_not_a_flake(self):
+        node = LockedNode(locked_ref="path:/x", original_ref="path:/x", is_flake=False)
+        assert not node.is_flake
 
     def test_defaults(self):
-        li = LockedInput()
-        assert li.attrs is None
-        assert li.is_flake is False  # proto default
-        assert li.follows == []
+        node = LockedNode()
+        assert node.locked_ref == ""
+        assert node.original_ref == ""
+        assert node.is_flake is False  # proto default
 
 
 class TestLockedFlake:
     def test_full(self):
-        lf = LockedFlake(
-            handle=1,
-            description="A test flake",
-            inputs={
-                "nixpkgs": LockedInput(
-                    attrs=AttrsMap(
-                        entries={
-                            "type": AttrsValue(string_value="github"),
-                            "owner": AttrsValue(string_value="NixOS"),
-                            "repo": AttrsValue(string_value="nixpkgs"),
-                            "rev": AttrsValue(string_value="abc"),
-                        },
-                    ),
-                    is_flake=True,
-                ),
-                "utils": LockedInput(
-                    attrs=AttrsMap(
-                        entries={
-                            "type": AttrsValue(string_value="github"),
-                            "owner": AttrsValue(string_value="x"),
-                            "repo": AttrsValue(string_value="y"),
-                        },
-                    ),
-                    is_flake=False,
-                ),
-            },
-        )
+        lf = LockedFlake(handle=1, description="A test flake")
         assert lf.handle == 1
         assert lf.description == "A test flake"
-        assert lf.inputs["nixpkgs"].attrs is not None
-        assert lf.inputs["nixpkgs"].attrs.entries["rev"].string_value == "abc"
-        assert lf.inputs["utils"].is_flake is False
 
-    def test_construct_nested(self):
-        lf = LockedFlake(
-            handle=42,
-            description="hello",
-            inputs={
-                "nixpkgs": LockedInput(
-                    attrs=AttrsMap(
-                        entries={
-                            "type": AttrsValue(string_value="github"),
-                            "owner": AttrsValue(string_value="NixOS"),
-                            "repo": AttrsValue(string_value="nixpkgs"),
-                            "rev": AttrsValue(string_value="abc"),
-                        },
-                    ),
-                    is_flake=True,
-                ),
-            },
-        )
-        assert lf.handle == 42
-        assert isinstance(lf.inputs["nixpkgs"], LockedInput)
-        assert lf.inputs["nixpkgs"].attrs is not None
-        assert lf.inputs["nixpkgs"].attrs.entries["rev"].string_value == "abc"
+    def test_defaults(self):
+        lf = LockedFlake()
+        assert lf.handle == 0
+        assert lf.description == ""
 
 
 # ── LogEvent ─────────────────────────────────────────────────────────
