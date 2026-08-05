@@ -30,6 +30,8 @@ from tests.support.notes import note
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
+
 
 #: One instance of every model, covering the authority, the scheme override,
 #: a list-valued setting and a setting whose value is itself a store URI.
@@ -284,6 +286,67 @@ def test_a_uri_string_is_never_rewritten() -> None:
     assert stores.resolve_store_spec("local://?root=/tmp/x", defaults) == "local://?root=/tmp/x"
 
 
+# ── Resolving `auto` ─────────────────────────────────────────────────
+
+
+def test_an_auto_that_became_the_daemon_is_reopened_with_a_pool() -> None:
+    """The connection limit reaches the store `auto` turned into.
+
+    Nix gives a daemon store one connection, and a library whose callers run
+    store operations at the same time needs more. ``auto`` itself cannot carry
+    the setting, because a parameter on it turns off Nix's rootless chroot
+    store, so the limit goes on a second open.
+    """
+    reopen = stores.resolve_auto_uri("auto", "daemon")
+
+    assert reopen is not None
+    assert stores.parse(reopen) == stores.Daemon(max_connections=stores.DAEMON_MAX_CONNECTIONS)
+
+
+def test_a_socket_that_is_not_the_default_one_survives_the_reopen() -> None:
+    """The second open goes to the same daemon as the first one.
+
+    The reopen is built from what Nix reported, and not from the bare default,
+    so a host with ``NIX_DAEMON_SOCKET_PATH`` set keeps its socket.
+    """
+    reopen = stores.resolve_auto_uri("auto", "unix:///run/other/socket")
+
+    assert reopen is not None
+    parsed = stores.parse(reopen)
+    assert isinstance(parsed, stores.Daemon)
+    assert parsed.socket == "/run/other/socket"
+    assert parsed.max_connections == stores.DAEMON_MAX_CONNECTIONS
+
+
+def test_a_named_daemon_store_gets_the_pool_when_it_is_opened() -> None:
+    """The two ways to reach the daemon agree, and neither is the model itself.
+
+    ``Daemon()`` describes a URI that states no limit, so it renders none. The
+    number arrives when the store is about to be opened, which is what
+    ``resolve_store_spec`` does. ``test_stores_properties.py`` is why the model
+    cannot carry it.
+    """
+    assert stores.Daemon().uri() == "unix://"
+    assert stores.resolve_store_spec(stores.Daemon()) == f"unix://?max-connections={stores.DAEMON_MAX_CONNECTIONS}"
+    assert stores.resolve_store_spec(stores.Daemon(max_connections=1)) == "unix://?max-connections=1"
+    assert stores.resolve_store_spec(stores.Local(root="/tmp/x")) == "local://?root=/tmp/x"
+
+
+@pytest.mark.parametrize(
+    ("requested", "resolved", "why"),
+    [
+        ("auto", "local", "a local store has no connections to pool"),
+        ("auto", "dummy://", "no other store type is what `auto` is about"),
+        ("auto", "moon://gouda", "a store type with no model says nothing about this rule"),
+        ("daemon", "daemon", "a caller who named the daemon gets the daemon they named"),
+        ("unix://?max-connections=2", "daemon", "a stated limit is the caller's own"),
+    ],
+)
+def test_a_store_that_is_left_alone(requested: str, resolved: str, why: str) -> None:
+    """Only an `auto` that became the daemon is opened a second time."""
+    assert stores.resolve_auto_uri(requested, resolved) is None, why
+
+
 def test_the_overlay_namespace_renders_through_the_store_model(tmp_path: Path) -> None:
     """``OverlayNamespace`` names a store, and the store model spells it.
 
@@ -320,3 +383,46 @@ async def test_a_model_opens_the_store_it_describes(tmp_path: Path) -> None:
 
     dummy = nanopynix.open_store(stores.Dummy().uri())
     assert dummy.get_store_dir() == "/nix/store"
+
+
+async def test_both_engines_open_auto_the_way_resolve_auto_uri_asks(
+    inproc_session: InprocSessionFactory,
+    rpc_session: RpcSessionFactory,
+) -> None:
+    """`resolve_auto_uri` reaches the store, and it reaches it on both engines.
+
+    ``CoreRuntime.open_store`` is the one place that applies the rule, and both
+    engines call it, so this asserts the contract rather than one outcome.
+    Which outcome the host gives is not fixed: a developer on a multi-user
+    install sees the daemon, and this suite's own state directory is writable,
+    so ``auto`` becomes a local store under it. Both readings are checked
+    against what the rule says for the store Nix reported.
+
+    Opening ``auto`` costs about half a millisecond and opens no socket,
+    because a connection pool is lazy. Nothing here writes to the host store.
+
+    **The check needs a Nix that can report a store's own parameters, and 2.31
+    cannot.** There, ``UDSRemoteStoreConfig::getReference`` builds its answer
+    with no ``.params`` at all -- ``getQueryParams`` arrived later -- so
+    ``render(withParams=true)`` says ``daemon`` on a store that really does
+    carry the limit. The rule still runs on 2.31, and no reading of the store
+    can show it, so the probe below decides whether there is anything to
+    assert. A version number would say the same thing and would rot.
+    """
+    for label, factory in (("inproc", inproc_session), ("rpc", rpc_session)):
+        async with factory() as nix:
+            async with nix.store(stores.Dummy(priority=7)) as probe:
+                reports_params = "priority=7" in await probe.uri(with_params=True)
+            async with nix.store("auto") as store:
+                plain = await store.uri()
+                full = await store.uri(with_params=True)
+        note(**{f"auto_{label}": full, f"reports_params_{label}": reports_params})
+
+        if not reports_params:
+            pytest.skip("this Nix does not report a store's own parameters, so the reopen cannot be read back")
+
+        expected = stores.resolve_auto_uri("auto", plain)
+        if expected is None:
+            assert "max-connections" not in full, f"{label} added a limit the rule did not ask for"
+        else:
+            assert stores.parse(full) == stores.parse(expected), f"{label} did not apply the rule"

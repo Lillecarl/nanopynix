@@ -53,6 +53,7 @@ from nanopynix.settings import (
     SettingsProvenance,
     reject_construction_time_keys,
 )
+from nanopynix.stores import resolve_auto_uri
 
 _RAW_GC_ACTIONS = {
     GcAction.RETURN_LIVE: nanopynix_store.GCAction.ReturnLive,
@@ -755,7 +756,18 @@ class CoreRuntime:
         return self._core.apply_settings(settings)
 
     def open_store(self, uri: str) -> CoreStore:
-        return CoreStore(self._core.open_store(uri))
+        raw = self._core.open_store(uri)
+        # `auto` alone cannot carry the connection limit that a daemon store
+        # needs, so the limit goes on a second open. `resolve_auto_uri` gives
+        # the reason. Both engines reach this method, so both get the rule.
+        reopen_uri = resolve_auto_uri(uri, raw.get_uri())
+        if reopen_uri is not None:
+            # The first store never took a connection, so this releases
+            # nothing. It runs because a store that this layer opened and does
+            # not return is a store this layer closes.
+            raw.close()
+            raw = self._core.open_store(reopen_uri)
+        return CoreStore(raw)
 
     def open_eval_state(
         self,
