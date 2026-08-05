@@ -110,6 +110,17 @@ DENYLIST: dict[str, str] = {
         "writes and reads the same session-wide verbosity. See the entry above. It was in the "
         "roster before the entry above joined it, and it passed only because it was the sole writer."
     ),
+    # The third writer of the same setting, and the one that does not read it
+    # back -- which is why it passed here while the two above did not, and why
+    # what it broke was a peer rather than itself. It walks the level through
+    # "error", and a peer that waits for an `lvlInfo` event never sees one
+    # while it does. That is what failed
+    # `test_inproc_session_subscribe_receives_log_events` at seed 4, on all
+    # three TSAN jobs of run 31047537102 and on `test-nogc-git` before them.
+    "tests/nanopynix/test_verbosity.py::test_nix_filters_at_a_pinned_ceiling_that_no_call_moves": (
+        "walks the session-wide verbosity through error/debug/vomit/notice. A peer waiting for an "
+        "lvlInfo event gets nothing while the level is 'error'."
+    ),
     # The two below drive Nix to stack exhaustion on purpose. Their own module
     # says what a regression does: it does not fail the test, it aborts the
     # whole pytest process. In a lane that blast radius is every peer.
