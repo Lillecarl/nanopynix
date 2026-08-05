@@ -178,6 +178,22 @@ let
   # constant at all.
   baseEnvSizePatch = ./nix/patches/nix-base-env-size.patch;
 
+  # `gmtime` returns a pointer into one buffer that the C library shares
+  # between every thread, and Nix calls it at two places that both format a
+  # `lastModified`: `describe` in libflake, which `lockFlake` reaches, and
+  # `emitTreeAttrs` in libexpr, which `callFlake` and the `fetchTree` primops
+  # reach. Two evaluator threads that touch a flake at the same time then
+  # overwrite each other's result. `nix` the command evaluates on one thread
+  # and never meets this; nanopynix gives each evaluator its own thread, so it
+  # does. ThreadSanitizer found it -- see issue #90, and the patch header.
+  #
+  # Two files for one change, because `describe` is byte-identical in 2.31,
+  # 2.34, 2.35 and git, and `emitTreeAttrs` is not: 2.31 writes the call on
+  # one line and takes no `state.mem`. The hunks cannot be shared, so each
+  # file carries both of its own.
+  gmtimePatch = ./nix/patches/nix-gmtime-not-thread-safe.patch;
+  gmtimePatch231 = ./nix/patches/nix-2.31-gmtime-not-thread-safe.patch;
+
   # Which patches to apply to a given nix version's modular component set,
   # keyed by that version's own major.minor (e.g. "2.34"), with `default`
   # as the fallback for anything without its own entry (git's rolling
@@ -186,14 +202,17 @@ let
     default = [
       emptyBindingsPatch
       baseEnvSizePatch
+      gmtimePatch
     ];
     "2.34" = [
       emptyBindingsPatch
       baseEnvSizePatch
+      gmtimePatch
     ];
     "2.35" = [
       emptyBindingsPatch
       baseEnvSizePatch
+      gmtimePatch
     ];
     # 2.31 is the one version that gets neither the same list nor the
     # default. emptyBindingsPatch is absent because 2.31's surrounding
@@ -208,9 +227,13 @@ let
     #
     # baseEnvSizePatch applies to every version. The three hunks have identical
     # context in 2.31, 2.34 and 2.35, so only the line numbers move.
+    #
+    # gmtimePatch231 is the 2.31 form of the same repair that gmtimePatch
+    # makes everywhere else. Only its `emitTreeAttrs` hunk differs.
     "2.31" = [
       valueToJsonCallDepthPatch
       baseEnvSizePatch
+      gmtimePatch231
     ];
   };
 
