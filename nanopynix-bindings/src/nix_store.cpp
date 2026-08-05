@@ -230,8 +230,8 @@ static nb::list compute_fs_closure(nix::Store &s, const nix::StorePath &path,
 // It stays here because `build_paths` takes `StorePath`, which cannot carry a
 // `^` selector at all -- so `Opaque` would leave that entry point with no way
 // to build anything, rather than with Nix's semantics. It has no Python
-// caller and no test; resolving that is issue #67's remaining question and
-// not this function's business.
+// caller and no test; issue #74 tracks that, and it is not this function's
+// business.
 //
 // This is byte-for-byte `StorePathWithOutputs::toDerivedPath()`
 // (`path-with-outputs.cc:15-31`) and is deliberately *not* routed through it:
