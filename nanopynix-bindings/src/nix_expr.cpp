@@ -1486,9 +1486,99 @@ static void bind_eval_state(nb::module_ &m) {
 // Python owns evaluator threads. Nix enables manual Boehm registration during
 // initGC(), but it does not register embedding-created threads itself.
 static thread_local bool evaluator_thread_registered = false;
-// `maybe_unused` because a `-Dgc=disabled` build never writes it: there is no
-// registration to own, and therefore nothing to undo.
-[[maybe_unused]] static thread_local bool evaluator_thread_registered_by_nanopynix = false;
+
+// Defined below, beside the rest of the diagnostic.
+static void gc_thread_debug_log(const char *event);
+
+// The one owner of this thread's Boehm registration.
+//
+// **Boehm scans the stack of a registered thread, and no other stack.**
+// `GC_push_all_stacks` (pthread_stop_world.c) walks the thread table, pushes
+// the stack of each entry as a root, and aborts with "Collecting from unknown
+// thread" only when the *calling* thread is absent. A thread that is absent
+// and is not the caller is never visited at all. So an unregistered thread
+// that drives an evaluator has two failure modes, and the thread that starts
+// a collection picks between them:
+//
+//  1. The collection starts here. Boehm aborts, and the process dies.
+//  2. The collection starts on some other registered thread. There is no
+//     abort. This stack is not scanned and this thread is not suspended, so a
+//     value that only this stack refers to is unreachable, the collector frees
+//     it, and the next read of that pointer gives whatever took the memory.
+//
+// `PyEvalState::checkThread` already names this hazard, and it answers a
+// different question: *which* thread may drive an evaluator. It does not make
+// that one thread known to the collector. This does.
+//
+// One object owns the registration, so that it is undone once. The destructor
+// is what covers a thread that registers and then exits: a registration left
+// behind names a `pthread_t` that glibc hands to the next thread, and
+// `GC_suspend_all` then signals a thread that is gone -- issue #72 when glibc
+// answers `EINVAL`, and issue #53 when it faults instead.
+namespace {
+struct GcThreadRegistration {
+    // True when this thread holds the registration and therefore owes the
+    // matching release. A `-Dgc=disabled` build still tracks it, because the
+    // contract that `enter`/`exit` hold to is not about the collector.
+    bool owned = false;
+
+    void acquire() {
+        if (owned)
+            return;
+#if NIX_USE_BOEHMGC
+        GC_stack_base stack_base;
+        if (GC_get_stack_base(&stack_base) != GC_SUCCESS)
+            throw std::runtime_error("could not determine thread stack base for Boehm GC");
+        auto result = GC_register_my_thread(&stack_base);
+        // `GC_DUPLICATE` is a stale entry for this same `pthread_t`, and this
+        // thread takes it over rather than leaving it. Issue #73 gives the
+        // whole argument: the entry names this thread, so releasing it later
+        // is correct whoever made it.
+        if (result != GC_SUCCESS && result != GC_DUPLICATE)
+            throw std::runtime_error("could not register this thread with Boehm GC");
+#endif
+        owned = true;
+        gc_thread_debug_log("gc_thread_registration:acquired");
+    }
+
+    void release() {
+        if (!owned)
+            return;
+        owned = false;
+#if NIX_USE_BOEHMGC
+        // **The main thread keeps its registration.** Its stack stays a root
+        // until the process ends, so there is no stale entry to leave: the
+        // `pthread_t` cannot be handed to another thread while this one runs.
+        // Releasing it from a `thread_local` destructor would instead call
+        // into the collector during static teardown, after the interpreter
+        // finalizes, which is the one moment nothing else here runs.
+        if (syscall(SYS_gettid) == getpid())
+            return;
+        if (GC_unregister_my_thread() != GC_SUCCESS)
+            throw std::runtime_error("could not unregister this thread from Boehm GC");
+#endif
+        gc_thread_debug_log("gc_thread_registration:released");
+    }
+
+    ~GcThreadRegistration() {
+        // A throw from a destructor calls `std::terminate`. The release above
+        // throws only when Boehm rejects a thread it gave us, and a crash at
+        // thread exit would say less than the leak does.
+        try {
+            release();
+        } catch (const std::exception &) {  // NOLINT -- see above
+            gc_thread_debug_log("gc_thread_registration:release-failed");
+        }
+    }
+};
+
+thread_local GcThreadRegistration gc_thread_registration;
+}  // namespace
+
+// Make Boehm aware of the calling thread, and keep it aware until that thread
+// exits. `PyEvalState::init` calls this, so a caller that builds an evaluator
+// directly -- with no executor and no `enter_evaluator_thread` -- is safe.
+void nanopynix_ensure_gc_thread_registered() { gc_thread_registration.acquire(); }
 
 // DIAGNOSTIC (temporary): logs every GC register/unregister call with its OS
 // thread id, gated behind NANOPYNIX_GC_THREAD_DEBUG=1, to correlate against a
@@ -1587,53 +1677,14 @@ static void enter_evaluator_thread() {
     if (evaluator_thread_registered)
         throw std::runtime_error("evaluator thread is already registered with Boehm GC");
 
-#if !NIX_USE_BOEHMGC
+    // `GcThreadRegistration` above owns the Boehm side, and it is the same
+    // object that `PyEvalState::init` reaches through
+    // `nanopynix_ensure_gc_thread_registered`. One owner, so an evaluator
+    // built directly on this thread and an executor that later enters it do
+    // not each hold a registration that the other undoes.
+    gc_thread_registration.acquire();
     evaluator_thread_registered = true;
-    gc_thread_debug_log("enter_evaluator_thread:no-collector");
-#else
-    GC_stack_base stack_base;
-    auto stack_base_result = GC_get_stack_base(&stack_base);
-    if (stack_base_result != GC_SUCCESS)
-        throw std::runtime_error("could not determine evaluator thread stack base for Boehm GC");
-
-    auto register_result = GC_register_my_thread(&stack_base);
-    if (register_result == GC_DUPLICATE) {
-        // **A duplicate is a stale entry for this same thread, and this thread
-        // takes it over.** It used to be left alone, on the belief that some
-        // Python runtime had registered the thread and owned that
-        // registration. CPython links no collector and registers nothing, and
-        // `GC_register_my_thread` in bdwgc 8.2.12 returns `GC_DUPLICATE` in
-        // one case alone: `GC_lookup_thread(pthread_self())` finds an entry
-        // without the `FINISHED` flag.
-        //
-        // That entry cannot belong to a live evaluator. `enter` above refuses
-        // a second registration on a thread that already has one, so a live
-        // evaluator never reaches this line. And `GC_register_my_thread` marks
-        // every thread it registers `DETACHED`, so `GC_unregister_my_thread`
-        // calls `GC_delete_thread` and removes the entry. What is left is a
-        // thread that registered, exited without unregistering, and had its
-        // `pthread_t` handed to this thread by glibc, which caches and reuses
-        // thread stacks.
-        //
-        // Leaving it is never right. `GC_suspend_all` signals every entry that
-        // is neither the caller nor `FINISHED`, so a stale entry means
-        // `pthread_kill` on a thread that is gone -- issue #72 when glibc
-        // answers `EINVAL`, and issue #53 when it faults instead. Unregistering
-        // at exit is safe whoever made the entry, because the entry names this
-        // thread: `GC_unregister_my_thread` looks up `pthread_self()`.
-        //
-        // Issue #73 gives the whole argument.
-        evaluator_thread_registered = true;
-        evaluator_thread_registered_by_nanopynix = true;
-        gc_thread_debug_log("enter_evaluator_thread:duplicate-taken-over");
-        return;
-    }
-    if (register_result != GC_SUCCESS)
-        throw std::runtime_error("could not register evaluator thread with Boehm GC");
-    evaluator_thread_registered = true;
-    evaluator_thread_registered_by_nanopynix = true;
     gc_thread_debug_log("enter_evaluator_thread:registered");
-#endif
 }
 
 // What the two probes below say when this build has no collector.
@@ -1793,15 +1844,8 @@ static void exit_evaluator_thread() {
     gc_thread_debug_log("exit_evaluator_thread:begin");
     if (!evaluator_thread_registered)
         throw std::runtime_error("evaluator thread is not registered with Boehm GC");
-#if NIX_USE_BOEHMGC
-    if (evaluator_thread_registered_by_nanopynix) {
-        auto unregister_result = GC_unregister_my_thread();
-        if (unregister_result != GC_SUCCESS)
-            throw std::runtime_error("could not unregister evaluator thread from Boehm GC");
-    }
-#endif
+    gc_thread_registration.release();
     evaluator_thread_registered = false;
-    evaluator_thread_registered_by_nanopynix = false;
     gc_thread_debug_log("exit_evaluator_thread:unregistered");
 }
 
