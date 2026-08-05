@@ -15,6 +15,7 @@ import pytest
 from nanopynix_bindings import util as nanopynix_util
 
 from nanopynix import EvalSessionClosedError, NixSettings, inproc
+from tests.support.notes import note
 
 # `_session` below builds an `inproc.Session` directly rather than through the
 # `inproc_session` fixture, so the no-collector rule in
@@ -508,14 +509,25 @@ async def test_inproc_parallel_batch_builds_use_multiple_store_workers(
                     assert all(result.success for group in outputs for result in group)
                     assert len(starts) == 20, f"expected 20 build-start activities, saw {len(starts)}: {starts}"
                     spread = _dispatch_spread(starts)
-                    # Dispatching 20 sandboxed builds (fork/exec + namespace setup
-                    # each) has real, non-instant CPU cost even when Nix's scheduler
-                    # submits all of them essentially at once -- observed ~3s on a
-                    # real machine for 20 builds. A truly serialized scheduler would
-                    # show spread on the order of (20 - 1) * seconds = 38s, so 8s
-                    # (4x the per-build sleep) stays a wide margin below that while
-                    # still well above legitimate dispatch overhead.
-                    assert spread < seconds * 4, (
+                    # The threshold below is a timing one, so the measurement
+                    # is on the record whether the test passes or fails. A
+                    # flake that reports 7.9s and one that reports 0.4s have
+                    # different causes, and the assertion alone cannot say
+                    # which one happened.
+                    note(build_start_spread=round(spread, 3))
+                    # Dispatching 20 sandboxed builds (fork/exec + namespace
+                    # setup each) has real CPU cost even when Nix submits all
+                    # of them at once. The threshold was 8s, and this test
+                    # failed about one run in four, because the shape it was
+                    # written to catch produced a spread of 8.0s to 8.6s: the
+                    # session store was `auto`, `auto` was the daemon, and Nix
+                    # gives a daemon store one connection. Issue #75.
+                    #
+                    # `stores.resolve_auto_uri` puts a pool on that store, and
+                    # the same six runs then measured 0.32s to 0.48s. So 4s is
+                    # eight times the concurrent shape and half the serial one,
+                    # where 8s could not tell them apart at all.
+                    assert spread < seconds * 2, (
                         f"four independent build requests were not dispatched concurrently (start spread {spread:.3f}s)"
                     )
                 finally:

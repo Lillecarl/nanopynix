@@ -369,12 +369,19 @@ class Daemon(_LocalFS, _Remote):
 
     ``socket`` names the socket. Left unset, Nix uses the default socket of the
     host, which is what the bare ``daemon`` URI means.
+
+    **Opening this store states a connection limit that Nix does not.** Nix
+    gives a remote store one connection, and this library asks for
+    :data:`DAEMON_MAX_CONNECTIONS`. :func:`resolve_store_spec` puts the number
+    on the URI, so the model itself keeps saying only what its caller said. A
+    ``max_connections`` written here is the caller's own, and ``1`` gets Nix's.
     """
 
     store_scheme: ClassVar[str] = "unix"
     store_type_name: ClassVar[str | None] = "Local Daemon Store"
 
     socket: str | None = _optional_authority()
+    max_connections: int | None = None
 
 
 class Ssh(_CommonSSH):
@@ -485,6 +492,10 @@ class Auto(StoreConfig):
     It carries only the settings every store type accepts, because which type
     it resolves to is not known until it is opened. To set anything else, name
     the store type.
+
+    **An ``auto`` that becomes the daemon is reopened with a connection pool.**
+    :func:`resolve_auto_uri` states that rule and gives the reason. Write a URI
+    string to get exactly the store you asked for.
     """
 
     store_scheme: ClassVar[str] = "auto"
@@ -585,6 +596,55 @@ def _validate(model: type[StoreConfig], data: Mapping[str, Any], uri: str) -> St
         raise ValueError(f"cannot read {uri!r} as {model.__name__}: {error}") from error
 
 
+#: Connections a :class:`Daemon` store gets when its caller states no limit.
+#:
+#: Nix's own number is 1 (``max-connections`` in ``remote-store.hh``), and a
+#: store operation holds a connection for as long as the operation runs. A
+#: build holds it until the builder exits, so two concurrent builds through
+#: the daemon run one after the other. Measured on four concurrent builds of a
+#: two-second derivation: with one connection the four requests started 8.1
+#: seconds apart, and with eight they started 0.4 seconds apart.
+#:
+#: ``nix build`` never meets this, because one command holds one connection and
+#: gets its parallelism from ``max-jobs`` inside a single build. A library
+#: whose callers run store operations at the same time is the case 1 does not
+#: fit.
+#:
+#: **Eight, and not more, because it multiplies ``max-jobs``.** The daemon
+#: forks for each connection, and the child opens its own store, so each
+#: connection gets its own build slots. Concurrent local builds are therefore
+#: connections times ``max-jobs``, and NixOS sets ``max-jobs`` to ``auto``.
+#: Eight leaves that product near the size of the ``build-users-group`` pool,
+#: which is the only limit the machine imposes on top.
+#:
+#: A pool costs nothing until it is used. ``nix::Pool`` opens a connection only
+#: when every existing one is busy, so this raises a ceiling rather than
+#: opening eight sockets.
+DAEMON_MAX_CONNECTIONS = 8
+
+
+def _with_connection_pool(config: StoreConfig) -> StoreConfig:
+    """State :data:`DAEMON_MAX_CONNECTIONS` on a daemon store that stated none.
+
+    **This is not a field default, and the reason is a property of the models.**
+    A model is a description of a URI, and ``None`` is how it says "the URI did
+    not state this". A field default that is not ``None`` makes that unsayable:
+    ``parse("unix://")`` would answer a store carrying a limit the URI never
+    carried, and rendering it again would not give ``unix://`` back.
+    ``tests/nanopynix/test_stores_properties.py`` asserts both directions, and
+    it is what found this.
+
+    So the number goes on at the moment a store is opened, and not on the model
+    that describes one. Only :class:`Daemon` gets it. The SSH stores have the
+    same field and the same one-connection default, and a connection there is a
+    whole SSH session rather than a socket, so raising that ceiling is a
+    separate decision with a separate cost. Nothing measured it.
+    """
+    if not isinstance(config, Daemon) or config.max_connections is not None:
+        return config
+    return config.model_copy(update={"max_connections": DAEMON_MAX_CONNECTIONS})
+
+
 def resolve_store_spec(spec: StoreConfig | str, defaults: NixStoreDefaults | None = None) -> str:
     """Render a store spec to a URI, filling unset fields from session defaults.
 
@@ -592,6 +652,11 @@ def resolve_store_spec(spec: StoreConfig | str, defaults: NixStoreDefaults | Non
     ``priority``, ``trusted``, ``want-mass-query`` or ``path-info-cache-size``,
     so the only place they can go is the URI of each store, and this is what
     puts them there. A value set on the store itself always wins.
+
+    A :class:`Daemon` that states no ``max_connections`` gets
+    :data:`DAEMON_MAX_CONNECTIONS` here, for the reason that constant gives.
+    This function renders the URI of a store that is about to be opened, which
+    is why the number goes on here rather than on the model.
 
     A string spec passes through untouched. Merging a default into it would
     mean reparsing and rewriting a URI the caller wrote by hand, and this
@@ -606,9 +671,52 @@ def resolve_store_spec(spec: StoreConfig | str, defaults: NixStoreDefaults | Non
     """
     if isinstance(spec, str):
         return spec
-    if defaults is None:
-        return spec.uri()
-    return fill_unset_fields(spec, defaults).uri()
+    filled = spec if defaults is None else fill_unset_fields(spec, defaults)
+    return _with_connection_pool(filled).uri()
+
+
+def resolve_auto_uri(requested_uri: str, resolved_uri: str) -> str | None:
+    """Return the URI to reopen an ``auto`` store with, or ``None`` to keep it.
+
+    ``auto`` becomes the daemon on a machine where this user cannot write the
+    store, and such a store gets :data:`DAEMON_MAX_CONNECTIONS` here, for the
+    reason that constant gives. :func:`resolve_store_spec` does the same for a
+    :class:`Daemon` a caller named, so the two ways to reach the daemon agree.
+
+    **The limit cannot go on ``auto`` itself.** Nix sets up its rootless chroot
+    store only when the store URI carries no parameter at all, which
+    ``store-registration.cc`` tests with ``params.empty()``. So
+    ``auto?max-connections=8`` would turn that fallback off for every user who
+    has no ``/nix``. The limit therefore goes on a second open, after Nix says
+    what ``auto`` became. Nix keeps its own rule, and this module does not copy
+    it.
+
+    The first open costs about half a millisecond and opens no socket, because
+    a connection pool is lazy. A caller who writes a URI string gets that store
+    unchanged, which is the rule :func:`resolve_store_spec` already states.
+
+    Args:
+        requested_uri: The URI the caller asked to open.
+        resolved_uri: What the open store reports as its own URI.
+
+    Returns:
+        The URI to open in place of the first one, or ``None`` when the first
+        one stands.
+    """
+    if requested_uri != Auto.store_scheme:
+        return None
+    try:
+        resolved = parse(resolved_uri)
+    except ValueError:
+        # A store type this module has no model for is a store this rule has
+        # nothing to say about, and an `auto` that reports one is not a caller
+        # mistake.
+        return None
+    if not isinstance(resolved, Daemon):
+        return None
+    # `parse` keeps a socket that is not the default one, so the second open
+    # goes to the same daemon as the first.
+    return _with_connection_pool(resolved).uri()
 
 
 def list_store_types() -> dict[str, dict[str, Any]]:
