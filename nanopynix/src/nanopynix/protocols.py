@@ -300,6 +300,44 @@ class AsyncStore(Protocol):
         ...
 
     @abstractmethod
+    async def dump_db(
+        self,
+        paths: Sequence[str | StorePath],
+        /,
+        *,
+        show_derivers: bool = True,
+        show_hash: bool = True,
+    ) -> str:
+        """Return the registration text for *paths*, as ``nix-store --dump-db`` does.
+
+        ``nix-store --load-db`` reads this text back. It builds the database
+        from nothing, and it adds to a database that exists already, so it can
+        register a closure on a machine that Nix never ran on.
+
+        **Give the whole closure.** This function registers the paths that it
+        gets, and nothing more. Call :meth:`compute_fs_closure` first, or the
+        database names a path that the machine does not have.
+
+        The records come out in the order of *paths*. The order does not change
+        the database, because ``--load-db`` adds every path before it resolves
+        any reference.
+
+        The text is not the text that ``pkgs.closureInfo`` writes. Both texts
+        are valid input for ``--load-db``, and the fields differ:
+
+        =============  ==========================  =========================
+        field          this function               ``closureInfo``
+        =============  ==========================  =========================
+        NAR hash       base16, with no prefix      ``sha256:`` and base32
+        deriver        the deriver of the path     always empty
+        =============  ==========================  =========================
+
+        Set *show_hash* to false to leave out the NAR hash and the NAR size,
+        and *show_derivers* to false to leave the deriver empty.
+        """
+        ...
+
+    @abstractmethod
     async def query_all_valid_paths(self) -> list[StorePath]:
         """Return every valid path registered in this store."""
         ...

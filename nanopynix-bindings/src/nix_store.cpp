@@ -210,6 +210,35 @@ static nb::dict query_path_info(nix::Store &s, const nix::StorePath &path) {
     return path_info_to_dict(s, **info);
 }
 
+// The text behind `nix-store --dump-db`, which `nix-store --load-db` reads
+// back. Nix calls makeValidityRegistration once for each argument
+// (`nix-store.cc`, opDumpDB), so the records come out in the order the caller
+// gave. One call with the whole set would sort them by store path instead,
+// because the parameter is a StorePathSet. The order does not change the
+// database that `--load-db` builds: LocalStore::registerValidPaths adds every
+// path first, and resolves the references in a second pass
+// (`local-store.cc`). Argument order is kept because it makes this function
+// byte-identical to the command.
+//
+// makeValidityRegistration is not virtual and is not in
+// NANOPYNIX_STORE_DISPATCH_METHODS. It needs no entry there: nix::Store
+// derives the whole text from queryPathInfo, which a Python store already
+// answers.
+//
+// The caller owns the closure. Nix says so at the definition, and it is true
+// here: this function registers exactly the paths it gets. A record whose
+// references are absent gives a database that names a path it does not have.
+static std::string dump_db(nix::Store &s, const std::vector<nix::StorePath> &paths,
+                           bool show_derivers, bool show_hash) {
+    std::string out;
+    {
+        nb::gil_scoped_release release;
+        for (const auto &path : paths)
+            out += s.makeValidityRegistration({path}, show_derivers, show_hash);
+    }
+    return out;
+}
+
 // --- Closures ---
 
 static nb::list compute_fs_closure(nix::Store &s, const nix::StorePath &path,
@@ -876,6 +905,7 @@ static void bind_store(nb::module_ &m) {
         .def("write_dev_shell_derivation", &write_dev_shell_derivation, "drv_path"_a, "get_env_script"_a)
         // Path info
         .def("query_path_info", &query_path_info, "path"_a)
+        .def("dump_db", &dump_db, "paths"_a, "show_derivers"_a = true, "show_hash"_a = true)
         .def("query_path_from_hash_part",
              [](nix::Store &s, const std::string &h) { return s.queryPathFromHashPart(h); },
              nb::call_guard<nb::gil_scoped_release>(), "hash"_a)
