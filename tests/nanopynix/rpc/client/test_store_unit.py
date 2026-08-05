@@ -308,19 +308,36 @@ class TestPublicStore:
         assert result.download_size == 12345
         pool.store_stub.query_missing.assert_awaited_once()
         sent = pool.store_stub.query_missing.await_args.args[0]  # type: ignore[reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
-        assert sent.derived_paths == ["/nix/store/aaa-foo.drv", "/nix/store/bbb-bar"]
+        # `DerivedPath.for_build` runs here, on the way out. The `.drv` gains a
+        # selector so that it means every output, and the plain path keeps the
+        # opaque reading a fetch genuinely has. See the same pair asserted
+        # against a real store in test_store_engine_parity_semantics.py.
+        assert sent.derived_paths == ["/nix/store/aaa-foo.drv^*", "/nix/store/bbb-bar"]
 
     async def test_build_paths_with_results_sends_derived_paths(self, public_store: PublicStore, pool: MagicMock):
         pool.store_stub.build_paths_with_results.return_value = _mock_build_result_list(
             [_mock_build_result(drv_path="/nix/store/aaa-foo.drv", success=True)],
         )
 
-        results = await public_store.build_paths_with_results(["/nix/store/aaa-foo.drv"])
+        results = await public_store.build_paths_with_results(["/nix/store/aaa-foo.drv", "/nix/store/bbb-bar"])
 
         assert results[0].success
         sent = pool.store_stub.build_paths_with_results.await_args.args[0]  # type: ignore[reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
-        assert sent.derived_paths == ["/nix/store/aaa-foo.drv"]
+        # As in query_missing above: `DerivedPath.for_build` selects every
+        # output of the `.drv`, and leaves the plain path opaque.
+        assert sent.derived_paths == ["/nix/store/aaa-foo.drv^*", "/nix/store/bbb-bar"]
         assert sent.build_mode == 0
+
+    async def test_build_paths_with_results_keeps_a_written_selector(self, public_store: PublicStore, pool: MagicMock):
+        """A caller who wrote the selector gets what they wrote, and no second one."""
+        pool.store_stub.build_paths_with_results.return_value = _mock_build_result_list(
+            [_mock_build_result(drv_path="/nix/store/aaa-foo.drv", success=True)],
+        )
+
+        await public_store.build_paths_with_results(["/nix/store/aaa-foo.drv^dev,out"])
+
+        sent = pool.store_stub.build_paths_with_results.await_args.args[0]  # type: ignore[reportOptionalMemberAccess, reportOptionalSubscript] -- test inspects stub call args
+        assert sent.derived_paths == ["/nix/store/aaa-foo.drv^dev,out"]
 
     async def test_read_derivation_sends_request(self, public_store: PublicStore, pool: MagicMock):
         pool.store_stub.read_derivation.return_value = _mock_derivation(

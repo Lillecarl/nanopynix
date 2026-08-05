@@ -156,16 +156,37 @@ class TestStore:
         assert results[0]["drv_path"] == f"{store.get_store_dir()}/{store_seeded_path.to_string()}"
         assert results[0]["outputs"] == []
 
-    def test_a_derivation_with_no_selector_is_reported_as_all_outputs(self, store: Any):
-        """The Built branch, without needing a build to succeed.
+    def test_a_bare_derivation_is_opaque_here_and_selects_no_outputs(self, store: Any):
+        """The bindings keep Nix's meaning, and Nix reads a bare ``.drv`` as opaque.
 
-        The result is keyed by the *request*, so a derivation that cannot be
-        built still reports which outputs were asked for. A bare ``.drv`` means
-        every output, and it arrives as ``["*"]`` rather than as a ``^*``
-        suffix welded onto ``drv_path``.
+        ``nix build <drv>`` selects no outputs and builds nothing
+        (``installable-derived-path.cc:32-37``), and this function maps
+        ``nix::Store::buildPathsWithResults``, so it answers the same. It used
+        to convert a bare ``.drv`` to ``Built{All}`` here instead, which made
+        this the one place nanopynix and the ``nix`` CLI disagreed about one
+        string, and left a direct caller no way to ask for the opaque fetch.
+
+        **The convenience did not go away, it moved.** Each engine's async
+        ``Store`` applies ``models.DerivedPath.for_build`` before it reaches
+        here, so a bare ``.drv`` still means every output to every caller of
+        the public API. ``test_a_bare_drv_means_every_output_on_both_engines``
+        is that half, and this is the half that keeps the two apart.
         """
         drv = nanopynix_store.StorePath("00000000000000000000000000000000-bogus.drv")
         results = store.build_paths_with_results([drv])
+        assert results[0]["drv_path"] == f"{store.get_store_dir()}/{drv.to_string()}"
+        assert results[0]["outputs"] == []
+
+    def test_a_derivation_with_an_explicit_selector_is_reported_as_all_outputs(self, store: Any):
+        """The Built branch, without needing a build to succeed.
+
+        The result is keyed by the *request*, so a derivation that cannot be
+        built still reports which outputs were asked for. ``^*`` means every
+        output, and it arrives as ``["*"]`` rather than as a suffix welded
+        onto ``drv_path``.
+        """
+        drv = nanopynix_store.StorePath("00000000000000000000000000000000-bogus.drv")
+        results = store.build_paths_with_results([f"{store.get_store_dir()}/{drv.to_string()}^*"])
         assert results[0]["drv_path"] == f"{store.get_store_dir()}/{drv.to_string()}"
         assert results[0]["outputs"] == ["*"]
 

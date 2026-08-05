@@ -358,7 +358,12 @@ class AsyncStore(Protocol):
         derived_paths: list[str | StorePath],
         /,
     ) -> MissingInfo:
-        """Return which of ``derived_paths`` still need to be built or substituted."""
+        """Return which of ``derived_paths`` still need to be built or substituted.
+
+        A plain derivation path means all outputs here, for the reason
+        :meth:`build_paths_with_results` gives. Both methods have to agree:
+        a caller asks this one whether the other would do any work.
+        """
         ...
 
     @abstractmethod
@@ -371,6 +376,13 @@ class AsyncStore(Protocol):
         eval_store: Self | None = None,
     ) -> list[BuildResult]:
         """Build derived paths, treating a plain derivation path as all outputs.
+
+        That reading belongs to this API and not to Nix, which takes a bare
+        ``.drv`` as an opaque fetch and builds none of its outputs.
+        :meth:`~nanopynix.models.DerivedPath.for_build` applies it, and each
+        engine's ``Store`` calls that before the request reaches a binding --
+        so ``nanopynix_bindings`` keeps Nix's meaning and this keeps the
+        useful one.
 
         Each result reports the request back decomposed:
         :attr:`BuildResult.drv_path` is a store path and

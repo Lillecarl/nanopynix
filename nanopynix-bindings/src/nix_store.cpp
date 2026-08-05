@@ -221,12 +221,17 @@ static nb::list compute_fs_closure(nix::Store &s, const nix::StorePath &path,
 
 // --- MissingInfo ---
 
-// The inbound half of the DerivedPath boundary: what a caller-supplied store
-// path with no ^ selector means. `build_result_util.hh`'s `derived_path_parts`
-// is the outbound half, and the two are inverses -- a bare `.drv` becomes
-// Built{All} and comes back as (`.drv`, `["*"]`), which re-parses to Built{All}
-// again, so the round trip is a fixed point rather than two rules that can
-// disagree. `tests/nanopynix/test_store_engine_parity_semantics.py` pins that.
+// What a `.drv` means to `build_paths`, which is now this function's only
+// caller. `parse_derived_paths` below used to call it too, and stopped: a
+// function that maps a Nix one has to keep Nix's answer, and Nix reads a bare
+// `.drv` as `Opaque`. That convenience lives in Python now
+// (`models.DerivedPath.for_build`).
+//
+// It stays here because `build_paths` takes `StorePath`, which cannot carry a
+// `^` selector at all -- so `Opaque` would leave that entry point with no way
+// to build anything, rather than with Nix's semantics. It has no Python
+// caller and no test; resolving that is issue #67's remaining question and
+// not this function's business.
 //
 // This is byte-for-byte `StorePathWithOutputs::toDerivedPath()`
 // (`path-with-outputs.cc:15-31`) and is deliberately *not* routed through it:
@@ -277,12 +282,21 @@ static nix::DerivedPaths parse_derived_paths(
         if (path.empty())
             throw nix::BadStorePath("%s: store path must not be empty", op);
         if (path[0] != '/') path = s.config.storeDir_ + "/" + path;
-        // A plain derivation path has historically meant all of its outputs.
-        // A ^ separator opts into Nix's canonical DerivedPath representation.
-        if (path.contains('^'))
-            paths.push_back(nix::DerivedPath::parse(s.config, path));
-        else
-            paths.push_back(derived_path_for_build_input(s.parseStorePath(path)));
+        // Nix's own parser, and nothing on top of it. A string with `^` is a
+        // `Built`, and one without is an `Opaque` -- including a bare `.drv`,
+        // which asks the store for the derivation *file* and builds none of
+        // its outputs.
+        //
+        // **A bare `.drv` used to become Built{All} right here, and that is
+        // now done in Python.** The convenience is real and both engines still
+        // give it (`models.DerivedPath.for_build`, applied by each async
+        // `Store` before it reaches this function). It does not belong in a
+        // binding that maps a Nix function: `nix build <drv>` is `Opaque` too
+        // (`installable-derived-path.cc:32-37`), so doing otherwise made this
+        // the one place where nanopynix and the `nix` CLI disagreed on the
+        // meaning of one string, and left a direct caller unable to ask for
+        // the opaque fetch at all.
+        paths.push_back(nix::DerivedPath::parse(s.config, path));
     }
     return paths;
 }

@@ -105,14 +105,14 @@ class DerivedPath(str):
         DerivedPath("/nix/store/h-x.drv^*").outputs    # ["*"] -- every output
         DerivedPath("/nix/store/h-x.drv^dev,out").outputs  # ["dev", "out"]
 
-    The distinction matters because a bare ``.drv`` is *not* an opaque fetch to
-    nanopynix: the worker reads it as "build every output"
-    (``nix_store.cpp``'s ``derived_path_for_build_input``), while a bare
-    non-derivation path is opaque. That interpretation needs Nix's store
-    config, so it lives in the worker and deliberately is not duplicated here;
-    ``None`` says "the string did not say" instead of guessing. It is also
-    what keeps this readable next to :attr:`BuildResult.outputs`, where ``[]``
-    is a real answer meaning ``DerivedPath::Opaque``.
+    The distinction matters because a bare ``.drv`` means different things at
+    different layers. To Nix it is ``DerivedPath::Opaque`` -- "fetch this
+    path" -- so ``nix build <drv>`` builds nothing. The async stores of both
+    engines read it as "build every output" instead, which is what
+    :meth:`for_build` below does for them. ``None`` here says "the string did
+    not say" rather than picking one of those. It is also what keeps this
+    readable next to :attr:`BuildResult.outputs`, where ``[]`` is a real
+    answer meaning ``DerivedPath::Opaque``.
     """
 
     __slots__ = ()
@@ -148,6 +148,32 @@ class DerivedPath(str):
         if not separator or not head:
             return None
         return tail.split(",") if tail else []
+
+    def for_build(self) -> DerivedPath:
+        """Append ``^*`` when this is a bare ``.drv``, and return it unchanged otherwise.
+
+        A bare ``.drv`` is ``DerivedPath::Opaque`` to Nix, which asks the store
+        to make the derivation *file* present and builds none of its outputs.
+        ``nix build <drv>`` does exactly that, and reports success having done
+        nothing -- which reads as "already up to date" to a caller who wanted
+        the outputs. ``Store.query_missing`` and
+        ``Store.build_paths_with_results`` of both engines therefore call this
+        first, so that a bare ``.drv`` selects every output.
+
+        The conversion is here, and not in the bindings, so that
+        ``nanopynix_bindings`` keeps Nix's own semantics for a function that
+        maps a Nix one. Everything else passes through: a bare
+        non-derivation path stays opaque, because a fetch is what that
+        genuinely means, and a string that already carries ``^`` said what it
+        wanted.
+
+        No store configuration is needed for this. Nix resolves a relative
+        store path before it looks for the separator, so ``<drv>^*`` is
+        correct whether or not the path is absolute.
+        """
+        if self.SEPARATOR in self or not self.endswith(".drv"):
+            return self
+        return DerivedPath(f"{self}{self.SEPARATOR}*")
 
 
 @dataclass(frozen=True)

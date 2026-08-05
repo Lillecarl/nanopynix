@@ -415,6 +415,39 @@ class TestDerivedPath:
         assert isinstance(dp, str)
         assert DerivedPath(dp) is dp
 
+    def test_for_build_selects_every_output_of_a_bare_drv(self):
+        """The one string the async stores rewrite before a binding sees it."""
+        assert DerivedPath(_DRV).for_build() == _DRV + "^*"
+
+    def test_for_build_leaves_a_written_selector_alone(self):
+        """A caller that wrote ``^`` said what it wanted, including ``^*``."""
+        for suffix in ("^out", "^out,dev", "^*", "^"):
+            assert DerivedPath(_DRV + suffix).for_build() == _DRV + suffix
+
+    def test_for_build_leaves_a_non_derivation_opaque(self):
+        """A bare non-derivation path is a fetch, and that is a real request.
+
+        Appending ``^*`` to it would ask Nix to build the outputs of something
+        that is not a derivation, which is an error rather than a convenience.
+        """
+        plain = "/nix/store/00000000000000000000000000000000-foo"
+        assert DerivedPath(plain).for_build() == plain
+
+    def test_for_build_needs_no_store_directory(self):
+        """It works on a relative path, which is why it can live in Python.
+
+        Nix resolves a relative store path *before* it looks for the
+        separator (``nix_store.cpp``'s ``parse_derived_paths``), so appending
+        the selector first is correct and needs no store configuration. That
+        is what makes this a string rule rather than a worker one.
+        """
+        assert DerivedPath("foo.drv").for_build() == "foo.drv^*"
+
+    def test_for_build_is_idempotent(self):
+        dp = DerivedPath(_DRV).for_build()
+        assert dp.for_build() == dp
+        assert isinstance(dp, DerivedPath)
+
 
 def test_derivation_mutable_defaults_isolated():
     """Two Derivation instances do not share mutable defaults (D2 fix)."""

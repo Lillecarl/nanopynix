@@ -45,7 +45,7 @@ from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
 from nanopynix.exceptions import SessionClosedError, StoreClosedError, WorkerDiedError
-from nanopynix.models import BuildResult, Derivation, GcResult, MissingInfo, StorePath
+from nanopynix.models import BuildResult, Derivation, DerivedPath, GcResult, MissingInfo, StorePath
 from nanopynix.protocols import AsyncStore
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
 from nanopynix.settings import DEFAULT_RPC_TIMEOUT_SECONDS
@@ -282,8 +282,15 @@ class Store(AsyncStore):
         derived_paths: list[str | StorePath],
         /,
     ) -> MissingInfo:
+        """Return which of ``derived_paths`` still need to be built or substituted.
+
+        A plain derivation path means all outputs -- see
+        :meth:`~nanopynix.models.DerivedPath.for_build`. It is applied here,
+        before the request goes on the wire, so the worker receives the same
+        canonical string the inproc engine hands its own bindings.
+        """
         return await self.rpc.query_missing(
-            QueryMissingRequest(derived_paths=[str(p) for p in derived_paths]),
+            QueryMissingRequest(derived_paths=[DerivedPath(str(p)).for_build() for p in derived_paths]),
         )
 
     async def build_paths_with_results(
@@ -296,14 +303,16 @@ class Store(AsyncStore):
     ) -> list[BuildResult]:
         """Build derived paths and return Nix's result for each path.
 
-        A plain derivation path builds all outputs. Use Nix's ``^`` syntax to
-        select explicit outputs in a canonical DerivedPath string.
+        A plain derivation path builds all outputs -- see
+        :meth:`~nanopynix.models.DerivedPath.for_build`, applied here before
+        the request goes on the wire. Use Nix's ``^`` syntax to select
+        explicit outputs in a canonical DerivedPath string.
         """
         if eval_store is not None and eval_store._session_id != self._session_id:  # noqa: SLF001 -- eval_store is another Store of this same class; comparing its private session id
             raise ValueError("eval_store belongs to a different Session")
         response = await self.rpc.build_paths_with_results(
             BuildPathsWithResultsRequest(
-                derived_paths=[str(path) for path in derived_paths],
+                derived_paths=[DerivedPath(str(path)).for_build() for path in derived_paths],
                 build_mode=build_mode,
                 eval_store_handle=0 if eval_store is None else eval_store._store_handle,  # noqa: SLF001 -- one Store reads another's worker handle to name the eval store
             ),

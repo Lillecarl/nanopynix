@@ -40,7 +40,7 @@ EXAMPLES = REPO_ROOT / EXAMPLES_DIR
 # Keyed by "<page>:<line>" -- the line moves when the page is edited, which is
 # deliberate: a moved block is a changed block, and it deserves another look.
 #
-# Both entries need something the suite must not require. Neither is a snippet
+# Each entry needs something the suite must not require. None is a snippet
 # nobody got round to; if that changes, the entry goes and a pointer arrives.
 UNMIRRORED: dict[str, str] = {
     "docs/nanopynix/api/namespace.md:23": (
@@ -48,7 +48,14 @@ UNMIRRORED: dict[str, str] = {
         "copies a closure into the host `daemon` store. CI runners differ on "
         "the first, and the second writes outside any store this suite owns."
     ),
-    "docs/nanopynix/api/store.md:29": (
+    "docs/nanopynix/api/store.md:22": (
+        "Two calls that need a derivation to build, and the block shows that "
+        "they agree rather than what either returns. "
+        "`tests/nanopynix/test_store_engine_parity_semantics.py::"
+        "test_a_bare_drv_means_every_output_on_both_engines` asserts that "
+        "same equality on both engines, so the claim on the page does run."
+    ),
+    "docs/nanopynix/api/store.md:55": (
         "Two lines that need a built output to run: a `tofu` binary in a "
         "relocated store. Building one to prove two lines parse would cost "
         "more than the lines are worth."
