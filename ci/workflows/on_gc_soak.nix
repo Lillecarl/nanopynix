@@ -77,34 +77,33 @@ workflow.evalWorkflow {
           ];
         };
       };
-      steps =
-        [
-          # No `ref`: the checkout takes the branch that the push carried.
-          (steps.checkout { })
-          (steps.installNix { })
-          (steps.cachix { })
-        ]
-        ++ [
-          {
-            name = "Build the nanopynix test runner for Nix ${version}";
-            timeout-minutes = caps.build;
-            run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs'';
-          }
-          (steps.enableSandboxNamespaces { })
-          {
-            name = "Run the full suite (arm \${{ matrix.arm }}, run \${{ matrix.run }})";
-            timeout-minutes = caps.suite;
-            run = # bash
-              ''
-                set -o pipefail
-                env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
-                  ''${{ matrix.armEnv }} \
-                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
-                  --nix-test-backends local \
-                  -m "not soak"
-              '';
-          }
-        ];
+      steps = [
+        # No `ref`: the checkout takes the branch that the push carried.
+        (steps.checkout { })
+        (steps.installNix { })
+        (steps.cachix { })
+      ]
+      ++ [
+        {
+          name = "Build the nanopynix test runner for Nix ${version}";
+          timeout-minutes = caps.build;
+          run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs'';
+        }
+        (steps.enableSandboxNamespaces { })
+        {
+          name = "Run the full suite (arm \${{ matrix.arm }}, run \${{ matrix.run }})";
+          timeout-minutes = caps.suite;
+          run = # bash
+            ''
+              set -o pipefail
+              env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
+                ''${{ matrix.armEnv }} \
+                ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
+                --nix-test-backends local \
+                -m "not soak"
+            '';
+        }
+      ];
     };
   };
 }

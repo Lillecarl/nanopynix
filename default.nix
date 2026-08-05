@@ -612,6 +612,10 @@ let
     name: value: lib.nameValuePair "nanopynix-tests-${name}" value.nanopynix.test
   ) nanopynixVersionsInternal;
 
+  # The CI experiments. `ci/experiments.nix` gives the reason each one is a
+  # package rather than a script in a workflow file.
+  experiments = import ./ci/experiments.nix { inherit pkgs tests; };
+
   getByVersion =
     version:
     lib.pipe nanopynixVersionsInternal [
@@ -643,6 +647,7 @@ in
     nanopynixVersions
     pyproject-nix
     tests
+    experiments
     tofuCoreSchemaTool
     storeExecTool
     ;
