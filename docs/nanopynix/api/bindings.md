@@ -16,12 +16,13 @@ The 23 names are not one surface, and the risk of calling one directly differs
 a lot between the three groups.
 
 Process-wide state
-: `enable_experimental_feature`, `install_logger`, `remove_logger`,
-  `set_verbosity` and `register_primop` change the whole process. Nix keeps
-  this state in global C++ objects, so a call here reaches every store and
-  every evaluator, including the ones a session opened already. A session
-  routes the same settings per scope, which is why the session route is the
-  documented one.
+: `enable_experimental_feature`, `install_logger`, `remove_logger` and
+  `register_primop` change the whole process. Nix keeps this state in global
+  C++ objects, so a call here reaches every store and every evaluator,
+  including the ones a session opened already. A session routes the same
+  settings per scope, which is why the session route is the documented one.
+  `set_verbosity` sits in this group by history rather than by scope: it now
+  writes one thread's level, and the paragraph below says what that means.
 
 Lifecycle and extension points
 : `init_libexpr`, `process_connection` and `register_store_implementation` are
@@ -83,10 +84,17 @@ Catch everything inside the callback.
 `get_verbosity` control how much the logger receives, on a scale of 0 (error)
 to 7 (vomit).
 
+**`set_verbosity` sets the level of the calling thread only.** Nix logs on the
+thread that produced the message, and the level lives in a thread-local, so a
+call here reaches no other thread. `set_default_verbosity` writes the level
+that a thread Nix starts for itself begins at.
+
 Prefer the session route. `Session(log_level=...)` sets the verbosity for that
-session's scope, and the session streams the events to an async iterator, so
-one evaluation's logs stay separate from another's. The functions here are
-process-wide and have no such separation.
+session's scope, an evaluator may hold a level of its own, and the session
+streams the events to an async iterator, so one evaluation's logs stay
+separate from another's. The functions here carry none of that: a level set
+here is undone by the next dispatched operation, which applies the level of
+whatever the caller dispatched through.
 
 ```{eval-rst}
 .. autofunction:: nanopynix_bindings.util.install_logger
