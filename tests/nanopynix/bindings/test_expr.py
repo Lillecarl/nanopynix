@@ -537,6 +537,49 @@ class TestEvaluatorThreadRegistration:
         _off_thread(body)
 
     @requires_boehm_gc
+    def test_a_stale_registration_is_taken_over_and_removed(self, eval_state: nanopynix.EvalState) -> None:
+        """A `GC_DUPLICATE` must not survive the thread it names. Issue #73.
+
+        The `eval_state` fixture is what starts the collector, and it is not
+        decoration. `GC_register_my_thread` aborts the process with "Threads
+        explicit registering is not previously enabled" when the collector has
+        not started, because `nix::initGC` is what calls
+        `GC_allow_register_threads`. Without the fixture this test kills the
+        run whenever it goes first -- measured, with `-k`.
+
+        `GC_register_my_thread` answers `GC_DUPLICATE` in one case: a live
+        entry already names this `pthread_t`. Every thread that registers is
+        `DETACHED`, so unregistering removes its entry, and a live entry can
+        therefore only belong to a thread that registered, exited without
+        unregistering, and had its `pthread_t` handed on by glibc.
+
+        The branch used to leave such an entry alone, on the belief that a
+        Python runtime owned it. CPython links no collector and registers
+        nothing. Leaving it makes the stale entry permanent, and
+        `GC_suspend_all` signals every entry that is neither the caller nor
+        `FINISHED` -- which is the call site of #72 and #53.
+
+        So `enter` adopts it and `exit` removes it. The final assertion is the
+        whole point: the entry is gone with the thread.
+        """
+
+        assert eval_state is not None, "the fixture starts the collector"
+
+        def body() -> bool:
+            # The state that glibc's stack reuse produces, made directly.
+            nanopynix_expr._gc_register_this_thread_unowned()  # type: ignore[reportPrivateUsage] -- the tool under test
+            assert nanopynix_expr._gc_thread_is_registered() is True, (  # type: ignore[reportPrivateUsage] -- the probe under test
+                "the probe must see the entry it just made"
+            )
+            nanopynix_expr._enter_evaluator_thread()  # type: ignore[reportPrivateUsage] -- the hook under test
+            nanopynix_expr._exit_evaluator_thread()  # type: ignore[reportPrivateUsage] -- the hook under test
+            return nanopynix_expr._gc_thread_is_registered()  # type: ignore[reportPrivateUsage] -- the probe under test
+
+        assert _off_thread(body) is False, (
+            "the entry outlived the thread, so a collection will signal a thread that is gone"
+        )
+
+    @requires_boehm_gc
     def test_the_collector_has_an_owner_thread(self, eval_state: nanopynix.EvalState) -> None:
         """One thread starts the collector, and that thread is still running.
 
