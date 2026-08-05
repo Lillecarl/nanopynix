@@ -1,0 +1,75 @@
+# GENERATED FILE -- do not edit by hand.
+# Edit ci/workflows/on_experiment.nix; a pytest run renders this file again.
+
+name: Experiment
+'on':
+  workflow_dispatch:
+    inputs:
+      ref:
+        type: string
+        description: Branch to check out
+        required: false
+        default: ci-develop
+      matrix:
+        type: string
+        description: JSON matrix, for example {"arm":["a","b"],"run":[1,2]}
+        required: false
+        default: '{"run":[1]}'
+      runner:
+        type: choice
+        description: Runner to use
+        required: false
+        default: ubuntu-24.04
+        options:
+        - ubuntu-24.04
+        - ubuntu-24.04-arm
+      experiment:
+        type: string
+        description: Attribute of ci/experiments.nix to run
+        required: true
+jobs:
+  experiment:
+    steps:
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+      with:
+        ref: ${{ inputs.ref }}
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
+      run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo sysctl -w kernel.unprivileged_userns_clone=1
+        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+    - name: Run ${{ inputs.experiment }}
+      timeout-minutes: 60
+      env:
+        EXPERIMENT: ${{ inputs.experiment }}
+        MATRIX_JSON: ${{ toJSON(matrix) }}
+      run: |
+        nix run --file . "experiments.$EXPERIMENT"
+    - name: Keep the evidence of a failed cell
+      timeout-minutes: 15
+      uses: actions/upload-artifact@main
+      with:
+        name: experiment-${{ inputs.experiment }}-${{ strategy.job-index }}
+        path: |
+          /tmp/core.*
+          .pytest-agent/
+      if: ${{ failure() }}
+    timeout-minutes: 135
+    runs-on: ${{ inputs.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.matrix) }}
