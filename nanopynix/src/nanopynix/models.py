@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from nanopynix_proto.nix.common import (
     # Types with extension subclasses — imported as private for subclassing
@@ -49,6 +49,35 @@ from nanopynix_proto.nix.store import (
 )
 
 from nanopynix._ansi import strip_ansi as _strip_ansi
+
+#: Where the text of a log action sits in ``LogEventExt.args``.
+#:
+#: ``PyLogger`` in ``nix_util.cpp`` calls the Python callback with the
+#: arguments each Nix logger method gives it, and the three differ: ``log``
+#: has a level then the text, ``warn`` has the text alone, and ``logEI`` has
+#: a level, the text, then the structured payload. So the text is not always
+#: last, and reading ``args[-1]`` for it was right only while nothing came
+#: after it.
+_MESSAGE_INDEX: dict[str, int] = {"msg": 1, "warn": 0, "error": 1}
+
+#: Where ``logEI``'s structured payload sits, after the text.
+_ERROR_INFO_INDEX = 2
+
+
+def _strip_ansi_deep(value: Any) -> Any:
+    """Filter every string inside ``value``, whatever it is nested in.
+
+    ``logEI``'s payload puts the strings a reader cares about -- the message,
+    each trace hint, each suggestion -- one and two levels down. A filter that
+    only saw the top level would leave those coloured.
+    """
+    if isinstance(value, str):
+        return _strip_ansi(value)
+    if isinstance(value, dict):
+        return {key: _strip_ansi_deep(item) for key, item in cast("dict[Any, Any]", value).items()}
+    if isinstance(value, list):
+        return [_strip_ansi_deep(item) for item in cast("list[Any]", value)]
+    return value
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -249,10 +278,32 @@ class LogEventExt(_LogEventProto):
     @property
     def message(self) -> str | None:
         """Raw message payload for log actions that carry text."""
-        if self.action not in {"msg", "warn", "error"} or not self.args:
+        index = _MESSAGE_INDEX.get(self.action or "")
+        args = self.args
+        if index is None or index >= len(args):
             return None
-        message = self.args[-1]
+        message = args[index]
         return message if isinstance(message, str) else None
+
+    @property
+    def error_info(self) -> dict[str, Any] | None:
+        """Nix's structured detail for an ``error`` action, or ``None``.
+
+        The same dict :attr:`~nanopynix.NixError.info` carries, from the same
+        C++ builder, so a warning and an exception describe a position the same
+        way. It holds ``level``, ``msg``, ``pos``, ``is_from_expr``,
+        ``status``, ``traces``, ``truncated`` and ``suggestions``.
+
+        Only an ``error`` action has one. ``msg`` and ``warn`` reach Nix's
+        logger as text, and there is no ``ErrorInfo`` behind them to report.
+
+        The strings in it carry Nix's escape sequences, as
+        :attr:`message` does. :meth:`without_ansi` filters both.
+        """
+        if self.action != "error" or len(self.args) <= _ERROR_INFO_INDEX:
+            return None
+        info = self.args[_ERROR_INFO_INDEX]
+        return cast("dict[str, Any]", info) if isinstance(info, dict) else None
 
     @property
     def message_without_ansi(self) -> str | None:
@@ -272,8 +323,12 @@ class LogEventExt(_LogEventProto):
         See :attr:`message_without_ansi` for what the filter does beside the
         removal of a colour. A build log carries a carriage return often, and
         this drops each one.
+
+        This reaches inside :attr:`error_info` as well. Filtering the flat
+        message and leaving the trace hints beside it coloured would answer
+        one question two ways.
         """
-        cleaned = [_strip_ansi(a) if isinstance(a, str) else a for a in self.args]
+        cleaned = [_strip_ansi_deep(a) for a in self.args]
         if self.nix_log is None:
             return self
         return LogEventExt(request_id=self.request_id, action=self.action, args=cleaned, result_type=self.result_type)

@@ -319,6 +319,80 @@ class TestLogEvent:
         assert clean.args == [3, "line 1\nline 2"]
         assert clean.message == "line 1\nline 2"
 
+    def test_an_error_event_carries_nixs_structured_detail(self):
+        """``logEI`` sends the dict ``NixError.info`` carries, beside the text.
+
+        The payload here is the shape ``errinfo::to_dict`` builds. It is
+        written out rather than taken from a live Nix, because what this
+        asserts is that the transport keeps every level of it -- and a real
+        warning does not populate every level. See the parity test in
+        ``test_engine_parity_logging.py`` for the live half.
+        """
+        info = {
+            "level": 1,
+            "msg": "a warning",
+            "pos": {"file": "«string»:1:1", "line": 1, "column": 1},
+            "is_from_expr": True,
+            "status": 1,
+            "traces": [{"hint": "while evaluating x", "pos": {"file": "f.nix", "line": 2, "column": 3}}],
+            "truncated": False,
+            "suggestions": ["did you mean y?"],
+        }
+        ev = LogEvent(request_id=7, action="error", args=[1, "a warning", info])
+
+        assert ev.error_info == info
+        assert ev.error_info is not None
+        assert ev.error_info["pos"] == {"file": "«string»:1:1", "line": 1, "column": 1}
+        assert ev.error_info["traces"][0]["hint"] == "while evaluating x"
+        assert ev.error_info["suggestions"] == ["did you mean y?"]
+
+    def test_the_message_of_an_error_is_the_text_and_not_the_payload(self):
+        """``args[-1]`` was the message until ``logEI`` put a dict after it."""
+        ev = LogEvent(request_id=7, action="error", args=[1, "a warning", {"msg": "a warning"}])
+
+        assert ev.message == "a warning"
+        assert ev.message_without_ansi == "a warning"
+
+    def test_only_an_error_action_has_a_payload(self):
+        """``msg`` and ``warn`` reach Nix's logger as text, with no ErrorInfo."""
+        assert LogEvent(request_id=1, action="msg", args=[3, "text"]).error_info is None
+        assert LogEvent(request_id=1, action="warn", args=["text"]).error_info is None
+        assert LogEvent(request_id=1, action="error", args=[1, "text"]).error_info is None
+
+    def test_without_ansi_reaches_inside_the_payload(self):
+        """A filtered event must not leave a coloured trace hint behind it.
+
+        The strings a reader wants are one and two levels down -- the message,
+        each trace hint, each suggestion -- so a filter that saw only the top
+        level would answer one question two ways.
+        """
+        ev = LogEvent(
+            request_id=7,
+            action="error",
+            args=[
+                1,
+                "\x1b[31ma warning\x1b[0m",
+                {
+                    "msg": "\x1b[31ma warning\x1b[0m",
+                    "pos": {"file": "\x1b[35mf.nix\x1b[0m", "line": 1, "column": 1},
+                    "traces": [{"hint": "\x1b[33mwhile evaluating x\x1b[0m", "pos": None}],
+                    "suggestions": ["\x1b[32mdid you mean y?\x1b[0m"],
+                    "is_from_expr": True,
+                },
+            ],
+        )
+
+        clean = ev.without_ansi().error_info
+
+        assert clean is not None
+        assert clean["msg"] == "a warning"
+        assert clean["pos"] == {"file": "f.nix", "line": 1, "column": 1}
+        assert clean["traces"][0]["hint"] == "while evaluating x"
+        assert clean["suggestions"] == ["did you mean y?"]
+        assert clean["is_from_expr"] is True, "a non-string must survive the filter unchanged"
+        assert ev.error_info is not None
+        assert "\x1b[" in ev.error_info["msg"], "the original event must keep what Nix sent"
+
     def test_start_event(self):
         ev = LogEvent(request_id=1, action="start", args=[1, 3, 100, "building", [], 0])
         assert ev.request_id == 1

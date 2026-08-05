@@ -251,12 +251,22 @@ public:
         _cb(nb::int_(logger_request_id), "msg", int(lvl), std::string(s));
     }
 
+    // The structured payload rides beside the flat message, and it is the
+    // dict `errinfo::to_dict` already builds for `NixError.info`. One builder
+    // serves both, so the log path stops carrying less than Nix's own
+    // `JSONLogger::logEI`, which emits every one of these fields.
+    //
+    // `to_dict` reads no source. It renders each position with `Pos::print`,
+    // which prints the origin; `Pos::getCodeLines` is what would read a file,
+    // and only `showErrorInfo(showTrace=true)` calls that. So this costs a
+    // dict per error event and no I/O. Issue #48.
     void logEI(const nix::ErrorInfo & ei) override {
         if (ei.level > thread_verbosity) return;
         if (!attached()) { _fallback->logEI(ei); return; }
         nb::gil_scoped_acquire gil;
         if (_cb.is_none()) return;
-        _cb(nb::int_(logger_request_id), "error", int(ei.level), std::string(ei.msg.str()));
+        _cb(nb::int_(logger_request_id), "error", int(ei.level), std::string(ei.msg.str()),
+            nanopynix::errinfo::to_dict(ei));
     }
 
     void warn(const std::string & msg) override {
