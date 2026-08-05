@@ -31,7 +31,7 @@ from nanopynix_bindings import (
 )
 from nanopynix_proto.nix.store import GcAction, StoreDirs
 
-from nanopynix._core._extract import flake_ref_attrs
+from nanopynix._core._extract import flake_ref_attrs, locked_node
 from nanopynix._core._nix_core import NixCore
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
@@ -43,6 +43,7 @@ from nanopynix.models import (
     FlakeRef,
     GcResult,
     GcRoot,
+    LockedNode,
     MissingInfo,
     PathInfo,
     StorePath,
@@ -736,6 +737,13 @@ class CoreLockedFlake:
 
     def write_lock_file(self) -> None:
         self.require_raw().write_lock_file()
+
+    def metadata_json(self) -> str:
+        return nanopynix_flake.metadata_json(self._eval_state.require_raw(), self.require_raw())
+
+    def find_input(self, path: Sequence[str]) -> LockedNode | None:
+        node = self.require_raw().find_input(list(path))
+        return None if node is None else locked_node(node)
 
 
 def _unwrap_local_values(value: Any) -> Any:

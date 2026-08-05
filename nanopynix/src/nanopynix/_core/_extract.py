@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from nanopynix_bindings import flake as nanopynix_flake
 from nanopynix_proto.nix import common as common_pb
 
 
@@ -38,35 +37,16 @@ def flake_ref_attrs(fr: Any, /) -> dict[str, common_pb.AttrsValue]:
     return input_attrs(fr)  # to_attrs() has the same shape on both types
 
 
-def locked_input(li_dict: dict[str, Any], /) -> common_pb.LockedInput:
-    """Extract a dict from LockedFlake.inputs values to LockedInput proto."""
-    is_flake: bool = bool(li_dict.get("is_flake", True))
-
-    attrs: common_pb.AttrsMap | None = None
-    if "ref" in li_dict:
-        ref_str = str(li_dict["ref"])
-        try:
-            fr = nanopynix_flake.parse_flake_ref(ref_str)
-        except Exception:
-            # Malformed ref — return as raw string attrs
-            attrs = common_pb.AttrsMap(entries={"ref": _attrs_value(ref_str)})
-        else:
-            # flake_ref_attrs already returns dict[str, AttrsValue];
-            # pass it directly — _attrs_map would double-wrap.
-            attrs = common_pb.AttrsMap(entries=flake_ref_attrs(fr))
-
-    follows_raw = li_dict.get("follows", [])
-    follows = [str(f) for f in follows_raw]
-
-    return common_pb.LockedInput(attrs=attrs, is_flake=is_flake, follows=follows)
+def locked_node(node: dict[str, Any], /) -> common_pb.LockedNode:
+    """Extract one L1 ``LockedFlake.find_input()`` result to a LockedNode proto."""
+    return common_pb.LockedNode(
+        locked_ref=str(node["locked_ref"]),
+        original_ref=str(node["original_ref"]),
+        is_flake=bool(node["is_flake"]),
+    )
 
 
 def locked_flake(lf: Any, /) -> common_pb.LockedFlake:
     """Extract a L1 LockedFlake to a proto LockedFlake message."""
-    inputs: dict[str, common_pb.LockedInput] = {}
-    lf_inputs = lf.inputs()
-    for k in lf_inputs:
-        inputs[str(k)] = locked_input(lf_inputs[k])
     description_raw = lf.description() if callable(lf.description) else lf.description
-    description = str(description_raw)
-    return common_pb.LockedFlake(description=description, inputs=inputs)
+    return common_pb.LockedFlake(description=str(description_raw))

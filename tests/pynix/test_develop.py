@@ -14,17 +14,25 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Never, cast
 
 import pytest
 from anyio import Path as AnyioPath, run_process
 from pynix._dev_env import BuildEnvironment, make_rc_script, quote
-from pynix.develop import InteractiveShell, compose_shell_script, take_unparsed
+from pynix.develop import (
+    InteractiveShell,
+    _nixpkgs_flake_ref,  # pyright: ignore[reportPrivateUsage] -- the ref-selection decision is unit-tested directly; the end-to-end path builds bashInteractive
+    compose_shell_script,
+    take_unparsed,
+)
 
+from nanopynix.models import LockedNode
+from nanopynix.protocols import AsyncLockedFlake
 from pynix import Pynix
 from tests.support.nix_environment import with_nixpkgs
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from tests.support.nix_environment import NixTestEnvironment
@@ -177,6 +185,80 @@ def test_a_second_parse_does_not_inherit_the_first_command() -> None:
 
     second = Pynix.parse(["develop", "--file", "x.nix"])
     assert take_unparsed(type(second.subcommand)) == []
+
+
+# --- which nixpkgs the interactive shell comes from ------------------------
+
+
+class _FakeLockedFlake(AsyncLockedFlake):
+    """A lock that answers ``find_input`` and nothing else.
+
+    The whole protocol is implemented, and not just the one method used, on
+    purpose: ``AsyncLockedFlake`` is ``@runtime_checkable`` and
+    ``_nixpkgs_flake_ref`` is annotated with it, so beartype does an
+    ``isinstance`` check on the way in. A partial double would fail that check
+    rather than the assertion the test is making.
+    """
+
+    description = ""
+
+    def __init__(self, node: LockedNode | None) -> None:
+        self._node = node
+
+    async def find_input(self, path: Sequence[str], /) -> LockedNode | None:
+        assert list(path) == ["nixpkgs"], "the question is about nixpkgs, and nothing else"
+        return self._node
+
+    async def eval(self) -> Never:
+        raise AssertionError("_nixpkgs_flake_ref must not evaluate the flake")
+
+    async def metadata_json(self) -> Never:
+        raise AssertionError("_nixpkgs_flake_ref must not need the whole metadata object")
+
+    async def write_lock_file(self) -> Never:
+        raise AssertionError("_nixpkgs_flake_ref must not write a lock file")
+
+    async def release(self) -> None:
+        """The caller in ``develop.py`` owns the lock, and releases it there."""
+
+
+async def test_a_flake_target_uses_the_nixpkgs_that_the_flake_locks() -> None:
+    """``InstallableFlake::nixpkgsFlakeRef``: the flake's own input wins.
+
+    This is the deviation issue #79 exists to close. Before the lock graph was
+    exposed, ``pynix develop`` took the registry's ``nixpkgs`` in every case, so
+    on a machine whose registry points elsewhere it gave an interactive bash
+    from a different nixpkgs than ``nix develop`` gives.
+
+    A unit test rather than a full run: the end-to-end proof builds
+    ``bashInteractive``, and this pins the decision itself.
+    """
+    locked = _FakeLockedFlake(
+        LockedNode(locked_ref="github:NixOS/nixpkgs/abc123", original_ref="nixpkgs", is_flake=True),
+    )
+    assert await _nixpkgs_flake_ref(locked) == "github:NixOS/nixpkgs/abc123"
+
+
+async def test_a_file_target_falls_back_to_the_registry() -> None:
+    """``--file`` has no lock at all, which is ``defaultNixpkgsFlakeRef()``."""
+    assert await _nixpkgs_flake_ref(None) == "nixpkgs"
+
+
+async def test_a_flake_that_locks_no_nixpkgs_falls_back_to_the_registry() -> None:
+    """``findInput`` answers nothing, and Nix falls back the same way."""
+    assert await _nixpkgs_flake_ref(_FakeLockedFlake(None)) == "nixpkgs"
+
+
+async def test_a_nixpkgs_input_that_is_not_a_flake_falls_back() -> None:
+    """Nix checks ``isFlake`` before it takes the node, and so does this.
+
+    An input declared ``flake = false`` is a source tree, not something with
+    ``legacyPackages.<system>.bashInteractive`` to evaluate.
+    """
+    locked = _FakeLockedFlake(
+        LockedNode(locked_ref="github:NixOS/nixpkgs/abc123", original_ref="nixpkgs", is_flake=False),
+    )
+    assert await _nixpkgs_flake_ref(locked) == "nixpkgs"
 
 
 # --- the oracle -----------------------------------------------------------

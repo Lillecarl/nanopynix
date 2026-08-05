@@ -20,7 +20,7 @@ from nanopynix._core._extract import (
     flake_ref_attrs,
     input_attrs,
     locked_flake,
-    locked_input,
+    locked_node,
 )
 from nanopynix.models import StorePath
 from tests.support.git import init_flake_repo
@@ -183,63 +183,32 @@ def test_attrs_map_converts_a_plain_dict():
 
 
 # ════════════════════════════════════════════════════════════════════
-# locked_input — pure Python dict
+# locked_node — one node of a lock graph
 # ════════════════════════════════════════════════════════════════════
 
 
-def test_locked_input_with_ref():
-    result = locked_input(
+def test_locked_node_carries_both_references():
+    result = locked_node(
         {
-            "ref": "github:NixOS/nixpkgs/123abc",
+            "locked_ref": "github:NixOS/nixpkgs/123abc",
+            "original_ref": "github:NixOS/nixpkgs/nixos-24.11",
             "is_flake": True,
         },
     )
-    assert result.is_flake is True
-    assert result.attrs is not None
-    assert isinstance(result.attrs.entries, dict)
-    assert result.attrs.entries["type"].string_value == "github"
-    assert result.follows == []
-
-
-def test_locked_input_without_ref():
-    result = locked_input(
-        {
-            "is_flake": True,
-            "follows": ["nixpkgs"],
-        },
-    )
-    assert result.attrs is None
-    assert result.follows == ["nixpkgs"]
+    assert result.locked_ref == "github:NixOS/nixpkgs/123abc"
+    assert result.original_ref == "github:NixOS/nixpkgs/nixos-24.11"
     assert result.is_flake is True
 
 
-def test_locked_input_default_is_flake():
-    result = locked_input({})
-    # The function defaults is_flake to True for empty input dict
-    # (matching Nix convention), which overrides the proto3 bool default.
-    assert result.is_flake is True
-    assert result.attrs is None
-    assert result.follows == []
+def test_locked_node_keeps_is_flake_false():
+    """``is_flake`` is read straight from the node, and not defaulted.
 
-
-def test_locked_input_is_flake_false():
-    result = locked_input({"is_flake": False})
+    The message this replaced defaulted a missing ``is_flake`` to true, because
+    it was assembled from a declared input where the key could be absent. The
+    C++ side always sets all three keys, so a false here means Nix said false.
+    """
+    result = locked_node({"locked_ref": "path:/x", "original_ref": "path:/x", "is_flake": False})
     assert result.is_flake is False
-
-
-def test_locked_input_follows_multiple():
-    result = locked_input({"follows": ["a", "b", "c"]})
-    assert result.follows == ["a", "b", "c"]
-
-
-def test_locked_input_falls_back_to_a_raw_string_ref_when_unparsable():
-    """A malformed ref must not raise out of locked_input; it degrades to a
-    single "ref" attrs entry with the raw string instead of a parsed FlakeRef."""
-    result = locked_input({"ref": "not a valid ref ??? %%% ###", "is_flake": True})
-
-    assert result.attrs is not None
-    assert result.attrs.entries.keys() == {"ref"}
-    assert result.attrs.entries["ref"].string_value == "not a valid ref ??? %%% ###"
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -260,4 +229,3 @@ def test_locked_flake_shape(eval_state: nanopynix.EvalState, tmp_path: Path):
     result = locked_flake(lf)
 
     assert isinstance(result.description, str)
-    assert isinstance(result.inputs, dict)

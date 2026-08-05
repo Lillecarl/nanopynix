@@ -31,7 +31,7 @@ from nanopynix_proto.nix.common import (
     FlakeRef as FlakeRef,
     Input as Input,
     LockedFlake as LockedFlake,
-    LockedInput as LockedInput,
+    LockedNode as LockedNode,
     LogEvent as _LogEventProto,
     MissingInfo as MissingInfo,
     NixLogEvent as NixLogEvent,

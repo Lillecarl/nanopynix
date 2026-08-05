@@ -62,7 +62,7 @@ from nanopynix.models import (
     GcResult,
     GcRoot,
     JsonValue,
-    LockedInput,
+    LockedNode,
     LogEvent,
     MissingInfo,
     NixType,
@@ -1384,7 +1384,7 @@ class EvalSession(AsyncEvalSession["Value"]):
             ),
         )
         proto = await self.run(_locked_flake_proto, local.require_raw())
-        locked_flake = LockedFlake(self, local, proto.description, proto.inputs)
+        locked_flake = LockedFlake(self, local, proto.description)
         self._locked_flakes.add(locked_flake)
         return locked_flake
 
@@ -1543,12 +1543,10 @@ class LockedFlake(AsyncLockedFlake):
         eval_session: EvalSession,
         local: CoreLockedFlake,
         description: str,
-        inputs: dict[str, LockedInput],
     ) -> None:
         self._eval_session = eval_session
         self._core: CoreLockedFlake | None = local
         self.description = description
-        self.inputs = inputs
 
     def _local_for(self) -> CoreLockedFlake:
         self._eval_session._require_core()  # type: ignore[reportPrivateUsage] -- parent owns local evaluator lifetime  # noqa: SLF001
@@ -1566,6 +1564,12 @@ class LockedFlake(AsyncLockedFlake):
 
     async def write_lock_file(self) -> None:
         await self._eval_session.run(self._local_for().write_lock_file)
+
+    async def metadata_json(self) -> str:
+        return await self._eval_session.run(self._local_for().metadata_json)
+
+    async def find_input(self, path: Sequence[str], /) -> LockedNode | None:
+        return await self._eval_session.run(partial(self._local_for().find_input, list(path)))
 
     async def release(self) -> None:
         """Release the underlying handle for this locked flake. Idempotent."""

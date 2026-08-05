@@ -53,6 +53,10 @@ from nanopynix_proto.nix.eval import (
     EvalFlakeRequest,
     EvalServiceBase,
     EvalStringRequest,
+    FindFlakeInputRequest,
+    FindFlakeInputResponse,
+    FlakeMetadataJsonRequest,
+    FlakeMetadataJsonResponse,
     ForceJsonRequest,
     ForceJsonResponse,
     GetEvalVerbosityRequest,
@@ -537,6 +541,16 @@ class EvalServiceHandler(EvalServiceBase):
         lf = self._state.handles.get_locked_flake(message.handle)
         lf.write_lock_file()
         return WriteLockFileResponse()
+
+    @worker_op
+    def flake_metadata_json(self, message: FlakeMetadataJsonRequest) -> FlakeMetadataJsonResponse:
+        lf = self._state.handles.get_locked_flake(message.handle)
+        return FlakeMetadataJsonResponse(metadata_json=lf.metadata_json())
+
+    @worker_op
+    def find_flake_input(self, message: FindFlakeInputRequest) -> FindFlakeInputResponse:
+        lf = self._state.handles.get_locked_flake(message.handle)
+        return FindFlakeInputResponse(node=lf.find_input(list(message.path)))
 
     @worker_op
     def release_locked_flake(self, message: ReleaseLockedFlakeRequest) -> ReleaseLockedFlakeResponse:

@@ -62,9 +62,15 @@ async def test_flake_metadata_json_does_not_write_lock_file(
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
-    assert data["resolvedRef"] == str(git_flake)
-    assert "description" in data
-    assert isinstance(data["inputs"], dict)
+    # `resolvedUrl` and `locks` are Nix's own key names. This object used to be
+    # a bespoke one keyed `resolvedRef`/`inputs`; see test_flake_metadata.py for
+    # the oracle that now holds it to `nix flake metadata --json`.
+    assert str(git_flake) in data["resolvedUrl"]
+    # No `description` key: this fixture's flake declares none, and Nix omits
+    # the key rather than reporting an empty string. The bespoke object this
+    # replaced always emitted one.
+    assert "description" not in data
+    assert isinstance(data["locks"], dict)
     assert not lock_file.exists()
 
 
@@ -75,4 +81,4 @@ async def test_flake_info_aliases_metadata(
     await cmd.astart()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
-    assert data["resolvedRef"] == str(git_flake)
+    assert str(git_flake) in data["resolvedUrl"]

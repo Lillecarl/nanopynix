@@ -40,6 +40,8 @@ service EvalService {
   rpc LockFlake(LockFlakeRequest) returns (nix.common.LockedFlake);
   rpc CallLockedFlake(CallLockedFlakeRequest) returns (nix.common.ValueHandle);
   rpc WriteLockFile(WriteLockFileRequest) returns (WriteLockFileResponse);
+  rpc FlakeMetadataJson(FlakeMetadataJsonRequest) returns (FlakeMetadataJsonResponse);
+  rpc FindFlakeInput(FindFlakeInputRequest) returns (FindFlakeInputResponse);
   rpc ReleaseLockedFlake(ReleaseLockedFlakeRequest) returns (ReleaseLockedFlakeResponse);
   rpc EvalFlake(EvalFlakeRequest) returns (nix.common.ValueHandle);
   rpc GetFlake(GetFlakeRequest) returns (nix.common.FlakeRef);
@@ -301,6 +303,32 @@ message WriteLockFileRequest {
   int64 eval_handle = 100;
 }
 message WriteLockFileResponse {}
+
+message FlakeMetadataJsonRequest {
+  int64 request_id = 1000;
+  int64 handle = 1;
+  int64 eval_handle = 100;
+}
+
+// The whole object that `nix flake metadata --json` prints, as JSON text. It
+// travels as text and not as a message, because the text is what fidelity is
+// claimed about: Nix writes it, and nothing here takes it apart.
+message FlakeMetadataJsonResponse {
+  string metadata_json = 1;
+}
+
+message FindFlakeInputRequest {
+  int64 request_id = 1000;
+  int64 handle = 1;
+  repeated string path = 2;
+  int64 eval_handle = 100;
+}
+
+// `node` is absent when the path names no input, and also when it names the
+// root, which carries no locked reference.
+message FindFlakeInputResponse {
+  nix.common.LockedNode node = 1;
+}
 
 message ReleaseLockedFlakeRequest {
   int64 request_id = 1000;

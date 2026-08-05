@@ -38,6 +38,8 @@ from nanopynix_proto.nix.eval import (
     EvalFlakeRequest,
     EvalServiceBase,
     EvalStringRequest,
+    FindFlakeInputRequest,
+    FlakeMetadataJsonRequest,
     ForceJsonRequest,
     GetEvalVerbosityRequest,
     GetFlakeRequest,
@@ -75,7 +77,7 @@ from nanopynix.exceptions import (
     WorkerDiedError,
     build_error_from_result,
 )
-from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedInput, NixType
+from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedNode, NixType
 from nanopynix.protocols import AsyncEvalSession, AsyncLockedFlake, AsyncReplSession, AsyncValue
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
 from nanopynix.settings import (
@@ -832,7 +834,6 @@ class LockedFlakeHandle(AsyncLockedFlake):
     _session: EvalSession = field(repr=False)
     handle: int
     description: str
-    inputs: dict[str, LockedInput]
     _released: bool = field(default=False, init=False, repr=False)
     _lease: _Lease = field(init=False, repr=False)
     _finalizer: Any = field(init=False, repr=False)
@@ -867,6 +868,16 @@ class LockedFlakeHandle(AsyncLockedFlake):
     async def write_lock_file(self, *, timeout: float | None = None) -> None:
         self._check_active()
         await self._session._write_lock_file(self, timeout=timeout)  # type: ignore[reportPrivateUsage] -- LockedFlakeHandle is its session's public door onto this private by-handle call  # noqa: SLF001 -- same reason
+
+    async def metadata_json(self, *, timeout: float | None = None) -> str:
+        """Return the JSON that ``nix flake metadata --json`` prints, as text."""
+        self._check_active()
+        return await self._session._flake_metadata_json(self, timeout=timeout)  # type: ignore[reportPrivateUsage] -- LockedFlakeHandle is its session's public door onto this private by-handle call  # noqa: SLF001 -- same reason
+
+    async def find_input(self, path: Sequence[str], /, *, timeout: float | None = None) -> LockedNode | None:
+        """Return the locked node at *path*, or ``None`` when there is none."""
+        self._check_active()
+        return await self._session._find_flake_input(self, path, timeout=timeout)  # type: ignore[reportPrivateUsage] -- LockedFlakeHandle is its session's public door onto this private by-handle call  # noqa: SLF001 -- same reason
 
     async def release(self, *, timeout: float | None = None) -> None:
         if self._released:
@@ -1207,7 +1218,6 @@ class EvalSession(AsyncEvalSession["ValueProxy"]):
             self,
             handle=locked.handle,
             description=locked.description,
-            inputs=locked.inputs,
         )
 
     def _locked_flake_id(self, locked: LockedFlakeHandle) -> int:
@@ -1239,6 +1249,32 @@ class EvalSession(AsyncEvalSession["ValueProxy"]):
         Private for the same reason as :meth:`_eval_locked_flake`.
         """
         await self._ensure_proxy().write_lock_file(WriteLockFileRequest(handle=self._locked_flake_id(locked)))
+
+    async def _flake_metadata_json(self, locked: LockedFlakeHandle, *, timeout: float | None = None) -> str:
+        """Return a locked flake's metadata JSON. Backs ``LockedFlakeHandle.metadata_json``.
+
+        Private for the same reason as :meth:`_eval_locked_flake`.
+        """
+        response = await self._ensure_proxy().flake_metadata_json(
+            FlakeMetadataJsonRequest(handle=self._locked_flake_id(locked)),
+        )
+        return response.metadata_json
+
+    async def _find_flake_input(
+        self,
+        locked: LockedFlakeHandle,
+        path: Sequence[str],
+        *,
+        timeout: float | None = None,
+    ) -> LockedNode | None:
+        """Find one node of a lock graph. Backs ``LockedFlakeHandle.find_input``.
+
+        Private for the same reason as :meth:`_eval_locked_flake`.
+        """
+        response = await self._ensure_proxy().find_flake_input(
+            FindFlakeInputRequest(handle=self._locked_flake_id(locked), path=list(path)),
+        )
+        return response.node
 
     async def _release_locked_flake(self, locked: LockedFlakeHandle, *, timeout: float | None = None) -> None:
         """Release the worker-side handle for a locked flake. Backs ``LockedFlakeHandle.release``.
