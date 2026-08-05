@@ -70,13 +70,17 @@ class WorkerState:
         #: Kept so ``GetSettings`` can tell a host value from one this session
         #: applied, which a caller has no other way to learn across the wire.
         self.provenance = SettingsProvenance()
-        #: The level every request of this worker logs at. The bindings hold
-        #: the verbosity per thread, and Store work runs on anyio's shared
-        #: thread pool, so a thread carries no level of its own that would
-        #: survive to the next request. ``Init`` resolves this.
+        #: The level a request logs at when it names no level of its own. The
+        #: bindings hold the verbosity per thread, and Store work runs on
+        #: anyio's shared thread pool, so a thread carries no level of its own
+        #: that would survive to the next request. ``Init`` resolves this.
+        #:
+        #: An evaluator that called ``SetEvalVerbosity`` overrides it, per
+        #: request — see ``EvalEntry.verbosity``. Store requests have no such
+        #: override, because a store is session-scoped.
         self.verbosity: int = int(LogLevel.INFO)
 
-    async def run_request(
+    async def run_request(  # noqa: PLR0913 -- five request-local facts, each independent: what to run, what to run it with, which of the two dispatch mechanisms, and at which level. Grouping them would hide that executor and limiter are mutually exclusive, which the body enforces
         self,
         *,
         request_id: int,
@@ -84,6 +88,7 @@ class WorkerState:
         args: tuple[Any, ...] = (),
         executor: NixThreadExecutor | None = None,
         limiter: anyio.CapacityLimiter | None = None,
+        verbosity: int | None = None,
     ) -> Any:
         """Run a unary operation with its request-local logger context installed.
 
@@ -92,6 +97,10 @@ class WorkerState:
         ``anyio.CapacityLimiter`` bounding ``anyio.to_thread.run_sync`` calls,
         for Store work) must be given -- these are two distinct dispatch
         mechanisms, not variants of one shared interface.
+
+        ``verbosity`` is the level this one request logs at. An evaluator that
+        holds a level of its own passes it; everything else leaves it out and
+        gets ``self.verbosity``.
         """
         collector = self.collector
         if request_id <= 0:
@@ -103,13 +112,13 @@ class WorkerState:
 
         # Read before the closure runs, so the request logs at the level that
         # was in force when it was dispatched.
-        verbosity = self.verbosity
+        level = self.verbosity if verbosity is None else verbosity
 
         def _run() -> Any:
             previous_id = nanopynix_util.get_logger_request_id()
             previous_verbosity = nanopynix_util.get_verbosity()
             nanopynix_util.set_logger_request_id(request_id)
-            nanopynix_util.set_verbosity(verbosity)
+            nanopynix_util.set_verbosity(level)
             try:
                 return operation(*args)
             finally:

@@ -371,6 +371,12 @@ async def _cmd_help(state: _ReplState, argument: str) -> None:
 
 
 async def _cmd_verbosity(state: _ReplState, argument: str) -> None:
+    """Show or set the level this repl's evaluator logs at.
+
+    Scoped to this repl, and not to the process. A store operation this repl
+    runs still logs at the session's level, and so do the threads Nix starts
+    for itself, such as a substituter.
+    """
     try:
         verbosity = await (
             state.repl.get_verbosity() if not argument else state.repl.set_verbosity(normalize_log_level(argument))

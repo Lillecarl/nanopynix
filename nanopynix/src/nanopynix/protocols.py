@@ -522,7 +522,12 @@ class AsyncLockedFlake(Protocol):
 
 @runtime_checkable
 class AsyncVerbosityController(Protocol[VerbosityT_co]):
-    """A resource that reads and updates the process-wide Nix verbosity.
+    """A resource that reads and updates its own Nix log verbosity.
+
+    The level belongs to the resource the caller holds, and not to the
+    process. A session's level covers its store work and the threads Nix
+    starts for itself; an evaluator's level covers that evaluator alone. See
+    :class:`AsyncEvalSession` for how the two relate.
 
     Defined here, above its first user, rather than at the end of the module:
     :class:`AsyncEvalSession` extends it.
@@ -532,12 +537,12 @@ class AsyncVerbosityController(Protocol[VerbosityT_co]):
 
     @abstractmethod
     async def get_verbosity(self) -> VerbosityT_co:
-        """Return the current Nix log verbosity."""
+        """Return the level this resource logs at."""
         ...
 
     @abstractmethod
     async def set_verbosity(self, verbosity: LogLevelInput) -> VerbosityT_co:
-        """Set the Nix log verbosity and return the resulting level."""
+        """Set the level this resource logs at, and return it."""
         ...
 
 
@@ -551,10 +556,22 @@ class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](AsyncVerbosityController
     caller who does not care can still write a bare ``AsyncEvalSession``.
 
     Extends :class:`AsyncVerbosityController` rather than redeclaring
-    ``get_verbosity``/``set_verbosity``: verbosity is process-wide, so an
-    evaluator is one of several doors onto a single setting, not the owner of
-    its own. A REPL is why the door is here at all -- ``pynix``'s
-    ``:verbosity`` command holds a repl session and nothing else.
+    ``get_verbosity``/``set_verbosity``. An evaluator owns its level: two
+    evaluators of one session can hold different levels at the same time.
+    Until an evaluator sets one, it follows its session, and a later
+    ``Session.set_verbosity`` moves it. After it sets one, it keeps that
+    level, and no session write moves it again. There is no way back to
+    following the session.
+
+    Two things stay at the session's level. A store is session-scoped, so
+    store work logs at the session's level even while an evaluator of that
+    session sits elsewhere. The threads Nix starts for itself, such as a
+    substituter or a build hook, read a process-wide default that only the
+    session writes, so an evaluator at ``DEBUG`` gets debug output from its
+    own evaluation and not from those threads.
+
+    A REPL is why the door is here at all -- ``pynix``'s ``:verbosity``
+    command holds a repl session and nothing else.
     """
 
     __slots__ = ()  # in the body, and load-bearing -- see the module docstring

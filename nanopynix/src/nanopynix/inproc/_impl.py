@@ -190,9 +190,10 @@ def _run_with_log_context[T](operation_id: int, verbosity: int, func: Callable[.
     The verbosity travels with the operation for the same reason the request
     id does. Nix logs on the thread that produced the message, and the
     bindings hold the level in a thread-local, so a level set on one Nix
-    thread means nothing on the next one. The session owns the level; this
-    function applies it to whichever thread the pool gave this operation, and
-    restores what was there before.
+    thread means nothing on the next one. The object the caller dispatched
+    through owns the level — an evaluator its own, a session or a store the
+    session's. This function applies that level to whichever thread ran this
+    operation, and restores what was there before.
     """
     previous_id = nanopynix_util.get_logger_request_id()
     previous_verbosity = nanopynix_util.get_verbosity()
@@ -639,6 +640,10 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         The session takes the level first, so the next operation carries it.
         The dispatched call then publishes the same level to the threads Nix
         starts for itself, which no operation of this session ever reaches.
+
+        This also moves every evaluator that never called
+        :meth:`EvalSession.set_verbosity`, because such an evaluator reads
+        this level live. An evaluator that holds a level of its own keeps it.
         """
         self._check_open()
         level = normalize_log_level(verbosity)
@@ -738,7 +743,14 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
 
 
 class Store(AsyncStore):
-    """Async façade over one direct ``nanopynix_store.Store`` pointer."""
+    """Async façade over one direct ``nanopynix_store.Store`` pointer.
+
+    A store logs at its session's level, and not at any evaluator's. Every
+    method here dispatches through :meth:`Session.run`, so the level follows
+    from the door the caller used. The same store still logs at an
+    evaluator's level when Nix reaches it from inside an evaluation, because
+    that work runs on the evaluator's own thread.
+    """
 
     def __init__(self, session: Session, uri: str) -> None:
         self._session = session
@@ -1086,6 +1098,10 @@ class EvalSession(AsyncEvalSession["Value"]):
         self._flake_defaults = flake_defaults if flake_defaults is not None else NixFlakeSettings()
         self._core: CoreEvalState | None = None
         self._active = False
+        # The level this evaluator logs at, or `None` while it follows the
+        # session. `set_verbosity` pins it, and nothing un-pins it — see
+        # `_level`.
+        self._own_level: int | None = None
         self._locked_flakes: set[LockedFlake] = set()
         self._executor = NixThreadExecutor(
             thread_name_prefix="nix-eval",
@@ -1222,11 +1238,14 @@ class EvalSession(AsyncEvalSession["Value"]):
     def _level(self) -> int:
         """The level this evaluator's operations log at.
 
-        The session's, because verbosity is one setting with two doors — see
-        :meth:`get_verbosity`. Reading it here rather than holding a copy is
-        what keeps a write through either door visible from the other.
+        Its own once :meth:`set_verbosity` pins one, and the session's until
+        then. The session's level is read live rather than copied at open
+        time, so an evaluator that never set a level follows every later
+        write through :meth:`Session.set_verbosity`.
         """
-        return int(self._session._level)  # type: ignore[reportPrivateUsage] -- Session owns the verbosity  # noqa: SLF001
+        if self._own_level is not None:
+            return self._own_level
+        return int(self._session._level)  # type: ignore[reportPrivateUsage] -- Session owns the fallback verbosity  # noqa: SLF001
 
     async def _run_closing[T](self, func: Callable[..., T], *args: object) -> T:
         operation_id = self._session._next_operation_id()  # type: ignore[reportPrivateUsage] -- Session owns operation correlation  # noqa: SLF001
@@ -1246,29 +1265,46 @@ class EvalSession(AsyncEvalSession["Value"]):
         return self._core
 
     async def get_verbosity(self) -> LogLevel:
-        """Return the current Nix log verbosity.
+        """Return the level this evaluator logs at.
 
-        Verbosity is process-wide, not per-evaluator — this reads the same
-        setting :meth:`Session.get_verbosity` does, and reaching it from here
-        is a convenience for code that holds an evaluator rather than the
-        session that made it. A REPL is the motivating case: ``pynix``'s
-        ``:verbosity`` command has only its :class:`ReplSession` to hand.
+        Read from this evaluator's own Nix thread, and not from
+        :attr:`_level`. The bindings hold the verbosity per thread, so what
+        that thread reports is what Nix would actually filter this
+        evaluator's messages at. :meth:`Session.get_verbosity` uses the same
+        honest door, on the Store pool.
 
-        rpc's ``EvalSession`` has always had this pair; inproc's not having it
-        is what ``test_engine_parity``'s "EvalSession.get_verbosity:rpc-only"
-        recorded, and nothing about process isolation forced the split.
+        An evaluator that never called :meth:`set_verbosity` reports its
+        session's level.
         """
         self._require_core()
-        return await self._session.get_verbosity()
+        return LogLevel(await self.run(self._session._runtime.get_verbosity))  # type: ignore[reportPrivateUsage] -- Session owns local runtime  # noqa: SLF001
 
     async def set_verbosity(self, verbosity: LogLevelInput) -> LogLevel:
-        """Set the Nix log verbosity and return the resulting level.
+        """Set the level this evaluator logs at, and return it.
 
-        Process-wide, as :meth:`get_verbosity` — this is not scoped to the
-        evaluator it is called on.
+        Scoped to this evaluator. Two evaluators of one session can hold
+        different levels, and a later :meth:`Session.set_verbosity` moves only
+        the evaluators that never set one of their own. There is no way back
+        to following the session.
+
+        The level is stored rather than dispatched, because
+        :meth:`run` applies :attr:`_level` to the Nix thread at the start of
+        every operation. So the next operation carries it.
+
+        Two things stay at the session's level, on purpose:
+
+        - Store work. A store is session-scoped, and it dispatches through
+          :meth:`Session.run` — see :class:`Store`.
+        - The threads Nix starts for itself, such as a substituter or a build
+          hook. Those read a process-wide default that only
+          :meth:`Session.set_verbosity` writes. Writing it from here would
+          move the default under every other evaluator of the process, which
+          is the shared state the per-thread filter removed.
         """
         self._require_core()
-        return await self._session.set_verbosity(verbosity)
+        level = normalize_log_level(verbosity)
+        self._own_level = int(level)
+        return level
 
     async def string(self, expr: str, path: str = "<string>") -> Value:
         """Evaluate the Nix expression ``expr``.

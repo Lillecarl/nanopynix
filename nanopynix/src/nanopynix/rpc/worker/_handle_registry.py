@@ -39,6 +39,10 @@ class EvalEntry:
     eval_state: CoreEvalState
     executor: NixThreadExecutor
     store_handle: int
+    #: The level this evaluator's requests log at, or ``None`` while it
+    #: follows ``WorkerState.verbosity``. ``SetEvalVerbosity`` pins it, and
+    #: nothing un-pins it.
+    verbosity: int | None = None
 
 
 @dataclass

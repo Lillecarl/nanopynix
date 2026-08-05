@@ -39,6 +39,7 @@ from nanopynix_proto.nix.eval import (
     EvalServiceBase,
     EvalStringRequest,
     ForceJsonRequest,
+    GetEvalVerbosityRequest,
     GetFlakeRequest,
     HasAttrRequest,
     ListGetRequest,
@@ -54,6 +55,7 @@ from nanopynix_proto.nix.eval import (
     ReplProcessLineRequest,
     ReplScopeNamesRequest,
     ResetFileCacheRequest,
+    SetEvalVerbosityRequest,
     TypeNameRequest,
     UpdateInputsList,
     WriteLockFileRequest,
@@ -1005,14 +1007,37 @@ class EvalSession(AsyncEvalSession["ValueProxy"]):
             self._store.rpc._register_dependent_eval(self)  # type: ignore[reportPrivateUsage] -- Store owns the public force-close lifecycle hook  # noqa: SLF001
 
     async def get_verbosity(self) -> LogLevel:
-        """Return the current Nix log verbosity while this eval session is open."""
-        self._ensure_proxy()
-        return await self._worker.get_verbosity()
+        """Return the level this evaluator logs at.
+
+        The worker reads it from this evaluator's own Nix thread, which is
+        what Nix would actually filter this evaluator's messages at. An
+        evaluator that never called :meth:`set_verbosity` reports its
+        session's level.
+        """
+        response = await self._ensure_proxy().get_eval_verbosity(GetEvalVerbosityRequest())
+        return LogLevel(response.verbosity)
 
     async def set_verbosity(self, verbosity: LogLevelInput) -> LogLevel:
-        """Update Nix log verbosity while retaining this eval session's scope."""
-        self._ensure_proxy()
-        return await self._worker.set_verbosity(normalize_log_level(verbosity))
+        """Set the level this evaluator logs at, and return it.
+
+        Scoped to this evaluator. Two evaluators of one session can hold
+        different levels, and a later :meth:`Session.set_verbosity` moves only
+        the evaluators that never set one of their own. There is no way back
+        to following the session.
+
+        Two things stay at the session's level, on purpose:
+
+        - Store work. A store is session-scoped, and its requests carry the
+          worker's level.
+        - The threads Nix starts for itself, such as a substituter or a build
+          hook. Those read a process-wide default that only
+          :meth:`Session.set_verbosity` writes. Writing it from here would
+          move the default under every other evaluator of the worker, which is
+          the shared state the per-thread filter removed.
+        """
+        level = normalize_log_level(verbosity)
+        response = await self._ensure_proxy().set_eval_verbosity(SetEvalVerbosityRequest(verbosity=level))
+        return LogLevel(response.verbosity)
 
     async def configure(
         self,

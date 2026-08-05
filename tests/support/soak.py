@@ -88,14 +88,20 @@ DENYLIST: dict[str, str] = {
     "tests/nanopynix/inproc/test_inproc.py::test_a_dropped_parent_gives_its_root_back_while_a_child_lives": (
         "forces a Boehm collection through _root_bytes. See the entry above."
     ),
-    # The verbosity is one setting for the whole session, so a lane that sets
-    # it sets it for every peer. The soak found this the moment a second
-    # verbosity test joined the roster: the two below ran side by side and the
-    # one that read back got the other one's level.
+    # The *session's* verbosity is one setting for the whole session, so a lane
+    # that sets it sets it for every peer. The soak found this the moment a
+    # second verbosity test joined the roster: the two below ran side by side
+    # and the one that read back got the other one's level.
     #
     # Neither test is wrong, and neither can be fixed while the session is
     # shared. A test of a per-session setting needs a session of its own, and
     # a lane never has one.
+    #
+    # An *evaluator's* level is not shared, because each lane opens its own
+    # evaluator. So the per-evaluator tests in `test_verbosity.py` need no
+    # entry of their own -- and they would be redundant here anyway, because
+    # each drives both engines from one body and `_candidates_in` takes only a
+    # test that names exactly one factory fixture.
     "tests/nanopynix/test_verbosity.py::test_a_change_of_level_reaches_a_thread_that_already_ran": (
         "writes the verbosity of the borrowed Session and reads it back. A peer that writes the "
         "same one setting in between makes the read report the peer's level."
