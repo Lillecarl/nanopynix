@@ -1813,6 +1813,42 @@ static bool gc_thread_is_registered() {
 #endif
 }
 
+// Register this thread with Boehm behind `GcThreadRegistration`'s back.
+//
+// **A test tool, and the only way to build the state that issue #73 argues
+// about.** `GC_register_my_thread` answers `GC_DUPLICATE` in one case:
+// `GC_lookup_thread(pthread_self())` finds an entry without the `FINISHED`
+// flag. Every thread that registers is `DETACHED`, so unregistering removes
+// its entry, and a live entry can therefore only belong to a thread that
+// registered, exited without unregistering, and had its `pthread_t` handed on
+// by glibc, which caches thread stacks.
+//
+// That sequence is not reachable on demand. This makes the same table state
+// directly, so a test can hold the behaviour that answers #73: the entry must
+// not survive the thread, because `GC_suspend_all` signals every entry that is
+// neither the caller nor `FINISHED`.
+static void gc_register_this_thread_unowned() {
+#if !NIX_USE_BOEHMGC
+    throw no_collector_in_this_build("cannot register a thread");
+#else
+    // **Refuse before bdwgc aborts.** `GC_register_my_thread` calls
+    // `ABORT("Threads explicit registering is not previously enabled")` when
+    // the collector has not started, because `GC_allow_register_threads` runs
+    // inside `nix::initGC`. That abort kills the process, and a test that runs
+    // this before any evaluator exists -- a `-k` selection, or a shard that
+    // happens to start here -- would die rather than fail.
+    if (gc_owner_thread_id.load(std::memory_order_acquire) == 0)
+        throw std::runtime_error(
+            "the collector has not started, so a thread cannot register with it; "
+            "build an EvalState first");
+    GC_stack_base stack_base;
+    if (GC_get_stack_base(&stack_base) != GC_SUCCESS)
+        throw std::runtime_error("could not determine thread stack base for Boehm GC");
+    if (GC_register_my_thread(&stack_base) != GC_SUCCESS)
+        throw std::runtime_error("could not register this thread with Boehm GC");
+#endif
+}
+
 // The Boehm counters. `GC_get_heap_size` and its neighbours are unsynchronized
 // getters, which is why they are read one after the other rather than through
 // GC_get_prof_stats: a caller must already quiesce the evaluator to get a
@@ -1889,10 +1925,22 @@ void nanopynix_bind_expr(nb::module_ &m) {
           "there. Issues #53, #69 and #72 give the reason.");
     m.def("_gc_thread_is_registered", &gc_thread_is_registered,
           "Internal: whether Boehm GC knows the calling thread.\n\n"
-          "The collector comes up while this module imports, so the main thread "
-          "answers True from then on. That is the invariant of issues #53, #69 "
-          "and #72: Boehm's first thread must outlive every collection.\n\n"
+          "The collector starts on a thread of its own, and not on the caller's, "
+          "so importing this module registers nothing. A thread answers True "
+          "once it builds an `EvalState` or enters the evaluator hook.\n\n"
+          "Boehm scans the stack of a registered thread and no other stack, so a "
+          "thread that drives an evaluator must answer True. Issue #70 gives the "
+          "reason, and the two ways an unregistered one fails.\n\n"
           "A build with no collector raises.");
+    m.def("_gc_register_this_thread_unowned", &gc_register_this_thread_unowned,
+          "Internal, for tests: register this thread behind the registrar's back.\n\n"
+          "This makes the one table state that produces `GC_DUPLICATE` -- a live "
+          "entry for this `pthread_t` that nanopynix does not own. Issue #73 "
+          "argues that such an entry must be taken over and removed, rather than "
+          "left alone, because `GC_suspend_all` signals every entry that is "
+          "neither the caller nor `FINISHED`.\n\n"
+          "Call it only on a thread that then enters and exits the evaluator "
+          "hook. A build with no collector raises.");
     m.def("_gc_stats", &gc_stats,
           "Internal: the Boehm counters, for a test that must measure the Nix heap.\n\n"
           "`non_gc_bytes` is the interesting one. Every `nix::allocRootValue` is one "
