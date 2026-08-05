@@ -45,7 +45,7 @@ workflow.evalWorkflow {
           type = "string";
         };
         ref = {
-          description = "Branch to check out";
+          description = "Branch, tag, or FULL 40-character sha to check out";
           required = false;
           type = "string";
           default = "ci-develop";
@@ -79,6 +79,26 @@ workflow.evalWorkflow {
         matrix = "\${{ fromJSON(inputs.matrix) }}";
       };
       steps = [
+        # **An abbreviated sha is the trap this catches.** `actions/checkout`
+        # treats a `ref` that is not a full 40-character sha as a branch or a
+        # tag, so `ref=59b837c26769` becomes `refs/heads/59b837c26769*`, which
+        # matches nothing. git then retries for three minutes and fails with
+        # "exit code 1" and no explanation. It cost a whole 30-job measurement
+        # once. Refuse it here, and say why.
+        {
+          name = "Check the ref";
+          timeout-minutes = 5;
+          env = {
+            REF = "\${{ inputs.ref }}";
+          };
+          run = # bash
+            ''
+              if [[ "$REF" =~ ^[0-9a-f]{7,39}$ ]]; then
+                echo "::error::ref '$REF' looks like an abbreviated commit sha. actions/checkout reads anything that is not a full 40-character sha as a branch or tag name, so this would fetch refs/heads/$REF and fail. Give a branch, a tag, or the full sha."
+                exit 1
+              fi
+            '';
+        }
         (steps.checkout { ref = "\${{ inputs.ref }}"; })
         (steps.installNix { })
         (steps.cachix { })
