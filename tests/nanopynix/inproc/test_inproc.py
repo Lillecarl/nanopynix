@@ -1117,8 +1117,14 @@ async def test_inproc_session_subscribe_receives_log_events(inproc_session: Inpr
         subscription = nix.subscribe(events.append)
         try:
             nanopynix_util._log_test("inproc subscribe test")  # type: ignore[reportPrivateUsage] -- test imports private helper
+            # The predicate the assertion below uses, and not `if events`.
+            # Every lane of the soak emits into the one session-wide stream,
+            # so `if events` broke on a peer's event before this test's own
+            # arrived, and the assertion then failed on a list that was not
+            # empty and held the wrong thing. The test under this one already
+            # waits the right way.
             for _ in range(50):
-                if events:
+                if any(event.message == "inproc subscribe test" for event in events):
                     break
                 await anyio.sleep(0.05)
             assert any(event.message == "inproc subscribe test" for event in events)
