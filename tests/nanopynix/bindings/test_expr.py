@@ -569,11 +569,32 @@ class TestEvaluatorThreadRegistration:
         the collector up, or every worker child inherits a thread table that
         nothing fixes up.
 
-        Nothing registers the main thread with Boehm except starting the
-        collector on it, so this fails if the initialisation moves to import.
+        The owner is a thread of its own, so it is not this one.
         """
         assert eval_state is not None
-        assert nanopynix_expr._gc_thread_is_registered() is False  # type: ignore[reportPrivateUsage] -- the probe under test
+        owner = nanopynix_expr._gc_owner_thread_id()  # type: ignore[reportPrivateUsage] -- the probe under test
+        assert owner != threading.get_native_id(), "the collector must not come up on the main thread"
+
+    @requires_boehm_gc
+    def test_the_thread_that_builds_an_evaluator_is_registered(self, eval_state: nanopynix.EvalState) -> None:
+        """The stack that holds the values must be a stack the collector scans.
+
+        This fixture builds its evaluator with `nanopynix.EvalState(store)`, on
+        the main thread, and never goes near `NixThreadExecutor`. That is the
+        shape a library caller writes, and it used to leave the main thread
+        absent from Boehm's thread table.
+
+        `GC_push_all_stacks` walks that table and visits nothing else. An
+        absent thread therefore aborts the process with "Collecting from
+        unknown thread" when a collection starts on it, and silently loses the
+        values that only its stack refers to when a collection starts
+        somewhere else. Issue #70 recorded the second one for a long time.
+
+        This assertion used to read `is False`, and it passed. The old
+        expectation described the defect.
+        """
+        assert eval_state is not None
+        assert nanopynix_expr._gc_thread_is_registered() is True  # type: ignore[reportPrivateUsage] -- the probe under test
 
     @requires_boehm_gc
     def test_a_plain_thread_is_not_registered(self, eval_state: nanopynix.EvalState) -> None:

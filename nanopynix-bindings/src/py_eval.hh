@@ -20,6 +20,8 @@
 #include <nix/store/store-api.hh>
 #include <nix/util/ref.hh>
 
+#include "nanopynix_gc_thread.hh"
+
 struct PyValue;
 
 struct PyEvalState {
@@ -155,6 +157,13 @@ private:
     void init(const std::vector<std::string> &searchPath,
               const SettingsMap &evalSettingsOverrides,
               const SettingsMap &fetchSettingsOverrides) {
+        // **Before anything here allocates in the collected heap.** `owner`
+        // above says which thread may drive this evaluator; this says that the
+        // collector knows that thread. A caller that never touches
+        // `NixThreadExecutor` -- `nanopynix.EvalState(store)` on the thread it
+        // happens to be on -- reaches the collector through this line alone.
+        nanopynix_ensure_gc_thread_registered();
+
         for (auto &cfg : evalSettingsConfigurators())
             cfg(evalSettings);
 

@@ -121,6 +121,44 @@ The full suite died once in `tests/nanopynix/rpc/test_log_backpressure.py`,
 with two `nix-eval_0` threads live, in `nix::ExprVar::eval`. The earlier note
 said "the four-evaluator test", and that is too narrow.
 
+### The thread that builds an evaluator must be registered with Boehm
+
+`GC_push_all_stacks` (`pthread_stop_world.c:778`) walks Boehm's thread table,
+pushes the stack of each entry as a root, and visits nothing else. Line 918
+aborts with `Collecting from unknown thread`, and it does so in one case only:
+
+```c
+if (!found_me && !GC_in_thread_creation)
+    ABORT("Collecting from unknown thread");
+```
+
+`found_me` names the **calling** thread. A thread that is absent and is not
+the caller gives no abort at all. So an unregistered thread that drives an
+evaluator has two outcomes, and the thread that starts the collection picks
+between them:
+
+| the collection starts on | outcome |
+|---|---|
+| the unregistered thread | `ABORT`, and the process dies |
+| another registered thread | no abort, and this stack is never scanned |
+
+The second outcome is silent. The values that only that stack refers to are
+unreachable, the collector frees them, and the next read of one of those
+pointers gives whatever took the memory.
+
+**`tests/conftest.py` builds its evaluator with `nanopynix.EvalState(store)`,
+on the pytest main thread.** Only `NixThreadExecutor` called
+`enter_evaluator_thread`, which was the one caller of `GC_register_my_thread`,
+so the main thread evaluated Nix while absent from the table.
+
+The evidence is the amplified arm of CI run 30966905346. The abort message is
+at `.rodata` 0x29ca0 of the `libgc.so.1` of that job, and the frames resolve
+to `GC_malloc_kind_global` → `GC_generic_malloc_inner` → `GC_collect_or_expand`
+→ `GC_try_to_collect_inner` → `GC_stopped_mark` → `GC_mark_some` → `abort`.
+
+`PyEvalState::init` now calls `nanopynix_ensure_gc_thread_registered`, so a
+caller that never touches the executor is covered.
+
 ## Excluded
 
 Each of these has evidence, and needs new evidence to reopen.
@@ -134,7 +172,9 @@ Each of these has evidence, and needs new evidence to reopen.
 - **The stop-the-world abort (#72).** A different signal, and it is gone: 0
   aborts in 30 runs.
 - **A foreign thread using an evaluator.** `PyEvalState::checkThread` gates
-  every accessor.
+  every accessor. **This entry was too strong until the registration above.**
+  `checkThread` answers which thread may drive an evaluator, and it never
+  asked whether the collector knows that one thread.
 - **A data race that ThreadSanitizer can see.** Every TSan job passes with the
   soak in it.
 - **Multiple evaluators plus frequent collections, on their own.** The two
@@ -149,6 +189,13 @@ live object that the collector reclaims and then hands out again.
 The reproduction is the **whole** test suite, at about 1 failure in 5 runs of
 8 minutes. The baseline before the collector change: 0 in 3. A narrower
 selection does not reproduce, even with collections forced.
+
+**The unregistered main thread is a mechanism that fits every measurement of
+#70, and it is not yet proven to be the cause.** The shape agrees: an
+unscanned stack loses exactly the values that only it refers to, and the rate
+follows the collection rate. The test is the rate after the registration
+lands. CI run 30966905346 gives the number to beat, and that number is weak:
+0 failures in 5 control runs, which measured no rate at all.
 
 ## The instruments, and what each one cannot see
 
