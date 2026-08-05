@@ -35,14 +35,9 @@ workflow.evalWorkflow {
   name = "On commit";
   on = {
     # Keep ci-develop available as a pushed ref for focused workflow_dispatch
-    # runs without starting the full push matrix. `gc-soak` is the trigger
-    # branch of the temporary soak workflow, and a push to it must start that
-    # workflow only.
+    # runs without starting the full push matrix.
     push = {
-      branches-ignore = [
-        "ci-develop"
-        "gc-soak"
-      ];
+      branches-ignore = [ "ci-develop" ];
     };
     workflow_dispatch = {
       inputs = {
