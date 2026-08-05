@@ -11,6 +11,7 @@ nanopynix/index
 pynix/index
 grpclib-transports/index
 nix-misconceptions
+collector-and-threads
 ```
 
 ---

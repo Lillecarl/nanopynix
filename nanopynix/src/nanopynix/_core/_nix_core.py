@@ -77,6 +77,12 @@ class NixCore:
             # itself, which never pass through that wrapper.
             nanopynix_util.set_default_verbosity(verbosity)
             nanopynix_util.set_verbosity(verbosity)
+        # Safe from any thread. `init_libexpr` starts the Boehm collector on a
+        # thread of its own that never exits, because Boehm keeps its one
+        # static `first_thread` entry for whoever calls `GC_INIT()` and removes
+        # it at no point. `nix_expr.cpp` carries the measurement, and owning
+        # the thread there is what makes a caller that skips this function --
+        # anything that builds an `EvalState` directly -- safe too.
         nanopynix_expr.init_libexpr()
         return SettingsProvenance(from_config=from_config, applied=applied)
 

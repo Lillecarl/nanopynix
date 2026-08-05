@@ -13,13 +13,16 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <future>
 #include <locale>
 #include <map>
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -1662,6 +1665,66 @@ static void gc_collect() {
 #endif
 }
 
+// The OS thread id of the collector's owner, or 0 before the collector starts.
+static std::atomic<long> gc_owner_thread_id{0};
+
+// Start the collector, once, on a thread that never exits.
+//
+// **Boehm's first thread must outlive every collection.** `GC_thr_init` gives
+// bdwgc's one statically allocated `GC_thread` -- `first_thread` -- to
+// whichever thread reaches `GC_INIT()` first, and marks that entry
+// `DETACHED | MAIN_THREAD`. bdwgc never frees the entry, and no thread exit
+// clears its flags. `GC_suspend_all` signals every entry that is neither the
+// caller nor `FINISHED`, so an entry that names a thread which has exited is
+// `pthread_kill` on a dead thread. That is issues #53, #69 and #72, with three
+// outcomes: a fault inside `pthread_kill`, an `EINVAL` return, and the
+// 150-retry `resend_lost_signals` abort.
+//
+// `Session.open` used to reach `nix::initGC` on a `nix-store` executor thread,
+// which shuts down with the session: 3 crashes in 4 runs, against 0 in 6 with
+// an immortal thread.
+//
+// **The owner lives here, and not in Python.** A caller that builds an
+// `EvalState` directly never passes through `NixCore.initialize`, and the test
+// fixtures of this repository do exactly that. A rule that one Python function
+// has to obey is a rule that every other entry point breaks.
+//
+// Not at import, either. bdwgc installs no atfork handlers unless something
+// calls `GC_set_handle_fork` before `GC_INIT`, and `GC_handle_fork` is FALSE
+// by default. A forkserver parent that only imports this module must not bring
+// the collector up, or every worker child inherits a thread table that nothing
+// fixes up.
+//
+// `std::call_once` is what makes two concurrent sessions safe. The
+// `gcInitialised` flag that `nix::initGC` tests is a plain `static bool` with
+// no mutex, so two threads can otherwise both enter it.
+static void init_gc_on_the_owner_thread() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        std::promise<void> ready;
+        std::future<void> started = ready.get_future();
+        std::thread owner([&ready] {
+            pthread_setname_np(pthread_self(), "nix-gc-owner");
+            gc_owner_thread_id.store(static_cast<long>(syscall(SYS_gettid)), std::memory_order_release);
+            nix::initGC();
+            ready.set_value();
+            // Park, and never leave. The entry that `GC_thr_init` just made
+            // names this thread, and bdwgc removes it at no point. A thread
+            // that returns from here takes the process down at the next
+            // collection.
+            //
+            // The promise below is never satisfied, and nothing else holds it,
+            // so this wait does not end.
+            std::promise<void> forever;
+            forever.get_future().wait();
+        });
+        owner.detach();
+        // Return only once the collector is up. Every caller behaves as though
+        // `nix::initGC` ran inline, which is what it used to do.
+        started.wait();
+    });
+}
+
 // Whether Boehm knows the calling thread.
 //
 // This is the probe for the invariant that `nanopynix_bind_expr` sets up: the
@@ -1724,43 +1787,6 @@ static void exit_evaluator_thread() {
 void nanopynix_bind_expr(nb::module_ &m) {
     m.doc() = "nanopynix: Nix expr bindings (EvalState, Value)";
 
-    // **Boehm's first thread must outlive every collection, so the collector
-    // comes up here, at import.** The thread that imports this module is the
-    // process's main thread, and that thread lives as long as the process.
-    //
-    // `GC_thr_init` gives its one statically allocated `GC_thread` --
-    // `first_thread` -- to whichever thread reaches it first, and marks that
-    // entry `DETACHED | MAIN_THREAD`. Nothing removes the entry: bdwgc never
-    // frees `first_thread`, and no thread exit clears its flags. Every later
-    // `GC_suspend_all` walks `GC_threads` and signals each entry that is
-    // neither the caller nor `FINISHED`. An entry that names a thread which
-    // has exited therefore means `pthread_kill` on a dead thread.
-    //
-    // `Session.open` used to reach `GC_INIT()` on a `nix-store` executor
-    // thread, through `init_libexpr`, and that pool shuts down with the
-    // session. One selection, one build, measured both ways: 3 crashes in 4
-    // runs that way, and 0 crashes in 6 runs with the collector brought up
-    // here. Issues #53, #69 and #72 are that one condition with three
-    // outcomes -- a fault inside `pthread_kill`, an `EINVAL` return, and the
-    // 150-retry `resend_lost_signals` abort.
-    //
-    // **The whole of `initGC` moves, and not the `GC_INIT()` inside it.** A
-    // first attempt did only Boehm's own bring-up here, and left the rest of
-    // `initGC` to run later. That made `initGC` call
-    // `GC_set_all_interior_pointers(0)` with `GC_is_initialized` already true,
-    // which resets the valid offsets and runs `GC_bl_init_no_interiors()` over
-    // a heap that is in use. Four evaluators then read a value as the wrong
-    // type: 6 failures in 6 runs against 0 in 6, on one selection.
-    //
-    // `init_libexpr` still calls `nix::initGC`, which returns at its own
-    // `gcInitialised` guard. It reaches the experimental feature it enables.
-    //
-    // The `nix-path` override that `initGC` applies keeps its meaning here.
-    // `AbstractConfig::applyConfig` skips `nix-path` and `extra-nix-path`
-    // whenever `NIX_PATH` is set, so `loadConfFile` does not overwrite the
-    // value, whichever of the two runs first.
-    nix::initGC();
-
     // No flake-primop registration here. There used to be one, duplicating
     // nix_flake.cpp's, because PyEvalState::evalSettingsConfigurators() is a
     // function-local static in a header and each hidden-visibility .so
@@ -1770,7 +1796,7 @@ void nanopynix_bind_expr(nb::module_ &m) {
     // registration nix_flake.cpp already does covers every EvalState.
 
     m.def("init_libexpr", []() {
-        nix::initGC();
+        init_gc_on_the_owner_thread();
         auto &f = nix::experimentalFeatureSettings.experimentalFeatures.get();
         f.insert(nix::Xp::FetchTree);
     }, nb::call_guard<nb::gil_scoped_release>());
@@ -1787,6 +1813,13 @@ void nanopynix_bind_expr(nb::module_ &m) {
           "an exception.\n\n"
           "A build with no collector raises as well. Ask "
           "`build_info()['capabilities']['boehm_gc']` before calling this.");
+    m.def("_gc_owner_thread_id", []() { return gc_owner_thread_id.load(std::memory_order_acquire); },
+          "Internal: the OS thread id that owns Boehm's `first_thread`, or 0.\n\n"
+          "Zero means the collector has not started, which is the state of a "
+          "process that imported nanopynix and opened no session.\n\n"
+          "That thread must never exit. A test reads `/proc/self/task/<id>` "
+          "after a session closes, which is how it proves the thread is still "
+          "there. Issues #53, #69 and #72 give the reason.");
     m.def("_gc_thread_is_registered", &gc_thread_is_registered,
           "Internal: whether Boehm GC knows the calling thread.\n\n"
           "The collector comes up while this module imports, so the main thread "
