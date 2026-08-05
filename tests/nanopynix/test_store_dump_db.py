@@ -150,17 +150,20 @@ async def test_the_registration_makes_a_store_that_never_saw_the_paths_valid(
         copy = await run_process(["cp", "-a", str(source), str(destination / "nix/store/")])
         assert copy.returncode == 0, copy.describe()
 
-    registration_file = anyio.Path(tmp_path) / "registration"
-    await registration_file.write_text(registration)
-
     # `root=` is what makes this a store of its own: the bytes live under
     # `destination`, and the paths stay the logical `/nix/store/...` names that
     # the registration text carries. Without it the URI would name the store of
     # the machine, and the test would ask Nix about paths that are already
     # valid there.
     target_uri = f"local?root={destination}"
+    # The registration goes down the stdin of `nix-store` directly, and **not**
+    # through `sh -c '... < file'`. `sh` is not in this closure, so a shell
+    # here is the host `/bin/sh`, and the host shell cannot load under the
+    # `LD_PRELOAD` of the sanitizer runtime. That cost this test every ASAN run
+    # (#92). `test_store_exec.py:36` gives the failure in full.
     load = await run_process(
-        ["sh", "-c", f"nix-store --store '{target_uri}' --load-db < '{registration_file}'"],
+        ["nix-store", "--store", target_uri, "--load-db"],
+        stdin=registration.encode(),
     )
     assert load.returncode == 0, load.describe()
 
