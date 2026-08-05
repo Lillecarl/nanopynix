@@ -1,0 +1,70 @@
+Use gmtime_r, because gmtime shares one static buffer between all threads.
+
+gmtime returns a pointer into a single buffer that belongs to the C library,
+so two threads that call it at the same time overwrite each other's result.
+Nix calls it at two places, and both format a `lastModified` timestamp:
+
+  * `describe` (src/libflake/lockfile.cc), which `LockFile::diff` calls, and
+    `lockFlake` calls that.
+  * `emitTreeAttrs` (src/libexpr/primops/fetchTree.cc), which `callFlake`
+    calls, and which the `fetchTree`/`fetchGit` primops also reach during an
+    ordinary evaluation.
+
+`nix` the command evaluates on one thread and never meets this. nanopynix
+gives each evaluator its own thread, so two evaluators that touch a flake at
+the same time do. ThreadSanitizer reports it:
+
+    WARNING: ThreadSanitizer: data race
+      Write of size 8 by thread T28:
+        #0 gmtime
+        #1 describe ../lockfile.cc:353
+        #15 nix::flake::lockFlake(...) ../flake.cc:804
+      Previous write of size 8 by thread T25:
+        #0 gmtime
+        #1 nix::emitTreeAttrs(...) ../primops/fetchTree.cc:167
+        #2 nix::flake::callFlake(...) ../flake.cc:951
+      Location is global '_tmbuf' of size 56 (libc.so.6+0x2013e0)
+    SUMMARY: ThreadSanitizer: data race ../lockfile.cc:353 in describe
+
+gmtime_r writes a buffer that the caller owns, and it returns that same
+pointer, so each call site stays one expression. `<ctime>` is included at
+both places already.
+
+This is nanopynix issue #90. The defect belongs to Nix, and this patch is the
+local repair until an upstream release carries one.
+
+diff -ruN a/src/libexpr/primops/fetchTree.cc b/src/libexpr/primops/fetchTree.cc
+--- a/src/libexpr/primops/fetchTree.cc	2026-08-05 23:08:27.296122245 +0200
++++ b/src/libexpr/primops/fetchTree.cc	2026-08-05 23:08:45.388985528 +0200
+@@ -64,7 +64,10 @@
+ 
+     if (auto lastModified = input.getLastModified()) {
+         attrs.alloc("lastModified").mkInt(*lastModified);
+-        attrs.alloc("lastModifiedDate").mkString(fmt("%s", std::put_time(std::gmtime(&*lastModified), "%Y%m%d%H%M%S")));
++        // See the comment in libflake/lockfile.cc's describe(): gmtime shares
++        // one static buffer between every thread, and gmtime_r does not.
++        struct tm tmBuf;
++        attrs.alloc("lastModifiedDate").mkString(fmt("%s", std::put_time(::gmtime_r(&*lastModified, &tmBuf), "%Y%m%d%H%M%S")));
+     }
+ 
+     v.mkAttrs(attrs);
+diff -ruN a/src/libflake/lockfile.cc b/src/libflake/lockfile.cc
+--- a/src/libflake/lockfile.cc	2026-08-05 23:08:27.295122250 +0200
++++ b/src/libflake/lockfile.cc	2026-08-05 23:08:45.388178086 +0200
+@@ -323,8 +323,14 @@
+ {
+     auto s = fmt("'%s'", flakeRef.to_string());
+ 
+-    if (auto lastModified = flakeRef.input.getLastModified())
+-        s += fmt(" (%s)", std::put_time(std::gmtime(&*lastModified), "%Y-%m-%d"));
++    if (auto lastModified = flakeRef.input.getLastModified()) {
++        // gmtime writes one static buffer that every thread shares, so two
++        // evaluator threads formatting a lastModified corrupt each other's
++        // result. gmtime_r writes the caller's buffer and returns it, which
++        // keeps this a single expression.
++        struct tm tmBuf;
++        s += fmt(" (%s)", std::put_time(::gmtime_r(&*lastModified, &tmBuf), "%Y-%m-%d"));
++    }
+ 
+     return s;
+ }
