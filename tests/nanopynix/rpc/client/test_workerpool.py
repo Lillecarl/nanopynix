@@ -17,7 +17,8 @@ from grpclib.exceptions import StreamTerminatedError
 
 from nanopynix import LogEvent, StoreClosedError, StoreError
 from nanopynix.rpc import Session, WorkerDiedError, WorkerSignaledError
-from nanopynix.rpc.client import session as session_module
+from nanopynix.rpc.client import _pool as pool_module, session as session_module
+from nanopynix.rpc.worker._worker import worker_child_teardown
 from tests.support.worker_death import expect_the_worker_to_die
 
 if TYPE_CHECKING:
@@ -666,3 +667,80 @@ async def test_a_terminal_interrupt_does_not_kill_the_worker():
             assert await (await ev.string("1 + 1")).to_python() == 2
             assert proc.is_alive()
             assert isinstance(await store.uri(), str)
+
+
+async def test_a_worker_tears_itself_down_when_the_client_never_asks(monkeypatch: pytest.MonkeyPatch):
+    """The teardown neither hangs the child nor delays it past its grace period.
+
+    The ``Shutdown`` is failed with ``TimeoutError``, which is one of the five
+    exceptions ``WorkerConnection.close`` already swallows, so the client asks
+    for no teardown at all. The evaluator is left open on purpose: on this
+    path ``child_teardown`` is what closes it, and closing an evaluator means
+    blocking on its own Nix thread from ``anyio``'s pool while the child is
+    already shutting down. That is the deadlock this test would catch.
+
+    **What this does not prove.** ``exitcode`` was 0 on this path before the
+    hook existed as well -- Python's own atexit join ends the evaluator
+    threads cleanly, it just never runs ``_exit_evaluator_thread`` on them.
+    So 0 here is a regression guard on the added work, and it is not evidence
+    that the teardown ran.
+
+    Three tests carry that chain instead, each proving one link:
+    ``test_multiprocessing_worker_runs_its_child_teardown`` (the transport
+    calls the hook), ``test_shutdown_worker_closes_an_evaluator_the_client_
+    left_open`` (the teardown closes evaluators), and the wiring test below
+    (nanopynix hands that teardown to that hook).
+    """
+
+    async def _shutdown_times_out(*_args: Any, **_kwargs: Any) -> Any:
+        raise TimeoutError
+
+    with anyio.fail_after(60):
+        nix = Session()
+        await nix.open()
+        store = nix.store()
+        await store.open()
+        evaluator = nix.eval(store)
+        await evaluator.open()
+        assert await (await evaluator.string("1 + 1")).to_python() == 2
+
+        proc = nix._manager._worker_proc  # type: ignore[reportPrivateUsage] -- intentional test of internal transport state
+        assert proc is not None
+        stub = nix._manager._worker_service_stub  # type: ignore[reportPrivateUsage] -- forcing the one branch this test is about
+        assert stub is not None
+        monkeypatch.setattr(stub, "shutdown", _shutdown_times_out)
+
+        await nix.close()
+
+    assert proc.exitcode == 0, f"the worker did not finish its own teardown: exitcode {proc.exitcode}"
+
+
+async def test_the_pool_hands_the_worker_teardown_to_the_transport(monkeypatch: pytest.MonkeyPatch):
+    """``_open_worker`` passes ``worker_child_teardown`` as ``child_teardown``.
+
+    The link the other two tests cannot see. The transport proves that it
+    calls whatever hook it is given, and the worker unit test proves what that
+    teardown does; neither notices if nanopynix stops passing it. A child that
+    silently gets no hook again is exactly the state this issue found.
+
+    The spawn is cut short with a sentinel, because the wiring is decided
+    before the worker starts and nothing after it is this test's subject.
+    """
+
+    class _SpawnedError(Exception):
+        """Ends `open()` at the call being inspected."""
+
+    seen: dict[str, Any] = {}
+
+    def _capture(*_args: Any, **kwargs: Any) -> Any:
+        seen.update(kwargs)
+        raise _SpawnedError
+
+    monkeypatch.setattr(pool_module, "multiprocessing_worker_with_backchannel", _capture)
+
+    nix = Session()
+    with pytest.raises(_SpawnedError):
+        await nix.open()
+
+    # `cast` is identity at run time, so this is the function itself.
+    assert seen["child_teardown"] is worker_child_teardown

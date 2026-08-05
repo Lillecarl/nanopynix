@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import multiprocessing as mp
 import os
-from collections.abc import AsyncGenerator, Callable, Collection, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,6 +22,13 @@ from grpclib_transports.protocol import DEFAULT_TUNING, TransportTuning, serve_h
 
 ServiceFactory = Callable[[], Collection[IServable]]
 BackchannelServiceFactory = Callable[[WorkerBackchannel], Collection[IServable]]
+#: What a worker does in the child after `serve_h2` returns, before the child
+#: exits. It receives the handlers the factory built, and it runs inside the
+#: child's event loop, so it can await a task the worker started there.
+#:
+#: The forkserver pickles this alongside the factory, so it has to be a
+#: module-level function.
+ChildTeardown = Callable[[Collection[IServable]], Awaitable[None]]
 _PROCESS_CLOSE_TIMEOUT = 3.0
 # How long a worker gets to end itself after its channel closes, before the
 # parent signals it. `_stop_process` gives the measurement and the reason.
@@ -152,15 +159,22 @@ def _run_multiprocessing_worker(
     tuning: TransportTuning,
     max_concurrency: int | None,
     status_details_codec: StatusDetailsCodecBase | None = None,
+    child_teardown: ChildTeardown | None = None,
 ) -> None:
     async def run() -> None:
+        services = tuple(service_factory())
         await serve_multiprocessing_endpoint(
             endpoint,
-            tuple(service_factory()),
+            services,
             tuning=tuning,
             max_concurrency=max_concurrency,
             status_details_codec=status_details_codec,
         )
+        # Inside `asyncio.run`, and not after it: a worker's teardown awaits
+        # the tasks it started on this loop, and there is no loop left once
+        # `asyncio.run` returns.
+        if child_teardown is not None:
+            await child_teardown(services)
 
     asyncio.run(run())
 
@@ -171,16 +185,23 @@ def _run_multiprocessing_worker_with_backchannel(
     tuning: TransportTuning,
     max_concurrency: int | None,
     status_details_codec: StatusDetailsCodecBase | None = None,
+    child_teardown: ChildTeardown | None = None,
 ) -> None:
     async def run() -> None:
         backchannel = WorkerBackchannel()
+        services = tuple(service_factory(backchannel))
         await serve_multiprocessing_endpoint(
             endpoint,
-            (*service_factory(backchannel), backchannel.service()),
+            (*services, backchannel.service()),
             tuning=tuning,
             max_concurrency=max_concurrency,
             status_details_codec=status_details_codec,
         )
+        # `services`, and not the tuple that was served: the backchannel
+        # service belongs to this transport, and the teardown is the worker's
+        # own. It gets what the factory gave, and nothing else.
+        if child_teardown is not None:
+            await child_teardown(services)
 
     asyncio.run(run())
 
@@ -224,16 +245,20 @@ async def multiprocessing_worker(
     tuning: TransportTuning = DEFAULT_TUNING,
     max_concurrency: int | None = None,
     status_details_codec: StatusDetailsCodecBase | None = None,
+    child_teardown: ChildTeardown | None = None,
 ) -> AsyncGenerator[PipeChannel]:
     """Start a forkserver worker process and yield a gRPC channel to it.
 
     ``service_factory`` runs inside the worker process and must return the
     grpclib service handlers served by that worker.
+
+    ``child_teardown`` runs in the worker process after the channel closes,
+    and it is the only hook the child has there.
     """
     pair = multiprocessing_pipe_pair(context=context, preload=preload)
     proc = pair.context.Process(
         target=_run_multiprocessing_worker,
-        args=(pair.child, service_factory, tuning, max_concurrency, status_details_codec),
+        args=(pair.child, service_factory, tuning, max_concurrency, status_details_codec, child_teardown),
     )
     proc.start()
     if on_process_start is not None:
@@ -263,17 +288,21 @@ async def multiprocessing_worker_with_backchannel(
     tuning: TransportTuning = DEFAULT_TUNING,
     max_concurrency: int | None = None,
     status_details_codec: StatusDetailsCodecBase | None = None,
+    child_teardown: ChildTeardown | None = None,
 ) -> AsyncGenerator[PipeChannel]:
     """Start a forkserver worker with an in-band parent-services backchannel.
 
     The yielded channel lets the parent call services hosted by the worker.
     ``parent_services`` are exposed to the worker over a long-lived
     bidirectional control stream on that same channel.
+
+    ``child_teardown`` runs in the worker process after the channel closes,
+    and it is the only hook the child has there.
     """
     pair = multiprocessing_pipe_pair(context=context, preload=preload)
     proc = pair.context.Process(
         target=_run_multiprocessing_worker_with_backchannel,
-        args=(pair.child, service_factory, tuning, max_concurrency, status_details_codec),
+        args=(pair.child, service_factory, tuning, max_concurrency, status_details_codec, child_teardown),
     )
     proc.start()
     if on_process_start is not None:
