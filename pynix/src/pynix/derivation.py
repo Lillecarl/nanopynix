@@ -6,22 +6,17 @@ import json
 # the command below at runtime to build its argument parser, so `Path` has to
 # exist as an object and not just as a lazy PEP 563 string.
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, override
+from typing import Any, override
 
 import structlog
 from clypi import Command, arg
 
-from nanopynix import NixType
-from nanopynix._typechecking import BEARTYPING
-
-if TYPE_CHECKING or BEARTYPING:
-    from nanopynix import AsyncValue
-
-from pynix._util import error_exit, print_json, report_and_exit, store_session
+from pynix._util import print_json, report_and_exit, store_session
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
     attr_option,
+    derivation_path,
     evaluate_target,
     file_option,
     flake_option,
@@ -60,28 +55,14 @@ class Show(Command):
                 except EvaluationTargetError as exc:
                     report_and_exit(exc)
 
-                drv_path = await self._get_drv_path(root)
+                try:
+                    drv_path = await derivation_path(root)
+                except EvaluationTargetError as exc:
+                    report_and_exit(exc)
 
             derivation = await store.read_derivation(drv_path)
             result = {drv_path: self._derivation_to_dict(derivation)}
             print_json(result)
-
-    @staticmethod
-    async def _get_drv_path(value: AsyncValue) -> str:
-        # has_attr() is an attrset question, so ask whether this is an attrset
-        # first. It used to answer False for any non-attrset, which made
-        # "is this a derivation?" work by accident on a string or a list; it
-        # now raises, which is right for an accessor but means the type test
-        # has to be explicit.
-        if await value.get_type() != NixType.ATTRS or not await value.has_attr("type"):
-            error_exit("value is not a derivation")
-        value_type = await value.attr("type").to_python()
-        if value_type != "derivation":
-            error_exit(f"value at attribute path is not a derivation (got {value_type!r})")
-        drv_path = await value.attr("drvPath").to_python()
-        if not isinstance(drv_path, str):
-            error_exit("failed to get derivation path")
-        return drv_path
 
     @staticmethod
     def _input_drv_to_dict(node: Any) -> dict[str, object]:

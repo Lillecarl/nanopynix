@@ -49,6 +49,9 @@ EMPTY_PATH_CALLS: dict[str, Callable[[Any, Path], Awaitable[object]]] = {
     "query_substitutable_paths": lambda store, _tmp: store.query_substitutable_paths([""]),
     "query_missing": lambda store, _tmp: store.query_missing([""]),
     "read_derivation": lambda store, _tmp: store.read_derivation(""),
+    # The script argument is never reached: the guard rejects the path first,
+    # which is the whole point of the entry.
+    "write_dev_shell_derivation": lambda store, _tmp: store.write_dev_shell_derivation("", "exit 0\n"),
     "get_build_log": lambda store, _tmp: store.get_build_log(""),
     "add_temp_root": lambda store, _tmp: store.add_temp_root(""),
     "ensure_path": lambda store, _tmp: store.ensure_path(""),

@@ -30,6 +30,9 @@
 #include <nix/store/store-registration.hh>
 #include <nlohmann/json.hpp>
 #include <nix/util/experimental-features.hh>
+// `experimentalFeatureSettings` itself, which write_dev_shell_derivation
+// consults on Nix 2.31. The header above declares the feature enum only.
+#include <nix/util/configuration.hh>
 #include <nix/util/hash.hh>
 #include <nix/util/serialise.hh>
 #include <nix/util/file-descriptor.hh>
@@ -620,6 +623,127 @@ static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
     return d;
 }
 
+// Rewrite a derivation so that its builder dumps its own environment, and
+// write the rewrite back to the store. This is what `nix develop` and
+// `nix print-dev-env` both start with -- `getDerivationEnvironment` in
+// `src/nix/develop.cc` -- and this follows it step for step.
+//
+// **This lives in C++ because the three supported Nix versions disagree on
+// the last two steps.** 2.31 writes with a free `writeDerivation` and fills
+// the output paths by hand, with `hashDerivationModulo` and `makeOutputPath`,
+// and it has a separate branch for `ca-derivations`. 2.34 and 2.35 have
+// `Derivation::fillInOutputPaths` and a `writeDerivation` method. A Python
+// caller would need four more bindings and a branch on the Nix version, and
+// `AGENTS.md` keeps version branches out of the library.
+//
+// The `nix::Derivation` also never leaves C++ this way: `derivationFromPath`
+// builds it, this mutates it, `writeDerivation` consumes it. So there is no
+// dict to reconstruct on the way back, and no faithfulness to prove.
+//
+// `get_env_script` is a parameter rather than a constant compiled in here.
+// Nix keeps its own copy as `getEnvSh`, a file-static string in the `nix`
+// binary that is in no library, so a consumer carries its own. It arrives as
+// text because the script has to reach the store *before* the derivation is
+// hashed, which is why a caller cannot add it and pass a path.
+//
+// One store, where Nix takes two. Nix reads and writes the derivation with
+// its `evalStore` and builds with the other. A caller that wants that split
+// can open the evaluation store and call this on it.
+static nix::StorePath write_dev_shell_derivation(
+    nix::Store &s,
+    const nix::StorePath &drv_path,
+    const std::string &get_env_script) {
+    std::optional<nix::StorePath> result;
+    {
+        nb::gil_scoped_release release;
+        auto drv = s.derivationFromPath(drv_path);
+
+        // The contract of the command, and the reason it can promise a shell
+        // at all. Nix refuses here too, with this message.
+        if (nix::baseNameOf(drv.builder) != "bash")
+            throw nix::Error("'develop' only works on derivations that use 'bash' as their builder");
+
+        nix::StringSource source{get_env_script};
+        auto script_path = s.addToStoreFromDump(
+            source,
+            "get-env.sh",
+            nix::FileSerialisationMethod::Flat,
+            nix::ContentAddressMethod::Raw::Text,
+            nix::HashAlgorithm::SHA256,
+            {});
+
+        drv.args = {s.printStorePath(script_path)};
+
+        // Drop the derivation checks. A dev shell is not the build, so the
+        // reference checks that the build declares must not apply to it.
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+        // 2.31 erases the flat variables and leaves `outputChecks` inside a
+        // structured-attrs derivation alone. Matched rather than corrected,
+        // so that `print-dev-env` agrees with the `nix` of the same version.
+        drv.env.erase("allowedReferences");
+        drv.env.erase("allowedRequisites");
+        drv.env.erase("disallowedReferences");
+        drv.env.erase("disallowedRequisites");
+#else
+        if (drv.structuredAttrs) {
+            drv.structuredAttrs->structuredAttrs.erase("outputChecks");
+        } else {
+            drv.env.erase("allowedReferences");
+            drv.env.erase("allowedRequisites");
+            drv.env.erase("disallowedReferences");
+            drv.env.erase("disallowedRequisites");
+        }
+#endif
+        drv.env.erase("name");
+
+        drv.name += "-env";
+        drv.env.emplace("name", drv.name);
+        drv.inputSrcs.insert(script_path);
+
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
+        if (nix::experimentalFeatureSettings.isEnabled(nix::Xp::CaDerivations)) {
+            for (auto &output : drv.outputs) {
+                output.second = nix::DerivationOutput::Deferred{};
+                drv.env[output.first] = nix::hashPlaceholder(output.first);
+            }
+        } else {
+            for (auto &output : drv.outputs) {
+                output.second = nix::DerivationOutput::Deferred{};
+                drv.env[output.first] = "";
+            }
+            // `Store` still derives from `StoreDirConfig` on this version, so
+            // `makeOutputPath` is on the store itself and not on `.config`.
+            auto hashes_modulo = nix::hashDerivationModulo(s, drv, true);
+            for (auto &output : drv.outputs) {
+                auto out_path = s.makeOutputPath(output.first, hashes_modulo.hashes.at(output.first), drv.name);
+                output.second = nix::DerivationOutput::InputAddressed{.path = out_path};
+                drv.env[output.first] = s.printStorePath(out_path);
+            }
+        }
+        result.emplace(nix::writeDerivation(s, drv));
+#else
+        // Only the two addressed kinds become deferred. CAFloating, Deferred
+        // and Impure already have no path to invalidate.
+        for (auto &[output_name, output] : drv.outputs) {
+            std::visit(nix::overloaded{
+                [&](const nix::DerivationOutput::InputAddressed &) {
+                    output = nix::DerivationOutput::Deferred{};
+                    drv.env[output_name] = "";
+                },
+                [&](const nix::DerivationOutput::CAFixed &) {
+                    output = nix::DerivationOutput::Deferred{};
+                    drv.env[output_name] = "";
+                },
+                [&](const auto &) {},
+            }, output.raw);
+        }
+        drv.fillInOutputPaths(s);
+        result.emplace(s.writeDerivation(drv));
+#endif
+    }
+    return *result;
+}
+
 static std::string store_uri(nix::Store &s, bool with_params) {
     return with_params ? s.config.getReference().render() : s.config.getHumanReadableURI();
 }
@@ -749,6 +873,7 @@ static void bind_store(nb::module_ &m) {
             "build_mode"_a = nix::bmNormal,
             "eval_store"_a = nullptr)
         .def("read_derivation", &read_derivation, "drv_path"_a)
+        .def("write_dev_shell_derivation", &write_dev_shell_derivation, "drv_path"_a, "get_env_script"_a)
         // Path info
         .def("query_path_info", &query_path_info, "path"_a)
         .def("query_path_from_hash_part",

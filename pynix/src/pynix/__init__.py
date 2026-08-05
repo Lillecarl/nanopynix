@@ -12,6 +12,7 @@ from pynix._util import configure_logging
 from pynix.build import Build
 from pynix.config import Config
 from pynix.derivation import Derivation
+from pynix.develop import Develop, PrintDevEnv
 from pynix.eval import Eval
 from pynix.flake import Flake
 from pynix.log import Log
@@ -41,11 +42,13 @@ _subcommand_types: list[type[Command]] = [
     Config,
     Eval,
     Derivation,
+    Develop,
     Flake,
     Log,
     Lsp,
     Osearch,
     PathInfo,
+    PrintDevEnv,
     Repl,
     Store,
 ]
@@ -62,7 +65,22 @@ if Ekn is not None:
 if TYPE_CHECKING:
     from ekn.cli import Ekn as _Ekn
 
-    _PynixSubcommand = Build | Config | Eval | Derivation | Flake | Log | Lsp | Osearch | PathInfo | Repl | Store | _Ekn
+    _PynixSubcommand = (
+        Build
+        | Config
+        | Eval
+        | Derivation
+        | Develop
+        | Flake
+        | Log
+        | Lsp
+        | Osearch
+        | PathInfo
+        | PrintDevEnv
+        | Repl
+        | Store
+        | _Ekn
+    )
 else:
     _PynixSubcommand = functools.reduce(operator.or_, _subcommand_types)
 

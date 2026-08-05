@@ -80,6 +80,28 @@ Examples:
 | `--flake` | `str or None` | Evaluate FLAKE, optionally with a '#'-separated attribute path. (default: `None`) |
 | `--store` | `str` | Store URI to use. (default: `'auto'`) |
 
+### `pynix develop`
+
+Run a command, or an interactive bash, in a derivation's build environment
+
+Everything after -- is the command. Without a command, this starts an
+interactive bash.
+
+Examples:
+  pynix develop --file default.nix --attr hello
+  pynix develop --flake .# -- make -j4
+  pynix develop --flake .# -- bash -c 'make | less'
+
+| Argument | Type | Help |
+| --- | --- | --- |
+| `--file` | `Path or None` | Evaluate FILE as a Nix expression. (default: `None`) |
+| `--attr` | `str or None` | Dot-separated attribute path within the evaluation result. (default: `None`) |
+| `--flake` | `str or None` | Evaluate FLAKE, optionally with a '#'-separated attribute path. (default: `None`) |
+| `--store` | `str` | Store URI to build with. (default: `'auto'`) |
+| `--eval-store` | `str or None` | Store URI to evaluate with. Defaults to --store. (default: `None`) |
+| `--verbosity` | `str or None` | Nix log verbosity: error, warn, notice, info, talkative, chatty, debug, vomit, or 0-7. (default: `None`) |
+| `--print-build-logs` | `bool` | Print build log lines to stderr. (default: `False`) |
+
 ### `pynix flake`
 
 Inspect and manage Nix flakes
@@ -158,6 +180,25 @@ Show information about a store path
 | --- | --- | --- |
 | `path` | `str` | Store path to query (e.g. '/nix/store/hash-name'). *(required)* |
 | `--store` | `str` | Store URI to query. (default: `'auto'`) |
+
+### `pynix print-dev-env`
+
+Print the build environment of a derivation
+
+Examples:
+  pynix print-dev-env --file default.nix --attr hello
+  pynix print-dev-env --flake .#hello --json
+
+| Argument | Type | Help |
+| --- | --- | --- |
+| `--file` | `Path or None` | Evaluate FILE as a Nix expression. (default: `None`) |
+| `--attr` | `str or None` | Dot-separated attribute path within the evaluation result. (default: `None`) |
+| `--flake` | `str or None` | Evaluate FLAKE, optionally with a '#'-separated attribute path. (default: `None`) |
+| `--store` | `str` | Store URI to build with. (default: `'auto'`) |
+| `--eval-store` | `str or None` | Store URI to evaluate with. Defaults to --store. (default: `None`) |
+| `--verbosity` | `str or None` | Nix log verbosity: error, warn, notice, info, talkative, chatty, debug, vomit, or 0-7. (default: `None`) |
+| `--print-build-logs` | `bool` | Print build log lines to stderr. (default: `False`) |
+| `--json` | `bool` | Print the environment as JSON, instead of the bash that restores it. (default: `False`) |
 
 ### `pynix repl`
 

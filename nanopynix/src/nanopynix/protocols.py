@@ -413,6 +413,23 @@ class AsyncStore(Protocol):
         ...
 
     @abstractmethod
+    async def write_dev_shell_derivation(self, drv_path: str | StorePath, get_env_script: str, /) -> str:
+        """Store a rewrite of ``drv_path`` whose builder dumps its environment.
+
+        This is the first half of what ``nix print-dev-env`` does. Build the
+        returned derivation, and its output holds the environment as JSON.
+
+        ``get_env_script`` is the text of the dumping script, and the caller
+        owns it: Nix keeps its own copy inside the ``nix`` binary, where no
+        library can reach it. The script has to enter the store before the
+        derivation is hashed, which is why the text is the argument.
+
+        Raises :class:`NixError` when the builder of ``drv_path`` is not
+        ``bash``, which is the same refusal ``nix develop`` makes.
+        """
+        ...
+
+    @abstractmethod
     async def collect_garbage(
         self,
         action: GcAction,

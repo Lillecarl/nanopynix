@@ -21,6 +21,7 @@ service StoreService {
   rpc QuerySubstitutablePaths(QuerySubstitutablePathsRequest) returns (PathsResponse);
   rpc BuildPathsWithResults(BuildPathsWithResultsRequest) returns (nix.common.BuildResultList);
   rpc ReadDerivation(ReadDerivationRequest) returns (nix.common.Derivation);
+  rpc WriteDevShellDerivation(WriteDevShellDerivationRequest) returns (WriteDevShellDerivationResponse);
   rpc FollowLinksToStorePath(FollowLinksToStorePathRequest) returns (FollowLinksToStorePathResponse);
   rpc AddTempRoot(AddTempRootRequest) returns (AddTempRootResponse);
   rpc FindRoots(FindRootsRequest) returns (FindRootsResponse);
@@ -162,6 +163,21 @@ message ReadDerivationRequest {
   int64 request_id = 1000;
   string path = 1;
   int64 store_handle = 100;
+}
+
+// The environment-dumping rewrite of a derivation, which `pynix develop` and
+// `pynix print-dev-env` both start with. `get_env_script` crosses the wire
+// because the script has to reach the store before the derivation is hashed,
+// so the worker cannot be handed a path instead.
+message WriteDevShellDerivationRequest {
+  int64 request_id = 1000;
+  string path = 1;
+  string get_env_script = 2;
+  int64 store_handle = 100;
+}
+
+message WriteDevShellDerivationResponse {
+  string path = 1;
 }
 
 message FollowLinksToStorePathRequest {

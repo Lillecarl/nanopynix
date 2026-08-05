@@ -57,6 +57,8 @@ from nanopynix_proto.nix.store import (
     StoreServiceBase,
     VerifyStoreRequest,
     VerifyStoreResponse,
+    WriteDevShellDerivationRequest,
+    WriteDevShellDerivationResponse,
 )
 
 from nanopynix._typechecking import BEARTYPING
@@ -234,6 +236,15 @@ class StoreServiceHandler(StoreServiceBase):
         return self._resolve(message.store_handle).read_derivation(message.path)
 
     # --- Mutation ---------------------------------------------------------
+
+    @worker_op
+    def write_dev_shell_derivation(self, message: WriteDevShellDerivationRequest) -> WriteDevShellDerivationResponse:
+        return WriteDevShellDerivationResponse(
+            path=self._resolve(message.store_handle).write_dev_shell_derivation(
+                message.path,
+                message.get_env_script,
+            ),
+        )
 
     @worker_op
     def ensure_path(self, message: EnsurePathRequest) -> EnsurePathResponse:
