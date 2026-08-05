@@ -1,0 +1,65 @@
+# GENERATED FILE -- do not edit by hand.
+# Edit ci/workflows/on_gc_soak.nix; a pytest run renders this file again.
+
+name: GC soak
+'on':
+  push:
+    branches:
+    - gc-soak
+jobs:
+  gc-soak:
+    steps:
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Build the nanopynix test runner for Nix nix_2_34
+      timeout-minutes: 30
+      run: nix build ".#nanopynix-tests-nix_2_34" --out-link result --print-build-logs
+    - name: Enable Nix sandbox namespaces
+      timeout-minutes: 5
+      run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo sysctl -w kernel.unprivileged_userns_clone=1
+        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
+        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+    - name: Run the full suite (arm ${{ matrix.arm }}, run ${{ matrix.run }})
+      timeout-minutes: 30
+      run: |
+        set -o pipefail
+        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 \
+          ${{ matrix.armEnv }} \
+          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds \
+          --nix-test-backends local \
+          -m "not soak"
+    timeout-minutes: 120
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        run:
+        - 1
+        - 2
+        - 3
+        - 4
+        - 5
+        arm:
+        - control
+        - interior
+        - amplified
+        include:
+        - arm: control
+          armEnv: NANOPYNIX_GC_SOAK_ARM=control
+        - arm: interior
+          armEnv: NANOPYNIX_GC_ALL_INTERIOR_POINTERS=1
+        - arm: amplified
+          armEnv: GC_FREE_SPACE_DIVISOR=64

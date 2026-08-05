@@ -1707,6 +1707,29 @@ static void init_gc_on_the_owner_thread() {
             pthread_setname_np(pthread_self(), "nix-gc-owner");
             gc_owner_thread_id.store(static_cast<long>(syscall(SYS_gettid)), std::memory_order_release);
             nix::initGC();
+#if NIX_USE_BOEHMGC
+            // TEMPORARY, for issue #70. Remove it with the issue.
+            //
+            // The differential for "a live pointer sits at a displacement that
+            // Boehm does not accept". `GC_push_contents_hdr` consults
+            // `GC_valid_offsets`, and it black-lists a reference at an
+            // unregistered displacement rather than marking the object. Nix
+            // registers 1 to 7, for the 3-bit discriminator that `value.hh`
+            // packs into the pointer.
+            //
+            // With every displacement valid, such a reference marks its object
+            // instead. If #70 goes away here, an unregistered displacement is
+            // the cause. If #70 survives, that whole class is excluded.
+            //
+            // The direction is always more conservative:
+            // `GC_initialize_offsets` marks every offset valid, so the
+            // collector retains more and frees less. It runs after
+            // `nix::initGC`, and on this thread, so no allocation has happened
+            // yet.
+            if (const char *all_interior = std::getenv("NANOPYNIX_GC_ALL_INTERIOR_POINTERS");
+                all_interior != nullptr && *all_interior == '1')
+                GC_set_all_interior_pointers(1);
+#endif
             ready.set_value();
             // Park, and never leave. The entry that `GC_thr_init` just made
             // names this thread, and bdwgc removes it at no point. A thread
