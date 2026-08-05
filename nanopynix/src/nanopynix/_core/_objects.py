@@ -255,6 +255,19 @@ class CoreStore:
     def query_path_info(self, path: str | nanopynix_store.StorePath) -> PathInfo:
         return PathInfo(**self.require_raw().query_path_info(self._store_path(path)))
 
+    def dump_db(
+        self,
+        paths: Sequence[str | nanopynix_store.StorePath],
+        *,
+        show_derivers: bool = True,
+        show_hash: bool = True,
+    ) -> str:
+        return self.require_raw().dump_db(
+            [self._store_path(path) for path in paths],
+            show_derivers,
+            show_hash,
+        )
+
     def query_all_valid_paths(self) -> list[StorePath]:
         return self._public_paths(self.require_raw().query_all_valid_paths())
 

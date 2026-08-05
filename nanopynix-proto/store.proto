@@ -12,6 +12,7 @@ service StoreService {
   rpc ParseStorePath(ParseStorePathRequest) returns (ParseStorePathResponse);
   rpc QueryPathInfo(QueryPathInfoRequest) returns (nix.common.PathInfo);
   rpc QueryPathFromHashPart(QueryPathFromHashPartRequest) returns (QueryPathFromHashPartResponse);
+  rpc DumpDb(DumpDbRequest) returns (DumpDbResponse);
   rpc ComputeFsClosure(ComputeFsClosureRequest) returns (PathsResponse);
   rpc QueryMissing(QueryMissingRequest) returns (nix.common.MissingInfo);
   rpc QueryDerivationOutputs(QueryDerivationOutputsRequest) returns (PathsResponse);
@@ -148,6 +149,22 @@ message QuerySubstitutablePathsRequest {
   int64 request_id = 1000;
   repeated string paths = 1;
   int64 store_handle = 100;
+}
+
+// The registration text of a closure, which `nix-store --load-db` reads back.
+// `paths` keeps the order the caller gave, because the records come out in
+// that order. `show_derivers` and `show_hash` default to true in the API and
+// to false in proto3, so the client always sends both.
+message DumpDbRequest {
+  int64 request_id = 1000;
+  repeated string paths = 1;
+  bool show_derivers = 2;
+  bool show_hash = 3;
+  int64 store_handle = 100;
+}
+
+message DumpDbResponse {
+  string registration = 1;
 }
 
 message BuildPathsWithResultsRequest {

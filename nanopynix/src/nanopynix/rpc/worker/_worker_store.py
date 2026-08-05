@@ -22,6 +22,8 @@ from nanopynix_proto.nix.store import (
     ComputeStorePathResponse,
     CopyClosureRequest,
     CopyClosureResponse,
+    DumpDbRequest,
+    DumpDbResponse,
     EnsurePathRequest,
     EnsurePathResponse,
     FindRootsRequest,
@@ -225,6 +227,16 @@ class StoreServiceHandler(StoreServiceBase):
     def query_substitutable_paths(self, message: QuerySubstitutablePathsRequest) -> PathsResponse:
         return PathsResponse(
             paths=_widen_paths(self._resolve(message.store_handle).query_substitutable_paths(list(message.paths))),
+        )
+
+    @worker_op
+    def dump_db(self, message: DumpDbRequest) -> DumpDbResponse:
+        return DumpDbResponse(
+            registration=self._resolve(message.store_handle).dump_db(
+                list(message.paths),
+                show_derivers=message.show_derivers,
+                show_hash=message.show_hash,
+            ),
         )
 
     @worker_op

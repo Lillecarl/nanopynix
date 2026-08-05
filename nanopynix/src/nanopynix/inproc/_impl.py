@@ -820,6 +820,23 @@ class Store(AsyncStore):
     async def query_path_info(self, path: str | StorePath) -> PathInfo:
         return await self._session.run(self._require_core().query_path_info, str(path))
 
+    async def dump_db(
+        self,
+        paths: Sequence[str | StorePath],
+        /,
+        *,
+        show_derivers: bool = True,
+        show_hash: bool = True,
+    ) -> str:
+        return await self._session.run(
+            partial(
+                self._require_core().dump_db,
+                [str(path) for path in paths],
+                show_derivers=show_derivers,
+                show_hash=show_hash,
+            ),
+        )
+
     async def query_all_valid_paths(self) -> list[StorePath]:
         return await self._session.run(self._require_core().query_all_valid_paths)
 

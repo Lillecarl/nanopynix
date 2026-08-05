@@ -15,6 +15,7 @@ from nanopynix_proto.nix.store import (
     ComputeFsClosureRequest,
     ComputeStorePathRequest,
     CopyClosureRequest,
+    DumpDbRequest,
     EnsurePathRequest,
     FindRootsRequest,
     FollowLinksToStorePathRequest,
@@ -52,6 +53,8 @@ from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
 from nanopynix.settings import DEFAULT_RPC_TIMEOUT_SECONDS
 
 if TYPE_CHECKING or BEARTYPING:
+    from collections.abc import Sequence
+
     from betterproto2 import Message
     from nanopynix_proto.nix.common import PathInfo
 
@@ -229,6 +232,23 @@ class Store(AsyncStore):
     async def query_all_valid_paths(self) -> list[StorePath]:
         response = await self.rpc.query_all_valid_paths(QueryAllValidPathsRequest())
         return [StorePath(path) for path in response.paths]
+
+    async def dump_db(
+        self,
+        paths: Sequence[str | StorePath],
+        /,
+        *,
+        show_derivers: bool = True,
+        show_hash: bool = True,
+    ) -> str:
+        response = await self.rpc.dump_db(
+            DumpDbRequest(
+                paths=[str(path) for path in paths],
+                show_derivers=show_derivers,
+                show_hash=show_hash,
+            ),
+        )
+        return response.registration
 
     async def compute_fs_closure(
         self,
