@@ -9,6 +9,7 @@ orchestration, all through nanopynix's worker instead of shelling out to
 :maxdepth: 2
 :caption: Contents
 
+develop
 reference
 ```
 
@@ -21,6 +22,10 @@ $ pynix eval --expr '1 + 1'
 $ pynix eval --flake .#hello --attr version
 
 $ pynix build --flake .#hello
+
+$ pynix develop --flake .#hello
+
+$ pynix develop --flake .#hello -- make -j4
 
 $ pynix flake show .
 

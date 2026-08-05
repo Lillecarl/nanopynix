@@ -312,6 +312,20 @@ class CoreStore:
 
     # --- Mutation ---------------------------------------------------------
 
+    def write_dev_shell_derivation(
+        self,
+        drv_path: str | nanopynix_store.StorePath,
+        get_env_script: str,
+    ) -> str:
+        """Rewrite *drv_path* to dump its build environment, and store it.
+
+        The rewrite itself is in C++, because the three supported Nix versions
+        disagree on how a derivation gets written and how its output paths are
+        filled. See ``write_dev_shell_derivation`` in ``nix_store.cpp``.
+        """
+        raw = self.require_raw().write_dev_shell_derivation(self._store_path(drv_path), get_env_script)
+        return self.print_store_path(raw)
+
     def ensure_path(self, path: str | nanopynix_store.StorePath) -> None:
         self.require_raw().ensure_path(self._store_path(path))
 

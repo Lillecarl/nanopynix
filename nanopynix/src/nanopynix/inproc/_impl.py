@@ -915,6 +915,18 @@ class Store(AsyncStore):
     ) -> Derivation:
         return await self._session.run(self._require_core().read_derivation, str(drv_path))
 
+    async def write_dev_shell_derivation(
+        self,
+        drv_path: str | StorePath,
+        get_env_script: str,
+        /,
+    ) -> str:
+        return await self._session.run(
+            self._require_core().write_dev_shell_derivation,
+            str(drv_path),
+            get_env_script,
+        )
+
     @no_runtime_type_check  # action validates its own membership in the shared
     # CoreStore.collect_garbage's _RAW_GC_ACTIONS at runtime for untyped
     # callers; beartype's parameter check would otherwise intercept before

@@ -39,6 +39,7 @@ from nanopynix_proto.nix.store import (
     StoreDirs,
     StoreServiceBase,
     VerifyStoreRequest,
+    WriteDevShellDerivationRequest,
 )
 from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
@@ -321,6 +322,12 @@ class Store(AsyncStore):
 
     async def read_derivation(self, drv_path: str | StorePath, /) -> Derivation:
         return await self.rpc.read_derivation(ReadDerivationRequest(path=str(drv_path)))
+
+    async def write_dev_shell_derivation(self, drv_path: str | StorePath, get_env_script: str, /) -> str:
+        response = await self.rpc.write_dev_shell_derivation(
+            WriteDevShellDerivationRequest(path=str(drv_path), get_env_script=get_env_script),
+        )
+        return response.path
 
     @no_runtime_type_check  # action is validated for untyped callers by pydantic
     # request construction below (CollectGarbageRequest raises ValidationError
