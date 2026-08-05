@@ -23,6 +23,9 @@ from grpclib_transports.protocol import DEFAULT_TUNING, TransportTuning, serve_h
 ServiceFactory = Callable[[], Collection[IServable]]
 BackchannelServiceFactory = Callable[[WorkerBackchannel], Collection[IServable]]
 _PROCESS_CLOSE_TIMEOUT = 3.0
+# How long a worker gets to end itself after its channel closes, before the
+# parent signals it. `_stop_process` gives the measurement and the reason.
+_PROCESS_EXIT_GRACE = 2.0
 
 
 def get_forkserver_context(
@@ -183,6 +186,23 @@ def _run_multiprocessing_worker_with_backchannel(
 
 
 async def _stop_process(proc: Any) -> None:
+    # The grace period runs first, and it is not politeness. A worker does its
+    # own teardown after `serve_h2` returns, and the parent gets here about
+    # 3 ms after it closes the channel. Nothing waited at all until this, so
+    # `terminate()` reached a healthy worker while that teardown was still
+    # running, and every worker died of SIGTERM with `exitcode` -15. A
+    # nanopynix worker measured 51 ms to end itself, so the wait normally costs
+    # that and no more.
+    #
+    # A caller that is already cancelled skips the wait, because the thread
+    # hand-off raises at once, and it gets the old behaviour. That is the right
+    # trade: a cancelled shutdown asks for speed.
+    #
+    # `proc.join`, and not a poll on `is_alive()`: a process exit is not an
+    # event this loop can await, and the join returns the moment the child
+    # ends. It is also the idiom the two calls below already use.
+    await anyio.to_thread.run_sync(proc.join, _PROCESS_EXIT_GRACE)
+
     # `anyio.to_thread.run_sync`, not `asyncio.to_thread`: a pool shutdown
     # stops every worker at once, and asyncio spawns one unbounded thread per
     # call. anyio's shared CapacityLimiter puts a ceiling on that.

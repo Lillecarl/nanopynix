@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import anyio
 import anyio.to_thread
+import grpclib_transports.multiprocessing as mp_transport
 import pytest
 from grpclib.exceptions import StreamTerminatedError
 
@@ -195,6 +196,31 @@ async def test_a_cancelled_close_still_stops_the_worker_process():
         await nix.close()
 
     assert not proc.is_alive()
+
+
+async def test_a_normal_close_lets_the_worker_end_itself():
+    """A worker that closes normally exits 0. It is not signalled.
+
+    The teardown of ``grpclib_transports`` is ``await channel.aclose()`` then
+    ``await _stop_process(proc)``, and ``_stop_process`` reached ``terminate()``
+    about 3 ms after the channel closed. So every healthy worker died of
+    SIGTERM, and anything the worker does after ``serve_h2`` returns never ran.
+    ``_stop_process`` waits for the child before it signals it now.
+
+    The cancelled close above is the other half of the pair. The signal is
+    still right there, because a cancelled shutdown asks for speed.
+
+    ``exitcode`` carries the whole assertion: 0 says the worker ended itself,
+    and -15 says the signal got there first.
+    """
+    nix = Session()
+    await nix.open()
+    proc = nix._manager._worker_proc  # type: ignore[reportPrivateUsage] -- intentional test of internal transport state
+    assert proc is not None
+
+    await nix.close()
+
+    assert proc.exitcode == 0, f"the worker was signalled rather than left to end itself: exitcode {proc.exitcode}"
 
 
 async def test_close_reports_its_own_deadline_and_still_stops_the_worker(monkeypatch: pytest.MonkeyPatch):
@@ -550,18 +576,41 @@ async def test_an_orderly_close_reports_nothing():
         assert nix._manager.unexpected_death is None  # type: ignore[reportPrivateUsage] -- the assertion is the point of the test
 
 
-async def test_closing_twice_does_not_report_our_own_terminate():
+async def _stop_without_grace(proc: Any) -> None:
+    """Stop a worker the way the transport did before it waited for one.
+
+    The test below needs a worker that the parent signals, and a healthy worker
+    ends itself before the signal now. Zeroing the grace constant is not enough:
+    the thread hand-off that reads it is itself a checkpoint, and the child
+    finishes during it. So this reproduces the old shape directly.
+    """
+    if proc.is_alive():
+        proc.terminate()
+        await anyio.to_thread.run_sync(proc.join, 3.0)
+    if proc.is_alive():
+        proc.kill()
+        await anyio.to_thread.run_sync(proc.join, 3.0)
+
+
+async def test_closing_twice_does_not_report_our_own_terminate(monkeypatch: pytest.MonkeyPatch):
     """The teardown's own SIGTERM is not a crash, on any number of closes.
 
-    A session that still holds an open store when it closes ends at status
-    -15: the worker does not exit by itself, so the transport terminates it.
-    That status is cached, and the second close used to read it back and
-    report it as a death nobody asked for. It failed 99 LSP tests, whose
-    fixture closes the session that way.
+    A worker that the transport had to terminate ends at status -15. That
+    status is cached, and the second close used to read it back and report it
+    as a death nobody asked for. It failed 99 LSP tests, whose fixture closes
+    the session that way.
+
+    The terminate is forced here, rather than incidental. It used to happen by
+    itself, because ``_stop_process`` signalled a healthy worker about 3 ms
+    after it closed the channel. A worker gets a grace period now and ends
+    itself at status 0, so this test sets that grace to zero to keep the -15
+    path it is about. A worker that really will not stop reaches the same
+    signal in production.
 
     Two closes, and the second is the one that matters. ``Session.close`` is
     idempotent by contract, so this is a supported call and not an abuse.
     """
+    monkeypatch.setattr(mp_transport, "_stop_process", _stop_without_grace)
     with anyio.fail_after(60):
         nix = Session()
         await nix.open()
