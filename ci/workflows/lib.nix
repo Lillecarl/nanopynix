@@ -172,6 +172,18 @@ let
     # out of our hands.
     docsUpload = 15;
     docsDeploy = 20;
+    # `actions/deploy-pages` polls the Pages API, and it gives up on its own
+    # after `timeout` milliseconds. That limit defaults to ten minutes, which
+    # is below `docsDeploy` above, so the action decided the deadline and the
+    # job cap never applied. Measured, on two runs of the same site:
+    #
+    #     2026-08-06 11:12:23 -> 11:21:21   success, 8m58s
+    #     2026-08-06 14:52:37 -> 15:02:47   "Timeout reached, aborting!"
+    #
+    # A deployment of this site takes about nine minutes, so the default left
+    # one minute of margin. This raises the limit of the action, and keeps it
+    # under `docsDeploy` so that the job cap stays the outer bound.
+    docsDeployPollMs = 15 * 60 * 1000;
     # An upload to Codecov of one XML file.
     codecov = 10;
     # `nix flake update`, which fetches every input, and one `nix eval` for
@@ -1005,6 +1017,9 @@ let
           id = "deployment";
           timeout-minutes = caps.docsDeploy;
           uses = "actions/deploy-pages@main";
+          "with" = {
+            timeout = caps.docsDeployPollMs;
+          };
         }
       ];
     };
