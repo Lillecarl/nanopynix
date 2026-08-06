@@ -45,6 +45,7 @@ from nanopynix.settings import (
     render_for_scope,
 )
 from tests.support.git import init_flake_repo
+from tests.support.nix_markers import NIX_CONF_FILE_IGNORED
 from tests.support.notes import note
 
 if TYPE_CHECKING:
@@ -547,6 +548,7 @@ def test_a_default_is_never_sent_to_nix() -> None:
     assert "experimental-features" in NixGlobalSettings.for_scope(NixSettings()).to_worker_settings()
 
 
+@NIX_CONF_FILE_IGNORED
 @pytest.mark.anyio
 async def test_the_substituters_of_the_host_reach_the_session(
     shared_nix_environment: NixTestEnvironment,
@@ -564,6 +566,7 @@ async def test_the_substituters_of_the_host_reach_the_session(
     assert live["substituters"].split() == ["https://first.example/", "https://second.example/"]
 
 
+@NIX_CONF_FILE_IGNORED
 @pytest.mark.anyio
 async def test_a_named_substituter_beats_the_host(
     shared_nix_environment: NixTestEnvironment,
@@ -585,6 +588,7 @@ async def test_a_named_substituter_beats_the_host(
     assert live["substituters"].split() == ["https://named.example/"]
 
 
+@NIX_CONF_FILE_IGNORED
 @pytest.mark.anyio
 async def test_the_features_of_the_host_survive_beside_ours(
     shared_nix_environment: NixTestEnvironment,
