@@ -49,7 +49,13 @@ from nanopynix import store_exec_prefix, strip_ansi
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import NixError
 from pynix._dev_env import BuildEnvironment, DevEnvError, make_rc_script, quote
-from pynix._settings import eval_store_option, print_build_logs_option, store_option, verbosity_option
+from pynix._settings import (
+    ConfiguredCommand,
+    eval_store_option,
+    print_build_logs_option,
+    store_option,
+    verbosity_option,
+)
 from pynix._util import error_exit, nix_session, print_json, report_and_exit
 from pynix.target import (
     EvaluationTarget,
@@ -106,7 +112,7 @@ class InteractiveShell:
     exec_prefix: list[str]
 
 
-class PrintDevEnv(Command):
+class PrintDevEnv(ConfiguredCommand):
     """Print the build environment of a derivation
 
     Examples:
@@ -135,7 +141,7 @@ class PrintDevEnv(Command):
         sys.stdout.write(script + "\n")
 
 
-class Develop(Command):
+class Develop(ConfiguredCommand):
     """Run a command, or an interactive bash, in a derivation's build environment
 
     Everything after -- is the command. Without a command, this starts an

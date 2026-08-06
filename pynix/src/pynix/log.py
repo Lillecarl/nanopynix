@@ -3,13 +3,13 @@ from __future__ import annotations
 import sys
 from typing import override
 
-from clypi import Command, Positional, arg
+from clypi import Positional, arg
 
-from pynix._settings import store_option
+from pynix._settings import ConfiguredCommand, store_option
 from pynix._util import store_session
 
 
-class Log(Command):
+class Log(ConfiguredCommand):
     """Show the build log for a store path"""
 
     path: Positional[str] = arg(help="Store path whose build log should be printed.")

@@ -27,7 +27,7 @@ for _path in (_PYNIX_SRC, _PYTHON_SRC):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-from pynix._settings import only_built_in_defaults  # noqa: E402 -- see above
+from pynix._settings import UNSET, PynixDefaults  # noqa: E402 -- see above
 
 from pynix import Pynix  # noqa: E402 -- sys.path must be extended before pynix is importable
 
@@ -67,6 +67,13 @@ def _render_default_suffix(conf: Any) -> str:
     if not conf.has_default():
         return " *(required)*"
     default = conf.get_default()
+    if default is UNSET:
+        # A configuration-backed option, whose value comes from the environment
+        # or the configuration file when the caller names no flag. The reference
+        # is checked in and gated, so it states the built-in default, which is
+        # what a reader with no configuration gets. The sentinel is what keeps
+        # this file the same on every machine.
+        default = PynixDefaults.model_fields[conf.name].get_default(call_default_factory=False)
     rendered = "None" if default is None else repr(default)
     return f" (default: `{rendered}`)"
 
@@ -117,12 +124,7 @@ def render() -> str:
         ),
         "",
     ]
-    # Inside the guard: each option's default now comes from a
-    # `default_factory` that reads the configuration file and the environment,
-    # and this file is checked in and gated. The reference states the built-in
-    # default, which is what a reader with no configuration gets.
-    with only_built_in_defaults():
-        lines += _render_command(Pynix, [])
+    lines += _render_command(Pynix, [])
     return "\n".join(lines) + "\n"
 
 

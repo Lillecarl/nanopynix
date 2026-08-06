@@ -10,12 +10,12 @@ from pathlib import Path
 from typing import override
 
 import structlog
-from clypi import Command, Positional, arg
+from clypi import Positional, arg
 from rapidfuzz import fuzz, process
 from rich.console import Console
 
 from pynix._options import OptionRecord, fetch_option_doc_list
-from pynix._settings import store_option
+from pynix._settings import ConfiguredCommand, store_option
 from pynix._util import error_console, eval_session, print_json, report_and_exit
 from pynix.target import (
     EvaluationTarget,
@@ -60,7 +60,7 @@ def _save_cache(path: Path, target: EvaluationTarget, records: list[OptionRecord
     path.write_text(json.dumps(payload))
 
 
-class Osearch(Command):
+class Osearch(ConfiguredCommand):
     """Search NixOS module options, using a cached, offline index."""
 
     query: Positional[str | None] = arg(None, help="Search query. Omit to just (re)build the index.")

@@ -9,7 +9,7 @@ from clypi import Command, Positional, arg
 
 import nanopynix
 from nanopynix._typechecking import BEARTYPING
-from pynix._settings import store_option
+from pynix._settings import ConfiguredCommand, store_option
 from pynix._util import print_json, store_session
 
 if TYPE_CHECKING or BEARTYPING:
@@ -18,7 +18,7 @@ if TYPE_CHECKING or BEARTYPING:
 logger = structlog.get_logger(__name__)
 
 
-class PrintRoots(Command):
+class PrintRoots(ConfiguredCommand):
     """List the garbage collector roots"""
 
     store: str = store_option("Store URI to query.")
@@ -37,7 +37,7 @@ class PrintRoots(Command):
             print_json({"roots": roots})
 
 
-class PrintDead(Command):
+class PrintDead(ConfiguredCommand):
     """List paths that would be removed by a garbage collection.
     Use --rip to actually delete them."""
 
@@ -55,7 +55,7 @@ class PrintDead(Command):
             print_json({"paths": list(result.paths), "bytesFreed": result.bytes_freed})
 
 
-class PrintAlive(Command):
+class PrintAlive(ConfiguredCommand):
     """List live paths in the store (reachable from GC roots)"""
 
     store: str = store_option("Store URI to query.")
@@ -73,7 +73,7 @@ class Gc(Command):
     subcommand: PrintRoots | PrintDead | PrintAlive
 
 
-class Info(Command):
+class Info(ConfiguredCommand):
     """Show store metadata"""
 
     store: str = store_option("Store URI to query.")
@@ -87,7 +87,7 @@ class Info(Command):
             print_json({"uri": uri, "storeDir": store_dir, "dirs": _store_dirs_to_json(dirs)})
 
 
-class Dirs(Command):
+class Dirs(ConfiguredCommand):
     """Show configured local store directories"""
 
     store: str = store_option("Store URI to query.")
@@ -99,7 +99,7 @@ class Dirs(Command):
             print_json(_store_dirs_to_json(dirs))
 
 
-class IsValidPath(Command):
+class IsValidPath(ConfiguredCommand):
     """Check whether a store path is valid"""
 
     path: Positional[str] = arg(help="Store path to check.")
@@ -112,7 +112,7 @@ class IsValidPath(Command):
             print_json({"path": self.path, "valid": valid})
 
 
-class FollowLinksToStorePath(Command):
+class FollowLinksToStorePath(ConfiguredCommand):
     """Resolve symlinks to a store path"""
 
     path: Positional[str] = arg(help="Filesystem path to resolve.")
@@ -125,7 +125,7 @@ class FollowLinksToStorePath(Command):
             print_json({"path": path})
 
 
-class ComputeFsClosure(Command):
+class ComputeFsClosure(ConfiguredCommand):
     """Compute the filesystem closure of a store path"""
 
     path: Positional[str] = arg(help="Store path to query.")
@@ -146,7 +146,7 @@ class ComputeFsClosure(Command):
             _print_paths(paths)
 
 
-class QueryMissing(Command):
+class QueryMissing(ConfiguredCommand):
     """Show which paths would need building, substituting, or are unknown"""
 
     paths: Positional[list[str]] = arg(help="Store paths to query.")
@@ -170,7 +170,7 @@ class QueryMissing(Command):
             )
 
 
-class QueryDerivationOutputs(Command):
+class QueryDerivationOutputs(ConfiguredCommand):
     """Show the outputs of a derivation path"""
 
     path: Positional[str] = arg(help="Derivation path to query.")
@@ -183,7 +183,7 @@ class QueryDerivationOutputs(Command):
             _print_paths(paths)
 
 
-class QueryValidDerivers(Command):
+class QueryValidDerivers(ConfiguredCommand):
     """Show valid derivers for a store path"""
 
     path: Positional[str] = arg(help="Store path to query.")
@@ -196,7 +196,7 @@ class QueryValidDerivers(Command):
             _print_paths(paths)
 
 
-class ListValidPaths(Command):
+class ListValidPaths(ConfiguredCommand):
     """List all valid paths in the store"""
 
     store: str = store_option("Store URI to query.")
@@ -208,7 +208,7 @@ class ListValidPaths(Command):
             _print_paths(paths)
 
 
-class QueryReferrers(Command):
+class QueryReferrers(ConfiguredCommand):
     """Show referrers of a store path"""
 
     path: Positional[str] = arg(help="Store path to query.")
@@ -221,7 +221,7 @@ class QueryReferrers(Command):
             _print_paths(paths)
 
 
-class QuerySubstitutablePaths(Command):
+class QuerySubstitutablePaths(ConfiguredCommand):
     """Show which paths are substitutable"""
 
     paths: Positional[list[str]] = arg(help="Store paths to query.")
@@ -237,7 +237,7 @@ class QuerySubstitutablePaths(Command):
             _print_paths(paths)
 
 
-class AddTempRoot(Command):
+class AddTempRoot(ConfiguredCommand):
     """Add a temporary GC root for this command's store session"""
 
     path: Positional[str] = arg(help="Store path to root temporarily.")
@@ -250,7 +250,7 @@ class AddTempRoot(Command):
             print_json({"path": self.path, "added": True})
 
 
-class AddPermRoot(Command):
+class AddPermRoot(ConfiguredCommand):
     """Add a permanent GC root symlink"""
 
     path: Positional[str] = arg(help="Store path to root.")
@@ -264,7 +264,7 @@ class AddPermRoot(Command):
             print_json({"path": self.path, "gcRoot": gc_root})
 
 
-class AddIndirectRoot(Command):
+class AddIndirectRoot(ConfiguredCommand):
     """Register an indirect GC root"""
 
     path: Positional[str] = arg(help="GC root path to register.")
@@ -277,7 +277,7 @@ class AddIndirectRoot(Command):
             print_json({"path": self.path, "added": True})
 
 
-class PathFromHashPart(Command):
+class PathFromHashPart(ConfiguredCommand):
     """Resolve a store path from its hash prefix"""
 
     hash_part: Positional[str] = arg(help="Store path hash prefix to resolve.")
@@ -290,7 +290,7 @@ class PathFromHashPart(Command):
             print_json({"path": path})
 
 
-class EnsurePath(Command):
+class EnsurePath(ConfiguredCommand):
     """Ensure a store path is valid, substituting it if available"""
 
     path: Positional[str] = arg(help="Store path to ensure.")
@@ -303,7 +303,7 @@ class EnsurePath(Command):
             print_json({"path": self.path, "valid": True})
 
 
-class Cat(Command):
+class Cat(ConfiguredCommand):
     """Print a file inside a local Nix store path"""
 
     path: Positional[str] = arg(help="File path to print.")
@@ -320,7 +320,7 @@ class Cat(Command):
             sys.stdout.buffer.write(f.read())
 
 
-class Ls(Command):
+class Ls(ConfiguredCommand):
     """List files inside a local Nix store path"""
 
     path: Positional[str] = arg(help="File or directory path to list.")
@@ -347,7 +347,7 @@ class Ls(Command):
             sys.stdout.write("\n")
 
 
-class Add(Command):
+class Add(ConfiguredCommand):
     """Add a file or directory to a Nix store"""
 
     path: Positional[str] = arg(help="Filesystem path to add.")
@@ -369,7 +369,7 @@ class Add(Command):
         )
 
 
-class AddFile(Command):
+class AddFile(ConfiguredCommand):
     """Add a single file to a Nix store"""
 
     path: Positional[str] = arg(help="Filesystem path to add.")
@@ -390,7 +390,7 @@ class AddFile(Command):
         )
 
 
-class AddPath(Command):
+class AddPath(ConfiguredCommand):
     """Add a path to a Nix store using NAR ingestion"""
 
     path: Positional[str] = arg(help="Filesystem path to add.")
@@ -411,7 +411,7 @@ class AddPath(Command):
         )
 
 
-class DiffClosures(Command):
+class DiffClosures(ConfiguredCommand):
     """Compare two filesystem closures"""
 
     before: Positional[str] = arg(help="Original store path.")
@@ -443,7 +443,7 @@ class DiffClosures(Command):
         )
 
 
-class Optimise(Command):
+class Optimise(ConfiguredCommand):
     """Optimise store disk usage by hard-linking duplicate files"""
 
     store: str = store_option("Store URI to optimise.")
@@ -455,7 +455,7 @@ class Optimise(Command):
             print_json({"optimised": True})
 
 
-class Verify(Command):
+class Verify(ConfiguredCommand):
     """Verify store integrity"""
 
     check_contents: bool = arg(False, help="Check path contents, not only metadata.")

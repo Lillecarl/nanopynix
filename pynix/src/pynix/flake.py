@@ -14,7 +14,7 @@ from rich.tree import Tree
 
 import nanopynix
 from nanopynix._typechecking import BEARTYPING
-from pynix._settings import store_option
+from pynix._settings import ConfiguredCommand, store_option
 from pynix._util import eval_session, print_json
 
 if TYPE_CHECKING or BEARTYPING:
@@ -33,7 +33,7 @@ class _TreeBudget:
     remaining: int = _MAX_TREE_NODES
 
 
-class Show(Command):
+class Show(ConfiguredCommand):
     """Show the outputs provided by a flake"""
 
     flake_ref: Positional[str] = arg(help="Flake reference (e.g. '.#' or 'nixpkgs#').")
@@ -61,7 +61,7 @@ class Show(Command):
             console.print(tree)
 
 
-class Metadata(Command):
+class Metadata(ConfiguredCommand):
     """Show locked flake metadata"""
 
     flake_ref: Positional[str] = arg(help="Flake reference (e.g. '.' or 'nixpkgs').")
@@ -72,7 +72,7 @@ class Metadata(Command):
         await _print_flake_metadata(self.flake_ref, store_uri=self.store)
 
 
-class Info(Command):
+class Info(ConfiguredCommand):
     """Alias for flake metadata"""
 
     flake_ref: Positional[str] = arg(help="Flake reference (e.g. '.' or 'nixpkgs').")

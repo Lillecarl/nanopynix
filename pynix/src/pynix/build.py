@@ -17,17 +17,17 @@ import anyio
 import anyio.to_thread
 import structlog
 from anyio import Path as AnyioPath
-from clypi import Command, arg
+from clypi import arg
 from nanopynix_helpers.build import FodBuildError, build_with_fod_update
 
 import nanopynix
 from nanopynix._typechecking import BEARTYPING
 from pynix._settings import (
-    DEFAULT_STORE,
-    defaults,
+    ConfiguredCommand,
     eval_store_option,
     nix_settings,
     print_build_logs_option,
+    store_option,
     verbosity_option,
 )
 from pynix._util import error_console, error_exit, nix_session, print_json, report_and_exit
@@ -57,19 +57,13 @@ def _no_sandbox_paths() -> list[str]:
     return []
 
 
-class Build(Command):
+class Build(ConfiguredCommand):
     """Build a Nix derivation value"""
 
     file: Path | None = file_option()
     attr: str | None = attr_option()
     flake: str | None = flake_option()
-    # `None` for "the flag was absent", and not the configured default that
-    # every other command takes from `store_option()`. `_resolve_namespaced`
-    # has to tell a store the user named from one a configuration file
-    # supplied: a namespaced build owns its store, so naming one is a
-    # contradiction, while a configured default is not a request about *this*
-    # build and must not refuse it.
-    store: str | None = arg(None, help=f"Store URI to build with. Defaults to the configured store ({DEFAULT_STORE}).")
+    store: str = store_option("Store URI to build with.")
     eval_store: str | None = eval_store_option()
     # None, not a literal list: an absent flag leaves the value to `[nix]`, to
     # `PYNIX_NIX_*`, and then to the built-in defaults, in that order. These
@@ -126,7 +120,11 @@ class Build(Command):
         namespaced = self.namespaced or self.overlay_dir is not None
         if self.sandbox_path and not namespaced:
             error_exit("--sandbox-path requires --namespaced: the daemon owns the sandbox of the host store")
-        if namespaced and self.store is not None:
+        # What the caller typed, and not what `self.store` holds: a namespaced
+        # build owns its store, so naming one on the command line is a
+        # contradiction. A store that the environment or the configuration file
+        # supplied is not a request about *this* build, and must not refuse it.
+        if namespaced and "store" in self._explicit:
             error_exit("--namespaced builds in its own overlay store, so it cannot be combined with --store")
         return namespaced
 
@@ -169,7 +167,7 @@ class Build(Command):
             # None, not "auto", when namespaced: the session already defaults
             # to its overlay store, and naming "auto" here would open a
             # different store instead.
-            store_uri = None if namespaced else (self.store if self.store is not None else defaults().store)
+            store_uri = None if namespaced else self.store
             promote = namespaced and self.copy_back
             try:
                 if self.eval_store is None:
