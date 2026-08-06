@@ -41,6 +41,7 @@ class NixCore:
         self,
         *,
         settings: Mapping[str, str],
+        experimental_features: Sequence[str],
         load_config: bool,
         verbosity: int | None,
     ) -> SettingsProvenance:
@@ -57,6 +58,17 @@ class NixCore:
         applied first, a caller's value was silently discarded for every key the
         host's ``nix.conf`` also named: measured with ``max-jobs``, the caller
         asked for 4, ``nix.conf`` said 99, and Nix used 99.
+
+        ``experimental_features`` obeys the same ordering, and for the same
+        reason. It is a separate parameter rather than an ``experimental-features``
+        entry of ``settings``, because a setting **replaces** the list and
+        ``enable_experimental_feature`` **inserts** into it: the host keeps what
+        it enabled, and this adds what nanopynix needs. The features go on
+        before any store opens, which is the second constraint on them --
+        ``LocalStore`` prepares its realisation SQL statements only when
+        ``ca-derivations`` is on at construction, and a query afterwards
+        dereferences those statements. ``nanopynix.init_libstore`` carries that
+        measurement.
         """
         nanopynix_util.init_libstore(load_config=load_config)
         # Whatever loadConfFile just set is, by definition, the overridden set.
@@ -65,6 +77,11 @@ class NixCore:
         # after applying our settings reports ours and nothing else.
         nanopynix_util.reset_overridden()
 
+        # After the reset, so that what this enables is reported as applied.
+        # nanopynix did apply it, and a caller that compares `applied` against
+        # `from_config` must see the change.
+        for feature in experimental_features:
+            nanopynix_util.enable_experimental_feature(feature)
         for name, value in settings.items():
             nanopynix_util.set_setting(name, value)
         applied = dict(nanopynix_util.list_settings(overridden_only=True))

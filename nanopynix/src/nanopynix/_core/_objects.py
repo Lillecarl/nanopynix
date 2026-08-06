@@ -771,11 +771,13 @@ class CoreRuntime:
         self,
         *,
         settings: Mapping[str, str],
+        experimental_features: Sequence[str],
         load_config: bool,
         verbosity: int | None,
     ) -> SettingsProvenance:
         return self._core.initialize(
             settings=settings,
+            experimental_features=experimental_features,
             load_config=load_config,
             verbosity=verbosity,
         )

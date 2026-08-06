@@ -255,10 +255,18 @@ def test_default_experimental_features_are_the_ones_we_intend() -> None:
 
 
 def test_session_defaults_to_the_default_experimental_features() -> None:
+    """The features travel as their own list, and never as a setting.
+
+    The second assertion is the whole point. As an ``experimental-features``
+    setting, the default **replaced** what the ``nix.conf`` of the host
+    enabled, and a user who turned a feature on lost it to a default nobody
+    asked for. ``enable_experimental_feature`` inserts into the current set
+    instead, so ``NixCore.initialize`` takes the list separately.
+    """
     session = Session()
 
-    expected = " ".join(DEFAULT_EXPERIMENTAL_FEATURES)
-    assert session._manager._settings["experimental-features"] == expected  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
+    assert session._manager._features == list(DEFAULT_EXPERIMENTAL_FEATURES)  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
+    assert "experimental-features" not in session._manager._settings  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
     assert session._manager._nix_conf is None  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
     assert session._manager._load_config  # type: ignore[reportPrivateUsage] -- intentional test of internal Session state
 

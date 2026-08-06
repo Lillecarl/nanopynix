@@ -73,7 +73,15 @@ class SharedSessions:
 
     async def _shared_session(self) -> Any:
         if self._session is None:
-            self._session = await self._stack.enter_async_context(nanopynix.rpc.Session())
+            # `load_config=False`, so the `nix.conf` of whoever runs the suite
+            # reaches nothing here. `pynix` itself loads it, and must: the real
+            # CLI takes what the host configured. A test is the other case --
+            # it states what it wants and asserts on the result -- and the
+            # substituters, the experimental features and the sandbox of a
+            # developer machine are none of its business. This mattered less
+            # while a session sent its own defaults over the file anyway; it
+            # matters now that the file stands unless a caller speaks.
+            self._session = await self._stack.enter_async_context(nanopynix.rpc.Session(load_config=False))
         return self._session
 
     async def _shared_store(self, store_uri: str) -> tuple[Any, Any]:

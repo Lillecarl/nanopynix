@@ -50,7 +50,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, cast, override
 
 from clypi import Command, arg
-from pydantic import Field
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from nanopynix import NixSettingsEnv
@@ -61,8 +60,6 @@ if TYPE_CHECKING or BEARTYPING:
 
 #: What every ``--store`` used to default to, once per module.
 DEFAULT_STORE = "auto"
-DEFAULT_SUBSTITUTERS = ("https://cache.nixos.org/",)
-DEFAULT_TRUSTED_PUBLIC_KEYS = ("cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=",)
 
 #: The table of the configuration file that each settings model reads.
 DEFAULTS_TABLE = "defaults"
@@ -188,11 +185,17 @@ class PynixDefaults(_TableBackedSettings):
 class PynixNixSettings(NixSettingsEnv, _TableBackedSettings):
     """The Nix settings of a ``pynix`` command, from ``[nix]`` and ``PYNIX_NIX_*``.
 
-    The two substituter fields carry the defaults that ``pynix build`` used to
-    hold as its own constants. They are ordinary field defaults here, so the
-    file and the environment both beat them -- which they did not, when the
-    command passed its constants to the model as keyword arguments and the init
-    source outranked the environment.
+    It adds no field, and it holds no default. ``pynix`` used to give
+    ``substituters`` and ``trusted-public-keys`` a default of its own, and a
+    session sends every setting that is not ``None``, so a host that named a
+    private cache in ``nix.conf`` lost that cache to ``pynix build`` with no
+    message. A session now sends only what a caller named, so a default here
+    could never take effect again -- and a default that cannot take effect is a
+    false statement about the program.
+
+    ``nix build`` carries no such default either. What ``nix.conf`` says stands,
+    and this model speaks only when the file, the environment, or a flag names a
+    setting.
     """
 
     # Taken from the parent, and derived rather than written out again.
@@ -203,9 +206,6 @@ class PynixNixSettings(NixSettingsEnv, _TableBackedSettings):
     # the environment lost to the configuration file with no message.
     model_config = SettingsConfigDict(**NixSettingsEnv.model_config)
     config_table: ClassVar[str] = NIX_TABLE
-
-    substituters: list[str] | None = Field(default_factory=lambda: list(DEFAULT_SUBSTITUTERS))
-    trusted_public_keys: list[str] | None = Field(default_factory=lambda: list(DEFAULT_TRUSTED_PUBLIC_KEYS))
 
 
 class _Unset:

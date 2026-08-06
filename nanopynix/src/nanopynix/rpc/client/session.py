@@ -152,7 +152,13 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         self._flake_defaults = NixFlakeSettings.for_scope(nix_settings)
         store_uri = resolve_store_spec(store_uri, self._store_defaults)
         self._store_uri = store_uri
-        worker_settings = NixGlobalSettings.for_scope(nix_settings).to_worker_settings()
+        # Only what the caller named. `render_for_scope` filters the rendered
+        # mapping, where `NixGlobalSettings.for_scope(...).to_worker_settings()`
+        # re-validates first and so marks every default as explicitly set --
+        # which sent every non-None field and overrode the host's `nix.conf`
+        # for each one. The five scope calls above stay: those build session
+        # defaults, which are models and read None-ness.
+        worker_settings = render_for_scope(nix_settings, NixGlobalSettings, explicit_only=True)
         if namespace is not None:
             # Under the settings the caller gave, not over them: a caller that
             # sets build-users-group itself has a reason to.
