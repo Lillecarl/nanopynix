@@ -43,9 +43,10 @@ from clypi import Command, arg
 # clypi fails here at import time instead of leaving take_unparsed silently
 # clearing nothing.
 from clypi._cli.main import CLYPI_UNPARSED
+from rich.text import Text
 
 import nanopynix
-from nanopynix import store_exec_prefix, strip_ansi
+from nanopynix import store_exec_prefix
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import NixError
 from pynix._dev_env import BuildEnvironment, DevEnvError, make_rc_script, quote
@@ -74,6 +75,9 @@ if TYPE_CHECKING or BEARTYPING:
     from nanopynix.protocols import AsyncLockedFlake, AsyncStore
 
 logger = structlog.get_logger(__name__)
+
+#: What Nix puts in front of an error message of its own.
+_NIX_ERROR_PREFIX = "error: "
 
 #: The vendored copy of Nix's own environment dumper. Its header gives the
 #: provenance and the licence.
@@ -327,7 +331,7 @@ async def build_dev_env(
     try:
         return BuildEnvironment.from_json(raw), shell
     except DevEnvError as exc:
-        error_exit(str(exc))
+        error_exit(str(exc), cause=exc)
 
 
 async def _read_dev_env(
@@ -344,7 +348,12 @@ async def _read_dev_env(
         # The one Nix error this command expects: a derivation whose builder is
         # not bash cannot dump its environment. A traceback would say the same
         # thing at ten times the length, so report the reason and stop.
-        error_exit(strip_ansi(exc.msg).removeprefix("error: "))
+        # `Text.from_ansi` first, and `removeprefix` after: the "error: " of
+        # Nix carries its own colour, so the prefix is not at the start of
+        # `exc.msg` and it is at the start of the plain text of the `Text`.
+        # "Error:" comes from `error_exit`, so this drops the second one.
+        text = Text.from_ansi(exc.msg)
+        error_exit(text[len(_NIX_ERROR_PREFIX) :] if text.plain.startswith(_NIX_ERROR_PREFIX) else text, cause=exc)
     logger.info("pynix develop building the environment", drv_path=shell_drv)
     separate_eval_store = eval_store if eval_store is not build_store else None
     results = await build_store.build_paths_with_results([shell_drv], eval_store=separate_eval_store)

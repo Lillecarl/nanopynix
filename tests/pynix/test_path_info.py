@@ -50,10 +50,10 @@ async def test_path_info_nonexistent(
 
     assert "Error" in captured.err
     assert captured.out == ""
-    # The message of Nix arrives whole. `Text.from_ansi` turns the colour of
-    # Nix into a style of rich, which keeps it for a terminal and drops it for
-    # a pipe. Interpolating the same text into a markup string instead loses
-    # the words: rich reads the `[35;1m` of Nix as a tag and eats it, so this
-    # asserts the words that such a tag sits next to.
+    # The message of Nix arrives whole. `error_exit` turns it into a `Text`,
+    # which keeps the colour of Nix for a terminal and drops it for a pipe.
+    # Interpolating the same text into a markup string instead breaks it: the
+    # highlighter of rich styles the `[` and the number of each escape, which
+    # orphans the escape byte. `_util.error_exit` carries the measurement.
     assert "deadbeef-nonexistent" in captured.err
     assert "error:" in captured.err

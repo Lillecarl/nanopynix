@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, NoReturn, TextIO, cast
 import anyio
 import structlog
 from rich.console import Console
+from rich.text import Text
 
 import nanopynix
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
@@ -45,10 +46,30 @@ def print_json(obj: object) -> None:
     sys.stdout.write("\n")
 
 
-def error_exit(message: str) -> NoReturn:
-    """Print `[red]Error:[/red] message` to stderr and exit(1)."""
-    error_console.print(f"[red]Error:[/red] {message}")
-    raise SystemExit(1)
+def error_exit(message: str | Text, *, cause: BaseException | None = None) -> NoReturn:
+    """Print ``Error: message`` to stderr and exit(1).
+
+    **The message arrives as a `Text`, and never inside a markup string.**
+    Most of these messages come from Nix, which colours its own output, and
+    an interpolated escape reaches the highlighter of rich as literal text.
+    Measured, with ``ESC`` for the escape byte, on ``ESC[35;1mvalue ...``::
+
+        f"...{message}"           ->  ESC ESC[1m [ ESC[0m ESC[1;36m 35 ESC[0m ;1mvalue ...
+        Text.from_ansi(message)   ->  ESC[1;35m value is a string ESC[0m
+
+    ``ReprHighlighter`` matches the ``[`` and the ``35`` and styles each one,
+    which leaves the escape byte of Nix with nothing after it. The markup
+    parser is not the cause: ``RE_TAGS`` starts a tag at ``[a-z#/@]``, and a
+    digit does not match. ``Text.from_ansi`` turns the escape into a style of
+    rich before rich sees the text, so a terminal keeps the colour and a pipe
+    drops it. A ``Text`` is also never highlighted, which is what makes this
+    safe for a message that pynix did not write.
+
+    Pass *cause* to chain the exception, so that a ``--debug`` traceback keeps
+    the real reason.
+    """
+    error_console.print("[red]Error:[/red]", Text.from_ansi(message) if isinstance(message, str) else message)
+    raise SystemExit(1) from cause
 
 
 def report_and_exit(exc: EvaluationTargetError) -> NoReturn:
@@ -56,8 +77,7 @@ def report_and_exit(exc: EvaluationTargetError) -> NoReturn:
     build.py's BuildTargetError) caught from `target.validate()`/
     `evaluate_target()` -- chains `from exc` so --debug tracebacks keep the
     real cause."""
-    error_console.print(f"[red]Error:[/red] {exc}")
-    raise SystemExit(1) from exc
+    error_exit(str(exc), cause=exc)
 
 
 @no_runtime_type_check  # file is duck-typed against TextIO -- under prompt_toolkit's
