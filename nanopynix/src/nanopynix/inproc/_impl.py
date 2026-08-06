@@ -258,7 +258,13 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         self._primops = to_primop_specs(primops)
         # One scope for each door Nix opens -- see the same block in
         # rpc.client.session.Session.__init__, which must agree with this one.
-        self._global_settings = NixGlobalSettings.for_scope(self._settings)
+        # A rendered mapping, and not a model: only what the caller named goes
+        # to Nix. `NixGlobalSettings.for_scope(...).to_worker_settings()`
+        # re-validates first and so marks every default as explicitly set,
+        # which sent every non-None field and overrode the host's `nix.conf`
+        # for each one. The four scope calls below stay: those build session
+        # defaults, which are models and read None-ness.
+        self._global_settings = render_for_scope(self._settings, NixGlobalSettings, explicit_only=True)
         self._store_defaults = NixStoreDefaults.for_scope(self._settings)
         self._eval_defaults = NixEvalSettings.for_scope(self._settings)
         self._fetch_defaults = NixFetchSettings.for_scope(self._settings)
@@ -370,13 +376,18 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         return (
             self._nix_conf,
             self._load_config,
-            tuple(sorted(self._global_settings.to_worker_settings().items())),
+            tuple(sorted(self._global_settings.items())),
+            # Part of the key, because the features are no longer a setting:
+            # two sessions that differ only in their features are not the same
+            # session.
+            tuple(self._settings.experimental_features or []),
             self._verbosity,
         )
 
     def _init_nix(self) -> None:
         self._provenance = self._runtime.initialize(
-            settings=self._global_settings.to_worker_settings(),
+            settings=self._global_settings,
+            experimental_features=list(self._settings.experimental_features or []),
             load_config=self._load_config,
             verbosity=None if self._verbosity is None else int(self._verbosity),
         )

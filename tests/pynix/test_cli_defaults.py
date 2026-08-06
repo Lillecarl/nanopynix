@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING
 import pytest
 from pynix._settings import (
     DEFAULT_STORE,
-    DEFAULT_SUBSTITUTERS,
     UNSET,
     ConfigFileError,
     PynixDefaults,
@@ -59,7 +58,11 @@ def test_the_built_in_default_applies_when_nothing_else_speaks(
     no_config(tmp_path, monkeypatch)
 
     assert PynixDefaults().store == DEFAULT_STORE
-    assert nix_settings().substituters == list(DEFAULT_SUBSTITUTERS)
+    # `pynix` holds no Nix setting of its own. `nix build` holds none either,
+    # and a value here would be sent to the worker and would replace what the
+    # `nix.conf` of the host says -- which is issue #96.
+    assert nix_settings().substituters is None
+    assert nix_settings().trusted_public_keys is None
 
 
 def test_the_file_beats_the_built_in_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

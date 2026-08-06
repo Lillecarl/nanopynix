@@ -173,8 +173,10 @@ def init_libstore(load_config: bool = True) -> None:
 
     Since libstore has to be initialised before any libstore call anyway, doing
     it here means every store nanopynix can open is constructed with the
-    defaults already in force. ``Session`` applies the same settings again
-    through ``runtime.initialize``; that is additive and harmless.
+    defaults already in force. ``Session`` enables the same features again
+    through ``runtime.initialize``, which calls
+    :func:`enable_experimental_feature` at the same point of its own sequence;
+    that is additive and harmless.
     """
     _init_libstore_raw(load_config=load_config)
     _enable_default_experimental_features()

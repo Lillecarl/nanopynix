@@ -31,7 +31,9 @@ from nanopynix import NixEvalSettings, NixFetchSettings, stores
 from nanopynix.exceptions import EvalError, NixError, SettingNotLiveError, SettingOutOfScopeError
 from nanopynix.namespace import STORE_DIR
 from nanopynix.settings import (
+    DEFAULT_EXPERIMENTAL_FEATURES,
     NixEvaluatorSettings,
+    NixGlobalSettings,
     NixSettings,
     construction_time_keys,
     field_is_supported,
@@ -40,6 +42,7 @@ from nanopynix.settings import (
     list_flake_settings_metadata,
     list_settings_metadata,
     reject_construction_time_keys,
+    render_for_scope,
 )
 from tests.support.git import init_flake_repo
 from tests.support.notes import note
@@ -483,6 +486,127 @@ async def test_the_session_reports_what_it_took_from_the_host_config(
     assert provenance.overridden_from_config == {"max-jobs": "4"}
 
 
+# ── What the host configured, and what a caller says over it ─────────
+#
+# A session sends the globals to `globalConfig` after `loadConfFile`, so every
+# key it sends replaces what the host wrote. It must therefore send only the
+# keys the caller named. Issue #96: `pynix` gave `substituters` a default, the
+# default was not None, and every `pynix build` on a host with a private cache
+# lost that cache with no message.
+
+#: A `nix.conf` for the *worker* to read. The names are not reachable, and
+#: nothing here builds: these tests read the settings back, and never fetch.
+_HOST_NIX_CONF = (
+    "substituters = https://first.example/ https://second.example/\n"
+    "experimental-features = nix-command flakes read-only-local-store\n"
+)
+
+
+def _host_nix_conf(tmp_path: Path, text: str = _HOST_NIX_CONF) -> Path:
+    """Write a `nix.conf` and give back its path.
+
+    It reaches Nix as `NIX_USER_CONF_FILES`, which `loadConfFile` reads after
+    the system file, so the value here wins wherever the suite runs.
+    """
+    path = tmp_path / "nix.conf"
+    path.write_text(text)
+    return path
+
+
+def _host_session(environment: NixTestEnvironment, path: Path, **overrides: Any) -> Any:
+    """One rpc session that reads ``path`` as the configuration of the host.
+
+    **rpc only, and not both engines.** ``initLibStore`` is process-global and
+    reads the configuration once, so ``load_config=True`` in-process would apply
+    this file to every later test of the run. The worker is a fresh process, and
+    that is the isolation this needs. Both engines share
+    ``NixCore.initialize``, which is where the ordering under test lives.
+    """
+    return nanopynix.rpc.Session(
+        store_uri=environment.store_uri,
+        nix_conf=path,
+        load_config=True,
+        **overrides,
+    )
+
+
+def test_a_default_is_never_sent_to_nix() -> None:
+    """The mechanism of #96, with no session.
+
+    ``experimental_features`` is the one field of the five scopes that carries
+    a non-``None`` default, so it is the one that shows the difference.
+    """
+    named_nothing = render_for_scope(NixSettings(), NixGlobalSettings, explicit_only=True)
+    named_one = render_for_scope(NixSettings(max_jobs=4), NixGlobalSettings, explicit_only=True)
+    note(named_nothing=named_nothing, named_one=named_one)
+
+    assert named_nothing == {}
+    assert named_one == {"max-jobs": "4"}
+    # What session construction used to call. Recorded because it is the whole
+    # defect: `for_scope` re-validates, so a default arrives marked as set.
+    assert "experimental-features" in NixGlobalSettings.for_scope(NixSettings()).to_worker_settings()
+
+
+@pytest.mark.anyio
+async def test_the_substituters_of_the_host_reach_the_session(
+    shared_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+) -> None:
+    """Issue #96, from the side a user sees.
+
+    Before this, the session sent the substituters of its own model, that model
+    carried a default, and the two names below were replaced by it.
+    """
+    async with _host_session(shared_nix_environment, _host_nix_conf(tmp_path)) as session:
+        live = await session.settings()
+
+    note(substituters=live["substituters"])
+    assert live["substituters"].split() == ["https://first.example/", "https://second.example/"]
+
+
+@pytest.mark.anyio
+async def test_a_named_substituter_beats_the_host(
+    shared_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+) -> None:
+    """Naming one is an explicit request, and it still wins.
+
+    This is the other half of #96: the file of the host stands until a caller
+    speaks, and a caller that speaks is obeyed.
+    """
+    session = _host_session(
+        shared_nix_environment,
+        _host_nix_conf(tmp_path),
+        settings=NixSettings(substituters=["https://named.example/"]),
+    )
+    async with session:
+        live = await session.settings()
+
+    assert live["substituters"].split() == ["https://named.example/"]
+
+
+@pytest.mark.anyio
+async def test_the_features_of_the_host_survive_beside_ours(
+    shared_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+) -> None:
+    """``enable_experimental_feature`` inserts, and the setting replaces.
+
+    ``read-only-local-store`` is in the file and in no default of nanopynix, so
+    it is what proves the insert. The features must also go on *after*
+    ``init_libstore``: ``loadConfFile`` writes the whole set, so a feature
+    enabled before it is discarded. Move that step of
+    ``NixCore.initialize`` above ``init_libstore`` and this test fails.
+    """
+    async with _host_session(shared_nix_environment, _host_nix_conf(tmp_path)) as session:
+        live = await session.settings()
+
+    features = set(live["experimental-features"].split())
+    note(features=sorted(features))
+    assert "read-only-local-store" in features
+    assert set(DEFAULT_EXPERIMENTAL_FEATURES) <= features
+
+
 # ── Session-scoped globals, on both engines ──────────────────────────
 
 
@@ -500,6 +624,23 @@ def _open_session(environment: NixTestEnvironment, engine: str, **overrides: Any
         load_config=False,
         settings=environment.settings.model_copy(update=overrides),
     )
+
+
+@pytest.mark.parametrize("engine", ["inproc", "rpc"])
+@pytest.mark.anyio
+async def test_both_engines_enable_the_features_without_the_setting(
+    shared_nix_environment: NixTestEnvironment,
+    engine: str,
+) -> None:
+    """The features are no longer a setting, so this is what carries them now.
+
+    Both engines pass them to ``NixCore.initialize``. inproc had no such call at
+    all, and relied on the setting alone, so it is the engine this protects.
+    """
+    async with _open_session(shared_nix_environment, engine) as session:
+        live = await session.settings()
+
+    assert set(DEFAULT_EXPERIMENTAL_FEATURES) <= set(live["experimental-features"].split())
 
 
 @pytest.mark.parametrize("engine", ["inproc", "rpc"])

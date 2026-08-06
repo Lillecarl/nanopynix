@@ -194,10 +194,14 @@ class WorkerServiceHandler(WorkerServiceBase):
 
     def _init_nix(self, message: InitRequest, settings: dict[str, str]) -> None:
         """Run every Nix C++ initialization operation on the Nix thread."""
-        for feature in message.experimental_features:
-            nanopynix_util.enable_experimental_feature(feature)
+        # The features go to `initialize`, which enables them after
+        # `init_libstore`. Enabling them here was a no-op on a host whose
+        # `nix.conf` names `experimental-features`: `loadConfFile` writes the
+        # whole set, so it discarded whatever this loop had inserted, and only
+        # the `experimental-features` setting applied afterwards put them back.
         self._state.provenance = self._state.runtime.initialize(
             settings=settings,
+            experimental_features=message.experimental_features,
             load_config=message.load_config,
             # None means "leave Nix's own default alone", which is what inproc
             # has always done. This used to force NOTICE, so the two engines
