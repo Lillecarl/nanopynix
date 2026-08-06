@@ -7,6 +7,7 @@ from clypi import Command, Positional, arg
 from rich.console import Console
 
 from nanopynix._typechecking import BEARTYPING
+from pynix._settings import store_option
 from pynix._util import print_json, store_session
 
 if TYPE_CHECKING or BEARTYPING:
@@ -15,14 +16,12 @@ if TYPE_CHECKING or BEARTYPING:
 logger = structlog.get_logger(__name__)
 console = Console()
 
-_DEFAULT_STORE = "auto"
-
 
 class PathInfo(Command):
     """Show information about a store path"""
 
     path: Positional[str] = arg(help="Store path to query (e.g. '/nix/store/hash-name').")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:

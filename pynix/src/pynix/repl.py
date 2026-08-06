@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
 import anyio
-from clypi import Command, arg
+from clypi import Command
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.formatted_text import ANSI, StyleAndTextTuples
@@ -32,6 +32,7 @@ from nanopynix.exceptions import EvaluatorAbandonedError, NixError
 from nanopynix.verbosity import normalize_log_level
 from pynix._completion import completion_prefix_at
 from pynix._nix_syntax import NIX_GRAMMAR_PATH, NIX_LANGUAGE, parse_nix
+from pynix._settings import store_option
 from pynix._util import forward_nix_logs
 from pynix._value_render import format_json
 from pynix.target import (
@@ -50,7 +51,6 @@ if TYPE_CHECKING or BEARTYPING:
 
     from nanopynix import AsyncReplSession
 
-_DEFAULT_STORE = "auto"
 _PROMPT = "pynix> "
 _COMMANDS = {
     ":a": "Add an attribute set to scope",
@@ -661,7 +661,7 @@ def _derivation_name_part(name: str) -> str:
 class Repl(Command):
     """Open an interactive Nix evaluation session."""
 
-    store: str = arg(_DEFAULT_STORE, help="Store URI to evaluate with.")
+    store: str = store_option("Store URI to evaluate with.")
     file: Path | None = file_option()
     attr: str | None = attr_option()
     flake: str | None = flake_option()

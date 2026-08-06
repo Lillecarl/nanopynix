@@ -5,16 +5,15 @@ from typing import override
 
 from clypi import Command, Positional, arg
 
+from pynix._settings import store_option
 from pynix._util import store_session
-
-_DEFAULT_STORE = "auto"
 
 
 class Log(Command):
     """Show the build log for a store path"""
 
     path: Positional[str] = arg(help="Store path whose build log should be printed.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:

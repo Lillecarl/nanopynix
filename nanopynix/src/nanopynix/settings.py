@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Self, cast
+from typing import TYPE_CHECKING, Any, Literal, Self, cast, get_args, get_origin
 
 import yaml
 from nanopynix_bindings import (
@@ -15,7 +16,7 @@ from nanopynix_bindings import (
     flake as nanopynix_flake,
     util as nanopynix_util,
 )
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
@@ -266,6 +267,61 @@ class SettingsDrift(BaseModel):
         return not self.missing and not self.extra
 
 
+#: How a field holds more than one value, or ``None`` for a scalar field.
+type ContainerKind = Literal["list", "dict"]
+
+
+def _container_kind(annotation: Any) -> ContainerKind | None:
+    """Whether ``annotation`` is a list or a dict field, looking through ``| None``.
+
+    Every field of every scope below is declared ``T | None``, so the union
+    members are searched beside the annotation itself.
+    """
+    for candidate in (annotation, *get_args(annotation)):
+        origin = get_origin(candidate)
+        if origin is list:
+            return "list"
+        if origin is dict:
+            return "dict"
+    return None
+
+
+@functools.cache
+def _container_fields(model: type[BaseModel]) -> Mapping[str, ContainerKind]:
+    """The multi-valued fields of ``model``, under both spellings that reach it.
+
+    A caller names a field either by its Python name or by its ``nix.conf``
+    key, because ``populate_by_name`` accepts both, so both are keys here.
+    """
+    kinds: dict[str, ContainerKind] = {}
+    for name, field in model.model_fields.items():
+        kind = _container_kind(field.annotation)
+        if kind is None:
+            continue
+        kinds[name] = kind
+        kinds[field_key(name, field)] = kind
+    return kinds
+
+
+def _parse_nix_conf_value(text: str, kind: ContainerKind) -> list[str] | dict[str, str]:
+    """Read one ``nix.conf`` value back into the container that wrote it.
+
+    The exact inverse of :func:`_render_value`, which joins a list with spaces
+    and a dict with spaces over ``key=value`` pairs. Nix separates the elements
+    of such a setting with whitespace and nothing else.
+    """
+    items = text.split()
+    if kind == "list":
+        return items
+    parsed: dict[str, str] = {}
+    for item in items:
+        key, separator, value = item.partition("=")
+        if separator == "":
+            raise ValueError(f"expected key=value pairs separated by spaces, got {item!r}")
+        parsed[key] = value
+    return parsed
+
+
 class NixConfigModel(BaseModel):
     """Shared base for Nix settings models: renders set fields as nix.conf key/value pairs."""
 
@@ -274,6 +330,37 @@ class NixConfigModel(BaseModel):
         populate_by_name=True,
         extra="forbid",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_the_nix_conf_spelling(cls, data: Any) -> Any:
+        """Read a multi-valued setting written the way Nix writes it.
+
+        ``substituters = https://a/ https://b/`` is how a ``nix.conf`` states a
+        list, and how :func:`_render_value` writes one. Without this the model
+        could write a value that it could not read back, so
+        :meth:`NixGlobalSettings.from_file` refused every real ``nix.conf``:
+        almost all of them set ``substituters``, and a ``list[str]`` field
+        answered "Input should be a valid list" to the string that
+        ``_parse_nix_conf`` gives it.
+
+        The same string arrives from an environment variable, where the only
+        accepted spelling used to be JSON. ``PYNIX_NIX_SUBSTITUTERS`` now takes
+        what a user would put in a ``nix.conf``.
+
+        A value that is already a list or a dict passes through untouched, so a
+        Python caller and a JSON file are unaffected.
+        """
+        if not isinstance(data, dict):
+            return data
+        typed_data = cast("dict[str, Any]", data)
+        kinds = _container_fields(cls)
+        converted = {
+            key: _parse_nix_conf_value(value, kinds[key])
+            for key, value in typed_data.items()
+            if key in kinds and isinstance(value, str)
+        }
+        return {**typed_data, **converted} if converted else typed_data
 
     def _iter_set(self, *, explicit_only: bool = False) -> Iterator[tuple[str, str]]:
         explicit = self.model_fields_set

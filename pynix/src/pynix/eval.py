@@ -11,6 +11,7 @@ from typing import override
 import structlog
 from clypi import Command, arg
 
+from pynix._settings import store_option
 from pynix._util import error_exit, eval_session, print_json, report_and_exit
 from pynix.target import (
     EvaluationTarget,
@@ -23,8 +24,6 @@ from pynix.target import (
 
 logger = structlog.get_logger(__name__)
 
-_DEFAULT_STORE = "auto"
-
 
 class Eval(Command):
     """Evaluate a Nix expression and print the result as JSON"""
@@ -33,7 +32,7 @@ class Eval(Command):
     file: Path | None = file_option()
     attr: str | None = attr_option()
     flake: str | None = flake_option()
-    store: str = arg(_DEFAULT_STORE, help="Store URI to evaluate with.")
+    store: str = store_option("Store URI to evaluate with.")
 
     @override
     async def run(self) -> None:

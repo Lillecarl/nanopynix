@@ -15,6 +15,7 @@ from rapidfuzz import fuzz, process
 from rich.console import Console
 
 from pynix._options import OptionRecord, fetch_option_doc_list
+from pynix._settings import store_option
 from pynix._util import error_console, eval_session, print_json, report_and_exit
 from pynix.target import (
     EvaluationTarget,
@@ -28,8 +29,6 @@ from pynix.target import (
 
 logger = structlog.get_logger(__name__)
 console = Console()
-
-_DEFAULT_STORE = "auto"
 
 
 def _cache_dir() -> Path:
@@ -73,7 +72,7 @@ class Osearch(Command):
     update_index: bool = arg(False, help="Re-evaluate and rebuild the cached index instead of using it.")
     limit: int = arg(20, help="Maximum number of results to print.")
     json_output: bool = arg(False, short="j", help="Print results as JSON instead of a human-readable list.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to evaluate with.")
+    store: str = store_option("Store URI to evaluate with.")
 
     @override
     async def run(self) -> None:

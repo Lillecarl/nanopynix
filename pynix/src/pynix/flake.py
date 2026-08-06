@@ -14,6 +14,7 @@ from rich.tree import Tree
 
 import nanopynix
 from nanopynix._typechecking import BEARTYPING
+from pynix._settings import store_option
 from pynix._util import eval_session, print_json
 
 if TYPE_CHECKING or BEARTYPING:
@@ -22,7 +23,6 @@ if TYPE_CHECKING or BEARTYPING:
 logger = structlog.get_logger(__name__)
 console = Console()
 
-_DEFAULT_STORE = "auto"
 _MAX_TREE_NODES = 200
 _MAX_TREE_DEPTH = 6
 _MAX_LIST_PREVIEW_ITEMS = 10
@@ -42,7 +42,7 @@ class Show(Command):
         short="A",
         help="Dot-separated attribute path within the flake outputs to start from.",
     )
-    store: str = arg(_DEFAULT_STORE, help="Store URI to evaluate with.")
+    store: str = store_option("Store URI to evaluate with.")
 
     @override
     async def run(self) -> None:
@@ -65,7 +65,7 @@ class Metadata(Command):
     """Show locked flake metadata"""
 
     flake_ref: Positional[str] = arg(help="Flake reference (e.g. '.' or 'nixpkgs').")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to evaluate with.")
+    store: str = store_option("Store URI to evaluate with.")
 
     @override
     async def run(self) -> None:
@@ -76,7 +76,7 @@ class Info(Command):
     """Alias for flake metadata"""
 
     flake_ref: Positional[str] = arg(help="Flake reference (e.g. '.' or 'nixpkgs').")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to evaluate with.")
+    store: str = store_option("Store URI to evaluate with.")
 
     @override
     async def run(self) -> None:
