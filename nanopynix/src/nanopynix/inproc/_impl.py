@@ -25,6 +25,7 @@ from nanopynix._core._nix_core import build_mode_value
 from nanopynix._core._nix_executor import NIX_EVALUATOR_STACK_SIZE, NixThreadExecutor
 from nanopynix._core._objects import CoreEvalState, CoreLockedFlake, CoreRuntime, CoreStore, CoreValue
 from nanopynix._core._primops import register_import_path_primops, to_primop_specs
+from nanopynix._fork import ForkGuard
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import (
     DEFAULT_CA_METHOD,
@@ -36,6 +37,7 @@ from nanopynix._wire import (
 from nanopynix.exceptions import (
     EvalSessionClosedError,
     EvaluatorAbandonedError,
+    ForkedSessionError,
     LockedFlakeReleasedError,
     SessionClosedError,
     StoreClosedError,
@@ -129,9 +131,36 @@ class _InprocProcessGuard:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._active_session: Session | None = None
+        #: Which process put `_active_session` here. A fork inherits both.
+        self._active_pid: int | None = None
         self._initialization_signature: tuple[object, ...] | None = None
 
     def acquire(self, session: Session, signature: tuple[object, ...]) -> None:
+        # Read before the lock, and answered before the lock. A fork keeps only
+        # the calling thread, so `self._lock` in a child may be held by a
+        # thread that no longer exists, and waiting for it never returns.
+        #
+        # A pid comparison, and not the at-fork hook that guards the executors:
+        # this object is process state rather than one session's state, so the
+        # question is which process wrote it, and `os.getpid()` answers exactly
+        # that.
+        owner = self._active_pid
+        if self._active_session is not None and owner is not None and owner != os.getpid():
+            # **The child does not get a session of its own, and this is
+            # deliberate.** Issue #64 asks for `_active_session` to be cleared
+            # here, so that a child may open one. A child whose parent held a
+            # live session inherits an initialised libexpr and a Boehm thread
+            # table that lists threads that no longer exist, so a "fresh"
+            # session over that is a second corruption and not a recovery.
+            #
+            # A parent that never opened a session leaves this guard empty, so
+            # nothing here reaches the supported pattern: fork first, then open
+            # a session in the child.
+            raise ForkedSessionError(
+                f"this process inherited an open nanopynix.inproc.Session from process {owner}. "
+                "Nix is already initialized in this address space by a process that is not this one, "
+                "so this process cannot open a session. Fork first, then open."
+            )
         with self._lock:
             active = self._active_session
             if active is not None and active is not session:
@@ -142,6 +171,7 @@ class _InprocProcessGuard:
                     "Nix is already initialized in this process with different nanopynix.inproc settings"
                 )
             self._active_session = session
+            self._active_pid = os.getpid()
 
     def mark_initialized(self, signature: tuple[object, ...]) -> None:
         with self._lock:
@@ -152,6 +182,7 @@ class _InprocProcessGuard:
         with self._lock:
             if self._active_session is session:
                 self._active_session = None
+                self._active_pid = None
 
 
 _process_guard = _InprocProcessGuard()
@@ -291,6 +322,10 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         # separate rather than encoded into the same attribute.
         self._nix_conf_env_saved = False
         self._nix_conf_env_before: str | None = None
+        # `close` reads this. Every *operation* is refused one level down, by
+        # the executor's own guard, because `EvalSession.run` reaches its
+        # executor without passing through this class at all.
+        self._fork = ForkGuard("the inproc Session")
 
     async def __aenter__(self) -> Session:
         await self.open()
@@ -401,6 +436,18 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         force: bool = False,
     ) -> None:
         if not self._opened:
+            return
+        if self._fork.forked:
+            # A fork inherits `_opened`, every evaluator, every store and the
+            # process guard, and it owns none of them. Closing them here would
+            # unregister Boehm threads that belong to the parent and release a
+            # guard that still holds the parent's session. It also cannot
+            # succeed: the executor's threads did not survive the fork, so
+            # `drain` and `shutdown` would wait for work nothing can finish.
+            #
+            # Silent, rather than raised. `__aexit__` calls this, so raising
+            # would replace whatever exception sent the child down that path.
+            # Every *operation* is still refused, by the executor's guard.
             return
         executor = self._executor
         if executor is None:

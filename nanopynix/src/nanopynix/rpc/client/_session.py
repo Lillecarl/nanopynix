@@ -65,6 +65,7 @@ from nanopynix_proto.nix.eval import (
 
 from nanopynix._core._codec import python_to_scalar, scalar_to_python
 from nanopynix._core._nix_core import build_mode_value
+from nanopynix._fork import ForkGuard
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import HandleKind
 from nanopynix.exceptions import (
@@ -207,12 +208,18 @@ class _Lease:
 class _DeferredReleases:
     """Thread-safe, generation-scoped finalizer handoff for one eval session."""
 
-    __slots__ = ("_active", "_generation", "_queue")
+    __slots__ = ("_active", "_fork", "_generation", "_queue")
 
     def __init__(self) -> None:
         self._active = True
         self._generation = object()
         self._queue: queue.SimpleQueue[_LeaseRef] = queue.SimpleQueue()
+        # **Every handle in this queue belongs to the parent's worker.**
+        # `weakref.finalize` has no process check of its own, unlike
+        # `multiprocessing.util.Finalize`, so a collection in a forked child
+        # queues a release here for a value the parent still holds. Sending it
+        # would free that value under the parent.
+        self._fork = ForkGuard("this evaluator's deferred releases")
 
     @property
     def generation(self) -> object:
@@ -222,10 +229,14 @@ class _DeferredReleases:
         return _Lease(_LeaseRef(kind, handle, self._generation))
 
     def defer(self, ref: _LeaseRef) -> None:
+        if self._fork.forked:
+            return
         if self._active and ref.generation is self._generation:
             self._queue.put(ref)
 
     def drain(self) -> list[_LeaseRef]:
+        if self._fork.forked:
+            return []
         refs: list[_LeaseRef] = []
         while True:
             try:

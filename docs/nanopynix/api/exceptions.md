@@ -15,6 +15,12 @@ Both engines raise the same class for the same situation — inproc used to
 have its own `Inproc*` names for three of these, which no `except` clause
 written against the rpc engine could catch.
 
+`ForkedSessionError` is in that group too, and it is a sibling of
+`SessionClosedError` rather than a subclass of it. `except SessionClosedError`
+usually means "I closed it, and that is fine"; a fork is not fine, and that
+clause must not swallow it. See {doc}`process` for what a fork does to each
+engine.
+
 `EngineError` is the third family: the machinery that runs Nix failed, and
 Nix reported nothing. Only rpc produces one, and `WorkerDiedError` is the
 only member — a separate worker process is what makes "it is gone, and
