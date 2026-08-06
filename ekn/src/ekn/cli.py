@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import sys
 from pathlib import Path as _Path
-from typing import TYPE_CHECKING, Literal, NoReturn, cast
+from typing import TYPE_CHECKING, Literal, NoReturn, cast, override
 
 import anyio
 import anyio.to_thread
@@ -137,7 +138,33 @@ async def _evaluate_gitops(
         _report_validation_error("GitOps config", exc)
 
 
-class Eval(Command):
+class EknCommand(Command):
+    """The base of every ekn command, which owns which stream carries what.
+
+    **stdout carries the answer of a command, and nothing else.** A usage
+    message that lands there is read as data by whatever reads the command.
+    ``clypi.Command.print_help`` writes to stdout whether the caller asked for
+    help or mistyped the command line, and ``ClypiConfig`` names no stream, so
+    this overrides the second case. ``--help`` keeps stdout, because the caller
+    asked for it.
+
+    **A copy of ``pynix._settings.PynixCommand``, and not an import of it.**
+    ekn cannot import pynix: ``pynix`` imports ``ekn.cli`` to mount it as a
+    subcommand, and it tolerates the import failing, so ekn runs on its own.
+    The ``check-ekn-sandbox`` gate runs it that way. An import here would turn
+    an optional dependency into a cycle.
+    """
+
+    @classmethod
+    @override
+    def print_help(cls, exception: Exception | None = None) -> NoReturn:
+        if exception is None:
+            super().print_help(exception)
+        with contextlib.redirect_stdout(sys.stderr):
+            super().print_help(exception)
+
+
+class Eval(EknCommand):
     """Evaluate Nix and dump JSON."""
 
     file: _Path | None = arg(None, short="f", inherited=True)
@@ -174,7 +201,7 @@ class Eval(Command):
         sys.stdout.write("\n")
 
 
-class Render(Command):
+class Render(EknCommand):
     """Render Kubernetes manifests as YAML on stdout."""
 
     file: _Path | None = arg(None, short="f", inherited=True)
@@ -195,7 +222,7 @@ class Render(Command):
             sys.stdout.write(content)
 
 
-class Diff(Command):
+class Diff(EknCommand):
     """Diff GitOps-routed manifests against the deploy branch."""
 
     file: _Path | None = arg(None, short="f", inherited=True)
@@ -298,7 +325,7 @@ async def _finalize_commit(  # noqa: PLR0913 -- tracked complexity/arg-count deb
         await _git_push(remote, deploy_branch, source_branch)
 
 
-class Commit(Command):
+class Commit(EknCommand):
     """Render manifests and write them to the GitOps deploy (and paired
     source) branch."""
 
@@ -394,7 +421,7 @@ async def _push_ekn_cache(file: _Path | None, flake: str | None, attr: str | Non
     _log.info(f"pushed {cache_package_out} to {cache_to}")
 
 
-class Validate(Command):
+class Validate(EknCommand):
     """Boot real etcd+kube-apiserver, apply manifests, and run kubeconform."""
 
     file: _Path | None = arg(None, short="f", inherited=True)
@@ -558,7 +585,7 @@ class Deploy(Commit):
         await try_jj_status(".")
 
 
-class Rollback(Command):
+class Rollback(EknCommand):
     """Roll back the GitOps deploy (and paired source) branch to an older
     commit -- forward-only, replays the old tree as a *new* commit, never
     resets or force-pushes anything.
@@ -640,7 +667,7 @@ class Rollback(Command):
         await try_jj_status(".")
 
 
-class KubeApply(Command):
+class KubeApply(EknCommand):
     """Apply Kubernetes objects directly against the current kubeconfig
     context: server-side apply in barrier order, with optional pruning.
 
@@ -711,7 +738,7 @@ class KubeApply(Command):
             _report_server_error("apply", exc)
 
 
-class ClusterDiff(Command):
+class ClusterDiff(EknCommand):
     """Diff Kubernetes objects against the live cluster.
 
     Unlike `ekn diff` (which compares against the previous GitOps commit),
@@ -754,7 +781,7 @@ class ClusterDiff(Command):
             _log.info("no differences")
 
 
-class PushCache(Command):
+class PushCache(EknCommand):
     """Build a Nix attribute and copy its realised closure to a remote store.
 
     Manual/ad-hoc escape hatch (or for CI) for pushing an arbitrary
@@ -791,7 +818,7 @@ class PushCache(Command):
         )
 
 
-class SplitManifest(Command):
+class SplitManifest(EknCommand):
     """Split a JSON manifest list into a namespace/kind/name.yaml directory tree.
 
     Internal: used by easykubenix's `manifestYAMLDir` derivation so the whole
@@ -823,7 +850,7 @@ _YAML_STREAM_PARSERS: dict[str, Callable[[str], list[JsonValue]]] = {
 }
 
 
-class YamlToJson(Command):
+class YamlToJson(EknCommand):
     """Parse a YAML document stream on stdin and dump it as a JSON array on stdout.
 
     Internal: the IFD-derivation fallback importyaml.nix shells out to when
@@ -854,7 +881,7 @@ class YamlToJson(Command):
         sys.stdout.buffer.write(_json_value_list_adapter.dump_json(docs))
 
 
-class JsonToYaml(Command):
+class JsonToYaml(EknCommand):
     """Parse a JSON value on stdin and dump it as YAML on stdout.
 
     Internal: the reverse of `_yamlToJson`, reusing nanopynix's `to_yaml`
@@ -877,7 +904,7 @@ class JsonToYaml(Command):
         sys.stdout.write(to_yaml(value))
 
 
-class Ekn(Command):
+class Ekn(EknCommand):
     """easykubenix CLI — evaluate Nix and manage GitOps release branches."""
 
     subcommand: (

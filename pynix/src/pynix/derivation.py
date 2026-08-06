@@ -9,9 +9,8 @@ from pathlib import Path
 from typing import Any, override
 
 import structlog
-from clypi import Command
 
-from pynix._settings import ConfiguredCommand, store_option
+from pynix._settings import ConfiguredCommand, PynixCommand, store_option
 from pynix._util import print_json, report_and_exit, store_session
 from pynix.target import (
     EvaluationTarget,
@@ -113,7 +112,7 @@ class Show(ConfiguredCommand):
         return result
 
 
-class Derivation(Command):
+class Derivation(PynixCommand):
     """Inspect and manipulate Nix derivations"""
 
     subcommand: Show

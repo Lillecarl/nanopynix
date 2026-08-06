@@ -14,15 +14,11 @@ tree and states the rule instead.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pytest
+from clypi import Command
 from pynix._settings import UNSET, ConfiguredCommand, _configured_fields
 
 from pynix import Pynix
-
-if TYPE_CHECKING:
-    from clypi import Command
 
 
 def _command_tree(cmd: type[Command]) -> list[type[Command]]:
@@ -76,3 +72,27 @@ def test_the_command_tree_is_not_empty() -> None:
 
     assert len(tree) > 20
     assert any(_configuration_backed_options(cmd) for cmd in tree)
+
+
+def test_every_command_writes_a_usage_failure_to_stderr() -> None:
+    """The whole command tree obeys the stream rule, and not a part of it.
+
+    ``clypi.Command.print_help`` writes to stdout whether the caller asked for
+    help or mistyped the command line, and ``ClypiConfig`` names no stream, so
+    a pynix command overrides the second case. A command that keeps clypi's
+    own method puts its usage table in the stdout of whatever reads the
+    command, and nothing reports that.
+
+    Measured before the override existed: ``pynix derivation show <path>`` put
+    2165 bytes on stdout and left stderr empty.
+
+    **The subject is the method, and not a shared base class.** ``pynix`` and
+    ``ekn`` each carry their own base, because ``pynix`` imports ``ekn.cli``
+    and tolerates that import failing, so ekn must not import pynix back. The
+    rule that matters is the behaviour they have in common.
+    """
+    offenders = sorted(
+        cmd.__name__ for cmd in _command_tree(Pynix) if cmd.print_help.__func__ is Command.print_help.__func__
+    )
+
+    assert offenders == [], "these commands keep clypi's print_help, so a usage failure goes to stdout"

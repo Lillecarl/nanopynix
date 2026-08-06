@@ -5,11 +5,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
 import structlog
-from clypi import Command, Positional, arg
+from clypi import Positional, arg
 
 import nanopynix
 from nanopynix._typechecking import BEARTYPING
-from pynix._settings import ConfiguredCommand, store_option
+from pynix._settings import ConfiguredCommand, PynixCommand, store_option
 from pynix._util import print_json, store_session
 
 if TYPE_CHECKING or BEARTYPING:
@@ -67,7 +67,7 @@ class PrintAlive(ConfiguredCommand):
             print_json({"paths": list(result.paths)})
 
 
-class Gc(Command):
+class Gc(PynixCommand):
     """Manage Nix store garbage collection"""
 
     subcommand: PrintRoots | PrintDead | PrintAlive
@@ -469,7 +469,7 @@ class Verify(ConfiguredCommand):
             print_json({"errors": errors})
 
 
-class Store(Command):
+class Store(PynixCommand):
     """Manage the Nix store"""
 
     subcommand: (

@@ -8,6 +8,7 @@ import rich.traceback
 from clypi import Command
 
 from nanopynix import set_manager_title
+from pynix._settings import PynixCommand
 from pynix._util import configure_logging
 from pynix.build import Build
 from pynix.config import Config
@@ -85,7 +86,7 @@ else:
     _PynixSubcommand = functools.reduce(operator.or_, _subcommand_types)
 
 
-class Pynix(Command):
+class Pynix(PynixCommand):
     """pynix — nanopynix CLI"""
 
     subcommand: _PynixSubcommand

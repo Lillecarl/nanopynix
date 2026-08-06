@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from typing import override
 
-from clypi import Command
-
 from pynix._lsp._handlers import create_server
+from pynix._settings import PynixCommand
 
 
-class Lsp(Command):
+class Lsp(PynixCommand):
     """Run pynix as a Nix language server (stdio transport).
 
     Files opt in to real hover/completion by naming a bound identifier and a
