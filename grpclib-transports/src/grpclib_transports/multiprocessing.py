@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import multiprocessing as mp
 import os
+import sys
 from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -44,6 +45,53 @@ def get_forkserver_context(
     if preload:
         context.set_forkserver_preload(list(preload))
     return context
+
+
+@contextlib.contextmanager
+def main_module_not_reexecuted() -> Any:
+    """Keep the child from running the program's ``__main__`` again.
+
+    Wrap :meth:`Process.start` with this. ``multiprocessing`` builds the data
+    for the child inside ``start()``, and ``spawn.get_preparation_data`` puts
+    ``sys.modules["__main__"].__file__`` in it. The child then runs that file
+    through ``runpy.run_path`` before it unpickles anything. With no
+    ``__file__``, the data names no path and the child skips the step.
+
+    **The child runs the whole top level of whatever program started it, and
+    that program is not always a script that expects it.** Measured with
+    ``ansible-playbook``, where ``__main__`` imports ``ansible.cli``: that
+    import builds a ``Display``, which reads ``sys.stdout``, which is ``None``
+    in the child because Ansible gives the forkserver closed standard file
+    descriptors. ``ansible/cli/__init__.py`` catches the failure and calls
+    ``sys.exit(5)``. A ``SystemExit`` is not an ``Exception``, so the
+    ``except Exception`` of the forkserver does not catch it, and the child
+    dies through ``os._exit`` with status 1 and prints nothing. The caller
+    sees a closed pipe. See nanopynix issue #97.
+
+    **The rule this puts on a caller: the worker payload lives in a module the
+    child can import, and never in** ``__main__``. The forkserver pickles the
+    service factory and the teardown hook by name, and the child resolves each
+    name by import. Re-running ``__main__`` is how ``multiprocessing`` would
+    otherwise supply a name that only the script defines, and this gives that
+    up on purpose. A factory defined in the calling script then fails in the
+    child with ``AttributeError``, which is what ``multiprocessing_example.py``
+    did until it moved its factory into ``services.py``.
+
+    The rule costs nanopynix nothing, because everything it sends is already
+    module-level: the pipe end, the service factory, the tuning, the
+    concurrency limit, the codec and the teardown hook. ``parent_services``,
+    which is where a caller's own objects live, never leaves the parent.
+    """
+    main_module = sys.modules.get("__main__")
+    main_path = getattr(main_module, "__file__", None)
+    if main_module is None or main_path is None:
+        yield
+        return
+    del main_module.__file__
+    try:
+        yield
+    finally:
+        main_module.__file__ = main_path
 
 
 @dataclass(frozen=True)
@@ -260,7 +308,8 @@ async def multiprocessing_worker(
         target=_run_multiprocessing_worker,
         args=(pair.child, service_factory, tuning, max_concurrency, status_details_codec, child_teardown),
     )
-    proc.start()
+    with main_module_not_reexecuted():
+        proc.start()
     if on_process_start is not None:
         on_process_start(proc)
     pair.close_child_connections()
@@ -304,7 +353,8 @@ async def multiprocessing_worker_with_backchannel(
         target=_run_multiprocessing_worker_with_backchannel,
         args=(pair.child, service_factory, tuning, max_concurrency, status_details_codec, child_teardown),
     )
-    proc.start()
+    with main_module_not_reexecuted():
+        proc.start()
     if on_process_start is not None:
         on_process_start(proc)
     pair.close_child_connections()

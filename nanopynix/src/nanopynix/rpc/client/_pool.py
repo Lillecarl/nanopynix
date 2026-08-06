@@ -478,13 +478,29 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
             raise await self._worker_death_error(exc) from exc
 
     async def _worker_death_error(self, disconnect: WorkerDiedError) -> WorkerDiedError:
-        """Name the signal that broke this call, or keep what the transport said.
+        """Name how this worker went away, or keep what the transport said.
 
         The upgrade is the whole point: an abort, a segmentation fault and an
         OOM kill are one closed pipe at this boundary, and the exit status is
         the only thing that tells them apart.
+
+        A **positive** status is an exit and not a crash, so it stays a plain
+        :class:`WorkerDiedError`. It still names the status, which is what
+        that class already promises. Issue #97 is what the silence costs: a
+        child that died before it answered ``Init`` reported only "Connection
+        lost", and the status of 1 that would have pointed at the child's own
+        ``SystemExit`` reached nobody. The transport cannot see it, because
+        the forkserver reports the status to this process alone.
         """
-        return self._note_worker_death(await self._reap_worker()) or disconnect
+        status = await self._reap_worker()
+        signaled = self._note_worker_death(status)
+        if signaled is not None:
+            return signaled
+        if status is not None and status > 0 and not self._stopping_the_worker:
+            return WorkerDiedError(
+                f"rpc worker {self._worker_pid} exited with status {status}; the transport reported: {disconnect}"
+            )
+        return disconnect
 
     # ── log access ─────────────────────────────────────────────────
 
