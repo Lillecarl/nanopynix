@@ -252,6 +252,19 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         shields its own teardown -- so every failure here means "shutdown was
         not clean", never "shutdown did not happen".
         """
+        if self._manager.forked:
+            # A fork owns none of this. Every evaluator and every store here
+            # is a handle in the *parent's* worker, and closing one sends an
+            # RPC that frees what the parent still uses. `WorkerClient.close`
+            # says the rest, including why the worker process itself must not
+            # be touched from here.
+            #
+            # Silent, rather than raised. `__aexit__` calls this, so raising
+            # would replace whatever exception sent the child down this path.
+            # Every *operation* is still refused, by the same guard.
+            await self._manager.close()
+            return
+
         errors: list[BaseException] = []
 
         async def close_resource(operation: Awaitable[None]) -> None:

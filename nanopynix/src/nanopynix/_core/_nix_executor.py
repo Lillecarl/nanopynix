@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 import anyio
 from nanopynix_bindings import signals as nanopynix_signals
 
+from nanopynix._fork import ForkGuard
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import EvaluatorAbandonedError
 
@@ -131,6 +132,13 @@ class NixThreadExecutor:
             # only the single-threaded evaluators ask for a stack at all.
             raise ValueError("stack_size is only supported with max_workers=1")
         self._stack_size = stack_size
+        # **Checked before `self._lock`, everywhere, and never under it.** The
+        # lock is itself a fork hazard: `fork()` keeps only the calling thread,
+        # so a lock another thread held at that moment stays held for ever, and
+        # a child that waits for it never reaches the check. `_require_usable`
+        # is therefore the wrong place for this one, although it is where the
+        # sibling `_poisoned` check lives.
+        self._fork = ForkGuard(f"the Nix executor {thread_name_prefix}")
         self._worker_spawned = False
         self._thread_initializer = thread_initializer
         self._thread_finalizer = thread_finalizer
@@ -216,6 +224,7 @@ class NixThreadExecutor:
         set one, so arming a scope here would only cost a thread-local write
         that nothing can ever read.
         """
+        self._fork.check()
         with self._lock:
             self._require_usable(allow_when_closing=False)
             self._ensure_worker_spawned()
@@ -235,6 +244,7 @@ class NixThreadExecutor:
         *,
         allow_when_closing: bool,
     ) -> _T:
+        self._fork.check()
         token = nanopynix_signals.InterruptToken()
         with self._lock:
             self._require_usable(allow_when_closing=allow_when_closing)
@@ -340,7 +350,16 @@ class NixThreadExecutor:
             self._futures.discard(future)
 
     def begin_close(self, *, force: bool = False) -> None:
-        """Reject new work and optionally cancel work that has not started."""
+        """Reject new work and optionally cancel work that has not started.
+
+        A no-op in a fork of the process that built this executor. The five
+        teardown methods below say the same thing, for one reason: there is
+        nothing in this process to tear down. The threads belong to the
+        parent, and reaching for ``self._lock`` to find that out is what
+        deadlocks -- see the note on ``self._fork`` in ``__init__``.
+        """
+        if self._fork.forked:
+            return
         with self._lock:
             self._accepting = False
             futures = tuple(self._futures)
@@ -352,13 +371,18 @@ class NixThreadExecutor:
         """Resume accepting work after a timed-out non-destructive close.
 
         A poisoned executor never resumes. Its thread is still inside the
-        operation that would not stop.
+        operation that would not stop. A forked one never resumes either --
+        see :meth:`begin_close`.
         """
+        if self._fork.forked:
+            return
         with self._lock:
             if not self._closed and self._poisoned is None:
                 self._accepting = True
 
     def has_pending_work(self) -> bool:
+        if self._fork.forked:
+            return False
         with self._lock:
             return any(not future.done() for future in self._futures)
 
@@ -368,8 +392,10 @@ class NixThreadExecutor:
         Returns at once on a poisoned executor. The outstanding work there is
         the operation that refused to stop, so waiting for it is exactly the
         hang this change removes -- and with ``timeout=None`` it would never
-        end.
+        end. A forked executor returns at once for the same reason.
         """
+        if self._fork.forked:
+            return
         with self._lock:
             if self._poisoned is not None:
                 return
@@ -392,7 +418,13 @@ class NixThreadExecutor:
         raise, and without this guard that exception would propagate out of
         shutdown() before self._pool.shutdown() ever ran, leaking the
         underlying OS thread as still-registered-but-never-torn-down.
+
+        A no-op in a fork. ``ThreadPoolExecutor.shutdown(wait=True)`` there
+        joins threads that no longer exist, which is the deadlock this whole
+        guard exists to stop.
         """
+        if self._fork.forked:
+            return
         with self._lock:
             if self._shutdown_started:
                 return

@@ -37,6 +37,7 @@ from nanopynix_proto.nix.worker import (
     WorkerServiceStub,
 )
 
+from nanopynix._fork import ForkGuard
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import DEFAULT_STORE_URI, WORKER_INIT_STATUS_OK
 from nanopynix.exceptions import (
@@ -221,6 +222,9 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         self._log_task: asyncio.Task[None] | None = None
         self._stack: contextlib.AsyncExitStack | None = None
         self._next_request_id = 1
+        # Built here rather than in `open`, so that a pool forked between
+        # construction and its first use is refused too.
+        self._fork = ForkGuard("the rpc Session")
 
     # ── lifecycle ──────────────────────────────────────────────────
 
@@ -364,6 +368,9 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         reports it there, because this runs from that method's ``finally``
         and an exception here would replace whatever sent it.
         """
+        if self._fork.forked:
+            self._abandon_the_parents_worker()
+            return
         # Before anything asks the worker to stop, so this process's own
         # SIGTERM can never be read back as the crash. Non-blocking: a live
         # worker gives None and costs nothing.
@@ -415,6 +422,38 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
                 # same thing in its own `finally`.
                 self._log_bus.emit(None)
 
+    def _abandon_the_parents_worker(self) -> None:
+        """Drop every handle to a worker this process does not own.
+
+        **The worker belongs to the parent, and every ordinary teardown step
+        reaches it.** The exit stack ends in ``_stop_process``, which calls
+        ``proc.join`` and then ``proc.terminate()``; ``_stop_worker_process``
+        calls ``proc.is_alive()`` and then ``proc.terminate()``. Neither
+        ``terminate()`` nor ``kill()`` checks which process is asking, so the
+        parent's worker would die of a SIGTERM the parent never sent, and the
+        parent would read that as a crash.
+
+        ``join`` and ``is_alive`` each assert ``self._parent_pid ==
+        os.getpid()``, so on a stock interpreter the child gets
+        ``AssertionError: can only test a child process`` from inside a
+        shielded teardown instead. That is not a guard: ``python -O`` removes
+        both asserts, and then the SIGTERM does arrive.
+
+        The pipe file descriptors stay open until this process ends. Closing
+        them is safe -- they are this process's own copies -- but the channel
+        that owns them is an asyncio transport on a loop that did not survive
+        the fork, and asking it to close is more machinery than a dropped
+        reference is worth.
+        """
+        self._worker_proc = None
+        self._worker_pid = None
+        self._channel = None
+        self._worker_service_stub = None
+        self._store_service_stub = None
+        self._eval_service_stub = None
+        self._stack = None
+        self._log_task = None
+
     async def _teardown(self) -> None:
         """Drain the log stream and dispose of the worker. Runs shielded."""
         if self._log_task is not None:
@@ -456,6 +495,11 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
 
     async def invoke(self, method: Callable[..., Any], request: Any, *, timeout: float) -> Any:  # noqa: ASYNC109 -- timeout passed to grpclib stub method which accepts a timeout parameter
         """Assign a worker-local operation ID and dispatch one unary RPC."""
+        # Before the channel check, and not after it: a fork inherits an open
+        # channel, so the check below would pass and this process would write
+        # to the parent's worker. See the three stub properties, which carry
+        # the same pair in the same order.
+        self._fork.check()
         if self._channel is None:
             # Backstop rather than the guard that normally fires: every caller
             # reaches a stub property first (`self.worker_stub.shutdown` is
@@ -608,6 +652,11 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         return error
 
     @property
+    def forked(self) -> bool:
+        """Whether this process is a fork of the one that built this client."""
+        return self._fork.forked
+
+    @property
     def unexpected_death(self) -> WorkerSignaledError | None:
         """The signal that killed this worker, when nothing asked it to stop.
 
@@ -711,6 +760,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
     # object, and the object's first piece of work is what fails.
     @property
     def worker_stub(self) -> WorkerServiceStub:
+        self._fork.check()
         stub = self._worker_service_stub
         if stub is None:
             raise SessionClosedError("rpc Session is not open — use async with")
@@ -718,6 +768,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
 
     @property
     def store_stub(self) -> StoreServiceStub:
+        self._fork.check()
         stub = self._store_service_stub
         if stub is None:
             raise SessionClosedError("rpc Session is not open — use async with")
@@ -725,6 +776,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
 
     @property
     def eval_stub(self) -> EvalServiceStub:
+        self._fork.check()
         stub = self._eval_service_stub
         if stub is None:
             raise SessionClosedError("rpc Session is not open — use async with")

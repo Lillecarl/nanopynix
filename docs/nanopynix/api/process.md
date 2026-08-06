@@ -33,3 +33,33 @@ copy: pass the name of your program, once, before you open a session.
 ```{eval-rst}
 .. autofunction:: nanopynix.set_manager_title
 ```
+
+## A session across fork()
+
+**A session does not survive a `fork()`, on either engine, and this library
+refuses rather than repairs.** Open a session in the process that uses it: fork
+first, then open.
+
+The child of an `nanopynix.rpc` session holds the same pipe to the same serial
+worker. Two processes then write to one worker, and the protocol desynchronises.
+The child also holds the worker's pid, and `Process.terminate()` asks no
+question about which process is calling, so a teardown there can kill the
+parent's worker.
+
+The child of an `nanopynix.inproc` session holds a thread pool whose threads no
+longer exist. `fork()` keeps only the calling thread, so the child submits work
+that no thread takes, and waits for a result that never comes. The child also
+inherits an initialised libexpr and a Boehm thread table that lists threads that
+are gone.
+
+Every entry point in a forked process raises
+{class}`~nanopynix.ForkedSessionError`. Teardown is silent instead: `close()`
+and `__aexit__` return without touching anything, because the resources belong
+to the parent and an exception there would replace whatever sent the child down
+that path.
+
+Two mechanisms find the fork, because each one misses what the other catches.
+`os.register_at_fork` sees `os.fork()` and every `multiprocessing` start method
+that forks. A comparison against `os.getpid()` sees a raw `fork(2)` through
+`ctypes`, which the hook does not. A `subprocess` is not a fork, and neither
+mechanism reports one.

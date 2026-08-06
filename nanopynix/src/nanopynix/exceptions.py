@@ -432,6 +432,26 @@ class SessionClosedError(ObjectLifetimeError):
     """A session was used after it closed, or before it was opened."""
 
 
+class ForkedSessionError(ObjectLifetimeError):
+    """A session was used in a process that forked away from the one that built it.
+
+    Nothing this library owns survives a ``fork()``. The child of an rpc
+    session holds the same pipe to the same serial worker, so two processes
+    write to one worker and the protocol desynchronises. The child of an
+    inproc session holds a thread pool whose threads no longer exist, because
+    ``fork()`` keeps only the calling thread, and a submit there waits for a
+    future that nothing will ever complete.
+
+    A sibling of :class:`SessionClosedError`, and deliberately not a subclass
+    of it. ``except SessionClosedError`` usually means "I closed it, and that
+    is fine". A fork is not fine, and that clause must not swallow it.
+
+    The library refuses rather than repairs. Open a session in the process
+    that uses it: fork first, then open. See ``nanopynix._fork`` for the two
+    mechanisms that detect the fork, and for what each one cannot see.
+    """
+
+
 class StoreClosedError(ObjectLifetimeError):
     """A store was used after it closed, or before it was opened."""
 
@@ -950,6 +970,7 @@ __all__ = [
     "EvalSessionClosedError",
     "EvaluatorAbandonedError",
     "ForeignValueError",
+    "ForkedSessionError",
     "HashMismatchError",
     "InfiniteRecursionError",
     "InputRejectedError",
