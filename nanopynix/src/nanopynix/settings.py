@@ -7,7 +7,7 @@ import json
 import os
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Self, cast, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Literal, Self, cast, get_args, get_origin, override
 
 import yaml
 from nanopynix_bindings import (
@@ -17,13 +17,15 @@ from nanopynix_bindings import (
     util as nanopynix_util,
 )
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, EnvSettingsSource, PydanticBaseSettingsSource, SettingsConfigDict
 
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix.exceptions import SettingNotLiveError, SettingOutOfScopeError
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Iterator, Mapping, Sequence
+
+    from pydantic.fields import FieldInfo
 
 
 DEFAULT_EXPERIMENTAL_FEATURES = (
@@ -742,8 +744,52 @@ class NixSettings(NixGlobalSettings, NixStoreDefaults, NixEvaluatorSettings, Nix
     """
 
 
+class PrefixedEnvSettingsSource(EnvSettingsSource):
+    """Read a field from ``env_prefix + field_name``, and from nothing else.
+
+    **The prefix of a settings model is not the only environment name that
+    pydantic-settings reads.** A model that gives its fields an alias gets that
+    alias as a second environment name, with no prefix in front of it.
+    ``_extract_field_info`` in ``pydantic_settings.sources.base`` builds the
+    alias entry first, and the prefixed entry only after, so the unprefixed
+    name also wins when both are set. Measured, on ``NixSettingsEnv``, whose
+    prefix is ``PYNIX_NIX_``::
+
+        cores=7                          ->  cores == 7
+        cores=7 and PYNIX_NIX_CORES=9    ->  cores == 7
+
+    The alias of every field here is its ``nix.conf`` key, so thirteen settings
+    answer to a single common word: ``builders``, ``cores``, ``fallback``,
+    ``http2``, ``http3``, ``priority``, ``sandbox``, ``store``, ``substitute``,
+    ``substituters``, ``system``, ``timeout``, and ``trusted``. ``stdenv``
+    exports ``system``, so every shell of Nix sets one of them::
+
+        NixSettingsEnv().model_fields_set == {'system'}
+
+    A field that a caller never named then reaches Nix and replaces what the
+    ``nix.conf`` of the host says.
+
+    This source keeps only the prefixed name. The alias stays a validation
+    alias, because the ``[nix]`` table of the configuration file carries the
+    ``nix.conf`` spelling and a file source validates that table by alias.
+    ``populate_by_name`` is what guarantees that the prefixed entry exists at
+    all, and ``test_every_settings_model_reads_one_environment_name`` states
+    that guarantee for each model.
+    """
+
+    @override
+    def _extract_field_info(self, field: FieldInfo, field_name: str) -> list[tuple[str, str, bool]]:
+        wanted = self._apply_case_sensitive(self.env_prefix + field_name)
+        return [info for info in super()._extract_field_info(field, field_name) if info[1] == wanted]
+
+
 class NixSettingsEnv(NixSettings, BaseSettings):
-    """Environment-backed Nix settings for command-line tools."""
+    """Environment-backed Nix settings for command-line tools.
+
+    ``PYNIX_NIX_`` is the only prefix that reaches these fields. See
+    :class:`PrefixedEnvSettingsSource` for what reaches them without it, and
+    why that is a defect rather than a convenience.
+    """
 
     model_config = SettingsConfigDict(
         alias_generator=_alias,
@@ -752,6 +798,19 @@ class NixSettingsEnv(NixSettings, BaseSettings):
         env_nested_delimiter="__",
         extra="forbid",
     )
+
+    @classmethod
+    @override
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """The same order pydantic-settings uses, with a stricter environment."""
+        return (init_settings, PrefixedEnvSettingsSource(settings_cls), dotenv_settings, file_secret_settings)
 
 
 #: Which scope owns each field, and where a caller must send it. Built from the

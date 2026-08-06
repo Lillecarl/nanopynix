@@ -26,6 +26,7 @@ from pynix._settings import (
 )
 from pynix.build import Build
 
+from nanopynix.settings import field_key
 from pynix import Pynix
 
 if TYPE_CHECKING:
@@ -230,6 +231,88 @@ def test_the_nix_settings_keep_their_environment_prefix() -> None:
     """
     assert PynixNixSettings.model_config.get("env_prefix") == "PYNIX_NIX_"
     assert PynixDefaults.model_config.get("env_prefix") == "PYNIX_"
+
+
+@pytest.mark.parametrize(
+    ("variable", "expected"),
+    [("PYNIX_NIX_CORES", 9), ("cores", None)],
+)
+def test_only_the_prefixed_spelling_reaches_a_nix_setting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+    expected: int | None,
+) -> None:
+    """``PYNIX_NIX_`` is the documented prefix, and the only one that works.
+
+    Every field carries its ``nix.conf`` key as an alias, and
+    pydantic-settings reads an alias as a second environment name with no
+    prefix in front of it. The unprefixed name also won, because
+    ``_extract_field_info`` builds the alias entry before the prefixed one.
+    """
+    no_config(tmp_path, monkeypatch)
+    monkeypatch.setenv(variable, "9")
+
+    assert PynixNixSettings().cores == expected
+
+
+def test_a_common_word_in_the_environment_changes_no_setting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every single-word ``nix.conf`` key, set at once, and none is read.
+
+    This list is what makes a new one-word setting safe: a field added to a
+    scope model joins it, and this test then covers that field too. ``stdenv``
+    exports ``system``, so the shell of Nix that runs this suite already sets
+    one of these names.
+    """
+    no_config(tmp_path, monkeypatch)
+    single_word = sorted(
+        key for name, field in PynixNixSettings.model_fields.items() if "-" not in (key := field_key(name, field))
+    )
+    for key in single_word:
+        monkeypatch.setenv(key, "0")
+
+    named = PynixNixSettings().model_fields_set
+
+    assert single_word, "no single-word key found; the scan is broken, not the model"
+    assert named == set(), f"these settings were read from an unprefixed name: {sorted(named)}"
+
+
+def test_the_defaults_model_also_refuses_an_unprefixed_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``store`` is a common word, and it names which store a command opens."""
+    no_config(tmp_path, monkeypatch)
+    monkeypatch.setenv("store", "/tmp/not-the-store")
+
+    assert PynixDefaults().store == DEFAULT_STORE
+
+
+def test_every_table_backed_model_still_reads_its_table(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The stricter environment source must not cost the configuration file.
+
+    ``PynixNixSettings`` inherits ``NixSettingsEnv`` first, and that base
+    states a source order of its own which names no file. Inheriting it
+    dropped the ``[nix]`` table, so this reads one key from each table rather
+    than trusting the method resolution order.
+
+    Two other tests here fail on the same cause, and both report a value that
+    is wrong rather than the reason it is wrong. This one names the reason.
+    """
+    write_config(
+        tmp_path,
+        monkeypatch,
+        '[defaults]\nstore = "daemon"\n\n[nix]\nmax-jobs = 8\n',
+    )
+
+    assert PynixDefaults().store == "daemon"
+    assert PynixNixSettings().max_jobs == 8
 
 
 # ── what the file may say, and what it may not ───────────────────────

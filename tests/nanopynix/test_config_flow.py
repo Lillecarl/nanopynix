@@ -27,7 +27,7 @@ import pytest
 from nanopynix_proto.nix.eval import ConfigureEvalRequest
 
 import nanopynix
-from nanopynix import NixEvalSettings, NixFetchSettings, stores
+from nanopynix import NixEvalSettings, NixFetchSettings, NixSettingsEnv, stores
 from nanopynix.exceptions import EvalError, NixError, SettingNotLiveError, SettingOutOfScopeError
 from nanopynix.namespace import STORE_DIR
 from nanopynix.settings import (
@@ -609,6 +609,38 @@ async def test_the_features_of_the_host_survive_beside_ours(
     note(features=sorted(features))
     assert "read-only-local-store" in features
     assert set(DEFAULT_EXPERIMENTAL_FEATURES) <= features
+
+
+@NIX_CONF_FILE_IGNORED
+@pytest.mark.anyio
+async def test_an_ambient_variable_overrides_nothing_of_the_host(
+    shared_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The third test #96 asks for, which #98 had to be fixed first to write.
+
+    ``overridden_from_config`` is the list a user should be shown: the host
+    asked for one value and this session uses another. It must hold nothing
+    that the caller did not name.
+
+    ``system`` is what made that impossible. ``stdenv`` exports it, and
+    ``NixSettingsEnv`` read it because pydantic-settings takes the ``nix.conf``
+    alias of a field as a second, unprefixed environment name. Every session
+    opened from a shell of Nix therefore replaced the ``system`` of the host.
+    Remove ``PrefixedEnvSettingsSource`` from
+    ``NixSettingsEnv.settings_customise_sources`` and this test fails.
+    """
+    monkeypatch.setenv("system", "i686-linux")
+    conf = _host_nix_conf(tmp_path, f"{_HOST_NIX_CONF}system = riscv64-linux\n")
+
+    async with _host_session(shared_nix_environment, conf, settings=NixSettingsEnv()) as session:
+        provenance = await session.settings_provenance()
+        live = await session.settings()
+
+    note(overridden=provenance.overridden_from_config, system=live["system"])
+    assert provenance.overridden_from_config == {}
+    assert live["system"] == "riscv64-linux"
 
 
 # ── Session-scoped globals, on both engines ──────────────────────────

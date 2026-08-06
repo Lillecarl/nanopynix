@@ -13,10 +13,48 @@ Run with::
 from __future__ import annotations
 
 import asyncio
+import os
+from typing import override
+
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 import nanopynix
-from nanopynix import NixGlobalSettings, NixSettings, list_settings_metadata
+from nanopynix import NixGlobalSettings, NixSettings, PrefixedEnvSettingsSource, list_settings_metadata
 from nanopynix.rpc import Session
+
+
+# region: prefixed-env
+class MySettings(BaseSettings):
+    """A settings model whose fields answer to one environment name each.
+
+    Every field below carries a dashed alias, and pydantic-settings reads an
+    alias as a second environment name with no prefix. A bare ``cores`` in the
+    environment would otherwise reach ``cores`` here.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="MYTOOL_",
+        alias_generator=lambda name: name.replace("_", "-"),
+        populate_by_name=True,
+    )
+
+    cores: int | None = None
+    max_jobs: int | None = None
+
+    @classmethod
+    @override
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (init_settings, PrefixedEnvSettingsSource(settings_cls), dotenv_settings, file_secret_settings)
+
+
+# endregion: prefixed-env
 
 
 async def main() -> None:
@@ -62,6 +100,19 @@ async def main() -> None:
 
     async with Session(settings=NixSettings(max_jobs=2)):
         print("session opened with max_jobs=2")
+
+    # --- keep an ambient variable out of a settings model ----------------
+
+    # `os.environ` here stands for the shell that runs the program: `stdenv`
+    # exports `system`, so a shell of Nix already sets one of the thirteen
+    # single-word `nix.conf` keys.
+    os.environ["cores"] = "7"  # noqa: SIM112 -- a lowercase name is the subject; Nix spells its keys this way
+    assert MySettings().model_fields_set == set(), "an unprefixed name must reach no field"
+
+    os.environ["MYTOOL_CORES"] = "9"
+    assert MySettings().cores == 9
+    print("prefixed cores:", MySettings().cores)
+    del os.environ["cores"], os.environ["MYTOOL_CORES"]  # noqa: SIM112 -- see above
 
     # --- query Nix's live setting registry ------------------------------
 

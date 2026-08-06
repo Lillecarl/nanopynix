@@ -20,6 +20,7 @@ from nanopynix.settings import (
     NixSettings,
     NixSettingsEnv,
     NixStoreDefaults,
+    PrefixedEnvSettingsSource,
     check_all_settings_model_drift,
     check_settings_model_drift,
     merge_defaults,
@@ -76,6 +77,45 @@ def test_nix_settings_env_reads_pynix_prefixed_values(monkeypatch: pytest.Monkey
 
     assert settings.max_jobs == 3
     assert settings.keep_going is True
+
+
+def test_nix_settings_env_reads_no_unprefixed_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``PYNIX_NIX_`` is the whole of what this model reads from the environment.
+
+    Every field carries its ``nix.conf`` key as a validation alias, and
+    pydantic-settings turns an alias into a second environment name with no
+    prefix. It also builds the alias entry first, so the unprefixed name won
+    where both were set. Measured before ``PrefixedEnvSettingsSource``::
+
+        cores=7                        ->  cores == 7
+        cores=7 and PYNIX_NIX_CORES=9  ->  cores == 7
+    """
+    monkeypatch.setenv("cores", "7")
+
+    assert NixSettingsEnv().model_fields_set == set()
+
+    monkeypatch.setenv("PYNIX_NIX_CORES", "9")
+
+    assert NixSettingsEnv().cores == 9
+
+
+def test_every_settings_model_reads_one_environment_name() -> None:
+    """One field, one environment name, for each model that reads the environment.
+
+    ``PrefixedEnvSettingsSource`` keeps the entry whose name is
+    ``env_prefix + field_name`` and drops the rest, so a field with no such
+    entry would be read from nothing at all. ``populate_by_name`` is what
+    guarantees the entry exists, and this states that guarantee rather than
+    leaving it to the first caller who sets the variable and sees nothing.
+    """
+    for model in (NixSettingsEnv, NanopynixSettings):
+        source = PrefixedEnvSettingsSource(model)
+        for name, field in model.model_fields.items():
+            names = [env_name for _, env_name, _ in source._extract_field_info(field, name)]
+
+            assert names == [f"{model.model_config.get('env_prefix', '')}{name}".lower()], (
+                f"{model.__name__}.{name} reads {names}"
+            )
 
 
 def test_nanopynix_settings_env_reads_runtime_values(monkeypatch: pytest.MonkeyPatch) -> None:
