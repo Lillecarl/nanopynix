@@ -744,3 +744,39 @@ async def test_the_pool_hands_the_worker_teardown_to_the_transport(monkeypatch: 
 
     # `cast` is identity at run time, so this is the function itself.
     assert seen["child_teardown"] is worker_child_teardown
+
+
+async def test_a_worker_that_exits_names_its_status() -> None:
+    """A positive exit status is not a crash, and it is still the diagnosis.
+
+    Issue #97: a child that died before it answered ``Init`` reported only
+    "Connection lost". The forkserver reports the status to this process and
+    reports nothing to the transport, so this class is the only place that can
+    say it. A signal keeps its own class, which the tests above cover.
+    """
+    client = pool_module.WorkerClient()
+    client._worker_pid = 4321  # type: ignore[reportPrivateUsage] -- intentional test of internal WorkerClient state
+    client._worker_exit_status = 1  # type: ignore[reportPrivateUsage] -- intentional test of internal WorkerClient state
+
+    error = await client._worker_death_error(WorkerDiedError("Connection lost"))  # type: ignore[reportPrivateUsage] -- the seam under test
+
+    # Not the signal class: a positive status did not crash.
+    assert not isinstance(error, WorkerSignaledError)
+    assert "status 1" in str(error)
+    # What the transport saw survives, because it says which call broke.
+    assert "Connection lost" in str(error)
+
+
+async def test_an_exit_during_teardown_stays_what_the_transport_said() -> None:
+    """The same rule the signal path already obeys, for the same reason.
+
+    The transport stops a worker that did not exit on its own, so a status
+    during teardown is this process's own doing. See ``_note_worker_death``.
+    """
+    client = pool_module.WorkerClient()
+    client._worker_exit_status = 1  # type: ignore[reportPrivateUsage] -- intentional test of internal WorkerClient state
+    client._stopping_the_worker = True  # type: ignore[reportPrivateUsage] -- intentional test of internal WorkerClient state
+
+    disconnect = WorkerDiedError("Connection lost")
+
+    assert await client._worker_death_error(disconnect) is disconnect  # type: ignore[reportPrivateUsage] -- the seam under test

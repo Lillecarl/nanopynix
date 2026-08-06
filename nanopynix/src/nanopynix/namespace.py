@@ -46,6 +46,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from grpclib_transports.multiprocessing import main_module_not_reexecuted
+
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.stores import LocalOverlay
 
@@ -241,7 +243,12 @@ def probe_namespace_support(root: str | os.PathLike[str] | None = None) -> Names
         context = multiprocessing.get_context("forkserver")
         parent_conn, child_conn = context.Pipe()
         process = context.Process(target=_probe_child, args=(probe_root, child_conn))
-        process.start()
+        # The same reason the worker spawn needs it, and a worse symptom here:
+        # a child that dies while it runs the `__main__` of the program is
+        # read below as "the probe process died", so a host that supports an
+        # overlay namespace is reported as a host that does not.
+        with main_module_not_reexecuted():
+            process.start()
         child_conn.close()
         try:
             reason = parent_conn.recv()
