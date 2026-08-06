@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import override
 
-from clypi import Command, arg
+from clypi import arg
 
 import nanopynix
+from pynix._settings import PynixCommand
 from pynix._util import print_json
 
 
-class Show(Command):
+class Show(PynixCommand):
     """Show Nix configuration settings"""
 
     setting: str | None = arg(None, help="Show only one setting.")
@@ -27,7 +28,7 @@ class Show(Command):
         print_json(settings)
 
 
-class Check(Command):
+class Check(PynixCommand):
     """Check that Nix configuration can be loaded"""
 
     @override
@@ -36,7 +37,7 @@ class Check(Command):
         print_json({"ok": True})
 
 
-class CurrentSystem(Command):
+class CurrentSystem(PynixCommand):
     """Show the effective system used by builtins.currentSystem"""
 
     @override
@@ -45,7 +46,7 @@ class CurrentSystem(Command):
         print_json({"currentSystem": nanopynix.current_system()})
 
 
-class Config(Command):
+class Config(PynixCommand):
     """Inspect Nix configuration"""
 
     subcommand: Show | Check | CurrentSystem

@@ -40,14 +40,16 @@ and ``anyio.Path`` would have nowhere to run.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import sys
 import tomllib
 
 # A real import, not a TYPE_CHECKING one: the option factories below return
 # clypi ``arg()`` placeholders, and clypi resolves the annotations of a command
 # at run time to build its parser.
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, cast, override
+from typing import TYPE_CHECKING, Any, ClassVar, NoReturn, cast, override
 
 from clypi import Command, arg
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
@@ -295,7 +297,37 @@ def _configured_fields(command: type[Command]) -> dict[type[BaseSettings], list[
     return owned
 
 
-class ConfiguredCommand(Command):
+class PynixCommand(Command):
+    """The base of every pynix command, which owns which stream carries what.
+
+    **stdout carries the answer of a command, and nothing else.** A caller
+    writes ``pynix derivation show ... | jq``, so anything else on stdout
+    arrives as data and breaks the reader. Everything a person reads --
+    a log of Nix, an error, a usage message about a failure -- goes to stderr.
+
+    ``clypi.Command.print_help`` writes to stdout for both of its cases, and
+    ``ClypiConfig`` has no stream to set, so this overrides the case that is
+    wrong. Measured before this class: ``pynix derivation show <path>``, which
+    names no option that command takes, put 2165 bytes of usage table and a
+    red error box on stdout and left stderr empty.
+
+    ``--help`` keeps stdout. The caller asked for it, so it is the answer of
+    the command rather than a report about a failure.
+    """
+
+    @classmethod
+    @override
+    def print_help(cls, exception: Exception | None = None) -> NoReturn:
+        if exception is None:
+            super().print_help(exception)
+        # `redirect_stdout` rather than a copy of the formatter: clypi reads
+        # `sys.stdout` when it writes, so this keeps one implementation of the
+        # help text and moves only the stream it lands on.
+        with contextlib.redirect_stdout(sys.stderr):
+            super().print_help(exception)
+
+
+class ConfiguredCommand(PynixCommand):
     """A command whose configuration-backed options resolve when it is built.
 
     The resolution happens in ``__init__`` rather than in each ``run``, so

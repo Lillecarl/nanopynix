@@ -8,13 +8,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
 
 import structlog
-from clypi import Command, Positional, arg
+from clypi import Positional, arg
 from rich.console import Console
 from rich.tree import Tree
 
 import nanopynix
 from nanopynix._typechecking import BEARTYPING
-from pynix._settings import ConfiguredCommand, store_option
+from pynix._settings import ConfiguredCommand, PynixCommand, store_option
 from pynix._util import eval_session, print_json
 
 if TYPE_CHECKING or BEARTYPING:
@@ -184,7 +184,7 @@ async def _print_flake_metadata(flake_ref: str, *, store_uri: str) -> None:
             await locked.release()
 
 
-class Flake(Command):
+class Flake(PynixCommand):
     """Inspect and manage Nix flakes"""
 
     subcommand: Show | Metadata | Info
