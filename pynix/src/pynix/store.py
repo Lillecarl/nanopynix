@@ -9,6 +9,7 @@ from clypi import Command, Positional, arg
 
 import nanopynix
 from nanopynix._typechecking import BEARTYPING
+from pynix._settings import store_option
 from pynix._util import print_json, store_session
 
 if TYPE_CHECKING or BEARTYPING:
@@ -16,13 +17,11 @@ if TYPE_CHECKING or BEARTYPING:
 
 logger = structlog.get_logger(__name__)
 
-_DEFAULT_STORE = "auto"
-
 
 class PrintRoots(Command):
     """List the garbage collector roots"""
 
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -46,7 +45,7 @@ class PrintDead(Command):
         False,
         help="Actually delete the dead store paths instead of just listing them.",
     )
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -59,7 +58,7 @@ class PrintDead(Command):
 class PrintAlive(Command):
     """List live paths in the store (reachable from GC roots)"""
 
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -77,7 +76,7 @@ class Gc(Command):
 class Info(Command):
     """Show store metadata"""
 
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -91,7 +90,7 @@ class Info(Command):
 class Dirs(Command):
     """Show configured local store directories"""
 
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -104,7 +103,7 @@ class IsValidPath(Command):
     """Check whether a store path is valid"""
 
     path: Positional[str] = arg(help="Store path to check.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -117,7 +116,7 @@ class FollowLinksToStorePath(Command):
     """Resolve symlinks to a store path"""
 
     path: Positional[str] = arg(help="Filesystem path to resolve.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -133,7 +132,7 @@ class ComputeFsClosure(Command):
     flip_direction: bool = arg(False, help="Compute the inverse closure.")
     include_outputs: bool = arg(False, help="Include derivation outputs.")
     include_derivers: bool = arg(False, help="Include derivers.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -151,7 +150,7 @@ class QueryMissing(Command):
     """Show which paths would need building, substituting, or are unknown"""
 
     paths: Positional[list[str]] = arg(help="Store paths to query.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -175,7 +174,7 @@ class QueryDerivationOutputs(Command):
     """Show the outputs of a derivation path"""
 
     path: Positional[str] = arg(help="Derivation path to query.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -188,7 +187,7 @@ class QueryValidDerivers(Command):
     """Show valid derivers for a store path"""
 
     path: Positional[str] = arg(help="Store path to query.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -200,7 +199,7 @@ class QueryValidDerivers(Command):
 class ListValidPaths(Command):
     """List all valid paths in the store"""
 
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -213,7 +212,7 @@ class QueryReferrers(Command):
     """Show referrers of a store path"""
 
     path: Positional[str] = arg(help="Store path to query.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -226,7 +225,7 @@ class QuerySubstitutablePaths(Command):
     """Show which paths are substitutable"""
 
     paths: Positional[list[str]] = arg(help="Store paths to query.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -242,7 +241,7 @@ class AddTempRoot(Command):
     """Add a temporary GC root for this command's store session"""
 
     path: Positional[str] = arg(help="Store path to root temporarily.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+    store: str = store_option("Store URI to use.")
 
     @override
     async def run(self) -> None:
@@ -256,7 +255,7 @@ class AddPermRoot(Command):
 
     path: Positional[str] = arg(help="Store path to root.")
     gc_root: Positional[str] = arg(help="GC root symlink to create.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+    store: str = store_option("Store URI to use.")
 
     @override
     async def run(self) -> None:
@@ -269,7 +268,7 @@ class AddIndirectRoot(Command):
     """Register an indirect GC root"""
 
     path: Positional[str] = arg(help="GC root path to register.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+    store: str = store_option("Store URI to use.")
 
     @override
     async def run(self) -> None:
@@ -282,7 +281,7 @@ class PathFromHashPart(Command):
     """Resolve a store path from its hash prefix"""
 
     hash_part: Positional[str] = arg(help="Store path hash prefix to resolve.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -295,7 +294,7 @@ class EnsurePath(Command):
     """Ensure a store path is valid, substituting it if available"""
 
     path: Positional[str] = arg(help="Store path to ensure.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+    store: str = store_option("Store URI to use.")
 
     @override
     async def run(self) -> None:
@@ -308,7 +307,7 @@ class Cat(Command):
     """Print a file inside a local Nix store path"""
 
     path: Positional[str] = arg(help="File path to print.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+    store: str = store_option("Store URI to use.")
 
     @override
     async def run(self) -> None:
@@ -326,7 +325,7 @@ class Ls(Command):
 
     path: Positional[str] = arg(help="File or directory path to list.")
     json: bool = arg(False, help="Print machine-readable JSON.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+    store: str = store_option("Store URI to use.")
 
     @override
     async def run(self) -> None:
@@ -356,7 +355,7 @@ class Add(Command):
     mode: str = arg("nar", help="Content-addressing method: nar, flat, or git.")
     hash_algo: str = arg("sha256", help="Hash algorithm to use.")
     dry_run: bool = arg(False, help="Compute the store path without adding the content.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+    store: str = store_option("Store URI to use.")
 
     @override
     async def run(self) -> None:
@@ -377,7 +376,7 @@ class AddFile(Command):
     name: str | None = arg(None, short="n", help="Override the store path name component.")
     hash_algo: str = arg("sha256", help="Hash algorithm to use.")
     dry_run: bool = arg(False, help="Compute the store path without adding the content.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+    store: str = store_option("Store URI to use.")
 
     @override
     async def run(self) -> None:
@@ -398,7 +397,7 @@ class AddPath(Command):
     name: str | None = arg(None, short="n", help="Override the store path name component.")
     hash_algo: str = arg("sha256", help="Hash algorithm to use.")
     dry_run: bool = arg(False, help="Compute the store path without adding the content.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+    store: str = store_option("Store URI to use.")
 
     @override
     async def run(self) -> None:
@@ -417,7 +416,7 @@ class DiffClosures(Command):
 
     before: Positional[str] = arg(help="Original store path.")
     after: Positional[str] = arg(help="New store path.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to query.")
+    store: str = store_option("Store URI to query.")
 
     @override
     async def run(self) -> None:
@@ -447,7 +446,7 @@ class DiffClosures(Command):
 class Optimise(Command):
     """Optimise store disk usage by hard-linking duplicate files"""
 
-    store: str = arg(_DEFAULT_STORE, help="Store URI to optimise.")
+    store: str = store_option("Store URI to optimise.")
 
     @override
     async def run(self) -> None:
@@ -461,7 +460,7 @@ class Verify(Command):
 
     check_contents: bool = arg(False, help="Check path contents, not only metadata.")
     repair: bool = arg(False, help="Attempt repair while verifying.")
-    store: str = arg(_DEFAULT_STORE, help="Store URI to verify.")
+    store: str = store_option("Store URI to verify.")
 
     @override
     async def run(self) -> None:

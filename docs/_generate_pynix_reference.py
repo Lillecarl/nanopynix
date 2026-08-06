@@ -27,6 +27,8 @@ for _path in (_PYNIX_SRC, _PYTHON_SRC):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
+from pynix._settings import only_built_in_defaults  # noqa: E402 -- see above
+
 from pynix import Pynix  # noqa: E402 -- sys.path must be extended before pynix is importable
 
 if TYPE_CHECKING:
@@ -115,7 +117,12 @@ def render() -> str:
         ),
         "",
     ]
-    lines += _render_command(Pynix, [])
+    # Inside the guard: each option's default now comes from a
+    # `default_factory` that reads the configuration file and the environment,
+    # and this file is checked in and gated. The reference states the built-in
+    # default, which is what a reader with no configuration gets.
+    with only_built_in_defaults():
+        lines += _render_command(Pynix, [])
     return "\n".join(lines) + "\n"
 
 

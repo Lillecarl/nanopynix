@@ -46,9 +46,10 @@ from clypi._cli.main import CLYPI_UNPARSED
 
 import nanopynix
 from nanopynix import store_exec_prefix, strip_ansi
-from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import NixError
 from pynix._dev_env import BuildEnvironment, DevEnvError, make_rc_script, quote
+from pynix._settings import eval_store_option, print_build_logs_option, store_option, verbosity_option
 from pynix._util import error_exit, nix_session, print_json, report_and_exit
 from pynix.target import (
     EvaluationTarget,
@@ -67,8 +68,6 @@ if TYPE_CHECKING or BEARTYPING:
     from nanopynix.protocols import AsyncLockedFlake, AsyncStore
 
 logger = structlog.get_logger(__name__)
-
-_DEFAULT_STORE = "auto"
 
 #: The vendored copy of Nix's own environment dumper. Its header gives the
 #: provenance and the licence.
@@ -107,29 +106,6 @@ class InteractiveShell:
     exec_prefix: list[str]
 
 
-@no_runtime_type_check  # clypi's arg() returns a PartialConfig placeholder at declaration time, not the annotated type -- see pynix.target.file_option
-def _store_option() -> str:
-    return arg(_DEFAULT_STORE, help="Store URI to build with.")
-
-
-@no_runtime_type_check  # see _store_option
-def _eval_store_option() -> str | None:
-    return arg(None, help="Store URI to evaluate with. Defaults to --store.")
-
-
-@no_runtime_type_check  # see _store_option
-def _verbosity_option() -> str | None:
-    return arg(
-        None,
-        help="Nix log verbosity: error, warn, notice, info, talkative, chatty, debug, vomit, or 0-7.",
-    )
-
-
-@no_runtime_type_check  # see _store_option
-def _print_build_logs_option() -> bool:
-    return arg(False, help="Print build log lines to stderr.")
-
-
 class PrintDevEnv(Command):
     """Print the build environment of a derivation
 
@@ -140,10 +116,10 @@ class PrintDevEnv(Command):
     file: Path | None = file_option()
     attr: str | None = attr_option()
     flake: str | None = flake_option()
-    store: str = _store_option()
-    eval_store: str | None = _eval_store_option()
-    verbosity: str | None = _verbosity_option()
-    print_build_logs: bool = _print_build_logs_option()
+    store: str = store_option("Store URI to build with.")
+    eval_store: str | None = eval_store_option()
+    verbosity: str | None = verbosity_option()
+    print_build_logs: bool = print_build_logs_option()
     json: bool = arg(False, help="Print the environment as JSON, instead of the bash that restores it.")
 
     @override
@@ -173,10 +149,10 @@ class Develop(Command):
     file: Path | None = file_option()
     attr: str | None = attr_option()
     flake: str | None = flake_option()
-    store: str = _store_option()
-    eval_store: str | None = _eval_store_option()
-    verbosity: str | None = _verbosity_option()
-    print_build_logs: bool = _print_build_logs_option()
+    store: str = store_option("Store URI to build with.")
+    eval_store: str | None = eval_store_option()
+    verbosity: str | None = verbosity_option()
+    print_build_logs: bool = print_build_logs_option()
 
     @override
     async def run(self) -> None:

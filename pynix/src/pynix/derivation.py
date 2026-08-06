@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any, override
 
 import structlog
-from clypi import Command, arg
+from clypi import Command
 
+from pynix._settings import store_option
 from pynix._util import print_json, report_and_exit, store_session
 from pynix.target import (
     EvaluationTarget,
@@ -24,8 +25,6 @@ from pynix.target import (
 
 logger = structlog.get_logger(__name__)
 
-_DEFAULT_STORE = "auto"
-
 
 class Show(Command):
     """Show the contents of a Nix derivation
@@ -38,7 +37,7 @@ class Show(Command):
     file: Path | None = file_option()
     attr: str | None = attr_option()
     flake: str | None = flake_option()
-    store: str = arg(_DEFAULT_STORE, help="Store URI to use.")
+    store: str = store_option("Store URI to use.")
 
     @override
     async def run(self) -> None:

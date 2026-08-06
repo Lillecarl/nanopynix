@@ -22,6 +22,14 @@ from nanopynix_helpers.build import FodBuildError, build_with_fod_update
 
 import nanopynix
 from nanopynix._typechecking import BEARTYPING
+from pynix._settings import (
+    DEFAULT_STORE,
+    defaults,
+    eval_store_option,
+    nix_settings,
+    print_build_logs_option,
+    verbosity_option,
+)
 from pynix._util import error_console, error_exit, nix_session, print_json, report_and_exit
 
 if TYPE_CHECKING or BEARTYPING:
@@ -42,9 +50,6 @@ logger = structlog.get_logger("pynix.build")
 #: Explicitly the daemon, never "auto" -- see _promote_to_host_store.
 _HOST_STORE_URI = "daemon"
 
-_DEFAULT_SUBSTITUTERS = "https://cache.nixos.org/"
-_DEFAULT_TRUSTED_PUBLIC_KEYS = "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
-
 
 def _no_sandbox_paths() -> list[str]:
     """Default for ``--sandbox-path``. A named function rather than ``list``,
@@ -58,19 +63,27 @@ class Build(Command):
     file: Path | None = file_option()
     attr: str | None = attr_option()
     flake: str | None = flake_option()
-    store: str = arg("auto", help="Store URI to build with.")
-    eval_store: str | None = arg(None, help="Store URI to evaluate with. Defaults to --store.")
-    substituters: str = arg(_DEFAULT_SUBSTITUTERS, help="Space-separated substituter URLs.")
-    trusted_public_keys: str = arg(_DEFAULT_TRUSTED_PUBLIC_KEYS, help="Space-separated substituter public keys.")
+    # `None` for "the flag was absent", and not the configured default that
+    # every other command takes from `store_option()`. `_resolve_namespaced`
+    # has to tell a store the user named from one a configuration file
+    # supplied: a namespaced build owns its store, so naming one is a
+    # contradiction, while a configured default is not a request about *this*
+    # build and must not refuse it.
+    store: str | None = arg(None, help=f"Store URI to build with. Defaults to the configured store ({DEFAULT_STORE}).")
+    eval_store: str | None = eval_store_option()
+    # None, not a literal list: an absent flag leaves the value to `[nix]`, to
+    # `PYNIX_NIX_*`, and then to the built-in defaults, in that order. These
+    # used to be clypi defaults passed straight into the settings model as
+    # keyword arguments, and pydantic-settings ranks the init source above the
+    # environment -- so `PYNIX_NIX_SUBSTITUTERS` never once took effect.
+    substituters: str | None = arg(None, help="Space-separated substituter URLs.")
+    trusted_public_keys: str | None = arg(None, help="Space-separated substituter public keys.")
     # None, not a literal level: nanopynix leaves Nix's own compiled-in default
     # (info) alone when no verbosity is named, and pynix has no reason to
     # disagree with the library it dogfoods. This used to force notice, so
     # `pynix build` was quieter than every other consumer of the same session.
-    verbosity: str | None = arg(
-        None,
-        help="Nix log verbosity: error, warn, notice, info, talkative, chatty, debug, vomit, or 0-7.",
-    )
-    print_build_logs: bool = arg(False, help="Print build log lines to stderr.")
+    verbosity: str | None = verbosity_option()
+    print_build_logs: bool = print_build_logs_option()
     update_fod: bool = arg(False, help="Update plain fixed-output hash literals after a hash mismatch.")
     dry_run: bool = arg(False, help="Show --update-fod changes without writing or rebuilding.")
     namespaced: bool = arg(
@@ -113,7 +126,7 @@ class Build(Command):
         namespaced = self.namespaced or self.overlay_dir is not None
         if self.sandbox_path and not namespaced:
             error_exit("--sandbox-path requires --namespaced: the daemon owns the sandbox of the host store")
-        if namespaced and self.store != "auto":
+        if namespaced and self.store is not None:
             error_exit("--namespaced builds in its own overlay store, so it cannot be combined with --store")
         return namespaced
 
@@ -131,9 +144,9 @@ class Build(Command):
 
         namespaced = self._resolve_namespaced()
 
-        settings = nanopynix.NixSettingsEnv(
-            substituters=self.substituters.split(),
-            trusted_public_keys=self.trusted_public_keys.split(),
+        settings = nix_settings(
+            substituters=self.substituters,
+            trusted_public_keys=self.trusted_public_keys,
         )
         if self.sandbox_path:
             settings = settings.model_copy(update={"sandbox_paths": list(self.sandbox_path)})
@@ -156,7 +169,7 @@ class Build(Command):
             # None, not "auto", when namespaced: the session already defaults
             # to its overlay store, and naming "auto" here would open a
             # different store instead.
-            store_uri = None if namespaced else self.store
+            store_uri = None if namespaced else (self.store if self.store is not None else defaults().store)
             promote = namespaced and self.copy_back
             try:
                 if self.eval_store is None:

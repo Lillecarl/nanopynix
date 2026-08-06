@@ -287,3 +287,64 @@ def test_session_rejects_raw_settings_dict() -> None:
     settings: Any = {"max-jobs": "4"}
     with pytest.raises(TypeError, match="settings must be"):
         Session(settings=settings)
+
+
+# ── the nix.conf spelling of a multi-valued setting ──────────────────
+#
+# `_render_value` joins a list with spaces and a dict with spaces over
+# `key=value` pairs, which is how Nix writes both. Reading that back was
+# missing, so the model could write a value it could not read: every one of
+# these cases raised `Input should be a valid list`.
+
+
+def test_from_file_reads_a_nix_conf_that_sets_a_list(tmp_path: Path) -> None:
+    """The documented case. Almost every real nix.conf sets `substituters`."""
+    nix_conf = tmp_path / "nix.conf"
+    nix_conf.write_text("substituters = https://a.example/ https://b.example/\nmax-jobs = 4\n")
+
+    settings = NixSettings.from_file(nix_conf)
+
+    assert settings.substituters == ["https://a.example/", "https://b.example/"]
+    assert settings.max_jobs == 4
+
+
+def test_a_rendered_list_loads_back_into_the_same_list(tmp_path: Path) -> None:
+    """Round trip, so the reader stays the inverse of the writer."""
+    original = NixSettings(substituters=["https://a.example/", "https://b.example/"], trusted=True)
+    nix_conf = tmp_path / "nix.conf"
+    nix_conf.write_text(original.to_nix_config())
+
+    assert NixSettings.from_file(nix_conf).substituters == original.substituters
+
+
+def test_a_dict_setting_reads_back_from_its_key_value_pairs() -> None:
+    settings = NixFetchSettings.model_validate({"access-tokens": "github.com=one gitlab.com=two"})
+
+    assert settings.access_tokens == {"github.com": "one", "gitlab.com": "two"}
+
+
+def test_a_dict_setting_refuses_an_item_that_is_not_a_pair() -> None:
+    with pytest.raises(ValidationError, match="key=value"):
+        NixFetchSettings.model_validate({"access-tokens": "github.com"})
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    ["https://a.example/ https://b.example/", '["https://a.example/", "https://b.example/"]'],
+    ids=["nix-conf", "json"],
+)
+def test_an_environment_variable_takes_either_spelling_of_a_list(
+    monkeypatch: pytest.MonkeyPatch,
+    spelling: str,
+) -> None:
+    """JSON was the only accepted spelling, and it is not the one a user knows."""
+    monkeypatch.setenv("PYNIX_NIX_SUBSTITUTERS", spelling)
+
+    assert NixSettingsEnv().substituters == ["https://a.example/", "https://b.example/"]
+
+
+def test_a_list_that_is_already_a_list_is_not_split_again() -> None:
+    """A Python caller and a JSON file must reach the model untouched."""
+    settings = NixSettings(substituters=["https://one.example/ with a space"])
+
+    assert settings.substituters == ["https://one.example/ with a space"]

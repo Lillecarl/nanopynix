@@ -9,6 +9,7 @@ orchestration, all through nanopynix's worker instead of shelling out to
 :maxdepth: 2
 :caption: Contents
 
+configuration
 develop
 reference
 ```
@@ -36,4 +37,5 @@ $ pynix store gc print-roots
 
 Every command accepts `--help` for its full option list, or see the
 {doc}`generated command reference <reference>` for every subcommand, its
-arguments, and defaults.
+arguments, and defaults. To set a default once instead of on each
+invocation, see {doc}`configuration`.
