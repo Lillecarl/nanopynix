@@ -90,6 +90,8 @@ jobs:
     - name: Deploy to GitHub Pages
       timeout-minutes: 20
       uses: actions/deploy-pages@main
+      with:
+        timeout: 900000
       id: deployment
     timeout-minutes: 35
     permissions:
