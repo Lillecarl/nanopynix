@@ -15,7 +15,7 @@ Build a Nix derivation value
 | `--file` | `Path or None` | Evaluate FILE as a Nix expression. (default: `None`) |
 | `--attr` | `str or None` | Dot-separated attribute path within the evaluation result. (default: `None`) |
 | `--flake` | `str or None` | Evaluate FLAKE, optionally with a '#'-separated attribute path. (default: `None`) |
-| `--store` | `str or None` | Store URI to build with. Defaults to the configured store (auto). (default: `None`) |
+| `--store` | `str` | Store URI to build with. (default: `'auto'`) |
 | `--eval-store` | `str or None` | Store URI to evaluate with. Defaults to --store. (default: `None`) |
 | `--substituters` | `str or None` | Space-separated substituter URLs. (default: `None`) |
 | `--trusted-public-keys` | `str or None` | Space-separated substituter public keys. (default: `None`) |

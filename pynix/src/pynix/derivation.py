@@ -11,7 +11,7 @@ from typing import Any, override
 import structlog
 from clypi import Command
 
-from pynix._settings import store_option
+from pynix._settings import ConfiguredCommand, store_option
 from pynix._util import print_json, report_and_exit, store_session
 from pynix.target import (
     EvaluationTarget,
@@ -26,7 +26,7 @@ from pynix.target import (
 logger = structlog.get_logger(__name__)
 
 
-class Show(Command):
+class Show(ConfiguredCommand):
     """Show the contents of a Nix derivation
 
     Examples:

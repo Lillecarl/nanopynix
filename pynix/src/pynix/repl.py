@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
 import anyio
-from clypi import Command
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.formatted_text import ANSI, StyleAndTextTuples
@@ -32,7 +31,7 @@ from nanopynix.exceptions import EvaluatorAbandonedError, NixError
 from nanopynix.verbosity import normalize_log_level
 from pynix._completion import completion_prefix_at
 from pynix._nix_syntax import NIX_GRAMMAR_PATH, NIX_LANGUAGE, parse_nix
-from pynix._settings import store_option
+from pynix._settings import ConfiguredCommand, store_option
 from pynix._util import forward_nix_logs
 from pynix._value_render import format_json
 from pynix.target import (
@@ -658,7 +657,7 @@ def _derivation_name_part(name: str) -> str:
     return name
 
 
-class Repl(Command):
+class Repl(ConfiguredCommand):
     """Open an interactive Nix evaluation session."""
 
     store: str = store_option("Store URI to evaluate with.")

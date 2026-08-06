@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import override
 
 import structlog
-from clypi import Command, arg
+from clypi import arg
 
-from pynix._settings import store_option
+from pynix._settings import ConfiguredCommand, store_option
 from pynix._util import error_exit, eval_session, print_json, report_and_exit
 from pynix.target import (
     EvaluationTarget,
@@ -25,7 +25,7 @@ from pynix.target import (
 logger = structlog.get_logger(__name__)
 
 
-class Eval(Command):
+class Eval(ConfiguredCommand):
     """Evaluate a Nix expression and print the result as JSON"""
 
     expr: str | None = arg(None, help="Nix expression to evaluate. Reads from stdin if not provided.")

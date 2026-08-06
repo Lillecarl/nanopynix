@@ -3,11 +3,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, override
 
 import structlog
-from clypi import Command, Positional, arg
+from clypi import Positional, arg
 from rich.console import Console
 
 from nanopynix._typechecking import BEARTYPING
-from pynix._settings import store_option
+from pynix._settings import ConfiguredCommand, store_option
 from pynix._util import print_json, store_session
 
 if TYPE_CHECKING or BEARTYPING:
@@ -17,7 +17,7 @@ logger = structlog.get_logger(__name__)
 console = Console()
 
 
-class PathInfo(Command):
+class PathInfo(ConfiguredCommand):
     """Show information about a store path"""
 
     path: Positional[str] = arg(help="Store path to query (e.g. '/nix/store/hash-name').")

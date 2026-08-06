@@ -7,10 +7,15 @@ Four layers, and the first one that names a value wins:
 3. ``$XDG_CONFIG_HOME/pynix/config.toml``
 4. the built-in default
 
-clypi resolves a flag before an environment variable before
-``default_factory``, so the file plugs into ``default_factory`` and the parser
-gives that order. Nothing here decides it, which is why the order cannot drift
-away from what the help text says.
+**pydantic-settings decides all four, and clypi decides none of them.** clypi
+parses the command line and says which options the caller actually named;
+those go into the model as keyword arguments, which is the init source, and
+the environment and the file are the sources below it. One ordering, in one
+library, stated once in :meth:`_TableBackedSettings.settings_customise_sources`.
+
+An option the caller did not name holds :data:`UNSET` until
+:class:`ConfiguredCommand` resolves it, which is how "absent" is told apart
+from "explicitly false".
 
 The file holds two tables. ``[defaults]`` holds the options that cross the
 commands, and ``[nix]`` holds the Nix settings::
@@ -27,16 +32,16 @@ commands, and ``[nix]`` holds the Nix settings::
 ``[nix]`` reaches the same model as ``PYNIX_NIX_*``, so a list takes the
 ``nix.conf`` spelling as well as a TOML array.
 
-**The blocking file read is deliberate.** ``default_factory`` runs inside
-``Pynix.parse()``, which ``main()`` calls before it starts any event loop, so
-there is no loop to block and ``anyio.Path`` would have nowhere to run.
+**The blocking file read is deliberate.** The read happens in
+:meth:`ConfiguredCommand.__init__`, which ``Pynix.parse()`` calls, and ``main()``
+calls ``parse()`` before it starts any event loop. There is no loop to block,
+and ``anyio.Path`` would have nowhere to run.
 """
 
 from __future__ import annotations
 
 import os
 import tomllib
-from contextlib import contextmanager
 
 # A real import, not a TYPE_CHECKING one: the option factories below return
 # clypi ``arg()`` placeholders, and clypi resolves the annotations of a command
@@ -44,7 +49,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, cast, override
 
-from clypi import arg
+from clypi import Command, arg
 from pydantic import Field
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
@@ -52,8 +57,6 @@ from nanopynix import NixSettingsEnv
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import Generator
-
     from pydantic.fields import FieldInfo
 
 #: What every ``--store`` used to default to, once per module.
@@ -205,19 +208,36 @@ class PynixNixSettings(NixSettingsEnv, _TableBackedSettings):
     trusted_public_keys: list[str] | None = Field(default_factory=lambda: list(DEFAULT_TRUSTED_PUBLIC_KEYS))
 
 
-_defaults: PynixDefaults | None = None
+class _Unset:
+    """The value of a configuration-backed option that the caller did not name.
 
+    A sentinel, and not ``None``, because of how clypi decides that an option is
+    a flag. ``clypi/_cli/arg_config.py:16`` returns an argument count of zero
+    only when the annotation *is* ``bool``; for ``bool | None`` it takes
+    ``max([0, 1])`` and the option starts demanding a value, so ``--flag``
+    fails with "Not enough values for flag".
 
-def defaults() -> PynixDefaults:
-    """The resolved ``[defaults]``, read once per process.
-
-    Cached because clypi calls ``default_factory`` once for each option it
-    fills, and every one of them would otherwise read the file again.
+    clypi never inspects what a ``default_factory`` returns, so a sentinel keeps
+    the annotation ``bool``, keeps the flag a flag, and still separates "absent"
+    from "explicitly false".
     """
-    global _defaults  # noqa: PLW0603 -- one process-wide cache, reset by the test fixture below
-    if _defaults is None:
-        _defaults = PynixDefaults()
-    return _defaults
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "<unset>"
+
+
+UNSET = _Unset()
+"""The one instance. Compare against it with ``is``."""
+
+#: The models an option resolves through, in priority order. The first model
+#: that declares a name owns it, and that matters for exactly one name:
+#: ``store``. :class:`PynixDefaults` means the store a command opens, and
+#: :class:`PynixNixSettings` inherits Nix's unrelated global of the same name.
+#: A command's ``--store`` is always the first. Without first-wins ownership the
+#: second model would resolve ``self.store`` a second time, to ``None``.
+_MODELS: tuple[type[BaseSettings], ...] = (PynixDefaults, PynixNixSettings)
 
 
 def nix_settings(**overrides: Any) -> PynixNixSettings:
@@ -226,67 +246,115 @@ def nix_settings(**overrides: Any) -> PynixNixSettings:
     A ``None`` override is dropped rather than applied, so an option the caller
     left alone keeps whatever the environment or the file said. This is the
     whole of the ordering: what reaches ``overrides`` is what a flag named.
+
+    A Nix setting that takes a list stays a plain flag of one string, and does
+    not go through :func:`option`. The flag spells such a setting the way
+    ``nix.conf`` does, in one space-separated string, and the model splits it.
+    :data:`UNSET` would make the resolved list reach the attribute, where the
+    command declares a string.
     """
     named = {key: value for key, value in overrides.items() if value is not None}
     return PynixNixSettings(**named)
 
 
-def reset_cache() -> None:
-    """Forget the cached ``[defaults]``. For a test that changes the environment."""
-    global _defaults  # noqa: PLW0603 -- see defaults()
-    _defaults = None
-
-
-@contextmanager
-def only_built_in_defaults() -> Generator[None]:
-    """Answer every option with its built-in default, inside this block.
-
-    ``docs/pynix/reference.md`` prints the default of each option, and it is a
-    checked-in file with a gate over it. Every ``default_factory`` here reads
-    the configuration file and the environment, so without this the generated
-    reference would say whatever the machine that ran the generator had
-    configured -- and the gate would then fail for the one developer who used
-    the feature that the reference documents.
-    """
-    global _defaults  # noqa: PLW0603 -- see defaults()
-    previous = _defaults
-    _defaults = PynixDefaults.model_construct()
-    try:
-        yield
-    finally:
-        _defaults = previous
-
-
 @no_runtime_type_check  # clypi's arg() returns a PartialConfig placeholder at
 # declaration time, not the annotated type -- see pynix.target.file_option
+def option(help: str, **kwargs: Any) -> Any:  # noqa: A002 -- clypi names the parameter `help`
+    """Declare an option whose default comes from the environment or the file.
+
+    The declared default is :data:`UNSET`, always, so nothing about this
+    declaration depends on the machine that runs it. That is what lets
+    ``docs/pynix/reference.md`` stay the same file everywhere.
+
+    A command that declares one of these must inherit :class:`ConfiguredCommand`,
+    which is what turns the sentinel back into a value.
+    ``tests/meta/test_configured_commands.py`` states that rule.
+    """
+    return arg(default_factory=lambda: UNSET, help=help, **kwargs)
+
+
+def _configured_fields(command: type[Command]) -> dict[type[BaseSettings], list[str]]:
+    """The options of *command* that :func:`option` declared, grouped by owner.
+
+    The declaration is the whole test: an option whose ``default_factory``
+    returns :data:`UNSET` is configuration-backed, and every other option is an
+    ordinary flag with an ordinary default. Reading the declaration keeps a name
+    that a model happens to share, such as ``substituters``, out of this.
+    """
+    owned: dict[type[BaseSettings], list[str]] = {}
+    for field, conf in command.options().items():
+        factory = conf.default_factory
+        if not callable(factory) or factory() is not UNSET:
+            continue
+        for model in _MODELS:
+            if field in model.model_fields:
+                owned.setdefault(model, []).append(field)
+                break
+        else:
+            raise TypeError(f"{command.__name__}.{field} uses option(), and no settings model declares it")
+    return owned
+
+
+class ConfiguredCommand(Command):
+    """A command whose configuration-backed options resolve when it is built.
+
+    The resolution happens in ``__init__`` rather than in each ``run``, so
+    ``self.store`` is never :data:`UNSET` and no command had to change to read
+    it. ``clypi.Command.__init__`` is an ordinary method, so this is a plain
+    override.
+
+    **The whole precedence lives in pydantic-settings.** What the caller typed
+    goes in as keyword arguments, which is the init source; the environment and
+    the file are the sources below it. clypi's only job is to say which options
+    the caller named.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        owned = _configured_fields(type(self))
+        named: dict[str, Any] = {
+            field: value
+            for fields in owned.values()
+            for field in fields
+            if (value := getattr(self, field, UNSET)) is not UNSET
+        }
+        #: The options the caller named on the command line. Neither an
+        #: environment variable nor the configuration file puts a name in here,
+        #: which is what makes this the right question for
+        #: ``Build._resolve_namespaced``.
+        #:
+        #: Declared here, and not in the class body: the clypi metaclass reads
+        #: every annotation of the body as a command-line option, and it then
+        #: refuses `frozenset[str]` because it has no parser for one.
+        self._explicit: frozenset[str] = frozenset(named)
+        for model, fields in owned.items():
+            resolved = model(**{field: named[field] for field in fields if field in named})
+            for field in fields:
+                setattr(self, field, getattr(resolved, field))
+
+
+@no_runtime_type_check  # see option
 def store_option(help: str = "Store URI to use.") -> str:  # noqa: A002 -- clypi names the parameter `help`
-    return arg(default_factory=lambda: defaults().store, help=help)
+    return option(help)
 
 
-@no_runtime_type_check  # see store_option
+@no_runtime_type_check  # see option
 def eval_store_option() -> str | None:
-    return arg(
-        default_factory=lambda: defaults().eval_store,
-        help="Store URI to evaluate with. Defaults to --store.",
-    )
+    return option("Store URI to evaluate with. Defaults to --store.")
 
 
-@no_runtime_type_check  # see store_option
+@no_runtime_type_check  # see option
 def verbosity_option() -> str | None:
-    return arg(
-        default_factory=lambda: defaults().verbosity,
-        help="Nix log verbosity: error, warn, notice, info, talkative, chatty, debug, vomit, or 0-7.",
-    )
+    return option("Nix log verbosity: error, warn, notice, info, talkative, chatty, debug, vomit, or 0-7.")
 
 
-@no_runtime_type_check  # see store_option
+@no_runtime_type_check  # see option
 def print_build_logs_option() -> bool:
-    return arg(
-        default_factory=lambda: defaults().print_build_logs,
+    return option(
+        "Print build log lines to stderr.",
         # Snake case, not the dashed spelling: clypi normalises the parsed
         # option to snake case before it compares against this. The negative
-        # exists because the default can now be true, and an option that a
+        # exists because the default can be true, and an option that a
         # configuration file turns on must stay possible to turn off.
         negative="no_print_build_logs",
-        help="Print build log lines to stderr.",
     )
