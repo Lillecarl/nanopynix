@@ -54,7 +54,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, NoReturn, cast, override
 from clypi import Command, arg
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
-from nanopynix import NixSettingsEnv
+from nanopynix import NixSettingsEnv, PrefixedEnvSettingsSource
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 
 if TYPE_CHECKING or BEARTYPING:
@@ -158,8 +158,19 @@ class _TableBackedSettings(BaseSettings):
 
         The built-in default of each field is last without being listed:
         pydantic uses it when no source names the field.
+
+        ``PrefixedEnvSettingsSource`` replaces the environment source that
+        pydantic-settings builds. Every model here gives its fields a dashed
+        alias, and pydantic-settings reads an alias as a second, unprefixed
+        environment name. ``store`` is the one that matters most in this
+        model: it is a common word, and it names which store a command opens.
+        The class of nanopynix carries the measurement.
         """
-        return (init_settings, env_settings, _ConfigFileSource(settings_cls, cls.config_table))
+        return (
+            init_settings,
+            PrefixedEnvSettingsSource(settings_cls),
+            _ConfigFileSource(settings_cls, cls.config_table),
+        )
 
 
 class PynixDefaults(_TableBackedSettings):
@@ -187,6 +198,13 @@ class PynixDefaults(_TableBackedSettings):
 class PynixNixSettings(NixSettingsEnv, _TableBackedSettings):
     """The Nix settings of a ``pynix`` command, from ``[nix]`` and ``PYNIX_NIX_*``.
 
+    **This class states its own source order, although both of its bases state
+    one.** ``NixSettingsEnv`` comes first in the method resolution order, and
+    its order names no configuration file, so inheriting it dropped the
+    ``[nix]`` table. Three tests catch that, and
+    ``test_every_table_backed_model_still_reads_its_table`` is the one that
+    names the reason rather than a symptom.
+
     It adds no field, and it holds no default. ``pynix`` used to give
     ``substituters`` and ``trusted-public-keys`` a default of its own, and a
     session sends every setting that is not ``None``, so a host that named a
@@ -208,6 +226,31 @@ class PynixNixSettings(NixSettingsEnv, _TableBackedSettings):
     # the environment lost to the configuration file with no message.
     model_config = SettingsConfigDict(**NixSettingsEnv.model_config)
     config_table: ClassVar[str] = NIX_TABLE
+
+    @classmethod
+    @override
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """The order of ``_TableBackedSettings``, and not the one of ``NixSettingsEnv``.
+
+        ``super(NixSettingsEnv, cls)`` starts the search after the base that
+        wins by default, so it reaches ``_TableBackedSettings`` with ``cls``
+        still bound to this class. ``cls.config_table`` is what needs that
+        binding: the base itself declares the name and holds no value for it.
+        """
+        return super(NixSettingsEnv, cls).settings_customise_sources(
+            settings_cls,
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+        )
 
 
 class _Unset:

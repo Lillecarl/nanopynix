@@ -67,6 +67,52 @@ gave it. Pass a {mod}`nanopynix.stores` model to get the session defaults.
 Each scope is also a class of its own, so a narrow parameter can ask for
 exactly what it uses and still accept the catch-all.
 
+### The environment
+
+{class}`~nanopynix.NixSettingsEnv` reads a setting from `PYNIX_NIX_` plus the
+field name, and from nothing else. That is stricter than pydantic-settings on
+its own: every field of the model carries its `nix.conf` key as an alias, and
+pydantic-settings takes an alias as a second environment name with no prefix
+in front of it. Thirteen Nix settings have a single-word key, and `stdenv`
+exports one of them, so a plain `system` in the environment used to replace
+what the `nix.conf` of the host says.
+
+{class}`~nanopynix.PrefixedEnvSettingsSource` is what removes the unprefixed
+name. Use it in `settings_customise_sources` for a settings model of your own
+that gives its fields an alias:
+
+<!-- example: settings_example.py#prefixed-env -->
+```python
+class MySettings(BaseSettings):
+    """A settings model whose fields answer to one environment name each.
+
+    Every field below carries a dashed alias, and pydantic-settings reads an
+    alias as a second environment name with no prefix. A bare ``cores`` in the
+    environment would otherwise reach ``cores`` here.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="MYTOOL_",
+        alias_generator=lambda name: name.replace("_", "-"),
+        populate_by_name=True,
+    )
+
+    cores: int | None = None
+    max_jobs: int | None = None
+
+    @classmethod
+    @override
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (init_settings, PrefixedEnvSettingsSource(settings_cls), dotenv_settings, file_secret_settings)
+```
+
 ### The search path
 
 `nix_path` is an eval setting, and `Session` also takes it as an argument of
@@ -103,6 +149,9 @@ its own. The more specific value wins:
    :members:
 
 .. autoclass:: nanopynix.NixSettingsEnv
+   :members:
+
+.. autoclass:: nanopynix.PrefixedEnvSettingsSource
    :members:
 
 .. autoclass:: nanopynix.NixSettingMetadata
