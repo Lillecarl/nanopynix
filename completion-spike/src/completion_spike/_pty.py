@@ -72,6 +72,16 @@ _TAB = "\t"
 #: in the output.
 _ESCAPE = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[\[\(][0-9;?>=<!]*[A-Za-z]|\x1b.")
 
+#: A command line whose last word is an option and its value written together,
+#: as in `demo build --attr=he`. `candidates` reads it to know that a shell may
+#: draw the whole word where another shell draws the value alone.
+_EQUALS_FORM = re.compile(r"(?:^|\s)--[^\s=]*=\S*$")
+
+#: What fish puts in front of a candidate whose beginning it did not draw. The
+#: pager shows `…ttr=hello` for `--attr=hello`, so the beginning is gone and
+#: cannot be recovered from the drawn text.
+_ELISION = "…"
+
 
 @dataclass(frozen=True)
 class ShellSpec:
@@ -307,15 +317,33 @@ def candidates(drawn: str, line: str) -> set[str]:
     The echo of what the caller typed is a piece too, and it goes the same way:
     `demo build --attr` holds spaces. A one-word echo, which is what a caller
     who typed a single word leaves, is removed by name.
+
+    **After `--attr=he` the three shells draw the same completion in two
+    shapes**, and this returns the value in both. bash and zsh draw `hello`,
+    because each replaces the value alone: bash breaks a word on `=`, and the
+    layer gives zsh a `compset -P '*='`. fish replaces the whole word, so it
+    draws `--attr=hello`, and its pager elides the beginning of a long word to
+    `…ttr=hello`. The value is what the three agree on, so a whole word is cut
+    back to its value here rather than in each test.
     """
     words = line.split()
     typed = set(words)
+    whole_word = _EQUALS_FORM.search(line) is not None
     found: set[str] = set()
     for piece in _pieces(drawn, words[0] if words else ""):
         if piece in typed or " " in piece or piece.startswith(("(", "-- ")):
             continue
-        found.add(piece)
+        found.add(_value_drawn(piece) if whole_word else piece)
     return found
+
+
+def _value_drawn(piece: str) -> str:
+    """*piece*, which may be a whole `--option=value` word, as the value.
+
+    A piece that is already the value has no `=` in it and comes back
+    unchanged, so this is safe to apply to every shell.
+    """
+    return piece.lstrip(_ELISION).split("=", 1)[-1]
 
 
 def completed_line(drawn: str, line: str) -> str:

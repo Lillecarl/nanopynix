@@ -127,3 +127,9 @@ def test_the_dynamic_layer_does_not_answer_another_option(shell: ShellSession) -
     """
     answer = shell.complete("demo build --help ")
     assert not set(CANDIDATES[DEFAULT_ENGINE]) & answer.candidates, answer.drawn
+
+
+def test_the_equals_form_completes_the_value(shell: ShellSession) -> None:
+    """`--attr=he` is one option and one value, written without a space."""
+    answer = shell.complete("demo build --attr=he")
+    assert answer.candidates == {"hello", "hello.x86_64-linux"}, answer.drawn

@@ -11,20 +11,24 @@ here therefore uses the extension point that its own shell already has:
   registers a function of its own that answers the dynamic case and delegates
   every other case to the generated one.
 
-A wrapper reads the word before the cursor to decide. It does not reach into
-the generated function, and it does not depend on how that function computes
-the command path.
+**A wrapper decides from the line, and not from the word array of the shell.**
+Each shell splits a line into words by its own rules, and the rules disagree
+exactly where a completion has to read: the default ``COMP_WORDBREAKS`` of bash
+holds ``=``, so bash makes three words of ``--attr=hel`` while fish and zsh make
+one. A guard that read the word before the cursor therefore answered ``--attr
+hel`` and missed ``--attr=hel``, in all three shells and for two different
+reasons. ``COMP_LINE`` in bash and ``BUFFER`` in zsh carry the line as the user
+typed it, so the guard reads those and cuts the last word itself. That is the
+same string that reaches `completion_spike._line`, which cuts it the same way.
+
+The word array is still read for the command path, where every shell agrees:
+``build`` holds no character that any of them breaks a word on.
 
 **The name of the generated function is read out of the generated script**, and
 not guessed. cyclopts calls it ``_cyclopts_demo`` in zsh and ``_demo`` in bash,
 and a guess that was right for one was wrong for the other. `entry_point` below
 is the single narrow coupling to cyclopts here, and it fails loudly rather than
 writing a script that calls a function that does not exist.
-
-Known gap, and it belongs to the spike rather than to this code: ``--attr=x``
-is one word in fish and zsh but three in bash, whose default
-``COMP_WORDBREAKS`` holds ``=``. The renderers below handle the separate-word
-form, which is what a shell produces when the user presses Tab after a space.
 """
 
 from __future__ import annotations
@@ -132,18 +136,28 @@ def _bash(program: str, values: tuple[DynamicValue, ...], static: str) -> list[s
     ``${COMP_LINE:0:$COMP_POINT}`` is the line up to the cursor. bash gives the
     whole line in ``COMP_LINE`` and the cursor in ``COMP_POINT``, and the part
     after the cursor is not context for a completion.
+
+    **bash replaces one word of ``COMP_WORDS``, and that word is not always the
+    value.** With ``--attr=`` the word under the cursor is ``=``, because ``=``
+    is in the default ``COMP_WORDBREAKS``. Writing ``hello`` into ``COMPREPLY``
+    there gives ``--attrhello``. The padding below puts back whatever of that
+    word is not the value, so the line becomes ``--attr=hello``.
     """
     generated = entry_point("bash", static)
     wrapper = f"{generated}_dynamic"
     lines = [
         f"{wrapper}() {{",
-        # Only the word before the cursor, which is what decides *whether* to
-        # answer. What to answer comes from the whole line, below.
-        "    local prev",
-        '    prev="${COMP_WORDS[COMP_CWORD-1]}"',
+        "    local line head prev cur value word pad",
+        '    line="${COMP_LINE:0:$COMP_POINT}"',
+        # The last word, and the one before it, cut out of the line. bash has
+        # `COMP_WORDS` for this and it splits on `=`, which is the whole
+        # problem, so the cutting happens here instead.
+        '    head="${line% *}"',
+        '    prev="${head##* }"',
+        '    cur="${line##* }"',
     ]
     for value in values:
-        guard = f'[[ "$prev" == "{value.option}" ]]'
+        guard = f'[[ "$prev" == "{value.option}" || "$cur" == "{value.option}="* ]]'
         for depth, word in enumerate(value.command_path, start=1):
             # The path words come in order, and each one sits at its own depth,
             # so this is an exact test of the command path and not a search for
@@ -151,8 +165,13 @@ def _bash(program: str, values: tuple[DynamicValue, ...], static: str) -> list[s
             guard += f' && [[ "${{COMP_WORDS[{depth}]}}" == "{word}" ]]'
         lines += [
             f"    if {guard}; then",
-            f'        mapfile -t COMPREPLY < <({program} {value.subcommand} --line "${{COMP_LINE:0:$COMP_POINT}}")',
-            "        return",
+            f'        mapfile -t COMPREPLY < <({program} {value.subcommand} --line "$line")',
+            '        value="$cur"',
+            f'        [[ "$cur" == "{value.option}="* ]] && value="${{cur#*=}}"',
+            '        word="${COMP_WORDS[COMP_CWORD]}"',
+            '        pad="${word%"$value"}"',
+            '        if [[ -n "$pad" ]]; then COMPREPLY=("${COMPREPLY[@]/#/$pad}"); fi',
+            "        return 0",
             "    fi",
         ]
     lines += [
@@ -176,23 +195,37 @@ def _zsh(program: str, values: tuple[DynamicValue, ...], static: str) -> list[st
 
     The delegation passes ``"$@"`` on, because zsh calls a completion function
     with the arguments of the context and the generated function reads them.
+
+    **zsh keeps ``--attr=hel`` as one word**, which is the opposite of what bash
+    does with it and wrong in the opposite way: ``compadd hello`` would replace
+    the option along with the value. ``compset -P '*='`` moves the ``--attr=``
+    part into ``IPREFIX``, so ``compadd`` completes the rest of the word only.
+    It matches nothing and changes nothing in the ``--attr hel`` spelling, so it
+    runs unconditionally.
     """
     generated = entry_point("zsh", static)
     wrapper = f"{generated}_dynamic"
     lines = [
         f"{wrapper}() {{",
-        "    local prev",
-        '    prev="${words[CURRENT-1]}"',
+        "    local line head prev cur",
+        '    line="${BUFFER[1,CURSOR]}"',
+        # `words` and `CURRENT` are here, and they hold `--attr=hel` as one
+        # word. Cutting the line is what makes this guard read the same as the
+        # bash one, and as `completion_spike._line`.
+        '    head="${line% *}"',
+        '    prev="${head##* }"',
+        '    cur="${line##* }"',
     ]
     for value in values:
-        guard = f'[[ "$prev" == "{value.option}" ]]'
+        guard = f'[[ "$prev" == "{value.option}" || "$cur" == "{value.option}="* ]]'
         for depth, word in enumerate(value.command_path, start=2):
             # `words[1]` is the program itself in zsh, so the path starts at 2.
             guard += f' && [[ "${{words[{depth}]}}" == "{word}" ]]'
         lines += [
             f"    if {guard}; then",
             "        local -a candidates",
-            f'        candidates=( ${{(f)"$({program} {value.subcommand} --line "${{BUFFER[1,CURSOR]}}")"}} )',
+            f'        candidates=( ${{(f)"$({program} {value.subcommand} --line "$line")"}} )',
+            "        compset -P '*='",
             "        compadd -a candidates",
             "        return",
             "    fi",
