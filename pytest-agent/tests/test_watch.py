@@ -29,6 +29,7 @@ from typing import Any
 
 import pytest
 from conftest import WAIT_TIMEOUT, run_cli, running_pytest, wait_until
+from pytest_agent._history import create_run_lock
 from pytest_agent._records import QueryError
 from pytest_agent._watch import (
     EXIT_CLEAN,
@@ -39,6 +40,7 @@ from pytest_agent._watch import (
     STATUS_GRACE,
     WatchOptions,
     WatchState,
+    _find_run,
     poll_once,
     watch,
 )
@@ -473,6 +475,55 @@ def test_watch_waits_for_an_agent_directory_that_does_not_exist_yet(tmp_path: Pa
     """
     with pytest.raises(QueryError, match="waited"):
         watch(str(tmp_path / "nothing-here"), None, WatchOptions(wait=0.0, poll=0.01))
+
+
+def test_a_reused_label_attaches_to_the_run_that_is_still_going(tmp_path: Path) -> None:
+    """The live match wins even when it is not the newest match.
+
+    Deliberately the older run: labels are documented as reusable, and the
+    workflow they exist for -- start the slow suite in the background, then do
+    focused runs while it goes -- produces exactly this shape when a focused
+    run reuses the name. The long one is still going and holds the *lower*
+    number, so "newest match" would answer with the short one that is already
+    over.
+
+    Written the other way round first, with the live run newest, and that
+    version passed with the fix reverted. A test that cannot fail pins
+    nothing.
+    """
+    live = _make_run(tmp_path, number=1, label="bg1")
+    create_run_lock(live)
+    later_but_finished = _make_run(tmp_path, number=2, label="bg1")
+    _write_summary(later_but_finished, passed=1)
+
+    assert _find_run(tmp_path, "bg1", accept_finished=False) == live
+    # ...and still, once the command is willing to take a finished run at all.
+    assert _find_run(tmp_path, "bg1", accept_finished=True) == live
+
+
+def test_a_label_matching_only_finished_runs_is_held_back_at_first(tmp_path: Path) -> None:
+    """The timing half of the same hazard, which is the one that bites.
+
+    A watcher armed in the seconds before tonight's run claims its directory
+    sees only last night's, and would report that one finished at once. Held
+    back rather than refused, because watching a run that is already over is a
+    reasonable thing to ask for -- it just must not win a race against the run
+    being started right now.
+    """
+    finished = _make_run(tmp_path, number=1, label="bg1")
+    _write_summary(finished, passed=1)
+
+    assert _find_run(tmp_path, "bg1", accept_finished=False) is None
+    assert _find_run(tmp_path, "bg1", accept_finished=True) == finished
+
+
+def test_a_run_number_is_taken_at_once_however_it_ended(tmp_path: Path) -> None:
+    # `--run 42` names one directory and can mean nothing else, so there is no
+    # race for it to lose and nothing to wait for.
+    finished = _make_run(tmp_path, number=42)
+    _write_summary(finished, passed=1)
+
+    assert _find_run(tmp_path, "42", accept_finished=False) == finished
 
 
 def test_watch_ignores_a_run_that_had_already_finished(tmp_path: Path) -> None:
