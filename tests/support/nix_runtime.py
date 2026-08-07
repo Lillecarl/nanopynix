@@ -173,6 +173,7 @@ def pytest_configure(config: pytest.Config) -> None:
         ),
         "evaluator_in_process: builds a Nix evaluator in the pytest process, without a fixture",
         "live_gc: test performs destructive garbage collection",
+        "forks_the_process: test calls fork() itself, so it cannot join a concurrency lane",
         "concurrency: test intentionally overlaps worker, executor, session, or log operations",
         "soak: runs the existing tests concurrently, for the ThreadSanitizer workflow",
         "l3_inproc: real in-process L3 worker tests with worker-side lifecycle inspection",

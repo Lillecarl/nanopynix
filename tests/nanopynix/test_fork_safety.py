@@ -54,7 +54,12 @@ _CHILD_DEADLINE_SECONDS = 30.0
 
 Outcome = tuple[str, str]
 
-pytestmark = pytest.mark.anyio
+# `forks_the_process` keeps every test here out of the concurrency soak. A lane
+# runs beside seven others, and a fork of a process in the middle of that work
+# keeps only the calling thread. The soak also lends one Session to every lane,
+# so the test below that needs a *second* Session cannot have one. See
+# `_DISQUALIFYING_MARKS` in tests/support/soak.py for the measurement.
+pytestmark = [pytest.mark.anyio, pytest.mark.forks_the_process]
 
 
 def _outcome_of(operation: Callable[[], Coroutine[Any, Any, object]]) -> Outcome:

@@ -392,6 +392,12 @@ WIRE_CLASSES = {
     # identity rather than a generic RuntimeError. See issue #37.
     "EvaluatorAbandonedError",
     "ForeignValueError",
+    # On the wire, and the worker is one of the processes that can raise it: a
+    # worker builds its own ``NixThreadExecutor`` pools, and each carries a
+    # fork guard of its own. A worker that forks answers with this rather than
+    # with a generic RuntimeError, and the class rebuilds from a message alone.
+    # Same reasoning as ``SettingNotLiveError`` below.
+    "ForkedSessionError",
     "HashMismatchError",
     "IndexError",
     "InfiniteRecursionError",
