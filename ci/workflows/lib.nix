@@ -514,12 +514,24 @@ let
                       fi
                       continue
                     fi
-                    rm -f "$RUNLOG" "$GCLOG"
+                    rm -f "$RUNLOG"
                     if [ "$status" -ne 0 ]; then
+                      # The collector log goes out here too, and not only on
+                      # the abort above. A stop-the-world that fails can hang
+                      # rather than abort, and then the status is the status
+                      # of pytest and the 134 branch never runs. Run
+                      # 31189073155 hit that: `test_soak_inproc[local]`
+                      # reached its 120s deadline with `nix-eval_0` inside
+                      # `lock_flake`, the status was 1, and these lines were
+                      # deleted unread. See issue #99.
+                      echo "=== Boehm resend log of run $i attempt $attempt ===" | tee -a "$LOGFILE"
+                      grep -E "Resent|Lost some threads|stop_world" "$GCLOG" | tail -40 | tee -a "$LOGFILE" || true
+                      rm -f "$GCLOG"
                       echo "::error::run $i failed with status $status -- see log above"
                       real_failure=1
                       break 2
                     fi
+                    rm -f "$GCLOG"
                     break
                   done
                 done
