@@ -37,6 +37,7 @@ from nanopynix_proto.nix.worker import (
     WorkerServiceStub,
 )
 
+from nanopynix._env import validate_session_env
 from nanopynix._fork import ForkGuard
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import DEFAULT_STORE_URI, WORKER_INIT_STATUS_OK
@@ -179,6 +180,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         store_uri: str = DEFAULT_STORE_URI,
         nix_conf: Path | None = None,
         load_config: bool = True,
+        env: Mapping[str, str] | None = None,
         settings: dict[str, str] | None = None,
         experimental_features: list[str] | None = None,
         verbosity: LogLevel | None = None,
@@ -195,6 +197,10 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         self._store_uri = store_uri
         self._nix_conf = nix_conf
         self._load_config = load_config
+        # Already validated by the Session that built this client. Validated
+        # again here rather than trusted, because this class is what the tests
+        # of the pool drive directly.
+        self._env = validate_session_env(env)
         self._settings = settings or {}
         self._features = experimental_features or []
         self._verbosity = verbosity
@@ -275,9 +281,11 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
 
         # A partial rather than a closure: grpclib_transports pickles the
         # factory through the forkserver, so it has to be a module-level
-        # function plus picklable arguments. An environment variable would not
-        # arrive at all -- the forkserver copies the environment once, when it
-        # starts, and reuses that copy for every child.
+        # function plus picklable arguments. An environment variable cannot
+        # ride along here at all -- the forkserver copies the environment once,
+        # when it starts, and reuses that copy for every child. That is why
+        # `env` travels on the InitRequest below instead, and why the worker
+        # applies it as its first act.
         service_factory = (
             worker_service_factory
             if self._namespace is None
@@ -347,6 +355,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
                 store_uri=self._store_uri,
                 nix_conf=str(self._nix_conf) if self._nix_conf is not None else None,
                 load_config=self._load_config,
+                env=self._env,
                 settings=self._settings,
                 experimental_features=self._features,
                 primops=proto_primops,

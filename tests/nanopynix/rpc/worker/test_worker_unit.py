@@ -179,6 +179,58 @@ async def test_init_writes_nix_conf_and_skips_empty_settings_render(monkeypatch:
     assert os.environ["NIX_USER_CONF_FILES"] == "/tmp/fake-nix.conf"
 
 
+async def test_init_puts_the_environment_in_place_before_libstore_loads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ordering an end-to-end test cannot see.
+
+    ``init_libstore`` is what calls ``loadConfFile``, so a value that is
+    already in ``os.environ`` when it runs is a value every later read of Nix
+    can see. Reading it from inside the stub is the only place that ordering is
+    observable.
+    """
+    name = "NANOPYNIX_TEST_INIT_ORDER"
+    seen: dict[str, str | None] = {}
+
+    def _noop(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    def _record(*_args: object, **_kwargs: object) -> None:
+        seen["at_init_libstore"] = os.environ.get(name)
+
+    monkeypatch.setattr(worker.nanopynix_util, "set_setting", _noop)
+    monkeypatch.setattr(worker.nanopynix_util, "enable_experimental_feature", _noop)
+    monkeypatch.setattr(worker.nanopynix_util, "init_libstore", _record)
+    monkeypatch.setattr(worker.nanopynix_util, "set_verbosity", _noop)
+    monkeypatch.setattr(worker, "_register_primops", _noop)
+    # Through monkeypatch rather than a plain assignment, so that its teardown
+    # removes what the handler writes. The worker itself never restores a name
+    # it sets, because a worker process is disposable and this one is not.
+    monkeypatch.setenv(name, "the value before init")
+
+    state = WorkerState()
+    state.executor = NixThreadExecutor()
+    state.rpc_bridge = _FakeBridge()  # type: ignore[assignment] -- only presence and start()/stop() matter to the initialization path
+    handler = WorkerServiceHandler(state)
+    message = InitRequest(
+        settings={},
+        nix_conf=None,
+        experimental_features=[],
+        load_config=False,
+        verbosity=None,
+        nix_path=[],
+        primops=[],
+        env={name: "the value the session named"},
+        request_id=1,
+    )
+
+    try:
+        response = await handler.init(message)
+    finally:
+        state.executor.shutdown()
+
+    assert response.status == "ok"
+    assert seen["at_init_libstore"] == "the value the session named"
+
+
 async def test_init_reports_and_reraises_initialization_failures(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
