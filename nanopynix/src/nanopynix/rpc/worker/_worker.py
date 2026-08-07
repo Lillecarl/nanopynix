@@ -29,11 +29,11 @@ import signal
 import sys
 import time
 import traceback
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import anyio
 import anyio.to_thread
-from grpclib_transports.stdio import serve_stdio
+from grpclib_transports.stdio import serve_stdio_with_backchannel
 from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
 from nanopynix_proto.nix.common import LogEvent, LogLevel, NixLogEvent, RequestFinalized
 from nanopynix_proto.nix.worker import (
@@ -69,6 +69,7 @@ from nanopynix.logging import LogCollector, LogOutbox, LogStreamEventKind, event
 from nanopynix.models import PrimOpSpec
 from nanopynix.namespace import enter_overlay_namespace
 from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC
+from nanopynix.rpc._worker_argv import parse_worker_argv
 from nanopynix.rpc.worker._grpc_util import wrap_service_handlers
 from nanopynix.rpc.worker._state import WorkerState as WorkerState
 from nanopynix.rpc.worker._worker_eval import EvalServiceHandler, close_eval_state, find_evals_by_store
@@ -81,11 +82,8 @@ from nanopynix.rpc.worker._worker_store import StoreServiceHandler
 from nanopynix.settings import DEFAULT_WORKER_MAX_CONCURRENCY
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import AsyncIterator, Collection
+    from collections.abc import AsyncIterator, Collection, Sequence
 
-    from grpclib._typing import (
-        IServable,  # type: ignore[reportPrivateUsage] -- named only in the cast in _stdio_main; see the comment there
-    )
     from grpclib_transports import WorkerBackchannel
 
     from nanopynix.namespace import OverlayNamespace
@@ -728,14 +726,21 @@ async def worker_child_teardown(handlers: Collection[WorkerServices]) -> None:
 # ── Stdio entry point (console_script / ``python -m nanopynix._worker``) ──
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     """Stdio entry point — serves gRPC over stdin/stdout.
 
-    This is the ``nanopynix-worker`` console_script target and also the
-    fallback for ``sys.executable -m nanopynix._worker``.
+    This is the ``nanopynix-worker`` console_script target, and also what
+    ``python -m nanopynix.rpc.worker`` runs. ``rpc/client/_pool.py`` starts a
+    worker the second way when ``worker_start`` is ``"stdio"``, and
+    ``grpclib_transports.ssh.connect_ssh_stdio`` starts one the first way on a
+    remote host.
+
+    ``argv`` is ``sys.argv[1:]`` by default. See
+    :mod:`nanopynix.rpc._worker_argv` for what it may hold and why.
     """
+    arguments = parse_worker_argv(argv)
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(_stdio_main())
+        asyncio.run(_stdio_main(namespace=arguments.namespace))
     _exit_now_if_nix_will_not_stop()
 
 
@@ -767,18 +772,32 @@ def _exit_now_if_nix_will_not_stop() -> None:
     os._exit(0)
 
 
-async def _stdio_main() -> None:
-    handlers = worker_service_factory()
-    await serve_stdio(
-        # The one place the protocol has to be named, because `serve_stdio`
-        # declares `list[IServable]` and `list` is invariant. Its sibling
-        # `serve_multiprocessing_endpoint` declares `Collection[IServable]`,
-        # which is covariant and needs no cast -- so this is an asymmetry in
-        # grpclib-transports rather than anything the handlers lack. A cast
-        # here, and not an annotation, keeps beartype able to check both
-        # functions above; see UNDECORATABLE in
-        # tests/nanopynix/test_beartype_instrumentation.py.
-        cast("list[IServable]", handlers),
+async def _stdio_main(*, namespace: OverlayNamespace | None = None) -> None:
+    """Serve one worker over stdin and stdout, and then tear it down.
+
+    ``serve_stdio_with_backchannel``, and not the plain ``serve_stdio`` this
+    used to call. The multiprocessing path always had the backchannel, and
+    without it this one could not serve a session at all: ``_init_nix`` raises
+    ``worker rpc_bridge is unavailable`` for **every** ``Init``, and not only
+    for one that registers an RPC primop. Measured, by putting the old call
+    back. So ``connect_ssh_stdio`` against ``nanopynix-worker`` could not have
+    worked either.
+
+    The list collects what the factory built, because
+    ``serve_stdio_with_backchannel`` returns nothing and ``_shutdown_worker``
+    needs the handlers. No ``child_teardown`` parameter goes into the
+    transport for this: unlike the multiprocessing child, whose body lives in
+    the library, this body is ours.
+    """
+    handlers: list[WorkerServices] = []
+
+    def build(backchannel: WorkerBackchannel) -> list[WorkerServices]:
+        built = worker_service_factory(backchannel, namespace=namespace)
+        handlers.extend(built)
+        return built
+
+    await serve_stdio_with_backchannel(
+        build,
         max_concurrency=DEFAULT_WORKER_MAX_CONCURRENCY,
         status_details_codec=NIX_STATUS_DETAILS_CODEC,
     )

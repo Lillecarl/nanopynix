@@ -149,6 +149,29 @@ class TestNamespacedWorker:
             async with session.store() as store:
                 assert await store.store_dirs()
 
+    async def test_a_stdio_worker_enters_the_namespace_too(
+        self, namespace_support: nanopynix.NamespaceSupport, tmp_path: Path
+    ) -> None:
+        """The spec reaches an exec'd worker, which can unpickle nothing.
+
+        ``worker_start="stdio"`` carries the namespace as JSON on the command
+        line instead -- see :mod:`nanopynix.rpc._worker_argv`. The store
+        directories are the assertion, because they are what the mount
+        changes: a worker that never entered the namespace would answer with
+        the host's own state directory.
+        """
+        spec = nanopynix.OverlayNamespace.under(tmp_path)
+        async with (
+            nanopynix.rpc.Session(
+                namespace=spec,
+                runtime_settings=nanopynix.NanopynixSettings(worker_start="stdio"),
+            ) as session,
+            session.store() as store,
+        ):
+            dirs = await store.store_dirs()
+            assert dirs.store_dir == STORE_DIR
+            assert dirs.state_dir == spec.state_dir
+
     async def test_a_build_lands_in_the_upper_layer_and_not_on_the_host(
         self,
         namespace_support: nanopynix.NamespaceSupport,

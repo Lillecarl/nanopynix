@@ -48,7 +48,7 @@ UNMIRRORED: dict[str, str] = {
         "copies a closure into the host `daemon` store. CI runners differ on "
         "the first, and the second writes outside any store this suite owns."
     ),
-    "docs/nanopynix/api/process.md:111": (
+    "docs/nanopynix/api/process.md:136": (
         "Needs a reachable remote host and a bastion in front of it, which is "
         "the whole point of the block: `NIX_SSHOPTS` exists because "
         "`ProxyJump` has no store-URI equivalent. "

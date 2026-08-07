@@ -30,7 +30,9 @@ calling thread, and they run once, at start.
 Also note that the configuration cannot travel in an environment variable. The
 forkserver takes a copy of the environment when it starts, and it reuses that
 copy for every later child, so a variable set after that point never arrives.
-The spec travels as a pickled argument instead.
+The spec travels as a pickled argument instead, and -- to a worker that starts
+by ``exec``, which can unpickle nothing -- as JSON on the command line. See
+:mod:`nanopynix.rpc._worker_argv`.
 """
 
 from __future__ import annotations
@@ -47,6 +49,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from grpclib_transports.multiprocessing import main_module_not_reexecuted
+from pydantic import ConfigDict
 
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.stores import LocalOverlay
@@ -111,6 +114,20 @@ class OverlayNamespace:
 
     ``work_dir`` must be on the same filesystem as ``upper_dir``, and must not
     be inside it. OverlayFS requires both.
+    """
+
+    __pydantic_config__ = ConfigDict(extra="forbid")
+    """How pydantic validates this class when it arrives as JSON.
+
+    A stdio worker receives its namespace on the command line, and
+    ``nanopynix.rpc._worker_argv`` reads it back with a
+    :class:`pydantic.TypeAdapter`. The default configuration **accepts an
+    unknown key and discards it**, measured, so a misspelt field would give
+    the worker a namespace that is not the one the client asked for, and say
+    nothing. ``extra="forbid"`` is what makes that a refusal.
+
+    It is a class attribute and nothing else: the class stays a plain frozen
+    dataclass, and every other user of it is unaffected.
     """
 
     upper_dir: str

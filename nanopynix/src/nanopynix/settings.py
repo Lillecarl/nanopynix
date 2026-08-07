@@ -1002,8 +1002,13 @@ class NanopynixSettings(BaseSettings):
 
     See :data:`DEFAULT_WORKER_PRELOAD` for what it costs to empty it."""
 
-    worker_start: Literal["auto", "forkserver", "spawn"] = "auto"
-    """Which ``multiprocessing`` start method brings up a worker process.
+    worker_start: Literal["auto", "forkserver", "spawn", "stdio"] = "auto"
+    """How a worker process is brought up.
+
+    Three of the four values name a ``multiprocessing`` start method.
+    ``stdio`` names something else: an ``exec`` of
+    ``python -m nanopynix.rpc.worker``, spoken to over that process's stdin
+    and stdout. See below.
 
     ``auto`` is ``spawn`` when this process is a fork, and ``forkserver``
     otherwise. That is the whole reason the setting exists.
@@ -1031,7 +1036,38 @@ class NanopynixSettings(BaseSettings):
 
     Name a method to pin it, when a caller knows better than ``auto`` does --
     a process that forks after it opens a session, for example, where the
-    session outlives the fork and the cost is paid once."""
+    session outlives the fork and the cost is paid once.
+
+    **``stdio`` is the one value with no ``multiprocessing`` in it at all.**
+    It execs a fresh interpreter for each worker, so it works from any process
+    state, it lets each worker be a different build of the extension, and it
+    is the only shape that can set a name Nix reads while ``libnixstore``
+    loads -- an exec sets the environment before the interpreter starts. See
+    issues #47 and #102 for the second and the third.
+
+    Two things do not reach an exec, and a caller has to know both:
+
+    * :attr:`worker_preload` buys nothing, for the same reason it buys nothing
+      under ``spawn``: there is no prepared parent to fork from.
+    * A directory this process added to ``sys.path`` at run time does not
+      travel. The forkserver inherits ``sys.path`` and ``spawn`` pickles it;
+      an exec reads ``PYTHONPATH`` and the installation, and nothing else.
+
+    Measured on one host, the median of four, opening a session and closing
+    it again::
+
+        forkserver     49 ms      (warm; the first one pays the preload)
+        spawn         920 ms
+        stdio         910 ms
+
+    **This is a different measurement from the two figures above, and not a
+    correction of them.** Those time ``Process.start()`` alone. These time
+    everything a caller waits for: the start, the import of nanopynix and its
+    bindings into a fresh interpreter, and ``Init``. A fresh interpreter
+    importing ``nanopynix.rpc.worker._worker`` is ~780 ms of the second and
+    third rows, and neither exec method can avoid it. The two exec methods
+    therefore cost the same to within the noise, and ``stdio`` is not the
+    expensive option that having no preload suggests."""
 
 
 @no_runtime_type_check  # settings validates its own type at runtime for untyped

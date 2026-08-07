@@ -102,6 +102,31 @@ Nothing needs to be set for the common case. Name a method to pin one, and read
 that setting for what the choice costs — `forkserver` is much cheaper per
 worker, because its preload is shared.
 
+### A worker that is not a `multiprocessing` child
+
+`worker_start="stdio"` is the fourth value, and the only one with no
+`multiprocessing` in it. It runs `python -m nanopynix.rpc.worker` and speaks
+gRPC over that process's stdin and stdout. `nanopynix-worker`, the console
+script, is the same program; `grpclib_transports.ssh.connect_ssh_stdio` runs it
+on a remote host, which is the one SSH mode that reaches a machine running
+OpenSSH.
+
+Three things follow from an `exec` that no start method above can give:
+
+- **It works from any process state.** There is no forkserver singleton to
+  inherit and no pid check to fail.
+- **Each worker may be a different build.** The forkserver imports the
+  extension once and every worker of that process is a fork of it, so one
+  process gets one build.
+- **It sets the environment before Nix loads.** Every other start method has
+  the library loaded before a worker exists. See the refused names below.
+
+It costs about what `spawn` costs — roughly 900 ms against 49 ms for a warm
+`forkserver` — because both import nanopynix into a fresh interpreter. Two
+things do not travel: `worker_preload` buys nothing, and a directory this
+process added to `sys.path` at run time is not there. Set `PYTHONPATH`, or
+install the package.
+
 ## The environment of a session
 
 Both engines take `env`, a mapping this session puts in the environment of the
