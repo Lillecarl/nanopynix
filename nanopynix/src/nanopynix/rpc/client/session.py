@@ -25,6 +25,7 @@ import anyio
 from nanopynix_proto.nix.common import LogLevel
 
 from nanopynix._core._primops import to_primop_specs
+from nanopynix._env import validate_session_env
 from nanopynix._process_title import set_manager_title
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import DEFAULT_STORE_URI
@@ -99,16 +100,18 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
                 info = await store.query_path_info(str(sp))
     """
 
-    @no_runtime_type_check  # nix_conf/settings validate their own types at runtime for
-    # untyped callers (see the isinstance guards below); beartype's parameter
-    # check would otherwise intercept before that guard runs and raise its own
-    # exception type instead of the documented TypeError.
+    @no_runtime_type_check  # nix_conf/settings/env validate their own types at runtime
+    # for untyped callers (see the isinstance guards below, and
+    # nanopynix._env.validate_session_env); beartype's parameter check would
+    # otherwise intercept before that guard runs and raise its own exception
+    # type instead of the documented TypeError.
     def __init__(  # noqa: PLR0913 -- tracked complexity/arg-count debt, see TODO.md
         self,
         *,
         store_uri: StoreConfig | str = DEFAULT_STORE_URI,
         nix_conf: Path | None = None,
         load_config: bool = True,
+        env: Mapping[str, str] | None = None,
         settings: NixSettings | PathLike[str] | str | None = None,
         experimental_features: list[str] | None = None,
         verbosity: LogLevelInput | None = None,
@@ -125,6 +128,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
                 raise TypeError("nix_conf must be a pathlib.Path or None")
             if not nix_conf.exists():
                 raise FileNotFoundError(nix_conf)
+        env = validate_session_env(env)
         nix_settings = normalize_nix_settings(settings).with_experimental_features(experimental_features)
         if namespace is not None:
             nix_settings = nix_settings.with_experimental_features([EXPERIMENTAL_FEATURE])
@@ -167,6 +171,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
             store_uri=store_uri,
             nix_conf=nix_conf,
             load_config=load_config,
+            env=env,
             settings=worker_settings,
             experimental_features=list(nix_settings.experimental_features or []),
             verbosity=normalize_log_level(verbosity) if verbosity is not None else None,

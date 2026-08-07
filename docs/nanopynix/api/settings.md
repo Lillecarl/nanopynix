@@ -113,6 +113,12 @@ class MySettings(BaseSettings):
         return (init_settings, PrefixedEnvSettingsSource(settings_cls), dotenv_settings, file_secret_settings)
 ```
 
+This section is about the environment nanopynix *reads*. For the environment a
+session *writes* — `Session(env=...)`, which reaches the process where Nix runs
+— see the "environment of a session" section of {doc}`process`.
+Several names are refused there because a setting already carries them,
+`ssl_cert_file` and `builders` among them.
+
 ### The search path
 
 `nix_path` is an eval setting, and `Session` also takes it as an argument of

@@ -101,3 +101,66 @@ gets `ChildProcessError`.
 Nothing needs to be set for the common case. Name a method to pin one, and read
 that setting for what the choice costs — `forkserver` is much cheaper per
 worker, because its preload is shared.
+
+## The environment of a session
+
+Both engines take `env`, a mapping this session puts in the environment of the
+process where Nix runs. It merges over the environment that process already
+has, and the mapping wins.
+
+```python
+async with nanopynix.rpc.Session(
+    store_uri="ssh-ng://web01",
+    env={"NIX_SSHOPTS": "-o ProxyJump=bastion.example.net"},
+) as session:
+    ...
+```
+
+`NIX_SSHOPTS` is the case this exists for. `ProxyCommand` and `ProxyJump` have
+no store-URI equivalent, unlike `ssh-key` and `compress`, so a host behind a
+bastion is otherwise unreachable. Setting the variable in the calling process
+does not work for `nanopynix.rpc`: the forkserver copies its environment once,
+when it starts, and every later worker gets that copy.
+
+The worker applies the mapping as its first act, before `initLibStore` and
+therefore before `loadConfFile`. It never puts the names back, because a worker
+process is disposable. An `nanopynix.inproc` session is in the caller's own
+process, which is not disposable, so it saves each name it sets and restores it
+on `close()`.
+
+### The names a session refuses
+
+**A name Nix reads while `libnixstore` loads is refused, and refused on both
+engines.** Nix reads these while the library loads, which is when the bindings
+are imported — before either engine has a session to carry a mapping. The rpc
+worker imports the bindings in the forkserver, and an inproc caller imported
+them to construct the session at all. A value passed for one of these names
+would do nothing and report nothing, so the session raises `ValueError` and
+names the route that works.
+
+| refused name | use instead |
+|---|---|
+| `NIX_STORE_DIR`, `NIX_STORE` | `stores.Local(store_dir=...)` |
+| `NIX_STATE_DIR` | `stores.Local(state=...)` |
+| `NIX_LOG_DIR` | `stores.Local(log=...)` |
+| `NIX_DAEMON_SOCKET_PATH` | `stores.Daemon(socket=...)` |
+| `NIX_SSL_CERT_FILE`, `SSL_CERT_FILE` | `NixSettings(ssl_cert_file=...)` |
+| `NIX_REMOTE_SYSTEMS` | `NixSettings(builders=[...])` |
+| `NIX_DATA_DIR`, `NIX_CONF_DIR`, `NIX_IGNORE_SYMLINK_STORE` | the environment of the whole process, before it imports nanopynix |
+
+The set is the union over every supported version of Nix, and it does not
+change with the version this environment linked. Nix moves such a read from the
+constructor of a global object to a function with a local static from one
+version to the next — `NIX_USER_CONF_FILES` did exactly that between 2.31 and
+2.34 — and one program must not get two answers because of it.
+
+**A name a session parameter already owns is refused for the same reason:**
+`NIX_USER_CONF_FILES` (use `nix_conf=`), `NIX_CONFIG` (use `settings=`),
+`NIX_REMOTE` (use `store_uri=`) and `NIX_PATH` (use `nix_path=`). `NIX_CONFIG`
+is the least obvious and the clearest: a session with `load_config=False` never
+calls `loadConfFile`, which is the only code that reads that variable, so the
+value would vanish for exactly the caller who asked for the most control.
+
+Everything else passes through. Nix reads `NIX_SSHOPTS` when a store opens its
+SSH connection, the proxy variables when it fetches, and `TMPDIR` when it
+builds, and all three are long after the session applies the mapping.

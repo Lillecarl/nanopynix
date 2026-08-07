@@ -152,6 +152,23 @@ class WorkerServiceHandler(WorkerServiceBase):
     async def init(self, message: InitRequest) -> InitResponse:
         """Bootstrap Nix without splitting its global state across threads."""
         try:
+            # **First, and before every other line of this handler.** Nix reads
+            # `NIX_SSHOPTS` when a store opens its SSH connection, the proxy
+            # variables when it fetches, and `TMPDIR` when it builds, so all of
+            # those only need to precede the operation that reads them. The
+            # binding that matters is `loadConfFile`, which runs inside
+            # `initialize` below.
+            #
+            # A name Nix reads while `libnixstore` loads never arrives here at
+            # all: the forkserver preloads this module, so the library is
+            # loaded before a worker exists. The client refuses those names
+            # rather than let them do nothing -- see nanopynix._env.
+            #
+            # Nothing puts this back. The worker process is disposable, which
+            # is the same reason the `nix_conf` line below leaves its
+            # assignment in place. `inproc.Session._restore_environment` states
+            # the other half of the rule, for a process that is not.
+            os.environ.update(message.env)
             settings = dict(message.settings)
             # NIX_USER_CONF_FILES must be in place before libstore reads
             # configuration, because `loadConfFile` is what reads it. It is an

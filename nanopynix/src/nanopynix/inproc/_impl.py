@@ -25,6 +25,7 @@ from nanopynix._core._nix_core import build_mode_value
 from nanopynix._core._nix_executor import NIX_EVALUATOR_STACK_SIZE, NixThreadExecutor
 from nanopynix._core._objects import CoreEvalState, CoreLockedFlake, CoreRuntime, CoreStore, CoreValue
 from nanopynix._core._primops import register_import_path_primops, to_primop_specs
+from nanopynix._env import validate_session_env
 from nanopynix._fork import ForkGuard
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import (
@@ -276,15 +277,17 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
     owns one separate Nix thread.
     """
 
-    @no_runtime_type_check  # nix_conf validates its own type at runtime for untyped
-    # callers (see the isinstance guard below); beartype's parameter check
-    # would otherwise intercept before that guard runs and raise its own
-    # exception type instead of the documented TypeError.
+    @no_runtime_type_check  # nix_conf/env validate their own types at runtime for
+    # untyped callers (see the isinstance guard below, and
+    # nanopynix._env.validate_session_env); beartype's parameter check would
+    # otherwise intercept before that guard runs and raise its own exception
+    # type instead of the documented TypeError.
     def __init__(  # noqa: PLR0913 -- tracked complexity/arg-count debt, see TODO.md
         self,
         *,
         nix_conf: Path | None = None,
         load_config: bool = True,
+        env: Mapping[str, str] | None = None,
         settings: NixSettings | PathLike[str] | str | None = None,
         experimental_features: Sequence[str] | None = None,
         verbosity: LogLevelInput | None = None,
@@ -300,6 +303,9 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
                 raise FileNotFoundError(nix_conf)
         self._nix_conf = nix_conf
         self._load_config = load_config
+        # The same refusals as rpc, for a stronger reason: Nix loaded when this
+        # process imported nanopynix, which is before this constructor ran.
+        self._env = validate_session_env(env)
         self._settings = normalize_nix_settings(settings).with_experimental_features(list(experimental_features or []))
         self._verbosity = normalize_log_level(verbosity) if verbosity is not None else None
         # The live level, which the session owns because the bindings hold it
@@ -341,11 +347,11 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         self._operation_ids = itertools.count(1)
         self._evals: set[EvalSession] = set()
         self._stores: set[Store] = set()
-        # What `NIX_USER_CONF_FILES` held before `open` set it. `None` is a
-        # real value here -- "the process did not have it" -- so the flag is
-        # separate rather than encoded into the same attribute.
-        self._nix_conf_env_saved = False
-        self._nix_conf_env_before: str | None = None
+        # What the environment held before `open` set each name of it. `None`
+        # is a real value here -- "the process did not have this name" -- so an
+        # absent key means "open set nothing" and a key holding `None` means
+        # "open added this name".
+        self._env_before: dict[str, str | None] = {}
         # `close` reads this. Every *operation* is refused one level down, by
         # the executor's own guard, because `EvalSession.run` reaches its
         # executor without passing through this class at all.
@@ -367,10 +373,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         self._executor = executor
         logger_installed = False
         try:
-            if self._nix_conf is not None:
-                self._nix_conf_env_before = os.environ.get(NIX_USER_CONF_FILES_ENV)
-                self._nix_conf_env_saved = True
-                os.environ[NIX_USER_CONF_FILES_ENV] = str(self._nix_conf)
+            self._apply_environment()
             nanopynix_util.install_logger(self._collector.callback)
             logger_installed = True
             await executor.run(self._init_nix)
@@ -392,32 +395,45 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
                     executor.shutdown(wait=True)
                 finally:
                     self._executor = None
-                    self._restore_nix_conf_env()
+                    self._restore_environment()
                     _process_guard.release(self)
             raise
 
-    def _restore_nix_conf_env(self) -> None:
-        """Put ``NIX_USER_CONF_FILES`` back the way ``open`` found it.
+    def _apply_environment(self) -> None:
+        """Set what this session names in the environment, and save what it replaced.
 
-        The variable is an input Nix reads once, in ``loadConfFile``, while
-        ``initialize`` runs. Nothing looks at it again, so putting it back
-        costs the session nothing.
+        ``env`` first and ``nix_conf`` after it, although the two cannot
+        collide: ``NIX_USER_CONF_FILES`` is a name ``validate_session_env``
+        refuses, because this session parameter already owns it.
 
-        The RPC worker sets the same variable and never restores it, and there
+        Nix reads each of these at a different moment -- ``NIX_USER_CONF_FILES``
+        in ``loadConfFile``, ``NIX_SSHOPTS`` when a store opens its SSH
+        connection -- and the latest of them is still after ``open`` returns.
+        So one assignment here serves all of them.
+        """
+        pending = dict(self._env)
+        if self._nix_conf is not None:
+            pending[NIX_USER_CONF_FILES_ENV] = str(self._nix_conf)
+        for name, value in pending.items():
+            self._env_before[name] = os.environ.get(name)
+            os.environ[name] = value
+
+    def _restore_environment(self) -> None:
+        """Put every name ``open`` set back the way ``open`` found it.
+
+        The RPC worker sets the same names and never restores them, and there
         that is correct: the worker process is disposable. This process is not.
-        Leaving the assignment behind changed the environment of the whole
+        Leaving the assignments behind changed the environment of the whole
         program for every later use of Nix in it, including one by a library
         that never opened a session.
         """
-        if not self._nix_conf_env_saved:
-            return
-        self._nix_conf_env_saved = False
-        previous = self._nix_conf_env_before
-        self._nix_conf_env_before = None
-        if previous is None:
-            os.environ.pop(NIX_USER_CONF_FILES_ENV, None)
-        else:
-            os.environ[NIX_USER_CONF_FILES_ENV] = previous
+        saved = self._env_before
+        self._env_before = {}
+        for name, previous in saved.items():
+            if previous is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = previous
 
     def _initialization_signature(self) -> tuple[object, ...]:
         # The globals only, because process-global state is all this guard
@@ -434,6 +450,11 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         # allows -- two spellings of one per-evaluator setting, disagreeing.
         return (
             self._nix_conf,
+            # Process-global, which is exactly what this guard guards: `open`
+            # writes it into `os.environ`, and Nix reads it from there. Two
+            # sessions that name different values for one variable cannot both
+            # be right in one process.
+            tuple(sorted(self._env.items())),
             self._load_config,
             tuple(sorted(self._global_settings.items())),
             # Part of the key, because the features are no longer a setting:
@@ -517,7 +538,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
                 errors.append(exc)
             self._executor = None
             self._opened = False
-            self._restore_nix_conf_env()
+            self._restore_environment()
             _process_guard.release(self)
             # The teardown marker. It ends every `log_stream` iterator, and
             # inproc did not send it: the forwarding task simply stopped, so

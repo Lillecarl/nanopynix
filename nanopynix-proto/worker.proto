@@ -28,6 +28,10 @@ message InitRequest {
   optional nix.common.LogLevel verbosity = 9;
   repeated string nix_path = 10;
   bool load_config = 11;
+  // Merged over the environment the worker inherited, before Nix initialises.
+  // Only names Nix reads after `initLibStore` can travel here, and the client
+  // refuses the rest -- see nanopynix._env.
+  map<string, string> env = 12;
 }
 
 message InitResponse {
