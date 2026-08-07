@@ -1740,6 +1740,14 @@ static std::atomic<long> gc_owner_thread_id{0};
 // fixtures of this repository do exactly that. A rule that one Python function
 // has to obey is a rule that every other entry point breaks.
 //
+// **`PyEvalState::init` calls this, which is what makes that true.** It used
+// to say only what `init_libexpr` did, and `nanopynix.EvalState(store)`
+// therefore ran with no collector at all: bdwgc aborts first, in
+// `GC_register_my_thread`, and `nix::EvalState`'s own `assertGCInitialized()`
+// waits behind it. That is issue #54, and the fork it was found in was
+// incidental -- a forked child is simply a process where nothing had called
+// `init_libexpr` yet.
+//
 // Not at import, either. bdwgc installs no atfork handlers unless something
 // calls `GC_set_handle_fork` before `GC_INIT`, and `GC_handle_fork` is FALSE
 // by default. A forkserver parent that only imports this module must not bring
@@ -1749,7 +1757,7 @@ static std::atomic<long> gc_owner_thread_id{0};
 // `std::call_once` is what makes two concurrent sessions safe. The
 // `gcInitialised` flag that `nix::initGC` tests is a plain `static bool` with
 // no mutex, so two threads can otherwise both enter it.
-static void init_gc_on_the_owner_thread() {
+void nanopynix_start_gc_owner_thread() {
     static std::once_flag once;
     std::call_once(once, [] {
         std::promise<void> ready;
@@ -1899,7 +1907,7 @@ void nanopynix_bind_expr(nb::module_ &m) {
     // registration nix_flake.cpp already does covers every EvalState.
 
     m.def("init_libexpr", []() {
-        init_gc_on_the_owner_thread();
+        nanopynix_start_gc_owner_thread();
         auto &f = nix::experimentalFeatureSettings.experimentalFeatures.get();
         f.insert(nix::Xp::FetchTree);
     }, nb::call_guard<nb::gil_scoped_release>());

@@ -134,5 +134,5 @@
    :show-inheritance:
 
 .. autofunction:: grpclib_transports.multiprocessing_pipe_pair
-.. autofunction:: grpclib_transports.get_forkserver_context
+.. autofunction:: grpclib_transports.get_worker_context
 ```

@@ -82,11 +82,13 @@ IN_PROCESS_EVALUATOR_FIXTURES = frozenset({"eval_state", "inproc_session"})
 # suite passed 2077 tests at a 3 GB peak in 12 minutes, and the in-process
 # subset alone fell from about 10 GB to 297 MB.
 #
-# A forked child that constructs its own `EvalState` aborts unless
-# `init_libexpr` ran in the parent first, because `EvalState` asserts that
-# `initGC` ran and an assert is not catchable. `TestGitFetcherSettings` is the
-# one place that does this, and it takes the `init_expr` fixture for the
-# ordering. Issue #54 carries the library-side correction.
+# A forked child that constructed its own `EvalState` used to abort, unless
+# `init_libexpr` ran in the parent first. Neither abort was catchable: bdwgc
+# refuses `GC_register_my_thread` before `GC_INIT`, and behind that Nix
+# asserts that `initGC` ran. `PyEvalState::init` now starts the collector
+# itself, so any process can build an evaluator with no ordering rule to obey.
+# Issue #54, and `TestGitFetcherSettings` no longer takes an ordering fixture
+# for it.
 #
 # Forking is not free. A forked test pays for every session-scoped fixture
 # again, because a fixture built in a child dies with the child.

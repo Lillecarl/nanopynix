@@ -134,6 +134,10 @@ class _InprocProcessGuard:
         #: Which process put `_active_session` here. A fork inherits both.
         self._active_pid: int | None = None
         self._initialization_signature: tuple[object, ...] | None = None
+        #: Which process initialized Nix here. Never cleared, because Nix
+        #: initialization cannot be undone. A fork inherits it, and a pid that
+        #: is not this one is what says the collector belongs to somebody else.
+        self._initialized_pid: int | None = None
 
     def acquire(self, session: Session, signature: tuple[object, ...]) -> None:
         # Read before the lock, and answered before the lock. A fork keeps only
@@ -161,6 +165,25 @@ class _InprocProcessGuard:
                 "Nix is already initialized in this address space by a process that is not this one, "
                 "so this process cannot open a session. Fork first, then open."
             )
+        # **A closed session leaves the collector behind, and that is the
+        # point.** `release` clears `_active_session`, so the check above sees
+        # nothing after a parent closes its session and forks. Nix
+        # initialization cannot be undone: `init_libexpr` parks a `nix-gc-owner`
+        # thread that owns Boehm's one static `first_thread` entry and never
+        # exits, and `fork()` keeps only the calling thread. A child that opens
+        # a "fresh" session over that entry gets a collector whose owner is a
+        # tid that does not exist -- issues #53, #69 and #72.
+        #
+        # Second, and not first: the message above names an *open* session,
+        # which is the more specific diagnosis when both apply.
+        initializer = self._initialized_pid
+        if initializer is not None and initializer != os.getpid():
+            raise ForkedSessionError(
+                f"this process is a fork of process {initializer}, which initialized Nix in this address space. "
+                "The collector belongs to a thread that the fork did not keep, so this process cannot open an "
+                "inproc session at all, even a new one. Fork first, then open -- or use nanopynix.rpc, whose "
+                "worker is a process of its own."
+            )
         with self._lock:
             active = self._active_session
             if active is not None and active is not session:
@@ -177,6 +200,7 @@ class _InprocProcessGuard:
         with self._lock:
             if self._initialization_signature is None:
                 self._initialization_signature = signature
+                self._initialized_pid = os.getpid()
 
     def release(self, session: Session) -> None:
         with self._lock:

@@ -1,9 +1,18 @@
-"""A session held across ``fork()`` refuses to work, on both engines.
+"""What a ``fork()`` does to a session, and what a forked child may open next.
 
-Issue #64. ``ansible-core`` pins ``multiprocessing.get_context('fork')`` and
-forks once for each (host, task) pair, so a session that is open when a plugin
-returns reaches every child. Neither engine noticed, and each failed somewhere
-other than the fork.
+Issues #64 and #100. ``ansible-core`` pins
+``multiprocessing.get_context('fork')`` and forks once for each (host, task)
+pair, so a session that is open when a plugin returns reaches every child.
+Neither engine noticed, and each failed somewhere other than the fork.
+
+Two questions, and this file answers both:
+
+1. **May a child use the session it inherited?** No, on either engine. That is
+   #64, and the first two thirds of this file.
+2. **May a child open one of its own?** inproc, no -- for the life of the
+   process, once Nix is initialised in that address space. rpc, yes: Nix lives
+   in a worker process, so the child starts one of its own. That is #100, and
+   the last third.
 
 **Each test here forks the pytest process, which carries threads.** That is the
 hazard under test and not an accident. The child only reads a flag and raises,
@@ -28,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import multiprocessing
 import os
+import sys
 import threading
 from typing import TYPE_CHECKING, Any
 
@@ -39,12 +49,14 @@ from nanopynix._fork import ForkGuard
 from nanopynix._wire import HandleKind
 from nanopynix.exceptions import ForkedSessionError
 from nanopynix.rpc.client._session import _DeferredReleases
+from nanopynix.settings import NanopynixSettings, resolve_worker_start
+from tests.support.subprocess_output import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
     from multiprocessing.connection import Connection
 
-    from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
+    from tests.support.nix_environment import InprocSessionFactory, NixTestEnvironment, RpcSessionFactory
 
 #: How long the child gives one operation before it calls the operation hung.
 _OPERATION_DEADLINE_SECONDS = 10.0
@@ -265,3 +277,198 @@ def test_a_forked_evaluator_queues_and_hands_back_no_release() -> None:
     releases._fork._created_pid = os.getpid() + 1
     releases.defer(ref)
     assert releases.drain() == []
+
+
+# ════════════════════════════════════════════════════════════════════
+# What a process may do after a fork, per engine
+# ════════════════════════════════════════════════════════════════════
+
+#: A whole program, for a process that has never initialised anything.
+#:
+#: This cannot run in the pytest process, and that is the point. Something
+#: there has always called ``init_libexpr`` by the time a test runs, which is
+#: exactly the state that hid issue #54.
+_EVALUATOR_WITH_NO_INIT_LIBEXPR = """
+import sys
+
+import nanopynix
+
+nanopynix.init_libstore(load_config=False)
+store = nanopynix.open_store(sys.argv[1])
+nanopynix.EvalState(store, [])
+print("constructed")
+"""
+
+#: A whole program: fork a process that has never touched Nix, and open an
+#: inproc session in the child. The supported pattern, and the one ansinix
+#: relies on.
+_FORK_FIRST_THEN_OPEN = """
+import asyncio
+import os
+import sys
+
+import nanopynix
+import nanopynix.inproc
+
+
+async def use_a_session():
+    session = nanopynix.inproc.Session(
+        store_uri=sys.argv[1],
+        load_config=False,
+        settings=nanopynix.NixSettings.model_validate_json(sys.argv[2]),
+    )
+    async with session as nix:
+        # A round trip, so the child proves it reached Nix and not only a
+        # constructor. Anything that raises exits this program nonzero.
+        await nix.get_verbosity()
+
+
+# The parent opens nothing, so the process guard is empty when it forks.
+if os.fork() == 0:
+    asyncio.run(use_a_session())
+    print("child opened a session")
+    # `os._exit` flushes nothing, and stdout is a pipe here, so it is block
+    # buffered and the line above would never leave the process.
+    sys.stdout.flush()
+    os._exit(0)
+_, status = os.waitpid(0, 0)
+# A wait status is not an exit code: a child killed by a signal encodes the
+# signal in the low bits, and `sys.exit` of the raw value would report success.
+sys.exit(os.waitstatus_to_exitcode(status))
+"""
+
+
+async def test_an_evaluator_needs_no_init_libexpr_before_it(shared_nix_environment: NixTestEnvironment) -> None:
+    """``nanopynix.EvalState(store)`` constructs, rather than aborting the process.
+
+    **Issue #54.** ``PyEvalState::init`` registered the calling thread with
+    Boehm and never started the collector, so the process died on SIGABRT with
+    nothing a caller could catch. Measured, by taking the collector start back
+    out::
+
+        exited -6
+        --- stderr ---
+        Threads explicit registering is not previously enabled
+
+    bdwgc aborts first, because ``GC_allow_register_threads`` runs inside
+    ``GC_INIT``. Behind it waits Nix's own ``assertGCInitialized()``, a bare
+    ``assert`` in the ``EvalState`` constructor. One call answers both.
+
+    The fork it was reported in was incidental: a forked child is simply a
+    process where nothing had called ``init_libexpr`` yet.
+
+    A subprocess, and not a fork, because the pytest process has initialised
+    already and cannot un-initialise.
+    """
+    result = await run_process(
+        [sys.executable, "-c", _EVALUATOR_WITH_NO_INIT_LIBEXPR, shared_nix_environment.store_uri]
+    )
+    assert result.returncode == 0, result.describe()
+    assert "constructed" in result.stdout
+
+
+async def test_a_fork_after_a_closed_inproc_session_is_still_refused(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    """Closing the session gives the collector back to nobody.
+
+    ``release`` clears the active session, so the guard looks empty after a
+    close. Nix initialisation does not come back out: ``init_libexpr`` parks a
+    ``nix-gc-owner`` thread that owns Boehm's one static ``first_thread``
+    entry and never exits, and ``fork()`` keeps only the calling thread. A
+    child that opened a "fresh" session over that entry would collect against
+    a thread that does not exist, which is issues #53, #69 and #72.
+
+    This is the hole that #64 left. It passed before this change, because
+    nothing refused the child at all.
+    """
+    async with inproc_session() as nix:
+        assert await nix.get_verbosity() is not None
+
+    async def open_another() -> None:
+        async with inproc_session():
+            pass
+
+    name, message = await _in_a_fork(open_another)
+    assert name == "ForkedSessionError", message
+    assert "initialized Nix in this address space" in message
+
+
+async def test_fork_first_then_open_still_works_for_inproc(shared_nix_environment: NixTestEnvironment) -> None:
+    """The one supported inproc pattern, and the test that stops the guard eating it.
+
+    A parent that never opened a session leaves the process guard empty, so a
+    child of it is an ordinary process as far as Nix is concerned. The refusal
+    above must not reach this.
+
+    A subprocess forks here, because the pytest process has itself initialised
+    Nix and is therefore the case that gets refused.
+    """
+    result = await run_process(
+        [
+            sys.executable,
+            "-c",
+            _FORK_FIRST_THEN_OPEN,
+            shared_nix_environment.store_uri,
+            shared_nix_environment.settings.model_dump_json(),
+        ]
+    )
+    assert result.returncode == 0, result.describe()
+    assert "child opened a session" in result.stdout
+
+
+async def test_a_forked_child_opens_an_rpc_session_of_its_own(rpc_session: RpcSessionFactory) -> None:
+    """The rpc half of the contract: refuse the inherited one, allow a new one.
+
+    Nix runs in a worker process, so a child of the client inherits no Nix at
+    all. What it does inherit is the ``multiprocessing`` forkserver, which
+    carries no pid guard: ``ensure_running`` calls
+    ``os.waitpid(self._forkserver_pid, WNOHANG)`` on a process that is not its
+    child and raises ``ChildProcessError``. ``worker_start="auto"`` answers
+    ``spawn`` here, which has no such singleton.
+    """
+    async with rpc_session() as nix:
+        assert await nix.get_verbosity() is not None
+
+        async def open_another() -> None:
+            async with rpc_session() as child_nix:
+                # A round trip, and not only a constructor: this is what proves
+                # the child spoke to a worker of its own. Anything that raises
+                # here reaches the assertion below as its own exception name.
+                await child_nix.get_verbosity()
+
+        assert await _in_a_fork(open_another) == ("ok", "")
+
+        # And the parent's own worker is untouched by any of it.
+        assert await nix.get_verbosity() is not None
+
+
+async def test_an_rpc_session_starts_a_spawn_worker_with_no_fork(rpc_session: RpcSessionFactory) -> None:
+    """``spawn`` is covered on its own, and not only inside a forked child.
+
+    A failure that only ever appeared under ``worker_start="auto"`` in a fork
+    would have two candidate causes. This leaves one.
+    """
+    async with rpc_session(runtime_settings=NanopynixSettings(worker_start="spawn")) as nix:
+        assert await nix.get_verbosity() is not None
+
+
+@pytest.mark.parametrize(
+    ("forked", "expected"),
+    [(False, "forkserver"), (True, "spawn")],
+)
+def test_auto_picks_the_start_method_from_the_fork(
+    monkeypatch: pytest.MonkeyPatch, forked: bool, expected: str
+) -> None:
+    """``auto`` asks one question, and this is it.
+
+    Patched on ``nanopynix.settings``, and not on ``nanopynix._fork``: the
+    resolver imported the name, so rebinding it at the source module would not
+    reach the caller.
+    """
+    monkeypatch.setattr("nanopynix.settings.process_is_forked", lambda: forked)
+    assert resolve_worker_start("auto") == expected
+
+    # A named method is never resolved against anything.
+    assert resolve_worker_start("forkserver") == "forkserver"
+    assert resolve_worker_start("spawn") == "spawn"

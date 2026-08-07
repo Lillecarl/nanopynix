@@ -13,8 +13,21 @@
 /// may drive an evaluator -- and it does not make that thread known to the
 /// collector.
 ///
-/// nix_expr.cpp defines this. The declaration is here so that py_eval.hh can
-/// call it without including the whole of that translation unit.
+/// nix_expr.cpp defines both. The declarations are here so that py_eval.hh can
+/// call them without including the whole of that translation unit.
+
+/// Start the collector, on a thread that owns it and never exits. Idempotent.
+///
+/// Boehm keeps its one static `first_thread` entry for whoever calls
+/// `GC_INIT()`, and removes it at no point, so that thread must outlive every
+/// collection. See `nanopynix_start_gc_owner_thread` in nix_expr.cpp for the
+/// measurement.
+///
+/// **Call this before `nanopynix_ensure_gc_thread_registered`.** A thread
+/// cannot register with a collector that has not started: `GC_INIT` is what
+/// runs `GC_allow_register_threads`, and `GC_register_my_thread` aborts the
+/// process without it.
+void nanopynix_start_gc_owner_thread();
 
 /// Register the calling thread with Boehm, if it is not registered already,
 /// and keep it registered until the thread exits. Idempotent.

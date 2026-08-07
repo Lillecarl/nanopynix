@@ -433,7 +433,7 @@ class SessionClosedError(ObjectLifetimeError):
 
 
 class ForkedSessionError(ObjectLifetimeError):
-    """A session was used in a process that forked away from the one that built it.
+    """A session was used, or opened, in a process that forked away from Nix.
 
     Nothing this library owns survives a ``fork()``. The child of an rpc
     session holds the same pipe to the same serial worker, so two processes
@@ -441,6 +441,12 @@ class ForkedSessionError(ObjectLifetimeError):
     inproc session holds a thread pool whose threads no longer exist, because
     ``fork()`` keeps only the calling thread, and a submit there waits for a
     future that nothing will ever complete.
+
+    **It also covers a session a forked child tries to open.** The inproc
+    engine refuses one for the life of the process, once Nix is initialised in
+    that address space, whether or not a session is still open: the collector
+    belongs to a thread the fork did not keep. The rpc engine refuses nothing
+    here, because its child opens a worker process of its own.
 
     A sibling of :class:`SessionClosedError`, and deliberately not a subclass
     of it. ``except SessionClosedError`` usually means "I closed it, and that

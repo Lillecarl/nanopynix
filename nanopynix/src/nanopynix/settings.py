@@ -19,6 +19,7 @@ from nanopynix_bindings import (
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, EnvSettingsSource, PydanticBaseSettingsSource, SettingsConfigDict
 
+from nanopynix._fork import process_is_forked
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix.exceptions import SettingNotLiveError, SettingOutOfScopeError
 
@@ -959,7 +960,26 @@ setting can.** The forkserver child imports this module while it unpickles the
 process target, before any code of ours runs there, and ``multiprocessing``
 keeps one forkserver for each process, started from the parent's ``sys.path``.
 So the venv decides, once, and a build with no Boehm collector is a different
-venv. See ``nanopynixVersions`` in ``default.nix``."""
+venv. See ``nanopynixVersions`` in ``default.nix``.
+
+``spawn`` shares neither property: it runs no preload, and it execs a fresh
+interpreter for each worker rather than forking one prepared parent. See
+:attr:`NanopynixSettings.worker_start`."""
+
+
+def resolve_worker_start(worker_start: Literal["auto", "forkserver", "spawn"]) -> str:
+    """Turn :attr:`NanopynixSettings.worker_start` into a start method name.
+
+    Only ``auto`` needs resolving, and it asks one question: is this process a
+    fork? A forked child cannot start a forkserver worker at all, so ``auto``
+    answers ``spawn`` there and ``forkserver`` everywhere else.
+
+    Called for each worker rather than once, because a process can become a
+    fork between one session and the next.
+    """
+    if worker_start != "auto":
+        return worker_start
+    return "spawn" if process_is_forked() else "forkserver"
 
 
 class NanopynixSettings(BaseSettings):
@@ -981,6 +1001,37 @@ class NanopynixSettings(BaseSettings):
     instrumented extension kept out of the forkserver, somewhere to say so.
 
     See :data:`DEFAULT_WORKER_PRELOAD` for what it costs to empty it."""
+
+    worker_start: Literal["auto", "forkserver", "spawn"] = "auto"
+    """Which ``multiprocessing`` start method brings up a worker process.
+
+    ``auto`` is ``spawn`` when this process is a fork, and ``forkserver``
+    otherwise. That is the whole reason the setting exists.
+
+    **A forked child cannot start a forkserver worker at all.**
+    ``multiprocessing.forkserver.ForkServer`` carries no pid guard, so a child
+    that inherits a running forkserver reaches
+    ``os.waitpid(self._forkserver_pid, WNOHANG)`` on a process that is not its
+    own child. ``resource_tracker`` handles that case; ``forkserver`` does not.
+    Measured, in a forked child::
+
+        spawn        -> start() succeeded
+        forkserver   -> ChildProcessError: [Errno 10] No child processes
+
+    ``forkserver`` stays the default because it is far cheaper. Measured, 5
+    workers each, with :data:`DEFAULT_WORKER_PRELOAD`::
+
+        forkserver     7.7 ms per worker
+        spawn         72.1 ms per worker
+
+    The difference is the preload: the forkserver imports nanopynix once and
+    each worker is a fork of that, while ``spawn`` execs an interpreter that
+    imports everything again. :attr:`worker_preload` therefore buys nothing
+    under ``spawn``.
+
+    Name a method to pin it, when a caller knows better than ``auto`` does --
+    a process that forks after it opens a session, for example, where the
+    session outlives the fork and the cost is paid once."""
 
 
 @no_runtime_type_check  # settings validates its own type at runtime for untyped

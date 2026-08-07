@@ -49,6 +49,26 @@ from nanopynix.exceptions import ForkedSessionError
 # session that owns it alive.
 _REGISTRY: weakref.WeakSet[ForkGuard] = weakref.WeakSet()
 
+# The same two mechanisms as `ForkGuard`, at the scope of the process rather
+# than of one object. A guard cannot answer this: it is built when a session
+# is, and the question "is this process a fork" has to be answerable before
+# anything is built.
+_IMPORT_PID = os.getpid()
+_process_forked = False
+
+
+def process_is_forked() -> bool:
+    """Whether this process is a fork of the one that imported this module.
+
+    **What reads it.** ``NanopynixSettings.worker_start`` resolves ``"auto"``
+    with this. A forkserver worker cannot be started from a forked child at
+    all: ``multiprocessing.forkserver.ForkServer`` carries no pid guard, so
+    ``ensure_running`` calls ``os.waitpid(self._forkserver_pid, WNOHANG)`` on a
+    process that is not this one's child and raises ``ChildProcessError``.
+    ``spawn`` has no such singleton, and is measured to work there.
+    """
+    return _process_forked or os.getpid() != _IMPORT_PID
+
 
 class ForkGuard:
     """Whether the object that holds this guard has crossed a ``fork()``.
@@ -81,14 +101,16 @@ class ForkGuard:
             )
 
 
-def _mark_every_guard_forked() -> None:
-    """Set the flag on every guard. Runs in the child, and takes no lock.
+def _mark_the_child_forked() -> None:
+    """Set the process flag, and the flag on every guard. Runs in the child.
 
-    ``list`` first, so that a weak reference which dies during the walk cannot
-    change the set under the iterator.
+    Takes no lock, and ``list`` first, so that a weak reference which dies
+    during the walk cannot change the set under the iterator.
     """
+    global _process_forked  # noqa: PLW0603 -- one process-wide fact, set once by the one at-fork hook
+    _process_forked = True
     for guard in list(_REGISTRY):
         guard._forked = True  # type: ignore[reportPrivateUsage] -- this module owns the flag  # noqa: SLF001
 
 
-os.register_at_fork(after_in_child=_mark_every_guard_forked)
+os.register_at_fork(after_in_child=_mark_the_child_forked)

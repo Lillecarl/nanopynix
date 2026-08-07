@@ -158,10 +158,21 @@ private:
               const SettingsMap &evalSettingsOverrides,
               const SettingsMap &fetchSettingsOverrides) {
         // **Before anything here allocates in the collected heap.** `owner`
-        // above says which thread may drive this evaluator; this says that the
-        // collector knows that thread. A caller that never touches
-        // `NixThreadExecutor` -- `nanopynix.EvalState(store)` on the thread it
-        // happens to be on -- reaches the collector through this line alone.
+        // above says which thread may drive this evaluator; these two say that
+        // a collector exists, and that it knows that thread. A caller that
+        // never touches `NixThreadExecutor` -- `nanopynix.EvalState(store)` on
+        // the thread it happens to be on -- reaches the collector through
+        // these lines alone.
+        //
+        // **In this order, and both aborts are measured.** Issue #54.
+        // Without the first line, `nanopynix.EvalState(store)` in a process
+        // where nothing called `init_libexpr` dies on SIGABRT with bdwgc's
+        // "Threads explicit registering is not previously enabled":
+        // `GC_allow_register_threads` runs inside `GC_INIT`, so the second
+        // line cannot come first. Behind that one waits Nix's own
+        // `assertGCInitialized()` in the `EvalState` constructor, a bare
+        // `assert`. Neither is catchable, and one call answers both.
+        nanopynix_start_gc_owner_thread();
         nanopynix_ensure_gc_thread_registered();
 
         for (auto &cfg : evalSettingsConfigurators())
