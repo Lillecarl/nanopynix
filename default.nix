@@ -642,9 +642,73 @@ let
     name: value: lib.nameValuePair "nanopynix-tests-${name}" value.nanopynix.test
   ) nanopynixVersionsInternal;
 
+  # Every suffix that `rename` above gives a variant scope.
+  #
+  # **A suffix that is missing here does not fail.** It quietly puts a slow,
+  # uncovered build into the regular per-commit matrix, because "not a variant"
+  # is the default everywhere. `unlistedVariants` below turns that silence into
+  # a build failure.
+  variantSuffixes = [
+    "-tsan"
+    "-ubsan"
+    "-asan"
+    "-nogc"
+  ];
+
+  # The check that makes a forgotten suffix a build failure.
+  #
+  # `rename` above writes a suffix for each variant axis, and every consumer of
+  # these names sorts by that suffix. A new axis that nobody adds to
+  # `ci/variants.nix` reads as a regular version everywhere, so it joins the
+  # per-commit matrix as a slow build that collects no coverage. Nothing else
+  # notices, because "not a variant" is the default.
+  unlistedVariants = builtins.filter (
+    name: builtins.match "^(nix_[0-9_]+|git)$" name == null && !hasKnownSuffix name
+  ) (builtins.attrNames nanopynixVersionsInternal);
+  hasKnownSuffix = name: lib.any (suffix: lib.hasSuffix suffix name) variantSuffixes;
+
+  # The version names of `tests`, grouped by variant, with the bare names under
+  # `regular`. `ci/workflows/lib.nix` builds one job per entry, and
+  # `ci/steps.nix` embeds the whole thing so that the scheduled workflow can
+  # write its matrices with one `echo` rather than five `nix eval` calls.
+  #
+  # **Do not drop a version from a group to save CI minutes.** The settings and
+  # store models carry 32 `nix_version_min`/`nix_version_removed` fields, and
+  # the drift check is what proves each gate is set correctly: a field the
+  # running Nix does not have shows up as `extra`, and a gate that hides a
+  # field the running Nix does have shows up as `missing`. Neither can be seen
+  # from one version. Measured: the gate refuses 31 of the 32 fields on 2.31,
+  # 15 on 2.34 and 1 on 2.35, so each version reaches a different part of the
+  # check. Dropping a version deletes that coverage in silence, because the
+  # remaining jobs stay green.
+  ciVersionMatrix =
+    let
+      names = map (lib.removePrefix "nanopynix-tests-") (builtins.attrNames tests);
+    in
+    {
+      regular = builtins.filter (name: !hasKnownSuffix name) names;
+    }
+    // builtins.listToAttrs (
+      map (suffix: {
+        name = lib.removePrefix "-" suffix;
+        value = builtins.filter (lib.hasSuffix suffix) names;
+      }) variantSuffixes
+    );
+
   # The CI experiments. `ci/experiments.nix` gives the reason each one is a
   # package rather than a script in a workflow file.
   experiments = import ./ci/experiments.nix { inherit pkgs tests; };
+
+  # Every body that a GitHub Actions step used to carry inline. `ci/steps.nix`
+  # gives the reason each one is a package.
+  ciSteps = import ./ci/steps.nix {
+    inherit
+      pkgs
+      tests
+      ciVersionMatrix
+      variantSuffixes
+      ;
+  };
 
   getByVersion =
     version:
@@ -655,30 +719,40 @@ let
       (lib.head)
     ];
 in
-{
-  inherit (pkgs) lib;
+lib.throwIf (unlistedVariants != [ ])
+  ''
+    default.nix: these variant scopes carry a suffix that ci/variants.nix does
+    not list, so every consumer reads them as regular Nix versions and CI runs
+    them in the per-commit matrix with no coverage:
+      ${builtins.concatStringsSep "\n    " unlistedVariants}
+    Add the suffix to ci/variants.nix.
+  ''
+  {
+    inherit (pkgs) lib;
 
-  inherit (nanopynixVersions.stable)
-    nanopynix
-    nanopynix-bindings
-    nanopynix-helpers
-    nanopynix-proto
-    ekn
-    pynix
-    pynixDevEnv
-    shell
-    nanopynix-docs
-    checks
-    ;
+    inherit (nanopynixVersions.stable)
+      nanopynix
+      nanopynix-bindings
+      nanopynix-helpers
+      nanopynix-proto
+      ekn
+      pynix
+      pynixDevEnv
+      shell
+      nanopynix-docs
+      checks
+      ;
 
-  inherit
-    flake
-    pkgs
-    nanopynixVersions
-    pyproject-nix
-    tests
-    experiments
-    tofuCoreSchemaTool
-    storeExecTool
-    ;
-}
+    inherit
+      flake
+      pkgs
+      nanopynixVersions
+      pyproject-nix
+      tests
+      experiments
+      ciSteps
+      ciVersionMatrix
+      tofuCoreSchemaTool
+      storeExecTool
+      ;
+  }

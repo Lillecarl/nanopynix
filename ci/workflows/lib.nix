@@ -1,10 +1,22 @@
 # Shared GitHub Actions job builders.  This file is imported by the rendered
 # workflow entrypoints; ci/render.py deliberately renders only on_*.nix.
+#
+# **No step here carries a script.** Every `run:` is one line, and it calls
+# either one command or a package from `ci/steps.nix`. Every value that comes
+# from a workflow expression reaches a step through `env:`. `CLAUDE.md` gives
+# the rule and `tests/meta/test_ci_step_policy.py` keeps it.
 { }:
 let
-  getFlake = builtins.${"getFlake"};
-  flake = getFlake (toString ../../.);
-  inherit (flake) lib;
+  # `import ../../.`, and not `builtins.getFlake`.
+  #
+  # This file used to read `flake.packages.<system>` and pick the test runners
+  # out of it by a `passthru.addToMatrix` marker, because a flake output set is
+  # flat and the version names had to survive being flattened into it. That is
+  # no longer necessary: `nix build --file . <attrpath>` reaches any attribute,
+  # so CI names `ciSteps.nix_2_34-tsan` directly and this file reads the same
+  # attributes CI builds. The marker is gone with it.
+  repo = import ../../. { };
+  inherit (repo) lib ciVersionMatrix;
 
   ghalib = import ../../ghanix { inherit lib; };
   inherit (ghalib)
@@ -14,74 +26,32 @@ let
     evalWorkflow
     ;
 
-  flakeTestOutputs = lib.pipe flake.packages.${builtins.currentSystem} [
-    (lib.filterAttrs (_n: v: v.passthru.addToMatrix or false))
-    lib.attrNames
-    (map builtins.unsafeDiscardStringContext)
-  ];
+  # `default.nix` groups the version names, so this file no longer repeats the
+  # variant suffixes as a second list, and `on_schedule.nix` no longer writes
+  # them a third time as a regular expression.
+  inherit (ciVersionMatrix)
+    regular
+    tsan
+    ubsan
+    asan
+    nogc
+    ;
 
-  nanopynixVersionNames = map (lib.removePrefix "nanopynix-tests-") flakeTestOutputs;
-  # Every suffix that `default.nix` gives a variant scope.
-  #
-  # **A new variant falls into the regular matrix until it is listed here.**
-  # `regularVersionNames` is the complement of this list and nothing else, so a
-  # suffix that is missing does not fail: it quietly adds a slow, uncovered
-  # build to the per-commit matrix. `ci/workflows/on_schedule.nix` writes the
-  # same set as a regular expression, and both have to agree.
-  variantSuffixes = [
-    "-tsan"
-    "-ubsan"
-    "-asan"
-    "-nogc"
-  ];
-  isVariant = name: lib.any (suffix: lib.hasSuffix suffix name) variantSuffixes;
-  # A variant is a separate job, never part of the regular matrix: each is far
-  # slower, and none collects coverage.
-  regularVersionNames = builtins.filter (name: !isVariant name) nanopynixVersionNames;
-  tsanVersionNames = builtins.filter (lib.hasSuffix "-tsan") nanopynixVersionNames;
-  ubsanVersionNames = builtins.filter (lib.hasSuffix "-ubsan") nanopynixVersionNames;
-  asanVersionNames = builtins.filter (lib.hasSuffix "-asan") nanopynixVersionNames;
-  nogcVersionNames = builtins.filter (lib.hasSuffix "-nogc") nanopynixVersionNames;
-
-  # "tsan", "ubsan", "asan", "nogc" -- the suffixes without their hyphen.
-  variantNames = map (lib.removePrefix "-") variantSuffixes;
-
-  # `update-lockfile`'s version-matrix step, in `on_schedule.nix`.
-  #
-  # **Built here rather than written there, so one list decides both sides.**
-  # The scheduled workflow runs `nix flake update` before it tests anything,
-  # so the set of Nix versions is not knowable at render time: a bumped
-  # nixpkgs can add or drop one. Each line therefore asks the *updated* flake
-  # which `nanopynix-tests-*` packages exist, and sorts them by suffix. Those
-  # filters used to be four hand-written copies of one long expression, beside
-  # `variantSuffixes` above, which is two places to remember when a variant
-  # arrives -- and a forgotten one does not fail. It quietly runs a slow,
-  # uncovered build in the regular matrix.
-  versionMatrixLine =
-    { output, keep }:
-    ''echo "${output}=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && ${keep}) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"'';
-
-  versionMatrixLines = [
-    (versionMatrixLine {
-      output = "regular_versions";
-      keep = ''builtins.match ".*-(${lib.concatStringsSep "|" variantNames})" n == null'';
-    })
-  ]
-  ++ map (
-    variant:
-    versionMatrixLine {
-      output = "${variant}_versions";
-      keep = ''builtins.match ".*-${variant}" n != null'';
-    }
-  ) variantNames;
-
-  # The `outputs` of that job, one for each line above.
+  # The `outputs` of the `update-lockfile` job, one for each group above.
   versionMatrixOutputs = builtins.listToAttrs (
-    map (output: {
-      name = "${output}_versions";
-      value = "\${{ steps.versions.outputs.${output}_versions }}";
-    }) ([ "regular" ] ++ variantNames)
+    map (group: {
+      name = "${group}_versions";
+      value = "\${{ steps.versions.outputs.${group}_versions }}";
+    }) (builtins.attrNames ciVersionMatrix)
   );
+
+  # Every gate of nix/checks.nix, so a new one cannot be forgotten by the job
+  # that is supposed to run them all.
+  #
+  # `isDerivation` is load-bearing: `checks` comes from `callPackage`, so
+  # `makeOverridable` adds `override` and `overrideDerivation` to it, and both
+  # are functions that `nix build` cannot realise.
+  checkAttrs = builtins.attrNames (lib.filterAttrs (_: lib.isDerivation) repo.checks);
 
   # Coverage-collecting backends run as separate matrix jobs (test-daemon-*,
   # test-local-*) rather than serially inside one job, so covering both stays
@@ -116,9 +86,10 @@ let
   # Each number is generous against a measurement, and each measurement is
   # named beside it.
   caps = {
-    # `nix build` of the test runner. cachix holds the closure, so this is a
-    # fetch and a build of the five packages of this repository: 2.3 minutes.
-    # The cap holds a cold build of Nix itself, which a bumped nixpkgs causes.
+    # `nix build` of the CI step package, which pulls the test runner into its
+    # closure. cachix holds the closure, so this is a fetch and a build of the
+    # five packages of this repository: 2.3 minutes. The cap holds a cold build
+    # of Nix itself, which a bumped nixpkgs causes.
     build = 30;
     # The same build, instrumented. Cold, and measured: 25 minutes for TSAN,
     # 38 for UBSan on the slowest version. A change to nix/sanitizer.nix is
@@ -147,7 +118,7 @@ let
     #   30895974566  806 tests, stopped at a 120-minute cap, 0 ASAN reports
     #
     # The third raised the three deadlines and got *slower* per test, because
-    # each failure then waited out a longer clock. `mkAsanTestJob` answers both
+    # each failure then waited out a longer clock. `ci/steps.nix` answers both
     # halves: it drops `tests/pynix`, where all ten of that run's failures
     # were, and brings the deadlines back to a middle ground. The remaining
     # selection is about 600 tests, and the passing rate of run 30895974566
@@ -158,16 +129,19 @@ let
     soak = 15;
     # Five runs of the concurrency soak, one per seed. Each run deals every
     # eligible test into eight overlapping lanes -- see tests/support/soak.py.
-    # This replaced five repeats of `-m tsan_stress`, which was one test.
     tsanStress = 25;
     tsanBroad = 20;
-    # `nix build` of five gates, which take about a minute between them.
+    # `nix build` of every gate, which takes about a minute between them.
     staticChecks = 20;
-    # One `git rev-list` and one `grep` for each commit pushed. No Nix.
-    commitSubjects = 5;
+    # One `git rev-list` and one `grep` for each commit pushed, plus the
+    # evaluation that builds the script. It was 5 while the body lived in the
+    # workflow file and needed no Nix at all.
+    commitSubjects = 15;
+    # Three `sysctl` calls, behind one evaluation.
+    sandbox = 10;
     # The documentation build, and the copy of its output into `public/`.
     docsBuild = 30;
-    docsPrepare = 5;
+    docsPrepare = 10;
     # An upload of the whole site, and then a wait on GitHub Pages. Both are
     # out of our hands.
     docsUpload = 15;
@@ -186,10 +160,9 @@ let
     docsDeployPollMs = 15 * 60 * 1000;
     # An upload to Codecov of one XML file.
     codecov = 10;
-    # `nix flake update`, which fetches every input, and one `nix eval` for
-    # each of the three version matrices. The eval is cold: `nix flake update`
-    # just moved every input.
+    # `nix flake update`, which fetches every input.
     flakeUpdate = 20;
+    # One `echo` for each group, behind the evaluation of the updated flake.
     versionMatrix = 20;
     # One commit and one push, by an action.
     autoCommit = 10;
@@ -245,42 +218,80 @@ let
       (steps.cachix { })
     ];
 
-  # The concurrency soak, as a step of its own.
-  #
-  # **The soak must not share a process with the rest of the suite.** It
-  # drives eight overlapping lanes of existing tests through one interpreter,
-  # and it reaches the corruption of issue #70, which ends the process with
-  # SIGSEGV. Inside the full-suite invocation that one crash took the results
-  # of about 1700 other tests with it -- measured in run 30931403310, job
-  # `test-daemon-nix_2_34`. Every full-suite step therefore passes
-  # `-m "not soak"`, and this step is where the soak runs instead.
-  #
-  # The step still fails its job. The soak reports a real defect, and a job
-  # that goes green over one is worth nothing. What this changes is the blast
-  # radius, and not the verdict.
-  #
-  # The TSAN jobs do not use this. They run the soak five times, once for each
-  # seed, with the retry budget that issue #69 needs; see `mkTsanTestJob`.
-  # `env` carries the deadlines and the sanitizer name of the job that this
-  # step belongs to. The soak runs the same tests as the suite beside it, so
-  # a deadline that suite needs is a deadline the soak needs.
-  mkSoakStep =
+  # `nix run --file .`, for a step that needs no out-link. The attribute path
+  # is the whole interface, and `ci/steps.nix` holds the body.
+  mkNixRunStep =
     {
-      label,
-      backends ? "local",
-      env ? "NANOPYNIX_RPC_TIMEOUT=30",
+      name,
+      attr,
+      cap,
+      env ? null,
     }:
     {
-      name = "Run the concurrency soak (${label})";
-      timeout-minutes = caps.soak;
-      run = # bash
-        ''
-          set -o pipefail
-          env NANOPYNIX_CORE_DEBUG=1 PYTHONDONTWRITEBYTECODE=1 ${env} \
-            ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends ${backends} \
-            -m soak
-        '';
+      inherit name;
+      timeout-minutes = cap;
+      run = "nix run --file . ciSteps.${attr}";
+    }
+    // lib.optionalAttrs (env != null) { inherit env; };
+
+  # The runner has to allow an unprivileged user namespace before any test
+  # that unshares one can run.
+  mkSandboxStep =
+    { }:
+    mkNixRunStep {
+      name = "Enable Nix sandbox namespaces";
+      attr = "enable-sandbox-namespaces";
+      cap = caps.sandbox;
     };
+
+  # Build the CI step package of one version, and leave it at `result`.
+  #
+  # `$CI_STEP` is a job-level environment variable, so the version reaches this
+  # command without a workflow expression in the body -- which is what keeps
+  # the scheduled workflow, where the version is `${{ matrix.version }}`, on
+  # the same one line as the per-commit workflow.
+  mkBuildStep =
+    { name, cap }:
+    {
+      inherit name;
+      timeout-minutes = cap;
+      run = ''nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths'';
+    };
+
+  # Run one subcommand of the package that `mkBuildStep` left at `result`.
+  mkRunStep =
+    {
+      name,
+      subcommand,
+      cap,
+    }:
+    {
+      inherit name;
+      timeout-minutes = cap;
+      run = "./result/bin/nanopynix-ci ${subcommand}";
+    };
+
+  # The concurrency soak, as a step of its own. `ci/steps.nix` says why it
+  # must not share a process with the rest of the suite.
+  mkSoakStep =
+    { label }:
+    mkRunStep {
+      name = "Run the concurrency soak (${label})";
+      subcommand = "soak";
+      cap = caps.soak;
+    };
+
+  # The job-level environment of a test job: which step package to build, and
+  # for a regular build, which backend to drive.
+  testJobEnv =
+    {
+      version,
+      backend ? null,
+    }:
+    {
+      CI_STEP = "ciSteps.${version}";
+    }
+    // lib.optionalAttrs (backend != null) { BACKEND = backend; };
 
   mkRegularTestJob =
     {
@@ -293,71 +304,32 @@ let
     mkJob (
       lib.optionalAttrs (needs != [ ]) { inherit needs; }
       // {
+        env = testJobEnv { inherit version backend; };
         steps = mkTestSetup { inherit ref lockArtifact; } ++ [
-          {
-            name = "Build nanopynix test runner for Nix ${version}";
-            timeout-minutes = caps.build;
-            run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
-          }
-          (steps.verifyClosure { name = "Verify test runner closure after build"; })
-          (steps.enableSandboxNamespaces { })
-          {
-            name = "Test nanopynix against Nix ${version} (full suite, ${backend} backend)";
-            timeout-minutes = caps.suite;
-            run = # bash
-              ''
-                set -o pipefail
-                paths_to_delete="''${{ github.workspace }}/nanopynix-test-store-paths.txt"
-                rm -f "$paths_to_delete"
-                # Not stderr: pytest captures fd 2 per test by default and only
-                # prints the buffer when that test fails, so a SIGSEGV takes the
-                # GC thread log down with it -- a full run that crashed produced
-                # zero diagnostic lines. A file is outside pytest's capture.
-                gc_thread_log="''${{ github.workspace }}/gc-thread-debug.log"
-                rm -f "$gc_thread_log"
-                status=0
-                # NANOPYNIX_COVERAGE rather than pytest-cov's --cov: the runner
-                # then measures with `coverage run` and combines after pytest
-                # exits. pytest-cov combines *inside* the run, alongside live
-                # evaluator threads and forkserver workers, and that combine
-                # intermittently failed with "database is locked" -- exit 3 on a
-                # job whose tests had all passed. See nanopynix/tests.nix.
-                env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG_FILE="$gc_thread_log" NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=''${{ github.workspace }}/.coverage NANOPYNIX_COVERAGE=1 NANOPYNIX_COVERAGE_XML=''${{ github.workspace }}/coverage.xml NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
-                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends ${backend} \
-                  -m "not soak" \
-                  --junitxml=''${{ github.workspace }}/junit.xml \
-                  2>&1 | tee ''${{ github.workspace }}/test-gdb-output.log || status=$?
-                # Only on a crash: this file has one line per evaluator thread
-                # registration and is long, so it is worth the log space solely
-                # when there is a faulting LWP to correlate it against.
-                if [ "$status" -gt 128 ] && [ -s "$gc_thread_log" ]; then
-                  {
-                    echo "=== Boehm GC thread registration log ($(wc -l <"$gc_thread_log") lines) ==="
-                    cat "$gc_thread_log"
-                  } >> ''${{ github.workspace }}/test-gdb-output.log
-                fi
-                if [ -s "$paths_to_delete" ]; then
-                  nix store delete --stdin < "$paths_to_delete" || true
-                fi
-                exit "$status"
-              '';
-          }
-          (mkSoakStep {
-            label = "${version}, ${backend} backend";
-            backends = backend;
+          (mkBuildStep {
+            name = "Build the CI step package for Nix ${version}";
+            cap = caps.build;
           })
+          (steps.verifyClosure { name = "Verify test runner closure after build"; })
+          (mkSandboxStep { })
+          (mkRunStep {
+            name = "Test nanopynix against Nix ${version} (full suite, ${backend} backend)";
+            subcommand = "suite";
+            cap = caps.suite;
+          })
+          (mkSoakStep { label = "${version}, ${backend} backend"; })
           (steps.uploadArtifact {
             name = "Upload test output";
             artifactName = "test-output-${backend}-${version}";
             path = "\${{ github.workspace }}/test-gdb-output.log";
           })
-          # Uploaded on every run, not just a crash. The step above inlines this
-          # into the log only when pytest died of a signal, which turned out to
-          # be the wrong trigger: the same suspected evaluator-state corruption
-          # also surfaces as an ordinary *test failure* (a value of the wrong
-          # type reaching nixpkgs' `env` type check, exit 1), and that path
-          # needs the same registration history to correlate against. As an
-          # artifact it costs no log space.
+          # Uploaded on every run, not just a crash. The suite step inlines
+          # this into the log only when pytest died of a signal, which turned
+          # out to be the wrong trigger: the same suspected evaluator-state
+          # corruption also surfaces as an ordinary *test failure* (a value of
+          # the wrong type reaching nixpkgs' `env` type check, exit 1), and
+          # that path needs the same registration history to correlate
+          # against. As an artifact it costs no log space.
           (steps.uploadArtifact {
             name = "Upload Boehm GC thread registration log";
             artifactName = "gc-thread-debug-${backend}-${version}";
@@ -391,6 +363,9 @@ let
       }
     );
 
+  # The concurrency soak and the concurrency tests, under ThreadSanitizer.
+  # `ci/steps.nix` carries the collector reasoning, the seed loop and the
+  # forensics that issue #69 asks for.
   mkTsanTestJob =
     {
       version,
@@ -404,171 +379,23 @@ let
     mkJob (
       lib.optionalAttrs (needs != [ ]) { inherit needs; }
       // {
+        env = testJobEnv { inherit version; };
         steps = mkTestSetup { inherit ref lockArtifact; } ++ [
-          {
-            name = "Build TSAN nanopynix test runner (${bareVersion})";
-            timeout-minutes = caps.tsanBuild;
-            run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
-          }
-          (steps.enableSandboxNamespaces { })
-          {
+          (mkBuildStep {
+            name = "Build the TSAN CI step package (${bareVersion})";
+            cap = caps.tsanBuild;
+          })
+          (mkSandboxStep { })
+          (mkRunStep {
             name = "Run TSAN-instrumented concurrency soak (five seeds, local+daemon backends)";
-            timeout-minutes = caps.tsanStress;
-            run = # bash
-              ''
-                set -o pipefail
-                LOGFILE="''${{ github.workspace }}/tsan-output-${bareVersion}.log"
-                # Boehm suspends every other thread with a signal before it
-                # collects, and TSAN intercepts signal delivery. When Boehm
-                # cannot stop the world it calls `abort`, and the process dies
-                # with status 134 and reports no race. See issue #69, which
-                # carries the measurement: the rate is near one run in four,
-                # and it does not depend on anything this repository sets.
-                #
-                # **Boehm's own answer to this is already in the build.**
-                # `gc_priv.h` suspends a thread with the synchronous `SIGSYS`
-                # when `THREAD_SANITIZER` is defined, and `gcconfig.h` defines
-                # it from `__has_feature(thread_sanitizer)`. GCC 15.3 supports
-                # `__has_feature` and reports the feature, so the collector
-                # this job links already uses `SIGSYS`, and it aborts anyway.
-                # Issue #69 carries the proof. So there is no known correction
-                # yet, and the two lines below are what this job does instead.
-                #
-                # `GC_INITIAL_HEAP_SIZE` gives Boehm a heap it does not have
-                # to grow, and a collection that never happens cannot fail to
-                # stop the world. Nix sets this itself when the variable is
-                # absent, to 25% of RAM capped at 384 MiB
-                # (libexpr/eval-gc.cc), and the soak exhausts that: it holds
-                # 66 tests and their evaluators in one process. The cap is
-                # what this raises, and `GC_expand_hp` takes virtual rather
-                # than resident memory, so the runner pays little for it.
-                # **This lowers the rate, and corrects nothing.** A full
-                # matrix run aborted with it in place.
-                #
-                # **The budget is zero, and an abort fails the job.** It was 5
-                # while #69 was open, when the abort was frequent and had no
-                # known cause. The cause is known now, and it is corrected:
-                # `99f74d82` registers the thread that builds an evaluator with
-                # Boehm, and #72 gives the mechanism -- the collector signalled
-                # a `pthread_t` that glibc had already handed on.
-                #
-                # Every `test-tsan-*` job since that commit reports zero
-                # aborts: 18 jobs, six runs, three Nix versions, five seeds
-                # against two backends each. A budget above zero therefore
-                # tolerates nothing that happens, and hides a regression of
-                # `99f74d82` up to five times over.
-                #
-                # The loop below stays, so raising the budget again is one
-                # character. The 134 branch still prints the Boehm resend log
-                # of the attempt before the job fails, which is the forensics
-                # that #69 asked for.
-                #
-                # This branch reads only that one signature. A race fails the
-                # job through its own branch, which runs first, and so does any
-                # other non-zero status.
-                ABORT_BUDGET=0
-                aborts=0
-                race_found=0
-                real_failure=0
-                for i in $(seq 1 5); do
-                  attempt=0
-                  while : ; do
-                    attempt=$((attempt + 1))
-                    echo "=== TSAN run $i attempt $attempt ===" | tee -a "$LOGFILE"
-                    RUNLOG="$(mktemp)"
-                    # Boehm's own log, which the abort branch below reads.
-                    # `GC_PRINT_STATS` turns on `GC_COND_LOG_PRINTF`, and
-                    # `resend_lost_signals` uses it to report how many threads
-                    # still owe an acknowledgement on each pass. That count is
-                    # the first thing issue #69 needs. `GC_LOG_FILE` keeps the
-                    # rest of the collector chatter out of the job log.
-                    GCLOG="$(mktemp)"
-                    status=0
-                    unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 GC_INITIAL_HEAP_SIZE=2147483648 GC_PRINT_STATS=1 GC_LOG_FILE="$GCLOG" \
-                      ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon \
-                      -m soak --soak-seed="$i" \
-                      --soak-report="''${{ github.workspace }}/soak-${bareVersion}-run$i.json" \
-                      2>&1 | tee "$RUNLOG" || status=$?
-                    cat "$RUNLOG" >> "$LOGFILE"
-                    echo "=== TSAN run $i attempt $attempt exit status: $status ===" | tee -a "$LOGFILE"
-                    # Read the attempt, and not the whole log. The log holds
-                    # every earlier attempt, so a match there says nothing
-                    # about this one.
-                    if grep -q "ThreadSanitizer: data race" "$RUNLOG"; then
-                      echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
-                      race_found=1
-                      rm -f "$RUNLOG" "$GCLOG"
-                      break 2
-                    fi
-                    if [ "$status" -eq 134 ] && grep -q "Signals delivery fails" "$RUNLOG"; then
-                      aborts=$((aborts + 1))
-                      rm -f "$RUNLOG"
-                      echo "=== Boehm resend log of run $i attempt $attempt ===" | tee -a "$LOGFILE"
-                      grep -E "Resent|Lost some threads|stop_world" "$GCLOG" | tail -40 | tee -a "$LOGFILE" || true
-                      rm -f "$GCLOG"
-                      echo "Boehm could not stop the world on run $i (issue #69). Tolerated aborts: $aborts of $ABORT_BUDGET." | tee -a "$LOGFILE"
-                      if [ "$aborts" -gt "$ABORT_BUDGET" ]; then
-                        echo "::error::the collector aborted more than $ABORT_BUDGET times -- see issue #69"
-                        real_failure=1
-                        break 2
-                      fi
-                      continue
-                    fi
-                    rm -f "$RUNLOG"
-                    if [ "$status" -ne 0 ]; then
-                      # The collector log goes out here too, and not only on
-                      # the abort above. A stop-the-world that fails can hang
-                      # rather than abort, and then the status is the status
-                      # of pytest and the 134 branch never runs. Run
-                      # 31189073155 hit that: `test_soak_inproc[local]`
-                      # reached its 120s deadline with `nix-eval_0` inside
-                      # `lock_flake`, the status was 1, and these lines were
-                      # deleted unread. See issue #99.
-                      echo "=== Boehm resend log of run $i attempt $attempt ===" | tee -a "$LOGFILE"
-                      grep -E "Resent|Lost some threads|stop_world" "$GCLOG" | tail -40 | tee -a "$LOGFILE" || true
-                      rm -f "$GCLOG"
-                      echo "::error::run $i failed with status $status -- see log above"
-                      real_failure=1
-                      break 2
-                    fi
-                    rm -f "$GCLOG"
-                    break
-                  done
-                done
-                echo "=== TSAN soak summary: $aborts tolerated collector abort(s) of a budget of $ABORT_BUDGET ===" | tee -a "$LOGFILE"
-                if [ "$race_found" -eq 1 ]; then
-                  echo "::error::genuine ThreadSanitizer data race detected -- see log above"
-                  exit 1
-                fi
-                if [ "$real_failure" -eq 1 ]; then
-                  exit 1
-                fi
-                exit 0
-              '';
-          }
-          {
+            subcommand = "soak-seeds";
+            cap = caps.tsanStress;
+          })
+          (mkRunStep {
             name = "Run TSAN-instrumented concurrency tests (single pass, local+daemon backends)";
-            timeout-minutes = caps.tsanBroad;
-            run = # bash
-              ''
-                set -o pipefail
-                LOGFILE="''${{ github.workspace }}/tsan-output-broad-${bareVersion}.log"
-                status=0
-                unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon -m concurrency \
-                  2>&1 | tee -a "$LOGFILE" || status=$?
-                echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
-                if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
-                  echo "::error::genuine ThreadSanitizer data race detected -- see log above"
-                  exit 1
-                fi
-                if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
-                  echo "::error::pytest reported a real failure, or the process crashed -- see log above"
-                  exit 1
-                fi
-                exit 0
-              '';
-          }
+            subcommand = "broad";
+            cap = caps.tsanBroad;
+          })
           (steps.uploadArtifact {
             name = "Upload TSAN output (${bareVersion})";
             artifactName = "tsan-race-report-${bareVersion}";
@@ -589,11 +416,6 @@ let
   #
   # The AddressSanitizer job is `mkAsanTestJob` below, and it needs a libexpr
   # with no collector. `mkNoGCTestJob` is that build without the sanitizer.
-  #
-  # No coverage, and the `local` backend only. Coverage instrumentation costs
-  # time this job has none of, and the daemon backend forks a handler process
-  # per connection -- a shape worth a separate decision once the run time of
-  # the simple case is a number rather than a guess.
   mkUbsanTestJob =
     {
       version,
@@ -607,45 +429,19 @@ let
     mkJob (
       lib.optionalAttrs (needs != [ ]) { inherit needs; }
       // {
+        env = testJobEnv { inherit version; };
         steps = mkTestSetup { inherit ref lockArtifact; } ++ [
-          {
-            name = "Build UBSAN nanopynix test runner (${bareVersion})";
-            timeout-minutes = caps.ubsanBuild;
-            run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
-          }
-          (steps.enableSandboxNamespaces { })
-          {
-            name = "Run UBSAN-instrumented suite (${bareVersion}, local backend)";
-            timeout-minutes = caps.suite;
-            run = # bash
-              ''
-                set -o pipefail
-                LOGFILE="''${{ github.workspace }}/ubsan-output-${bareVersion}.log"
-                status=0
-                env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=60 NANOPYNIX_TEST_SANITIZER=ubsan PYTHONDONTWRITEBYTECODE=1 \
-                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
-                  -m "not soak" \
-                  2>&1 | tee -a "$LOGFILE" || status=$?
-                # A sanitizer report is the finding, so grep for it rather than
-                # trusting the exit status alone: halt_on_error=1 makes UBSan
-                # kill the process, but a report raised inside a forkserver
-                # worker can still be reaped into a plain test failure.
-                #
-                # "Unexpected condition" is the message of `nix::unreachable`,
-                # which is what `nixUnreachableWhenHardened` becomes once
-                # `NIX_UBSAN_ENABLED` is on. That path never prints the word
-                # "runtime error", so the first two patterns would miss it.
-                if grep -qE "(UndefinedBehaviorSanitizer|runtime error):|Unexpected condition in " "$LOGFILE"; then
-                  echo "::error::sanitizer report on ${bareVersion} -- see the log above"
-                  exit 1
-                fi
-                exit "$status"
-              '';
-          }
-          (mkSoakStep {
-            label = "UBSAN, ${bareVersion}";
-            env = "NANOPYNIX_RPC_TIMEOUT=60 NANOPYNIX_TEST_SANITIZER=ubsan";
+          (mkBuildStep {
+            name = "Build the UBSAN CI step package (${bareVersion})";
+            cap = caps.ubsanBuild;
           })
+          (mkSandboxStep { })
+          (mkRunStep {
+            name = "Run UBSAN-instrumented suite (${bareVersion}, local backend)";
+            subcommand = "suite";
+            cap = caps.suite;
+          })
+          (mkSoakStep { label = "UBSAN, ${bareVersion}"; })
           (steps.uploadArtifact {
             name = "Upload UBSAN output (${bareVersion})";
             artifactName = "ubsan-report-${bareVersion}";
@@ -694,25 +490,21 @@ let
     mkJob (
       lib.optionalAttrs (needs != [ ]) { inherit needs; }
       // {
+        env = testJobEnv { inherit version; };
         steps = mkTestSetup { inherit ref lockArtifact; } ++ [
-          {
-            name = "Build no-collector nanopynix test runner (${bareVersion})";
+          (mkBuildStep {
+            name = "Build the no-collector CI step package (${bareVersion})";
             # The plain cap, not a sanitizer one. `-Dgc=disabled` rebuilds
             # nix-expr, nix-flake and the bindings, and leaves nix-util,
             # nix-store and nix-fetchers alone -- measured, three derivations.
-            timeout-minutes = caps.build;
-            run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
-          }
-          (steps.enableSandboxNamespaces { })
-          {
+            cap = caps.build;
+          })
+          (mkSandboxStep { })
+          (mkRunStep {
             name = "Run the suite without a collector (${bareVersion}, local backend)";
-            timeout-minutes = caps.suite;
-            run = ''
-              env NANOPYNIX_CORE_DEBUG=1 PYTHONDONTWRITEBYTECODE=1 \
-                ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local \
-                -m "not soak"
-            '';
-          }
+            subcommand = "suite";
+            cap = caps.suite;
+          })
           (mkSoakStep { label = "no collector, ${bareVersion}"; })
         ];
       }
@@ -755,88 +547,19 @@ let
     mkJob (
       lib.optionalAttrs (needs != [ ]) { inherit needs; }
       // {
+        env = testJobEnv { inherit version; };
         steps = mkTestSetup { inherit ref lockArtifact; } ++ [
-          {
-            name = "Build ASAN nanopynix test runner (${bareVersion})";
-            timeout-minutes = caps.asanBuild;
-            run = ''nix build ".#nanopynix-tests-${version}" --out-link result --print-build-logs --print-out-paths'';
-          }
-          (steps.enableSandboxNamespaces { })
-          {
-            name = "Run ASAN-instrumented suite (${bareVersion}, local backend)";
-            timeout-minutes = caps.asanSuite;
-            run = # bash
-              ''
-                set -o pipefail
-                LOGFILE="''${{ github.workspace }}/asan-output-${bareVersion}.log"
-                status=0
-                # **`tests/pynix` is out, and run 30895974566 is the reason.**
-                # That run reached the 120-minute cap, and its log says what it
-                # bought:
-                #
-                #   806 tests executed, 742 passed, 10 failed, 54 skipped
-                #   0 AddressSanitizer reports
-                #   killed inside tests/pynix/test_lsp.py
-                #
-                # **All ten failures were in `tests/pynix`, and none were in
-                # `tests/nanopynix`.** Two hours of ASAN found no memory error
-                # anywhere, so nothing is lost by the cut and the whole failure
-                # set goes with it.
-                #
-                # The reason it can go is that only instrumented code reports:
-                # nanopynix-bindings, the Nix libraries and boost.
-                # `tests/nanopynix` drives that surface directly.
-                # `tests/pynix` tests a CLI and an LSP server through
-                # uninstrumented Python, and reaches the bindings only along
-                # paths `tests/nanopynix` already covers. It is also where #44
-                # lives.
-                #
-                # The in-process engine stays, so the acceptance test of issue
-                # #35 keeps its ASAN cover: a test that builds an evaluator in
-                # the pytest process runs in a fork of it.
-                #
-                # **Three deadlines, and the default of each one is written for
-                # a build with no instrumentation.** Run 30891726124 measured
-                # what happens when they stay: tests failed on a clock rather
-                # than on an assertion about Nix.
-                #
-                #   NANOPYNIX_RPC_TIMEOUT      default 300. Six tests died with
-                #                              Status.DEADLINE_EXCEEDED at 120.
-                #   NANOPYNIX_SHUTDOWN_TIMEOUT default 5. The worker cannot
-                #                              answer `Shutdown` in five
-                #                              seconds under ASAN.
-                #   NANOPYNIX_TEST_TIMEOUT     default 120 (`tests/conftest.py`,
-                #                              whose own comment asks for this
-                #                              override "for slower
-                #                              environments").
-                #
-                # The first answer to that was 600/120/900, and it cost more
-                # than it saved: throughput fell from 15.0 tests a minute to
-                # 6.7, because each of the ten failures then waited out a much
-                # longer deadline. A deadline exists to make a hang visible,
-                # not to sit through one. These are the middle ground, and this
-                # job is the measurement run for tighter ones. See #61.
-                env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=180 NANOPYNIX_SHUTDOWN_TIMEOUT=60 NANOPYNIX_TEST_TIMEOUT=300 NANOPYNIX_TEST_SANITIZER=asan PYTHONDONTWRITEBYTECODE=1 \
-                  ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
-                  --ignore=tests/pynix \
-                  -m "not soak" \
-                  2>&1 | tee -a "$LOGFILE" || status=$?
-                # A sanitizer report is the finding, so read the log rather
-                # than trusting the exit status alone: `halt_on_error=1` kills
-                # the process that reports, but a report raised inside a
-                # forkserver worker can still be reaped into a plain test
-                # failure. mkUbsanTestJob says the same thing.
-                if grep -qE "AddressSanitizer|LeakSanitizer" "$LOGFILE"; then
-                  echo "::error::sanitizer report on ${bareVersion} -- see the log above"
-                  exit 1
-                fi
-                exit "$status"
-              '';
-          }
-          (mkSoakStep {
-            label = "ASAN, ${bareVersion}";
-            env = "NANOPYNIX_RPC_TIMEOUT=180 NANOPYNIX_SHUTDOWN_TIMEOUT=60 NANOPYNIX_TEST_TIMEOUT=300 NANOPYNIX_TEST_SANITIZER=asan";
+          (mkBuildStep {
+            name = "Build the ASAN CI step package (${bareVersion})";
+            cap = caps.asanBuild;
           })
+          (mkSandboxStep { })
+          (mkRunStep {
+            name = "Run ASAN-instrumented suite (${bareVersion}, local backend)";
+            subcommand = "suite";
+            cap = caps.asanSuite;
+          })
+          (mkSoakStep { label = "ASAN, ${bareVersion}"; })
           (steps.uploadArtifact {
             name = "Upload ASAN output (${bareVersion})";
             artifactName = "asan-report-${bareVersion}";
@@ -852,14 +575,17 @@ let
   # `--keep-going` is what makes that last part true: without it the first
   # failing gate hides the rest.
   #
-  # `check-grpclib-transports`, `check-pytest-agent` and `check-ekn-sandbox`
-  # are the odd ones out, each being a run rather than a static tool. All
-  # three are here rather than in the `test-*` matrix because all three are
-  # version-independent: that matrix exists to run one suite against each
-  # supported Nix version. Neither subproject links Nix at all, and
-  # `check-ekn-sandbox` asks whether `ekn` can start where there is no trust
-  # store, which no Nix version changes. Three copies of any of them would be
-  # three identical runs. See nix/checks.nix.
+  # **The list comes from `repo.checks`, so a new gate joins this job by
+  # existing.** It was written by hand until this file could read the
+  # attribute set directly, and a gate that nobody added here ran nowhere.
+  #
+  # `grpclib-transports`, `pytest-agent` and `ekn-sandbox` are the odd ones
+  # out, each being a run rather than a static tool. All three are here rather
+  # than in the `test-*` matrix because all three are version-independent:
+  # that matrix exists to run one suite against each supported Nix version.
+  # Neither subproject links Nix at all, and `ekn-sandbox` asks whether `ekn`
+  # can start where there is no trust store, which no Nix version changes.
+  # Three copies of any of them would be three identical runs.
   mkStaticChecksJob =
     {
       ref ? null,
@@ -877,39 +603,19 @@ let
           (steps.installNix { })
           (steps.cachix { })
           {
-            name = "Run the gates (ruff, ruff-strict, ruff format, pyright, shellcheck, grpclib-transports, pytest-agent, ekn-sandbox)";
+            name = "Run the gates (${builtins.concatStringsSep ", " checkAttrs})";
             timeout-minutes = caps.staticChecks;
-            run = ''
-              nix build --no-link --print-build-logs --keep-going \
-                ".#check-lint" ".#check-lint-strict" ".#check-format" ".#check-types" \
-                ".#check-shell" ".#check-grpclib-transports" ".#check-pytest-agent" \
-                ".#check-ekn-sandbox"
-            '';
+            run = "nix build --file . --no-link --print-build-logs --keep-going ${
+              builtins.concatStringsSep " " (map (attr: "checks.${attr}") checkAttrs)
+            }";
           }
         ];
       }
     );
 
-  # The one part of the commit convention that a machine can check: the
-  # Conventional Commits prefix that CLAUDE.md requires. It checks the *shape*
-  # and not a list of allowed types, because CLAUDE.md gives `feat(scope):` and
-  # `fix(tests):` as examples and never agreed a taxonomy. The shape alone is
-  # enough to catch the subjects that this repository actually produced before
-  # the convention settled -- `fmt`, `ASD-STE100`, `add gdb to devshell`.
-  #
-  # Needs no Nix, so it is the cheapest job in the workflow.
-  #
-  # DELIBERATELY NOT CHECKED. Read the name of this job as the subject line
-  # only, because these two are not machine-decidable:
-  #
-  #   `Closes #<number>` is conditional. A commit completes an issue, or it
-  #   does not, and no machine knows which. A required trailer would train
-  #   people to write `Closes` for partial work -- the exact failure that
-  #   CLAUDE.md warns about, and worse than no check.
-  #
-  #   The `Co-Authored-By` and `Claude-Session` trailers are contextual. A
-  #   commit that a person writes without an agent carries neither, and it must
-  #   not fail for that.
+  # The one part of the commit convention that a machine can check.
+  # `ci/steps.nix` carries the rule, and the two parts it deliberately leaves
+  # alone.
   mkCommitSubjectJob =
     {
       ref ? null,
@@ -921,51 +627,16 @@ let
         steps = [
           (steps.checkout {
             inherit ref;
-            # The range below needs the commits themselves, and the default
-            # checkout fetches one.
+            # The range needs the commits themselves, and the default checkout
+            # fetches one.
             fetchDepth = 0;
           })
-          {
+          (steps.installNix { })
+          (mkNixRunStep {
             name = "Check the Conventional Commits subject of each pushed commit";
-            timeout-minutes = caps.commitSubjects;
-            run = ''
-              set -euo pipefail
-
-              before="''${{ github.event.before }}"
-              after="''${{ github.sha }}"
-
-              # `before` is the all-zero SHA for a new branch, and it names a
-              # commit that the remote no longer has after a force push. The
-              # range means nothing in either case, so check the head alone.
-              if git cat-file -e "$before^{commit}" 2>/dev/null; then
-                commits=$(git rev-list --no-merges "$before..$after")
-              else
-                echo "no usable base commit; checking $after alone"
-                commits=$(git rev-list --no-merges -1 "$after")
-              fi
-
-              # Say how many, so that a pass is auditable. A range with no
-              # commits also exits 0, and a gate that quietly checks nothing
-              # reads exactly like a gate that checked everything.
-              echo "checking $(printf '%s\n' "$commits" | grep -c .) commit subject(s)"
-
-              status=0
-              for sha in $commits; do
-                subject=$(git log -1 --format=%s "$sha")
-                # A space is legal inside the parentheses, because this
-                # repository writes a multi-scope subject as `(nanopynix, ekn)`.
-                if ! printf '%s\n' "$subject" | grep -Eq '^[a-z]+(\([a-z0-9._/, -]+\))?!?: .+'; then
-                  echo "::error::$sha: not a Conventional Commits subject: $subject"
-                  status=1
-                fi
-              done
-
-              if [ "$status" -ne 0 ]; then
-                echo "CLAUDE.md requires the Conventional Commits prefix, for example 'feat(scope):' or 'fix(tests):'."
-              fi
-              exit "$status"
-            '';
-          }
+            attr = "commit-subjects";
+            cap = caps.commitSubjects;
+          })
         ];
       }
     );
@@ -988,17 +659,14 @@ let
         {
           name = "Build documentation";
           timeout-minutes = caps.docsBuild;
-          run = "nix build .#nanopynix-docs --out-link result --print-build-logs --print-out-paths";
+          run = "nix build --file . nanopynix-docs --out-link result --print-build-logs --print-out-paths";
         }
         (steps.verifyClosure { name = "Verify docs closure"; })
-        {
+        (mkNixRunStep {
           name = "Prepare Pages artifact";
-          timeout-minutes = caps.docsPrepare;
-          run = ''
-            mkdir -p public
-            cp -r --no-preserve=mode,ownership result/. public/
-          '';
-        }
+          attr = "prepare-pages";
+          cap = caps.docsPrepare;
+        })
         {
           uses = "actions/upload-pages-artifact@main";
           timeout-minutes = caps.docsUpload;
@@ -1049,13 +717,9 @@ in
     # jobs.
     caps
     mkJob
-    regularVersionNames
+    mkNixRunStep
+    mkSandboxStep
     regularBackends
-    tsanVersionNames
-    ubsanVersionNames
-    asanVersionNames
-    nogcVersionNames
-    versionMatrixLines
     versionMatrixOutputs
     mkRegularTestJob
     mkTsanTestJob
@@ -1068,22 +732,32 @@ in
     mkDocsDeployJob
     ;
 
+  # **Every workflow sets this, and every workflow needs it.**
+  # `nix/compat.nix` normally overrides `self` with the local checkout, which
+  # is right on a laptop and wrong on a runner: CI must evaluate the tree the
+  # way the flake evaluator would, from the lockfile and through a store copy.
+  # With this set, `nix build --file . <attrpath>` and `nix build .#<name>`
+  # agree, which is what lets every step name a plain attribute path.
+  workflowEnv = {
+    FLAKE_COMPATISH_DISABLE_OVERRIDES = "1";
+  };
+
   # Why these expand statically here, and through a GHA matrix in
   # `on_schedule.nix`, for the same jobs.
   #
-  # The names come from `nanopynixVersionNames`, which this file reads out of
-  # the flake at *render* time. The scheduled workflow runs `nix flake update`
-  # before it tests anything, so its version list is not knowable until the
-  # run is under way -- a bumped nixpkgs can add or drop a Nix version, and a
-  # statically rendered list would silently never test the new one. That is
-  # the whole of the difference, and it is why the scheduled side computes the
-  # list in a step and feeds it to `strategy.matrix`.
+  # The names come from `ciVersionMatrix`, which `default.nix` computes and
+  # this file reads at *render* time. The scheduled workflow runs `nix flake
+  # update` before it tests anything, so its version list is not knowable
+  # until the run is under way -- a bumped nixpkgs can add or drop a Nix
+  # version, and a statically rendered list would silently never test the new
+  # one. That is the whole of the difference, and it is why the scheduled side
+  # computes the list in a step and feeds it to `strategy.matrix`.
   #
   # The per-commit side cannot use a matrix in exchange: the `jobs` dispatch
   # input selects by exact job name, and a matrix collapses eight jobs into
   # one id with eight legs. Both mechanisms are load-bearing, so the rule is
-  # that every *kind* of test job exists on both sides -- regular, tsan, ubsan
-  # -- and only the expansion differs.
+  # that every *kind* of test job exists on both sides, and only the expansion
+  # differs.
   #
   # **`asan` is on both sides now, and it has the number issue #35 asked
   # for.** That issue said "Do not put it in the per-commit workflow until the
@@ -1120,7 +794,7 @@ in
               needs
               ;
           };
-        }) regularVersionNames
+        }) regular
       ) regularBackends
     );
 
@@ -1141,7 +815,7 @@ in
             needs
             ;
         };
-      }) ubsanVersionNames
+      }) ubsan
     );
 
   mkStaticNoGCTestJobs =
@@ -1161,19 +835,9 @@ in
             needs
             ;
         };
-      }) nogcVersionNames
+      }) nogc
     );
 
-  # The per-commit expansion of the `asan` kind, in the shape of the three
-  # above. The comment on `mkStaticTestJobs` asked for the number before this
-  # existed, and run 30905635880 produced it:
-  #
-  #   1622 passed, 93 skipped, 1 xfailed, in 18m30s
-  #   whole job 19m42s, against caps.asanSuite = 60
-  #
-  # That 19m42s carries a 36-second build, because the derivation was already
-  # in the cache. A commit that changes the bindings pays `caps.asanBuild` on
-  # top, which is why that cap stays at 60.
   mkStaticAsanTestJobs =
     {
       ref ? null,
@@ -1191,7 +855,7 @@ in
             needs
             ;
         };
-      }) asanVersionNames
+      }) asan
     );
 
   mkStaticTsanTestJobs =
@@ -1211,6 +875,6 @@ in
             needs
             ;
         };
-      }) tsanVersionNames
+      }) tsan
     );
 }

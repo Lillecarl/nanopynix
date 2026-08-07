@@ -2,6 +2,8 @@
 # Edit ci/workflows/on_schedule.nix; a pytest run renders this file again.
 
 name: On schedule
+env:
+  FLAKE_COMPATISH_DISABLE_OVERRIDES: '1'
 'on':
   workflow_dispatch: null
   schedule:
@@ -30,14 +32,12 @@ jobs:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
-    - name: Run the gates (ruff, ruff-strict, ruff format, pyright, shellcheck, grpclib-transports,
-        pytest-agent, ekn-sandbox)
+    - name: Run the gates (ekn-sandbox, format, grpclib-transports, lint, lint-strict,
+        pytest-agent, shell, types)
       timeout-minutes: 20
-      run: |
-        nix build --no-link --print-build-logs --keep-going \
-          ".#check-lint" ".#check-lint-strict" ".#check-format" ".#check-types" \
-          ".#check-shell" ".#check-grpclib-transports" ".#check-pytest-agent" \
-          ".#check-ekn-sandbox"
+      run: nix build --file . --no-link --print-build-logs --keep-going checks.ekn-sandbox
+        checks.format checks.grpclib-transports checks.lint checks.lint-strict checks.pytest-agent
+        checks.shell checks.types
     timeout-minutes: 85
     runs-on: ubuntu-24.04
   docs-build:
@@ -70,20 +70,19 @@ jobs:
         useDaemon: false
     - name: Build documentation
       timeout-minutes: 30
-      run: nix build .#nanopynix-docs --out-link result --print-build-logs --print-out-paths
+      run: nix build --file . nanopynix-docs --out-link result --print-build-logs
+        --print-out-paths
     - name: Verify docs closure
       timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     - name: Prepare Pages artifact
-      timeout-minutes: 5
-      run: |
-        mkdir -p public
-        cp -r --no-preserve=mode,ownership result/. public/
+      timeout-minutes: 10
+      run: nix run --file . ciSteps.prepare-pages
     - timeout-minutes: 15
       uses: actions/upload-pages-artifact@main
       with:
         path: public
-    timeout-minutes: 130
+    timeout-minutes: 135
     runs-on: ubuntu-24.04
   docs-deploy:
     needs: docs-build
@@ -106,6 +105,9 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-24.04
   test-regular:
+    env:
+      CI_STEP: ciSteps.${{ matrix.version }}
+      BACKEND: ${{ matrix.backend }}
     needs:
     - update-lockfile
     steps:
@@ -128,66 +130,23 @@ jobs:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
-    - name: Build nanopynix test runner for Nix ${{ matrix.version }}
+    - name: Build the CI step package for Nix ${{ matrix.version }}
       timeout-minutes: 30
-      run: nix build ".#nanopynix-tests-${{ matrix.version }}" --out-link result --print-build-logs
-        --print-out-paths
+      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
     - name: Verify test runner closure after build
       timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     - name: Enable Nix sandbox namespaces
-      timeout-minutes: 5
-      run: |
-        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-        sudo sysctl -w kernel.unprivileged_userns_clone=1
-        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
-        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+      timeout-minutes: 10
+      run: nix run --file . ciSteps.enable-sandbox-namespaces
     - name: Test nanopynix against Nix ${{ matrix.version }} (full suite, ${{ matrix.backend
         }} backend)
       timeout-minutes: 30
-      run: |
-        set -o pipefail
-        paths_to_delete="${{ github.workspace }}/nanopynix-test-store-paths.txt"
-        rm -f "$paths_to_delete"
-        # Not stderr: pytest captures fd 2 per test by default and only
-        # prints the buffer when that test fails, so a SIGSEGV takes the
-        # GC thread log down with it -- a full run that crashed produced
-        # zero diagnostic lines. A file is outside pytest's capture.
-        gc_thread_log="${{ github.workspace }}/gc-thread-debug.log"
-        rm -f "$gc_thread_log"
-        status=0
-        # NANOPYNIX_COVERAGE rather than pytest-cov's --cov: the runner
-        # then measures with `coverage run` and combines after pytest
-        # exits. pytest-cov combines *inside* the run, alongside live
-        # evaluator threads and forkserver workers, and that combine
-        # intermittently failed with "database is locked" -- exit 3 on a
-        # job whose tests had all passed. See nanopynix/tests.nix.
-        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG=1 NANOPYNIX_GC_THREAD_DEBUG_FILE="$gc_thread_log" NANOPYNIX_RPC_TIMEOUT=30 PYTHONDONTWRITEBYTECODE=1 COVERAGE_FILE=${{ github.workspace }}/.coverage NANOPYNIX_COVERAGE=1 NANOPYNIX_COVERAGE_XML=${{ github.workspace }}/coverage.xml NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends ${{ matrix.backend }} \
-          -m "not soak" \
-          --junitxml=${{ github.workspace }}/junit.xml \
-          2>&1 | tee ${{ github.workspace }}/test-gdb-output.log || status=$?
-        # Only on a crash: this file has one line per evaluator thread
-        # registration and is long, so it is worth the log space solely
-        # when there is a faulting LWP to correlate it against.
-        if [ "$status" -gt 128 ] && [ -s "$gc_thread_log" ]; then
-          {
-            echo "=== Boehm GC thread registration log ($(wc -l <"$gc_thread_log") lines) ==="
-            cat "$gc_thread_log"
-          } >> ${{ github.workspace }}/test-gdb-output.log
-        fi
-        if [ -s "$paths_to_delete" ]; then
-          nix store delete --stdin < "$paths_to_delete" || true
-        fi
-        exit "$status"
+      run: ./result/bin/nanopynix-ci suite
     - name: Run the concurrency soak (${{ matrix.version }}, ${{ matrix.backend }}
         backend)
       timeout-minutes: 15
-      run: |
-        set -o pipefail
-        env NANOPYNIX_CORE_DEBUG=1 PYTHONDONTWRITEBYTECODE=1 NANOPYNIX_RPC_TIMEOUT=30 \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends ${{ matrix.backend }} \
-          -m soak
+      run: ./result/bin/nanopynix-ci soak
     - name: Upload test output
       timeout-minutes: 15
       uses: actions/upload-artifact@main
@@ -222,7 +181,7 @@ jobs:
     - name: Verify test runner closure after tests
       timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    timeout-minutes: 225
+    timeout-minutes: 230
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -232,6 +191,8 @@ jobs:
         - daemon
         - local
   test-ubsan:
+    env:
+      CI_STEP: ciSteps.${{ matrix.version }}
     needs:
     - update-lockfile
     steps:
@@ -254,48 +215,18 @@ jobs:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
-    - name: Build UBSAN nanopynix test runner (${{ matrix.version }})
+    - name: Build the UBSAN CI step package (${{ matrix.version }})
       timeout-minutes: 60
-      run: nix build ".#nanopynix-tests-${{ matrix.version }}" --out-link result --print-build-logs
-        --print-out-paths
+      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
     - name: Enable Nix sandbox namespaces
-      timeout-minutes: 5
-      run: |
-        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-        sudo sysctl -w kernel.unprivileged_userns_clone=1
-        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
-        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+      timeout-minutes: 10
+      run: nix run --file . ciSteps.enable-sandbox-namespaces
     - name: Run UBSAN-instrumented suite (${{ matrix.version }}, local backend)
       timeout-minutes: 30
-      run: |
-        set -o pipefail
-        LOGFILE="${{ github.workspace }}/ubsan-output-${{ matrix.version }}.log"
-        status=0
-        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=60 NANOPYNIX_TEST_SANITIZER=ubsan PYTHONDONTWRITEBYTECODE=1 \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
-          -m "not soak" \
-          2>&1 | tee -a "$LOGFILE" || status=$?
-        # A sanitizer report is the finding, so grep for it rather than
-        # trusting the exit status alone: halt_on_error=1 makes UBSan
-        # kill the process, but a report raised inside a forkserver
-        # worker can still be reaped into a plain test failure.
-        #
-        # "Unexpected condition" is the message of `nix::unreachable`,
-        # which is what `nixUnreachableWhenHardened` becomes once
-        # `NIX_UBSAN_ENABLED` is on. That path never prints the word
-        # "runtime error", so the first two patterns would miss it.
-        if grep -qE "(UndefinedBehaviorSanitizer|runtime error):|Unexpected condition in " "$LOGFILE"; then
-          echo "::error::sanitizer report on ${{ matrix.version }} -- see the log above"
-          exit 1
-        fi
-        exit "$status"
+      run: ./result/bin/nanopynix-ci suite
     - name: Run the concurrency soak (UBSAN, ${{ matrix.version }})
       timeout-minutes: 15
-      run: |
-        set -o pipefail
-        env NANOPYNIX_CORE_DEBUG=1 PYTHONDONTWRITEBYTECODE=1 NANOPYNIX_RPC_TIMEOUT=60 NANOPYNIX_TEST_SANITIZER=ubsan \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
-          -m soak
+      run: ./result/bin/nanopynix-ci soak
     - name: Upload UBSAN output (${{ matrix.version }})
       timeout-minutes: 15
       uses: actions/upload-artifact@main
@@ -303,13 +234,15 @@ jobs:
         name: ubsan-report-${{ matrix.version }}
         path: ${{ github.workspace }}/ubsan-output-${{ matrix.version }}.log
       if: ${{ !cancelled() }}
-    timeout-minutes: 190
+    timeout-minutes: 195
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         version: ${{ fromJson(needs.update-lockfile.outputs.ubsan_versions) }}
   test-tsan:
+    env:
+      CI_STEP: ciSteps.${{ matrix.version }}
     needs:
     - update-lockfile
     steps:
@@ -332,167 +265,18 @@ jobs:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
-    - name: Build TSAN nanopynix test runner (${{ matrix.version }})
+    - name: Build the TSAN CI step package (${{ matrix.version }})
       timeout-minutes: 45
-      run: nix build ".#nanopynix-tests-${{ matrix.version }}" --out-link result --print-build-logs
-        --print-out-paths
+      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
     - name: Enable Nix sandbox namespaces
-      timeout-minutes: 5
-      run: |
-        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-        sudo sysctl -w kernel.unprivileged_userns_clone=1
-        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
-        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+      timeout-minutes: 10
+      run: nix run --file . ciSteps.enable-sandbox-namespaces
     - name: Run TSAN-instrumented concurrency soak (five seeds, local+daemon backends)
       timeout-minutes: 25
-      run: |
-        set -o pipefail
-        LOGFILE="${{ github.workspace }}/tsan-output-${{ matrix.version }}.log"
-        # Boehm suspends every other thread with a signal before it
-        # collects, and TSAN intercepts signal delivery. When Boehm
-        # cannot stop the world it calls `abort`, and the process dies
-        # with status 134 and reports no race. See issue #69, which
-        # carries the measurement: the rate is near one run in four,
-        # and it does not depend on anything this repository sets.
-        #
-        # **Boehm's own answer to this is already in the build.**
-        # `gc_priv.h` suspends a thread with the synchronous `SIGSYS`
-        # when `THREAD_SANITIZER` is defined, and `gcconfig.h` defines
-        # it from `__has_feature(thread_sanitizer)`. GCC 15.3 supports
-        # `__has_feature` and reports the feature, so the collector
-        # this job links already uses `SIGSYS`, and it aborts anyway.
-        # Issue #69 carries the proof. So there is no known correction
-        # yet, and the two lines below are what this job does instead.
-        #
-        # `GC_INITIAL_HEAP_SIZE` gives Boehm a heap it does not have
-        # to grow, and a collection that never happens cannot fail to
-        # stop the world. Nix sets this itself when the variable is
-        # absent, to 25% of RAM capped at 384 MiB
-        # (libexpr/eval-gc.cc), and the soak exhausts that: it holds
-        # 66 tests and their evaluators in one process. The cap is
-        # what this raises, and `GC_expand_hp` takes virtual rather
-        # than resident memory, so the runner pays little for it.
-        # **This lowers the rate, and corrects nothing.** A full
-        # matrix run aborted with it in place.
-        #
-        # **The budget is zero, and an abort fails the job.** It was 5
-        # while #69 was open, when the abort was frequent and had no
-        # known cause. The cause is known now, and it is corrected:
-        # `99f74d82` registers the thread that builds an evaluator with
-        # Boehm, and #72 gives the mechanism -- the collector signalled
-        # a `pthread_t` that glibc had already handed on.
-        #
-        # Every `test-tsan-*` job since that commit reports zero
-        # aborts: 18 jobs, six runs, three Nix versions, five seeds
-        # against two backends each. A budget above zero therefore
-        # tolerates nothing that happens, and hides a regression of
-        # `99f74d82` up to five times over.
-        #
-        # The loop below stays, so raising the budget again is one
-        # character. The 134 branch still prints the Boehm resend log
-        # of the attempt before the job fails, which is the forensics
-        # that #69 asked for.
-        #
-        # This branch reads only that one signature. A race fails the
-        # job through its own branch, which runs first, and so does any
-        # other non-zero status.
-        ABORT_BUDGET=0
-        aborts=0
-        race_found=0
-        real_failure=0
-        for i in $(seq 1 5); do
-          attempt=0
-          while : ; do
-            attempt=$((attempt + 1))
-            echo "=== TSAN run $i attempt $attempt ===" | tee -a "$LOGFILE"
-            RUNLOG="$(mktemp)"
-            # Boehm's own log, which the abort branch below reads.
-            # `GC_PRINT_STATS` turns on `GC_COND_LOG_PRINTF`, and
-            # `resend_lost_signals` uses it to report how many threads
-            # still owe an acknowledgement on each pass. That count is
-            # the first thing issue #69 needs. `GC_LOG_FILE` keeps the
-            # rest of the collector chatter out of the job log.
-            GCLOG="$(mktemp)"
-            status=0
-            unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 GC_INITIAL_HEAP_SIZE=2147483648 GC_PRINT_STATS=1 GC_LOG_FILE="$GCLOG" \
-              ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon \
-              -m soak --soak-seed="$i" \
-              --soak-report="${{ github.workspace }}/soak-${{ matrix.version }}-run$i.json" \
-              2>&1 | tee "$RUNLOG" || status=$?
-            cat "$RUNLOG" >> "$LOGFILE"
-            echo "=== TSAN run $i attempt $attempt exit status: $status ===" | tee -a "$LOGFILE"
-            # Read the attempt, and not the whole log. The log holds
-            # every earlier attempt, so a match there says nothing
-            # about this one.
-            if grep -q "ThreadSanitizer: data race" "$RUNLOG"; then
-              echo "TSAN data race detected on run $i -- stopping early" | tee -a "$LOGFILE"
-              race_found=1
-              rm -f "$RUNLOG" "$GCLOG"
-              break 2
-            fi
-            if [ "$status" -eq 134 ] && grep -q "Signals delivery fails" "$RUNLOG"; then
-              aborts=$((aborts + 1))
-              rm -f "$RUNLOG"
-              echo "=== Boehm resend log of run $i attempt $attempt ===" | tee -a "$LOGFILE"
-              grep -E "Resent|Lost some threads|stop_world" "$GCLOG" | tail -40 | tee -a "$LOGFILE" || true
-              rm -f "$GCLOG"
-              echo "Boehm could not stop the world on run $i (issue #69). Tolerated aborts: $aborts of $ABORT_BUDGET." | tee -a "$LOGFILE"
-              if [ "$aborts" -gt "$ABORT_BUDGET" ]; then
-                echo "::error::the collector aborted more than $ABORT_BUDGET times -- see issue #69"
-                real_failure=1
-                break 2
-              fi
-              continue
-            fi
-            rm -f "$RUNLOG"
-            if [ "$status" -ne 0 ]; then
-              # The collector log goes out here too, and not only on
-              # the abort above. A stop-the-world that fails can hang
-              # rather than abort, and then the status is the status
-              # of pytest and the 134 branch never runs. Run
-              # 31189073155 hit that: `test_soak_inproc[local]`
-              # reached its 120s deadline with `nix-eval_0` inside
-              # `lock_flake`, the status was 1, and these lines were
-              # deleted unread. See issue #99.
-              echo "=== Boehm resend log of run $i attempt $attempt ===" | tee -a "$LOGFILE"
-              grep -E "Resent|Lost some threads|stop_world" "$GCLOG" | tail -40 | tee -a "$LOGFILE" || true
-              rm -f "$GCLOG"
-              echo "::error::run $i failed with status $status -- see log above"
-              real_failure=1
-              break 2
-            fi
-            rm -f "$GCLOG"
-            break
-          done
-        done
-        echo "=== TSAN soak summary: $aborts tolerated collector abort(s) of a budget of $ABORT_BUDGET ===" | tee -a "$LOGFILE"
-        if [ "$race_found" -eq 1 ]; then
-          echo "::error::genuine ThreadSanitizer data race detected -- see log above"
-          exit 1
-        fi
-        if [ "$real_failure" -eq 1 ]; then
-          exit 1
-        fi
-        exit 0
+      run: ./result/bin/nanopynix-ci soak-seeds
     - name: Run TSAN-instrumented concurrency tests (single pass, local+daemon backends)
       timeout-minutes: 20
-      run: |
-        set -o pipefail
-        LOGFILE="${{ github.workspace }}/tsan-output-broad-${{ matrix.version }}.log"
-        status=0
-        unshare --user --map-root-user --mount --pid --fork --mount-proc env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=30 NANOPYNIX_TEST_SANITIZER=tsan PYTHONDONTWRITEBYTECODE=1 \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local,daemon -m concurrency \
-          2>&1 | tee -a "$LOGFILE" || status=$?
-        echo "=== TSAN broad pass exit status: $status ===" | tee -a "$LOGFILE"
-        if grep -q "ThreadSanitizer: data race" "$LOGFILE"; then
-          echo "::error::genuine ThreadSanitizer data race detected -- see log above"
-          exit 1
-        fi
-        if grep -qE "[0-9]+ (failed|error)|Fatal Python error|pthread_kill failed at suspend" "$LOGFILE"; then
-          echo "::error::pytest reported a real failure, or the process crashed -- see log above"
-          exit 1
-        fi
-        exit 0
+      run: ./result/bin/nanopynix-ci broad
     - name: Upload TSAN output (${{ matrix.version }})
       timeout-minutes: 15
       uses: actions/upload-artifact@main
@@ -503,13 +287,15 @@ jobs:
           ${{ github.workspace }}/tsan-output-broad-${{ matrix.version }}.log
           ${{ github.workspace }}/soak-${{ matrix.version }}-run*.json
       if: ${{ !cancelled() }}
-    timeout-minutes: 175
+    timeout-minutes: 180
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         version: ${{ fromJson(needs.update-lockfile.outputs.tsan_versions) }}
   test-nogc:
+    env:
+      CI_STEP: ciSteps.${{ matrix.version }}
     needs:
     - update-lockfile
     steps:
@@ -532,37 +318,27 @@ jobs:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
-    - name: Build no-collector nanopynix test runner (${{ matrix.version }})
+    - name: Build the no-collector CI step package (${{ matrix.version }})
       timeout-minutes: 30
-      run: nix build ".#nanopynix-tests-${{ matrix.version }}" --out-link result --print-build-logs
-        --print-out-paths
+      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
     - name: Enable Nix sandbox namespaces
-      timeout-minutes: 5
-      run: |
-        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-        sudo sysctl -w kernel.unprivileged_userns_clone=1
-        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
-        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+      timeout-minutes: 10
+      run: nix run --file . ciSteps.enable-sandbox-namespaces
     - name: Run the suite without a collector (${{ matrix.version }}, local backend)
       timeout-minutes: 30
-      run: |
-        env NANOPYNIX_CORE_DEBUG=1 PYTHONDONTWRITEBYTECODE=1 \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --run-temp-store-builds --nix-test-backends local \
-          -m "not soak"
+      run: ./result/bin/nanopynix-ci suite
     - name: Run the concurrency soak (no collector, ${{ matrix.version }})
       timeout-minutes: 15
-      run: |
-        set -o pipefail
-        env NANOPYNIX_CORE_DEBUG=1 PYTHONDONTWRITEBYTECODE=1 NANOPYNIX_RPC_TIMEOUT=30 \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
-          -m soak
-    timeout-minutes: 145
+      run: ./result/bin/nanopynix-ci soak
+    timeout-minutes: 150
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         version: ${{ fromJson(needs.update-lockfile.outputs.nogc_versions) }}
   test-asan:
+    env:
+      CI_STEP: ciSteps.${{ matrix.version }}
     needs:
     - update-lockfile
     steps:
@@ -585,91 +361,18 @@ jobs:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
-    - name: Build ASAN nanopynix test runner (${{ matrix.version }})
+    - name: Build the ASAN CI step package (${{ matrix.version }})
       timeout-minutes: 60
-      run: nix build ".#nanopynix-tests-${{ matrix.version }}" --out-link result --print-build-logs
-        --print-out-paths
+      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
     - name: Enable Nix sandbox namespaces
-      timeout-minutes: 5
-      run: |
-        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-        sudo sysctl -w kernel.unprivileged_userns_clone=1
-        sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p
-        unshare --user --map-root-user --mount --pid --fork --mount-proc true
+      timeout-minutes: 10
+      run: nix run --file . ciSteps.enable-sandbox-namespaces
     - name: Run ASAN-instrumented suite (${{ matrix.version }}, local backend)
       timeout-minutes: 60
-      run: |
-        set -o pipefail
-        LOGFILE="${{ github.workspace }}/asan-output-${{ matrix.version }}.log"
-        status=0
-        # **`tests/pynix` is out, and run 30895974566 is the reason.**
-        # That run reached the 120-minute cap, and its log says what it
-        # bought:
-        #
-        #   806 tests executed, 742 passed, 10 failed, 54 skipped
-        #   0 AddressSanitizer reports
-        #   killed inside tests/pynix/test_lsp.py
-        #
-        # **All ten failures were in `tests/pynix`, and none were in
-        # `tests/nanopynix`.** Two hours of ASAN found no memory error
-        # anywhere, so nothing is lost by the cut and the whole failure
-        # set goes with it.
-        #
-        # The reason it can go is that only instrumented code reports:
-        # nanopynix-bindings, the Nix libraries and boost.
-        # `tests/nanopynix` drives that surface directly.
-        # `tests/pynix` tests a CLI and an LSP server through
-        # uninstrumented Python, and reaches the bindings only along
-        # paths `tests/nanopynix` already covers. It is also where #44
-        # lives.
-        #
-        # The in-process engine stays, so the acceptance test of issue
-        # #35 keeps its ASAN cover: a test that builds an evaluator in
-        # the pytest process runs in a fork of it.
-        #
-        # **Three deadlines, and the default of each one is written for
-        # a build with no instrumentation.** Run 30891726124 measured
-        # what happens when they stay: tests failed on a clock rather
-        # than on an assertion about Nix.
-        #
-        #   NANOPYNIX_RPC_TIMEOUT      default 300. Six tests died with
-        #                              Status.DEADLINE_EXCEEDED at 120.
-        #   NANOPYNIX_SHUTDOWN_TIMEOUT default 5. The worker cannot
-        #                              answer `Shutdown` in five
-        #                              seconds under ASAN.
-        #   NANOPYNIX_TEST_TIMEOUT     default 120 (`tests/conftest.py`,
-        #                              whose own comment asks for this
-        #                              override "for slower
-        #                              environments").
-        #
-        # The first answer to that was 600/120/900, and it cost more
-        # than it saved: throughput fell from 15.0 tests a minute to
-        # 6.7, because each of the ten failures then waited out a much
-        # longer deadline. A deadline exists to make a hang visible,
-        # not to sit through one. These are the middle ground, and this
-        # job is the measurement run for tighter ones. See #61.
-        env NANOPYNIX_CORE_DEBUG=1 NANOPYNIX_RPC_TIMEOUT=180 NANOPYNIX_SHUTDOWN_TIMEOUT=60 NANOPYNIX_TEST_TIMEOUT=300 NANOPYNIX_TEST_SANITIZER=asan PYTHONDONTWRITEBYTECODE=1 \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
-          --ignore=tests/pynix \
-          -m "not soak" \
-          2>&1 | tee -a "$LOGFILE" || status=$?
-        # A sanitizer report is the finding, so read the log rather
-        # than trusting the exit status alone: `halt_on_error=1` kills
-        # the process that reports, but a report raised inside a
-        # forkserver worker can still be reaped into a plain test
-        # failure. mkUbsanTestJob says the same thing.
-        if grep -qE "AddressSanitizer|LeakSanitizer" "$LOGFILE"; then
-          echo "::error::sanitizer report on ${{ matrix.version }} -- see the log above"
-          exit 1
-        fi
-        exit "$status"
+      run: ./result/bin/nanopynix-ci suite
     - name: Run the concurrency soak (ASAN, ${{ matrix.version }})
       timeout-minutes: 15
-      run: |
-        set -o pipefail
-        env NANOPYNIX_CORE_DEBUG=1 PYTHONDONTWRITEBYTECODE=1 NANOPYNIX_RPC_TIMEOUT=180 NANOPYNIX_SHUTDOWN_TIMEOUT=60 NANOPYNIX_TEST_TIMEOUT=300 NANOPYNIX_TEST_SANITIZER=asan \
-          ./result/bin/nanopynix-tests --verbose --tb=short -rsxXfE --capture=no --run-temp-store-builds --nix-test-backends local \
-          -m soak
+      run: ./result/bin/nanopynix-ci soak
     - name: Upload ASAN output (${{ matrix.version }})
       timeout-minutes: 15
       uses: actions/upload-artifact@main
@@ -677,7 +380,7 @@ jobs:
         name: asan-report-${{ matrix.version }}
         path: ${{ github.workspace }}/asan-output-${{ matrix.version }}.log
       if: ${{ !cancelled() }}
-    timeout-minutes: 220
+    timeout-minutes: 225
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -685,11 +388,11 @@ jobs:
         version: ${{ fromJson(needs.update-lockfile.outputs.asan_versions) }}
   update-lockfile:
     outputs:
+      asan_versions: ${{ steps.versions.outputs.asan_versions }}
+      nogc_versions: ${{ steps.versions.outputs.nogc_versions }}
       regular_versions: ${{ steps.versions.outputs.regular_versions }}
       tsan_versions: ${{ steps.versions.outputs.tsan_versions }}
       ubsan_versions: ${{ steps.versions.outputs.ubsan_versions }}
-      asan_versions: ${{ steps.versions.outputs.asan_versions }}
-      nogc_versions: ${{ steps.versions.outputs.nogc_versions }}
     steps:
     - timeout-minutes: 10
       uses: actions/checkout@main
@@ -711,12 +414,7 @@ jobs:
       run: nix flake update
     - name: Compute Nix version matrices
       timeout-minutes: 20
-      run: |
-        echo "regular_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-(tsan|ubsan|asan|nogc)" n == null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
-        echo "tsan_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-tsan" n != null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
-        echo "ubsan_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-ubsan" n != null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
-        echo "asan_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-asan" n != null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
-        echo "nogc_versions=$(nix eval --json '.#packages.x86_64-linux' --apply 'pkgs: map (builtins.replaceStrings ["nanopynix-tests-"] [""]) (builtins.filter (n: builtins.match "nanopynix-tests-.*" n != null && builtins.match ".*-nogc" n != null) (builtins.attrNames pkgs))')" >> "$GITHUB_OUTPUT"
+      run: nix run --file . ciSteps.version-matrix
       id: versions
     - timeout-minutes: 15
       uses: actions/upload-artifact@main

@@ -17,6 +17,14 @@
       # is vendored here now (grpclib-transports/) and a second, published
       # copy of it in the closure would be a confusing thing to reason about.
       inputs.nanopynix.follows = "";
+      # One flake-compatish in this lockfile, and not two. Without this,
+      # easykubenix pins its own copy, Nix names one node `flake-compatish`
+      # and the other `flake-compatish_2`, and which name lands on which is
+      # not ours to choose. `nix/compat.nix` follows the root input mapping
+      # rather than the node name, so it reads the right one either way -- but
+      # a second copy is still a second revision of the code that every
+      # `--file .` evaluation goes through.
+      inputs.flake-compatish.follows = "flake-compatish";
     };
     # numtide's fork, not nix-community/tree-sitter-nix: numtide's README
     # states it's "kept moving while upstream is stalled" and "new bug
@@ -42,20 +50,21 @@
       );
     in
     {
-      packages = forAllSystems (
-        system:
-        lib.filterAttrs (_: v: lib.isDerivation v) (
-          eachDefNix.${system}
-          // eachDefNix.${system}.tests
-          // lib.mapAttrs' (
-            n: v: lib.nameValuePair "nanopynix-${n}" v.nanopynix
-          ) eachDefNix.${system}.nanopynixVersions
-          # Also under `packages`, and not only under `checks` below, because
-          # CI builds a job's outputs by `nix build ".#<name>"`. See
-          # nix/checks.nix.
-          // lib.mapAttrs' (n: v: lib.nameValuePair "check-${n}" v) eachDefNix.${system}.checks
-        )
-      );
+      # The finished products, and nothing else.
+      #
+      # This used to flatten three more sets into one namespace: every
+      # per-version test runner as `nanopynix-tests-<version>`, every
+      # per-version library as `nanopynix-<version>`, and every gate as
+      # `check-<name>`. All three existed for one reason -- CI selected what
+      # to build with `nix build ".#<name>"`, and a flake output set is flat,
+      # so a nested attribute had to be given a mangled flat name to be
+      # reachable.
+      #
+      # `nix build --file . <attrpath>` reaches any attribute, and
+      # `FLAKE_COMPATISH_DISABLE_OVERRIDES=1` makes that evaluation agree with
+      # a flake evaluation, so CI names `ciSteps.nix_2_34-tsan` and
+      # `checks.lint` as they are written. The mangling had no other consumer.
+      packages = forAllSystems (system: lib.filterAttrs (_: lib.isDerivation) eachDefNix.${system});
       # The standard place for the four static gates, although `nix flake
       # check` cannot run them today: that command evaluates every package,
       # and `packages.shell` fails a pure evaluation with "Editable root was

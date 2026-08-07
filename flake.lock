@@ -18,7 +18,9 @@
     "easykubenix": {
       "inputs": {
         "adios": "adios",
-        "flake-compatish": "flake-compatish",
+        "flake-compatish": [
+          "flake-compatish"
+        ],
         "nanopynix": [],
         "nixpkgs": [
           "nixpkgs"
@@ -39,21 +41,6 @@
       }
     },
     "flake-compatish": {
-      "locked": {
-        "lastModified": 1783984082,
-        "narHash": "sha256-A7Xl565OqEU7VCqq1hEBw5AzOTicFttZggJnA17tpSU=",
-        "owner": "lillecarl",
-        "repo": "flake-compatish",
-        "rev": "30cb7674c79484293588da00f39e6cd5eb36865c",
-        "type": "github"
-      },
-      "original": {
-        "owner": "lillecarl",
-        "repo": "flake-compatish",
-        "type": "github"
-      }
-    },
-    "flake-compatish_2": {
       "locked": {
         "lastModified": 1786117702,
         "narHash": "sha256-RWLVkrabWD6H3oxshfSeIT0iWnmXuO8sDEorZOMjfeM=",
@@ -107,7 +94,7 @@
     "root": {
       "inputs": {
         "easykubenix": "easykubenix",
-        "flake-compatish": "flake-compatish_2",
+        "flake-compatish": "flake-compatish",
         "nixpkgs": "nixpkgs",
         "pyproject-nix": "pyproject-nix",
         "tree-sitter-nix-numtide": "tree-sitter-nix-numtide"
