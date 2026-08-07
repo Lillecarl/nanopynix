@@ -239,6 +239,21 @@ def nodeid_to_relpath(nodeid: str) -> Path:
     return Path(file_part) / test_part
 
 
+def stuck_dump_path(root: Path, nodeid: str) -> Path:
+    """Where stack dumps for *nodeid* go: beside its log, not inside it.
+
+    The log is written when a test finishes, and a test being dumped may
+    never finish.
+
+    Here rather than on AgentRuntime, which is what writes these files,
+    because `pytest-agent watch` reads them from another process entirely. A
+    naming convention that one side computes and the other side re-derives is
+    a convention that drifts.
+    """
+    rel = nodeid_to_relpath(nodeid)
+    return root / rel.parent / f"{rel.name}.stuck.txt"
+
+
 def abbreviate_nodeid(nodeid: str, limit: int = MAX_NODEID_DISPLAY_CHARS) -> str:
     """Shorten *nodeid* to at most *limit* characters for a terminal line.
 

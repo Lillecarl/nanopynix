@@ -245,6 +245,61 @@ pulling the three procfs reads into `read_identity` and the match into
 `ReaderIdentity.banned_name` left the scan loop simple enough to pass on its
 own.
 
+## status.json is a third file, not a field on an existing one
+
+`meta.json`, `summary.json` and now `status.json` divide by lifetime: what the
+run *is* (written once, before the first test), what it *did* (written once,
+at the end), and where it has *got to* (rewritten every couple of seconds, and
+meaningless the moment the process dies). Nothing else in the archive is
+rewritten, so nothing else could carry the third.
+
+`distributed` rides on `status.json` rather than on `meta.json`, where it
+arguably belongs, because `meta.json` is read by the prune path, by the label
+resolver and by every query, while `status.json` has exactly one reader and no
+contract yet. The smaller blast radius won.
+
+Two things the file deliberately does not do:
+
+- **It does not carry a start time.** `time.monotonic()` has no fixed origin,
+  so its values are meaningless in another process. The age of the running
+  test travels as an age, and the reader adds its own `now - written_at`.
+- **It does not replace the `.lock` file.** That one answers "may this
+  directory be pruned", which is a question with a twelve-hour tolerance;
+  this one answers "is the process alive", which needs seconds.
+
+`watch` reads the pid from `meta.json` and asks the kernel, rather than
+trusting freshness alone, because a run killed with SIGKILL leaves every file
+exactly as it was. Staleness is only the fallback, for a run whose `meta.json`
+never got written -- it cannot be the primary test, because
+`--agent-status-interval 0` writes the file once and never again.
+
+**The limit, recorded rather than left to be rediscovered:** a pid means
+nothing across a pid namespace or a machine boundary, and a recycled pid reads
+as alive. Both make `watch` over-report life and never death, so the failure
+mode is a watcher that waits instead of one that announces a death that did
+not happen.
+
+## The events of `watch` are chosen against silence
+
+`DIED` is the load-bearing one. Without it a segfault, an OOM kill and a
+healthy run all look identical from outside the process -- no output,
+indefinitely -- so silence would carry no information and the whole command
+would be untrustworthy. Every other event could be dropped and `watch` would
+still be worth having; drop that one and it is a watcher you cannot leave
+alone.
+
+The failure cap (`MAX_REPORTED_FAILURES`) protects the same property from the
+other side. An agent harness stops a watch that emits too many notifications,
+and a suite with two hundred failures would trip that and lose the `DONE`
+line -- the one carrying the totals. Ten failures is also where the question
+stops being "which ones" and becomes "what happened", which `digest` answers.
+
+Attaching defaults to the newest run **that is still going**, which is the one
+place `watch` resolves a run differently from every other subcommand. The
+others answer about a run that is over, so newest-overall is right for them.
+Here it would silently attach to the previous suite and report it finished:
+a wrong answer shaped exactly like a right one.
+
 ## Not supported: pytest-xdist
 
 Untested and expected broken, documented in the README rather than fixed.

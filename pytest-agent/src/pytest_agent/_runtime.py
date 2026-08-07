@@ -18,7 +18,7 @@ from pytest_agent._capture import (
     TestRecorder,
     abbreviate_nodeid,
     nodeid_is_evident_from,
-    nodeid_to_relpath,
+    stuck_dump_path,
 )
 from pytest_agent._history import (
     append_run_record,
@@ -57,6 +57,30 @@ MAX_CAPTURE_ERRORS_SHOWN = 10
 
 # Where the builtin terminal reporter's output goes in agent mode.
 TERMINAL_LOG_NAME = "terminal.txt"
+
+# Where a run says what it is doing *right now*, for a reader outside the
+# process. The third of three files, and the division between them is by
+# lifetime: meta.json is what the run is (written once, at the start),
+# summary.json is what it did (written once, at the end), and this one is
+# where it has got to (rewritten while it goes, gone stale the moment the
+# process dies).
+#
+# It exists because the running nodeid and its age were in memory only. Every
+# other question about a live run could be answered from disk -- which tests
+# finished, whether the directory is still claimed -- but not "what is it
+# waiting on", which is the only question a hung run raises.
+STATUS_FILE_NAME = "status.json"
+
+# How often that file is rewritten. `pytest-agent watch` polls at two seconds,
+# so a finer interval buys a reader nothing and costs the run one more write.
+DEFAULT_STATUS_INTERVAL = 2.0
+
+# The outcomes counted for a run, as a fixed tuple rather than only as the
+# keys of the dict built from it. The watcher thread snapshots the counts
+# while the main thread is adding to them, and reading through a known key
+# list cannot raise "dictionary changed size during iteration" the way
+# copying the dict wholesale could.
+COUNT_NAMES = ("passed", "failed", "error", "skipped", "xfailed", "xpassed", "collect_error")
 
 # ...and where the end-of-run reports other plugins wrote through it are saved
 # a second time, on their own. A coverage table is an artifact somebody wants
@@ -131,6 +155,7 @@ class AgentRuntime:
         keep_runs: int,
         heartbeat_interval: float,
         stuck_after: float,
+        status_interval: float = DEFAULT_STATUS_INTERVAL,
         max_summary_lines: int = DEFAULT_MAX_TERMINAL_SUMMARY_LINES,
         terminal: RealTerminal | None,
         terminal_log: TextIO | None = None,
@@ -147,6 +172,7 @@ class AgentRuntime:
         self.keep_runs = keep_runs
         self.heartbeat_interval = heartbeat_interval
         self.stuck_after = stuck_after
+        self.status_interval = status_interval
         self.max_summary_lines = max_summary_lines
         self.terminal = terminal
         self.terminal_log = terminal_log
@@ -156,10 +182,7 @@ class AgentRuntime:
         self.recorder = TestRecorder(root, rootpath=config.rootpath)
         self.started_at_iso = ""
 
-        self.counts: dict[str, int] = dict.fromkeys(
-            ("passed", "failed", "error", "skipped", "xfailed", "xpassed", "collect_error"),
-            0,
-        )
+        self.counts: dict[str, int] = dict.fromkeys(COUNT_NAMES, 0)
         self.total_collected = 0
 
         self.session_started_at = 0.0
@@ -195,8 +218,19 @@ class AgentRuntime:
                 f"auto-activated: found {self.autodetected_via} in the environment "
                 "(set PYTEST_AGENT_NO_AUTODETECT=1 to disable this)",
             )
+        # Before the thread starts, so the file is there for a reader that
+        # attached to this run the moment its directory appeared. Waiting for
+        # the first tick would leave a window in which the run looks dead.
+        self._write_status()
         named = f"run {self.run_number}" if self.label is None else f"run {self.run_number} [{self.label}]"
-        self._print(f"{named}: writing full per-test detail to: {self.root.resolve()}")
+        # The pid is on this line because the thing people need it for is
+        # killing a run that will not stop, and the alternative is
+        # `pkill -f <some pattern>`. That pattern matches every process whose
+        # command line contains it, including the shell script that wrote the
+        # pattern -- which kills the wrong process, and looks like the run
+        # ending by itself. meta.json has carried the pid all along; nobody
+        # opens a file to find out how to stop something.
+        self._print(f"{named}, pid {os.getpid()}: writing full per-test detail to: {self.root.resolve()}")
         if self.distributed:
             self._print(
                 "xdist: recording from the controller -- tracebacks, captured output and "
@@ -229,6 +263,46 @@ class AgentRuntime:
                     "args": list(self.config.invocation_params.args),
                 },
             )
+
+    def _write_status(self) -> None:
+        """Say where this run has got to, for a reader in another process.
+
+        Whole or not at all, like meta.json and summary.json: this file is
+        rewritten every couple of seconds and read by a process that has no
+        way to know it caught one mid-write, so a torn read would be a wrong
+        answer rather than a missing one.
+
+        The age of the running test travels as an age and not as a start time.
+        `time.monotonic()` has no fixed origin, so its values mean nothing in
+        another process; a reader adds its own `now - written_at` to this.
+
+        Failure is tolerated for the reason the whole of agent mode tolerates
+        it: this is a way of watching a test run, and it must never be the
+        reason one stops. A run whose disk filled keeps running, and the
+        reader sees a stale file and reports the run as dead -- which is the
+        honest answer from out there.
+        """
+        current = self._current
+        running_since = None if current is None else round(time.monotonic() - current[1], 3)
+        status = {
+            "run": self.run_number,
+            "written_at": time.time(),
+            "elapsed_s": round(time.monotonic() - self.session_started_at, 3),
+            "running": None if current is None else current[0],
+            "running_since_s": running_since,
+            # Through COUNT_NAMES rather than dict(self.counts): the main
+            # thread is writing to that dict while this thread reads it.
+            "counts": {name: self.counts.get(name, 0) for name in COUNT_NAMES},
+            "total_collected": self.total_collected,
+            # So a reader does not report a stuck test that is not one. Under
+            # xdist several tests run at once and `running` names an arbitrary
+            # one of them, which makes its age meaningless.
+            "distributed": self.distributed,
+        }
+        with contextlib.suppress(OSError):
+            temp_path = self.root / f"{STATUS_FILE_NAME}.tmp"
+            temp_path.write_text(json.dumps(status) + "\n", encoding="utf-8")
+            temp_path.replace(self.root / STATUS_FILE_NAME)
 
     @pytest.hookimpl(optionalhook=True)
     def pytest_xdist_node_collection_finished(self, node: object, ids: list[str]) -> None:
@@ -425,22 +499,33 @@ class AgentRuntime:
         if tick is None:
             return
         since_heartbeat = 0.0
+        since_status = 0.0
         while not self._stop_event.wait(tick):
             since_heartbeat += tick
+            since_status += tick
             if self.heartbeat_interval > 0 and since_heartbeat >= self.heartbeat_interval:
                 since_heartbeat = 0.0
                 self._print(self._progress_line())
+            if self.status_interval > 0 and since_status >= self.status_interval:
+                since_status = 0.0
+                self._write_status()
             self._check_stuck()
 
     def _tick_interval(self) -> float | None:
         """How often the watcher wakes, or None when it has nothing to do.
 
-        A non-positive interval means "off" for both options, matching what
-        --agent-stuck-after already documented. Before this, --agent-heartbeat 0
-        was an unguarded Event.wait(0): a spin loop that pegged a core and
-        printed hundreds of thousands of progress lines through a short run.
+        A non-positive interval means "off" for all three options, matching
+        what --agent-stuck-after already documented. Before this,
+        --agent-heartbeat 0 was an unguarded Event.wait(0): a spin loop that
+        pegged a core and printed hundreds of thousands of progress lines
+        through a short run.
+
+        --agent-status-interval joins the other two here rather than being a
+        constant, so that turning every interval off still stops the thread
+        entirely. A constant would keep a thread alive, writing a file every
+        two seconds, in a run that asked for no thread at all.
         """
-        intervals = [value for value in (self.heartbeat_interval, self.stuck_after) if value > 0]
+        intervals = [value for value in (self.heartbeat_interval, self.stuck_after, self.status_interval) if value > 0]
         return min(intervals) if intervals else None
 
     def _check_stuck(self) -> None:
@@ -481,13 +566,8 @@ class AgentRuntime:
         )
 
     def stuck_path_for(self, nodeid: str) -> Path:
-        """Where stack dumps for *nodeid* go: beside the test's log, not inside it.
-
-        The log is written when a test finishes, and a test being dumped may
-        never finish.
-        """
-        rel = nodeid_to_relpath(nodeid)
-        return self.root / rel.parent / f"{rel.name}.stuck.txt"
+        """Where stack dumps for *nodeid* go. See `_capture.stuck_dump_path`."""
+        return stuck_dump_path(self.root, nodeid)
 
     def _progress_line(self) -> str:
         elapsed = time.monotonic() - self.session_started_at
@@ -520,6 +600,12 @@ class AgentRuntime:
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=5)
+        # After the join, so nothing else is writing the file, and before
+        # summary.json, so a reader never sees a status older than the run in
+        # the window between the two. `running` is deliberately left as it
+        # stands: a value here means the run was cut short mid-test, and that
+        # nodeid is the most useful thing it can still say.
+        self._write_status()
         self._restore_sigterm()
 
         duration = time.monotonic() - self.session_started_at
