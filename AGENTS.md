@@ -139,6 +139,10 @@ commands:
 
 - `pytest-agent digest` groups the failures by root cause. Start with this
   command, and do not read each failure separately first.
+- `pytest-agent watch --run <label>` follows a run that is still going. It
+  prints one line for each failure, stuck test, finish and death. Start a long
+  run in the background, put `watch` under a `Monitor`, and then wait. Do not
+  build a `tail -f` loop or a `grep` filter to do this.
 - `pytest-agent history '<test>'` tells you if your change broke the test, or
   if the test failed before your change.
 - `pytest-agent rerun` runs only the recorded failures again.

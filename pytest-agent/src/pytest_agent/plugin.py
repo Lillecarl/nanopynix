@@ -17,6 +17,7 @@ from pytest_agent._pipe_guard import find_banned_pipe_reader, zero_detail_mode
 from pytest_agent._profile import profile as profile
 from pytest_agent._runtime import (
     DEFAULT_MAX_TERMINAL_SUMMARY_LINES,
+    DEFAULT_STATUS_INTERVAL,
     RUNTIME_PLUGIN_NAME,
     TERMINAL_LOG_NAME,
     AgentRuntime,
@@ -122,6 +123,17 @@ def pytest_addoption(parser: pytest.Parser) -> None:
             "path (repeats up to 5 times per test; 0 disables). The default sits "
             "below the `timeout 500 pytest` an agent typically uses, so a hung run "
             "leaves its stack behind before the kill arrives (default: %(default)s)."
+        ),
+    )
+    group.addoption(
+        "--agent-status-interval",
+        type=float,
+        default=float(os.environ.get("PYTEST_AGENT_STATUS_INTERVAL", str(DEFAULT_STATUS_INTERVAL))),
+        help=(
+            "Seconds between rewrites of the run's status.json, which names the "
+            "test running now and how long it has been running. This is what "
+            "`pytest-agent watch` reads to report a stuck test from another "
+            "process; 0 writes none (default: %(default)s)."
         ),
     )
     group.addoption(
@@ -269,6 +281,7 @@ def pytest_configure(config: pytest.Config) -> None:
     distributed = _xdist_role(config) == "controller"
     if distributed:
         stuck_after = 0.0
+    status_interval = cast("float", config.getoption("agent_status_interval"))
     max_summary_lines = cast("int", config.getoption("agent_max_summary_lines"))
     runtime = AgentRuntime(
         config,
@@ -278,6 +291,7 @@ def pytest_configure(config: pytest.Config) -> None:
         keep_runs=keep_runs,
         heartbeat_interval=heartbeat_interval,
         stuck_after=stuck_after,
+        status_interval=status_interval,
         max_summary_lines=max_summary_lines,
         terminal=_REAL_TERMINAL,
         terminal_log=terminal_log,

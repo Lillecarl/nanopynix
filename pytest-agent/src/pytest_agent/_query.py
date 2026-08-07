@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from dataclasses import dataclass, field
@@ -34,24 +33,26 @@ from pytest_agent._capture import nodeid_is_evident_from
 from pytest_agent._crash import normalize_message
 from pytest_agent._history import existing_run_numbers, run_is_locked, run_label, run_number_of
 from pytest_agent._paths import display_path
+from pytest_agent._records import (
+    FAILING_OUTCOMES,
+    QueryError as QueryError,
+    crash_of,
+    one_line,
+    resolve_agent_dir,
+)
+from pytest_agent._watch import WATCH_COMMAND, WatchOptions, add_watch_arguments, watch
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 # argv[0] values that mean "query", not "run pytest". Everything else the
 # console script sees is forwarded to pytest untouched.
-SUBCOMMANDS = ("show", "last-failures", "digest", "history", "compare", "help")
-
-FAILING_OUTCOMES = frozenset({"failed", "error", "collect_error"})
+SUBCOMMANDS = ("show", "last-failures", "digest", WATCH_COMMAND, "history", "compare", "help")
 
 # Nodeids listed in full, per digest group and per compare/history section,
 # before collapsing into a count. These commands answer "what shape is this
 # run in?" -- an exhaustive nodeid list works against that.
 MAX_LISTED_NODEIDS = 10
-
-# A crash message under a list entry is a label, not the failure itself:
-# `show` prints the whole thing.
-MAX_MESSAGE_CHARS = 160
 
 _NO_CRASH_GROUP = "\x00no-crash"
 
@@ -67,18 +68,6 @@ Anything else is forwarded to pytest with --agent, so `pytest-agent -x tests/`
 is `pytest --agent -x tests/`. Only the exact words above are subcommands; a
 path that collides with one still works as `pytest-agent ./show`.
 """
-
-
-class QueryError(Exception):
-    """A query that could not be answered -- reported to stderr, exit code 1."""
-
-
-@dataclass(frozen=True)
-class Crash:
-    """What failed, as recorded by _crash.crash_from_report."""
-
-    message: str
-    location: str | None
 
 
 @dataclass(frozen=True)
@@ -175,6 +164,13 @@ def _build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="Group failures by root cause: one entry per distinct exception, with a count.",
     )
+    watch_parser = subparsers.add_parser(
+        WATCH_COMMAND,
+        parents=[common],
+        help="Follow a run in progress: one line per failure, stuck test, finish or death.",
+    )
+    add_watch_arguments(watch_parser)
+
     history = subparsers.add_parser(
         "history",
         parents=[where],
@@ -226,6 +222,12 @@ def _dispatch(args: argparse.Namespace) -> int:
         return _cmd_history(args)
     if args.command == "compare":
         return _cmd_compare(args)
+    # watch resolves its own too, and for a stronger reason: the run it wants
+    # may not exist yet, and the whole point is that it waits for one. Loading
+    # a run's records here would refuse the case the command exists for.
+    if args.command == WATCH_COMMAND:
+        options = WatchOptions(stuck_after=args.stuck_after, poll=args.poll, wait=args.wait)
+        return watch(args.dir, args.run, options)
     run_dir = _resolve_run_dir(args.dir, args.run)
     records = _load_records(run_dir)
     if args.command == "show":
@@ -233,35 +235,6 @@ def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "last-failures":
         return _cmd_last_failures(args, run_dir, records)
     return _cmd_digest(run_dir, records)
-
-
-def _resolve_agent_dir(explicit: str | None) -> Path:
-    """Locate the agent directory to read.
-
-    Searching upward from the cwd (rather than only looking in it) is what
-    makes these commands usable from a subdirectory of the project, which is
-    where an agent inspecting one package's tests usually is.
-    """
-    name = explicit if explicit is not None else os.environ.get("PYTEST_AGENT_DIR", ".pytest-agent")
-    candidate = Path(name)
-    if candidate.is_absolute() or explicit is not None:
-        directory = candidate if candidate.is_absolute() else Path.cwd() / candidate
-        if not directory.is_dir():
-            raise QueryError(f"no such agent directory: {display_path(directory)}")
-        return directory
-
-    start = Path.cwd()
-    for parent in (start, *start.parents):
-        found = parent / name
-        if found.is_dir():
-            return found
-    # Spelled out in full here, not shortened to "." by display_path: when
-    # the answer is "there is nothing to read", where you were looking is
-    # the whole content of the message.
-    raise QueryError(
-        f"no {name}/ found in {start} or any parent directory -- "
-        "run `pytest --agent` first, or point at one with --dir",
-    )
 
 
 def _resolve_run_dir(explicit_dir: str | None, run: str | None) -> Path:
@@ -272,7 +245,7 @@ def _resolve_run_dir(explicit_dir: str | None, run: str | None) -> Path:
     never gets a history entry, and that is exactly the run someone is most
     likely to be asking about.
     """
-    agent_dir = _resolve_agent_dir(explicit_dir)
+    agent_dir = resolve_agent_dir(explicit_dir)
     if run is not None:
         return _select_run_dir(agent_dir, run)
 
@@ -519,7 +492,7 @@ def _cmd_last_failures(args: argparse.Namespace, run_dir: Path, records: list[di
         if not nodeid_is_evident_from(str(record["log_file"]), str(record["nodeid"])):
             line = f"{line}  ({record['nodeid']})"
         print(line)
-        crash = _crash_of(record)
+        crash = crash_of(record)
         if crash is not None:
             print(f"    {crash.message}")
     return 0
@@ -546,7 +519,7 @@ def _scanned_line(numbers: list[int]) -> str:
 
 
 def _cmd_history(args: argparse.Namespace) -> int:
-    agent_dir = _resolve_agent_dir(args.dir)
+    agent_dir = resolve_agent_dir(args.dir)
     numbers = _usable_run_numbers(agent_dir)
     if not numbers:
         raise QueryError(f"no completed runs under {display_path(agent_dir)} -- run `pytest --agent` first")
@@ -598,24 +571,13 @@ def _print_history(nodeid: str, runs: list[RunResult]) -> None:
         duration = record.get("duration_s")
         elapsed = f"{duration:>7.2f}s" if isinstance(duration, (int, float)) else " " * 8
         print(f"  {run.run_dir.name}  {record['outcome']!s:<9}{elapsed}")
-        crash = _crash_of(record)
+        crash = crash_of(record)
         if crash is not None:
-            print(f"      {_one_line(crash.message)}")
-
-
-def _one_line(message: str) -> str:
-    """A crash message shrunk to fit under a list entry.
-
-    These lists exist to be scanned -- if one test's message is a 40-line
-    assertion diff, the shape of the run stops being visible. `show` prints
-    the whole thing.
-    """
-    first = message.strip().splitlines()[0] if message.strip() else message
-    return first if len(first) <= MAX_MESSAGE_CHARS else f"{first[:MAX_MESSAGE_CHARS]}..."
+            print(f"      {one_line(crash.message)}")
 
 
 def _cmd_compare(args: argparse.Namespace) -> int:
-    agent_dir = _resolve_agent_dir(args.dir)
+    agent_dir = resolve_agent_dir(args.dir)
     old, new = _runs_to_compare(agent_dir, [str(selector) for selector in args.runs])
 
     shared = [nodeid for nodeid in new.by_nodeid if nodeid in old.by_nodeid]
@@ -671,35 +633,11 @@ def _print_changed(title: str, nodeids: list[str], run: RunResult) -> None:
     print(f"{title}:")
     for nodeid in nodeids[:MAX_LISTED_NODEIDS]:
         print(f"  {nodeid}")
-        crash = _crash_of(run.by_nodeid[nodeid])
+        crash = crash_of(run.by_nodeid[nodeid])
         if crash is not None:
-            print(f"    {_one_line(crash.message)}")
+            print(f"    {one_line(crash.message)}")
     if len(nodeids) > MAX_LISTED_NODEIDS:
         print(f"  +{len(nodeids) - MAX_LISTED_NODEIDS} more")
-
-
-def _crash_of(record: dict[str, Any]) -> Crash | None:
-    """The crash field of one record, or None if it has none.
-
-    Every field is re-validated rather than trusted: these records come off
-    disk, and runs written by an older pytest-agent (up to --agent-keep-runs
-    of them can still be sitting there after an upgrade) have no crash field
-    at all. Missing structured data degrades to a thinner answer, never a
-    traceback out of the query itself.
-    """
-    raw = record.get("crash")
-    if not isinstance(raw, dict):
-        return None
-    crash = cast("dict[str, object]", raw)
-    message = crash.get("message")
-    if not isinstance(message, str) or not message:
-        return None
-    path = crash.get("path")
-    lineno = crash.get("lineno")
-    location = None
-    if isinstance(path, str) and path:
-        location = f"{path}:{lineno}" if isinstance(lineno, int) else path
-    return Crash(message=message, location=location)
 
 
 def _frames_of(record: dict[str, Any]) -> list[Frame]:
@@ -735,7 +673,7 @@ def _group_failures(records: list[dict[str, Any]]) -> list[FailureGroup]:
     """
     groups: dict[str, FailureGroup] = {}
     for record in records:
-        crash = _crash_of(record)
+        crash = crash_of(record)
         key = normalize_message(crash.message) if crash is not None else _NO_CRASH_GROUP
         group = groups.get(key)
         if group is None:

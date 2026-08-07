@@ -96,7 +96,8 @@ overwritten:
 ```
 
 pytest-agent always prints the exact run directory in its startup and final
-banner lines (`run 2: writing full per-test detail to: ...`) -- that's the
+banner lines (`run 2, pid 12345: writing full per-test detail to: ...`) --
+that's the
 normal way to find where to look. If you need to find the most recent run
 without having seen that banner, `history.jsonl`'s last line always names it:
 
@@ -128,6 +129,7 @@ the per-test logs, so they're safe to pipe anywhere.
 | `pytest-agent last-failures --detail` | ...with every failure's full log inlined |
 | `pytest-agent show '<nodeid>'` | One test's full detail, by nodeid or any unique substring of one |
 | `pytest-agent digest` | Failures grouped by root cause, so 18 failures sharing one bug read as one entry |
+| `pytest-agent watch` | Follows a run that is still going, and prints one line per failure, stuck test, finish or death |
 | `pytest-agent history '<nodeid>'` | That test's outcome in every run still on disk -- did I break this, or was it already failing? |
 | `pytest-agent compare [A B]` | What changed between two runs: newly failing, newly passing, still failing |
 | `pytest-agent rerun` | Re-run exactly the tests that failed, without re-running the suite |
@@ -205,12 +207,92 @@ Some details worth knowing:
   when there was more than one.
 - **`PYTEST_AGENT_LABEL`** does the same for a whole shell or CI job.
 
+### Watching a run in progress
+
+The commands above answer a question about a run that has already happened.
+`watch` answers "tell me when something happens", which is what a suite
+started in the background actually needs. Without it, the caller must guess
+when to look, and every guess is either too early or too late.
+
+```sh
+# start the suite, and leave it going
+$ pytest --agent-label bg1 tests/ &
+
+# then follow it. This ends when the run ends.
+$ pytest-agent watch --run bg1
+pytest-agent: watching .pytest-agent/runs-0042
+FAIL  tests/test_parser.py::test_roundtrip -- AssertionError: 3 != 4
+STUCK 124s tests/test_net.py::test_timeout -- stack: .pytest-agent/runs-0042/tests/test_net.py/test_timeout.stuck.txt
+DONE  runs-0042 [bg1]: 4 failed, 835 passed, 10 skipped in 214s (exit 1) -- pytest-agent digest --run bg1
+```
+
+Four events, and the fourth is the one that makes the other three worth
+trusting:
+
+- **`FAIL` / `ERROR`** — one test finished badly, named with its crash
+  message. `ERROR` covers a collection error too: both mean the test never
+  got to say anything about itself.
+- **`STUCK`** — one test has been running past `--stuck-after` (120s), and
+  again at each doubling, four times at most. When the run also wrote a stack
+  dump, the line names it.
+- **`DONE`** — the run finished, with its counts and its exit status.
+- **`DIED`** — the process is gone and wrote no summary: a segfault, an OOM
+  kill, a `kill -9`.
+
+**Without `DIED`, silence would mean nothing.** A crashed run and a healthy
+one both produce no output, so a watcher that reports only good news is a
+watcher you cannot leave alone. With it, silence means the run is fine.
+
+The exit status tells the four apart: `0` finished clean, `2` finished with
+failures, `3` died, `1` could not watch at all.
+
+Some details worth knowing:
+
+- **Nothing here parses terminal output.** Every event comes from a file the
+  run writes as it goes — `index.jsonl` for finished tests, `status.json` for
+  the test running now, `summary.json` for the end. So it does not matter how
+  the run was started or where its output went.
+- **`--wait` (60s) lets the watcher be armed first.** A run claims its
+  directory inside `pytest_configure`, which is after the interpreter, the
+  plugins and every conftest have loaded, so a watcher started at the same
+  moment routinely gets there first. The wait covers the `.pytest-agent`
+  directory as well, which the first run of a fresh checkout creates.
+- **With no `--run`, it follows the newest run that is still going**, not the
+  newest run. The newest is right for every other subcommand, because those
+  answer about a run that is over; here it would report the *previous* suite
+  as finished, immediately.
+- **A flood of failures is capped at ten lines.** Past that they are counted
+  rather than listed, and the totals arrive with `DONE`. This protects the
+  last line, which is the one that matters most.
+- **`--stuck-after` is not `--agent-stuck-after`.** This one decides when to
+  report; that one decides when the run dumps every thread's stack into the
+  run directory. Reporting should come first, so this default is lower.
+- **Under `-n`, no stuck test is reported.** Several tests run at once, so
+  the running one names an arbitrary member of that set and its age measures
+  nothing.
+
+#### With an AI coding agent
+
+`watch` prints one line per event and then exits, which is the shape an agent
+harness consumes: each line becomes a notification, and a command that ends
+by itself stops being armed once the thing it watched is over. In Claude Code
+that is a background `Bash` for the run and one `Monitor` for the watcher:
+
+```
+Bash(run_in_background=true):  pytest --agent-label bg1 tests/
+Monitor(command="pytest-agent watch --run bg1 --wait 120", timeout_ms=3600000)
+```
+
+Give the monitor a timeout longer than the suite. The background run keeps
+its own exit status, so the watcher reports the run and the harness reports
+the process.
+
 ### Re-running the failures
 
 ```sh
 $ pytest-agent rerun
 re-running 18 failed from .pytest-agent/runs-0259
-[pytest-agent] run 260: writing full per-test detail to: ...
+[pytest-agent] run 260, pid 481922: writing full per-test detail to: ...
 ```
 
 `rerun` is the one subcommand that starts a pytest session: it reads a
@@ -371,6 +453,7 @@ the file when the question is answered.
 | `--agent-dir` | `PYTEST_AGENT_DIR` | `.pytest-agent` | Where to write run detail (relative to rootdir) |
 | `--agent-heartbeat` | `PYTEST_AGENT_HEARTBEAT` | `10` | Seconds between progress lines (0 prints none) |
 | `--agent-stuck-after` | `PYTEST_AGENT_STUCK_AFTER` | `300` | Dump every thread's stack after one test has run this long (0 disables) |
+| `--agent-status-interval` | `PYTEST_AGENT_STATUS_INTERVAL` | `2` | Seconds between rewrites of `status.json`, which names the test running now and its age. `pytest-agent watch` reads it (0 writes none) |
 | `--agent-keep-runs` | `PYTEST_AGENT_KEEP_RUNS` | `20` | Keep only the newest N `runs-*` dirs (the just-finished run is never pruned); labeled runs get a second budget of the same size; `history.jsonl` entries are kept forever regardless |
 | `--agent-max-summary-lines` | `PYTEST_AGENT_MAX_SUMMARY_LINES` | `40` | Terminal lines another plugin's end-of-run report (a `--cov` table) may take inline; past that it is pointed at rather than shown in part. 0 for no bound. Full text is in `reports.txt` regardless |
 | `--agent-label` | `PYTEST_AGENT_LABEL` | *(none)* | Name this run, so later queries can find it by name instead of by number |

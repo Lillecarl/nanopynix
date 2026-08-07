@@ -69,9 +69,10 @@ eighteen.
 | `pytest-agent history '<pattern>'` | That test's outcome in every run still on disk — did I break this, or was it already failing? `--limit N` for the newest N runs |
 | `pytest-agent compare [OLD NEW]` | Newly failing / newly passing / still failing between two runs (default: the two newest) |
 | `pytest-agent rerun [pytest args...]` | Re-run exactly the recorded failures. The only subcommand that starts a pytest session |
+| `pytest-agent watch` | Follows a run that is **still going** and prints one line per failure, stuck test, finish or death. See "Long runs in the background" |
 | `pytest-agent help` | The above, with flags |
 
-`show`, `last-failures`, `digest` and `rerun` take `--run N|LABEL` to read a
+`show`, `last-failures`, `digest`, `watch` and `rerun` take `--run N|LABEL` to read a
 run other than the newest. `history` and `compare` read across runs instead —
 `history` has no `--run`, and `compare` names its two runs positionally (either
 order). All take `--dir PATH`; by default they find the nearest
@@ -113,6 +114,10 @@ that swaps the same path is a race.
     meta.json                 # written *before* the first test: run number,
                               # label, pid, argv -- so an in-progress run is
                               # already queryable
+    status.json               # rewritten while the run goes: the test running
+                              # now and its age. `pytest-agent watch` reads it
+                              # (the three JSON files divide by lifetime:
+                              # what the run is, where it is, what it did)
     terminal.txt              # what plain pytest would have printed, verbatim
     reports.txt               # only the other-plugin reports from it (--cov, ...)
     notes.jsonl               # one line per note() call
@@ -158,6 +163,50 @@ pytest-agent rerun --run full-suite
   `.`, `_`, `-`, up to 64 characters. Labels need not be unique — the newest
   match wins.
 - `PYTEST_AGENT_LABEL` does the same for a whole shell or CI job.
+
+### Do not poll the run — watch it
+
+`pytest-agent watch` follows a run that is still going and prints **one line
+per event**. It ends when the run ends.
+
+```sh
+pytest --agent-label bg1 tests/ &     # start it
+pytest-agent watch --run bg1          # then follow it
+```
+
+```
+FAIL  tests/test_parser.py::test_roundtrip -- AssertionError: 3 != 4
+STUCK 124s tests/test_net.py::test_timeout
+DONE  runs-0042 [bg1]: 4 failed, 835 passed, 10 skipped in 214s (exit 1) -- pytest-agent digest --run bg1
+```
+
+**In Claude Code, pair a background `Bash` with one `Monitor`.** Each line of
+stdout becomes a notification, and the command exits by itself, so the monitor
+does not stay armed after the run is over:
+
+```
+Bash(run_in_background=true):  direnv exec . pytest tests --agent-label bg1
+Monitor(command="direnv exec . pytest-agent watch --run bg1 --wait 120",
+        description="pytest bg1: failures, stuck tests, finish",
+        timeout_ms=3600000)
+```
+
+Then wait. Do not poll the files yourself, and do not build a `tail -f` or a
+`grep` loop — those are what this replaces.
+
+- **Set `timeout_ms` above the length of the suite.** The default is five
+  minutes.
+- **`--wait` (60s) means the watcher may be armed first**, which is the usual
+  order. It waits for the `.pytest-agent` directory too.
+- **`DIED` is why silence is meaningful.** A segfault or an OOM kill is an
+  event, not an absence, so nothing happening really does mean the run is
+  healthy. Exit status: `0` clean, `2` failures, `3` died, `1` could not
+  watch.
+- **`--stuck-after` (120s) reports a slow test; it is not the run's own
+  `--agent-stuck-after` (300s), which dumps stacks.** When a dump exists, the
+  `STUCK` line names it.
+- The failure list is capped at ten lines. The totals come with `DONE`, and
+  `pytest-agent digest --run bg1` gives the rest.
 
 ## Getting values out of a test
 
@@ -245,6 +294,7 @@ releases the GIL, which the Python watchdog cannot cover; use it (with
 | `--agent-label` | `PYTEST_AGENT_LABEL` | *(none)* | Name this run for later queries |
 | `--agent-heartbeat` | `PYTEST_AGENT_HEARTBEAT` | `10` | Seconds between progress lines (0 prints none) |
 | `--agent-stuck-after` | `PYTEST_AGENT_STUCK_AFTER` | `300` | Dump thread stacks after one test runs this long (0 disables) |
+| `--agent-status-interval` | `PYTEST_AGENT_STATUS_INTERVAL` | `2` | Seconds between rewrites of `status.json`, which `pytest-agent watch` reads (0 writes none) |
 | `--agent-keep-runs` | `PYTEST_AGENT_KEEP_RUNS` | `20` | Keep the newest N `runs-*` dirs; labeled runs get a second budget of the same size; `history.jsonl` is kept forever |
 | n/a | `PYTEST_AGENT_NO_AUTODETECT` | off | Disable harness auto-activation |
 
