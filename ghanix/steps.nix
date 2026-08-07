@@ -66,26 +66,13 @@ rec {
         };
       };
 
-    enableSandboxNamespaces =
-      {
-        corePattern ? true,
-        timeoutMinutes ? 5,
-      }:
-      {
-        name = "Enable Nix sandbox namespaces";
-        timeout-minutes = timeoutMinutes;
-        run = builtins.concatStringsSep "\n" (
-          [
-            "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"
-            "sudo sysctl -w kernel.unprivileged_userns_clone=1"
-          ]
-          ++ lib.optional corePattern "sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p"
-          ++ [
-            "unshare --user --map-root-user --mount --pid --fork --mount-proc true"
-            ""
-          ]
-        );
-      };
+    # There is no `enableSandboxNamespaces` here any more. It was the one
+    # constructor in this file whose `run` body was a script rather than a
+    # command, and a body that a workflow file carries is read by no gate and
+    # runs on no machine but a runner. It is
+    # `ci/steps.nix`'s `enable-sandbox-namespaces` now, and
+    # `ci/workflows/lib.nix` calls it through `mkSandboxStep`. Every
+    # constructor left here either names an action or runs one command.
 
     verifyClosure =
       {

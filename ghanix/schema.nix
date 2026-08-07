@@ -154,6 +154,18 @@ let
         default = null;
         description = "Named outputs this job exposes to jobs that `need` it, as GitHub Actions expression strings.";
       };
+      env = mkOption {
+        type = types.nullOr (types.attrsOf types.str);
+        default = null;
+        description = ''
+          Environment variables shared by every step of this job.
+
+          This is where a workflow expression belongs. A value that reaches a
+          step through `env` cannot become part of a command, and it keeps the
+          `run` body free of `''${{ ... }}` -- which is what lets that body be
+          a single line that calls a script.
+        '';
+      };
       steps = mkOption {
         type = types.listOf (types.submodule stepModule);
         default = [ ];
@@ -173,6 +185,16 @@ let
         description = ''
           Trigger configuration, passed through verbatim -- shape varies
           too widely across trigger types to usefully type.
+        '';
+      };
+      env = mkOption {
+        type = types.nullOr (types.attrsOf types.str);
+        default = null;
+        description = ''
+          Environment variables shared by every job of this workflow.
+
+          A setting that every job needs belongs here rather than in each job,
+          so that a job added later cannot be the one that forgets it.
         '';
       };
       jobs = mkOption {
@@ -258,6 +280,7 @@ in
       name,
       on,
       jobs,
+      env ? null,
     }:
     let
       evaluated = lib.evalModules {
@@ -265,13 +288,25 @@ in
           assertionsModule
           workflowModule
           noEmptyJobsModule
-          { inherit name on jobs; }
+          {
+            inherit
+              name
+              on
+              jobs
+              env
+              ;
+          }
         ];
       };
       cfg = evaluated.config;
     in
-    lib.asserts.checkAssertWarn cfg.assertions cfg.warnings {
-      inherit (cfg) name on;
-      jobs = stripNulls cfg.jobs;
-    };
+    lib.asserts.checkAssertWarn cfg.assertions cfg.warnings (
+      {
+        inherit (cfg) name on;
+      }
+      // lib.optionalAttrs (cfg.env != null) { inherit (cfg) env; }
+      // {
+        jobs = stripNulls cfg.jobs;
+      }
+    );
 }

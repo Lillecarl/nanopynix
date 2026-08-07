@@ -36,6 +36,7 @@ let
 in
 workflow.evalWorkflow {
   name = "Experiment";
+  env = workflow.workflowEnv;
   on = {
     workflow_dispatch = {
       inputs = {
@@ -79,32 +80,35 @@ workflow.evalWorkflow {
         matrix = "\${{ fromJSON(inputs.matrix) }}";
       };
       steps = [
-        # **An abbreviated sha is the trap this catches.** `actions/checkout`
-        # treats a `ref` that is not a full 40-character sha as a branch or a
-        # tag, so `ref=59b837c26769` becomes `refs/heads/59b837c26769*`, which
-        # matches nothing. git then retries for three minutes and fails with
-        # "exit code 1" and no explanation. It cost a whole 30-job measurement
-        # once. Refuse it here, and say why.
-        {
+        # **Two checkouts, and the first one is the guard.**
+        #
+        # `ci-check-dispatch-ref` refuses an abbreviated sha, which is a trap
+        # worth three minutes of a runner: `actions/checkout` reads a `ref`
+        # that is not a full 40-character sha as a branch or tag name, so
+        # `ref=59b837c26769` becomes `refs/heads/59b837c26769`, git retries,
+        # and it fails with "exit code 1" and no explanation. It cost a whole
+        # 30-job measurement once.
+        #
+        # The guard is a package now, so it needs the tree that holds it. This
+        # first checkout takes the ref the workflow was dispatched from, which
+        # always exists, and the second takes the requested one. A checkout
+        # costs seconds, and the guard still fires before the retry it exists
+        # to prevent.
+        (steps.checkout { })
+        (steps.installNix { })
+        (workflow.mkNixRunStep {
           name = "Check the ref";
-          timeout-minutes = 5;
+          attr = "check-dispatch-ref";
+          cap = 10;
           env = {
             REF = "\${{ inputs.ref }}";
           };
-          run = # bash
-            ''
-              if [[ "$REF" =~ ^[0-9a-f]{7,39}$ ]]; then
-                echo "::error::ref '$REF' looks like an abbreviated commit sha. actions/checkout reads anything that is not a full 40-character sha as a branch or tag name, so this would fetch refs/heads/$REF and fail. Give a branch, a tag, or the full sha."
-                exit 1
-              fi
-            '';
-        }
+        })
         (steps.checkout { ref = "\${{ inputs.ref }}"; })
-        (steps.installNix { })
         (steps.cachix { })
         # Every experiment here drives the Nix test suite, which needs the
         # sandbox namespaces and a core pattern that a later step can collect.
-        (steps.enableSandboxNamespaces { })
+        (workflow.mkSandboxStep { })
         {
           name = "Run \${{ inputs.experiment }}";
           timeout-minutes = caps.build + caps.suite;
@@ -112,10 +116,7 @@ workflow.evalWorkflow {
             EXPERIMENT = "\${{ inputs.experiment }}";
             MATRIX_JSON = "\${{ toJSON(matrix) }}";
           };
-          run = # bash
-            ''
-              nix run --file . "experiments.$EXPERIMENT"
-            '';
+          run = ''nix run --file . "experiments.$EXPERIMENT"'';
         }
         (steps.uploadArtifact {
           name = "Keep the evidence of a failed cell";

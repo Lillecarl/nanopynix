@@ -33,6 +33,7 @@ let
 in
 workflow.evalWorkflow {
   name = "On commit";
+  env = workflow.workflowEnv;
   on = {
     # Keep ci-develop available as a pushed ref for focused workflow_dispatch
     # runs without starting the full push matrix.

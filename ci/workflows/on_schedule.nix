@@ -117,6 +117,7 @@ let
 in
 workflow.evalWorkflow {
   name = "On schedule";
+  env = workflow.workflowEnv;
   on = {
     schedule = [ { cron = "17 3 * * *"; } ];
     workflow_dispatch = null;
@@ -137,15 +138,21 @@ workflow.evalWorkflow {
           timeout-minutes = caps.flakeUpdate;
           run = "nix flake update";
         }
-        {
-          id = "versions";
-          name = "Compute Nix version matrices";
-          timeout-minutes = caps.versionMatrix;
-          # The trailing newline keeps the rendered block a plain `|` rather
-          # than a `|-`. Same shell either way; a stable render is what the
-          # staleness gate in tests/nanopynix/test_ci_workflows.py compares.
-          run = builtins.concatStringsSep "\n" (workflow.versionMatrixLines ++ [ "" ]);
-        }
+        # **This runs after `nix flake update`, and that is the whole point.**
+        # The script is built from the updated flake, so the version list it
+        # writes is the updated one. `ci/steps.nix` says why that replaced five
+        # `nix eval` calls that each repeated the variant suffixes as a regular
+        # expression.
+        (
+          workflow.mkNixRunStep {
+            name = "Compute Nix version matrices";
+            attr = "version-matrix";
+            cap = caps.versionMatrix;
+          }
+          // {
+            id = "versions";
+          }
+        )
         (steps.uploadArtifact {
           name = null;
           artifactName = lockArtifact;
