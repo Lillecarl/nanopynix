@@ -9,15 +9,19 @@
 # names the gate that failed, and so the cheap ones still report when pyright
 # is the slow one.
 #
-# `grpclib-transports` at the bottom is the one gate here that runs tests
-# rather than a static tool, and it is here because nothing else would run
-# them. That suite used to run by itself: the project came from a separate
-# repository as a nixpkgs `buildPythonPackage`, so `pytestCheckHook` executed
-# it inside every build. Vendoring the project moved it to pyproject.nix's
-# builders, which have no check phase, and the repository's own test runner
-# (nanopynix/tests.nix) collects `tests/` and not this. Without the
-# derivation below, vendoring would have quietly deleted a passing test suite
-# from CI.
+# `grpclib-transports` and `pytest-agent` are the two gates here that run
+# tests rather than a static tool, and both are here because nothing else
+# would run them. Each subproject carries its own pytest configuration, and
+# the repository's own test runner (nanopynix/tests.nix) collects `tests/`
+# and not those, so a suite that nobody names runs nowhere.
+#
+# The two arrived at that state differently. `grpclib-transports` used to run
+# by itself: the project came from a separate repository as a nixpkgs
+# `buildPythonPackage`, so `pytestCheckHook` executed it inside every build,
+# and vendoring it moved the project to pyproject.nix's builders, which have
+# no check phase. `pytest-agent` never ran anywhere at all -- it is the
+# plugin that every other suite here reports through, so a defect in it
+# reaches every job while its own 14 test modules gate nothing.
 {
   lib,
   runCommand,
@@ -104,6 +108,15 @@ let
     grpclib-transports = [ "test" ];
   };
 
+  # And a third, for the same reason. This one must also be an installed
+  # `pytest-agent` rather than a `pythonpath` entry: the suite asks
+  # `plugin_registered_via_entry_points()` to decide whether to pass `-p
+  # pytest_agent.plugin` to each inner pytest, and that question only has the
+  # right answer when the distribution metadata is really there.
+  pytestAgentEnv = pythonSet.mkVirtualEnv "pytest-agent-test-env" {
+    pytest-agent = [ "test" ];
+  };
+
   mkCheck =
     name: nativeBuildInputs: command:
     runCommand "nanopynix-check-${name}" { inherit nativeBuildInputs; } ''
@@ -151,6 +164,23 @@ in
   grpclib-transports =
     mkCheck "grpclib-transports" [ grpclibEnv ]
       "python -m pytest -p no:cacheprovider grpclib-transports/tests";
+
+  # The plugin every other suite in this repository reports through, gated for
+  # the first time. See this file's header.
+  #
+  # `tests`, spelled out, for the same reason as the gate above it.
+  #
+  # `-p no:cacheprovider` for the read-only store path, and
+  # `PYTEST_AGENT_NO_AUTODETECT=1` because the plugin activates itself when it
+  # finds an agent-harness variable in the environment. Without it, this suite
+  # would run in agent mode when a developer builds the gate from a Claude
+  # Code session and in plain mode in CI -- two different runs from one
+  # command. The inner sessions that the tests start are unaffected: they get
+  # a cleaned environment from the suite's own autouse fixture.
+  pytest-agent = mkCheck "pytest-agent" [ pytestAgentEnv ] ''
+    export PYTEST_AGENT_NO_AUTODETECT=1
+    python -m pytest -p no:cacheprovider pytest-agent/tests
+  '';
 
   # `ekn` runs inside a Nix build sandbox from three easykubenix derivations
   # (`_yamlToJson`, `_jsonToYAML` and `split-manifest`), and a sandbox has no

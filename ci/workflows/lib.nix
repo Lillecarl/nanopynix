@@ -840,13 +840,14 @@ let
   # `--keep-going` is what makes that last part true: without it the first
   # failing gate hides the rest.
   #
-  # `check-grpclib-transports` and `check-ekn-sandbox` are the odd ones out,
-  # each being a run rather than a static tool. Both are here rather than in
-  # the `test-*` matrix because both are version-independent: that matrix
-  # exists to run one suite against each supported Nix version. The library
-  # links no Nix at all, and `check-ekn-sandbox` asks whether `ekn` can start
-  # where there is no trust store, which no Nix version changes. Three copies
-  # of either would be three identical runs. See nix/checks.nix.
+  # `check-grpclib-transports`, `check-pytest-agent` and `check-ekn-sandbox`
+  # are the odd ones out, each being a run rather than a static tool. All
+  # three are here rather than in the `test-*` matrix because all three are
+  # version-independent: that matrix exists to run one suite against each
+  # supported Nix version. Neither subproject links Nix at all, and
+  # `check-ekn-sandbox` asks whether `ekn` can start where there is no trust
+  # store, which no Nix version changes. Three copies of any of them would be
+  # three identical runs. See nix/checks.nix.
   mkStaticChecksJob =
     {
       ref ? null,
@@ -864,12 +865,13 @@ let
           (steps.installNix { })
           (steps.cachix { })
           {
-            name = "Run the gates (ruff, ruff-strict, ruff format, pyright, shellcheck, grpclib-transports, ekn-sandbox)";
+            name = "Run the gates (ruff, ruff-strict, ruff format, pyright, shellcheck, grpclib-transports, pytest-agent, ekn-sandbox)";
             timeout-minutes = caps.staticChecks;
             run = ''
               nix build --no-link --print-build-logs --keep-going \
                 ".#check-lint" ".#check-lint-strict" ".#check-format" ".#check-types" \
-                ".#check-shell" ".#check-grpclib-transports" ".#check-ekn-sandbox"
+                ".#check-shell" ".#check-grpclib-transports" ".#check-pytest-agent" \
+                ".#check-ekn-sandbox"
             '';
           }
         ];
