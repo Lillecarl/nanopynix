@@ -14,6 +14,10 @@
   sanitizerRuntime ? null,
 }:
 let
+  # The tree this runner `cd`s into. `nix/source.nix` says why it is filtered
+  # and what a bare `../.` cost.
+  source = import ../nix/source.nix { inherit lib; };
+
   # A venv over the whole repo, with every project's test extra enabled.
   #
   # This replaces a `python.withPackages` list that had to name each
@@ -94,7 +98,7 @@ in
     storeExecTool
   ];
   text = ''
-    cd ${../.}
+    cd ${source}
     export PYTHONNOUSERSITE=1
     export NIX_PATH=nixpkgs=${nixpkgs}
     # This runner is the gate, so it always takes the faithful path: every
@@ -293,21 +297,14 @@ in
     fi
     exit "$status"
   '';
+  # There is no `addToMatrix` flag here any more. `ci/workflows/lib.nix` picked
+  # the test runners out of the flat flake output set by that marker, because
+  # a flake output set is flat and a name had to survive being flattened into
+  # it. That file reads `ciVersionMatrix` from `default.nix` directly now, so
+  # the marker had one producer and no consumer. `default.nix` carries the
+  # reason a version must not be dropped from the matrix.
   passthru = {
     inherit pythonEnv;
-    # `ci/workflows/lib.nix` derives the whole test matrix from this flag, so
-    # one job per supported Nix runs the full suite.
-    #
-    # Do not turn it off for a version to save CI minutes. The settings and
-    # store models carry 32 `nix_version_min`/`nix_version_removed` fields, and
-    # the drift check is what proves each gate is set correctly: a field the
-    # running Nix does not have shows up as `extra`, and a gate that hides a
-    # field the running Nix does have shows up as `missing`. Neither can be
-    # seen from one version. Measured: the gate refuses 31 of the 32 fields on
-    # 2.31, 15 on 2.34 and 1 on 2.35, so each version reaches a different part
-    # of the check. Dropping a version deletes that coverage in silence,
-    # because the remaining jobs stay green.
-    addToMatrix = true;
   };
 }).overrideAttrs
   {
