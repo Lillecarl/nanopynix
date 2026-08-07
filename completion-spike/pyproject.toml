@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "completion-spike"
+version = "0.1.0"
+description = "Static and dynamic shell completion for a cyclopts program, and a way to test it"
+authors = [{ name = "Carl Andersson", email = "github@lillecarl.com" }]
+# PEP 639. Apache-2.0, like every project here except `nanopynix-bindings`:
+# this one links nothing and imports nothing of Nix. `license-files` cannot
+# name a path above the source root of a distribution, so the file beside this
+# one is a copy of the one at the root of the repository. Read the
+# `# Licensing` section of AGENTS.md.
+license = "Apache-2.0"
+license-files = [ "LICENSE" ]
+requires-python = ">=3.13"
+# `cyclopts` only. This package answers whether a dynamic completion can sit on
+# top of a cyclopts-generated script, so it must depend on nothing that could
+# supply the answer some other way. It does not import `nanopynix`, and it must
+# not: the whole point of the static half is that no heavy program starts.
+dependencies = ["cyclopts"]
+
+[project.optional-dependencies]
+# `pexpect` gives the read-until-pattern loop that drives a shell on a pty.
+# The three shells themselves are not Python packages, so the Nix build lists
+# them instead -- see nix/completion-spike.nix.
+test = ["pexpect", "pytest"]
+
+[project.scripts]
+demo = "completion_spike.demo:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/completion_spike"]
+
+# Its own configuration, so `rootdir` is this directory and none of the
+# nanopynix-specific pytest configuration applies. The same arrangement as
+# grpclib-transports, and for the same reason.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# `-ra`, because a pty test that fails reports what the shell drew and that
+# report is the whole diagnosis.
+addopts = "-ra --strict-markers"

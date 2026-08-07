@@ -42,6 +42,14 @@ editablePythonSet.mkVirtualEnv "nanopynix-dev-env" (
     # dependency, so it needs no entry of its own. The `test` extra is what
     # makes `pytest pynixd` run from the dev shell.
     pynixd = [ "test" ];
+    # The two dependencies of `completion-spike`. That subproject is a nixpkgs
+    # `buildPythonApplication` rather than a package of this set, so it cannot
+    # be named here -- but `pyright` and `pytest` run over its tree from the
+    # dev shell, and without these two the dev shell would report errors that
+    # the CI gate does not. See nix/checks.nix, which names the same two for
+    # the same reason.
+    cyclopts = [ ];
+    pexpect = [ ];
   }
   // extraSpec
 )

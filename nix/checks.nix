@@ -32,6 +32,7 @@
   pythonSet,
   nixos,
   pynixd,
+  completionSpike,
 }:
 let
   # Only the trees the gates read. An allowlist, and not the shared denylist
@@ -70,6 +71,7 @@ let
       # `pynixd/docs/notes/`.
       ../pynixd
       ../pynix
+      ../completion-spike
       ../pytest-agent
       ../test-support
       ../nanopynix-testing
@@ -123,6 +125,13 @@ let
     grpclib-transports = [ "test" ];
     test-support = [ "test" ];
     nanopynix-testing = [ ];
+    # `completion-spike` itself is not a package of this set -- it is a nixpkgs
+    # `buildPythonApplication`. Its two dependencies are named directly, so
+    # that pyright can read its source and its tests. Without them pyright
+    # reported 56 errors on that tree, every one of them an unknown type
+    # reached through `cyclopts` or `pexpect`.
+    cyclopts = [ ];
+    pexpect = [ ];
   };
 
   # A second venv, holding this one library and its test extra and nothing
@@ -344,6 +353,16 @@ in
   test-support = mkCheck "test-support" [
     testSupportEnv
   ] "python -m pytest -p no:cacheprovider test-support";
+
+  # The completion spike, whose suite drives fish, bash and zsh on a pty. Named
+  # here so that the `static-checks` job builds it: that job takes its list
+  # from this attribute set (ci/workflows/lib.nix), and a package that no job
+  # names is a suite that never runs.
+  #
+  # An alias, and not a `mkCheck`. The suite is the check phase of the package
+  # itself, so building the package *is* running the gate. See
+  # nix/completion-spike.nix for why that shape was chosen.
+  completion-spike = completionSpike;
 
   # **No gate for the pynix suite, and that is not an oversight.** Issue #130
   # moved it to `pynix/tests/`, and the two gates above exist because a moved
