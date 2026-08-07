@@ -25,10 +25,17 @@ class Line:
     ``prefix`` is the unfinished word under the cursor, and is empty when the
     line ends with a space -- which is the commonest case of all, because a
     user presses Tab straight after typing an option.
+
+    ``completing`` names the option whose value the cursor sits in, and is
+    ``None`` when the cursor sits somewhere else. **Both spellings give the
+    same answer**: after ``--attr hel`` and after ``--attr=hel``, ``completing``
+    is ``--attr`` and ``prefix`` is ``hel``. The ``--attr=`` part is not a part
+    of the value, and a candidate never starts with it.
     """
 
     words: tuple[str, ...]
     prefix: str
+    completing: str | None = None
 
     def option(self, name: str, default: str) -> str:
         """The value that the line gives to *name*, or *default*.
@@ -47,7 +54,14 @@ class Line:
 
 
 def read_line(text: str) -> Line:
-    """*text*, which is a command line up to the cursor, as a `Line`."""
+    """*text*, which is a command line up to the cursor, as a `Line`.
+
+    **The line is the one input that every shell agrees on.** A shell splits
+    the line into words by its own rules, and the rules differ: the default
+    ``COMP_WORDBREAKS`` of bash holds ``=``, so bash makes three words of
+    ``--attr=hel`` while fish and zsh make one. Reading the line here rather
+    than the words of the shell gives one answer for all three.
+    """
     try:
         words = shlex.split(text)
     except ValueError:
@@ -58,4 +72,13 @@ def read_line(text: str) -> Line:
     prefix = "" if not text or text[-1].isspace() else (words.pop() if words else "")
     # The name of the program is not a word of the command line for this
     # purpose. It is always there, and nothing reads it.
-    return Line(words=tuple(words[1:]), prefix=prefix)
+    rest = tuple(words[1:])
+    completing: str | None = None
+    if prefix.startswith("-") and "=" in prefix:
+        # `--attr=hel`. The option and the value are one word, so the value is
+        # what follows the first `=`, and the option is what precedes it.
+        completing, prefix = prefix.split("=", 1)
+    elif rest and rest[-1].startswith("-"):
+        # `--attr hel`, and `--attr ` with the cursor after the space.
+        completing = rest[-1]
+    return Line(words=rest, prefix=prefix, completing=completing)

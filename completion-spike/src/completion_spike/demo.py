@@ -98,6 +98,12 @@ def complete_value(*, line: str = "") -> None:
     One candidate for each line, which is what every shell here reads.
     """
     context = read_line(line)
+    if context.completing != "--attr":
+        # The shell decides whether to call this at all, and the guard it
+        # carries is the same one. Reading it here too means a wrong guard
+        # offers nothing rather than offering an attribute where a file
+        # belongs, and it is what lets one command serve several options later.
+        return
     engine = context.option("--engine", DEFAULT_ENGINE)
     for candidate in CANDIDATES.get(engine, ()):
         if candidate.startswith(context.prefix):

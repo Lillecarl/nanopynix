@@ -57,6 +57,23 @@ def test_a_candidate_joined_to_the_redraw_is_still_read() -> None:
     assert candidates(drawn, "demo build --attr ") == {"hello", "python3Packages.rich"}
 
 
+def test_fish_draws_the_whole_word_after_an_equals_sign() -> None:
+    """The measured fish case for `demo build --attr=he`.
+
+    fish replaces the whole word, so it offers `--attr=hello`, and its pager
+    elides the beginning of the word. bash and zsh replace the value alone and
+    offer `hello`. The value is what all three agree on.
+    """
+    drawn = "demo build --attr=hedemo build --attr=hello\n…ttr=hello  …ttr=hello.x86_64-linux"
+    assert candidates(drawn, "demo build --attr=he") == {"hello", "hello.x86_64-linux"}
+
+
+def test_a_value_holding_no_equals_sign_is_left_alone() -> None:
+    """bash and zsh answer the same line with the value already cut out."""
+    drawn = "demo build --attr=he\nhello  hello.x86_64-linux"
+    assert candidates(drawn, "demo build --attr=he") == {"hello", "hello.x86_64-linux"}
+
+
 def test_the_last_redraw_is_the_finished_line() -> None:
     """fish separates one redraw from the next with a space."""
     drawn = "demo stodemo store demo store"
