@@ -129,6 +129,13 @@ let
   # library, so it lives out here rather than in nanopynixForNixVersions.
   storeExecTool = pkgs.callPackage ./tools/store-exec/package.nix { };
 
+  # The completion spike: a tiny cyclopts program, the shell code that gives a
+  # cyclopts script a dynamic completion, and a pty driver that proves it in
+  # fish, bash and zsh. Version-independent, like the two tools above, so it
+  # lives out here and not in `nanopynixForNixVersions`. Its own tests run in
+  # its own build -- see nix/completion-spike.nix.
+  completionSpike = pythonBase.pkgs.callPackage ./nix/completion-spike.nix { };
+
   # This repo's seam onto pyproject.nix's builders: `ps` builds package sets
   # (nix/python-set.nix), `mkApp` turns one of their packages into a release
   # application (nix/mk-app.nix).
@@ -470,7 +477,15 @@ let
                   ]
                   ++ ps.nixpkgsRootsFor {
                     inherit python;
-                    projectRoots = final.pyPackages.projectRoots ++ projectRoots;
+                    # `completion-spike` is not one of `pyPackages`: it is a
+                    # nixpkgs `buildPythonApplication`, and it runs its own
+                    # tests in its own build. Its *declarations* are read here
+                    # anyway, so that `cyclopts` and `pexpect` reach this set
+                    # and the type gate can see the tree. Reading the
+                    # pyproject.toml is all `nixpkgsRootsFor` does, so this
+                    # adds no second package.
+                    projectRoots =
+                      final.pyPackages.projectRoots ++ [ ./completion-spike ] ++ projectRoots;
                     # A nixpkgs Python package, but this scope's own -- lifted
                     # in as a root above rather than looked up by name.
                     exclude = [ "nanopynix-bindings" ];
@@ -546,7 +561,7 @@ let
               # An attrset of derivations, not one derivation, so a failing
               # run names the gate. `flake.nix` puts it under `checks`; the
               # `packages` filter drops it, which is what we want.
-              checks = final.callPackage ./nix/checks.nix { };
+              checks = final.callPackage ./nix/checks.nix { inherit completionSpike; };
             }
           ) scope.packages
         );

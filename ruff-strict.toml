@@ -506,6 +506,16 @@ ignorelist = ["eval"]
 # in scope for vendoring the library, so this records the decision instead of
 # quietly making it.
 "grpclib-transports/src/grpclib_transports/**" = ["PLR0913"]
+
+# ---------------------------------------------------------------------------
+# completion-spike, the subproject that answers whether a cyclopts program can
+# have a dynamic shell completion.
+#
+# `tests/**` above is anchored at the repository root and does not reach this
+# tree, so the same allowance is stated again. Only `S101` is needed: these
+# tests assert, and they need nothing else that the rest of the repository
+# forbids.
+"completion-spike/tests/**" = ["S101"]
 # The demo CLI and the demo client that `docs/examples` and the `__main__`
 # entry point share. A hardcoded "password" and a fixed `/tmp` socket path are
 # what a demo is.

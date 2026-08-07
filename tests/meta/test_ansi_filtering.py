@@ -16,6 +16,10 @@ The unit tests below are not decoration. A scanner that quietly matches nothing
 would leave this file passing forever while enforcing nothing, so they pin both
 directions: that each retired pattern is caught, and that the shapes the
 repository legitimately uses are not.
+
+``ansi_regexes.EXEMPT`` is the ledger of the files that may read a sequence
+themselves, each with its reason. ``TestTheExemptionLedgerStaysHonest`` below
+makes an entry cost something to keep.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tests.support.ansi_regexes import (
+    EXEMPT as EXEMPT,
     RE_FUNCTIONS as RE_FUNCTIONS,
     format_report as format_report,
     scan_source as scan_source,
@@ -54,6 +59,30 @@ def test_no_module_writes_its_own_ansi_pattern() -> None:
         "including an OSC 8 hyperlink and a sequence that does not end in "
         "`m`.\n\n" + format_report(violations)
     )
+
+
+class TestTheExemptionLedgerStaysHonest:
+    """An exemption that nothing checks is a hole that nothing closes.
+
+    Each entry of ``EXEMPT`` names a file that reads an escape sequence itself
+    and gives the reason. These tests make the ledger cost something to keep:
+    an entry whose file has gone, or whose pattern has gone, fails here and has
+    to be deleted rather than sitting there exempting a file forever.
+    """
+
+    def test_every_exempt_path_exists(self) -> None:
+        for relative in EXEMPT:
+            assert (REPO_ROOT / relative).is_file(), f"{relative} is exempt but is not in the tree"
+
+    def test_every_exempt_path_still_needs_the_exemption(self) -> None:
+        for relative in EXEMPT:
+            path = REPO_ROOT / relative
+            found = scan_source(path.read_text(encoding="utf-8"), Path(relative))
+            assert found, f"{relative} no longer reads an escape sequence; remove it from EXEMPT"
+
+    def test_every_exemption_gives_a_reason(self) -> None:
+        for relative, reason in EXEMPT.items():
+            assert len(reason.split()) >= 10, f"{relative} is exempt with no real reason given"
 
 
 class TestScannerCatchesAPattern:

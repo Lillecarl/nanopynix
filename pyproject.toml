@@ -8,6 +8,7 @@ extraPaths = [
   "pynix/src",
   "pytest-agent/src",
   "grpclib-transports/src",
+  "completion-spike/src",
   # `_bench_utils`, which the benchmark modules and their conftest import by
   # bare name -- the directory goes on `sys.path` by pytest's rootdir rule
   # rather than being a package.
