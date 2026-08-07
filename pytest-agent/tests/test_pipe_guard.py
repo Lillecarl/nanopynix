@@ -5,18 +5,34 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import TYPE_CHECKING
+from pathlib import Path, PurePosixPath
 
 import pytest
 from pytest_agent._pipe_guard import find_banned_pipe_reader
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 # Keeps a reader alive on stdin until the write end is closed, so the /proc
 # scan has something to find. Nothing in the name or the arguments is a banned
 # tool, so any detection has to come from where the test put it.
 _BLOCK_ON_STDIN = "import sys; sys.stdin.read()"
+
+# The interpreter binary itself, past any launcher that stands in front of it.
+#
+# `sys.executable` cannot serve, and the difference is the whole reason this
+# constant exists. A pyproject.nix `mkVirtualEnv` -- what both this repository's
+# dev shell and its CI gate give you -- puts an ELF launcher at
+# `<venv>/bin/python`, and that launcher re-execs the base interpreter. An
+# exec **replaces argv[0]**, so a child started as
+# `Popen(["ugrep", ...], executable=sys.executable)` arrives in /proc calling
+# itself `<venv>/bin/python3.14`, and the faked argv[0] the test below depends
+# on is gone before the test can look at it.
+#
+# Measured, not assumed: with the venv launcher the child reports
+# argv0='<venv>/bin/python3.14', and with this path it reports argv0='ugrep'.
+#
+# `/proc/self/exe` is the binary running this very process, which is what is
+# left after every launcher has done its exec. Reading it needs no private
+# attribute of CPython, and this module is procfs-only already.
+_REAL_INTERPRETER = str(Path("/proc/self/exe").readlink())
 
 
 def _settled(write_fd: int, *, expect_banned: bool) -> str | None:
@@ -33,6 +49,23 @@ def _settled(write_fd: int, *, expect_banned: bool) -> str | None:
         time.sleep(0.02)
         found = find_banned_pipe_reader(write_fd)
     return found
+
+
+def _argv0_of(pid: int) -> str | None:
+    """What process *pid* currently calls itself, for a failure message.
+
+    Read once, and only after `_settled` has already waited, because a
+    launcher that re-execs is exactly what this is meant to reveal and the
+    re-exec has not happened yet in the first milliseconds of the child's
+    life. Polling here would read the pre-exec argv[0] and report that the
+    fixture is fine when it is not -- which is how this check failed the
+    first time it was written.
+    """
+    try:
+        first = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0", 1)[0]
+    except OSError:
+        return None
+    return PurePosixPath(first.decode("utf-8", "replace")).name if first else None
 
 
 def test_no_reader_reported_for_a_plain_python_reader() -> None:
@@ -73,17 +106,30 @@ def test_detects_a_banned_tool_hidden_behind_a_wrapper_binary(tool: str) -> None
     half of the same hole: an agent told to stop using `grep` reaches for `rg`
     next, and none of these were in the banned set. Running them all under a
     faked argv[0] means the test needs none of them installed.
+
+    The launcher is `_REAL_INTERPRETER` rather than `sys.executable`; that
+    constant says why, and the premise below is asserted rather than assumed
+    because getting it wrong fails this test as `assert None is not None`,
+    which names the guard instead of the fixture that broke.
     """
     read_fd, write_fd = os.pipe()
     proc = subprocess.Popen(
         [tool, "-c", _BLOCK_ON_STDIN],
-        executable=sys.executable,
+        executable=_REAL_INTERPRETER,
         stdin=read_fd,
     )
     os.close(read_fd)
     try:
         found = _settled(write_fd, expect_banned=True)
-        assert found is not None
+        # The diagnosis rides on the assertion rather than preceding it,
+        # because a launcher that re-execs still shows the faked argv[0] for
+        # the first few milliseconds of the child's life. Only a read taken
+        # after the settle window above tells the truth.
+        assert found is not None, (
+            f"no banned reader found; the child's argv[0] is {_argv0_of(proc.pid)!r}. "
+            f"If that is not {tool!r} then {_REAL_INTERPRETER} re-exec'd and replaced it, "
+            "so this fixture is what broke, not the guard."
+        )
         assert found.startswith(tool)
         # The refusal names both, or it tells an agent that wrote `grep` it
         # piped into a `ugrep` it has never heard of.
