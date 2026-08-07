@@ -32,11 +32,11 @@
   ekn,
 }:
 let
-  # Only the trees the gates read. `${../.}` -- what the test runner uses --
-  # would drag `.pytest-agent`, `result` symlinks and `.direnv` in under a
-  # plain `--file .` evaluation, and a lint gate must not report on files that
-  # are gitignored and absent under a flake evaluation. Naming the inputs also
-  # keeps an unrelated edit from rebuilding all four.
+  # Only the trees the gates read. An allowlist, and not the shared denylist
+  # of `nix/source.nix` that the test runner and the docs build take: a lint
+  # gate must not report on a file that is gitignored and absent under a flake
+  # evaluation, and naming each input keeps an unrelated edit from rebuilding
+  # all four gates.
   source = lib.fileset.toSource {
     root = ../.;
     fileset = lib.fileset.unions [

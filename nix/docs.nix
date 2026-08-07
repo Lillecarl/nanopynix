@@ -16,7 +16,9 @@ stdenvNoCC.mkDerivation {
   pname = "nanopynix-docs";
   version = "0";
 
-  src = ../.;
+  # Filtered, and not a bare `../.`: see `nix/source.nix`. Sphinx reads `docs/`
+  # and imports `pynix`, so a cache directory only adds weight to the copy.
+  src = import ./source.nix { inherit lib; };
 
   nativeBuildInputs = [ pythonEnv ];
 
