@@ -273,6 +273,15 @@ let
       # bad as it sounds so long as evaluation just takes place within
       # short-lived processes". An RPC worker is such a process.
       gc ? true,
+      # Whether the whole C and C++ closure comes from the zig stdenv, which
+      # targets an old glibc so that a PyPI wheel runs off NixOS.
+      #
+      # A whole scope, and for the same reason as the sanitizer above: a wheel
+      # takes the highest glibc floor of everything that it carries, so one
+      # library of the stdenv of nixpkgs holds the whole wheel at `GLIBC_2.38`.
+      # `nix/zig-nix.nix` names each package, and issue #111 holds the
+      # measurements.
+      zig ? false,
     }:
     assert lib.assertMsg (!(sanitizer.requiresNoGC or false) || !gc) ''
       The ${sanitizer.name} sanitizer needs `gc = false`.
@@ -554,6 +563,15 @@ let
           }
         );
 
+      # Every C and C++ library of the closure, from the zig stdenv. The file
+      # gives the package list, the payload trim and the corrections that each
+      # package needs.
+      zigNix = import ./nix/zig-nix.nix {
+        inherit lib pkgs;
+        boehmgc = patchedBoehmGC;
+        python = pythonBase;
+      };
+
       # nixComponents_2_34 -> nix_2_34, nixComponents_git -> git (matching
       # the names the previous hand-written patchedNixVersions used), plus a
       # suffix for each variant axis: "-tsan"/"-ubsan"/"-asan" for a sanitizer,
@@ -571,6 +589,8 @@ let
           suffix =
             if sanitizer != null then
               "-${sanitizer.suffix}"
+            else if zig then
+              "-zig"
             else if !gc then
               "-nogc"
             else
@@ -609,6 +629,11 @@ let
       # nix-expr when `gc` is false -- and the order still says which one wins
       # if a third ever arrives.
       ++ lib.optional (!gc) (lib.mapAttrs (_: applyNoGCOverrides))
+      # Last, so this is the final word on the stdenv of the scope. It writes
+      # `nix-expr` too, and `applyBoehmGCPatch` above writes the same
+      # attribute: the later one wins, and the collector that it names is the
+      # patched one rebuilt with zig, so the patch survives the order.
+      ++ lib.optional zig (lib.mapAttrs (_: zigNix.applyZigOverrides))
       ++ [ (lib.mapAttrs' rename) ]
     );
 
@@ -635,6 +660,25 @@ let
     stable = getByVersion pkgs.nixVersions.stable.version;
     latest = getByVersion pkgs.nixVersions.latest.version;
   };
+
+  # The wheel build, and **deliberately not a member of
+  # `nanopynixVersionsInternal`.**
+  #
+  # Every CI job comes from that set: `tests` maps it to one
+  # `nanopynix-tests-<name>` package for each entry, and `ciVersionMatrix`
+  # groups the same names into the matrices. Adding "-zig" there would put a
+  # from-source rebuild of the whole C and C++ closure into the per-commit
+  # matrix, on every version. That closure leaves the binary cache by
+  # construction, because lowering the glibc floor is what it is for.
+  #
+  # So it lives here, reachable by name for a person who wants a wheel, and
+  # invisible to the matrices. `variantSuffixes` needs no "-zig" entry for the
+  # same reason: `unlistedVariants` reads `nanopynixVersionsInternal`, and this
+  # is not in it.
+  #
+  # One version only. A wheel carries one Nix, which is the whole reason a
+  # wheel removes the ABI matrix.
+  nanopynixZig = (nanopynixForNixVersions { zig = true; }).nix_2_34-zig;
 
   # Per-version test runners, exposed individually as `nanopynix-tests-<name>`
   # flake packages so CI can build/run each Nix version in its own job.
@@ -747,6 +791,7 @@ lib.throwIf (unlistedVariants != [ ])
       flake
       pkgs
       nanopynixVersions
+      nanopynixZig
       pyproject-nix
       tests
       experiments
