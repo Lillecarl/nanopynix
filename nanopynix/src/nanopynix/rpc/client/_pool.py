@@ -16,12 +16,12 @@ import contextlib
 import functools
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import anyio
 import anyio.to_thread
 from grpclib.exceptions import GRPCError, StreamTerminatedError
-from grpclib_transports.multiprocessing import multiprocessing_worker_with_backchannel
+from grpclib_transports.multiprocessing import get_worker_context, multiprocessing_worker_with_backchannel
 from nanopynix_proto.nix.common import PrimOpSpec as PrimOpSpecPB
 from nanopynix_proto.nix.eval import EvalServiceStub
 from nanopynix_proto.nix.store import StoreServiceStub
@@ -58,6 +58,7 @@ from nanopynix.settings import (
     DEFAULT_SHUTDOWN_TIMEOUT_SECONDS,
     DEFAULT_WORKER_MAX_CONCURRENCY,
     DEFAULT_WORKER_PRELOAD,
+    resolve_worker_start,
 )
 
 if TYPE_CHECKING or BEARTYPING:
@@ -188,6 +189,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         rpc_timeout: float = DEFAULT_RPC_TIMEOUT_SECONDS,
         shutdown_timeout: float = DEFAULT_SHUTDOWN_TIMEOUT_SECONDS,
         worker_preload: Sequence[str] = DEFAULT_WORKER_PRELOAD,
+        worker_start: Literal["auto", "forkserver", "spawn"] = "auto",
         namespace: OverlayNamespace | None = None,
     ) -> None:
         self._store_uri = store_uri
@@ -201,6 +203,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         self._primop_callables = primop_callables or {}
         self._worker_oom_score_adj = worker_oom_score_adj
         self._worker_preload = list(worker_preload)
+        self._worker_start: Literal["auto", "forkserver", "spawn"] = worker_start
         self._namespace = namespace
         self.rpc_timeout = rpc_timeout
         self._shutdown_timeout = shutdown_timeout
@@ -306,6 +309,11 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
                 # its preload list, its environment and its `sys.path` when it
                 # starts. See NanopynixSettings.worker_preload.
                 preload=self._worker_preload,
+                # `spawn` in a forked process, and `forkserver` otherwise: a
+                # forked child cannot start a forkserver worker at all, because
+                # `ensure_running` waits on a process that is not its child.
+                # See NanopynixSettings.worker_start for both measurements.
+                context=get_worker_context(resolve_worker_start(self._worker_start), preload=self._worker_preload),
                 max_concurrency=DEFAULT_WORKER_MAX_CONCURRENCY,
                 # Installs the codec on *both* ends: the channel yielded here,
                 # and -- because grpclib_transports forwards it through the

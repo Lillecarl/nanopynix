@@ -63,3 +63,41 @@ Two mechanisms find the fork, because each one misses what the other catches.
 that forks. A comparison against `os.getpid()` sees a raw `fork(2)` through
 `ctypes`, which the hook does not. A `subprocess` is not a fork, and neither
 mechanism reports one.
+
+### What a forked child may open
+
+The two engines answer differently, and the difference is where Nix runs.
+
+**`nanopynix.inproc`: nothing, for the life of the process.** Once Nix is
+initialised in an address space, every fork of that address space is refused a
+session — a new one as much as the inherited one. `init_libexpr` starts the
+collector on a thread that owns Boehm's one static thread-table entry and never
+exits, and `fork()` keeps only the calling thread. A child that opened a
+"fresh" session would collect against a thread that is not there. Nix
+initialisation cannot be undone, so closing the session first changes nothing.
+
+**`nanopynix.rpc`: a new session, which gets a worker of its own.** Nix runs in
+the worker process, so the child inherits none of it. Open a new
+{class}`~nanopynix.rpc.Session` and use that; the inherited one still refuses.
+
+The supported inproc pattern is therefore unchanged, and it is the whole rule:
+**fork first, then open**. A parent that has not initialised Nix leaves its
+children free.
+
+Python agrees, and says so from 3.12 on. A process that has initialised the
+inproc engine is multi-threaded, so `os.fork()` there raises
+`DeprecationWarning: This process is multi-threaded, use of fork() may lead to
+deadlocks in the child`. Importing nanopynix alone does not.
+
+### Which start method a worker uses
+
+{attr}`~nanopynix.NanopynixSettings.worker_start` picks it, and
+`"auto"` is the default. `"auto"` means `"spawn"` when this process is a fork
+and `"forkserver"` otherwise, because **a forked child cannot start a
+forkserver worker at all**: `multiprocessing`'s forkserver singleton carries no
+process check, so the child waits on a process that is not its own child and
+gets `ChildProcessError`.
+
+Nothing needs to be set for the common case. Name a method to pin one, and read
+that setting for what the choice costs — `forkserver` is much cheaper per
+worker, because its preload is shared.

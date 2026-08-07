@@ -32,7 +32,7 @@ from grpclib_transports.limits import (
 from grpclib_transports.multiprocessing import (
     MultiprocessingPipeEndpoint as MultiprocessingPipeEndpoint,
     MultiprocessingPipePair as MultiprocessingPipePair,
-    get_forkserver_context as get_forkserver_context,
+    get_worker_context as get_worker_context,
     multiprocessing_pipe_pair as multiprocessing_pipe_pair,
     multiprocessing_worker as multiprocessing_worker,
     multiprocessing_worker_with_backchannel as multiprocessing_worker_with_backchannel,
@@ -132,7 +132,7 @@ __all__ = [
     "connect_ssh_stdio",
     "connect_tcp",
     "connect_unix",
-    "get_forkserver_context",
+    "get_worker_context",
     "init_h2_transport",
     "inproc_pipe_pair",
     "inproc_worker",

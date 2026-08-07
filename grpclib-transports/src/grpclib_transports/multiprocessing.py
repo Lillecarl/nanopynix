@@ -1,4 +1,4 @@
-"""Multiprocessing pipe-pair helpers: forkserver contexts and dup'd FDs."""
+"""Multiprocessing pipe-pair helpers: worker contexts and dup'd FDs."""
 
 from __future__ import annotations
 
@@ -36,13 +36,35 @@ _PROCESS_CLOSE_TIMEOUT = 3.0
 _PROCESS_EXIT_GRACE = 2.0
 
 
-def get_forkserver_context(
+def get_worker_context(
+    method: str = "forkserver",
     *,
     preload: Sequence[str] = (),
 ) -> Any:
-    """Return a ``multiprocessing`` forkserver context, optionally preloading modules."""
-    context = mp.get_context("forkserver")
-    if preload:
+    """Return a ``multiprocessing`` context for *method*, optionally preloading modules.
+
+    ``preload`` applies to ``forkserver`` alone. It is what makes that method
+    cheap: the forkserver imports the list once and each worker is a fork of
+    that. No other start method has an equivalent, and asking a ``spawn``
+    context for one raises :class:`AttributeError`.
+
+    Measured, 5 workers each, preloading one module that imports Nix::
+
+        forkserver     7.7 ms per worker
+        spawn         72.1 ms per worker
+
+    **``spawn`` is the one that works in a forked process.**
+    ``multiprocessing.forkserver.ForkServer`` carries no pid guard, so a child
+    that inherits a running forkserver reaches
+    ``os.waitpid(self._forkserver_pid, WNOHANG)`` on a process that is not its
+    own child, and ``ensure_running`` raises ``ChildProcessError``. Measured,
+    in a forked child::
+
+        spawn        -> start() succeeded
+        forkserver   -> ChildProcessError: [Errno 10] No child processes
+    """
+    context = mp.get_context(method)
+    if preload and method == "forkserver":
         context.set_forkserver_preload(list(preload))
     return context
 
@@ -155,10 +177,13 @@ def multiprocessing_pipe_pair(
 ) -> MultiprocessingPipePair:
     """Create a :class:`MultiprocessingPipePair` for parent-child communication.
 
-    If *context* is not given, calls :func:`get_forkserver_context` with *preload*.
+    If *context* is not given, calls :func:`get_worker_context` with *preload*.
     """
-    ctx = context or get_forkserver_context(preload=preload)
-    if context is not None and preload:
+    ctx = context or get_worker_context(preload=preload)
+    # Only a forkserver context has this method, so a caller that hands in a
+    # `spawn` context must not be asked for it. `get_worker_context` makes the
+    # same distinction, and gives the measurement behind it.
+    if context is not None and preload and ctx.get_start_method() == "forkserver":
         ctx.set_forkserver_preload(list(preload))
     parent_read, child_write = ctx.Pipe(duplex=False)
     child_read, parent_write = ctx.Pipe(duplex=False)
@@ -295,7 +320,9 @@ async def multiprocessing_worker(
     status_details_codec: StatusDetailsCodecBase | None = None,
     child_teardown: ChildTeardown | None = None,
 ) -> AsyncGenerator[PipeChannel]:
-    """Start a forkserver worker process and yield a gRPC channel to it.
+    """Start a worker process and yield a gRPC channel to it.
+
+    The start method comes from *context*; see :func:`get_worker_context`.
 
     ``service_factory`` runs inside the worker process and must return the
     grpclib service handlers served by that worker.
@@ -339,7 +366,9 @@ async def multiprocessing_worker_with_backchannel(
     status_details_codec: StatusDetailsCodecBase | None = None,
     child_teardown: ChildTeardown | None = None,
 ) -> AsyncGenerator[PipeChannel]:
-    """Start a forkserver worker with an in-band parent-services backchannel.
+    """Start a worker with an in-band parent-services backchannel.
+
+    The start method comes from *context*; see :func:`get_worker_context`.
 
     The yielded channel lets the parent call services hosted by the worker.
     ``parent_services`` are exposed to the worker over a long-lived

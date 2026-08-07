@@ -177,6 +177,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
             rpc_timeout=nanopynix_settings.rpc_timeout,
             shutdown_timeout=nanopynix_settings.shutdown_timeout,
             worker_preload=nanopynix_settings.worker_preload,
+            worker_start=nanopynix_settings.worker_start,
             namespace=namespace,
         )
         self._session_id = uuid.uuid4().hex
