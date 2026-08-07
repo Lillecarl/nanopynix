@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fcntl
+import os
 import sys
 from collections.abc import Callable, Collection
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 from grpclib import client
 from grpclib._typing import IServable
@@ -35,6 +36,10 @@ if TYPE_CHECKING:
 
 BackchannelServiceFactory = Callable[[WorkerBackchannel], Collection[IServable]]
 _SUBPROCESS_CLOSE_TIMEOUT = 5.0
+# How long a worker gets to end itself after its channel closes, before the
+# parent signals it. `_close_worker_process` gives the measurement and the
+# reason; `multiprocessing._stop_process` carries the same number.
+_PROCESS_EXIT_GRACE = 2.0
 
 
 class StdioTransport(BaseCustomTransport):
@@ -85,15 +90,67 @@ class StdioTransport(BaseCustomTransport):
         pass
 
 
+def take_wire_descriptors() -> tuple[BinaryIO, BinaryIO]:
+    """Move the H2 pipe pair off descriptors 0 and 1, and return the two files.
+
+    **Descriptor 1 carries the wire, and a serving process does not own it.**
+    A redirection of ``sys.stdout`` is a Python-level rebinding, so it cannot
+    stop a C++ library, a C extension or a subprocess from writing to the
+    descriptor itself. Every such byte becomes an HTTP/2 frame, and the peer
+    reports a protocol error that names nothing about where the byte came
+    from.
+
+    Descriptor 0 has the matching problem in the other direction: a subprocess
+    that reads it takes frames the transport needed. ``ssh`` asking for a
+    passphrase is the case that reaches a real deployment.
+
+    So this takes both descriptors for the transport, and leaves behind what a
+    program that still uses them expects: descriptor 1 becomes a duplicate of
+    descriptor 2, so a stray write is a log line rather than a corruption, and
+    descriptor 0 becomes ``/dev/null``, so a stray read gets end of file.
+
+    Call it once, before anything writes. It is the first act of
+    :func:`stdio_streams`, and a process serves stdio once.
+    """
+    # First: whatever is already in the buffer of `sys.stdout` was written
+    # before this function existed, and belongs to the descriptor it was
+    # written for. Flushing after the exchange below would send it to stderr.
+    with contextlib.suppress(ValueError, OSError):
+        sys.stdout.flush()
+
+    wire_write_fd = os.dup(1)
+    try:
+        os.dup2(2, 1)
+    except OSError:
+        # A process with no stderr. `/dev/null` still keeps a stray write off
+        # the wire, which is the whole subject here.
+        _point_descriptor_at_devnull(1, os.O_WRONLY)
+
+    wire_read_fd = os.dup(0)
+    _point_descriptor_at_devnull(0, os.O_RDONLY)
+
+    return os.fdopen(wire_read_fd, "rb", buffering=0), os.fdopen(wire_write_fd, "wb", buffering=0)
+
+
+def _point_descriptor_at_devnull(fd: int, flags: int) -> None:
+    devnull = os.open(os.devnull, flags)
+    try:
+        os.dup2(devnull, fd)
+    finally:
+        os.close(devnull)
+
+
 async def stdio_streams(
     *,
     tuning: TransportTuning = DEFAULT_TUNING,
 ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter, StdioTransport]:
+    wire_read, wire_write = take_wire_descriptors()
+
     loop = asyncio.get_running_loop()
     reader = asyncio.StreamReader()
     await loop.connect_read_pipe(
         lambda: asyncio.StreamReaderProtocol(reader),
-        sys.stdin.buffer,
+        wire_read,
     )
 
     transport_ref: list[StdioTransport] = []
@@ -123,7 +180,7 @@ async def stdio_streams(
 
     t, proto = await loop.connect_write_pipe(
         _Bridge,
-        sys.stdout.buffer,
+        wire_write,
     )
     writer = asyncio.StreamWriter(t, proto, reader, loop)
 
@@ -142,8 +199,10 @@ async def serve_stdio(
 ) -> None:
     """Serve gRPC over the current process's stdin/stdout.
 
-    Redirects stdout to stderr before starting so that only H2 frames go
-    over the pipe.
+    :func:`take_wire_descriptors` moves the pipe pair off descriptors 0 and 1
+    first, so that only H2 frames go over the wire. The redirection below adds
+    the one case that cannot reach: a caller that replaced ``sys.stdout`` with
+    an object of its own, which writes wherever that object writes.
     """
     reader, _writer, transport = await stdio_streams(tuning=tuning)
 
@@ -191,16 +250,40 @@ def bump_subprocess_pipe_buffers(
 
 
 async def _close_worker_process(proc: asyncio.subprocess.Process) -> None:
+    """Wait for the worker to end itself, then make sure that it has.
+
+    **The grace period runs first, and it is not politeness.** A worker does
+    its own teardown after ``serve_h2`` returns, and the parent gets here
+    milliseconds after it closes the channel. Nothing waited at all until
+    this, so ``terminate()`` reached a healthy worker while that teardown was
+    still running, and every worker died of SIGTERM with a return code of -15.
+    A nanopynix worker measured 51 ms to end itself, so the wait normally
+    costs that and no more.
+
+    ``multiprocessing._stop_process`` carries the same period, for the same
+    reason. A caller that is already cancelled skips it, because the wait
+    raises at once, and gets the old behaviour -- which is the right trade,
+    because a cancelled shutdown asks for speed.
+    """
     if proc.returncode is not None:
         return
 
-    proc.terminate()
+    with contextlib.suppress(asyncio.TimeoutError):
+        await asyncio.wait_for(proc.wait(), _PROCESS_EXIT_GRACE)
+        return
+
+    # ProcessLookupError: the worker ended between the wait above and this
+    # line, and `send_signal` refuses a process it has already reaped. The
+    # grace period made that window wide enough to reach.
+    with contextlib.suppress(ProcessLookupError):
+        proc.terminate()
     with contextlib.suppress(asyncio.TimeoutError):
         await asyncio.wait_for(proc.wait(), _SUBPROCESS_CLOSE_TIMEOUT)
         return
 
     if proc.returncode is None:
-        proc.kill()
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
         await proc.wait()
 
 
@@ -213,10 +296,17 @@ async def stdio_worker(
     env: Mapping[str, str] | None = None,
     stderr: Any = None,
     status_details_codec: StatusDetailsCodecBase | None = None,
+    on_process_start: Callable[[asyncio.subprocess.Process], None] | None = None,
 ) -> AsyncGenerator[StdioChannel]:
     """Spawn a subprocess and yield a :class:`StdioChannel` connected to its stdin/stdout.
 
     Use as an async context manager.  The subprocess is terminated on exit.
+
+    ``on_process_start`` receives the process as soon as it exists, and is the
+    only way a caller reaches it: the channel yielded below carries the wire
+    and nothing about the peer. ``multiprocessing_worker`` takes the same hook
+    for the same reason. A caller needs it to read the exit status, which is
+    what tells an abort from an ordinary exit, and to act on the pid.
     """
     if not argv:
         raise ValueError("argv must not be empty")
@@ -229,6 +319,10 @@ async def stdio_worker(
         cwd=str(cwd) if cwd is not None else None,
         env=env,
     )
+    # Before the guard below, so that a caller which acts on the pid gets to
+    # do it for a process that failed to give pipes as well.
+    if on_process_start is not None:
+        on_process_start(proc)
     if proc.stdin is None or proc.stdout is None:
         await _close_worker_process(proc)
         raise RuntimeError("stdio worker was not started with stdin/stdout pipes")
@@ -257,6 +351,7 @@ async def stdio_worker_with_backchannel(
     env: Mapping[str, str] | None = None,
     stderr: Any = None,
     status_details_codec: StatusDetailsCodecBase | None = None,
+    on_process_start: Callable[[asyncio.subprocess.Process], None] | None = None,
 ) -> AsyncGenerator[StdioChannel]:
     """Spawn a stdio worker and expose parent services on the same channel."""
     async with (
@@ -267,6 +362,7 @@ async def stdio_worker_with_backchannel(
             env=env,
             stderr=stderr,
             status_details_codec=status_details_codec,
+            on_process_start=on_process_start,
         ) as channel,
         open_parent_control_peer(channel, parent_services),
     ):
