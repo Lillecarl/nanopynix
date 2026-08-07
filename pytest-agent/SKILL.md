@@ -207,6 +207,8 @@ Then wait. Do not poll the files yourself, and do not build a `tail -f` or a
   `STUCK` line names it.
 - The failure list is capped at ten lines. The totals come with `DONE`, and
   `pytest-agent digest --run bg1` gives the rest.
+- **Reusing a label is safe.** `watch` prefers the run of that name which is
+  still going, so it cannot attach to yesterday's run of the same name.
 
 ## Getting values out of a test
 

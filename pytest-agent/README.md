@@ -261,6 +261,11 @@ Some details worth knowing:
   newest run. The newest is right for every other subcommand, because those
   answer about a run that is over; here it would report the *previous* suite
   as finished, immediately.
+- **A reused label prefers the run that is still going**, for the same
+  reason. Labels are meant to be reused, so `--run nightly` regularly matches
+  both last night's run and tonight's. A name that matches only finished runs
+  is taken after a few seconds, which is long enough for a run being started
+  right now to claim its directory.
 - **A flood of failures is capped at ten lines.** Past that they are counted
   rather than listed, and the totals arrive with `DONE`. This protects the
   last line, which is the one that matters most.

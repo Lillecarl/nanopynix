@@ -44,7 +44,7 @@ from pytest_agent._records import FAILING_OUTCOMES, QueryError, crash_of, one_li
 
 if TYPE_CHECKING:
     import argparse
-    from collections.abc import Iterator
+    from collections.abc import Iterable, Iterator
     from typing import TextIO
 
 WATCH_COMMAND = "watch"
@@ -79,6 +79,23 @@ MAX_REPORTED_FAILURES = 10
 # A test that is wedged says so once and then stays quiet, rather than filing
 # a notification on every poll for as long as the run lasts.
 MAX_STUCK_NOTICES = 4
+
+# How long a label that matches only *finished* runs is held before one of
+# them is accepted.
+#
+# The hazard it covers: labels are meant to be reused, so `--run nightly`
+# regularly matches both last night's run and tonight's, and a watcher armed
+# in the seconds before tonight's claims its directory would attach to last
+# night's and report it finished at once.
+#
+# Bounded by a few seconds rather than by --wait, which was the first attempt
+# and was worse than the problem: a suite that finishes before its watcher
+# attaches -- an ordinary thing for a fast one -- then blocked for a minute
+# before saying so. Measured, by breaking two tests that do exactly that.
+#
+# Past this grace the behaviour is what it was before the guard existed, so
+# the worst case is no worse than not having it.
+FINISHED_MATCH_GRACE = 5.0
 
 # How stale status.json may be before a run with no readable pid is presumed
 # dead. Generously above the default write interval, because a loaded machine
@@ -519,7 +536,14 @@ def _attach(explicit_dir: str | None, selector: str | None, options: WatchOption
     up front refused exactly the case this command is for -- measured, by
     arming a watcher on a directory the run had not created yet.
     """
-    deadline = time.monotonic() + max(options.wait, 0.0)
+    wait = max(options.wait, 0.0)
+    started = time.monotonic()
+    deadline = started + wait
+    # A run that is going always wins, on every poll. A run of that name that
+    # has already finished is taken only once the grace is over, which gives
+    # a run being started right now the few seconds it needs to claim its
+    # directory.
+    accept_finished_from = started + min(wait, FINISHED_MATCH_GRACE)
     while True:
         agent_dir: Path | None = None
         missing_dir: QueryError | None = None
@@ -527,10 +551,12 @@ def _attach(explicit_dir: str | None, selector: str | None, options: WatchOption
             agent_dir = resolve_agent_dir(explicit_dir)
         except QueryError as error:
             missing_dir = error
-        found = None if agent_dir is None else _find_run(agent_dir, selector)
-        if found is not None:
-            return found
-        remaining = deadline - time.monotonic()
+        now = time.monotonic()
+        if agent_dir is not None:
+            found = _find_run(agent_dir, selector, accept_finished=now >= accept_finished_from)
+            if found is not None:
+                return found
+        remaining = deadline - now
         if remaining <= 0:
             if agent_dir is None and missing_dir is not None:
                 raise QueryError(f"{missing_dir}; waited {options.wait:.0f}s for it to appear")
@@ -552,7 +578,7 @@ def _nothing_to_watch(agent_dir: Path, selector: str | None, waited: float) -> s
     )
 
 
-def _find_run(agent_dir: Path, selector: str | None) -> Path | None:
+def _find_run(agent_dir: Path, selector: str | None, *, accept_finished: bool) -> Path | None:
     """The run *selector* names, or the newest live one when it names nothing.
 
     "Live" rather than "newest", and that is the whole of the difference
@@ -561,10 +587,20 @@ def _find_run(agent_dir: Path, selector: str | None) -> Path | None:
     one follows a run that is going, and defaulting to the newest would
     quietly attach to the suite before this one and report it finished --
     which is a wrong answer that looks exactly like a right one.
+
+    **A label needs the same care, and for a sharper reason: labels are meant
+    to be reused.** Re-running one command with one name is the documented
+    way to use them, so `--run nightly` regularly matches both last night's
+    finished run and tonight's. Preferring the locked one settles that. A name
+    that matches only finished runs is accepted at the deadline instead
+    (`accept_finished`), so watching a run that is already over still works
+    -- it just cannot win a race against the run being started right now.
+
+    A numeric selector is exempt: `--run 42` names one directory and can mean
+    nothing else, so there is no race to lose.
     """
     if selector is None:
-        live = [run_dir for _, run_dir in _runs_by_number(agent_dir) if run_is_locked(run_dir, time.time())]
-        return live[-1] if live else None
+        return _newest_live(run_dir for _, run_dir in _runs_by_number(agent_dir))
     if selector.isdigit():
         candidate = agent_dir / f"runs-{int(selector):04d}"
         return candidate if candidate.is_dir() else None
@@ -572,7 +608,17 @@ def _find_run(agent_dir: Path, selector: str | None) -> Path | None:
     # caller chose, and having `full` answer for `full-suite-2` would make it
     # less trustworthy than the run number it replaces.
     matching = [run_dir for _, run_dir in _runs_by_number(agent_dir) if run_label(run_dir) == selector]
-    return matching[-1] if matching else None
+    live = _newest_live(matching)
+    if live is not None:
+        return live
+    return matching[-1] if matching and accept_finished else None
+
+
+def _newest_live(candidates: Iterable[Path]) -> Path | None:
+    """The last of *candidates*, oldest first, that a session still holds."""
+    now = time.time()
+    live = [run_dir for run_dir in candidates if run_is_locked(run_dir, now)]
+    return live[-1] if live else None
 
 
 def _runs_by_number(agent_dir: Path) -> list[tuple[int, Path]]:
