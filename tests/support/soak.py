@@ -50,7 +50,16 @@ _SUPPLIED_FIXTURES = frozenset({*_FACTORY_FIXTURES, "tmp_path"})
 # A mark that means the test cannot join a lane. `live_gc` destroys the shared
 # store under its peers, `forked` asks for a process the driver does not give,
 # and the three skip/xfail marks mean the outcome is already decided.
-_DISQUALIFYING_MARKS = frozenset({"live_gc", "forked", "skip", "skipif", "xfail"})
+#
+# `forks_the_process` is the fourth, and the soak found it. A lane runs beside
+# seven others, so a test that calls `fork()` copies a process in the middle of
+# that work: `fork()` keeps only the calling thread, and every lock a peer held
+# stays locked for ever in the child. The soak also lends one Session to every
+# lane, so a fork test that needs a *second* Session cannot have one -- the
+# borrowed one is already open, and `open()` returns before it reaches the
+# process guard the test is about. Measured, on the TSan job of
+# `tests/nanopynix/test_fork_safety.py`: "assert 'ok' == 'ForkedSessionError'".
+_DISQUALIFYING_MARKS = frozenset({"live_gc", "forked", "forks_the_process", "skip", "skipif", "xfail"})
 
 # Only the library's own tests. `tests/pynix/` drives a CLI and an LSP server
 # through subprocesses, which puts no extra thread into this process.
