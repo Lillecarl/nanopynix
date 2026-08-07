@@ -16,6 +16,17 @@ service WorkerService {
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 }
 
+// There is no version field here, and that is a decision rather than an
+// omission. A client always starts its own worker from its own installed
+// package: `multiprocessing` forks or spawns this very interpreter, and the
+// stdio start method execs `sys.executable`. So the two ends cannot be
+// different builds, and a version field would carry a number nobody could act
+// on.
+//
+// The one case where they can differ is a worker reached over
+// `grpclib_transports.ssh.connect_ssh_stdio`, which runs `nanopynix-worker` on
+// another machine. That peer is not started by this client, and a version
+// check for it belongs to whatever starts it.
 message InitRequest {
   int64 request_id = 1000;
   reserved 6, 7, 8; // formerly pure_eval, restrict_eval, allowed_uris — now per-EvalState, see OpenEvalRequest

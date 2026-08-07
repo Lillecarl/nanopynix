@@ -44,6 +44,7 @@ from nanopynix.rpc.client._session import (
     _EvalProxyContext as _EvalProxyContext,
     _ResolvedValue as _ResolvedValue,
 )
+from nanopynix.rpc.client._worker_process import MultiprocessingWorkerProcess
 from nanopynix.rpc.client.session import Session
 from nanopynix.rpc.client.store import Store, StoreHandle
 from nanopynix.settings import (
@@ -883,7 +884,10 @@ class TestWorkerOomScore:
         )
         manager = WorkerClient(worker_oom_score_adj=500)
 
-        manager._on_worker_process_start(MagicMock(pid=1234))  # type: ignore[reportPrivateUsage] -- test accesses pool internals
+        # The real adapter over a mock process, and not a mock of the adapter:
+        # `_on_worker_process_start` takes a `WorkerProcess`, which beartype
+        # checks, and a `MagicMock` satisfies no protocol.
+        manager._on_worker_process_start(MultiprocessingWorkerProcess(MagicMock(pid=1234)))  # type: ignore[reportPrivateUsage] -- test accesses pool internals
 
         assert manager._worker_pid == 1234  # type: ignore[reportPrivateUsage] -- test accesses pool internals
         assert calls == [(1234, 500)]

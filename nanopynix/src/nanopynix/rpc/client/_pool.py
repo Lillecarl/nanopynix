@@ -22,6 +22,7 @@ import anyio
 import anyio.to_thread
 from grpclib.exceptions import GRPCError, StreamTerminatedError
 from grpclib_transports.multiprocessing import get_worker_context, multiprocessing_worker_with_backchannel
+from grpclib_transports.stdio import stdio_worker_with_backchannel
 from nanopynix_proto.nix.common import PrimOpSpec as PrimOpSpecPB
 from nanopynix_proto.nix.eval import EvalServiceStub
 from nanopynix_proto.nix.store import StoreServiceStub
@@ -52,7 +53,13 @@ from nanopynix.exceptions import (
 from nanopynix.logging import ACTIVE_LOG_CAPTURES, BusSubscription, CallbackBus, bus_log_stream
 from nanopynix.namespace import probe_namespace_support
 from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC, unpack_error_details
+from nanopynix.rpc._worker_argv import worker_argv
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
+from nanopynix.rpc.client._worker_process import (
+    MultiprocessingWorkerProcess,
+    StdioWorkerProcess,
+    WorkerProcess,
+)
 from nanopynix.rpc.worker._worker import worker_child_teardown, worker_service_factory
 from nanopynix.settings import (
     DEFAULT_RPC_TIMEOUT_SECONDS,
@@ -64,6 +71,7 @@ from nanopynix.settings import (
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+    from contextlib import AbstractAsyncContextManager
 
     from grpclib_transports.multiprocessing import ChildTeardown
     from nanopynix_proto.nix.common import LogLevel
@@ -191,7 +199,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         rpc_timeout: float = DEFAULT_RPC_TIMEOUT_SECONDS,
         shutdown_timeout: float = DEFAULT_SHUTDOWN_TIMEOUT_SECONDS,
         worker_preload: Sequence[str] = DEFAULT_WORKER_PRELOAD,
-        worker_start: Literal["auto", "forkserver", "spawn"] = "auto",
+        worker_start: Literal["auto", "forkserver", "spawn", "stdio"] = "auto",
         namespace: OverlayNamespace | None = None,
     ) -> None:
         self._store_uri = store_uri
@@ -209,12 +217,12 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         self._primop_callables = primop_callables or {}
         self._worker_oom_score_adj = worker_oom_score_adj
         self._worker_preload = list(worker_preload)
-        self._worker_start: Literal["auto", "forkserver", "spawn"] = worker_start
+        self._worker_start: Literal["auto", "forkserver", "spawn", "stdio"] = worker_start
         self._namespace = namespace
         self.rpc_timeout = rpc_timeout
         self._shutdown_timeout = shutdown_timeout
         self._worker_pid: int | None = None
-        self._worker_proc: Any = None
+        self._worker_proc: WorkerProcess | None = None
         # How the worker went away, and whether anybody wanted it to. Read
         # once and cached, because the process object is dropped during
         # teardown and the forkserver only reports the status once.
@@ -279,58 +287,11 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         self._primop_handler = ManagerPrimopServiceHandler()
         self._primop_handler.register_all(self._primop_callables)
 
-        # A partial rather than a closure: grpclib_transports pickles the
-        # factory through the forkserver, so it has to be a module-level
-        # function plus picklable arguments. An environment variable cannot
-        # ride along here at all -- the forkserver copies the environment once,
-        # when it starts, and reuses that copy for every child. That is why
-        # `env` travels on the InitRequest below instead, and why the worker
-        # applies it as its first act.
-        service_factory = (
-            worker_service_factory
-            if self._namespace is None
-            else functools.partial(worker_service_factory, namespace=self._namespace)
-        )
-
-        self._channel = await stack.enter_async_context(
-            multiprocessing_worker_with_backchannel(
-                service_factory,
-                [
-                    self._primop_handler,
-                ],
-                on_process_start=self._on_worker_process_start,
-                # What the child does after its transport closes. Nothing ran
-                # there before, so a worker that the client never asked to
-                # shut down politely -- a cancelled close, a `Shutdown` that
-                # timed out, a parent that died -- left every open evaluator's
-                # thread to exit still registered with the Boehm collector.
-                # See `worker_child_teardown`. Pickled through the forkserver,
-                # like the factory above.
-                #
-                # The cast is contravariance and nothing else: the transport
-                # declares `Collection[IServable]`, and the worker annotates
-                # the concrete handlers so that beartype can check them. See
-                # that function's docstring.
-                child_teardown=cast("ChildTeardown", worker_child_teardown),
-                # One list for the whole process, whoever asks first. The
-                # forkserver is a `multiprocessing` singleton, and it copies
-                # its preload list, its environment and its `sys.path` when it
-                # starts. See NanopynixSettings.worker_preload.
-                preload=self._worker_preload,
-                # `spawn` in a forked process, and `forkserver` otherwise: a
-                # forked child cannot start a forkserver worker at all, because
-                # `ensure_running` waits on a process that is not its child.
-                # See NanopynixSettings.worker_start for both measurements.
-                context=get_worker_context(resolve_worker_start(self._worker_start), preload=self._worker_preload),
-                max_concurrency=DEFAULT_WORKER_MAX_CONCURRENCY,
-                # Installs the codec on *both* ends: the channel yielded here,
-                # and -- because grpclib_transports forwards it through the
-                # forkserver process args -- the worker's own server. Both are
-                # required; grpclib drops the trailer silently if either is
-                # missing. See nanopynix.rpc._status_details.
-                status_details_codec=NIX_STATUS_DETAILS_CODEC,
-            ),
-        )
+        worker_start = self._worker_start
+        if worker_start == "stdio":
+            self._channel = await stack.enter_async_context(self._open_stdio_worker())
+        else:
+            self._channel = await stack.enter_async_context(self._open_multiprocessing_worker(worker_start))
         self._worker_service_stub = WorkerServiceStub(self._channel)
         self._store_service_stub = StoreServiceStub(self._channel)
         self._eval_service_stub = EvalServiceStub(self._channel)
@@ -366,6 +327,98 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         )
         if init_response.status != WORKER_INIT_STATUS_OK:
             raise RuntimeError(f"Worker init failed: {init_response.status}")
+
+    def _open_stdio_worker(self) -> AbstractAsyncContextManager[Any]:
+        """Start a worker by ``exec``, and speak over its stdin and stdout.
+
+        **Nothing travels from this process except the argument vector and the
+        environment.** So the namespace goes on the command line rather than in
+        a pickled ``functools.partial``, and ``nanopynix.rpc._worker_argv``
+        holds both halves of that contract.
+
+        ``env`` is deliberately not passed to the exec. It would work, and it
+        would make ``Session(env=...)`` accept names on this start method that
+        every other one refuses -- which is issue #102's subject, and its
+        decision to make. The worker applies the mapping from ``InitRequest``
+        here as it does everywhere else.
+
+        ``stderr`` is left alone, so the worker inherits descriptor 2 from this
+        process. That is the rule in ``CLAUDE.md``: in Nix, "stderr" means
+        logging, and the log events already travel over the wire.
+        """
+        return stdio_worker_with_backchannel(
+            worker_argv(namespace=self._namespace),
+            [
+                self._primop_handler,
+            ],
+            on_process_start=lambda proc: self._on_worker_process_start(StdioWorkerProcess(proc)),
+            # No `max_concurrency` here, and the asymmetry with the
+            # multiprocessing call below is real rather than an oversight.
+            # That transport builds the child's server itself and has to be
+            # told; this one execs a program that builds its own, and
+            # `_stdio_main` passes DEFAULT_WORKER_MAX_CONCURRENCY there.
+            #
+            # The codec still has to be named, because it installs on this end
+            # only. The worker installs the same one for itself.
+            status_details_codec=NIX_STATUS_DETAILS_CODEC,
+        )
+
+    def _open_multiprocessing_worker(
+        self,
+        worker_start: Literal["auto", "forkserver", "spawn"],
+    ) -> AbstractAsyncContextManager[Any]:
+        """Start a worker as a ``multiprocessing`` child of this process."""
+        # A partial rather than a closure: grpclib_transports pickles the
+        # factory through the forkserver, so it has to be a module-level
+        # function plus picklable arguments. An environment variable cannot
+        # ride along here at all -- the forkserver copies the environment once,
+        # when it starts, and reuses that copy for every child. That is why
+        # `env` travels on the InitRequest below instead, and why the worker
+        # applies it as its first act.
+        service_factory = (
+            worker_service_factory
+            if self._namespace is None
+            else functools.partial(worker_service_factory, namespace=self._namespace)
+        )
+
+        return multiprocessing_worker_with_backchannel(
+            service_factory,
+            [
+                self._primop_handler,
+            ],
+            on_process_start=lambda proc: self._on_worker_process_start(MultiprocessingWorkerProcess(proc)),
+            # What the child does after its transport closes. Nothing ran
+            # there before, so a worker that the client never asked to
+            # shut down politely -- a cancelled close, a `Shutdown` that
+            # timed out, a parent that died -- left every open evaluator's
+            # thread to exit still registered with the Boehm collector.
+            # See `worker_child_teardown`. Pickled through the forkserver,
+            # like the factory above. The stdio worker needs no equivalent:
+            # `_stdio_main` runs the same teardown itself.
+            #
+            # The cast is contravariance and nothing else: the transport
+            # declares `Collection[IServable]`, and the worker annotates
+            # the concrete handlers so that beartype can check them. See
+            # that function's docstring.
+            child_teardown=cast("ChildTeardown", worker_child_teardown),
+            # One list for the whole process, whoever asks first. The
+            # forkserver is a `multiprocessing` singleton, and it copies
+            # its preload list, its environment and its `sys.path` when it
+            # starts. See NanopynixSettings.worker_preload.
+            preload=self._worker_preload,
+            # `spawn` in a forked process, and `forkserver` otherwise: a
+            # forked child cannot start a forkserver worker at all, because
+            # `ensure_running` waits on a process that is not its child.
+            # See NanopynixSettings.worker_start for both measurements.
+            context=get_worker_context(resolve_worker_start(worker_start), preload=self._worker_preload),
+            max_concurrency=DEFAULT_WORKER_MAX_CONCURRENCY,
+            # Installs the codec on *both* ends: the channel yielded here,
+            # and -- because grpclib_transports forwards it through the
+            # forkserver process args -- the worker's own server. Both are
+            # required; grpclib drops the trailer silently if either is
+            # missing. See nanopynix.rpc._status_details.
+            status_details_codec=NIX_STATUS_DETAILS_CODEC,
+        )
 
     async def close(self) -> None:
         """Ask the worker to shut down, then make sure it is gone.
@@ -593,10 +646,13 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         except (GRPCError, StreamTerminatedError, ConnectionError):
             logger.debug("worker log stream ended", exc_info=True)
 
-    def _on_worker_process_start(self, proc: Any) -> None:
+    def _on_worker_process_start(self, proc: WorkerProcess) -> None:
         # The process object, not just its pid: close()'s teardown needs to be
         # able to stop it directly if the exit stack that normally owns that
         # job does not get there. See _stop_worker_process.
+        #
+        # Already adapted by the caller, because the two transports hand over
+        # two unrelated classes. See rpc/client/_worker_process.py.
         self._worker_pid = proc.pid
         self._worker_proc = proc
         self._set_worker_oom_score_adj(self._worker_oom_score_adj)
@@ -609,11 +665,13 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
     # the account of what it costs to be without them: a run of the suite
     # reported success while a worker core-dumped inside it.
     #
-    # `multiprocessing` reports the status as a negative number for a signal,
-    # because the forkserver passes the child's wait status through
-    # `os.waitstatus_to_exitcode`.
+    # Both transports report the status as a negative number for a signal,
+    # because both pass the child's wait status through
+    # `os.waitstatus_to_exitcode`. That is what lets the three methods below
+    # read one convention whichever start method built the worker; see
+    # rpc/client/_worker_process.py.
 
-    def _read_worker_exit_status(self, proc: Any) -> int | None:
+    def _read_worker_exit_status(self, proc: WorkerProcess | None) -> int | None:
         """Cache and return the exit status, without waiting for it.
 
         ``None`` means the worker is still running, or that the forkserver has
@@ -622,7 +680,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         :meth:`_reap_worker` for the point where it is.
         """
         if self._worker_exit_status is None and proc is not None:
-            self._worker_exit_status = proc.exitcode
+            self._worker_exit_status = proc.exit_status
         return self._worker_exit_status
 
     async def _reap_worker(self) -> int | None:
@@ -639,7 +697,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         if proc is None:
             return None
         with anyio.CancelScope(shield=True):
-            await anyio.to_thread.run_sync(proc.join, _WORKER_REAP_TIMEOUT_SECONDS)
+            await proc.join(_WORKER_REAP_TIMEOUT_SECONDS)
         return self._read_worker_exit_status(proc)
 
     def _note_worker_death(self, status: int | None) -> WorkerSignaledError | None:
@@ -708,10 +766,10 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
                 return
             logger.warning("nanopynix: worker %s outlived its teardown; stopping it", proc.pid)
             proc.terminate()
-            await anyio.to_thread.run_sync(proc.join, _WORKER_JOIN_TIMEOUT_SECONDS)
+            await proc.join(_WORKER_JOIN_TIMEOUT_SECONDS)
             if proc.is_alive():
                 proc.kill()
-                await anyio.to_thread.run_sync(proc.join, _WORKER_JOIN_TIMEOUT_SECONDS)
+                await proc.join(_WORKER_JOIN_TIMEOUT_SECONDS)
         finally:
             # The last moment the process object exists. Whatever it says now
             # is all this client will ever know, so cache it -- including for

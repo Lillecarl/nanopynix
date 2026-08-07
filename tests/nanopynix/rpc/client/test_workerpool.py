@@ -211,8 +211,8 @@ async def test_a_normal_close_lets_the_worker_end_itself():
     The cancelled close above is the other half of the pair. The signal is
     still right there, because a cancelled shutdown asks for speed.
 
-    ``exitcode`` carries the whole assertion: 0 says the worker ended itself,
-    and -15 says the signal got there first.
+    ``exit_status`` carries the whole assertion: 0 says the worker ended
+    itself, and -15 says the signal got there first.
     """
     nix = Session()
     await nix.open()
@@ -221,7 +221,9 @@ async def test_a_normal_close_lets_the_worker_end_itself():
 
     await nix.close()
 
-    assert proc.exitcode == 0, f"the worker was signalled rather than left to end itself: exitcode {proc.exitcode}"
+    assert proc.exit_status == 0, (
+        f"the worker was signalled rather than left to end itself: exit status {proc.exit_status}"
+    )
 
 
 async def test_close_reports_its_own_deadline_and_still_stops_the_worker(monkeypatch: pytest.MonkeyPatch):
@@ -386,9 +388,13 @@ async def _reaped(proc: Any) -> None:
     A dead child that is never joined stays a zombie, so "the call raised" is
     only half of what crash isolation means.
     """
-    await anyio.to_thread.run_sync(proc.join, 10.0)
+    # `await proc.join(...)`, and not `anyio.to_thread.run_sync(proc.join, ...)`:
+    # the pool holds a `WorkerProcess` adapter now, whose `join` is a
+    # coroutine. Handing that to `run_sync` builds a coroutine object, returns
+    # it unawaited, and waits for nothing at all.
+    await proc.join(10.0)
     assert not proc.is_alive()
-    assert proc.exitcode is not None
+    assert proc.exit_status is not None
 
 
 @contextlib.contextmanager
@@ -584,6 +590,11 @@ async def _stop_without_grace(proc: Any) -> None:
     ends itself before the signal now. Zeroing the grace constant is not enough:
     the thread hand-off that reads it is itself a checkpoint, and the child
     finishes during it. So this reproduces the old shape directly.
+
+    **A raw ``multiprocessing.Process``, not a ``WorkerProcess``.** This
+    replaces ``_stop_process`` inside the transport, which is below the layer
+    where the pool wraps the process, so ``join`` here is the blocking one.
+    ``_reaped`` above takes the adapter and awaits its ``join`` instead.
     """
     if proc.is_alive():
         proc.terminate()
@@ -679,7 +690,7 @@ async def test_a_worker_tears_itself_down_when_the_client_never_asks(monkeypatch
     blocking on its own Nix thread from ``anyio``'s pool while the child is
     already shutting down. That is the deadlock this test would catch.
 
-    **What this does not prove.** ``exitcode`` was 0 on this path before the
+    **What this does not prove.** The exit status was 0 on this path before the
     hook existed as well -- Python's own atexit join ends the evaluator
     threads cleanly, it just never runs ``_exit_evaluator_thread`` on them.
     So 0 here is a regression guard on the added work, and it is not evidence
@@ -712,7 +723,7 @@ async def test_a_worker_tears_itself_down_when_the_client_never_asks(monkeypatch
 
         await nix.close()
 
-    assert proc.exitcode == 0, f"the worker did not finish its own teardown: exitcode {proc.exitcode}"
+    assert proc.exit_status == 0, f"the worker did not finish its own teardown: exit status {proc.exit_status}"
 
 
 async def test_the_pool_hands_the_worker_teardown_to_the_transport(monkeypatch: pytest.MonkeyPatch):

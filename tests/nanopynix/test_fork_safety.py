@@ -443,6 +443,24 @@ async def test_a_forked_child_opens_an_rpc_session_of_its_own(rpc_session: RpcSe
         assert await nix.get_verbosity() is not None
 
 
+async def test_a_forked_child_opens_a_stdio_session(rpc_session: RpcSessionFactory) -> None:
+    """``stdio`` is the one start method with no ``multiprocessing`` singleton.
+
+    ``auto`` answers ``spawn`` in a fork, which works because ``spawn`` has no
+    forkserver to inherit. An exec has nothing to inherit at all, and that is
+    the first of the three reasons issue #25 gives for the start method
+    existing. Nothing else in the suite pins it, because every other stdio
+    test runs in an unforked process.
+    """
+
+    async def open_a_stdio_session() -> None:
+        async with rpc_session(runtime_settings=NanopynixSettings(worker_start="stdio")) as child_nix:
+            # A round trip, and not only a constructor -- see the test above.
+            await child_nix.get_verbosity()
+
+    assert await _in_a_fork(open_a_stdio_session) == ("ok", "")
+
+
 async def test_an_rpc_session_starts_a_spawn_worker_with_no_fork(rpc_session: RpcSessionFactory) -> None:
     """``spawn`` is covered on its own, and not only inside a forked child.
 
