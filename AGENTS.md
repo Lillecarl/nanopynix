@@ -36,10 +36,22 @@ no trust store, in the `static-checks` job. Each one is a derivation in
 `nix/checks.nix`, and each is a package. Build them to run a gate the way CI
 runs it, in a sandbox and not in the dev shell:
 
-- nix build --no-link --keep-going .#check-lint .#check-lint-strict .#check-format .#check-types .#check-shell .#check-grpclib-transports .#check-ekn-sandbox
+- nix build --file . --no-link --keep-going checks.lint checks.lint-strict checks.format checks.types checks.shell checks.grpclib-transports checks.pytest-agent checks.ekn-sandbox
 
 Do not use `nix flake check` for this. That command evaluates every package,
 and `packages.shell` cannot evaluate in a pure flake evaluation.
+
+**Build with `--file .` and an attribute path, and not with `.#`.** Every
+attribute of `default.nix` is reachable that way, at any depth, so a nested
+attribute needs no flat name in `flake.packages`. `flake.packages` holds the
+finished products only. `FLAKE_COMPATISH_DISABLE_OVERRIDES=1` makes a
+`--file .` evaluation agree with a flake evaluation: it stops `nix/compat.nix`
+overriding `self` with the local checkout, and reads the lockfile instead.
+Every CI workflow sets it, so CI and a local run build the same derivation.
+
+- nix build --file . pkgs.nixVersions.nix_2_34.src --no-link --print-out-paths # Download the source code of a Nix package and print the path to it.
+
+# GitHub Actions
 
 **`.github/workflows/*.yml` is generated. Do not edit it.** `ci/render.py`
 writes each file from `ci/workflows/on_*.nix`. Change the Nix source, then run
@@ -47,7 +59,40 @@ writes each file from `ci/workflows/on_*.nix`. Change the Nix source, then run
 static gate and then fails `test_checked_in_workflows_are_current` in each job
 of the test matrix, which costs a whole CI run to learn.
 
-- nix build --file . pkgs.nixVersions.nix_2_34.src --no-link --print-out-paths # Download the source code of a Nix package and print the path to it.
+**A `run:` body of a step is one line, and it holds no `${{ ... }}`
+expression.** `tests/meta/test_ci_step_policy.py` enforces both rules, and it
+names the workflow, the job and the step when one breaks.
+
+Put the body in `ci/steps.nix`, which builds each one as a
+`writeShellApplication`, and call it from the step:
+
+```yaml
+env:
+  CI_STEP: ciSteps.nix_2_34-tsan
+run: nix build --file . "$CI_STEP" --out-link result --print-build-logs
+run: ./result/bin/nanopynix-ci soak-seeds
+```
+
+Three reasons apply, and each one names a thing that a body in a YAML file
+cannot do:
+
+- **A gate reads a script.** `writeShellApplication` runs `shellcheck` over
+  what it builds. `check-shell` reads `scripts/*.sh`, and a bash string inside
+  a Nix file is not a script to any tool.
+- **A script runs here, and against one Nix version.** These are the commands
+  that CI runs:
+  - `nix run --file . ciSteps.commit-subjects`
+  - `nix build --file . ciSteps.nix_2_34 --out-link result`, and then
+    `BACKEND=local ./result/bin/nanopynix-ci soak`
+- **`runtimeInputs` names each tool.** A step that declares `jq`, `git` and
+  `unshare` does not depend on the tools of the runner image, so the step also
+  runs on a different CI service.
+
+Give a value to a step through `env:`, at the step or at the job. GitHub puts
+an expression into the text before the shell reads the line, so a value in a
+command can become a part of that command. `env:` also keeps the body to one
+line: the backend, the Nix version and the workspace path were the values that
+made an expression necessary.
 
 # Version control
 
