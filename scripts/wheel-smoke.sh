@@ -56,6 +56,19 @@ fi
 
 runtime=${WHEEL_SMOKE_RUNTIME:-podman}
 
+# Name the platform, and do not let the local image cache pick it. A pull of
+# the same tag for another architecture stays in the cache, and the next run
+# then starts that one and stops with `exec container process (missing dynamic
+# library?)`, which does not name the cause.
+case "$(uname -m)" in
+x86_64) platform=linux/amd64 ;;
+aarch64) platform=linux/arm64 ;;
+*)
+    echo "wheel-smoke: no platform known for $(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
 work_dir=$(mktemp -d -t nanopynix-wheel-smoke-XXXXXX)
 trap 'rm -rf "$work_dir"' EXIT
 
@@ -126,8 +139,8 @@ print("gc      : forced", value.list_length(), "attribute sets")
 print("RESULT  : ok")
 PYTHON
 
-echo "wheel-smoke: $image, CPython $python_version"
-"$runtime" run --rm --network=bridge \
+echo "wheel-smoke: $image ($platform), CPython $python_version"
+"$runtime" run --rm --network=bridge --platform "$platform" \
     -v "$wheel_dir":/wheel:ro,z \
     -v "$work_dir/smoke.py":/smoke.py:ro,z \
     -e "PYTHON_VERSION=$python_version" \
@@ -139,7 +152,9 @@ echo "wheel-smoke: $image, CPython $python_version"
         curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1
         export PATH=/root/.local/bin:$PATH
         uv venv --python "$PYTHON_VERSION" /venv >/dev/null 2>&1
-        uv pip install --python /venv/bin/python \
-            --no-index --find-links /wheel nanopynix-bindings >/dev/null
+        # The wheel file, by path, and not the project by name. A publishable
+        # build carries the Nix version in its name -- `nanopynix-bindings-nix2-34`
+        # -- so a name written here would be wrong for every build but one.
+        uv pip install --python /venv/bin/python --no-index /wheel/*.whl >/dev/null
         /venv/bin/python /smoke.py
     '
