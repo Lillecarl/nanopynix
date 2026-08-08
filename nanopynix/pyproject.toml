@@ -22,8 +22,13 @@ dependencies = [
   "setproctitle",
 ]
 
+# PEP 639, and the same reasoning as `nanopynix-bindings/pyproject.toml`. The
+# classifier is a name, and `license-files` is what puts the text in the built
+# artifact. The file is a copy of the one at the root of the repository,
+# because the source root of this project is `nanopynix/`.
+license = "LGPL-2.1-or-later"
+license-files = [ "LICENSE" ]
 classifiers = [
-  "License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)",
   "Programming Language :: Python :: 3",
 ]
 
