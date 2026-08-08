@@ -147,6 +147,27 @@ let
   # concern.
   boehmgc = pkgs.callPackage ./nix/boehmgc.nix { };
 
+  # The collector every build gets, whether or not a sanitizer is asking.
+  # `applyBoehmGCPatch` puts it in place for a build with no sanitizer;
+  # `boehmgcOverride` is what the sanitized builds add their instrumentation
+  # to.
+  patchedBoehmGC = boehmgc.patchBoehmGC pkgs.nixDependencies.boehmgc;
+
+  # Every C and C++ library of the closure, from the zig stdenv. The file
+  # gives the package list, the payload trim and the corrections that each
+  # package needs.
+  #
+  # **At the top level, and not in the `let` of `nanopynixForNixVersions`.**
+  # `nanopynixWheel` reads `zigLibs` to name the licence of each library that
+  # rides in the wheel, and that binding is a sibling of this one. Neither this
+  # import nor `patchedBoehmGC` above reads an argument of that function, so
+  # both moved out whole.
+  zigNix = import ./nix/zig-nix.nix {
+    inherit lib pkgs;
+    boehmgc = patchedBoehmGC;
+    python = pythonBase;
+  };
+
   # A confirmed data race in nix::Bindings::emptyBindings (a process-wide
   # shared static that ExprAttrs::eval unconditionally writes to -- see the
   # patch's own commentary) found via ThreadSanitizer (see `sanitizers` above).
@@ -529,12 +550,6 @@ let
         boehmgc = sanitizer.sanitizeBoehmGC patchedBoehmGC;
       };
 
-      # The collector every build gets, whether or not a sanitizer is asking.
-      # `applyBoehmGCPatch` below puts it in place for a build with no
-      # sanitizer; `boehmgcOverride` above is what the sanitized builds add
-      # their instrumentation to.
-      patchedBoehmGC = boehmgc.patchBoehmGC pkgs.nixDependencies.boehmgc;
-
       # The patch, and nothing else. This runs before
       # `applySanitizerOverrides`, so a sanitized build still ends up with the
       # instrumented collector: both write `boehmgc`, and the later one wins.
@@ -562,15 +577,6 @@ let
             nix-expr = prev.nix-expr.override { enableGC = false; };
           }
         );
-
-      # Every C and C++ library of the closure, from the zig stdenv. The file
-      # gives the package list, the payload trim and the corrections that each
-      # package needs.
-      zigNix = import ./nix/zig-nix.nix {
-        inherit lib pkgs;
-        boehmgc = patchedBoehmGC;
-        python = pythonBase;
-      };
 
       # nixComponents_2_34 -> nix_2_34, nixComponents_git -> git (matching
       # the names the previous hand-written patchedNixVersions used), plus a
@@ -683,8 +689,25 @@ let
   # The wheel itself. `nix/wheel.nix` runs `auditwheel repair` over the
   # extension above, which bundles each library and writes the `manylinux` tag.
   # Off the matrices for the same reason as the build it reads.
+  # The licence text of every library that the wheel bundles. The package set
+  # is the whole zig closure plus the collector and the five Nix components,
+  # which is every library that can end up in `nanopynix_bindings.libs/`.
+  nanopynixWheelLicenses = pkgs.callPackage ./nix/wheel-licenses.nix { } {
+    packages = zigNix.zigLibs // {
+      boehmgc = zigNix.zigBoehmGC;
+      inherit (nanopynixZig)
+        nix-util
+        nix-store
+        nix-expr
+        nix-fetchers
+        nix-flake
+        ;
+    };
+  };
+
   nanopynixWheel = pkgs.callPackage ./nix/wheel.nix {
-    inherit (pkgs.python3Packages) auditwheel;
+    inherit (pkgs.python3Packages) auditwheel wheel;
+    licenses = nanopynixWheelLicenses;
     bindings = nanopynixZig.nanopynix-bindings.override {
       # **The Nix version is in the name, and not in the version.**
       #
@@ -821,6 +844,7 @@ lib.throwIf (unlistedVariants != [ ])
       nanopynixVersions
       nanopynixZig
       nanopynixWheel
+      nanopynixWheelLicenses
       pyproject-nix
       tests
       experiments
