@@ -680,6 +680,14 @@ let
   # wheel removes the ABI matrix.
   nanopynixZig = (nanopynixForNixVersions { zig = true; }).nix_2_34-zig;
 
+  # The wheel itself. `nix/wheel.nix` runs `auditwheel repair` over the
+  # extension above, which bundles each library and writes the `manylinux` tag.
+  # Off the matrices for the same reason as the build it reads.
+  nanopynixWheel = pkgs.callPackage ./nix/wheel.nix {
+    inherit (pkgs.python3Packages) auditwheel;
+    bindings = nanopynixZig.nanopynix-bindings;
+  };
+
   # Per-version test runners, exposed individually as `nanopynix-tests-<name>`
   # flake packages so CI can build/run each Nix version in its own job.
   tests = lib.mapAttrs' (
@@ -792,6 +800,7 @@ lib.throwIf (unlistedVariants != [ ])
       pkgs
       nanopynixVersions
       nanopynixZig
+      nanopynixWheel
       pyproject-nix
       tests
       experiments
