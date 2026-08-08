@@ -177,6 +177,30 @@ except Exception as caught:
     ) from caught
 print("casts   : find_roots on a local store, ok")
 
+# 3. An error class that **no `catch` clause names** still translates. This is
+#    a different mechanism from check 1, and it broke while check 1 passed.
+#
+#    `nix::Abort` is `MakeError(Abort, EvalError)`, and `src/nix_errors.cpp`
+#    names no `Abort`. So the extension holds no type information for it, and
+#    libc++abi has to walk the base classes of the thrown type instead of
+#    comparing one address. That walk starts with
+#    `dynamic_cast<const __class_type_info *>(thrown_type)`, over the *type
+#    information object itself*. The cast needs one
+#    `__cxxabiv1::__si_class_type_info` for the process, and every object of
+#    the wheel carried its own until `nix/zig-cxx-runtime.nix` gave them one
+#    shared C++ runtime.
+try:
+    state.eval_string('abort "x"', "<smoke>").force()
+    raise AssertionError("abort did not raise")
+except errors.EvalError as caught:
+    print("bases   : Abort reached EvalError, message:", "x" in str(caught))
+except SystemError as caught:  # noqa: F841 -- named to make the report readable
+    raise AssertionError(
+        "the wheel cannot translate an error through its base classes -- see "
+        "issue #112. The objects hold more than one C++ runtime, so a "
+        "dynamic_cast over type information fails."
+    ) from caught
+
 print("RESULT  : ok")
 PYTHON
 
