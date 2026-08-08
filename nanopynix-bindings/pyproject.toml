@@ -19,4 +19,19 @@ Homepage = "https://github.com/lillecarl/nanopynix"
 
 [tool.scikit-build]
 minimum-version = "build-system.requires"
-wheel.platlib = false
+
+# **This package is not pure Python, and the wheel has to say so.**
+#
+# `wheel.platlib = false` used to be here. It writes `Root-Is-Purelib: true`
+# and tags the wheel `py3-none-any`, which claims the wheel runs on any Python
+# on any platform. The wheel holds `_ext.cpython-314-x86_64-linux-gnu.so`, so
+# it runs on CPython 3.14 on x86-64 Linux and nowhere else. pip would install
+# it anywhere and the import would then fail.
+#
+# **Nix hides this.** `buildPythonPackage` puts purelib and platlib in the same
+# `site-packages`, so the setting changed nothing that a Nix build can see. It
+# became visible at the first real wheel: `auditwheel` refuses a wheel with no
+# platform tag.
+#
+# The default gives `cp314-cp314-linux_x86_64`, which `auditwheel repair` then
+# rewrites to a `manylinux` tag.
