@@ -26,7 +26,9 @@ and `x86_64-linux`. Each claim names the command that produced it.
   `ddrn/examples/venv`.
 - **One planner output is exactly one derivation.** A fan-out needs
   `builder-rpc-v0`, which is merged in Nix master and is in no release yet.
-  That feature is where `nanopynix` belongs. See
+- `builder-rpc-v0` **runs on this machine**, on Nix
+  `2.36.0pre20260806_9137203`. `ddrn/examples/submitted/run.sh` builds it and
+  proves it. That feature is where `nanopynix` belongs. See
   [What `builder-rpc-v0` changes](#what-builder-rpc-v0-changes).
 
 ## Running the examples
@@ -177,11 +179,56 @@ $ nix develop --file . nanopynixVersions.git.shell
 That shell is not new enough. `pkgs.nixVersions.git` in the current pin is
 `2.35pre20260619`, and the merge landed on 2026-07-21. The `nixpkgs` input
 itself is recent, from 2026-08-03; it is the Nix revision that nixpkgs pins
-inside `nixVersions.git` that lags, and a flake update does not move it.
+inside `nixVersions.git` that lags, and a flake update does not move it. To
+move it, override the source of `nixComponents_git`, which
+`modular/packages.nix` supports through `nixComponents.overrideSource`.
 
-To reach the feature, override the source of `nixComponents_git`, which
-`default.nix` reads through `pkgs.nixVersions` and renames to `git`. Doing so
-compiles Nix from source.
+### Running this
+
+`ddrn/examples/submitted/run.sh` runs the feature end to end, and needs no
+change to the machine:
+
+```console
+$ ddrn/examples/submitted/run.sh
+==> 2.36.0pre20260806_9137203
+submitted-hello> NIX_REMOTE=unix:///build/.nix-socket
+/nix/store/561lqncd629kabjdhpxjqqwcmfmkxz5l-submitted-hello
+```
+
+Three things make that work, and each one was needed:
+
+- **A Nix from master, without compiling one.** Hydra builds master, so
+  `nix build github:NixOS/nix/<rev>#nix` substitutes from `cache.nixos.org`.
+  The revision only has to be later than 2026-07-21.
+- **A private chroot store.** `/nix/store` belongs to root here, so an
+  ordinary build goes through the system daemon, which is 2.34.8 and has no
+  such feature. `nix build --store <dir>` makes the client build in itself,
+  which runs the new code. The store *directory* stays `/nix/store`, so every
+  dependency still substitutes rather than rebuilds.
+- **`--system-features 'builder-rpc-v0'`.** It is a system feature, so the
+  store has to advertise it, exactly as `recursive-nix` does.
+
+What the build shows:
+
+- `NIX_REMOTE=unix:///build/.nix-socket`. The socket is an ordinary
+  worker-protocol socket, at `tmpDirInSandbox() / ".nix-socket"`
+  (`derivation-builder.cc`), serving a `RestrictedStore` with
+  `RecursiveFlag::RecursiveSubmitted`.
+- `$out` is unset, and the build asserts it. The output arrives only through
+  `submit-output`.
+- The derivation must be content-addressing. Nix refuses otherwise: *"The
+  builder-rpc-v0 feature may only be used with content-addressing
+  derivations"*.
+- The submitted store object must carry the name the output must have, which
+  is the derivation name for `out`. The first attempt failed with:
+
+  ```text
+  error: derivation '...-submitted-hello.drv' output 'out'
+         (at '/nix/store/...-work') was named 'work',
+         expected 'submitted-hello'
+  ```
+
+  `nix store add --name submitted-hello ./work` is the fix.
 
 ## Where nanopynix fits
 
@@ -215,18 +262,25 @@ together.
 
 ### Inside the sandbox, with `builder-rpc-v0`: nanopynix
 
-This is the interesting one, and it is what the feature was built for. The
-builder gets a daemon socket, so a planner is a full store client. `nanopynix`
-already speaks that: `add_to_store`, `read_derivation`, `query_path_info` and
-the rest of `AsyncStore` are the operations a planner needs to register a
-graph. The work it needs is:
+This is the interesting one, and it is what the feature was built for, and it
+now runs here.
+
+`NIX_REMOTE` inside the sandbox is an ordinary worker-protocol socket. A
+planner is therefore a full store client, and `nanopynix` already speaks that
+protocol: `add_to_store`, `read_derivation`, `query_path_info` and the rest of
+`AsyncStore` are the operations that registering a graph needs. Two things are
+missing:
 
 - **A `submit_output` store operation.** It is one worker-protocol call,
   `SubmitOutput = 1000`, gated on the `submit-output` feature of the
   connection.
-- **A way to open a store on the socket the sandbox provides**, and to report
-  a clear error when the feature is absent rather than when the first call
-  fails.
+- **A store opened on the socket that the sandbox provides.** `NIX_REMOTE` is
+  already a store URI, so this may cost nothing beyond a clear error when the
+  feature is absent, rather than a failure at the first call.
+
+With those, the whole ATerm writer of `ddrn` becomes unnecessary in this mode:
+Nix writes the derivation, Nix computes the paths, and Python decides only
+what the graph is.
 
 Everything else `ddrn` does by hand becomes unnecessary: Nix writes the ATerm,
 Nix computes the paths, and Python decides what the graph is.
@@ -286,15 +340,17 @@ is correct; only the prediction is missing.
 
 ## Next steps
 
-1. Override the source of `nixComponents_git` to a `master` revision after
-   2026-07-21, and run `ddrn` against `builder-rpc-v0` in
-   `nanopynixVersions.git.shell`. Nothing below this line can be designed with
-   confidence until the socket is real on this machine. This step compiles
-   Nix, so it is a candidate for the shared remote builder.
-2. Add `submit_output` to `nanopynix`, and a way to open a store on the
-   socket of the sandbox.
+1. Add `submit_output` to `nanopynix`, against the socket that
+   `ddrn/examples/submitted` already proves is there. The bindings have to
+   build against a Nix that carries the operation, so this needs step 2 as
+   well.
+2. Override the source of `nixComponents_git` to a `master` revision after
+   2026-07-21, so `nanopynixVersions.git` carries the feature and the bindings
+   compile against it. `nixComponents.overrideSource` is the hook. Unlike
+   step 1's runtime check, this compiles Nix rather than substituting it,
+   because the packaging expressions of the pin are applied to a new source.
 3. Then rewrite `ddrn/examples/venv` as a graph: one derivation per wheel, one
    per install step, and an sdist path that resolves its own build backend.
-   That is the case `uv2nix` handles and this experiment cannot.
+   That is the case `uv2nix` handles and a plain dynamic derivation cannot.
 4. Bind `StoreDirConfig` for the host side, and give
    `ddrn/tests/test_aterm_matches_nix.py` a second oracle.
