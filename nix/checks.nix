@@ -78,6 +78,9 @@ let
       # that stops an unattributed library reaching PyPI, so a fault in it is
       # a licence fault.
       ../nix/wheel-notice.py
+      # The gate step of the same build, and here for the same reason. A
+      # fault in it is a gate that passes, which is worse than no gate.
+      ../nix/wheel-gates.py
       # Tracked, and therefore in scope, although it holds one module and no
       # project of its own. With it the gate reads 259 Python files, which is
       # what `ruff format --check .` reads in the dev shell. Without it the
