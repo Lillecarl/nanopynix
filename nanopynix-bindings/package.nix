@@ -16,6 +16,25 @@
   version,
   sanitizer ? null,
   sanitizerRuntime ? null,
+  # The distribution name to publish under, or null to build for this
+  # repository. Setting it makes the build **publishable to PyPI**, and it
+  # changes two things together because one without the other is not
+  # publishable:
+  #
+  # 1. The distribution takes this name. PyPI holds one name for one project,
+  #    and this project builds one artifact for each Nix version, so the Nix
+  #    version goes in the name: `nanopynix-bindings-nix2-34`. Each one imports
+  #    as `nanopynix_bindings`, so they are alternatives rather than a set to
+  #    install together.
+  # 2. The `+nix<version>` local segment goes. PEP 440 permits a local version
+  #    and **a public index refuses one**, so a wheel that carries it cannot be
+  #    uploaded whatever else is right about it.
+  #
+  # Both stay for a build of this repository, where the local segment is the
+  # right answer: it keeps two builds of one source apart, it orders the way a
+  # reader expects, and it takes the version of the git scope, which no public
+  # version can spell.
+  pypiName ? null,
 }:
 
 let
@@ -52,7 +71,15 @@ buildPythonPackage (
     # it orders the way you would want between Nix versions, and PEP 440
     # normalisation accepts the git scope's version too
     # (`2.35pre20260619_f8bb823a` -> local `nix2.35pre20260619.f8bb823a`).
-    version = "${attrs.version}+nix${version}";
+    #
+    # A publishable build drops it, because a public index refuses a local
+    # version. `pypiName` above says why the name carries the Nix version
+    # instead.
+    version = if pypiName == null then "${attrs.version}+nix${version}" else attrs.version;
+
+    # `pname` follows the distribution name, so the store path and the wheel
+    # agree on what this package is called.
+    pname = if pypiName == null then attrs.pname else pypiName;
 
     src = ./.;
 
@@ -63,14 +90,31 @@ buildPythonPackage (
 
     nativeBuildInputs = [
       pkg-config
-      # Rewrites `project.version` in pyproject.toml to the derivation's
-      # `version` before the build reads it, so the wheel's METADATA carries
-      # the `+nix<version>` local segment too. Without it the build is still
-      # correct but pythonMetadataCheckHook fails the derivation, because
-      # scikit-build-core would emit the unsuffixed `0.1.0` from the checkout
-      # while the derivation claims the suffixed one.
-      pyprojectVersionPatchHook
-    ];
+    ]
+    # Rewrites `project.version` in pyproject.toml to the derivation's
+    # `version` before the build reads it, so the wheel's METADATA carries the
+    # `+nix<version>` local segment too. Without it the build is still correct
+    # but pythonMetadataCheckHook fails the derivation, because
+    # scikit-build-core would emit the unsuffixed `0.1.0` from the checkout
+    # while the derivation claims the suffixed one.
+    #
+    # **A publishable build has no version to patch**, and this hook treats
+    # that as an error rather than as nothing to do: `The version in
+    # pyproject.toml already matches the derivation's version. Remove
+    # pyprojectVersionPatchHook.`
+    ++ lib.optional (pypiName == null) pyprojectVersionPatchHook;
+
+    # `pyprojectVersionPatchHook` rewrites `project.version` and never the
+    # name, so a publishable build rewrites the name here. Without it the build
+    # is named `nanopynix-bindings-nix2-34` and the wheel inside it still says
+    # `nanopynix_bindings-0.1.0-...`, which is the name that PyPI reads.
+    #
+    # `--replace-fail`, so a rename of the project in `pyproject.toml` stops
+    # this build rather than quietly publishing under the old name.
+    postPatch = lib.optionalString (pypiName != null) ''
+      substituteInPlace pyproject.toml \
+        --replace-fail 'name = "nanopynix-bindings"' 'name = "${pypiName}"'
+    '';
     # nix's modular components don't propagatedBuildInputs their own C
     # library deps (blake3, boost, libarchive, libsodium, ...) to consumers,
     # so pkg-config can't find e.g. libblake3.pc for nix-util unless it's
