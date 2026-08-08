@@ -1,0 +1,44 @@
+/* What `_ext.so` exports.
+ *
+ * `-fvisibility-ms-compat` gives every *type* default visibility, which is
+ * what makes a `catch` and a `dynamic_cast` work across the boundary between
+ * this extension and `libnixexpr.so`. It exports too much on its own: 301 new
+ * symbols, of which 262 are type information and **23 are functions** -- the
+ * constructors and destructors of `boost::wrapexcept<...>`, which come with
+ * the vtable of each boost format exception.
+ *
+ * A function must not travel. CPython opens this extension as the root of its
+ * own `dlopen` scope, so a symbol that this file exports is found *before* the
+ * copy inside `libnixexpr.so`. libnixexpr then called this extension's
+ * `~wrapexcept()` over an object that its own copy had built, and
+ * `builtins.throw` ended in `double free or corruption` inside
+ * `nix::ErrorInfo::~ErrorInfo`.
+ *
+ * So: the type information travels, and nothing else does.
+ *
+ *   _ZTI*  typeinfo         -- the object a `catch` and a `dynamic_cast`
+ *                              compare, and the only one that has to be
+ *                              one object for the whole process
+ *   _ZTS*  typeinfo name    -- the string beside it
+ *
+ * A vtable (`_ZTV*`) stays local on purpose. Nothing outside this file reads
+ * one, and a vtable names the functions above.
+ */
+/* **Nix's own types, and not boost's.** `_ZTI*` was the first attempt, and it
+ * still ended in `double free or corruption`. boost::format throws and catches
+ * `boost::io::too_few_args` inside itself, so a `boost` typeinfo exported from
+ * here shadows the copy inside `libnixexpr.so` and boost's own handling then
+ * runs over two type universes. Only the types that cross this boundary need
+ * to travel, and those are Nix's exceptions and stores, plus this extension's
+ * own two exception classes.
+ */
+{
+  global:
+    PyInit__ext;
+    _ZTIN3nix*;
+    _ZTSN3nix*;
+    _ZTIN10nanopynix*;
+    _ZTSN10nanopynix*;
+  local:
+    *;
+};

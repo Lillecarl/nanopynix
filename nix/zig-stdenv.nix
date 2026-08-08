@@ -104,6 +104,24 @@ let
       # decides whether an assertion stays. zig puts its own define at the
       # front of the command line, so a `-U` anywhere after it wins.
       "-UNDEBUG"
+
+      # **Do not put `-fvisibility-ms-compat` here.** It corrects the type
+      # information of the extension, and `nanopynix-bindings/package.nix`
+      # gives it to that build alone. The reason it cannot go on the whole
+      # closure is measured:
+      #
+      # The flag sets the default visibility of a *value* to hidden and of a
+      # *type* to default. A package that already passes `-fvisibility=hidden`
+      # therefore keeps its values as they were and gets its types back, which
+      # is the correction. Every other package of this closure exports its API
+      # by default visibility, and the flag hides that API. `attr` was the
+      # first to stop:
+      #
+      #   ld.lld: error: undefined symbol: attr_get
+      #   >>> referenced by attr.c:199, tools/attr.o:(main)
+      #
+      # `libattr.so` built, and the `attr` tool beside it could no longer link
+      # against it.
     ];
     nixSupport.cc-ldflags = [
       # lld 17 made `--no-undefined-version` its default, and GNU ld only

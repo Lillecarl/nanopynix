@@ -136,6 +136,47 @@ value.force_deep()
 assert value.list_length() == 2000, value.list_length()
 print("gc      : forced", value.list_length(), "attribute sets")
 
+# ── The two checks that only a failing path reaches ──────────────────────
+#
+# Everything above asserts that the wheel *works*. Both defects of issue #112
+# left every one of those checks green, because both need an error or a
+# `dynamic_cast` to show. A `catch` and a `dynamic_cast` across two shared
+# objects are exactly what a bundled wheel adds, so this is the part of the
+# wheel that the ordinary test suite cannot cover.
+
+# 1. An error keeps its class. The extension names each Nix exception in a
+#    `catch` clause, and `libnixexpr.so` throws it, so the two objects have to
+#    agree about the type. When they do not, every clause misses and nanobind
+#    reports `SystemError: exception could not be translated`.
+from nanopynix_bindings import errors
+
+try:
+    state.eval_string('throw "boom"', "<smoke>").force()
+    raise AssertionError("throw did not raise")
+except errors.ThrownError as caught:
+    print("errors  : ThrownError, and the message survived:", "boom" in str(caught))
+except SystemError as caught:  # noqa: F841 -- named to make the report readable
+    raise AssertionError(
+        "the wheel cannot translate a Nix exception -- see issue #112. "
+        "Type information is hidden, so no catch clause matches."
+    ) from caught
+
+# 2. `dynamic_cast` still finds a base class. **This one fails silently.** The
+#    store below is a LocalStore, so `find_roots` has to work. When the cast
+#    returns null the binding reports "store does not support garbage
+#    collection", which reads like a true answer about a limited store.
+import tempfile
+
+root = tempfile.mkdtemp()
+local = store.open_store(f"local?root={root}")
+try:
+    local.find_roots()
+except Exception as caught:
+    raise AssertionError(
+        f"dynamic_cast across the bundled objects failed -- see issue #112: {caught}"
+    ) from caught
+print("casts   : find_roots on a local store, ok")
+
 print("RESULT  : ok")
 PYTHON
 
