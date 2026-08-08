@@ -29,10 +29,22 @@
   # The zig build. A gcc build gets a `manylinux_2_38` tag, which is what this
   # whole closure exists to avoid.
   bindings,
+  # The one C++ runtime of the closure, from `nix/zig-cxx-runtime.nix`. The
+  # gate below reads its soname, so that the name lives in the file that
+  # decides it and not in two places.
+  cxxRuntime,
   # The same number as `nix/zig-stdenv.nix` targets. `auditwheel` refuses a tag
   # that the objects do not support, so a mismatch here fails the build rather
   # than shipping a wheel that does not load.
   glibcVersion ? "2.34",
+  # The unpacked wheel, in bytes. It measured 49.4 MiB on 2026-08-08, and the
+  # payload was about 90 MiB before the trim of issue #111.
+  #
+  # **A ceiling, and not a target.** It is here to catch a return to the size
+  # before that trim, and to catch an object that lost its strip. Raise it when
+  # a measured change earns the space, and say in the commit message what the
+  # space bought.
+  payloadCeiling ? 60 * 1024 * 1024,
 }:
 let
   # A wheel names the architecture the way `uname -m` does, which is what
@@ -94,6 +106,17 @@ runCommand "nanopynix-bindings-wheel-${platform}"
     dist_info=$(cd "$unpacked" && echo ./*.dist-info)
 
     python3 ${./wheel-notice.py} "$unpacked" ${licenses} "$dist_info"
+
+    # The gates that a wheel which installs would otherwise pass. The header of
+    # `nix/wheel-gates.py` names each one, and names what `auditwheel` already
+    # covers so that this adds nothing twice.
+    #
+    # **Here, and not in `nix/checks.nix`.** Those gates run in the
+    # `static-checks` job, and this one reads a built wheel. Putting it there
+    # would build the whole zig closure for every lint run. Here it is a step of
+    # the build that makes the thing it reads, so no wheel exists without it.
+    echo "--- gates ---"
+    python3 ${./wheel-gates.py} "$unpacked" ${toString payloadCeiling} ${cxxRuntime.soname}
 
     # `wheel pack` writes the file name from `WHEEL` and `METADATA`, so the
     # `manylinux` tag that the repair set stays on the product.

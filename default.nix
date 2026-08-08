@@ -711,6 +711,7 @@ let
   nanopynixWheel = pkgs.callPackage ./nix/wheel.nix {
     inherit (pkgs.python3Packages) auditwheel wheel;
     licenses = nanopynixWheelLicenses;
+    inherit (zigNix.zigStdenv) cxxRuntime;
     bindings = nanopynixZig.nanopynix-bindings.override {
       # **The Nix version is in the name, and not in the version.**
       #
