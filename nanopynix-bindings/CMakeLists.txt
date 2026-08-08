@@ -125,6 +125,20 @@ target_compile_options(_ext PRIVATE -std=c++23)
 nanopynix_target_uses_nix_compat(_ext)
 nanopynix_link_as_needed(_ext)
 
+# What this extension exports. `src/export.map` gives the whole reason; the
+# short form is that `-fvisibility-ms-compat` (set by the Nix build) has to
+# export the type information so a `catch` and a `dynamic_cast` work across the
+# boundary to `libnixexpr.so`, and it exports 23 boost functions with it.
+# CPython opens this extension as the root of a `dlopen` scope, so those
+# functions shadow the copies inside `libnixexpr.so`, and `builtins.throw` then
+# ends in `double free or corruption`.
+#
+# Here, and not in `cmakeFlags` of `package.nix`: each entry there becomes its
+# own `-Ccmake.args=` token and must hold no space, so it cannot carry both
+# this and the linker flag of a sanitizer build.
+target_link_options(_ext PRIVATE
+  "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/src/export.map")
+
 # --- Install rules ---
 install(TARGETS _ext LIBRARY DESTINATION nanopynix_bindings)
 # The whole directory, not a file list: it holds `__init__.py` plus one
