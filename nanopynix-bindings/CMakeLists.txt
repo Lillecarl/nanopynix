@@ -11,7 +11,27 @@ if (CMAKE_VERSION VERSION_LESS 3.18)
 else()
   set(DEV_MODULE Development.Module)
 endif()
-find_package(Python 3.9 COMPONENTS Interpreter ${DEV_MODULE} REQUIRED)
+# **The stable ABI is for the wheel, and for nothing else.**
+#
+# A stable ABI extension imports on every CPython from 3.12 up, so one wheel
+# serves 3.13, 3.14 and every release after it. Without it, PyPI needs one
+# wheel for each Python minor version, times three Nix versions and two
+# architectures, and each Python release rebuilds all of them.
+#
+# It is off by default, because nothing else here wants it. A package that Nix
+# builds is built for the one interpreter that Nix builds it against, so the
+# compatibility buys nothing, and nanobind states a cost for it: the stable ABI
+# stops nanobind reading the internals of the data structures of CPython
+# directly. `pynix` and the test suite take the ordinary build and keep the
+# speed.
+option(NANOPYNIX_STABLE_ABI "Build the extension against the stable ABI of CPython" OFF)
+
+# `Development.SABIModule` is what `STABLE_ABI` links against, and it is
+# optional: a CPython that ships no `libpython3.so` has no stable ABI, and
+# nanobind then ignores the flag rather than failing the build.
+find_package(Python 3.9
+  REQUIRED COMPONENTS Interpreter ${DEV_MODULE}
+  OPTIONAL_COMPONENTS Development.SABIModule)
 find_package(nanobind CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
 
@@ -94,7 +114,16 @@ endfunction()
 # dlopening ABI-coupled C++ plugins named by someone's nix.conf. --as-needed prunes whatever this build does not actually resolve
 # a symbol from, so the union costs nothing but says plainly which Nix
 # components the bindings are built against.
+# `STABLE_ABI` is a positional argument of `nanobind_add_module`, so the option
+# above becomes a list that is either empty or holds that one word.
+if (NANOPYNIX_STABLE_ABI)
+  set(NANOPYNIX_ABI_FLAG STABLE_ABI)
+else()
+  set(NANOPYNIX_ABI_FLAG)
+endif()
+
 nanobind_add_module(_ext
+  ${NANOPYNIX_ABI_FLAG}
   src/nanopynix_module.cpp
   src/nix_errors.cpp
   src/nix_signals.cpp

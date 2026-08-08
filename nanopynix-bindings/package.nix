@@ -35,6 +35,20 @@
   # reader expects, and it takes the version of the git scope, which no public
   # version can spell.
   pypiName ? null,
+  # Build the extension against the stable ABI of CPython, and tag the wheel
+  # `cp313-abi3`. **For the wheel, and for nothing that Nix builds.**
+  #
+  # One such wheel imports on 3.13, 3.14 and every CPython after them. Without
+  # it PyPI needs one wheel for each Python minor version, times three Nix
+  # versions and two architectures, and each release of CPython rebuilds all of
+  # them. `nanopynix-bindings/CMakeLists.txt` gives the count.
+  #
+  # A package that Nix builds is built for the one interpreter that Nix builds
+  # it against, so the compatibility buys nothing there, and nanobind states a
+  # cost: the stable ABI stops it reading the internals of the data structures
+  # of CPython directly. `pynix` and the test suite therefore take the ordinary
+  # build.
+  stableAbi ? false,
 }:
 
 let
@@ -147,6 +161,7 @@ buildPythonPackage (
       "-Dnanobind_ROOT=${nanobind2_13}/${python.sitePackages}/nanobind/cmake"
       "-DPython_EXECUTABLE=${python}/bin/python"
     ]
+    ++ lib.optional stableAbi "-DNANOPYNIX_STABLE_ABI=ON"
     ++ lib.optionals (sanitizer != null) [
       # Each cmakeFlags entry becomes its own -Ccmake.args= token, and a single
       # entry with embedded spaces gets re-split upstream into bare (invalid)
@@ -238,6 +253,18 @@ buildPythonPackage (
           ++ lib.optional (sanitizer != null) sanitizer.flags
         );
       }
+      // lib.optionalAttrs stableAbi {
+        # **The tag of the wheel, which CMake does not decide.** `STABLE_ABI`
+        # gives the extension the `.abi3.so` suffix, and scikit-build-core
+        # still writes `cp314-cp314` on the wheel unless it is told. A wheel
+        # with the interpreter tag installs on one CPython whatever the
+        # extension inside it supports, so the two settings are one change.
+        #
+        # `cp313`, and not `cp312`: `pyproject.toml` says
+        # `requires-python = ">=3.13"`, and a tag below that floor would
+        # promise a Python that this project does not support.
+        SKBUILD_WHEEL_PY_API = "cp313";
+      }
       // lib.optionalAttrs (sanitizer != null) sanitizer.buildEnv
       // lib.optionalAttrs (sanitizerRuntime != null) {
         LD_PRELOAD = sanitizerRuntime;
@@ -273,6 +300,14 @@ buildPythonPackage (
       "nanopynix_bindings.fetchers"
       "nanopynix_bindings.flake"
     ];
+
+    # `nix/wheel.nix` gates the suffix of the extension against this, so the
+    # flag travels with the derivation and the two cannot disagree. An
+    # `override` argument is not an attribute of the result, so it has to be
+    # said here.
+    passthru = (attrs.passthru or { }) // {
+      inherit stableAbi;
+    };
 
     meta = attrs.meta // {
       license = lib.licenses.lgpl21Plus;
