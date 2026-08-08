@@ -182,14 +182,63 @@ buildPythonPackage (
     # LeakSanitizer reports the build shell and the build fails. That value
     # comes from `sanitizer.buildEnv`, which gives the measurement.
     env =
-      lib.optionalAttrs (sanitizer != null) (
-        {
-          # The same flags every nix-* component gets (nix/sanitizer.nix), so the
-          # extension and the libraries it calls agree about instrumentation.
-          NIX_CFLAGS_COMPILE = sanitizer.flags;
-        }
-        // sanitizer.buildEnv
-      )
+      {
+        # **The type information of this extension keeps default visibility.**
+        # Without this flag a `catch` and a `dynamic_cast` across the boundary
+        # between this extension and `libnixexpr.so` both fail.
+        #
+        # nanobind compiles the extension with `-fvisibility=hidden`. A class
+        # that a `catch` clause names then gets a *local* `type_info` here,
+        # which the loader cannot merge with the copy that `libnixexpr.so`
+        # exports. libstdc++ falls back to comparing the two by name and still
+        # matches. The libc++abi that zig links compares them by address, so it
+        # never matches, and the zig build broke in two ways at once:
+        #
+        # 1. Every Nix error reached Python as `SystemError`, "exception could
+        #    not be translated". No clause of `src/nix_errors.cpp` matched --
+        #    not `catch (nix::Error &)`, and not nanobind's own
+        #    `catch (std::exception &)`.
+        # 2. `dynamic_cast` returned null, so `find_roots()` on a real
+        #    `LocalStore` answered "store 'local://' does not support garbage
+        #    collection". **A wrong answer, and not an error.**
+        #
+        # `-fvisibility-ms-compat` sets the default visibility of a value to
+        # hidden and of a type to default. nanobind already hides the values,
+        # so this changes the types alone. Measured on two shared objects, one
+        # throwing and one catching, with the catching one `dlopen`ed
+        # `RTLD_LOCAL` the way CPython opens an extension:
+        #
+        #   -fvisibility=hidden                          translation lost
+        #   -fvisibility=hidden -fvisibility-ms-compat   correct
+        #   -fvisibility=default                         correct
+        #   gcc, -fvisibility=hidden                     correct
+        #
+        # `-D_LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION=3` does **not** correct
+        # it: that macro changes an inline comparison in `<typeinfo>`, and the
+        # comparison that decides a `catch` is inside the libc++abi that zig
+        # already built.
+        #
+        # **Here, and not in `nix/zig-stdenv.nix`.** On the whole closure the
+        # flag hides the API of every C library that exports by default
+        # visibility. `attr` was the first to stop: `libattr.so` built, and the
+        # `attr` tool beside it could not link against it
+        # (`undefined symbol: attr_get`).
+        #
+        # It applies to the gcc build as well. That build is correct without
+        # it, because libstdc++ compares by name, but one flag for both keeps
+        # the two builds the same shape.
+        #
+        # cc-wrapper appends `NIX_CFLAGS_COMPILE` after the command line that
+        # cmake writes, so this wins over nanobind's `-fvisibility=hidden`.
+        NIX_CFLAGS_COMPILE = lib.concatStringsSep " " (
+          [ "-fvisibility-ms-compat" ]
+          # The same flags every nix-* component gets (nix/sanitizer.nix), so
+          # the extension and the libraries it calls agree about
+          # instrumentation.
+          ++ lib.optional (sanitizer != null) sanitizer.flags
+        );
+      }
+      // lib.optionalAttrs (sanitizer != null) sanitizer.buildEnv
       // lib.optionalAttrs (sanitizerRuntime != null) {
         LD_PRELOAD = sanitizerRuntime;
       };
