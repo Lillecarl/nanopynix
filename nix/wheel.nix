@@ -116,7 +116,8 @@ runCommand "nanopynix-bindings-wheel-${platform}"
     # would build the whole zig closure for every lint run. Here it is a step of
     # the build that makes the thing it reads, so no wheel exists without it.
     echo "--- gates ---"
-    python3 ${./wheel-gates.py} "$unpacked" ${toString payloadCeiling} ${cxxRuntime.soname}
+    python3 ${./wheel-gates.py} "$unpacked" ${toString payloadCeiling} ${cxxRuntime.soname} \
+      ${if bindings.stableAbi then "1" else "0"}
 
     # `wheel pack` writes the file name from `WHEEL` and `METADATA`, so the
     # `manylinux` tag that the repair set stays on the product.

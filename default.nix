@@ -732,6 +732,16 @@ let
       pypiName = "nanopynix-bindings-nix${
         lib.replaceStrings [ "." ] [ "-" ] (lib.versions.majorMinor nanopynixZig.version)
       }";
+
+      # **Here, and in no other build.** One `cp313-abi3` wheel imports on
+      # every CPython from 3.13 up, so a release of CPython costs no rebuild.
+      # Without it PyPI needs one wheel for each Python minor version, times
+      # three Nix versions and two architectures.
+      #
+      # `nanopynix-bindings/package.nix` says why nothing that Nix builds wants
+      # this: such a build serves one interpreter, and the stable ABI stops
+      # nanobind reading the internals of CPython directly.
+      stableAbi = true;
     };
   };
 

@@ -29,6 +29,10 @@ The four gates below cover what stays silent:
    interpreter of the wheel's own architecture. This gate runs inside the Nix
    build, on both architectures, and it is the only backend check that the
    aarch64 wheel gets.
+5. **The stable ABI, as asked for.** `STABLE_ABI` is a positional argument of
+   `nanobind_add_module`, so dropping it changes nothing that fails: the wheel
+   builds, installs and imports, on the one CPython that built it. The suffix
+   of the extension is what says which build ran.
 """
 
 from __future__ import annotations
@@ -116,7 +120,12 @@ STORE_BACKENDS = (
     "DummyStore",
 )
 
-ARGUMENT_COUNT = 4
+# The suffix that a stable ABI extension carries. nanobind writes
+# `_ext.cpython-314-x86_64-linux-gnu.so` for an ordinary build and
+# `_ext.abi3.so` for this one.
+STABLE_ABI_SUFFIX = ".abi3.so"
+
+ARGUMENT_COUNT = 5
 
 
 @dataclass(frozen=True)
@@ -274,9 +283,33 @@ def check_store_backends(objects: dict[Path, Elf]) -> list[str]:
     return []
 
 
+def check_stable_abi(unpacked: Path, wanted: bool) -> list[str]:
+    """The extension carries the stable ABI, or it does not, as asked."""
+    extensions = sorted(path.name for path in unpacked.rglob("_ext*.so"))
+    if len(extensions) != 1:
+        return [f"the wheel holds {len(extensions)} files called `_ext*.so`, and it needs one."]
+
+    found = extensions[0].endswith(STABLE_ABI_SUFFIX)
+    if wanted and not found:
+        return [
+            f"the extension is `{extensions[0]}`, and the stable ABI was asked for.",
+            "  `STABLE_ABI` did not reach `nanobind_add_module`. The wheel then serves",
+            "  one CPython minor version, and PyPI needs one wheel for each of them.",
+        ]
+    if not wanted and found:
+        return [
+            f"the extension is `{extensions[0]}`, and the stable ABI was not asked for.",
+            "  A build that Nix consumes serves one interpreter, and the stable ABI",
+            "  costs speed at every crossing of the boundary for nothing.",
+        ]
+    return []
+
+
 def main() -> int:
     if len(sys.argv) != ARGUMENT_COUNT:
-        sys.stderr.write("usage: wheel-gates.py <unpacked wheel> <payload ceiling in bytes> <runtime soname>\n")
+        sys.stderr.write(
+            "usage: wheel-gates.py <unpacked wheel> <payload ceiling in bytes> <runtime soname> <stable abi: 1 or 0>\n"
+        )
         return 2
 
     unpacked = Path(sys.argv[1])
@@ -285,6 +318,7 @@ def main() -> int:
     # here: `auditwheel` puts 8 hexadecimal characters before the `.so` of every
     # library that it copies. So this is a prefix, and not a name.
     runtime = sys.argv[3].split(".so")[0]
+    stable_abi = sys.argv[4] == "1"
 
     paths = sorted(path for path in unpacked.rglob("*") if path.is_file() and ".so" in path.name)
     if not paths:
@@ -298,6 +332,7 @@ def main() -> int:
         *check_no_foreign_cxx_runtime(objects),
         *check_payload(unpacked, ceiling),
         *check_store_backends(objects),
+        *check_stable_abi(unpacked, stable_abi),
     ]
     if failures:
         sys.stderr.write("wheel-gates: " + "\n".join(failures) + "\n")
@@ -305,7 +340,8 @@ def main() -> int:
 
     sys.stdout.write(
         f"wheel-gates: {len(paths)} objects, one C++ runtime, no C++ library of the host, "
-        f"{len(STORE_BACKENDS)} store backends\n"
+        f"{len(STORE_BACKENDS)} store backends, "
+        f"{'stable' if stable_abi else 'version-locked'} ABI\n"
     )
     return 0
 

@@ -40,10 +40,14 @@ static constexpr const char *OVERRIDES_ATTRIBUTE = "_nanopynix_store_overrides";
 // here rather than costing two attribute lookups under the GIL on every single
 // store operation.
 PyStoreMethods PyStoreMethods::resolve(const nb::object &py_store) {
+    // `nb::inst_name`, and not `Py_TYPE(...)->tp_name`. The stable ABI build
+    // of the wheel makes `PyTypeObject` an opaque struct, so that field does
+    // not compile there. nanobind reads the name through `PyType_GetName`,
+    // which the limited API has.
     if (!nb::hasattr(py_store, OVERRIDES_ATTRIBUTE))
         throw nb::type_error(
             ("a Python store must subclass nanopynix.StoreImpl; open_store() returned an "
-             "instance of '" + std::string(Py_TYPE(py_store.ptr())->tp_name) + "', which does not")
+             "instance of '" + nb::cast<std::string>(nb::inst_name(py_store)) + "', which does not")
                 .c_str());
 
     auto overrides = py_store.attr(OVERRIDES_ATTRIBUTE);
