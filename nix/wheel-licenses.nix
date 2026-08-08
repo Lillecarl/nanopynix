@@ -81,6 +81,19 @@ let
         The GPL covers the getfacl and setfacl tools.
       '';
     };
+    nanopynix-zig-cxx-runtime = {
+      spdx = "Apache-2.0 WITH LLVM-exception";
+      note = ''
+        libc++ and libc++abi of the LLVM project, which zig ships and which
+        `nix/zig-cxx-runtime.nix` links into one shared library.
+        Each of the two `LICENSE.TXT` files opens with "The LLVM Project is
+        under the Apache License v2.0 with LLVM Exceptions", so the expression
+        is one licence with an exception. nixpkgs has no single attribute for
+        that, and `meta.license` therefore lists the two parts separately,
+        which would render as `Apache-2.0 AND LLVM-exception` and say
+        something else.
+      '';
+    };
     libgit2 = {
       spdx = "GPL-2.0-only WITH GCC-exception-2.0";
       note = ''
@@ -182,6 +195,13 @@ let
     aws-checksums = [ "LICENSE" ];
     s2n-tls = awsLicense;
     aws-crt-cpp = awsLicense;
+
+    # The one C++ runtime of the closure. `nix/zig-cxx-runtime.nix` says why
+    # the wheel carries it. The two files differ, so both travel.
+    nanopynix-zig-cxx-runtime = [
+      "libcxx/LICENSE.TXT"
+      "libcxxabi/LICENSE.TXT"
+    ];
   };
 
   awsLicense = [
@@ -202,35 +222,54 @@ let
     name: wanted:
     let
       package = packages.${name};
+      # A package that carries its own licence text in its output, because it
+      # has no source archive to unpack. `nanopynix-zig-cxx-runtime` is the
+      # one: it is built from the archives that zig materialises, and its three
+      # `LICENSE.TXT` files come from the tree of zig. Naming that tree as
+      # `src` here would copy the whole of zig into the store for three files.
+      licenseRoot = package.licenseRoot or null;
     in
-    stdenvNoCC.mkDerivation {
-      name = "license-${name}";
-      inherit (package) src;
-      nativeBuildInputs = [ unzip ];
-      dontConfigure = true;
-      dontBuild = true;
-      dontFixup = true;
-      # `sourceRoot` stays automatic. Some of these sources are a directory
-      # from `fetchgit` and some are an archive, and the unpack phase of
-      # stdenv handles both.
-      installPhase = ''
-        runHook preInstall
+    if licenseRoot != null then
+      runCommand "license-${name}" { } ''
         mkdir -p "$out"
         for wanted in ${lib.escapeShellArgs wanted}; do
-          if [ ! -f "$wanted" ]; then
-            echo "wheel-licenses: the source of ${name} holds no '$wanted'." >&2
-            echo "  Upstream renamed or moved it. Read the source, and correct the" >&2
-            echo "  entry for ${name} in nix/wheel-licenses.nix. Do not delete the" >&2
-            echo "  entry: the wheel ships this library, so the wheel needs the text." >&2
+          if [ ! -f "${package}/${licenseRoot}/$wanted" ]; then
+            echo "wheel-licenses: ${name} installs no '$wanted' under ${licenseRoot}." >&2
             exit 1
           fi
-          # The path, and not the base name. `nghttp3` names two files
-          # `COPYING`, and `install` would put the second one over the first.
-          install -Dm444 "$wanted" "$out/$(echo "$wanted" | tr / _)"
+          install -Dm444 "${package}/${licenseRoot}/$wanted" \
+            "$out/$(echo "$wanted" | tr / _)"
         done
-        runHook postInstall
-      '';
-    };
+      ''
+    else
+      stdenvNoCC.mkDerivation {
+        name = "license-${name}";
+        inherit (package) src;
+        nativeBuildInputs = [ unzip ];
+        dontConfigure = true;
+        dontBuild = true;
+        dontFixup = true;
+        # `sourceRoot` stays automatic. Some of these sources are a directory
+        # from `fetchgit` and some are an archive, and the unpack phase of
+        # stdenv handles both.
+        installPhase = ''
+          runHook preInstall
+          mkdir -p "$out"
+          for wanted in ${lib.escapeShellArgs wanted}; do
+            if [ ! -f "$wanted" ]; then
+              echo "wheel-licenses: the source of ${name} holds no '$wanted'." >&2
+              echo "  Upstream renamed or moved it. Read the source, and correct the" >&2
+              echo "  entry for ${name} in nix/wheel-licenses.nix. Do not delete the" >&2
+              echo "  entry: the wheel ships this library, so the wheel needs the text." >&2
+              exit 1
+            fi
+            # The path, and not the base name. `nghttp3` names two files
+            # `COPYING`, and `install` would put the second one over the first.
+            install -Dm444 "$wanted" "$out/$(echo "$wanted" | tr / _)"
+          done
+          runHook postInstall
+        '';
+      };
 
   texts = lib.mapAttrs textOf files;
 

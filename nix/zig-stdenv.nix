@@ -13,8 +13,12 @@
 #     `-idirafter <glibc-dev>/include` and stops bintools-wrapper adding
 #     `-L<glibc>/lib`. zig supplies both.
 #
-# zig also links libc++ statically, so a library that this stdenv builds needs
-# no C++ runtime on the host.
+# zig links libc++ statically **into every shared object**, so a process that
+# loads five of them holds five C++ runtimes. That is a defect and not a size
+# problem, because one library then destroys a static object of another. So
+# this stdenv links one shared runtime instead, and `nix/zig-cxx-runtime.nix`
+# gives the measurement and the mechanism. A build product still needs no C++
+# runtime of the host: it carries this one.
 #
 # A build still has to *run* what it compiles, and zig names a loader that no
 # NixOS machine has. `zig-cc-wrapper.sh` corrects each executable after the
@@ -30,6 +34,7 @@
   wrapBintoolsWith,
   overrideCC,
   stdenv,
+  callPackage,
   # The oldest glibc that a build product must run against. This is the
   # `manylinux_2_34` tag, which covers RHEL 9, Debian 12 and Ubuntu 22.04.
   #
@@ -42,6 +47,10 @@
 }:
 let
   target = "${stdenv.hostPlatform.qemuArch}-linux-gnu.${glibcVersion}";
+
+  # The one C++ runtime of this closure. `nix/zig-cxx-runtime.nix` gives the
+  # whole reason, and issue #112 holds the measurement that made it necessary.
+  cxxRuntime = callPackage ./zig-cxx-runtime.nix { inherit target; };
 
   hostLibc = lib.getLib stdenv.cc.libc;
   hostLoader = stdenv.cc.bintools.dynamicLinker;
@@ -123,6 +132,41 @@ let
       # `libattr.so` built, and the `attr` tool beside it could no longer link
       # against it.
     ];
+    # **The C++ runtime is shared, and `-nostdlib++` belongs to the link
+    # alone.**
+    #
+    # cc-wrapper reads this file into `NIX_CXXSTDLIB_LINK`, and it adds that
+    # variable when it links C++. `libcxx-cxxflags` is the compile-time
+    # partner, and it stays empty on purpose: `-nostdlib++` on a *compile*
+    # takes away the include path of libc++ and all 18 of the `-D_LIBCPP_*`
+    # macros that zig sets, and the compile then stops at
+    # `'sstream' file not found`. Restoring those by hand would make this
+    # closure disagree with the archives that the runtime holds, which is the
+    # class of defect the runtime exists to remove. So a compile keeps every
+    # flag that zig gives it, and only the link changes.
+    nixSupport.libcxx-ldflags = [
+      "-nostdlib++"
+      "-L${cxxRuntime}/lib"
+      "-lnanopynixcxx"
+      # **The unwinder, for the consumer and not only for the runtime.** A
+      # function with a cleanup emits a call to `_Unwind_Resume` in the object
+      # that holds it, so every library of this closure names that symbol
+      # itself. `-nostdlib++` takes away the `libunwind.a` that used to answer,
+      # and the shared runtime must not answer either: `libgcc_s.so.1` owns
+      # unwinding for the process, and two unwinders in one process end a
+      # `throw` with SIGSEGV. `nix/zig-cxx-runtime.nix` gives that backtrace.
+      #
+      # This is a link input, and nothing of the path survives the link. The
+      # link records the soname, `manylinux_2_34` whitelists that soname, and
+      # the host supplies the file.
+      #
+      # **A stub, named as a file, and never `-lgcc_s`.** zig answers that flag
+      # with its own static libunwind, which is the defect again and links with
+      # no complaint, and the real `libgcc_s.so.1` of gcc 15 names a glibc
+      # symbol above the floor of this closure. `nix/zig-cxx-runtime.nix` holds
+      # both measurements, and it builds the stub.
+      "${cxxRuntime}/${cxxRuntime.unwinderStub}"
+    ];
     nixSupport.cc-ldflags = [
       # lld 17 made `--no-undefined-version` its default, and GNU ld only
       # warns. A version script that names a symbol which the build did not
@@ -134,4 +178,7 @@ let
     ];
   };
 in
-overrideCC stdenv cc
+# `cxxRuntime` rides in the wheel like every other shared library, so
+# `nix/wheel-licenses.nix` has to name it. It is reachable here alone, because
+# `target` decides it and `target` is computed above.
+(overrideCC stdenv cc) // { inherit cxxRuntime; }

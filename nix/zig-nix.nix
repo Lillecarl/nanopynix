@@ -31,12 +31,16 @@ let
   #
   # **`--enable-cplusplus` has to go, and its two headers have to stay.**
   #
-  # That flag builds `libgccpp.so` and `libgctba.so`. zig links libc++abi
-  # statically into each shared library, with hidden visibility, so
-  # `libgctba.so` cannot take `__cxa_throw` out of `libgccpp.so` and lld stops
-  # with `non-exported symbol ... is referenced by DSO`. Dropping `-nostdlib`
-  # does not answer this: the symbols stay hidden in both libraries either way.
-  # It is what a static C++ runtime means, and not a fault of the link.
+  # That flag builds `libgccpp.so` and `libgctba.so`. It first went because the
+  # link stopped: zig linked libc++abi statically into each shared library with
+  # hidden visibility, so `libgctba.so` could not take `__cxa_throw` out of
+  # `libgccpp.so` and lld reported `non-exported symbol ... is referenced by
+  # DSO`.
+  #
+  # **That link error is gone.** `nix/zig-cxx-runtime.nix` gives the closure one
+  # shared C++ runtime, and it exports `__cxa_throw`. The flag still stays out,
+  # on the measurement below alone: nothing links those two libraries, so
+  # building them would only add payload to the wheel.
   #
   # Nothing links those two libraries. Measured on the stock build of
   # `libnixexpr.so.2.34.8`: it names `libgc.so.1` and never `libgccpp`, and

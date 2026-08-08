@@ -695,6 +695,9 @@ let
   nanopynixWheelLicenses = pkgs.callPackage ./nix/wheel-licenses.nix { } {
     packages = zigNix.zigLibs // {
       boehmgc = zigNix.zigBoehmGC;
+      # The one C++ runtime of the closure. Every C++ object of the wheel names
+      # it, so the wheel carries it and the notice has to describe it.
+      nanopynix-zig-cxx-runtime = zigNix.zigStdenv.cxxRuntime;
       inherit (nanopynixZig)
         nix-util
         nix-store
@@ -843,6 +846,10 @@ lib.throwIf (unlistedVariants != [ ])
       pkgs
       nanopynixVersions
       nanopynixZig
+      # The C and C++ closure that the wheel bundles, and the stdenv that
+      # builds it. `zigStdenv.cxxRuntime` is the one C++ runtime of that
+      # closure, and it is a build of its own that has its own gate.
+      zigNix
       nanopynixWheel
       nanopynixWheelLicenses
       pyproject-nix
