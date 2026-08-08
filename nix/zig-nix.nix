@@ -209,10 +209,29 @@ let
       # `include(AwsCFlags)` against that installed copy. Putting the rule in
       # `nix/zig-cc-wrapper.sh` instead would change the hash of the compiler
       # and rebuild the whole closure on a shared machine.
+      #
+      # `AwsSIMD.cmake` is the second file, and it stops an aarch64 build.
+      # It asks for the CRC and crypto instructions with
+      # `-march=armv8-a+crc+crypto`, and zig reads `-march` on ARM as its own
+      # `-mcpu`, takes `armv8` for a CPU name, and answers `unknown CPU:
+      # 'armv8'` with a list of the names it knows.
+      #
+      # `-mcpu=generic+crc+crypto` is the same request in the spelling that zig
+      # takes, so the hardware CRC stays. Measured with zig 0.16 on a file that
+      # calls `__crc32cb` from `<arm_acle.h>`:
+      #
+      #   -march=armv8-a+crc+crypto    unknown CPU: 'armv8'
+      #   -mcpu=generic+crc+crypto     compiles
+      #
+      # zig also refuses `-mtune=neoverse-v1`, so `check_c_compiler_flag` in
+      # that file reports false and cmake takes the branch with no `-mtune`.
+      # Both branches are replaced anyway.
       aws-c-common = old: {
         postPatch = (old.postPatch or "") + ''
           substituteInPlace cmake/AwsCFlags.cmake \
             --replace-fail ' -Wl,--exclude-libs,libcrypto.a' ""
+          substituteInPlace cmake/AwsSIMD.cmake \
+            --replace-fail '-march=armv8-a+crc+crypto' '-mcpu=generic+crc+crypto'
         '';
       };
 
