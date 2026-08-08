@@ -73,6 +73,11 @@ let
       # compiler of the whole zig closure, so a fault in it is a fault in every
       # package of that closure.
       ../nix/zig-cc-wrapper.sh
+      # The licence step of the wheel build. It runs inside a derivation, so
+      # no test imports it and only these gates read it. It is also the check
+      # that stops an unattributed library reaching PyPI, so a fault in it is
+      # a licence fault.
+      ../nix/wheel-notice.py
       # Tracked, and therefore in scope, although it holds one module and no
       # project of its own. With it the gate reads 259 Python files, which is
       # what `ruff format --check .` reads in the dev shell. Without it the

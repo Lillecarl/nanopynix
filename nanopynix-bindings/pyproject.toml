@@ -8,8 +8,20 @@ version = "0.1.0"
 description = "nanobind-based Python bindings for Nix (compiled extensions)"
 authors = [{ name = "nanopynix contributors" }]
 requires-python = ">=3.13"
+# PEP 639, and not the `License ::` classifier that this held before. The
+# classifier is a name, and `license-files` is what puts the **text** in the
+# wheel. Without it the built wheel carried no licence file at all: its
+# `.dist-info` held `METADATA`, `WHEEL` and `RECORD` and nothing else.
+#
+# The file is a copy of the one at the root of the repository, because the
+# source root of this project is `nanopynix-bindings/` and a path above it is
+# not in the sdist.
+#
+# PEP 639 says a `License ::` classifier and a `license` expression must not
+# both appear, so the classifier is gone.
+license = "LGPL-2.1-or-later"
+license-files = [ "LICENSE" ]
 classifiers = [
-  "License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)",
   "Programming Language :: Python :: 3",
   "Programming Language :: C++",
 ]
