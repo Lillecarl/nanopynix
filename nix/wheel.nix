@@ -15,6 +15,17 @@
   runCommand,
   auditwheel,
   patchelf,
+  python3,
+  # `wheel unpack` and `wheel pack`. The pack step rewrites `RECORD` from what
+  # is on disk, so the licence files that this build adds are hashed and
+  # listed. A plain `zip` would leave `RECORD` describing the wheel before the
+  # addition, and `pip` reports that as a corrupt wheel.
+  wheel,
+  unzip,
+  # `nix/wheel-licenses.nix`, built with the package set of the zig closure. It
+  # carries the licence text of each package, a soname map over the whole
+  # closure, and the licence of each package as JSON.
+  licenses,
   # The zig build. A gcc build gets a `manylinux_2_38` tag, which is what this
   # whole closure exists to avoid.
   bindings,
@@ -37,6 +48,9 @@ runCommand "nanopynix-bindings-wheel-${platform}"
     nativeBuildInputs = [
       auditwheel
       patchelf
+      python3
+      wheel
+      unzip
     ];
 
     # `bindings` itself, and not `bindings.dist` alone. The `.so` inside the
@@ -64,8 +78,29 @@ runCommand "nanopynix-bindings-wheel-${platform}"
     echo "--- before ---"
     auditwheel show ./*.whl
 
-    auditwheel repair --plat "$platform" -w "$out" ./*.whl
+    auditwheel repair --plat "$platform" -w repaired ./*.whl
+
+    # The licence of every library that `auditwheel` just bundled.
+    #
+    # **After the repair, and not before.** The set of bundled libraries is
+    # what `auditwheel` decided, and it is smaller than the closure: the
+    # `manylinux` policy names 24 libraries that the host supplies, so zlib is
+    # built here and left out of the wheel. `nix/wheel-notice.py` reads the
+    # objects that are really in `nanopynix_bindings.libs/`, and it fails this
+    # build when one of them has no licence entry.
+    echo "--- licences ---"
+    wheel unpack --dest unpacked repaired/*.whl
+    unpacked=$(echo unpacked/*/)
+    dist_info=$(cd "$unpacked" && echo ./*.dist-info)
+
+    python3 ${./wheel-notice.py} "$unpacked" ${licenses} "$dist_info"
+
+    # `wheel pack` writes the file name from `WHEEL` and `METADATA`, so the
+    # `manylinux` tag that the repair set stays on the product.
+    wheel pack --dest-dir "$out" "$unpacked"
 
     echo "--- after ---"
     auditwheel show "$out"/*.whl
+    echo "--- licence files in the wheel ---"
+    unzip -l "$out"/*.whl | grep -E 'licenses/|LICENSE' || true
   ''
