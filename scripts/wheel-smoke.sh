@@ -19,6 +19,14 @@
 # and not a Nix one -- so nothing of this repository is in the container except
 # the wheel.
 #
+# **A distribution, and not any machine with a Python.** A `manylinux` wheel
+# bundles what it needs, less the 24 libraries that the policy says the system
+# supplies. `libz.so.1` is one of them, so `auditwheel` leaves it out on
+# purpose. A NixOS host has no `libz.so.1` on the default search path, and the
+# import there stops with `libz.so.1: cannot open shared object file`. That
+# reads like a fault of the wheel and it is not: the same wheel imports in the
+# container, and an x86-64 wheel fails the same way on the same host.
+#
 # Usage:
 #   nix build --file . nanopynixWheel --out-link result-wheel
 #   scripts/wheel-smoke.sh result-wheel
