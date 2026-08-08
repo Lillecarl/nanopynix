@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+#
+# Load the wheel on a distribution that has the target glibc, and evaluate a
+# Nix expression with it.
+#
+# `auditwheel` reads the versioned symbols of each object and writes a
+# `manylinux` tag that those symbols support. That is a measurement of the
+# files, and it is not a run. It cannot see a library that the bundle left out,
+# a `$ORIGIN` that points at nothing, or a collector that does not start. Only
+# a load on a machine with that glibc shows those.
+#
+# The default image is Rocky Linux 9, whose glibc is 2.34 exactly, which is the
+# floor that `nix/zig-stdenv.nix` targets. A newer image proves less: it
+# satisfies a 2.34 requirement whatever the wheel really needs.
+#
+# The interpreter comes from `uv`, and not from the distribution. Rocky 9 ships
+# Python 3.9, and the extension is built for CPython 3.14. `uv` installs a
+# python-build-standalone interpreter, which is an ordinary manylinux CPython
+# and not a Nix one -- so nothing of this repository is in the container except
+# the wheel.
+#
+# Usage:
+#   nix build --file . nanopynixWheel --out-link result-wheel
+#   scripts/wheel-smoke.sh result-wheel
+#
+# The second argument names another image:
+#   scripts/wheel-smoke.sh result-wheel docker.io/library/debian:12
+
+set -euo pipefail
+
+wheel_dir=${1:?usage: wheel-smoke.sh <directory holding the wheel> [image]}
+image=${2:-docker.io/library/rockylinux:9}
+python_version=${WHEEL_SMOKE_PYTHON:-3.14}
+
+wheel_dir=$(readlink -f "$wheel_dir")
+if ! compgen -G "$wheel_dir/*.whl" >/dev/null; then
+    echo "wheel-smoke: no wheel in $wheel_dir" >&2
+    exit 1
+fi
+
+runtime=${WHEEL_SMOKE_RUNTIME:-podman}
+
+work_dir=$(mktemp -d -t nanopynix-wheel-smoke-XXXXXX)
+trap 'rm -rf "$work_dir"' EXIT
+
+# The test is a here-document rather than a file in `scripts/`, because it
+# imports `nanopynix_bindings`, which resolves in the container alone. A file
+# would join the ruff and pyright filesets, and both would report on an import
+# that cannot resolve in this checkout.
+cat >"$work_dir/smoke.py" <<'PYTHON'
+import platform
+import sys
+
+print("python  :", sys.version.split()[0], platform.machine())
+print("libc    :", platform.libc_ver())
+
+from nanopynix_bindings import expr, store, util
+
+print("import  : ok")
+
+# `load_config=False`, so the wheel reads no `nix.conf` of the container.
+util.init_libstore(load_config=False)
+print("libstore: ok")
+
+# `dummy://` needs no daemon, no `/nix/store` and no network.
+expr.init_libexpr()
+state = expr.EvalState(store.open_store("dummy://"), [], None, {}, {})
+print("store   : ok")
+
+value = state.eval_string("1 + 1", "<smoke>")
+value.force()
+assert value.as_int() == 2, value.as_int()
+print("arith   : 1 + 1 =", value.as_int())
+
+value = state.eval_string('builtins.concatStringsSep "-" ["nix" "on" "pypi"]', "<smoke>")
+value.force()
+assert value.as_string() == "nix-on-pypi", value.as_string()
+print("strings :", value.as_string())
+
+info = util.build_info()
+print("nix     :", info["nix_version"])
+assert info["capabilities"]["boehm_gc"], "the wheel carries no collector"
+print("gc      : boehm_gc =", info["capabilities"]["boehm_gc"])
+
+# A deep force over a large tree runs the collector, which is the part of the
+# closure that a plain import never reaches.
+value = state.eval_string(
+    "let f = n: if n == 0 then [] else [ { v = n; } ] ++ f (n - 1); in f 2000",
+    "<smoke>",
+)
+value.force_deep()
+assert value.list_length() == 2000, value.list_length()
+print("gc      : forced", value.list_length(), "attribute sets")
+
+print("RESULT  : ok")
+PYTHON
+
+echo "wheel-smoke: $image, CPython $python_version"
+"$runtime" run --rm --network=bridge \
+    -v "$wheel_dir":/wheel:ro,z \
+    -v "$work_dir/smoke.py":/smoke.py:ro,z \
+    -e "PYTHON_VERSION=$python_version" \
+    "$image" \
+    sh -c '
+        set -e
+        echo "distro  : $(. /etc/os-release && echo "$PRETTY_NAME")"
+        echo "glibc   : $(ldd --version | head -1 | sed "s/.*) //")"
+        curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1
+        export PATH=/root/.local/bin:$PATH
+        uv venv --python "$PYTHON_VERSION" /venv >/dev/null 2>&1
+        uv pip install --python /venv/bin/python \
+            --no-index --find-links /wheel nanopynix-bindings >/dev/null
+        /venv/bin/python /smoke.py
+    '
