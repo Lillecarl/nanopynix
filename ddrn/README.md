@@ -340,17 +340,50 @@ is correct; only the prediction is missing.
 
 ## Next steps
 
-1. Add `submit_output` to `nanopynix`, against the socket that
-   `ddrn/examples/submitted` already proves is there. The bindings have to
-   build against a Nix that carries the operation, so this needs step 2 as
-   well.
-2. Override the source of `nixComponents_git` to a `master` revision after
-   2026-07-21, so `nanopynixVersions.git` carries the feature and the bindings
-   compile against it. `nixComponents.overrideSource` is the hook. Unlike
-   step 1's runtime check, this compiles Nix rather than substituting it,
-   because the packaging expressions of the pin are applied to a new source.
-3. Then rewrite `ddrn/examples/venv` as a graph: one derivation per wheel, one
+Two of the four steps below are done.
+
+1. **Done.** `nix/nix-master.nix` builds a Nix from the default branch, and
+   `nanopynixMaster` in `default.nix` is the nanopynix scope over it. It is
+   off every CI matrix, in the same way and for the same reason as
+   `nanopynixZig`.
+2. **Done.** `Store.submit_output` is bound, gated on the 2.36 band and
+   advertised as `build_info()['capabilities']['store_submit_output']`. It is
+   bound on every version and refuses on a Nix that has no such operation, so
+   the surface of the module does not vary by Nix version.
+3. **Blocked, and the block is not this feature.** `nanopynix-bindings` does
+   not compile against the default branch of Nix. That branch changed several
+   APIs that the bindings use, and none of them has to do with
+   `builder-rpc-v0`:
+
+   - `fetchers::Input::fromURL` and `fromAttrs` take different arguments.
+   - `Store::ensurePath` and `Store::registerDrvOutput` are gone from `Store`.
+   - `nix::parseDerivation` is not in that namespace any more.
+   - `Logger::Fields` moved, and the `Logger` methods are `noexcept`, so every
+     override in `PyLogger` has a looser exception specification.
+   - `Store` has pure virtuals that `PyStoreImpl` does not implement, so that
+     class is abstract.
+
+   Each one is an ordinary port to a new compatibility band. Together they are
+   a piece of work of their own, and they are what stands between here and a
+   planner written in Python.
+4. Then rewrite `ddrn/examples/venv` as a graph: one derivation per wheel, one
    per install step, and an sdist path that resolves its own build backend.
    That is the case `uv2nix` handles and a plain dynamic derivation cannot.
-4. Bind `StoreDirConfig` for the host side, and give
+5. Bind `StoreDirConfig` for the host side, and give
    `ddrn/tests/test_aterm_matches_nix.py` a second oracle.
+
+### Two patches of this repository meet the default branch differently
+
+`nixPatches` in `default.nix` needs its own `"2.36"` entry, because the
+fallback is wrong in both directions:
+
+- `emptyBindingsPatch` is **dropped, because upstream fixed the defect.** The
+  patch made a shared mutable global `thread_local`. The default branch
+  declares `const constinit Bindings Bindings::emptyBindings`, which no thread
+  can write.
+- `gmtimePatch` is **rebased and kept, because upstream did not.** Both
+  `std::gmtime` calls are still there; only the context around one of them
+  moved, when `emitTreeAttrs` gained a `callPos` argument.
+
+A patch that stops applying means one of those two things, and they call for
+opposite actions. Check which before deleting one.

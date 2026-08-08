@@ -215,6 +215,12 @@ let
   gmtimePatch = ./nix/patches/nix-gmtime-not-thread-safe.patch;
   gmtimePatch231 = ./nix/patches/nix-2.31-gmtime-not-thread-safe.patch;
 
+  # The same repair again, for the default branch. `emitTreeAttrs` gained a
+  # `callPos` argument there, so the released form of the hunk does not apply.
+  # Both call sites of `std::gmtime` are still on that branch, so the repair is
+  # still needed.
+  gmtimePatch236 = ./nix/patches/nix-2.36-gmtime-not-thread-safe.patch;
+
   # Which patches to apply to a given nix version's modular component set,
   # keyed by that version's own major.minor (e.g. "2.34"), with `default`
   # as the fallback for anything without its own entry (git's rolling
@@ -234,6 +240,23 @@ let
       emptyBindingsPatch
       baseEnvSizePatch
       gmtimePatch
+    ];
+    # The default branch, which `nix/nix-master.nix` builds. It differs from
+    # `default` in both directions, so it needs its own entry rather than the
+    # fallback.
+    #
+    # `emptyBindingsPatch` is **gone, because upstream fixed the defect**. The
+    # patch made a shared mutable global `thread_local`; the default branch
+    # declares it `const constinit Bindings Bindings::emptyBindings`, which no
+    # thread can write. Reapplying the patch on top would be an error, and it
+    # does not apply anyway.
+    #
+    # `gmtimePatch236` replaces `gmtimePatch` for the opposite reason. Nothing
+    # upstream repaired that one: both `std::gmtime` calls are still there, and
+    # only the surrounding context moved.
+    "2.36" = [
+      baseEnvSizePatch
+      gmtimePatch236
     ];
     # 2.31 is the one version that gets neither the same list nor the
     # default. emptyBindingsPatch is absent because 2.31's surrounding
@@ -303,6 +326,13 @@ let
       # `nix/zig-nix.nix` names each package, and issue #111 holds the
       # measurements.
       zig ? false,
+      # Extra Nix component scopes to build against, keyed as
+      # `nixComponents_<name>` exactly as `pkgs.nixVersions` keys its own.
+      #
+      # `nixMasterComponents` is the only caller, and it stays out of
+      # `nanopynixVersionsInternal` for the same reason `nanopynixZig` does:
+      # every CI job comes from that set, and this one builds Nix from source.
+      extraNixScopes ? { },
     }:
     assert lib.assertMsg (!(sanitizer.requiresNoGC or false) || !gc) ''
       The ${sanitizer.name} sanitizer needs `gc = false`.
@@ -604,7 +634,7 @@ let
         in
         lib.nameValuePair "${versionName}${suffix}" value;
     in
-    lib.pipe pkgs.nixVersions (
+    lib.pipe (pkgs.nixVersions // extraNixScopes) (
       [
         (lib.filterAttrs isNixScope)
       ]
@@ -685,6 +715,25 @@ let
   # One version only. A wheel carries one Nix, which is the whole reason a
   # wheel removes the ABI matrix.
   nanopynixZig = (nanopynixForNixVersions { zig = true; }).nix_2_34-zig;
+
+  # A Nix from the default branch, and the nanopynix built against it.
+  #
+  # `builder-rpc-v0` reaches no Nix release, so this is the only build in
+  # which `Store.submit_output` does anything. `ddrn/README.md` says what the
+  # feature is; `nix/nix-master.nix` says which revision and why the version
+  # string has to be overridden with the source.
+  #
+  # **Off every matrix, exactly like `nanopynixZig` above.** The packaging
+  # expressions come from the nixpkgs pin and the source does not, so no part
+  # of this is in a binary cache and the whole of Nix builds from source.
+  # `variantSuffixes` needs no entry for it, because `unlistedVariants` reads
+  # `nanopynixVersionsInternal` and this is not in it.
+  nixMasterComponents = pkgs.callPackage ./nix/nix-master.nix { } { };
+
+  nanopynixMaster =
+    (nanopynixForNixVersions {
+      extraNixScopes.nixComponents_master = nixMasterComponents;
+    }).nix_master;
 
   # The wheel itself. `nix/wheel.nix` runs `auditwheel repair` over the
   # extension above, which bundles each library and writes the `manylinux` tag.
@@ -843,6 +892,7 @@ lib.throwIf (unlistedVariants != [ ])
       pkgs
       nanopynixVersions
       nanopynixZig
+      nanopynixMaster
       nanopynixWheel
       nanopynixWheelLicenses
       pyproject-nix

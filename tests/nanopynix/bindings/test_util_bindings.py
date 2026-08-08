@@ -21,6 +21,11 @@ def test_build_info_reports_compile_time_compatibility() -> None:
         "eval_state_mem",
         "dynamic_primop_registration",
         "store_impl_read_derivation",
+        # `Store.submit_output`, the one operation of `builder-rpc-v0`. False
+        # on every Nix release, because the feature reaches none of them:
+        # NixOS/nix#15793 merged after 2.35, so only `nix/nix-master.nix`
+        # builds a Nix that has it.
+        "store_submit_output",
         # The one capability here that the Nix version does not decide. It
         # comes from `-Dgc=disabled`, which the AddressSanitizer variant
         # builds because libexpr refuses ASAN together with a conservative

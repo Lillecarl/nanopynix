@@ -43,6 +43,12 @@
 
 #include <nanopynix/nix_compat_config.hh>
 
+// `builder-rpc-v0` reaches no Nix release yet, so this header exists only in
+// the 2.36 band. See `store_submit_output` below, and `nix/nix-master.nix`.
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+#  include <nix/store/submit-store.hh>
+#endif
+
 #if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35
 #include <nix/util/posix-source-accessor.hh>
 #endif
@@ -851,6 +857,43 @@ static nix::StorePath compute_store_path(
     return *result;
 }
 
+// `submit-output`, the one operation that `builder-rpc-v0` adds.
+//
+// A derivation that asks for the `builder-rpc-v0` system feature is given a
+// restricted daemon socket at `$NIX_REMOTE`, and gets no `$out`. It creates
+// store objects through that socket and then names one of them as its output,
+// which is what this call does. Registering a graph of derivations and
+// submitting the root is the point: a plain dynamic derivation emits exactly
+// one derivation, and this lifts that limit.
+//
+// `SubmitStore::require` is Nix's own gate. A store that is not the restricted
+// one of a running build raises there, which is the honest place for it: the
+// same `Store` type is used either way, so no earlier check can tell.
+//
+// The method is bound on every supported Nix, and refuses on a version that
+// has no such operation. Binding it conditionally would give a caller an
+// `AttributeError` naming nothing, and would make the surface of the module
+// depend on which Nix it links.
+static void store_submit_output(nix::Store &s, const std::string &path, const std::string &output) {
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+    auto store_path = s.parseStorePath(path);
+    auto &submit = nix::SubmitStore::require(s);
+    {
+        nb::gil_scoped_release release;
+        submit.submitOutput(nix::SingleDerivedPath::Opaque{store_path}, output);
+    }
+#else
+    (void) s;
+    (void) path;
+    (void) output;
+    throw nix::Error(
+        "submit_output needs a Nix that has the builder-rpc-v0 feature, and this "
+        "build links Nix %s. Ask "
+        "`build_info()['capabilities']['store_submit_output']` before calling this.",
+        NANOPYNIX_NIX_VERSION);
+#endif
+}
+
 // The proto-shaped pair are adapters over the native ones above: unpack the
 // request, hand back a printed path. They carry no store logic of their own.
 // =========================================================================
@@ -903,6 +946,7 @@ static void bind_store(nb::module_ &m) {
             "eval_store"_a = nullptr)
         .def("read_derivation", &read_derivation, "drv_path"_a)
         .def("write_dev_shell_derivation", &write_dev_shell_derivation, "drv_path"_a, "get_env_script"_a)
+        .def("submit_output", &store_submit_output, "path"_a, "output"_a = "out")
         // Path info
         .def("query_path_info", &query_path_info, "path"_a)
         .def("dump_db", &dump_db, "paths"_a, "show_derivers"_a = true, "show_hash"_a = true)
