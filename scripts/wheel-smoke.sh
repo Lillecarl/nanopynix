@@ -82,6 +82,21 @@ print("nix     :", info["nix_version"])
 assert info["capabilities"]["boehm_gc"], "the wheel carries no collector"
 print("gc      : boehm_gc =", info["capabilities"]["boehm_gc"])
 
+# Every store backend registers itself with a file-scope static object, so a
+# backend that did not build is absent and nothing else says so. `s3://` is the
+# one that needs the 13 AWS CRT libraries, and it is the reason they are in the
+# closure at all.
+import json
+
+schemes = set()
+for entry in json.loads(store.list_store_types_json()).values():
+    schemes.update(entry["uri-schemes"])
+print("stores  :", " ".join(sorted(schemes)))
+# `unix` is the daemon, and there is no `daemon` scheme.
+for required in ("s3", "ssh", "ssh-ng", "unix", "file", "http", "https", "local", "dummy"):
+    assert required in schemes, f"the wheel carries no {required}:// store"
+print("s3      : registered")
+
 # A deep force over a large tree runs the collector, which is the part of the
 # closure that a plain import never reaches.
 value = state.eval_string(

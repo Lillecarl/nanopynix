@@ -96,6 +96,31 @@ let
     "libarchive"
     "libgit2"
     "boost"
+
+    # The AWS CRT, which gives `s3://` its authenticated requests. 13 libraries
+    # and about 5 MiB.
+    #
+    # **`aws-crt-cpp` is C++, so it cannot stay behind.** A gcc build of it
+    # carries the libstdc++ ABI, and `libnixstore.so` is libc++ here, so the
+    # two do not share a `std::string`. The C libraries below it move for the
+    # ordinary reason: a gcc build holds the whole wheel at `GLIBC_2.38`.
+    #
+    # Nix 2.34 takes the CRT alone. `libstore/package.nix` reads
+    # `versionAtLeast "2.33"` and takes `aws-sdk-cpp` only below that, so the
+    # old and much larger SDK is not in this closure.
+    "aws-c-common"
+    "aws-c-cal"
+    "aws-c-io"
+    "aws-c-compression"
+    "aws-c-http"
+    "aws-c-sdkutils"
+    "aws-c-auth"
+    "aws-c-s3"
+    "aws-c-event-stream"
+    "aws-c-mqtt"
+    "aws-checksums"
+    "s2n-tls"
+    "aws-crt-cpp"
   ];
 
   zigLibs = import ./zig-closure.nix {
@@ -168,6 +193,29 @@ let
         '';
       };
 
+      # zig 0.16 stops with `error: unsupported linker arg: --exclude-libs`.
+      # Its driver keeps a list of the linker arguments that it forwards, and
+      # this one is not on that list, although lld itself takes it.
+      #
+      # **The flag is a no-op here, so it goes rather than the wrapper.**
+      # `AwsCFlags.cmake` says what it is for: it hides the symbols of
+      # `libcrypto.a` so that a process holding both the static and the shared
+      # libcrypto does not call one implementation for some functions and the
+      # other for the rest. This closure links OpenSSL as a shared library, so
+      # no `libcrypto.a` reaches the link and the flag hides nothing.
+      #
+      # One patch covers all 13 packages. `aws-c-common` installs this file to
+      # `lib/cmake/aws-c-common/modules/`, and each of the other twelve does
+      # `include(AwsCFlags)` against that installed copy. Putting the rule in
+      # `nix/zig-cc-wrapper.sh` instead would change the hash of the compiler
+      # and rebuild the whole closure on a shared machine.
+      aws-c-common = old: {
+        postPatch = (old.postPatch or "") + ''
+          substituteInPlace cmake/AwsCFlags.cmake \
+            --replace-fail ' -Wl,--exclude-libs,libcrypto.a' ""
+        '';
+      };
+
       # `tests/fullbench.c` expands `__DATE__`. clang reports `-Wdate-time` for
       # that and gcc does not, so `-Werror` stops the build of the test alone.
       # The library compiles, and the test suite still runs.
@@ -188,9 +236,13 @@ let
       _final: prev:
       {
         stdenv = zigStdenv;
-        # The AWS C SDK is 13 shared objects and about 8 MiB. A wheel that
-        # evaluates against a `dummy://` store reads no S3 binary cache.
-        nix-store = prev.nix-store.override { withAWS = false; };
+        # `withAWS` keeps its default, which is on. The 13 libraries of the CRT
+        # are in `packages` above, so they carry the same floor as the rest.
+        #
+        # This used to be `withAWS = false`, for about 5 MiB. That was the
+        # wrong trade: an `s3://` binary cache is what some callers need the
+        # bindings for, and a feature that a wheel cannot turn back on is a
+        # feature the wheel does not have.
         # The scope of a `nixComponents_X` holds no `boehmgc` attribute at all,
         # so naming it here would do nothing. libexpr takes it as an argument,
         # and that is where it has to go.
