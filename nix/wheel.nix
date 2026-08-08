@@ -11,6 +11,7 @@
 # measurement and not a claim. Issue #111 holds the run.
 {
   lib,
+  stdenv,
   runCommand,
   auditwheel,
   patchelf,
@@ -23,7 +24,13 @@
   glibcVersion ? "2.34",
 }:
 let
-  platform = "manylinux_${lib.replaceStrings [ "." ] [ "_" ] glibcVersion}_x86_64";
+  # A wheel names the architecture the way `uname -m` does, which is what
+  # `parsed.cpu.name` holds: `x86_64` and `aarch64`. Do not write this by hand.
+  # It was `_x86_64` at first, and an `aarch64` build then produced a
+  # derivation called `...manylinux_2_34_x86_64`, which is a wheel that pip
+  # installs on the wrong machine.
+  architecture = stdenv.hostPlatform.parsed.cpu.name;
+  platform = "manylinux_${lib.replaceStrings [ "." ] [ "_" ] glibcVersion}_${architecture}";
 in
 runCommand "nanopynix-bindings-wheel-${platform}"
   {

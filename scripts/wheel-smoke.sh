@@ -25,6 +25,14 @@
 #
 # The second argument names another image:
 #   scripts/wheel-smoke.sh result-wheel docker.io/library/debian:12
+#
+# **This runs the wheel of the machine it runs on.** For a wheel of another
+# architecture, use `scripts/wheel-inspect.sh`, which reads the files and needs
+# no interpreter of that architecture. A container of a foreign architecture
+# does not answer: this host registers `aarch64-linux` binfmt with the `P` flag
+# and not `F`, so the kernel looks for the emulator inside the mount namespace
+# of the container. Mounting the emulator there is not sufficient either --
+# measured, and qemu then exits 255 with no output.
 
 set -euo pipefail
 
