@@ -9,6 +9,10 @@ extraPaths = [
   "ekn/src",
   "pytest-agent/src",
   "grpclib-transports/src",
+  # The planner library of the dynamic-derivations experiment. It is stdlib
+  # only, and it is not installed into the dev environment: a planner reaches
+  # it through PYTHONPATH inside a build sandbox.
+  "ddrn/src",
   # `_bench_utils`, which the benchmark modules and their conftest import by
   # bare name -- the directory goes on `sys.path` by pytest's rootdir rule
   # rather than being a package.
