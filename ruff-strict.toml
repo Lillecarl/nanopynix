@@ -386,6 +386,13 @@ ignorelist = ["eval"]
 "tests/**" = ["SLF001", "S101", "S108", "ANN201", "PLR2004"]
 # doc/example snippets use bare assert and illustrative literal comparisons
 "docs/**" = ["S101", "PLR2004"]
+# The planner library of the dynamic-derivations experiment. Its tests follow
+# the same rule as `tests/**`. A planner and an example plan both report their
+# decisions on stderr, because a build log is the only channel a build sandbox
+# has: no logging handler of the caller reaches it.
+"ddrn/tests/**" = ["S101", "PLR2004"]
+"ddrn/examples/**" = ["T20"]
+"ddrn/src/ddrn/_planner.py" = ["T20"]
 # dev-tooling subprocess/git-plumbing harness, not shipped production code.
 # T20 too: pytest-agent is a CLI whose entire job is printing to stdout
 # (`pytest-agent show/last-failures/digest`), so print() is the interface,
