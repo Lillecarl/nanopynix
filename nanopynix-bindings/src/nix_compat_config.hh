@@ -7,3 +7,7 @@
 
 #define NANOPYNIX_NIX_2_32 2032
 #define NANOPYNIX_NIX_2_35 2035
+// `builder-rpc-v0`, which NixOS/nix#15793 merged on 2026-07-21, after 2.35.
+// It reaches no release yet, so `nix/nix-master.nix` is the only source that
+// selects this band. Read `ddrn/README.md` for what it is.
+#define NANOPYNIX_NIX_2_36 2036

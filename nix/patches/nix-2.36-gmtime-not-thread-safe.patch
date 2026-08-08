@@ -1,0 +1,54 @@
+Use gmtime_r, because gmtime shares one static buffer between all threads.
+
+The 2.36 form of `nix-gmtime-not-thread-safe.patch`. The defect and the repair
+are the same, and the patch header of that file gives the ThreadSanitizer
+report and the reasoning. Read it first.
+
+Only the context differs. `emitTreeAttrs` in `src/libexpr/primops/fetchTree.cc`
+gained a `callPos` argument on the default branch, so the hunk of the released
+form does not apply. `src/libflake/lockfile.cc` is unchanged, and its hunk is
+the same in both files.
+
+**This is still needed on the default branch.** Both call sites of `std::gmtime`
+are still there at 9137203c, so nothing upstream has repaired this yet. Check
+before deleting: `grep -rn gmtime src/libexpr/primops/fetchTree.cc
+src/libflake/lockfile.cc`.
+
+This is nanopynix issue #90.
+
+diff -ruN a/src/libexpr/primops/fetchTree.cc b/src/libexpr/primops/fetchTree.cc
+--- a/src/libexpr/primops/fetchTree.cc	2026-08-08 17:49:50.641640033 +0200
++++ b/src/libexpr/primops/fetchTree.cc	2026-08-08 17:49:50.683464001 +0200
+@@ -167,8 +167,11 @@
+ 
+     if (auto lastModified = input.getLastModified()) {
+         attrs.alloc("lastModified", callPos).mkInt(*lastModified);
++        // See the comment in libflake/lockfile.cc's describe(): gmtime shares
++        // one static buffer between every thread, and gmtime_r does not.
++        struct tm tmBuf;
+         attrs.alloc("lastModifiedDate", callPos)
+-            .mkString(fmt("%s", std::put_time(std::gmtime(&*lastModified), "%Y%m%d%H%M%S")), state.mem);
++            .mkString(fmt("%s", std::put_time(::gmtime_r(&*lastModified, &tmBuf), "%Y%m%d%H%M%S")), state.mem);
+     }
+ 
+     v.mkAttrs(attrs);
+diff -ruN a/src/libflake/lockfile.cc b/src/libflake/lockfile.cc
+--- a/src/libflake/lockfile.cc	2026-08-08 17:49:50.642640028 +0200
++++ b/src/libflake/lockfile.cc	2026-08-08 17:49:50.684619732 +0200
+@@ -349,8 +349,14 @@
+ {
+     auto s = fmt("'%s'", flakeRef.to_string());
+ 
+-    if (auto lastModified = flakeRef.input.getLastModified())
+-        s += fmt(" (%s)", std::put_time(std::gmtime(&*lastModified), "%Y-%m-%d"));
++    if (auto lastModified = flakeRef.input.getLastModified()) {
++        // gmtime writes one static buffer that every thread shares, so two
++        // evaluator threads formatting a lastModified corrupt each other's
++        // result. gmtime_r writes the caller's buffer and returns it, which
++        // keeps this a single expression.
++        struct tm tmBuf;
++        s += fmt(" (%s)", std::put_time(::gmtime_r(&*lastModified, &tmBuf), "%Y-%m-%d"));
++    }
+ 
+     return s;
+ }

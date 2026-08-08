@@ -399,6 +399,15 @@ static nb::dict build_info() {
     capabilities["store_impl_read_derivation"] = true;
 #endif
 
+    // Whether `Store.submit_output` works, which is the one operation of the
+    // `builder-rpc-v0` feature. NixOS/nix#15793 merged it on 2026-07-21, and
+    // no release carries it, so only `nix/nix-master.nix` selects this band.
+    //
+    // True here means the operation exists. It does *not* mean the store is
+    // one that accepts it: only the restricted socket of a running
+    // `builder-rpc-v0` build does, and Nix reports that at the call.
+    capabilities["store_submit_output"] = NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36;
+
     // Whether libexpr in this build has the Boehm collector.
     //
     // The one capability here that a Nix version does not decide. It comes

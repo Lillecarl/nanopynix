@@ -9,7 +9,7 @@ import os
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from nanopynix_bindings import store as nanopynix_store
+from nanopynix_bindings import store as nanopynix_store, util as nanopynix_util
 
 from nanopynix.models import StorePath
 from tests.support.nix_markers import NIX_GC_ROOTS_BUG
@@ -333,3 +333,52 @@ class TestOpenStore:
         }
         assert (root / "nix" / "store").is_dir()
         assert (root / "nix" / "var" / "nix" / "db" / "db.sqlite").is_file()
+
+
+class TestSubmitOutput:
+    """`Store.submit_output`, the one operation of `builder-rpc-v0`.
+
+    The method is bound on every supported Nix and refuses on a build whose
+    Nix has no such operation, so the surface of the module does not vary by
+    Nix version. These tests check both halves of that.
+
+    Neither test submits an output. Only the restricted socket of a running
+    `builder-rpc-v0` build accepts one, and a test cannot be inside its own
+    build. `ddrn/examples/submitted` covers the accepting case, from a build.
+    """
+
+    @staticmethod
+    def _supported() -> bool:
+        capabilities: dict[str, bool] = nanopynix_util.build_info()["capabilities"]
+        return capabilities["store_submit_output"]
+
+    def test_method_is_bound_on_every_version(self, tmp_path: Path):
+        """The binding exists whether or not the linked Nix implements it."""
+        store = nanopynix_store.open_store(f"local?root={tmp_path}")
+        assert hasattr(store, "submit_output")
+
+    def test_refuses_when_the_linked_nix_is_too_old(self, tmp_path: Path):
+        """An unsupported build names the capability to check, not a symbol."""
+        if self._supported():
+            pytest.skip("this build links a Nix that has builder-rpc-v0")
+
+        store = nanopynix_store.open_store(f"local?root={tmp_path}")
+        with pytest.raises(Exception, match="builder-rpc-v0") as excinfo:
+            store.submit_output("/nix/store/00000000000000000000000000000000-bogus", "out")
+        assert "store_submit_output" in str(excinfo.value)
+
+    def test_refuses_a_store_that_is_not_a_running_build(self, tmp_path: Path):
+        """A supported build still refuses an ordinary store.
+
+        `SubmitStore::require` is the gate, and it is the only one that can
+        tell: a restricted store and an ordinary one are the same C++ type.
+        """
+        if not self._supported():
+            pytest.skip("this build links a Nix without builder-rpc-v0")
+
+        store = nanopynix_store.open_store(f"local?root={tmp_path}")
+        # `match` is deliberately loose. Nix chooses both the class and the
+        # wording here, and pinning either would make this test a copy of a
+        # message that upstream owns. That it refuses at all is the claim.
+        with pytest.raises(Exception, match=r"."):
+            store.submit_output("/nix/store/00000000000000000000000000000000-bogus", "out")
