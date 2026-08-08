@@ -685,7 +685,27 @@ let
   # Off the matrices for the same reason as the build it reads.
   nanopynixWheel = pkgs.callPackage ./nix/wheel.nix {
     inherit (pkgs.python3Packages) auditwheel;
-    bindings = nanopynixZig.nanopynix-bindings;
+    bindings = nanopynixZig.nanopynix-bindings.override {
+      # **The Nix version is in the name, and not in the version.**
+      #
+      # PyPI holds one name for one project, and this project builds one
+      # artifact for each Nix version. Those artifacts are alternatives: each
+      # imports as `nanopynix_bindings`, so two of them cannot be installed
+      # together, and the name is what says so. `opencv-python` against
+      # `opencv-python-headless` is the same shape.
+      #
+      # The version then stays the version of this project, which is what a
+      # dependency specifier wants to name. The other route, a version of
+      # `2.34.8.1` with the Nix version leading, reads well for a pin and
+      # leaves this package no way to state a version of its own API.
+      #
+      # Major and minor only. A Nix patch release does not change the ABI that
+      # the extension links, so `nix2-34` covers 2.34.8 and 2.34.9, and the
+      # exact version stays in `build_info()` and in the metadata.
+      pypiName = "nanopynix-bindings-nix${
+        lib.replaceStrings [ "." ] [ "-" ] (lib.versions.majorMinor nanopynixZig.version)
+      }";
+    };
   };
 
   # Per-version test runners, exposed individually as `nanopynix-tests-<name>`
