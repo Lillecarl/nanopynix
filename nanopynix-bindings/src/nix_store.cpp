@@ -1031,20 +1031,35 @@ static std::optional<std::string> get_build_log(nix::Store &s, const nix::StoreP
     }
 }
 
+// The references that a caller declares for a store object that it adds.
+//
+// **Nix scans for references, and a caller that knows them says so instead.**
+// A planner that writes a file naming a `.drv` knows which path it wrote, so
+// it declares that one path. A scan would find the same path, and would also
+// find any other text that looks like a store path.
+static nix::StorePathSet parse_reference_set(nix::Store &s, const std::vector<std::string> &references) {
+    nix::StorePathSet result;
+    for (const auto &reference : references)
+        result.insert(s.parseStorePath(reference));
+    return result;
+}
+
 static nix::StorePath add_to_store(
     nix::Store &s,
     const std::string &path,
     const std::optional<std::string> &name,
     const std::string &method,
-    const std::string &hash_algo) {
+    const std::string &hash_algo,
+    const std::vector<std::string> &references) {
     auto resolved_name = store_add_name(name, path);
     auto source_path = source_path_from(path);
     auto ca_method = parse_content_address_method(method);
     auto algo = parse_store_hash_algo(hash_algo);
+    auto reference_set = parse_reference_set(s, references);
     std::optional<nix::StorePath> result;
     {
         nb::gil_scoped_release release;
-        result.emplace(s.addToStoreSlow(resolved_name, source_path, ca_method, algo, {}).path);
+        result.emplace(s.addToStoreSlow(resolved_name, source_path, ca_method, algo, reference_set).path);
     }
     return *result;
 }
@@ -1054,15 +1069,17 @@ static nix::StorePath compute_store_path(
     const std::string &path,
     const std::optional<std::string> &name,
     const std::string &method,
-    const std::string &hash_algo) {
+    const std::string &hash_algo,
+    const std::vector<std::string> &references) {
     auto resolved_name = store_add_name(name, path);
     auto source_path = source_path_from(path);
     auto ca_method = parse_content_address_method(method);
     auto algo = parse_store_hash_algo(hash_algo);
+    auto reference_set = parse_reference_set(s, references);
     std::optional<nix::StorePath> result;
     {
         nb::gil_scoped_release release;
-        result.emplace(s.computeStorePath(resolved_name, source_path, ca_method, algo, {}).first);
+        result.emplace(s.computeStorePath(resolved_name, source_path, ca_method, algo, reference_set).first);
     }
     return *result;
 }
@@ -1145,6 +1162,13 @@ static void bind_store(nb::module_ &m) {
                  return s.parseStorePath(p);
              },
              nb::call_guard<nb::gil_scoped_release>(), "path"_a)
+        // The inverse of `parse_store_path`. `StorePath.to_string()` gives the
+        // base name alone, and a caller that has to reach a store again needs
+        // the store directory in front of it. Joining the two by hand is the
+        // kind of string work that this binding exists to remove.
+        .def("print_store_path",
+             [](nix::Store &s, const nix::StorePath &p) { return s.printStorePath(p); },
+             nb::call_guard<nb::gil_scoped_release>(), "path"_a)
         .def("follow_links_to_store_path",
              [](nix::Store &s, const std::string &p) { return s.followLinksToStorePath(p); },
              nb::call_guard<nb::gil_scoped_release>(), "path"_a)
@@ -1198,14 +1222,16 @@ static void bind_store(nb::module_ &m) {
             "path"_a,
             "name"_a = nb::none(),
             "method"_a = "nar",
-            "hash_algo"_a = "sha256")
+            "hash_algo"_a = "sha256",
+            "references"_a = std::vector<std::string>{})
         .def(
             "compute_store_path",
             &compute_store_path,
             "path"_a,
             "name"_a = nb::none(),
             "method"_a = "nar",
-            "hash_algo"_a = "sha256")
+            "hash_algo"_a = "sha256",
+            "references"_a = std::vector<std::string>{})
         // GC
         .def("add_temp_root", [](nix::Store &s, const nix::StorePath &p) { s.addTempRoot(p); },
              nb::call_guard<nb::gil_scoped_release>(), "path"_a)

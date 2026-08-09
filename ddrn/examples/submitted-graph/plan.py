@@ -5,7 +5,7 @@ runs inside the sandbox of a content-addressing derivation that asks for the
 `builder-rpc-v0` system feature. Nix gives that build a restricted daemon
 socket at `$NIX_REMOTE` and no `$out`.
 
-**The socket permits six worker operations and no more** (`daemon.cc:326`):
+**The socket permits seven worker operations and no more** (`daemon.cc:326`):
 the four `Add*` operations, `AddTempRoot`, `IsValidPath` and `SubmitOutput`.
 Everything this script does stays inside that set, and each step below says
 which operation it uses.
