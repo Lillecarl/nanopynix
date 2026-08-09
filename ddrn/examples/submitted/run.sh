@@ -11,9 +11,13 @@
 set -euo pipefail
 
 # A Nix revision that has the feature. `builder-rpc-v0` merged on 2026-07-21
-# in NixOS/nix#15793, so any master revision after that date works. Hydra
-# builds master, so this substitutes and does not compile.
-NIX_REV="${NIX_REV:-9137203c1d85c9d13b3d1ef91ba8885b185e5947}"
+# in NixOS/nix#15793, so any master revision after that date works.
+#
+# **A revision of today compiles, and an older one substitutes.** Hydra builds
+# master, but it lags the branch by some hours. Set `NIX_REV` to a revision
+# that `cache.nixos.org` already holds to skip a build of Nix that takes about
+# 20 minutes.
+NIX_REV="${NIX_REV:-adee431334cd12f3a33764ac86284220cef4d204}"
 
 work="${1:-${TMPDIR:-/tmp}/ddrn-builder-rpc}"
 mkdir -p "$work"
@@ -30,7 +34,12 @@ echo "==> $("$nix_master/bin/nix" --version)"
 
 echo "==> seeding the private store at $store"
 mkdir -p "$store"
-"$nix_master/bin/nix" copy --to "$store" "$nix_master" \
+# `--no-check-sigs` is needed and is safe here. A chroot store refuses an
+# unsigned path by default, and this machine builds the Nix itself when
+# `cache.nixos.org` has no build of `NIX_REV` yet. The store is a private
+# directory that this script created, and the source is the local store of
+# this same machine.
+"$nix_master/bin/nix" copy --to "$store" --no-check-sigs "$nix_master" \
   --extra-experimental-features 'nix-command flakes'
 
 echo "==> building the example"

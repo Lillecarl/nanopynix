@@ -370,15 +370,131 @@ class TestSubmitOutput:
     def test_refuses_a_store_that_is_not_a_running_build(self, tmp_path: Path):
         """A supported build still refuses an ordinary store.
 
-        `SubmitStore::require` is the gate, and it is the only one that can
-        tell: a restricted store and an ordinary one are the same C++ type.
+        `nix::SubmitStore` is the gate. Only the restricted store of a
+        running build implements that interface, so an ordinary store fails
+        the cast and gets a refusal.
         """
         if not self._supported():
             pytest.skip("this build links a Nix without builder-rpc-v0")
 
         store = nanopynix_store.open_store(f"local?root={tmp_path}")
-        # `match` is deliberately loose. Nix chooses both the class and the
-        # wording here, and pinning either would make this test a copy of a
-        # message that upstream owns. That it refuses at all is the claim.
+        # `match` is deliberately loose. The store URI is part of the message
+        # and a temporary directory is part of that URI, so a tighter pattern
+        # would pin a path that changes on each run. That it refuses at all is
+        # the claim.
         with pytest.raises(Exception, match=r"."):
             store.submit_output("/nix/store/00000000000000000000000000000000-bogus", "out")
+
+
+class TestDerivationValue:
+    """`StoreDirConfig` and `Derivation`, which render ATerm with Nix's writer.
+
+    The point of these bindings is that Nix renders the bytes, so the format
+    cannot drift from the Nix that this build links. `ddrn` renders the same
+    bytes in pure Python, and `ddrn/tests/test_aterm_matches_nix.py` compares
+    the two.
+    """
+
+    STORE_DIR = "/nix/store"
+    # A store path that exists in no store. Nothing here builds or realises,
+    # and rendering reads the store directory alone, so a path only has to
+    # parse.
+    BOGUS = "/nix/store/00000000000000000000000000000000-bogus"
+
+    @staticmethod
+    def _dict(**overrides: Any) -> dict[str, Any]:
+        value: dict[str, Any] = {
+            "name": "example",
+            "outputs": {"out": {"type": "Deferred"}},
+            "input_srcs": [],
+            "input_drvs": {},
+            "system": "x86_64-linux",
+            "builder": "/bin/sh",
+            "args": ["-c", "true"],
+            "env": {"out": "", "name": "example"},
+            "structured_attrs": None,
+        }
+        value.update(overrides)
+        return value
+
+    def _config(self) -> Any:
+        return nanopynix_store.StoreDirConfig(self.STORE_DIR)
+
+    def test_config_needs_a_store_dir(self):
+        with pytest.raises(Exception, match="store_dir"):
+            nanopynix_store.StoreDirConfig("")
+
+    def test_render_needs_no_store(self):
+        """The whole reason for `StoreDirConfig`: no daemon, no socket."""
+        cfg = self._config()
+        drv = nanopynix_store.Derivation.from_dict(cfg, self._dict())
+
+        aterm = drv.to_aterm(cfg)
+        assert aterm.startswith("Derive(")
+        assert '"x86_64-linux"' in aterm
+
+        path = drv.store_path(cfg)
+        assert path.startswith(f"{self.STORE_DIR}/")
+        assert path.endswith("-example.drv")
+
+    def test_round_trip_through_the_dict(self):
+        """`from_dict` is the exact inverse of what `read_derivation` returns."""
+        cfg = self._config()
+        original = self._dict(
+            input_srcs=[self.BOGUS],
+            outputs={"out": {"type": "InputAddressed", "path": self.BOGUS}},
+        )
+        drv = nanopynix_store.Derivation.from_dict(cfg, original)
+        assert drv.to_dict(cfg) == original
+        # And the rendering is stable across the trip.
+        assert nanopynix_store.Derivation.from_dict(cfg, drv.to_dict(cfg)).to_aterm(cfg) == drv.to_aterm(cfg)
+
+    def test_input_drvs_keep_their_dynamic_tree(self):
+        """A `DerivedPathMap` is a tree, and the trip must not flatten it."""
+        cfg = self._config()
+        original = self._dict(
+            input_drvs={
+                f"{self.STORE_DIR}/00000000000000000000000000000000-dep.drv": {
+                    # Nix holds these names in a `StringSet`, so the trip
+                    # returns them in order and not in the order given here.
+                    # Sorted here, so the assertion below compares the tree.
+                    "outputs": ["dev", "out"],
+                    "dynamic_outputs": {
+                        "out": {"outputs": ["inner"], "dynamic_outputs": {}},
+                    },
+                },
+            },
+        )
+        drv = nanopynix_store.Derivation.from_dict(cfg, original)
+        assert drv.to_dict(cfg) == original
+
+    def test_a_missing_key_is_an_error(self):
+        """A silent default would render valid ATerm and fail much later."""
+        cfg = self._config()
+        incomplete = self._dict()
+        del incomplete["input_srcs"]
+        with pytest.raises(Exception, match="input_srcs"):
+            nanopynix_store.Derivation.from_dict(cfg, incomplete)
+
+    def test_an_unknown_output_type_is_an_error(self):
+        cfg = self._config()
+        with pytest.raises(Exception, match="Nonsense"):
+            nanopynix_store.Derivation.from_dict(cfg, self._dict(outputs={"out": {"type": "Nonsense"}}))
+
+    def test_write_derivation_agrees_with_store_path_and_read(self, tmp_path: Path):
+        """The path computed with no store is the path the store gives it."""
+        store = nanopynix_store.open_store(f"local?root={tmp_path}")
+        cfg = nanopynix_store.StoreDirConfig(store.get_store_dir())
+        drv = nanopynix_store.Derivation.from_dict(cfg, self._dict())
+
+        # A `Deferred` output has no path, and the environment variable `out`
+        # is empty. `writeDerivation` checks the two against each other and
+        # refuses the derivation, so this call is not optional. It is the same
+        # order that `ddrn/examples/submitted-graph/plan.py` uses.
+        drv.fill_in_output_paths(store)
+        value = drv.to_dict(cfg)
+        assert value["outputs"]["out"]["type"] == "InputAddressed"
+
+        written = store.write_derivation(drv)
+        assert written == drv.store_path(cfg)
+        assert store.read_derivation(store.parse_store_path(written)) == value

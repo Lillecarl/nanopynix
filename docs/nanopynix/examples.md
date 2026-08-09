@@ -45,8 +45,7 @@ Registering a Python callable as a Nix builtin over the worker's RPC
 backchannel, plus the built-in YAML primops.
 
 ```{note}
-Requires Nix >= 2.32 — primop registration is broken on Nix 2.31 and isn't
-expected to be fixed there.
+Requires dynamic primop registration, which every supported Nix has.
 ```
 
 ```{literalinclude} ../examples/primops_example.py

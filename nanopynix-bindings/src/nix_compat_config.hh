@@ -5,7 +5,9 @@
 #define NANOPYNIX_NIX_VERSION_MINOR @NANOPYNIX_NIX_VERSION_MINOR@
 #define NANOPYNIX_NIX_VERSION_NUMBER @NANOPYNIX_NIX_VERSION_NUMBER@
 
-#define NANOPYNIX_NIX_2_32 2032
+// The oldest Nix that this project supports is 2.34, so there is no
+// `NANOPYNIX_NIX_2_32`. Each API that moved in 2.32 now has one form here.
+// `minimumNixVersion` in `default.nix` gives the reason 2.31 went away.
 #define NANOPYNIX_NIX_2_35 2035
 // `builder-rpc-v0`, which NixOS/nix#15793 merged on 2026-07-21, after 2.35.
 // It reaches no release yet, so `nix/nix-master.nix` is the only source that

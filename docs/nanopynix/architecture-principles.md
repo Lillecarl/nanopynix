@@ -56,9 +56,9 @@ code obey them on both engines:
    binding keeps the owner alive. Rule 3 covers a resource that the wrapper
    creates. This covers a resource that Nix reaches by a raw pointer, which
    the wrapper neither creates nor frees. A `fetchers::Settings` is the case
-   #34 found: Nix 2.31 keeps a `const fetchers::Settings *` inside
-   `fetchers::Input`, and `parse_flake_ref` built the reference against a
-   local of that one call.
+   #34 found: a `fetchers::Input` reads its settings long after the parse,
+   and `parse_flake_ref` built the reference against a local of that one
+   call.
 7. **An evaluator's own settings decide what that evaluator does.** A setting
    baked into a value that a caller passes in applies to the step that made
    the value, and to nothing after it. `lock_flake` and `get_flake` therefore

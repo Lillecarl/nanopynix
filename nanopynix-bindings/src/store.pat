@@ -1,4 +1,9 @@
 nanopynix_bindings.store.__prefix__:
+    # nanobind writes the imports that its own signatures need. These two are
+    # needed by the patched signatures below, and by nothing else.
+    from collections.abc import Mapping
+    from typing import Any
+
     class StoreDirs(TypedDict):
         # store_dir and uri are set unconditionally by store_dirs_to_dict();
         # the rest stay None unless the store is a LocalFSStore (root/state/log/
@@ -57,7 +62,11 @@ nanopynix_bindings.store.__prefix__:
         outputs: list[str]
         dynamic_outputs: dict[str, "DerivationOutputs"]
 
-    class Derivation(TypedDict):
+    # Named `DerivationDict`, and not `Derivation`, because the module also
+    # binds a class `Derivation`. That class wraps a `nix::Derivation` and
+    # renders ATerm; this TypedDict is the plain dict that `read_derivation`
+    # and `Derivation.to_dict` return. The two names must not collide.
+    class DerivationDict(TypedDict):
         name: str
         outputs: dict[str, DerivationOutput]
         input_srcs: list[str]
@@ -100,7 +109,27 @@ nanopynix_bindings.store.Store.query_missing:
     def query_missing(self, paths: Sequence[str | StorePath]) -> MissingPaths: ...
 
 nanopynix_bindings.store.Store.read_derivation:
-    def read_derivation(self, drv_path: StorePath) -> Derivation: ...
+    def read_derivation(self, drv_path: StorePath) -> DerivationDict: ...
+
+# The two ends of the same shape. nanobind renders an `nb::dict` as a bare
+# `dict`, which a strict type checker reads as `dict[Unknown, Unknown]`, so
+# each caller of these two methods loses every type below it.
+#
+# `from_dict` takes a `Mapping` and not a `DerivationDict`, and `to_dict`
+# returns the `DerivationDict`. The check that the value has every key belongs
+# to the C++ side, which raises on a key that is missing or on an output type
+# that it does not know. A caller that builds the value itself holds a
+# `dict[str, Any]`, which no type checker can narrow to a TypedDict, and the
+# tests of those two errors have to pass a value that is wrong on purpose.
+nanopynix_bindings.store.Derivation.from_dict:
+    @staticmethod
+    def from_dict(store_dir_config: StoreDirConfig, value: Mapping[str, Any]) -> Derivation:
+        """
+        Build a derivation from the same shape that `Store.read_derivation` returns. Every key of that shape is required.
+        """
+
+nanopynix_bindings.store.Derivation.to_dict:
+    def to_dict(self, store_dir_config: StoreDirConfig) -> DerivationDict: ...
 
 nanopynix_bindings.store.Store.collect_garbage:
     def collect_garbage(self, action: GCAction, ignore_liveness: bool = False, paths_to_delete: Sequence[StorePath] = [], max_freed: int = 18446744073709551615) -> GCResults: ...

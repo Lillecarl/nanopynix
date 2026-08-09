@@ -41,20 +41,16 @@ of Nix store operations are deliberately absent:
   ``add_indirect_root``. Those live on Nix's ``GcStore``, ``LogStore`` and
   ``LocalFSStore`` interfaces, which a Python store does not inherit, so there
   is nothing to override.
-One operation is present but *version-dependent*:
-:meth:`~StoreImpl.read_derivation` is only dispatched where Nix declares
-``Store::readDerivation`` virtual, which it does not before 2.32. On an older
-build the method is never called; the store still opens, every other operation
-works, and Nix logs a warning at open time saying so. To branch on it instead,
-read ``nanopynix.build_info()["capabilities"]["store_impl_read_derivation"]``
--- the same mechanism ``dynamic_primop_registration`` uses for primops, which
-are likewise unavailable on 2.31.
+:meth:`~StoreImpl.read_derivation` is dispatched because Nix declares
+``Store::readDerivation`` virtual from 2.34 on.
+``nanopynix.build_info()["capabilities"]["store_impl_read_derivation"]``
+carries the fact, the same mechanism ``dynamic_primop_registration`` uses for
+primops.
 
-There is no workaround on those builds, and an earlier version of this note
-claimed there was. Nix does *not* read a ``.drv`` through
-:meth:`~StoreImpl.query_path_info`: it reads it through a store accessor,
-which a Python store without an ``underlying_store`` cannot serve, so
-``read_derivation`` against one has always failed with ``InvalidPath``.
+Nix does *not* read a ``.drv`` through :meth:`~StoreImpl.query_path_info`: it
+reads it through a store accessor, which a Python store without an
+``underlying_store`` cannot serve, so ``read_derivation`` against one fails
+with ``InvalidPath`` unless this hook answers.
 
 This is not the same thing as :mod:`nanopynix.protocols`. Those describe the
 async API that nanopynix's own engines *provide* to callers; this describes the
@@ -307,9 +303,8 @@ class StoreImpl:
         A malformed or empty value raises out of Nix's parser, naming
         ``path``.
 
-        Only dispatched where ``Store::readDerivation`` is virtual, which is
-        not the case before Nix 2.32 -- see the module docstring, and check
-        ``build_info()["capabilities"]["store_impl_read_derivation"]`` to
-        branch on it.
+        Dispatched because ``Store::readDerivation`` is virtual -- see the
+        module docstring, and
+        ``build_info()["capabilities"]["store_impl_read_derivation"]``.
         """
         raise NotImplementedError

@@ -299,8 +299,8 @@ class _BinaryCache(StoreConfig):
 class _RemoteCache(_BinaryCache):
     """A binary cache reached over the network, and so through curl and TLS.
 
-    Nix 2.31 has neither of these two. It gained the TLS client certificate in
-    2.34 and the retry policy in 2.35.
+    Nix gained the TLS client certificate in 2.34 and the retry policy in
+    2.35.
 
     The per-file compression settings are deliberately not here. They belong to
     both subclasses, but not since the same version: S3 has had them all along,

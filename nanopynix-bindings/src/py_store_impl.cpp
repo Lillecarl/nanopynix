@@ -18,6 +18,14 @@
 
 #include <nix/store/derived-path.hh>
 #include <nix/store/path-info.hh>
+// Both headers are new in the 2.36 band. `build.hh` holds the `nix::Builder`
+// interface that took the build entry points off `nix::Store`, and
+// `derivation/aterm.hh` holds the reader that was `nix::parseDerivation`.
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+#  include <nix/store/build.hh>
+#  include <nix/store/build-result.hh>
+#  include <nix/store/derivation/aterm.hh>
+#endif
 #include <nix/store/realisation.hh>
 #include <nix/util/hash.hh>
 #include <nix/util/memory-source-accessor.hh>
@@ -55,22 +63,6 @@ PyStoreMethods PyStoreMethods::resolve(const nb::object &py_store) {
     NANOPYNIX_STORE_DISPATCH_METHODS(NANOPYNIX_STORE_RESOLVE_FLAG)
 #undef NANOPYNIX_STORE_RESOLVE_FLAG
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    // The one operation this build cannot dispatch, said out loud rather than
-    // left to be discovered. `readDerivation` is non-virtual here, so there is
-    // no hook; the store still opens and every other operation works, which is
-    // why this warns instead of throwing -- one unsupported method should not
-    // cost a caller the whole store, and `dynamic_primop_registration` sets the
-    // same precedent by degrading rather than refusing. What it must not do is
-    // stay quiet, since the failure it would otherwise produce is a method that
-    // exists, type-checks, and is never called.
-    if (methods.read_derivation)
-        nix::warn(
-            "this store implements read_derivation, which the linked Nix (%s) cannot dispatch: "
-            "Store::readDerivation is not virtual before 2.32, so the method will not be called. "
-            "nanopynix.build_info()['capabilities']['store_impl_read_derivation'] reports this.",
-            NANOPYNIX_NIX_VERSION);
-#endif
     return methods;
 }
 
@@ -180,12 +172,8 @@ void PyStoreImpl::queryPathInfoUncached(
             auto d = nb::cast<nb::dict>(result);
             auto info = std::make_shared<nix::ValidPathInfo>(
                 nix::StorePath(path.to_string()),
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-                nix::UnkeyedValidPathInfo(nix::Hash::dummy)
-#else
                 nix::UnkeyedValidPathInfo(
                     static_cast<const nix::StoreDirConfig &>(*this), nix::Hash::dummy)
-#endif
             );
             if (auto v = dict_entry(d, "nar_hash"))
                 info->narHash = nix::Hash::parseAny(nb::cast<std::string>(*v), nix::HashAlgorithm::SHA256);
@@ -198,16 +186,12 @@ void PyStoreImpl::queryPathInfoUncached(
             if (auto v = dict_entry(d, "deriver")) info->deriver = store_path_from_py(*this, *v);
             if (auto v = dict_entry(d, "ca")) info->ca = nix::ContentAddress::parse(nb::cast<std::string>(*v));
             if (auto v = dict_entry(d, "ultimate")) info->ultimate = nb::cast<bool>(*v);
-            // Same split as the outbound rendering in nix_store.cpp: 2.31 keeps
-            // signatures as plain strings, 2.34+ as parsed nix::Signature.
+            // The inbound half of what `nix_store.cpp` renders outward: a
+            // signature is a parsed `nix::Signature` and not a plain string.
             if (auto v = dict_entry(d, "sigs")) {
                 for (auto sig : nb::cast<nb::list>(*v)) {
                     auto text = nb::cast<std::string>(nb::borrow<nb::object>(sig));
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-                    info->sigs.insert(text);
-#else
                     info->sigs.insert(nix::Signature::parse(text));
-#endif
                 }
             }
             callback(info);
@@ -228,11 +212,7 @@ void PyStoreImpl::queryPathInfoUncached(
 
 void PyStoreImpl::queryRealisationUncached(
     const nix::DrvOutput & id,
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    nix::Callback<std::shared_ptr<const nix::Realisation>> callback
-#else
     nix::Callback<std::shared_ptr<const nix::UnkeyedRealisation>> callback
-#endif
     ) noexcept
 {
     if (underlying) { underlying->queryRealisation(id, std::move(callback)); return; }
@@ -273,22 +253,29 @@ nix::StorePath PyStoreImpl::addToStoreFromDump(
     unsupported("addToStoreFromDump");
 }
 
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+void PyStoreImpl::registerDrvOutputUnchecked(const nix::Realisation & output) {
+    // `registerDrvOutputUnchecked` is protected, so the delegation goes
+    // through the public wrapper with `NoCheckSigs`, which is what the base
+    // wrapper does. The checking wrapper of this store already ran, so a
+    // second signature check on the way down would repeat the same work.
+    if (underlying) { underlying->registerDrvOutput(output, nix::NoCheckSigs); return; }
+}
+#else
 void PyStoreImpl::registerDrvOutput(const nix::Realisation & output) {
     if (underlying) { underlying->registerDrvOutput(output); return; }
 }
+#endif
 
 nix::ref<nix::SourceAccessor> PyStoreImpl::getFSAccessor(bool requireValidPath) {
     if (underlying) return underlying->getFSAccessor(requireValidPath);
     return nix::make_ref<nix::MemorySourceAccessor>();
 }
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-#else
 std::shared_ptr<nix::SourceAccessor> PyStoreImpl::getFSAccessor(const nix::StorePath & path, bool requireValidPath) {
     if (underlying) return underlying->getFSAccessor(path, requireValidPath);
     return nullptr;
 }
-#endif
 
 std::optional<nix::TrustedFlag> PyStoreImpl::isTrustedClient() {
     if (underlying) return underlying->isTrustedClient();
@@ -376,7 +363,7 @@ nix::StorePathSet PyStoreImpl::querySubstitutablePaths(const nix::StorePathSet &
     if (underlying) return underlying->querySubstitutablePaths(paths);
     // Was `paths`, i.e. "everything you asked about has a substitute" -- so a
     // store reporting nothing valid still reported every path substitutable.
-    // The base consults this store's substituters (2.34+) or returns {} (2.31).
+    // The base consults this store's own substituters.
     return nix::Store::querySubstitutablePaths(paths);
 }
 
@@ -394,17 +381,74 @@ void PyStoreImpl::addTempRoot(const nix::StorePath & path) {
     nix::Store::addTempRoot(path);
 }
 
-void PyStoreImpl::ensurePath(const nix::StorePath & path) {
-    {
-        nb::gil_scoped_acquire gil;
-        if (methods.ensure_path) {
-            py_store.attr("ensure_path")(store_path_to_py(path));
-            return;
-        }
+bool PyStoreImpl::try_python_ensure_path(const nix::StorePath & path) {
+    nb::gil_scoped_acquire gil;
+    if (!methods.ensure_path) return false;
+    py_store.attr("ensure_path")(store_path_to_py(path));
+    return true;
+}
+
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+namespace {
+
+/// A `nix::Builder` that gives the Python `ensure_path` hook the first look.
+///
+/// Nix 2.36 moves `ensurePath`, `buildPaths`, `buildPathsWithResults`,
+/// `buildDerivation` and `repairPath` off `nix::Store` and onto `nix::Builder`.
+/// A `PyStoreImpl` is not a `Builder`, so this wrapper is what keeps the hook
+/// reachable. Every other method forwards to the builder that the store would
+/// have used, which leaves a store with no hook behaving as it did before 2.36.
+struct PyBuilder : nix::Builder
+{
+    PyStoreImpl & store;
+    /// Holds the store for as long as this builder lives. `inner` keeps the
+    /// *underlying* store alive when there is one, and that is a different
+    /// object, so this reference is what makes `store` safe to read.
+    std::shared_ptr<nix::Store> keep_alive;
+    nix::ref<nix::Builder> inner;
+
+    PyBuilder(PyStoreImpl & store, std::shared_ptr<nix::Store> keep_alive, nix::ref<nix::Builder> inner)
+        : store(store), keep_alive(std::move(keep_alive)), inner(std::move(inner)) {}
+
+    void buildPaths(const std::vector<nix::DerivedPath> & reqs, nix::BuildMode buildMode) override {
+        inner->buildPaths(reqs, buildMode);
     }
+
+    std::vector<nix::KeyedBuildResult> buildPathsWithResults(
+        const std::vector<nix::DerivedPath> & reqs, nix::BuildMode buildMode) override {
+        return inner->buildPathsWithResults(reqs, buildMode);
+    }
+
+    nix::BuildResult buildDerivation(
+        const nix::StorePath & drvPath, const nix::BasicDerivation & drv, nix::BuildMode buildMode) override {
+        return inner->buildDerivation(drvPath, drv, buildMode);
+    }
+
+    void ensurePath(const nix::StorePath & path) override {
+        if (store.try_python_ensure_path(path)) return;
+        inner->ensurePath(path);
+    }
+
+    void repairPath(const nix::StorePath & path) override {
+        inner->repairPath(path);
+    }
+};
+
+} // namespace
+
+nix::ref<nix::Builder> PyStoreImpl::getBuilder(std::shared_ptr<nix::Store> evalStore) {
+    // The fallback order is the one every other method here uses: the Python
+    // hook, then `underlying`, then `nix::Store` itself.
+    auto inner = underlying ? underlying->getBuilder(evalStore) : nix::Store::getBuilder(evalStore);
+    return nix::make_ref<PyBuilder>(*this, weak_from_this().lock(), std::move(inner));
+}
+#else
+void PyStoreImpl::ensurePath(const nix::StorePath & path) {
+    if (try_python_ensure_path(path)) return;
     if (underlying) { underlying->ensurePath(path); return; }
     nix::Store::ensurePath(path);
 }
+#endif
 
 void PyStoreImpl::optimiseStore() {
     {
@@ -501,8 +545,6 @@ nix::MissingPaths PyStoreImpl::queryMissing(const std::vector<nix::DerivedPath> 
     return nix::Store::queryMissing(targets);
 }
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-#else
 nix::Derivation PyStoreImpl::readDerivation(const nix::StorePath & drvPath) {
     // The one dispatched operation whose Python return value is a
     // *serialization* rather than a rendering: the ATerm text of the `.drv`,
@@ -512,7 +554,7 @@ nix::Derivation PyStoreImpl::readDerivation(const nix::StorePath & drvPath) {
     // from a dict -- five `DerivationOutput` variants, a `DerivedPathMap` tree
     // and `structuredAttrs`, each of which changed shape across the supported
     // versions. `parseDerivation` is Nix's own reader for this format, has an
-    // identical signature on 2.31, 2.34 and 2.35, and is what
+    // identical signature on every supported version, and is what
     // `readDerivationCommon` itself calls, so reusing it is both less code and
     // the only version of it guaranteed to agree with Nix.
     std::optional<std::string> aterm;
@@ -530,13 +572,21 @@ nix::Derivation PyStoreImpl::readDerivation(const nix::StorePath & drvPath) {
     // adds the path for exactly that reason, and the empty case gets its own
     // message there too, which here is the likelier bug: a store returning ""
     // is a method that forgot to return, and "expected string 'D'" does not say
-    // so. `msg()` rather than `message()` because 2.31 declares the latter
-    // non-const (`error.hh:159`).
+    // so. `msg()` rather than `message()`, which an older Nix declared
+    // non-const.
     if (aterm) {
         try {
             if (aterm->empty())
                 throw nix::FormatError("derivation is empty (the store returned no ATerm text)");
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+            // Nix 2.36 moves the reader to `nix::derivation::parse`, in the
+            // new `nix/store/derivation/aterm.hh`. The parameters are the
+            // same ones.
+            return nix::derivation::parse(
+                config, std::move(*aterm), nix::Derivation::nameFromPath(drvPath));
+#else
             return nix::parseDerivation(config, std::move(*aterm), nix::Derivation::nameFromPath(drvPath));
+#endif
         } catch (nix::FormatError & e) {
             throw nix::Error("error parsing derivation '%s': %s", printStorePath(drvPath), e.msg());
         }
@@ -544,7 +594,6 @@ nix::Derivation PyStoreImpl::readDerivation(const nix::StorePath & drvPath) {
     if (underlying) return underlying->readDerivation(drvPath);
     return nix::Store::readDerivation(drvPath);
 }
-#endif
 
 // --- not dispatched into Python; see the dispatch list in the header ---
 

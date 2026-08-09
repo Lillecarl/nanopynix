@@ -2,14 +2,14 @@
 
 /// One rendering of Nix's BuildResult, for both files that report one.
 ///
-/// Nix 2.32 split `BuildResult::Status` into `Success::Status` and
-/// `Failure::Status`, so reading a result takes a version branch. That branch
-/// and the vocabulary it renders used to be duplicated verbatim in
+/// A `BuildResult` carries `Success::Status` or `Failure::Status`, and the
+/// vocabulary that renders them used to be duplicated verbatim in
 /// `nix_expr.cpp` and `nix_store.cpp` -- around a hundred lines each, in two
-/// translation units with no way to notice they had drifted, plus a
-/// `NANOPYNIX_NIX_HAS_KEYED_BUILD_RESULTS` macro defined and `#undef`ed
-/// separately in both to name the condition. With one copy the condition can
-/// just be written where it is used, so the macro is gone.
+/// translation units with no way to notice they had drifted. Nix 2.32 split
+/// the single `BuildResult::Status` into those two, and each file also carried
+/// its own `NANOPYNIX_NIX_HAS_KEYED_BUILD_RESULTS` macro to name that
+/// condition. Both the branch and the macro are gone: the oldest supported Nix
+/// is 2.34, so only the split form remains.
 ///
 /// The strings are not an internal detail. `nanopynix.exceptions`'s
 /// `_BUILD_STATUS_EXCEPTIONS` maps them to `BuildError` subclasses, so they are
@@ -96,42 +96,6 @@ inline nb::dict to_dict(
     return d;
 }
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-/// Pre-2.32 Nix has one flat status enum covering success and failure alike.
-///
-/// It has no `HashMismatch`: that member arrived with the 2.32 split, so a
-/// fixed-output hash mismatch reports under one of the neighbouring failure
-/// names here. The Python side maps whatever it is given and falls back to
-/// plain `BuildError` for a name it does not know, so the older vocabulary
-/// being shorter costs detail rather than correctness.
-inline std::string status_str(nix::BuildResult::Status s) {
-    using enum nix::BuildResult::Status;
-    switch (s) {
-        case Built:                  return "built";
-        case Substituted:            return "substituted";
-        case AlreadyValid:           return "already-valid";
-        case ResolvesToAlreadyValid: return "resolves-to-already-valid";
-        case PermanentFailure:       return "permanent-failure";
-        case InputRejected:          return "input-rejected";
-        case OutputRejected:         return "output-rejected";
-        case TransientFailure:       return "transient-failure";
-        case CachedFailure:          return "cached-failure";
-        case TimedOut:               return "timed-out";
-        case MiscFailure:            return "misc-failure";
-        case DependencyFailed:       return "dependency-failed";
-        case LogLimitExceeded:       return "log-limit-exceeded";
-        case NotDeterministic:       return "not-deterministic";
-        case NoSubstituters:         return "no-substituters";
-    }
-    return "unknown";
-}
-
-inline nb::dict from_kbr(const nix::KeyedBuildResult &kbr, const nix::StoreDirConfig &store) {
-    auto result = static_cast<nix::BuildResult>(kbr);
-    auto [drv_path, outputs] = derived_path_parts(kbr.path, store);
-    return to_dict(drv_path, outputs, result.success(), status_str(result.status), result.errorMsg);
-}
-#else
 inline std::string success_status_str(nix::BuildResult::Success::Status s) {
     using enum nix::BuildResult::Success::Status;
     switch (s) {
@@ -170,6 +134,5 @@ inline nb::dict from_kbr(const nix::KeyedBuildResult &kbr, const nix::StoreDirCo
         return to_dict(path, outputs, false, failure_status_str(failure->status), failure->msg());
     return to_dict(path, outputs, false, "unknown", "");
 }
-#endif
 
 }  // namespace nanopynix::build_result

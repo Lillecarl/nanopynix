@@ -10,7 +10,7 @@ form does not apply. `src/libflake/lockfile.cc` is unchanged, and its hunk is
 the same in both files.
 
 **This is still needed on the default branch.** Both call sites of `std::gmtime`
-are still there at 9137203c, so nothing upstream has repaired this yet. Check
+are still there at adee4313, so nothing upstream has repaired this yet. Check
 before deleting: `grep -rn gmtime src/libexpr/primops/fetchTree.cc
 src/libflake/lockfile.cc`.
 
