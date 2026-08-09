@@ -31,7 +31,7 @@
 #include <nlohmann/json.hpp>
 #include <nix/util/experimental-features.hh>
 // `experimentalFeatureSettings` itself, which write_dev_shell_derivation
-// consults on Nix 2.31. The header above declares the feature enum only.
+// consults. The header above declares the feature enum only.
 #include <nix/util/configuration.hh>
 #include <nix/util/hash.hh>
 #include <nix/util/serialise.hh>
@@ -45,9 +45,21 @@
 
 // `builder-rpc-v0` reaches no Nix release yet, so this header exists only in
 // the 2.36 band. See `store_submit_output` below, and `nix/nix-master.nix`.
+//
+// `build.hh` is new in the same band. Nix 2.36 moves `buildPaths`,
+// `buildPathsWithResults`, `buildDerivation`, `ensurePath` and `repairPath`
+// off `nix::Store` and onto a separate `nix::Builder` interface, which
+// `Store::getBuilder()` returns.
 #if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+#  include <nix/store/build.hh>
+#  include <nix/store/derivation/aterm.hh>
 #  include <nix/store/submit-store.hh>
+// `aterm.hh` declares the memo `nix::derivation::hashes` after including only
+// `concurrent_flat_map_fwd.hpp`, so the type is incomplete there. Writing to
+// the memo needs the definition, which only this header carries.
+#  include <boost/unordered/concurrent_flat_map.hpp>
 #endif
+#include <nix/store/parsed-derivations.hh>
 
 #if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35
 #include <nix/util/posix-source-accessor.hh>
@@ -60,27 +72,87 @@
 namespace nb = nanobind;
 using namespace nb::literals;
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-using NixGCAction = nix::GCOptions::GCAction;
-constexpr auto gcReturnLive = nix::GCOptions::gcReturnLive;
-constexpr auto gcReturnDead = nix::GCOptions::gcReturnDead;
-constexpr auto gcDeleteDead = nix::GCOptions::gcDeleteDead;
-constexpr auto gcDeleteSpecific = nix::GCOptions::gcDeleteSpecific;
+// Nix 2.36 makes `nix::Derivation` a template over the type of its inputs, and
+// groups the two input members into one `inputs` member of that type:
+// `drv.inputSrcs` becomes `drv.inputs.srcs`, and `drv.inputDrvs` becomes
+// `drv.inputs.drvs`. The same change moves `fillInOutputPaths` off the class
+// and makes it the free function `nix::derivation::fillInOutputPaths`.
+static inline auto & drv_input_srcs(nix::Derivation &drv) {
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+    return drv.inputs.srcs;
 #else
+    return drv.inputSrcs;
+#endif
+}
+
+static inline auto & drv_input_drvs(nix::Derivation &drv) {
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+    return drv.inputs.drvs;
+#else
+    return drv.inputDrvs;
+#endif
+}
+
+static inline const auto & drv_input_srcs(const nix::Derivation &drv) {
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+    return drv.inputs.srcs;
+#else
+    return drv.inputSrcs;
+#endif
+}
+
+static inline const auto & drv_input_drvs(const nix::Derivation &drv) {
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+    return drv.inputs.drvs;
+#else
+    return drv.inputDrvs;
+#endif
+}
+
+// Nix's own ATerm writer. **This is the reason these bindings exist**: a
+// derivation that Nix renders is compliant with the format of that same Nix,
+// and cannot drift from it. `ddrn/_derivation.py` renders the same bytes in
+// pure Python, and its differential test now checks itself against this.
+//
+// Nix 2.36 moves the writer off the class and makes it the free function
+// `nix::derivation::unparse`. The `maskOutputs` argument of the method form
+// has no counterpart, and false is what a caller that writes a derivation to
+// the store wants: `infoForDerivation` passes the same.
+static inline std::string drv_unparse(const nix::Derivation &drv, const nix::StoreDirConfig &cfg) {
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+    return nix::derivation::unparse(drv, cfg);
+#else
+    return drv.unparse(cfg, false);
+#endif
+}
+
+// The path that a derivation gets, computed with no store and no file system.
+//
+// `nix::computeStorePath` is `infoForDerivation` with the first three of its
+// four results dropped. This wrapper exists so that a caller names one thing,
+// and so that a later band that moves the function again changes one line.
+static inline nix::StorePath drv_store_path(const nix::Derivation &drv, const nix::StoreDirConfig &cfg) {
+    return nix::computeStorePath(cfg, drv);
+}
+
+// Nix 2.36 moves this off the class too, beside `unparse` above.
+static inline void drv_fill_in_output_paths(nix::Derivation &drv, nix::Store &s) {
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+    nix::derivation::fillInOutputPaths(drv, s);
+#else
+    drv.fillInOutputPaths(s);
+#endif
+}
+
 using NixGCAction = nix::GCAction;
 constexpr auto gcReturnLive = nix::GCAction::gcReturnLive;
 constexpr auto gcReturnDead = nix::GCAction::gcReturnDead;
 constexpr auto gcDeleteDead = nix::GCAction::gcDeleteDead;
 constexpr auto gcDeleteSpecific = nix::GCAction::gcDeleteSpecific;
-#endif
 
 template<typename Path>
 static std::string nix_path_to_string(const Path &path) {
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    return path;
-#else
     return path.string();
-#endif
 }
 
 // =========================================================================
@@ -132,17 +204,11 @@ static nb::dict path_info_to_dict(nix::Store &s, const nix::ValidPathInfo &info)
 
     d["ultimate"] = info.ultimate;
 
-    // Narinfo signatures. Nix changed the field's element type -- 2.31 stores
-    // plain strings, 2.34+ stores parsed `nix::Signature` with `toStrings` to
-    // render them back. The guard is spelled 2.32 because that is the constant
-    // this file already has and it is correct for every version actually built
-    // (2.31, 2.34, 2.35); the exact release that changed it was not measured.
+    // Narinfo signatures. Each element is a parsed `nix::Signature`, and
+    // `toStrings` renders the set back. An older Nix held plain strings here,
+    // which is why this looks like more work than the field needs.
     nb::list sigs;
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    for (auto &sig : info.sigs) sigs.append(sig);
-#else
     for (auto &sig : nix::Signature::toStrings(info.sigs)) sigs.append(sig);
-#endif
     d["sigs"] = sigs;
 
     return d;
@@ -184,16 +250,9 @@ static std::shared_ptr<nix::Store> open_store_default() {
 }
 
 static void close_store(nix::Store &store) {
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    // Nix 2.31 has no RemoteStore::shutdownConnections(). The Python owner
-    // drops its final shared_ptr immediately after this call, so the
-    // RemoteStore destructor closes the pooled daemon connections via RAII.
-    (void) store;
-#else
     if (auto *remote_store = dynamic_cast<nix::RemoteStore *>(&store)) {
         remote_store->shutdownConnections();
     }
-#endif
 }
 
 static void process_connection(std::shared_ptr<nix::Store> store, int fd, bool trusted, bool recursive) {
@@ -519,7 +578,13 @@ static nb::list build_derived_paths_with_results(
     std::vector<nix::KeyedBuildResult> results;
     {
         nb::gil_scoped_release release;
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+        // Nix 2.36 moves the build entry points onto `nix::Builder`. The eval
+        // store is a parameter of `getBuilder` there, and not of the call.
+        results = s.getBuilder(evalStore)->buildPathsWithResults(paths, buildMode);
+#else
         results = s.buildPathsWithResults(paths, buildMode, evalStore);
+#endif
     }
     nb::list out;
     for (auto &kbr : results) out.append(nanopynix::build_result::from_kbr(kbr, s));
@@ -578,12 +643,27 @@ static nb::dict derived_path_node_to_dict(const Node &node) {
     return entry;
 }
 
-static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
-    nix::Derivation drv;
-    {
-        nb::gil_scoped_release release;
-        drv = s.readDerivation(drvPath);
-    }
+// One node of `inputDrvs`, read back from the dict that
+// `derived_path_node_to_dict` produced. Templated for the same reason: the
+// value type of the map differs across the supported Nix versions.
+template<typename Node>
+static Node derived_path_node_from_dict(const nb::dict &entry) {
+    Node node;
+    if (entry.contains("outputs"))
+        for (auto output : nb::cast<nb::sequence>(entry["outputs"]))
+            node.value.insert(nb::cast<std::string>(output));
+    if (entry.contains("dynamic_outputs"))
+        for (auto [output_name, child] : nb::cast<nb::dict>(entry["dynamic_outputs"]))
+            node.childMap.insert_or_assign(
+                nb::cast<std::string>(output_name),
+                derived_path_node_from_dict<Node>(nb::cast<nb::dict>(child)));
+    return node;
+}
+
+// Only the store directory is needed to render a derivation or to compute its
+// path, and `nix::Store` derives from `nix::StoreDirConfig`, so every caller
+// that has a store already has one of these.
+static nb::dict derivation_to_dict(const nix::StoreDirConfig &cfg, const nix::Derivation &drv) {
     nb::dict d;
     d["name"] = drv.name;
 
@@ -594,7 +674,7 @@ static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
         std::visit(nix::overloaded{
             [&](const nix::DerivationOutput::InputAddressed &ia) {
                 o["type"] = "InputAddressed";
-                o["path"] = s.printStorePath(ia.path);
+                o["path"] = cfg.printStorePath(ia.path);
             },
             [&](const nix::DerivationOutput::CAFixed &caf) {
                 o["type"] = "CAFixed";
@@ -620,13 +700,13 @@ static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
 
     // input_srcs: set<StorePath>
     nb::list input_srcs;
-    for (auto &p : drv.inputSrcs) input_srcs.append(s.printStorePath(p));
+    for (auto &p : drv_input_srcs(drv)) input_srcs.append(cfg.printStorePath(p));
     d["input_srcs"] = input_srcs;
 
     // input_drvs: map<drvPath, DerivationOutputs>
     nb::dict input_drvs;
-    for (auto &[path, node] : drv.inputDrvs.map)
-        input_drvs[s.printStorePath(path).c_str()] = derived_path_node_to_dict(node);
+    for (auto &[path, node] : drv_input_drvs(drv).map)
+        input_drvs[cfg.printStorePath(path).c_str()] = derived_path_node_to_dict(node);
     d["input_drvs"] = input_drvs;
 
     d["system"] = drv.platform;
@@ -658,18 +738,181 @@ static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
     return d;
 }
 
+static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
+    nix::Derivation drv;
+    {
+        nb::gil_scoped_release release;
+        drv = s.readDerivation(drvPath);
+    }
+    return derivation_to_dict(s, drv);
+}
+
+// --- The inverse of `derivation_to_dict` ---
+//
+// Every field is required, and a missing one is an error rather than a
+// default. A derivation whose `input_srcs` silently defaulted to empty would
+// render as valid ATerm, hash to a path that Nix accepts, and then build in an
+// empty sandbox. The failure would appear at build time and name nothing.
+
+static nb::object dict_item(const nb::dict &d, const char *key, const char *what) {
+    if (!d.contains(key))
+        throw nix::Error("%s is missing the key '%s'", what, key);
+    return nb::cast<nb::object>(d[key]);
+}
+
+static std::string dict_str(const nb::dict &d, const char *key, const char *what) {
+    return nb::cast<std::string>(dict_item(d, key, what));
+}
+
+static nix::DerivationOutput derivation_output_from_dict(
+        const nix::StoreDirConfig &cfg, const std::string &output_name, const nb::dict &o) {
+    auto what = "derivation output '" + output_name + "'";
+    auto type = dict_str(o, "type", what.c_str());
+
+    if (type == "InputAddressed")
+        return nix::DerivationOutput::InputAddressed{
+            .path = cfg.parseStorePath(dict_str(o, "path", what.c_str())),
+        };
+    if (type == "CAFixed")
+        return nix::DerivationOutput::CAFixed{
+            .ca = nix::ContentAddress::parse(dict_str(o, "ca", what.c_str())),
+        };
+    if (type == "CAFloating")
+        return nix::DerivationOutput::CAFloating{
+            .method = nix::ContentAddressMethod::parse(dict_str(o, "method", what.c_str())),
+            .hashAlgo = nix::parseHashAlgo(dict_str(o, "hash_algo", what.c_str())),
+        };
+    if (type == "Deferred")
+        return nix::DerivationOutput::Deferred{};
+    if (type == "Impure")
+        return nix::DerivationOutput::Impure{
+            .method = nix::ContentAddressMethod::parse(dict_str(o, "method", what.c_str())),
+            .hashAlgo = nix::parseHashAlgo(dict_str(o, "hash_algo", what.c_str())),
+        };
+
+    throw nix::Error(
+        "%s has type '%s', which is not one of InputAddressed, CAFixed, CAFloating, "
+        "Deferred or Impure", what, type);
+}
+
+static nix::Derivation derivation_from_dict(const nix::StoreDirConfig &cfg, const nb::dict &d) {
+    static constexpr const char *what = "a derivation dict";
+    nix::Derivation drv;
+
+    drv.name = dict_str(d, "name", what);
+    drv.platform = dict_str(d, "system", what);
+    drv.builder = dict_str(d, "builder", what);
+
+    for (auto [name, output] : nb::cast<nb::dict>(dict_item(d, "outputs", what))) {
+        auto output_name = nb::cast<std::string>(name);
+        drv.outputs.insert_or_assign(
+            output_name, derivation_output_from_dict(cfg, output_name, nb::cast<nb::dict>(output)));
+    }
+
+    for (auto path : nb::cast<nb::sequence>(dict_item(d, "input_srcs", what)))
+        drv_input_srcs(drv).insert(cfg.parseStorePath(nb::cast<std::string>(path)));
+
+    using Node = std::remove_cvref_t<decltype(drv_input_drvs(drv))>::ChildNode;
+    for (auto [path, node] : nb::cast<nb::dict>(dict_item(d, "input_drvs", what)))
+        drv_input_drvs(drv).map.insert_or_assign(
+            cfg.parseStorePath(nb::cast<std::string>(path)),
+            derived_path_node_from_dict<Node>(nb::cast<nb::dict>(node)));
+
+    for (auto arg : nb::cast<nb::sequence>(dict_item(d, "args", what)))
+        drv.args.push_back(nb::cast<std::string>(arg));
+
+    for (auto [k, v] : nb::cast<nb::dict>(dict_item(d, "env", what)))
+        drv.env.insert_or_assign(nb::cast<std::string>(k), nb::cast<std::string>(v));
+
+    // `unparse` re-inserts the `__json` environment variable itself, so the
+    // round trip must not also carry it in `env`. `derivation_to_dict` never
+    // puts it there, because Nix's own parser erases it.
+    auto structured = dict_item(d, "structured_attrs", what);
+    if (!structured.is_none())
+        drv.structuredAttrs = nix::StructuredAttrs::parse(nb::cast<std::string>(structured));
+
+    return drv;
+}
+
+// `nix::StoreDirConfig` holds a *reference* to the store directory, so
+// something has to own that string. This class is that owner.
+//
+// It is also what makes every operation below need no store: no daemon, no
+// socket, no `/nix/var` and no `LocalStore`. Rendering a derivation and
+// computing its path read the store directory and nothing else, so both work
+// in a unit test, on a machine with no Nix daemon, and inside the restricted
+// sandbox of a `builder-rpc-v0` build, whose worker-protocol allowlist would
+// refuse most store operations.
+struct PyStoreDirConfig {
+    std::string store_dir;
+
+    explicit PyStoreDirConfig(std::string dir) : store_dir(std::move(dir)) {
+        if (store_dir.empty())
+            throw nix::Error("store_dir must not be empty");
+    }
+
+    nix::StoreDirConfig config() const { return nix::StoreDirConfig{store_dir}; }
+};
+
+/// A `nix::Derivation` held by value, so that Python can build one, render it,
+/// and hand it to a store.
+struct PyDerivation {
+    nix::Derivation drv;
+};
+
+// Write a derivation to the store, and remember its hash modulo.
+//
+// The write itself is `unparse` plus three store operations -- `addTempRoot`,
+// `isValidPath` and `addToStoreFromDump` -- and those three are exactly the
+// operations that the `builder-rpc-v0` allowlist permits (`daemon.cc:326`).
+// So this call works inside the sandbox of such a build, where almost nothing
+// else does.
+//
+// **The memoisation is what keeps it that way for a graph.**
+// `fill_in_output_paths` on a derivation that names this one as an input
+// reaches `pathInputModulo` (`aterm.cc:745`), which reads the input `.drv`
+// back out of the store on a cache miss. `readInvalidDerivation` is *not* on
+// that allowlist. Priming the cache here, while the value is still in hand,
+// means a caller that builds a graph from the leaves upwards never misses,
+// and so never reads. Nix's own `writeDerivation` could do this and does not.
+static std::string store_write_derivation(nix::Store &s, const PyDerivation &drv, bool repair) {
+    std::optional<nix::StorePath> path;
+    {
+        nb::gil_scoped_release release;
+        path.emplace(s.writeDerivation(drv.drv, repair ? nix::Repair : nix::NoRepair));
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+        // `hashInputModulo` recurses into the inputs of this derivation, and
+        // each of those is either a source or a derivation that an earlier
+        // call already memoised. A leaf therefore reads nothing.
+        nix::derivation::hashes.insert_or_assign(
+            *path, nix::derivation::hashInputModulo(s, drv.drv));
+#endif
+    }
+    return s.printStorePath(*path);
+}
+
+// Fill in the output paths that Nix computes, rather than the caller.
+//
+// This is what lets a planner use ordinary input-addressed outputs. Such a
+// path comes from the hash of the derivation, so a caller cannot know it in
+// advance, and a planner that had to know it was forced into fixed-output
+// derivations for every node of its graph.
+static void derivation_fill_in_output_paths(PyDerivation &drv, nix::Store &s) {
+    nb::gil_scoped_release release;
+    drv_fill_in_output_paths(drv.drv, s);
+}
+
 // Rewrite a derivation so that its builder dumps its own environment, and
 // write the rewrite back to the store. This is what `nix develop` and
 // `nix print-dev-env` both start with -- `getDerivationEnvironment` in
 // `src/nix/develop.cc` -- and this follows it step for step.
 //
-// **This lives in C++ because the three supported Nix versions disagree on
-// the last two steps.** 2.31 writes with a free `writeDerivation` and fills
-// the output paths by hand, with `hashDerivationModulo` and `makeOutputPath`,
-// and it has a separate branch for `ca-derivations`. 2.34 and 2.35 have
-// `Derivation::fillInOutputPaths` and a `writeDerivation` method. A Python
-// caller would need four more bindings and a branch on the Nix version, and
-// `AGENTS.md` keeps version branches out of the library.
+// **This lives in C++ because the supported Nix versions disagree on the last
+// two steps.** 2.34 and 2.35 have `Derivation::fillInOutputPaths` and a
+// `writeDerivation` method on `Store`; 2.36 makes the first a free function in
+// `nix::derivation`. A Python caller would need four more bindings and a
+// branch on the Nix version, and `AGENTS.md` keeps version branches out of the
+// library.
 //
 // The `nix::Derivation` also never leaves C++ this way: `derivationFromPath`
 // builds it, this mutates it, `writeDerivation` consumes it. So there is no
@@ -711,15 +954,6 @@ static nix::StorePath write_dev_shell_derivation(
 
         // Drop the derivation checks. A dev shell is not the build, so the
         // reference checks that the build declares must not apply to it.
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        // 2.31 erases the flat variables and leaves `outputChecks` inside a
-        // structured-attrs derivation alone. Matched rather than corrected,
-        // so that `print-dev-env` agrees with the `nix` of the same version.
-        drv.env.erase("allowedReferences");
-        drv.env.erase("allowedRequisites");
-        drv.env.erase("disallowedReferences");
-        drv.env.erase("disallowedRequisites");
-#else
         if (drv.structuredAttrs) {
             drv.structuredAttrs->structuredAttrs.erase("outputChecks");
         } else {
@@ -728,35 +962,12 @@ static nix::StorePath write_dev_shell_derivation(
             drv.env.erase("disallowedReferences");
             drv.env.erase("disallowedRequisites");
         }
-#endif
         drv.env.erase("name");
 
         drv.name += "-env";
         drv.env.emplace("name", drv.name);
-        drv.inputSrcs.insert(script_path);
+        drv_input_srcs(drv).insert(script_path);
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        if (nix::experimentalFeatureSettings.isEnabled(nix::Xp::CaDerivations)) {
-            for (auto &output : drv.outputs) {
-                output.second = nix::DerivationOutput::Deferred{};
-                drv.env[output.first] = nix::hashPlaceholder(output.first);
-            }
-        } else {
-            for (auto &output : drv.outputs) {
-                output.second = nix::DerivationOutput::Deferred{};
-                drv.env[output.first] = "";
-            }
-            // `Store` still derives from `StoreDirConfig` on this version, so
-            // `makeOutputPath` is on the store itself and not on `.config`.
-            auto hashes_modulo = nix::hashDerivationModulo(s, drv, true);
-            for (auto &output : drv.outputs) {
-                auto out_path = s.makeOutputPath(output.first, hashes_modulo.hashes.at(output.first), drv.name);
-                output.second = nix::DerivationOutput::InputAddressed{.path = out_path};
-                drv.env[output.first] = s.printStorePath(out_path);
-            }
-        }
-        result.emplace(nix::writeDerivation(s, drv));
-#else
         // Only the two addressed kinds become deferred. CAFloating, Deferred
         // and Impure already have no path to invalidate.
         for (auto &[output_name, output] : drv.outputs) {
@@ -772,9 +983,8 @@ static nix::StorePath write_dev_shell_derivation(
                 [&](const auto &) {},
             }, output.raw);
         }
-        drv.fillInOutputPaths(s);
+        drv_fill_in_output_paths(drv, s);
         result.emplace(s.writeDerivation(drv));
-#endif
     }
     return *result;
 }
@@ -866,9 +1076,9 @@ static nix::StorePath compute_store_path(
 // submitting the root is the point: a plain dynamic derivation emits exactly
 // one derivation, and this lifts that limit.
 //
-// `SubmitStore::require` is Nix's own gate. A store that is not the restricted
-// one of a running build raises there, which is the honest place for it: the
-// same `Store` type is used either way, so no earlier check can tell.
+// `nix::SubmitStore` is the gate. Only the restricted store of a running
+// build implements that interface, so a cast to it separates the two cases,
+// the way every other optional store interface in this file is reached.
 //
 // The method is bound on every supported Nix, and refuses on a version that
 // has no such operation. Binding it conditionally would give a caller an
@@ -877,7 +1087,17 @@ static nix::StorePath compute_store_path(
 static void store_submit_output(nix::Store &s, const std::string &path, const std::string &output) {
 #if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
     auto store_path = s.parseStorePath(path);
-    auto &submit = nix::SubmitStore::require(s);
+    // `SubmitStore::require` is declared in `submit-store.hh` and defined
+    // nowhere: `submit-store.cc` holds only the vtable anchor, and
+    // `libnixstore.so` exports no such symbol. A call to it links and then
+    // fails at import time with an undefined symbol. This does the cast the
+    // way `require_indirect_root_store` above does it, which is also what
+    // every other optional store interface in this file uses.
+    auto *submit_store = dynamic_cast<nix::SubmitStore *>(&s);
+    if (submit_store == nullptr)
+        throw nix::Unsupported(
+            "store '%s' does not support submitting an output", s.config.getHumanReadableURI());
+    auto &submit = *submit_store;
     {
         nb::gil_scoped_release release;
         submit.submitOutput(nix::SingleDerivedPath::Opaque{store_path}, output);
@@ -945,6 +1165,11 @@ static void bind_store(nb::module_ &m) {
             "build_mode"_a = nix::bmNormal,
             "eval_store"_a = nullptr)
         .def("read_derivation", &read_derivation, "drv_path"_a)
+        .def("write_derivation", &store_write_derivation, "derivation"_a, "repair"_a = false,
+             "Write a derivation to this store with Nix's own ATerm writer, and "
+             "return its path. Also memoises the hash modulo of the derivation, so "
+             "that a later `fill_in_output_paths` over a graph never has to read "
+             "the derivation back out of the store.")
         .def("write_dev_shell_derivation", &write_dev_shell_derivation, "drv_path"_a, "get_env_script"_a)
         .def("submit_output", &store_submit_output, "path"_a, "output"_a = "out")
         // Path info
@@ -1007,7 +1232,16 @@ static void bind_store(nb::module_ &m) {
             },
             nb::call_guard<nb::gil_scoped_release>(),
             "path"_a)
-        .def("ensure_path", [](nix::Store &s, const nix::StorePath &p) { s.ensurePath(p); },
+        .def("ensure_path",
+             [](nix::Store &s, const nix::StorePath &p) {
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+                 // `ensurePath` moved onto `nix::Builder` in 2.36, with the
+                 // rest of the build entry points.
+                 s.getBuilder()->ensurePath(p);
+#else
+                 s.ensurePath(p);
+#endif
+             },
              nb::call_guard<nb::gil_scoped_release>(), "path"_a)
         .def("optimise_store", [](nix::Store &s) { s.optimiseStore(); },
              nb::call_guard<nb::gil_scoped_release>())
@@ -1038,6 +1272,57 @@ void nanopynix_bind_store(nb::module_ &m) {
         .value("ReturnDead", gcReturnDead)
         .value("DeleteDead", gcDeleteDead)
         .value("DeleteSpecific", gcDeleteSpecific);
+
+    nb::class_<PyStoreDirConfig>(m, "StoreDirConfig")
+        .def(nb::init<std::string>(), "store_dir"_a,
+             "The store directory, and nothing else. Every method that takes one of "
+             "these is pure: it opens no store and speaks to no daemon.")
+        .def_prop_ro("store_dir", [](const PyStoreDirConfig &c) { return c.store_dir; })
+        .def("parse_store_path",
+             [](const PyStoreDirConfig &c, const std::string &path) {
+                 auto cfg = c.config();
+                 return cfg.printStorePath(cfg.parseStorePath(path));
+             },
+             "path"_a)
+        .def("__repr__", [](const PyStoreDirConfig &c) {
+            return "StoreDirConfig(" + c.store_dir + ")";
+        });
+
+    nb::class_<PyDerivation>(m, "Derivation")
+        .def_static(
+            "from_dict",
+            [](const PyStoreDirConfig &c, const nb::dict &value) {
+                return PyDerivation{derivation_from_dict(c.config(), value)};
+            },
+            "store_dir_config"_a, "value"_a,
+            "Build a derivation from the same shape that `Store.read_derivation` "
+            "returns. Every key of that shape is required.")
+        .def("to_dict",
+             [](const PyDerivation &self, const PyStoreDirConfig &c) {
+                 return derivation_to_dict(c.config(), self.drv);
+             },
+             "store_dir_config"_a)
+        .def("to_aterm",
+             [](const PyDerivation &self, const PyStoreDirConfig &c) {
+                 return drv_unparse(self.drv, c.config());
+             },
+             "store_dir_config"_a,
+             "The ATerm bytes, rendered by Nix's own writer. These are the bytes "
+             "that `Store.write_derivation` would store.")
+        .def("store_path",
+             [](const PyDerivation &self, const PyStoreDirConfig &c) {
+                 auto cfg = c.config();
+                 return cfg.printStorePath(drv_store_path(self.drv, cfg));
+             },
+             "store_dir_config"_a,
+             "The path this derivation would have, without writing it.")
+        .def("fill_in_output_paths", &derivation_fill_in_output_paths, "store"_a,
+             "Replace each Deferred output with the input-addressed path that Nix "
+             "computes for it. Mutates this derivation.")
+        .def_prop_ro("name", [](const PyDerivation &self) { return self.drv.name; })
+        .def("__repr__", [](const PyDerivation &self) {
+            return "Derivation(" + self.drv.name + ")";
+        });
 
     m.def("open_store", &open_store_uri, "uri"_a);
     m.def("open_store", &open_store_default);

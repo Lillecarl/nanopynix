@@ -31,10 +31,10 @@ using namespace nb::literals;
 struct PyInput {
     /// The settings that `input` points at.
     ///
-    /// Nix 2.31 keeps a `const fetchers::Settings *` inside
-    /// `fetchers::Input`, so an input that Python holds must own the settings
-    /// it was built against. Before this member the settings were a local of
-    /// the function below, and the input pointed at a destroyed object.
+    /// A `fetchers::Input` reads its settings after the parse, so an input
+    /// that Python holds must own the settings it was built against. Before
+    /// this member the settings were a local of the function below, and the
+    /// input pointed at a destroyed object.
     ///
     /// No test on a supported version reaches that pointer through a
     /// `PyInput`, so this half is preventive. `nix_flake.cpp` has the same
@@ -54,13 +54,7 @@ struct PyInput {
 
     std::optional<std::string> get_fingerprint(nix::Store &store) const {
         nb::gil_scoped_release release;
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        return input.getFingerprint(nix::ref<nix::Store>(store.shared_from_this()));
-#elif NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35
         return input.getFingerprint(store);
-#else
-        return input.getFingerprint(store);
-#endif
     }
 };
 
@@ -75,7 +69,15 @@ static PyInput input_from_url(const std::string &url) {
     std::optional<nix::fetchers::Input> input;
     {
         nb::gil_scoped_release release;
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+        // Nix 2.36 drops the `fetchers::Settings &` parameter of `fromURL`
+        // and of `fromAttrs`. An `Input` no longer holds the settings; each
+        // fetch call takes them instead. `PyInput::settings` still owns the
+        // settings, because those calls still need them.
+        input.emplace(nix::fetchers::Input::fromURL(url));
+#else
         input.emplace(nix::fetchers::Input::fromURL(*settings, url));
+#endif
     }
     return PyInput(std::move(settings), std::move(*input));
 }
@@ -87,7 +89,11 @@ static PyInput input_from_attrs(const std::map<std::string, std::string> &attrs)
     std::optional<nix::fetchers::Input> input;
     {
         nb::gil_scoped_release release;
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+        input.emplace(nix::fetchers::Input::fromAttrs(std::move(a)));
+#else
         input.emplace(nix::fetchers::Input::fromAttrs(*settings, std::move(a)));
+#endif
     }
     return PyInput(std::move(settings), std::move(*input));
 }

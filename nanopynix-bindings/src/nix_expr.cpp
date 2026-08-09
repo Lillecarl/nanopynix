@@ -64,6 +64,12 @@
 
 #include <nanopynix/nix_compat_config.hh>
 
+// New in the 2.36 band: `nix::Builder` holds the build entry points that
+// `nix::Store` held before, and `Store::getBuilder` returns one.
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+#  include <nix/store/build.hh>
+#endif
+
 #include "build_result_util.hh"
 #include "nanopynix_errors.hh"
 #include "nix_error_info.hh"
@@ -71,6 +77,20 @@
 
 namespace nb = nanobind;
 using namespace nb::literals;
+
+// Nix 2.36 changes the signature of a primop implementation. `PrimOpFun` was
+// `void(EvalState &, const PosIdx, Value **, Value &)`, and it is now
+// `void(EvalState &, CallSite, Value * const *, Value &)`. `CallSite` is a
+// struct that holds the same `PosIdx`, and the argument array became const.
+// This bridge reads neither the position nor a writable argument array, so
+// two aliases carry the whole change.
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+using NanopynixCallSite = nix::CallSite;
+using NanopynixPrimOpArgs = nix::Value *const *;
+#else
+using NanopynixCallSite = const nix::PosIdx;
+using NanopynixPrimOpArgs = nix::Value **;
+#endif
 
 // =========================================================================
 // PyValue out-of-line method implementations
@@ -453,7 +473,13 @@ nb::dict PyValue::build(
     std::vector<nix::KeyedBuildResult> results;
     try {
         nb::gil_scoped_release release;
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+        // Nix 2.36 moves the build entry points onto `nix::Builder`, which
+        // `Store::getBuilder` returns, and takes the eval store there.
+        results = store->getBuilder(eval_store)->buildPathsWithResults(paths, build_mode);
+#else
         results = store->buildPathsWithResults(paths, build_mode, eval_store);
+#endif
     } catch (nix::Error &e) {
         nix::logger->logEI(nix::lvlError, e.info());
         e.addTrace({}, "while building evaluated derivation");
@@ -506,11 +532,7 @@ std::string PyValue::repr() {
 static nix::SourcePath lookup_file_arg(nix::EvalState &state, std::string_view s) {
     if (nix::EvalSettings::isPseudoUrl(s)) {
         auto accessor = nix::fetchers::downloadTarball(
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-            state.store,
-#else
             *state.store,
-#endif
             state.fetchSettings, nix::EvalSettings::resolvePseudoUrl(s));
         auto storePath = nix::fetchToStore(
             state.fetchSettings, *state.store, nix::SourcePath(accessor), nix::FetchMode::Copy);
@@ -519,16 +541,17 @@ static nix::SourcePath lookup_file_arg(nix::EvalState &state, std::string_view s
 
     if (nix::hasPrefix(s, "flake:")) {
         nix::experimentalFeatureSettings.require(nix::Xp::Flakes);
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+        // Nix 2.36 drops the `fetchers::Settings &` parameter of
+        // `parseFlakeRef`. Parsing no longer reads a fetch setting; only a
+        // fetch does, and `resolve` and `lazyFetch` still take the settings.
+        auto flakeRef = nix::parseFlakeRef(std::string(s.substr(6)), {}, true, false);
+#else
         auto flakeRef =
             nix::parseFlakeRef(state.fetchSettings, std::string(s.substr(6)), {}, true, false);
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        // resolve()/lazyFetch() read the fetch settings off the store's own
-        // state before 2.32; they grew explicit Settings parameters after.
-        auto [accessor, lockedRef] = flakeRef.resolve(state.store).lazyFetch(state.store);
-#else
+#endif
         auto [accessor, lockedRef] = flakeRef.resolve(state.fetchSettings, *state.store)
                                          .lazyFetch(state.fetchSettings, *state.store);
-#endif
         auto storePath = nix::fetchToStore(
             state.fetchSettings, *state.store, nix::SourcePath(accessor), nix::FetchMode::Copy,
             lockedRef.input.getName());
@@ -539,11 +562,7 @@ static nix::SourcePath lookup_file_arg(nix::EvalState &state, std::string_view s
     if (s.size() > 2 && s.front() == '<' && s.back() == '>')
         return state.findFile(std::string(s.substr(1, s.size() - 2)));
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    return state.rootPath(nix::absPath(s));
-#else
     return state.rootPath(nix::absPath(std::filesystem::path{s}).string());
-#endif
 }
 
 // =========================================================================
@@ -571,11 +590,7 @@ void PyEvalState::begin_repl() {
 
     constexpr size_t repl_env_size = 32768;
     repl_static_env = std::make_shared<nix::StaticEnv>(nullptr, state->staticBaseEnv);
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    repl_env = &state->allocEnv(repl_env_size);
-#else
     repl_env = &state->mem.allocEnv(repl_env_size);
-#endif
     repl_env->up = &state->baseEnv;
     repl_displ = 0;
     // The one place the size is named. Every bounds check reads it back from
@@ -662,54 +677,6 @@ std::optional<PyValue> PyEvalState::repl_process_line(const std::string &line, c
     nb::gil_scoped_release release;
     auto basePath = state->rootPath(nix::CanonPath(path));
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    // Nix 2.31 has no parseReplBindings(). Preserve the core REPL contract
-    // with simple identifier assignments; newer Nix versions use its full
-    // binding parser below (including inherit forms).
-    auto trim = [](std::string_view value) {
-        auto first = value.find_first_not_of(" \t\n\r");
-        if (first == std::string_view::npos)
-            return std::string_view{};
-        return value.substr(first, value.find_last_not_of(" \t\n\r") - first + 1);
-    };
-    auto is_identifier = [](std::string_view name) {
-        if (name.empty() || !(std::isalpha(static_cast<unsigned char>(name.front())) || name.front() == '_'))
-            return false;
-        for (char ch : name.substr(1)) {
-            if (!(std::isalnum(static_cast<unsigned char>(ch)) || ch == '_' || ch == '-' || ch == '\''))
-                return false;
-        }
-        return true;
-    };
-    size_t assignment = std::string::npos;
-    for (size_t i = 0; i < line.size(); ++i) {
-        if (line[i] != '=')
-            continue;
-        bool adjacentEquals = (i > 0 && line[i - 1] == '=') || (i + 1 < line.size() && line[i + 1] == '=');
-        if (!adjacentEquals) {
-            assignment = i;
-            break;
-        }
-    }
-    if (assignment != std::string::npos) {
-        auto name = trim(std::string_view(line).substr(0, assignment));
-        auto expression = trim(std::string_view(line).substr(assignment + 1));
-        if (!expression.empty() && expression.back() == ';')
-            expression = trim(expression.substr(0, expression.size() - 1));
-        if (is_identifier(name) && !expression.empty()) {
-            auto *parsedExpr = state->parseExprFromString(std::string(expression), basePath, repl_static_env);
-            nix::Value &value(*state->allocValue());
-            value.mkThunk(repl_env, parsedExpr);
-            repl_bind(state->symbols.create(name), value);
-            return std::nullopt;
-        }
-    }
-    auto *parsedExpr = state->parseExprFromString(line, basePath, repl_static_env);
-    auto *value = state->allocValue();
-    parsedExpr->eval(*state, *repl_env, *value);
-    state->forceValue(*value, nix::noPos);
-    return PyValue(value, this, alive);
-#else
     nix::ExprAttrs *bindings = nullptr;
     try {
         bindings = state->parseReplBindings(line, basePath, repl_static_env);
@@ -734,7 +701,6 @@ std::optional<PyValue> PyEvalState::repl_process_line(const std::string &line, c
         repl_bind(symbol, value);
     }
     return std::nullopt;
-#endif
 }
 
 std::vector<std::string> PyEvalState::repl_add_attrs(PyValue attrs) {
@@ -1065,8 +1031,8 @@ static std::vector<std::unique_ptr<nix::PrimOp>> &anon_primops() {
 // from the callable branch in python_to_value.
 static void py_primop_bridge(
     const std::string &name, int arity,
-    nix::EvalState &state, const nix::PosIdx,
-    nix::Value **args, nix::Value &ret);
+    nix::EvalState &state, NanopynixCallSite,
+    NanopynixPrimOpArgs args, nix::Value &ret);
 
 // Holder for a registered Python primop callback (forward-declared for
 // the callable branch in python_to_value).
@@ -1131,15 +1097,11 @@ static void python_to_value(
         v.mkFloat(nb::cast<double>(obj));
     } else if (nb::isinstance<nb::str>(obj)) {
         auto s = nb::cast<std::string>(obj);
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        v.mkString(s);
-#else
         if (context.empty()) {
             v.mkString(s, state.mem);
         } else {
             v.mkString(s, context, state.mem);
         }
-#endif
     } else if (nb::isinstance<nb::list>(obj)) {
         auto pyList = nb::cast<nb::list>(obj);
         auto builder = state.buildList(pyList.size());
@@ -1198,8 +1160,8 @@ static void python_to_value(
             reg[anon_name] = PyPrimOpCallback{std::move(obj), arity, ""};
 
             auto impl = [anon_name, arity](
-                nix::EvalState &st, const nix::PosIdx pos,
-                nix::Value **args, nix::Value &ret) {
+                nix::EvalState &st, NanopynixCallSite pos,
+                NanopynixPrimOpArgs args, nix::Value &ret) {
                 py_primop_bridge(anon_name, arity, st, pos, args, ret);
             };
 
@@ -1208,16 +1170,8 @@ static void python_to_value(
                 .name = anon_name,
                 .args = arg_names,
                 .arity = static_cast<size_t>(arity),
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-                .doc = nullptr,
-#else
                 .doc = std::nullopt,
-#endif
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-                .fun = impl,
-#else
                 .impl = impl,
-#endif
             }));
 
             v.mkPrimOp(anon.get());
@@ -1243,8 +1197,8 @@ PyValue PyEvalState::value_from_python(nb::object obj) {
 // C++ primop implementation that bridges to Python.
 static void py_primop_bridge(
     const std::string &name, int arity,
-    nix::EvalState &state, const nix::PosIdx,
-    nix::Value **args, nix::Value &ret)
+    nix::EvalState &state, NanopynixCallSite,
+    NanopynixPrimOpArgs args, nix::Value &ret)
 {
     auto &reg = py_primop_registry();
     auto it = reg.find(name);
@@ -1321,19 +1275,14 @@ static void register_primop(
     const std::string &doc,
     nb::object callback)
 {
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    throw std::runtime_error(
-        "register_primop is unsupported by Nix " NANOPYNIX_NIX_VERSION
-        ": this Nix version has a fixed-capacity builtin attribute set");
-#else
     // Store callback in registry
     auto &reg = py_primop_registry();
     auto [it, _] = reg.insert_or_assign(name, PyPrimOpCallback{callback, arity, doc});
     auto &registered = it->second;
 
     // Create the C++ PrimOp
-    auto impl = [name, arity](nix::EvalState &state, const nix::PosIdx pos,
-                               nix::Value **args, nix::Value &ret) {
+    auto impl = [name, arity](nix::EvalState &state, NanopynixCallSite pos,
+                               NanopynixPrimOpArgs args, nix::Value &ret) {
         py_primop_bridge(name, arity, state, pos, args, ret);
     };
 
@@ -1341,22 +1290,13 @@ static void register_primop(
         .name = name,
         .args = arg_names,
         .arity = static_cast<size_t>(arity),
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        .doc = registered.doc.empty() ? nullptr : registered.doc.c_str(),
-#else
         .doc = registered.doc.empty() ? std::optional<std::string>{} : std::optional<std::string>{registered.doc},
-#endif
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        .fun = impl,
-#else
         .impl = impl,
-#endif
     };
 
     // Register globally
     nix::RegisterPrimOp r(std::move(*p));
     delete p;
-#endif
 }
 
 // =========================================================================

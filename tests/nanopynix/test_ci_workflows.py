@@ -39,12 +39,11 @@ if TYPE_CHECKING:
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RENDERER = _REPO_ROOT / "ci" / "render.py"
 
-# Dynamic primop registration is broken on Nix 2.31 and is not expected to be
-# fixed there, and the renderer needs `builtins.toYAML` -- see
-# nanopynix.primops. Every other supported version renders, so the gate still
-# runs on each of them. The guard below carries no such marker: it reads the
-# tree and never evaluates anything, so it must report a missing renderer on
-# every version.
+# The renderer needs `builtins.toYAML`, which dynamic primop registration
+# provides -- see nanopynix.primops. The marker states that requirement rather
+# than assuming it. The guard below carries no such marker: it reads the tree
+# and never evaluates anything, so it must report a missing renderer on every
+# version.
 _requires_dynamic_primops = pytest.mark.nix_capability("dynamic_primop_registration")
 
 

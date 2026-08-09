@@ -43,35 +43,21 @@ namespace nb = nanobind;
  *   or a list of strings", so they are excluded deliberately and permanently.
  * - `queryValidPaths` is not on that class, so nothing can call it directly;
  *   `nix::Store` derives it from `queryPathInfo`, which already dispatches.
- * `read_derivation` is in the list on every version but is only *dispatched*
- * where `nix::Store::readDerivation` is virtual -- not on 2.31
- * (`store-api.hh:771`), yes by 2.34 (`:819`). Keeping the name in the list
- * regardless is deliberate: `StoreImpl.__init_subclass__` only records
- * overrides of names this list contains, so a version-varying list would leave
- * a 2.31 store's `read_derivation` recorded nowhere and ignored with no signal
- * at all. With it present the flag is read on every version -- to dispatch on
- * 2.34+, and to warn at store-open time on 2.31 -- so no build has a flag
- * nothing looks at. `nanopynix.build_info()["capabilities"]` carries
- * `store_impl_read_derivation` for callers that want to branch rather than
- * read a warning, the same way `dynamic_primop_registration` is handled.
+ * `read_derivation` is dispatched because `nix::Store::readDerivation` is
+ * virtual from 2.34 on (`store-api.hh:819`).
+ * `nanopynix.build_info()["capabilities"]` carries
+ * `store_impl_read_derivation`, the same way `dynamic_primop_registration` is
+ * handled, for a caller that wants to branch on it.
  *
- * There is no fallback on 2.31, and the comment this replaces claimed
- * otherwise. `nix::Store::readDerivation` does *not* route through
+ * There is no fallback. `nix::Store::readDerivation` does *not* route through
  * `queryPathInfo`: `readDerivationCommon` reads the `.drv` through
- * `getFSAccessor(bool)` (2.31, `store-api.cc:1129`) or
- * `requireStoreObjectAccessor` (2.35, `:1183`), and `PyStoreImpl` answers both
- * with an empty `MemorySourceAccessor`/`nullptr` when no `underlying` is set.
- * Measured, not inferred: on 2.35 a pure Python store whose
- * `is_valid_path_uncached` returns true and whose `query_path_info` answers
- * still fails `read_derivation` with `InvalidPath: path '...' is not a valid
- * store path`. Serving derivations was never possible on any supported
- * version, which is what makes this an addition rather than a relaxation.
- *
- * Serving it through `getFSAccessor` instead -- which would work on 2.31 too,
- * with no virtual needed -- was rejected: 2.31 asks the whole-store accessor
- * for `CanonPath(drvPath.to_string())` while 2.35 asks a per-object accessor
- * for `CanonPath::root`. Two accessor contracts with different path rooting is
- * two protocols, not one, in the same way `narFromPath`'s `Sink &` is.
+ * `requireStoreObjectAccessor` (2.35, `store-api.cc:1183`), and `PyStoreImpl`
+ * answers with a `nullptr` accessor when no `underlying` is set. Measured, not
+ * inferred: on 2.35 a pure Python store whose `is_valid_path_uncached` returns
+ * true and whose `query_path_info` answers still fails `read_derivation` with
+ * `InvalidPath: path '...' is not a valid store path`. Serving derivations was
+ * never possible without this hook, which is what makes it an addition rather
+ * than a relaxation.
  */
 #define NANOPYNIX_STORE_DISPATCH_METHODS(X)                                                        \
     X(is_valid_path_uncached)                                                                      \
@@ -147,11 +133,7 @@ struct PyStoreImpl : public nix::Store {
 
     void queryRealisationUncached(
         const nix::DrvOutput & id,
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        nix::Callback<std::shared_ptr<const nix::Realisation>> callback
-#else
         nix::Callback<std::shared_ptr<const nix::UnkeyedRealisation>> callback
-#endif
         ) noexcept override;
 
     std::optional<nix::StorePath> queryPathFromHashPart(const std::string & hashPart) override;
@@ -171,13 +153,18 @@ struct PyStoreImpl : public nix::Store {
         const nix::StorePathSet & references,
         nix::RepairFlag repair) override;
 
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+    // Nix 2.36 makes `registerDrvOutputUnchecked` the pure virtual, and keeps
+    // `registerDrvOutput(const Realisation &, CheckSigsFlag)` as a
+    // signature-checking wrapper that calls it. This class holds the same
+    // place in both shapes: the innermost operation.
+    void registerDrvOutputUnchecked(const nix::Realisation & output) override;
+#else
     void registerDrvOutput(const nix::Realisation & output) override;
+#endif
 
     nix::ref<nix::SourceAccessor> getFSAccessor(bool requireValidPath = true) override;
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-#else
     std::shared_ptr<nix::SourceAccessor> getFSAccessor(const nix::StorePath & path, bool requireValidPath = true) override;
-#endif
 
     std::optional<nix::TrustedFlag> isTrustedClient() override;
 
@@ -190,13 +177,27 @@ struct PyStoreImpl : public nix::Store {
     nix::StorePathSet queryAllValidPaths() override;
     nix::StorePathSet querySubstitutablePaths(const nix::StorePathSet & paths) override;
     void addTempRoot(const nix::StorePath & path) override;
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+    // Nix 2.36 moves `ensurePath`, and the build entry points beside it, off
+    // `nix::Store` and onto the `nix::Builder` that `getBuilder` returns. A
+    // `PyStoreImpl` is not a `Builder`, so the Python `ensure_path` hook stays
+    // reachable through a wrapper builder that `py_store_impl.cpp` defines.
+    // `try_python_ensure_path` is the body that both bands share.
+    nix::ref<nix::Builder> getBuilder(std::shared_ptr<nix::Store> evalStore = nullptr) override;
+#else
     void ensurePath(const nix::StorePath & path) override;
+#endif
+    /// Give the Python `ensure_path` hook the first look at `path`.
+    ///
+    /// Returns true when the hook handled the call, and false when the caller
+    /// must fall back.
+    bool try_python_ensure_path(const nix::StorePath & path);
     void optimiseStore() override;
     bool verifyStore(bool checkContents, nix::RepairFlag repair) override;
 
     // `nix::Store` declares two `computeFSClosure` overloads and only the
-    // set-taking one is virtual (`store-api.hh:836` on 2.34, `:788` on 2.31,
-    // `:979` on 2.35); the single-path one just wraps it. Overriding the wrong
+    // set-taking one is virtual (`store-api.hh:836` on 2.34, `:979` on 2.35);
+    // the single-path one just wraps it. Overriding the wrong
     // one would compile and never be called, so this is the set overload.
     void computeFSClosure(
         const nix::StorePathSet & paths,
@@ -207,16 +208,7 @@ struct PyStoreImpl : public nix::Store {
 
     nix::MissingPaths queryMissing(const std::vector<nix::DerivedPath> & targets) override;
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    // Not overridable here: `readDerivation` is non-virtual on 2.31, so an
-    // `override` would not compile and a same-signature member would be
-    // shadowed rather than called. `PyStoreMethods::resolve` warns instead.
-    // 2.32 is the threshold the rest of this codebase uses for "not 2.31"; the
-    // release that actually added `virtual` is somewhere in 2.32..2.34 and was
-    // not measured, which costs nothing while only 2.31/2.34/2.35 are built.
-#else
     nix::Derivation readDerivation(const nix::StorePath & drvPath) override;
-#endif
 
     // Not dispatched: overridden only so `underlying` gets a chance before
     // nix::Store's own behaviour. `narFromPath` needs a `Sink &`, and

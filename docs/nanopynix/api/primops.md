@@ -8,7 +8,7 @@ custom Python-backed primop alongside these.
 ```{note}
 Primop registration — these YAML primops and custom
 `Session(primops=..., primop_callables=...)` registration alike — requires
-Nix >= 2.32. It's broken on Nix 2.31 and not expected to be fixed there.
+Nix >= 2.32. Every supported Nix meets that.
 ```
 
 ```{eval-rst}

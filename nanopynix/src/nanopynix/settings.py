@@ -691,10 +691,9 @@ class NixFetchSettings(NixConfigModel):
     allow_dirty: bool | None = _live()
     allow_dirty_locks: bool | None = _live()
     flake_registry: str | None = _live()
-    # Nix 2.31 keeps `tarball-ttl` in the global registry. Nix 2.34 moved it
-    # into the fetcher registry, where the two versions disagree about the
-    # owner rather than about the setting. Live, like every field here -- the
-    # version gate is what it has to say, and untagged already means live.
+    # Nix 2.34 moved `tarball-ttl` into the fetcher registry, from the global
+    # one. The gate says which registry owns it, and not whether the setting
+    # exists. Live, like every field here -- untagged already means live.
     tarball_ttl: int | None = since(NIX_2_34)
     trust_tarballs_from_git_forges: bool | None = _live()
     warn_dirty: bool | None = _live()

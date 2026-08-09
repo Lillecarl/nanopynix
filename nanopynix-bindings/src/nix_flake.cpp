@@ -38,15 +38,17 @@ using namespace nb::literals;
 struct PyFlakeRef {
     /// The settings that `ref.input` points at.
     ///
-    /// Nix 2.31 keeps a `const fetchers::Settings *` inside `fetchers::Input`,
-    /// and its git fetcher reads through that pointer long after the parse.
-    /// So a flake reference that Python holds must own the settings it was
-    /// parsed against. Before this member the settings were a local of
-    /// `parse_flake_ref`, and every `lock_flake` on 2.31 read freed memory.
-    /// See issue #34.
+    /// A `fetchers::Input` reads its settings long after the parse, through
+    /// `resolve` and through `lazyFetch`. So a flake reference that Python
+    /// holds must own the settings it was parsed against. Before this member
+    /// the settings were a local of `parse_flake_ref`, and every `lock_flake`
+    /// read freed memory. See issue #34.
     ///
     /// A `shared_ptr`, because a `PyFlakeRef` is copied and moved while the
     /// raw pointer inside `ref` stays as it was.
+    ///
+    /// From 2.36 an `Input` carries no settings pointer, and the member is
+    /// then only what `resolve` and `lazyFetch` are given.
     std::shared_ptr<nix::fetchers::Settings> settings;
     nix::FlakeRef ref;
 
@@ -124,9 +126,7 @@ struct PyLockedFlake {
                 nix::CanonPath(relPath),
                 lockFileStr + "\n",
                 std::nullopt);
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-            // SourcePath did not expose a cache invalidation hook yet.
-#elif NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35
             locked->flake.lockFilePath().invalidateCache();
 #else
             // SourcePath cache invalidation was removed in Nix 2.35.
@@ -165,23 +165,39 @@ static PyFlakeRef parse_flake_ref(const std::string &url,
         // called `path:/w` here, and `lock_flake` disagreed with `eval_flake`
         // about the same string. A relative path did not parse at all -- the
         // `else` branch of that function rejects one.
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+        // Nix 2.36 drops the `fetchers::Settings &` parameter of
+        // `parseFlakeRef` and of `FlakeRef::fromAttrs`. A parse reads no fetch
+        // setting there; `resolve` and `lazyFetch` still take the settings, so
+        // `PyFlakeRef::settings` still owns them.
+        ref.emplace(nix::parseFlakeRef(url, std::filesystem::current_path()));
+#else
         ref.emplace(nix::parseFlakeRef(*settings, url, std::filesystem::current_path()));
+#endif
     }
     return PyFlakeRef(std::move(settings), std::move(*ref));
 }
 
 /// Re-parse `flakeRef` against the fetch settings of `es`.
 ///
-/// Nix 2.34 and Nix 2.35 pass `state.fetchSettings` to each fetcher call, so
-/// an evaluator's own fetch settings already decide there. Nix 2.31 reads the
-/// settings that the reference was parsed against instead. This makes the
-/// three versions agree: the evaluator owns the fetch scope, and a setting
-/// baked into a parsed reference applies to the parse alone.
+/// The evaluator owns the fetch scope, and a setting baked into a parsed
+/// reference applies to the parse alone. 2.34 and 2.35 need this rebinding to
+/// make that true, because a `FlakeRef` there still names the settings it was
+/// parsed against. 2.36 makes it true by construction.
 ///
 /// `es.fetchSettings` outlives `es.state`, which Nix requires of it, so the
 /// result is valid for as long as the evaluator is.
 static nix::FlakeRef bind_to_evaluator(PyEvalState &es, const PyFlakeRef &flakeRef) {
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+    // From 2.36 a `FlakeRef` carries no settings at all, so there is nothing
+    // left to rebind and the evaluator owns the fetch scope by construction.
+    // The round trip through the attributes stays, so that every band builds
+    // the reference the same way.
+    (void) es;
+    return nix::FlakeRef::fromAttrs(flakeRef.ref.toAttrs());
+#else
     return nix::FlakeRef::fromAttrs(es.fetchSettings, flakeRef.ref.toAttrs());
+#endif
 }
 
 static PyLockedFlake lock_flake(
@@ -207,17 +223,11 @@ static PyLockedFlake lock_flake(
     }
 
     for (const auto &input : input_updates) {
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        if (input.empty())
-            throw std::runtime_error("input path cannot be empty: '" + input + "'");
-        lockFlags.inputUpdates.insert(nix::flake::parseInputAttrPath(input));
-#else
         auto path = nix::flake::NonEmptyInputAttrPath::parse(input);
         if (!path)
             throw std::runtime_error(
                 "input path cannot be empty: '" + input + "'");
         lockFlags.inputUpdates.insert(*path);
-#endif
     }
 
     std::unique_ptr<nix::flake::LockedFlake> locked;
@@ -288,15 +298,7 @@ static std::string metadata_json(PyEvalState &es, PyLockedFlake &lf) {
         // all three.
         j["path"] = store->printStorePath(store->toStorePath(flake.path.path.abs()).first);
         j["locks"] = lockedFlake.lockFile.toJSON().first;
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        // getFingerprint took a `ref<Store>` until Nix 2.32, and takes a `Store &`
-        // from that version on. This is the only version difference in the whole
-        // lock-file surface: `InputAttrPath`, `Node::Edge`, `findInput` and
-        // `toJSON` are identical in Nix 2.31, 2.34 and 2.35.
-        auto fingerprint = lockedFlake.getFingerprint(nix::ref<nix::Store>(store), es.fetchSettings);
-#else
         auto fingerprint = lockedFlake.getFingerprint(*store, es.fetchSettings);
-#endif
         if (fingerprint)
             j["fingerprint"] = fingerprint->to_string(nix::HashFormat::Base16, false);
 
@@ -321,8 +323,12 @@ static PyFlakeRef get_flake(PyEvalState &es, PyFlakeRef &flakeRef,
     // Back onto this reference's own settings, so the result is
     // self-contained. Every `PyFlakeRef` owns what its `Input` points at, and
     // no caller has to know which evaluator resolved it.
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+    return PyFlakeRef(flakeRef.settings, nix::FlakeRef::fromAttrs(resolved));
+#else
     return PyFlakeRef(flakeRef.settings,
                       nix::FlakeRef::fromAttrs(*flakeRef.settings, resolved));
+#endif
 }
 
 static PyValue call_flake(PyEvalState &es, PyLockedFlake &lf) {
@@ -347,8 +353,12 @@ static PyValue eval_flake(PyEvalState &es, const std::string &ref,
     nix::Value *v;
     {
         nb::gil_scoped_release release;
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+        auto flakeRef = nix::parseFlakeRef(ref, std::filesystem::current_path());
+#else
         auto flakeRef = nix::parseFlakeRef(
             es.fetchSettings, ref, std::filesystem::current_path());
+#endif
         auto lockedFlake = nix::flake::lockFlake(
             flakeSettings, *es.state, flakeRef, lockFlags);
         v = es.state->allocValue();

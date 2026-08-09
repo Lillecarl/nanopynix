@@ -27,7 +27,7 @@ and `x86_64-linux`. Each claim names the command that produced it.
 - **One planner output is exactly one derivation.** A fan-out needs
   `builder-rpc-v0`, which is merged in Nix master and is in no release yet.
 - `builder-rpc-v0` **runs on this machine**, on Nix
-  `2.36.0pre20260806_9137203`. `ddrn/examples/submitted/run.sh` builds it and
+  `2.36.0pre20260809_adee4313`. `ddrn/examples/submitted/run.sh` builds it and
   proves it. That feature is where `nanopynix` belongs. See
   [What `builder-rpc-v0` changes](#what-builder-rpc-v0-changes).
 
@@ -160,11 +160,153 @@ set in such a derivation, which the upstream test
 This removes the one-derivation limit. A planner can add a `.drv` for every
 package, wire them into a real graph, and submit the root.
 
+#### The socket is an allowlist of six operations
+
+**`builder-rpc-v0` is not `recursive-nix`, and the difference is larger than
+the name suggests.** `daemon.cc:326` refuses every operation that this list
+does not name:
+
+```cpp
+static constexpr std::array validOperations = {
+    WorkerProto::Op::AddToStore,
+    WorkerProto::Op::AddMultipleToStore,
+    WorkerProto::Op::AddToStoreNar,
+    WorkerProto::Op::AddToStoreScanning,
+    WorkerProto::Op::SubmitOutput,
+    WorkerProto::Op::AddTempRoot,
+    WorkerProto::Op::IsValidPath,
+};
+```
+
+A refused operation gives `Operation <n> not allowed inside derivation`.
+
+Three consequences follow, and each one shapes what a planner can do:
+
+- **The builder cannot build.** `BuildPaths` and `BuildPathsWithResults` are
+  not on the list. A planner registers a graph; it does not realise one. The
+  consumer of the submitted `.drv` realises it, with `builtins.outputOf`.
+- **The builder cannot read path information.** `QueryPathInfo` is not on the
+  list, so a planner cannot ask the store for the size, the references or the
+  NAR hash of a path.
+- **The evaluator cannot attach store context.** `builtins.storePath` calls
+  `ensurePath` (`primops.cc:2017`), and so does `builtins.appendContext`
+  (`context.cc:276`). `EnsurePath` is operation 10, and it is not on the list.
+  Both primops skip the call under `read-only`, but `read-only` also makes
+  `derivationStrict` *compute* a derivation path rather than write one
+  (`primops.cc:1901`), which is the opposite of what a planner needs.
+
+The third consequence is the load-bearing one. A derivation gets its
+`inputSrcs` from the string context of its attributes, and the two primops
+that attach that context are the two the allowlist forbids. **So a planner
+inside this sandbox cannot use the evaluator to write its `.drv` files, and
+must write the ATerm itself.** That is what `ddrn/_derivation.py` is for.
+
+An evaluator over a second, unrestricted store (`dummy://`) would side-step
+the primops, and the ATerm bytes would still have to reach the real store
+through `AddToStore`. This is untested here.
+
+#### The graph that this allowlist permits
+
+`ddrn/examples/submitted-graph` builds one, and each step uses an operation
+that the allowlist names. Run it with
+`ddrn/examples/submitted-graph/run.sh`.
+
+1. **Build each derivation as a value.** `Derivation.from_dict` takes the same
+   shape that `Store.read_derivation` returns, and `Derivation.to_aterm`
+   renders it with Nix's own writer. Both need a `StoreDirConfig` and nothing
+   else: no store, no daemon and no socket, so neither can be refused.
+2. **Let Nix fill in the output paths.** An input-addressed output path comes
+   from the hash of the derivation, so a planner cannot know it in advance.
+   `Derivation.fill_in_output_paths` computes it, and also sets the output's
+   environment variable.
+3. **Write each derivation.** `Store.write_derivation` uses `AddTempRoot`,
+   `IsValidPath` and `AddToStoreFromDump`, which are all permitted.
+4. **Submit the root `.drv`**, and not an output of it. The builder cannot
+   build, so the `.drv` is the deliverable. Its consumer realises the graph
+   with `builtins.outputOf`.
+
+Two rules of Nix meet at step 4, and one mode satisfies both.
+
+Nix checks the name of the submitted store object against
+`outputPathName(drv.name, "out")`, which is `drv.name`
+(`derivation-check.cc:109`). The submitted object is a `.drv`, so **the outer
+derivation must be named `<something>.drv`.** A derivation may carry such a
+name only when it ingests as text and has exactly one output named `out`
+(`primops.cc:1815`), and `builder-rpc-v0` needs a content-addressing
+derivation (`derivation-builder.cc:482`). Text ingestion is content-addressing,
+so `outputHashMode = "text"` meets both rules.
+
+That mode is the one an ordinary dynamic derivation uses, which is the honest
+description of the result: **a `builder-rpc-v0` planner is a dynamic
+derivation whose `.drv` nanopynix wrote through the socket, rather than one
+its builder wrote to `$out`.** What the feature buys is the rest of the graph.
+A `$out` of a text-ingested derivation is one file, so it holds one `.drv`;
+`AddToStore` puts as many as the planner likes into the store beside it.
+
+##### Why the memo in `write_derivation` matters
+
+Step 2 on the root reaches `pathInputModulo` (`aterm.cc:745`), which looks up
+each input derivation in a process-global memo and, on a miss, reads that
+`.drv` back out of the store with `readInvalidDerivation`. **That read is not
+on the allowlist.** `Store.write_derivation` therefore records the hash modulo
+of what it writes, while the value is still in hand. A planner that builds its
+graph from the leaves upwards never misses, and so never reads. Nix's own
+`writeDerivation` could do this and does not.
+
+#### Why this, and not recursive Nix
+
 The PR states the relationship to `recursive-nix` directly:
 
 > recursive-nix has not been moving towards stabilization. This new API
 > greatly limits the allowed nix daemon API calls within derivations […] in
-> order to reduce attack surface and opportunities for non-reproducability.
+> order to reduce attack surface and opportunities for non-reproducability of
+> derivations between nix versions.
+
+Four issues give the rest of the reasoning, and they read in this order:
+
+- **[#8602](https://github.com/NixOS/nix/issues/8602)** (2023, open) asks for
+  "a very restricted recursive nix socket in the sandbox". It gives the want:
+  "for RFC 92 dynamic derivations we want to add derivations to the store from
+  within the sandbox. While writing a derivation text to a predefined location
+  such as `$out` would get the job done for a single derivation, the real power
+  comes from adding multiple derivations."
+- **[#13768](https://github.com/NixOS/nix/pull/13768)** (draft) built that
+  socket as a separate varlink daemon. #15793 says why it moved: the varlink
+  form "required a separate client and server, not reusing any of the existing
+  nix daemon code and protocol", so the work went into the standard daemon "to
+  reduce the total implementation burden".
+- **[#15791](https://github.com/NixOS/nix/issues/15791)** (closed) named the
+  three design rules that became the allowlist: register an output
+  imperatively rather than leave data in a place; do not let the builder extend
+  the sandbox; "disable imperatively building things; perhaps whitelist
+  operations extremely stringently in general".
+- **[#15810](https://github.com/NixOS/nix/issues/15810)** (open) asks for a
+  "simple builder-rpc alternative requiring no client code in derivation". It
+  names the cost of the current design: "the stdenv bootstrap and other
+  foundational derivations cannot reasonably depend on Nix itself". It sketches
+  three successors: a textual pipe, a file system interface under `$NIX_OUT`
+  where the client chooses each identifier and computes no hash, and a shim
+  that runs after the builder inside the same sandbox.
+
+**The reviewers of #15793 raised the same objection.** edolstra asked "wouldn't
+it be nicer to provide a simple textual pipe mechanism […] since the latter
+requires a derivation to include Nix (or something that implements enough of
+the daemon protocol) in its input closure". roberth answered that this "is very
+much a version zero 'worse is better' solution […] for reducing unknown
+unknowns for the Nix team", and added: "**it may not move to stabilization
+though**". The author agrees: "it is called `-v0` and locked behind an
+experimental feature for a reason".
+
+Two conclusions matter to this repository:
+
+- **The protocol does not ask a program to invent the `.drv` format.** RFC 92
+  already had a builder write one `.drv`, to `$out`. `builder-rpc-v0` adds the
+  rest of the graph, which is the part #8602 calls the real power. The client
+  code that writes the ATerm is the cost of that, and `ddrn` pays it once.
+- **A successor is likely, and it moves the ATerm out of the client.** The
+  file system interface of #15810 would replace `Derivation.to_aterm` and
+  `Store.write_derivation` with a directory of files. The planner above it, in
+  `ddrn/_plan.py`, does not change. Keep that boundary.
 
 **It is in no release.** The newest tag is 2.35.1, and
 `src/nix/store-submit-output.cc` exists only on `master`.
@@ -190,16 +332,19 @@ change to the machine:
 
 ```console
 $ ddrn/examples/submitted/run.sh
-==> 2.36.0pre20260806_9137203
+==> nix (Nix) 2.36.0pre20260809_adee431
 submitted-hello> NIX_REMOTE=unix:///build/.nix-socket
 /nix/store/561lqncd629kabjdhpxjqqwcmfmkxz5l-submitted-hello
 ```
 
 Three things make that work, and each one was needed:
 
-- **A Nix from master, without compiling one.** Hydra builds master, so
-  `nix build github:NixOS/nix/<rev>#nix` substitutes from `cache.nixos.org`.
-  The revision only has to be later than 2026-07-21.
+- **A Nix from master.** `nix build github:NixOS/nix/<rev>#nix` gets one, and
+  the revision only has to be later than 2026-07-21. Hydra builds master, so an
+  older revision substitutes from `cache.nixos.org` and does not compile. Hydra
+  lags the branch by some hours, so the revision that `nix/nix-master.nix` pins
+  compiles instead, which takes about 20 minutes. Set `NIX_REV` to trade one
+  for the other.
 - **A private chroot store.** `/nix/store` belongs to root here, so an
   ordinary build goes through the system daemon, which is 2.34.8 and has no
   such feature. `nix build --store <dir>` makes the client build in itself,
@@ -242,10 +387,13 @@ must fetch. Linking libnixstore into every planner is a cost with no benefit
 while the plan is one derivation.
 
 The risk of a private copy of a format is that the copy drifts.
-`ddrn/tests/test_aterm_matches_nix.py` is the answer: it writes a derivation
-with `ddrn`, adds the text to the store, and parses it with **Nix's own
-parser** through `nanopynix`'s `read_derivation`. A disagreement about ATerm
-is a test failure.
+`ddrn/tests/test_aterm_matches_nix.py` is the answer, and it uses two oracles.
+It writes a derivation with `ddrn`, adds the text to the store, and parses it
+with **Nix's own parser** through `nanopynix`'s `read_derivation`. It then
+gives that parse to `Derivation.from_dict` and writes it again with **Nix's
+own writer**, and the two texts must be equal byte for byte. The parser alone
+would accept a difference that it tolerates, such as a field in the wrong
+order. A disagreement about ATerm is a test failure.
 
 Nix checks the store path arithmetic too, without being asked. A fixed-output
 derivation whose recorded path differs from the one Nix computes is refused:
@@ -268,22 +416,20 @@ now runs here.
 `NIX_REMOTE` inside the sandbox is an ordinary worker-protocol socket. A
 planner is therefore a full store client, and `nanopynix` already speaks that
 protocol: `add_to_store`, `read_derivation`, `query_path_info` and the rest of
-`AsyncStore` are the operations that registering a graph needs. Two things are
-missing:
+`AsyncStore` are the operations that registering a graph needs. Two things
+were missing, and both exist now:
 
 - **A `submit_output` store operation.** It is one worker-protocol call,
-  `SubmitOutput = 1000`, gated on the `submit-output` feature of the
-  connection.
+  `SubmitOutput = 1000`. `Store.submit_output` makes it, and raises
+  `Unsupported` on a store that is not a restricted build socket.
 - **A store opened on the socket that the sandbox provides.** `NIX_REMOTE` is
-  already a store URI, so this may cost nothing beyond a clear error when the
-  feature is absent, rather than a failure at the first call.
+  already a store URI, so `open_store(os.environ["NIX_REMOTE"])` is the whole
+  of it.
 
-With those, the whole ATerm writer of `ddrn` becomes unnecessary in this mode:
-Nix writes the derivation, Nix computes the paths, and Python decides only
-what the graph is.
-
-Everything else `ddrn` does by hand becomes unnecessary: Nix writes the ATerm,
-Nix computes the paths, and Python decides what the graph is.
+So the ATerm writer of `ddrn` is unnecessary in this mode. Nix writes the
+derivation, Nix computes the paths, and Python decides only what the graph is.
+`ddrn/examples/submitted-graph/plan.py` is that planner, and it imports no
+part of `ddrn`.
 
 ### Outside the sandbox, today: a store-free binding surface
 
@@ -300,15 +446,24 @@ StorePath makeFixedOutputPath(std::string_view name, const FixedOutputInfo & inf
 take the same argument and nothing else. **None of them needs a store, a
 daemon or a file system.**
 
-`nanopynix` has no binding for any of this yet. `compute_store_path` is the
-nearest thing, and it takes a `Store` and hashes a real file, so it cannot
-answer "where does a wheel with this hash land" from a lock file alone.
+**`nanopynix` binds all of this now.** `nanopynix_bindings.store` gives a
+`StoreDirConfig` class, which takes a store directory and nothing else, and a
+`Derivation` class with `from_dict`, `to_dict`, `to_aterm`, `store_path` and
+`fill_in_output_paths`. Each of the five takes a `StoreDirConfig`, or a
+`Store` for the one that needs the hash of an input, so a host-side tool
+computes a path and renders a derivation with no store and no daemon.
 
-A `StoreDirConfig` binding would give the host side of a planner Nix's own
-arithmetic and Nix's own serialiser, which is the right authority for a tool
-that generates plans, checks them, or explains them. It leaves the in-sandbox
-copy in `ddrn` as the one place a private implementation is justified, and
-gives the differential test a second oracle.
+That gives the host side of a planner Nix's own arithmetic and Nix's own
+serialiser, which is the right authority for a tool that generates plans,
+checks them, or explains them. It leaves the in-sandbox copy in `ddrn` as the
+one place a private implementation is justified, and it gives the differential
+test a second oracle: `test_nix_writes_back_the_same_bytes` in
+`ddrn/tests/test_aterm_matches_nix.py` lets Nix parse what `ddrn` wrote, lets
+Nix write it again, and compares the two texts byte for byte.
+
+`compute_store_path` remains the nearest thing for a file that exists: it
+takes a `Store` and hashes a real file, so it cannot answer "where does a
+wheel with this hash land" from a lock file alone.
 
 ## What is unbuilt on the client side
 
@@ -340,7 +495,7 @@ is correct; only the prediction is missing.
 
 ## Next steps
 
-Two of the four steps below are done.
+Four of the five steps below are done.
 
 1. **Done.** `nix/nix-master.nix` builds a Nix from the default branch, and
    `nanopynixMaster` in `default.nix` is the nanopynix scope over it. It is
@@ -350,27 +505,32 @@ Two of the four steps below are done.
    advertised as `build_info()['capabilities']['store_submit_output']`. It is
    bound on every version and refuses on a Nix that has no such operation, so
    the surface of the module does not vary by Nix version.
-3. **Blocked, and the block is not this feature.** `nanopynix-bindings` does
-   not compile against the default branch of Nix. That branch changed several
-   APIs that the bindings use, and none of them has to do with
-   `builder-rpc-v0`:
+3. **Done.** `nanopynix-bindings` compiles against the default branch of Nix.
+   That branch changed several APIs that the bindings use, and none of the
+   changes has to do with `builder-rpc-v0`. Each one now sits behind
+   `NANOPYNIX_NIX_2_36`:
 
    - `fetchers::Input::fromURL` and `fromAttrs` take different arguments.
    - `Store::ensurePath` and `Store::registerDrvOutput` are gone from `Store`.
-   - `nix::parseDerivation` is not in that namespace any more.
-   - `Logger::Fields` moved, and the `Logger` methods are `noexcept`, so every
-     override in `PyLogger` has a looser exception specification.
-   - `Store` has pure virtuals that `PyStoreImpl` does not implement, so that
-     class is abstract.
+     Building goes through `Store::getBuilder()`, and `PyStoreImpl` returns a
+     builder that offers the Python hook first.
+   - `nix::parseDerivation` is `nix::derivation::parse`.
+   - `Logger::Fields` is `std::span<const Field>`, and the `Logger` methods are
+     `noexcept`, so every override in `PyLogger` catches what the Python
+     callback raises and writes it to stderr.
+   - `Store` has pure virtuals that `PyStoreImpl` did not implement.
+4. **Done.** `ddrn/examples/submitted-graph` registers a graph of three
+   derivations from inside a `builder-rpc-v0` build, and submits the root
+   `.drv`. It uses no `nix` binary and no evaluator, because the socket
+   permits six operations and the evaluator needs a seventh.
+5. **Done.** `StoreDirConfig` and `Derivation` are bound, and
+   `ddrn/tests/test_aterm_matches_nix.py` compares the writer of `ddrn` with
+   the writer of Nix byte for byte.
 
-   Each one is an ordinary port to a new compatibility band. Together they are
-   a piece of work of their own, and they are what stands between here and a
-   planner written in Python.
-4. Then rewrite `ddrn/examples/venv` as a graph: one derivation per wheel, one
-   per install step, and an sdist path that resolves its own build backend.
-   That is the case `uv2nix` handles and a plain dynamic derivation cannot.
-5. Bind `StoreDirConfig` for the host side, and give
-   `ddrn/tests/test_aterm_matches_nix.py` a second oracle.
+What remains is the case that motivated all of it: rewrite
+`ddrn/examples/venv` as a graph, with one derivation for each wheel, one for
+each install step, and an sdist path that resolves its own build backend.
+That is the case `uv2nix` handles and a plain dynamic derivation cannot.
 
 ### Two patches of this repository meet the default branch differently
 

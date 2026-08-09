@@ -56,8 +56,8 @@ bindings directly gets neither guarantee.
 `build_info` reports the Nix version this extension linked against, and the
 compile-time capabilities that the version decides. The capability flags are
 how nanopynix supports more than one Nix version from one source tree: a
-feature that 2.34 has and 2.31 lacks appears here as a boolean rather than as a
-version comparison at each call site.
+feature that one supported version has and another lacks appears here as a
+boolean rather than as a version comparison at each call site.
 
 `current_system` returns the value that `builtins.currentSystem` gives, after
 the `system` setting is applied.

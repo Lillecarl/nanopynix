@@ -131,7 +131,8 @@ static thread_local int64_t logger_request_id = 0;
 //   chatty   0.070 / 0.085 s       0.061 / 0.067 s
 //   error    0.089 / 0.078 s       0.081 / 0.071 s
 //
-// Flake work does not. `pynix flake show` of a git flake, on Nix 2.31,
+// Flake work does not. `pynix flake show` of a git flake, measured on Nix 2.31
+// while that version was still supported,
 // through the rpc engine with a cold fetch cache and the 30 second deadline
 // that CI gives an rpc call:
 //
@@ -243,12 +244,52 @@ public:
 
     bool attached() const { return _active.load(std::memory_order_acquire); }
 
-    void log(nix::Verbosity lvl, std::string_view s) override {
-        if (lvl > thread_verbosity) return;
-        if (!attached()) { _fallback->log(lvl, s); return; }
+private:
+    /// Take the GIL, and run `f` when a callback is still installed.
+    ///
+    /// Nix 2.36 marks each logging method `noexcept`, because Nix calls a
+    /// logger from places that cannot handle an exception. An exception that
+    /// leaves such a method calls `std::terminate`, so this reports one and
+    /// continues. The GIL is still held in the handler, which is what lets
+    /// `what()` render a Python exception. Before 2.36 the method may throw,
+    /// and this changes nothing.
+    template<typename F>
+    void with_python(F && f) {
         nb::gil_scoped_acquire gil;
         if (_cb.is_none()) return;
-        _cb(nb::int_(logger_request_id), "msg", int(lvl), std::string(s));
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+        try {
+            f();
+        } catch (const std::exception &e) {
+            nix::writeToStderr(
+                std::string("nanopynix: the log callback raised: ") + e.what() + "\n");
+        } catch (...) {
+            nix::writeToStderr("nanopynix: the log callback raised an unknown exception\n");
+        }
+#else
+        f();
+#endif
+    }
+
+    /// One field of an activity or of a result, as a Python object.
+    ///
+    /// Nix 2.36 makes `Logger::Field` a `std::variant`. The accessors in
+    /// `nix_compat.hh` read either shape.
+    static nb::object field_to_py(const nix::Logger::Field &f) {
+        namespace compat = nanopynix::nix_compat;
+        if (compat::log_field_is_int(f))
+            return nb::int_(compat::log_field_int(f));
+        const auto &s = compat::log_field_string(f);
+        return nb::str(s.c_str(), s.size());
+    }
+
+public:
+    void log(nix::Verbosity lvl, std::string_view s) NANOPYNIX_LOG_NOEXCEPT override {
+        if (lvl > thread_verbosity) return;
+        if (!attached()) { _fallback->log(lvl, s); return; }
+        with_python([&] {
+            _cb(nb::int_(logger_request_id), "msg", int(lvl), std::string(s));
+        });
     }
 
     // The structured payload rides beside the flat message, and it is the
@@ -260,30 +301,30 @@ public:
     // which prints the origin; `Pos::getCodeLines` is what would read a file,
     // and only `showErrorInfo(showTrace=true)` calls that. So this costs a
     // dict per error event and no I/O. Issue #48.
-    void logEI(const nix::ErrorInfo & ei) override {
+    void logEI(const nix::ErrorInfo & ei) NANOPYNIX_LOG_NOEXCEPT override {
         if (ei.level > thread_verbosity) return;
         if (!attached()) { _fallback->logEI(ei); return; }
-        nb::gil_scoped_acquire gil;
-        if (_cb.is_none()) return;
-        _cb(nb::int_(logger_request_id), "error", int(ei.level), std::string(ei.msg.str()),
-            nanopynix::errinfo::to_dict(ei));
+        with_python([&] {
+            _cb(nb::int_(logger_request_id), "error", int(ei.level), std::string(ei.msg.str()),
+                nanopynix::errinfo::to_dict(ei));
+        });
     }
 
-    void warn(const std::string & msg) override {
+    void warn(const std::string & msg) NANOPYNIX_LOG_NOEXCEPT override {
         // Matches nix::Logger::warn's own default impl (log(lvlWarn, ...)),
         // which we fully override rather than delegate to -- so we must
         // apply the same verbosity gate ourselves.
         if (nix::lvlWarn > thread_verbosity) return;
         if (!attached()) { _fallback->warn(msg); return; }
-        nb::gil_scoped_acquire gil;
-        if (_cb.is_none()) return;
-        _cb(nb::int_(logger_request_id), "warn", msg);
+        with_python([&] {
+            _cb(nb::int_(logger_request_id), "warn", msg);
+        });
     }
 
     void startActivity(nix::ActivityId id, nix::Verbosity lvl,
                        nix::ActivityType type, const std::string & s,
-                       const nix::Logger::Fields & fields,
-                       nix::ActivityId parent) override {
+                       nanopynix::nix_compat::LogFieldsParam fields,
+                       nix::ActivityId parent) NANOPYNIX_LOG_NOEXCEPT override {
         // Matches nix's own default logger (SimpleLogger::startActivity:
         // `if (lvl <= verbosity && !s.empty()) log(...)`) -- most Activities
         // in a big build/copy closure are structural bookkeeping nodes
@@ -293,19 +334,15 @@ public:
         // here for any consumer of this callback to use either.
         if (lvl > thread_verbosity || s.empty()) return;
         if (!attached()) { _fallback->startActivity(id, lvl, type, s, fields, parent); return; }
-        nb::gil_scoped_acquire gil;
-        if (_cb.is_none()) return;
-        nb::list fl;
-        for (auto & f : fields) {
-            if (f.type == nix::Logger::Field::tInt)
-                fl.append(nb::int_(f.i));
-            else
-                fl.append(nb::str(f.s.c_str(), f.s.size()));
-        }
-        _cb(nb::int_(logger_request_id), "start", id, int(lvl), int(type), s, std::move(fl), parent);
+        with_python([&] {
+            nb::list fl;
+            for (auto & f : fields) fl.append(field_to_py(f));
+            _cb(nb::int_(logger_request_id), "start", id, int(lvl), int(type), s,
+                std::move(fl), parent);
+        });
     }
 
-    void stopActivity(nix::ActivityId id) override {
+    void stopActivity(nix::ActivityId id) NANOPYNIX_LOG_NOEXCEPT override {
         // Nix constructs one Activity per derivation/store-path/
         // substitution it processes -- hundreds of thousands for a single
         // big deploy's closure, each with a stopActivity call on top of its
@@ -323,7 +360,7 @@ public:
     }
 
     void result(nix::ActivityId id, nix::ResultType type,
-                const nix::Logger::Fields & fields) override {
+                nanopynix::nix_compat::LogFieldsParam fields) NANOPYNIX_LOG_NOEXCEPT override {
         // Of all ResultTypes, only resBuildLogLine/resPostBuildLogLine are
         // ever read by a consumer in this repo (both check for exactly
         // those two before doing anything) -- the rest (resProgress/
@@ -337,16 +374,11 @@ public:
         // `printBuildLogs`, so the detached path delegates rather than drops.
         if (!attached()) { _fallback->result(id, type, fields); return; }
         if (type != nix::resBuildLogLine && type != nix::resPostBuildLogLine) return;
-        nb::gil_scoped_acquire gil;
-        if (_cb.is_none()) return;
-        nb::list fl;
-        for (auto & f : fields) {
-            if (f.type == nix::Logger::Field::tInt)
-                fl.append(nb::int_(f.i));
-            else
-                fl.append(nb::str(f.s.c_str(), f.s.size()));
-        }
-        _cb(nb::int_(logger_request_id), "result", id, int(type), std::move(fl));
+        with_python([&] {
+            nb::list fl;
+            for (auto & f : fields) fl.append(field_to_py(f));
+            _cb(nb::int_(logger_request_id), "result", id, int(type), std::move(fl));
+        });
     }
 };
 
@@ -384,20 +416,10 @@ static void _log_test(const std::string & msg) {
 static nb::dict build_info() {
     nb::dict capabilities;
     capabilities["logger_unique_ptr"] = NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35;
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    capabilities["build_result_sum"] = false;
-    capabilities["eval_state_mem"] = false;
-    capabilities["dynamic_primop_registration"] = false;
-    // Whether `nanopynix.StoreImpl.read_derivation` is dispatched at all --
-    // `nix::Store::readDerivation` is non-virtual before 2.32, so there is no
-    // hook to install. See `py_store_impl.hh`'s dispatch-list comment.
-    capabilities["store_impl_read_derivation"] = false;
-#else
     capabilities["build_result_sum"] = true;
     capabilities["eval_state_mem"] = true;
     capabilities["dynamic_primop_registration"] = true;
     capabilities["store_impl_read_derivation"] = true;
-#endif
 
     // Whether `Store.submit_output` works, which is the one operation of the
     // `builder-rpc-v0` feature. NixOS/nix#15793 merged it on 2026-07-21, and
@@ -616,14 +638,7 @@ void nanopynix_bind_util(nb::module_ &m) {
           "s"_a,
           "Percent-decode string per RFC 3986.");
     m.def("fix_git_url", [](const std::string &url) -> std::string {
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-            auto normalized = nix::fixGitURL(url);
-            if (normalized.starts_with("git+"))
-                normalized.erase(0, 4);
-            return normalized;
-#else
             return nix::fixGitURL(url).to_string();
-#endif
           },
           "url"_a,
           "Normalize SCP-style and git+https:// URLs to proper URL format.");

@@ -12,15 +12,40 @@
 #
 # Read `ddrn/README.md` for what the feature is and what it is for.
 {
+  lib,
   fetchFromGitHub,
   nixVersions,
 }:
 
+let
+  # **The default source is a local checkout, because this lab patches Nix.**
+  # The goal is to change the daemon and to build nanopynix against the change,
+  # so the source has to be a directory that an edit changes. Make one from the
+  # Nix checkout at `~/Code/nix`:
+  #
+  #     jj workspace add --name ddnix -r master@origin ~/Code/ddnix
+  #
+  # `NANOPYNIX_NIX_MASTER_SRC` names a different directory, and an unset
+  # variable reads as the empty string. `builtins.getEnv` also returns the
+  # empty string under a pure evaluation, so a flake evaluation needs no
+  # `--impure` to reach the line below.
+  #
+  # The build falls back to `fetchFromGitHub` when the directory is absent, so
+  # another machine and a CI runner still evaluate.
+  fromEnvironment = builtins.getEnv "NANOPYNIX_NIX_MASTER_SRC";
+  candidate = if fromEnvironment != "" then fromEnvironment else "/home/lillecarl/Code/ddnix";
+  defaultWorkspace = if builtins.pathExists candidate then candidate else null;
+in
+
 {
-  # A revision of the default branch of Nix, later than 2026-07-21.
-  rev ? "9137203c1d85c9d13b3d1ef91ba8885b185e5947",
-  hash ? "sha256-CFcOMFIJGsvNsDt5awut3tf8woW/4XD3VPs2u8htpV0=",
-  # The version that this revision reports.
+  # A revision of the default branch of Nix, later than 2026-07-21. The build
+  # reads it only when `workspace` is `null`.
+  rev ? "adee431334cd12f3a33764ac86284220cef4d204",
+  hash ? "sha256-5OGPbefMDQmC4NIJ34EqfTGMHXNvuRU/Y3nZuj5TXsM=",
+  # The directory that holds the working tree of Nix, as a string, or `null` to
+  # read `rev` from GitHub.
+  workspace ? defaultWorkspace,
+  # The version that this source reports.
   #
   # **Both overrides below are necessary, and the second one is easy to
   # forget.** `overrideSource` replaces the source and leaves the version
@@ -29,15 +54,38 @@
   # `NANOPYNIX_NIX_VERSION_NUMBER` from that string, so a stale version does
   # not fail: it silently compiles the pre-2.36 branch of every `#if`, and the
   # feature this file exists for disappears with no error.
-  version ? "2.36.0pre20260806_9137203",
+  #
+  # The CMake rule reads `^([0-9]+)\.([0-9]+)` only, so the text after `2.36`
+  # is free. A local build says so, and does not claim a revision that it did
+  # not read.
+  version ? if workspace == null then "2.36.0pre20260809_adee4313" else "2.36.0pre-ddnix",
 }:
 
 let
-  src = fetchFromGitHub {
-    owner = "NixOS";
-    repo = "nix";
-    inherit rev hash;
+  # **The filter is not a tidiness measure.** `.jj` changes under every `jj`
+  # command, and `build` holds the output of a meson build in the tree. Either
+  # one gives a new store path to every evaluation, which builds the whole of
+  # Nix again for a change that no compiler reads.
+  workspaceSource = lib.cleanSourceWith {
+    name = "nix-source";
+    src = /. + workspace;
+    filter =
+      path: type:
+      let
+        base = baseNameOf path;
+      in
+      lib.cleanSourceFilter path type && base != ".jj" && base != "build" && base != "outputs";
   };
+
+  src =
+    if workspace == null then
+      fetchFromGitHub {
+        owner = "NixOS";
+        repo = "nix";
+        inherit rev hash;
+      }
+    else
+      workspaceSource;
 in
 (nixVersions.nixComponents_git.overrideSource src).overrideScope (
   _final: _prev: { inherit version; }

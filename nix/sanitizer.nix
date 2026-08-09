@@ -227,12 +227,12 @@ in
   # by disabling it, and that error arrives twenty minutes into a from-source
   # rebuild of the whole instrumented closure.
   #
-  # **Nix 2.31 makes no such test, and this is where that matters.** Upstream
-  # added `bdw_gc_required` after 2.31; that version's `src/libexpr/meson.build`
-  # reads only `dependency('bdw-gc', required : get_option('gc'))`. So a 2.31
-  # build of ASAN together with the collector *succeeds*, and produces exactly
-  # the configuration whose report is not evidence. On 2.31 this attribute is
-  # the only thing that stops it.
+  # **The assertion matters even where meson would refuse.** Upstream added
+  # `bdw_gc_required` after 2.31, and a libexpr without that test builds ASAN
+  # together with the collector *successfully*, producing exactly the
+  # configuration whose report is not evidence. Every supported Nix now makes
+  # the test, so this attribute is the earlier of two refusals rather than the
+  # only one -- keep it, because the other one costs a rebuild to reach.
   requiresNoGC = isAddress;
   flags = sanitizerFlagsStr;
   # One token, no spaces. The compile flags go through NIX_CFLAGS_COMPILE,
