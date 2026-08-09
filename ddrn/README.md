@@ -48,6 +48,16 @@ The tests check the writer of `ddrn` against Nix itself:
 $ direnv exec . pytest ddrn/tests
 ```
 
+Three examples do not run this way, because each needs a Nix that the pin of
+this repository does not give. Each has a `run.sh` that sets up a private
+chroot store and the Nix that it needs:
+
+```console
+$ ddrn/examples/submitted/run.sh        # builder-rpc-v0, driven by the nix CLI
+$ ddrn/examples/submitted-graph/run.sh  # the same, driven by nanopynix
+$ ddrn/examples/evaluated-graph/run.sh  # the evaluator in the sandbox, patched Nix
+```
+
 ## How it works
 
 A **planner** is an ordinary derivation with three extra attributes:
@@ -140,6 +150,14 @@ attempt failed at the store layer: the output of the emitted planner lost its
 derivation path`. I did not pursue it, because a chain gives depth and not
 breadth, and because the feature below removes the need.
 
+**The cause of that failure is rule 2 above**, and the name is the whole of it.
+`outputPathName` gives the output of `stage2-planner` the name
+`stage2-planner`, and a planner named `stage2-planner.drv` would have worked.
+The name relaxation of this lab removes the rule for a submitted output only,
+so it does not reach a planner that writes to `$out`. Nesting does work under
+`builder-rpc-v0`: `tests/functional/dyn-drv/eval-submit.sh` follows a graph of
+two levels, and `builtins.outputOf` chains three times to reach the file.
+
 ## What `builder-rpc-v0` changes
 
 [NixOS/nix#15793](https://github.com/NixOS/nix/pull/15793), merged on
@@ -160,7 +178,7 @@ set in such a derivation, which the upstream test
 This removes the one-derivation limit. A planner can add a `.drv` for every
 package, wire them into a real graph, and submit the root.
 
-#### The socket is an allowlist of six operations
+#### The socket is an allowlist of seven operations
 
 **`builder-rpc-v0` is not `recursive-nix`, and the difference is larger than
 the name suggests.** `daemon.cc:326` refuses every operation that this list
@@ -252,6 +270,41 @@ on the allowlist.** `Store.write_derivation` therefore records the hash modulo
 of what it writes, while the value is still in hand. A planner that builds its
 graph from the leaves upwards never misses, and so never reads. Nix's own
 `writeDerivation` could do this and does not.
+
+#### What three changes to Nix remove
+
+Everything above describes the protocol as it was released. This repository
+also patches Nix, and `ddrn/UPSTREAM.md` gives each change and the file that
+holds it. `ddrn/examples/evaluated-graph` is the same graph under those
+changes, and it is worth reading beside `ddrn/examples/submitted-graph` because
+the difference is the argument.
+
+- **The allowlist permits `EnsurePath`.** That is one entry in the array in
+  `daemon.cc`, and the restricted builder already answers the operation by
+  asserting closure membership and substituting nothing. With that entry, the
+  evaluator runs in the sandbox: `plan.py` writes a Nix expression, and the
+  ATerm writer of the third consequence above becomes an implementation detail
+  of nanopynix rather than a thing each planner needs.
+- **A submitted derivation carries its own name.** Nix checks the derivation
+  rather than the name: the object must parse, and its own contents must give
+  the path where it sits. The name coupling of step 4 goes away, so the outer
+  derivation is named `planner` and the root that it submits is named `graph`.
+  Text ingestion stays, because every derivation ingests as text.
+- **`nix eval --submit` registers what the evaluator wrote.** One command
+  evaluates the graph, writes each derivation of it through the socket, and
+  submits the root. `ddrn/examples/evaluated-graph/plan.py` reaches the same
+  result through nanopynix, with `EvalState.eval_string` and
+  `Value.derived_path`.
+
+The memo above stops mattering too, for a third reason. One `EvalState` writes
+every derivation of the graph and records each hash modulo as it goes, so a
+miss cannot happen inside one planner. The graph of `evaluated-graph` therefore
+holds one floating child and one input-addressed child, and the released form
+could carry neither without the memo of `write_derivation`.
+
+**None of the three changes is upstream.** Each is a candidate for
+[NixOS/nix#15810](https://github.com/NixOS/nix/issues/15810), which asks for a
+simpler successor to this protocol and is open.
 
 #### Why this, and not recursive Nix
 
@@ -495,7 +548,7 @@ is correct; only the prediction is missing.
 
 ## Next steps
 
-Four of the five steps below are done.
+Each of the six steps below is done.
 
 1. **Done.** `nix/nix-master.nix` builds a Nix from the default branch, and
    `nanopynixMaster` in `default.nix` is the nanopynix scope over it. It is
@@ -522,10 +575,15 @@ Four of the five steps below are done.
 4. **Done.** `ddrn/examples/submitted-graph` registers a graph of three
    derivations from inside a `builder-rpc-v0` build, and submits the root
    `.drv`. It uses no `nix` binary and no evaluator, because the socket
-   permits six operations and the evaluator needs a seventh.
+   permits seven operations and the evaluator needs an eighth.
 5. **Done.** `StoreDirConfig` and `Derivation` are bound, and
    `ddrn/tests/test_aterm_matches_nix.py` compares the writer of `ddrn` with
    the writer of Nix byte for byte.
+6. **Done.** `ddrn/examples/evaluated-graph` runs the evaluator inside the
+   sandbox, through `EvalState.eval_string` and `Value.derived_path`, and
+   submits the root that the evaluator wrote. The outer derivation is named
+   `planner`, and the root is named `graph`. It needs the three changes to Nix
+   that `ddrn/UPSTREAM.md` gives, and it writes no ATerm.
 
 What remains is the case that motivated all of it: rewrite
 `ddrn/examples/venv` as a graph, with one derivation for each wheel, one for

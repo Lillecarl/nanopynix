@@ -8,7 +8,7 @@
 #
 # **There is no `nix` binary in this sandbox.** nanopynix links libnixstore
 # directly. Read `ddrn/examples/submitted-graph/plan.py`, and the section
-# "The socket is an allowlist of six operations" in `ddrn/README.md`.
+# "The socket is an allowlist of seven operations" in `ddrn/README.md`.
 #
 # This example does NOT run under the Nix of this repository's pin. It needs a
 # Nix from master, and a nanopynix built against that same Nix.

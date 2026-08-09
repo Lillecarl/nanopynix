@@ -280,6 +280,35 @@ derivations, and an input-addressed root over one floating child. The third
 case makes the root deferred, so the root has no output path until the child is
 built.
 
+**nanopynix reaches the same result, and `ddrn/examples/evaluated-graph` is the
+measurement.** A derivation named `planner` submitted
+`/nix/store/ydwl54aq…-graph.drv`, and the graph realised to a directory holding
+`alpha` and `beta`. The route is `EvalState.eval_string`, then
+`Value.derived_path`, then `Store.submit_output`. No ATerm, and no `nix`
+binary.
+
+**The two kinds of child look different in the ATerm, and the difference is
+visible in that run.** `nix derivation show` of the submitted root gives:
+
+```json
+"args": ["-c", "mkdir -p \"$out\"\ncp /1jgic4bscb63… \"$out/a\"\ncp /nix/store/5q9bz587…-leaf-b \"$out/b\"\n"]
+```
+
+`leaf-a` floats, so the evaluator wrote a downstream placeholder, which the
+build rewrites. `leaf-b` is input-addressed, so the evaluator wrote the real
+output path. One `EvalState` computed that path with no read of a `.drv` back
+out of the store, which is the read that the allowlist refuses.
+
+**`inputs.srcs` of that root holds bash and coreutils.** Each one reached the
+derivation through `builtins.storePath`, and so through `EnsurePath`. Without
+the allowlist entry of this lab, the expression stops at that primop.
+
+**The realised root sits at a different path from the submitted root.** The run
+submitted `ydwl54aq…-graph.drv` and built `cz50wrj9…-graph.drv`. The second is
+the *resolved* derivation: a floating child has a real output path once it is
+built, and resolution rewrites the placeholder to it. This is ordinary for a
+content-addressed graph, and it is not a symptom.
+
 ## Deriving paths
 
 **A `SingleDerivedPath` names a derivation only when it is the `drvPath` field

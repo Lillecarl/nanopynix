@@ -53,65 +53,132 @@ runs.
 array, one entry earlier, for `IsValidPath`: "restricted store will prevent it
 from seeing derivations it shouldn't".
 
-Two things to prove, and not to assume:
+**Done.** Two things were open, and the measurement answered both.
 
-- `RestrictedStore::getBuilder` is `unreachable()`, so the daemon must receive
-  the restricted builder from `derivation-builder.cc`. Confirm that the
-  `RecursiveSubmitted` socket gets one.
+- `RestrictedStore::getBuilder` is `unreachable()`, so the daemon has to
+  receive the restricted builder from somewhere else. It does:
+  `DerivationBuildingGoal::processDaemonConnection`
+  (`src/libstore/build/derivation-building-goal.cc`) passes
+  `makeRestrictedBuilder(freshWorker, context)` to `daemon::processConnection`
+  for both recursive flags.
 - `builtins.storePath` skips `ensurePath` when `state.storeFS->getMount(...)`
-  finds the path. The closure is bind-mounted in the sandbox. Measure whether
-  that guard already fires, because it changes how much Goal 1 buys.
+  finds the path, and the closure is bind-mounted in the sandbox, so the guard
+  might have made the primop work already. **It does not fire.** The mount
+  table fills lazily and holds no entry for a closure path that nothing
+  touched. With the allowlist entry removed again, `builtins.storePath` and
+  `builtins.appendContext` both fail with "Operation 10 not allowed inside
+  derivation". `tests/functional/dyn-drv/sandbox-eval.sh` covers both primops
+  and the refusal of a path outside the closure.
 
-## Goal 2: let `$out` hold a reference to a derivation
+## Goal 2: let a submitted derivation carry its own name
 
-**Today the submitted store object is the derivation, and three rules collide
-because of it.** `src/libstore/build/derivation-check.cc` compares the name of
-the submitted object with `outputPathName(drv.name, "out")`, so the outer
-derivation must carry a `.drv` name. `src/libexpr/primops.cc` permits a `.drv`
-name only for a derivation that ingests as text and has exactly one output
-named `out`. `src/libstore/build/derivation-builder.cc` needs a
-content-addressing derivation. Text ingestion satisfies all three at once,
-which is a coincidence, and it constrains the shape of every planner.
+**Today the name of the planner has to be the name of its result.**
+`src/libstore/build/derivation-check.cc` compares the name of the submitted
+object with `outputPathName(drv.name, "out")`. The submitted object is the root
+`.drv` of the graph, and a `.drv` is named `<root name>.drv`, so a planner that
+makes `graph` must itself be named `graph.drv`. It declares, in advance, the
+name of a result that its own builder computes.
 
-The alternative is one level of indirection: `$out` holds a store path, and
-that path is the root `.drv`. The planner writes the `.drv` through the socket,
-as it does now, and then writes the reference.
+`ddrn/NIX-FACTS.md`, section "Why the `.drv` naming schema exists", gives the
+whole chain and the commit that added each link. The short form: the `.drv`
+suffix is a type tag that the store enforces, the name rule of an output is
+what keeps a fixed content-addressed output on the path its name gives, and
+neither rule was written with a planner in mind.
 
-This is more expressive than the RFC 92 form, in which a builder writes the
-ATerm bytes to `$out`. A reference lets the root name siblings that the planner
-wrote separately.
+**The change replaces the name check with a check of the derivation.** A
+submitted output that is a derivation, and whose declared output floats, gets a
+different rule: the object must parse as a derivation, and `computeStorePath`
+of that derivation must give the path where the object sits. That is a stronger
+identity than a name, and it holds the type-tag invariant directly.
 
-## Goal 3: make the trampoline follow the reference
+**Done.** `enum struct OutputSource` tells `checkOutputs` whether the outputs
+came from a build or from a submission, and `isSubmittedDerivation` holds the
+new rule. Four things were open, and each has an answer.
 
-`src/libstore/build/derivation-trampoline-goal.cc` turns "output `out` of
-derivation D" into a derivation to build. It calls `resolveDerivedPath`
-(`src/libstore/misc.cc`), which returns the output path of D, and it then reads
-that path as a derivation with `readDerivation`.
+- **The relaxation reaches one output, and not the whole derivation.** A
+  planner with two outputs submits a derivation for one and an ordinary store
+  object for the other, and the name rule still holds the second one.
+  `tests/functional/dyn-drv/submit-drv-any-name.sh` asserts both.
+- **A fixed content-addressed output keeps the name rule.**
+  `DerivationOutput::CAFixed::path` derives the output path from
+  `outputPathName(drvName, outputName)`, so a relaxation there would let
+  `queryPartialDerivationOutputMap` name one path and the realisation name
+  another. `isSubmittedDerivation` returns false for a fixed output, and
+  `submit-drv-broken.sh` asserts the refusal.
+- **The ingestion method still has to agree.** Every derivation ingests as
+  text, and the `CAFloating` branch of `checkCAOutput` compares the declared
+  method with the method of the submitted object. So a planner that submits a
+  derivation declares `outputHashMode = "text"`. The name is free; the method
+  is not.
+- **A store object that is not a derivation cannot reach the check.**
+  `LocalStore::registerValidPath` parses every path whose name ends in `.drv`,
+  so the store refuses one that does not parse. The catch in
+  `isSubmittedDerivation` is a backstop for a store that does not, and it turns
+  a parse error into a rejection of the output.
 
-That last step is the assumption to change. The output path must be able to
-name the derivation instead of being the derivation.
+## Goal 3: let the evaluator submit what it wrote
 
-**A suffix keeps the old form working.** Give the reference file the extension
-`.drvref`. The trampoline reads the name of the resolved output path:
+`nix eval --submit <output-name>` registers the derivation that the expression
+gives, as that output of the derivation that runs now.
 
-- a name that ends in `.drv` is the derivation, which is the behaviour today;
-- a name that ends in `.drvref` holds the store path of the derivation, and the
-  trampoline reads that file and follows the path.
+A planner needed two steps before this flag: write the graph, read the store
+path of the root, and then run `nix store submit-output` with that path. The
+evaluator already writes each derivation of the graph through the restricted
+socket, so the second step needs no separate command.
 
-No existing dynamic derivation changes, because no existing output has the new
-extension.
+**Done.** Two things were open, and reading the code answered both.
 
-Open questions for the plan:
+- **A derivation stands for its output, so the flag takes the `drvPath` field
+  of the resulting deriving path.** The build that runs now makes the
+  derivation, and no build made the output of that derivation yet.
+- **`SubmitOutput` accepts an `Opaque` deriving path only**
+  (`derivation-builder-impl.hh`, which links NixOS/nix#12727), so a nested
+  deriving path gets a clear refusal rather than a confusing one.
 
-- Which store validates the reference, and when. A reference to a path that no
-  store holds must fail with a clear message, and not with a parse error of a
-  derivation.
-- Whether `.drvref` needs the same name rule as `.drv` in
-  `src/libexpr/primops.cc`. The rule exists to stop an arbitrary derivation
-  claiming a `.drv` name.
-- Whether the reference holds one path, or a list. One path is enough for a
-  root. A list would let a planner submit several roots.
-- What `builtins.outputOf` reports when the reference is absent or empty.
+`tests/functional/dyn-drv/eval-submit.sh` runs the evaluator inside the
+sandbox, over four graphs: one of floating content-addressed derivations, one
+of input-addressed derivations, one input-addressed root over a floating child,
+and one of two levels where the root of the first level is a second planner. It
+also asserts that two evaluators in two sandboxes give the same root derivation
+path.
+
+## What the three goals gave
+
+`ddrn/examples/evaluated-graph` is the result, beside
+`ddrn/examples/submitted-graph`, which stays as the record of what the released
+protocol needs. Three things went away:
+
+- **The ATerm writer.** `plan.py` gives the evaluator a Nix expression.
+  Interpolating one derivation into the script of another gives the dependency
+  and the output path together, and the ATerm form has to compute both.
+- **The name coupling.** The outer derivation is named `planner`, and the root
+  that it submits is named `graph`.
+- **The limit to floating outputs.** One `EvalState` writes every derivation of
+  the graph and memoises each hash modulo as it goes, so an input-addressed
+  child needs no read of a `.drv` back out of the store. The graph of the
+  example has one child of each kind.
+
+Two capabilities went into nanopynix for this, and both are of general use:
+`Store.add_to_store` takes a `references` list, and `Store.print_store_path` is
+the inverse of `Store.parse_store_path`.
+
+## The `.drvref` design, and why it went away
+
+An earlier attempt gave the reference its own extension. `$out` held a file
+whose content was the store path of the root `.drv`, and the trampoline
+followed that path. `~/Code/ddnix` holds the prototype on the bookmark
+`ensure-path-and-drvref`.
+
+Two measurements ended it. **The follow has to reach every reader, and not only
+the goal that builds.** `nix derivation show` returned an empty result and
+`nix build --dry-run --json` threw, because each one resolves the deriving path
+and reads the result as a derivation without going through the trampoline.
+Four call sites needed the follow, and a fifth would appear with the next
+reader.
+
+**The indirection also buys nothing that the relaxation does not.** A planner
+wants to name a result that it computes, and the name rule was the only thing
+in the way.
 
 ## Not goals
 
@@ -121,4 +188,5 @@ Open questions for the plan:
   a real defect, and it is not on the path of the three goals above.
 - The two upstream defects that `ddrn/README.md` records. `SubmitStore::require`
   has no definition, and `Store::writeDerivation` does not prime
-  `nix::derivation::hashes`. Both have a workaround in nanopynix already.
+  `nix::derivation::hashes`. Both have a workaround in nanopynix already, and
+  the second one is why the graph above takes content-addressed outputs.
