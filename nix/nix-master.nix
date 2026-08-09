@@ -63,19 +63,33 @@ in
 
 let
   # **The filter is not a tidiness measure.** `.jj` changes under every `jj`
-  # command, and `build` holds the output of a meson build in the tree. Either
-  # one gives a new store path to every evaluation, which builds the whole of
-  # Nix again for a change that no compiler reads.
-  workspaceSource = lib.cleanSourceWith {
-    name = "nix-source";
-    src = /. + workspace;
-    filter =
-      path: type:
-      let
-        base = baseNameOf path;
-      in
-      lib.cleanSourceFilter path type && base != ".jj" && base != "build" && base != "outputs";
-  };
+  # command, and a development shell puts a meson build in `build` and installs
+  # it into `outputs`. Each one gives a new store path to every evaluation,
+  # which builds the whole of Nix again for a change that no compiler reads.
+  #
+  # **Only the top of the tree carries those two names.** Nix has eight
+  # directories of source called `build` or `outputs`, and
+  # `src/libstore/build/build-log.cc` is one file of one of them. A filter on
+  # the base name alone drops each of them, and meson then stops with
+  # "File build/build-log.cc does not exist". So the test is on the path
+  # relative to the root, and not on the base name.
+  workspaceSource =
+    let
+      root = toString (/. + workspace);
+    in
+    lib.cleanSourceWith {
+      name = "nix-source";
+      src = /. + workspace;
+      filter =
+        path: type:
+        let
+          relative = lib.removePrefix "${root}/" (toString path);
+        in
+        lib.cleanSourceFilter path type
+        && baseNameOf path != ".jj"
+        && relative != "build"
+        && relative != "outputs";
+    };
 
   src =
     if workspace == null then
