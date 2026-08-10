@@ -1,0 +1,11 @@
+[build-system]
+requires = ["flit_core >=3.11,<5"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "myapp"
+version = "0.1.0"
+description = "A local package that the graph installs as an editable."
+
+[project.scripts]
+myapp = "myapp:main"

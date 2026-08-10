@@ -626,25 +626,58 @@ Each of the seven steps below is done.
    express neither. That is the case `uv2nix` handles and a plain dynamic
    derivation cannot.
 
+   **A binary wheel gets the loader of this system.** The `ninja` wheel ships
+   an ELF executable that names `/lib64/ld-linux-x86-64.so.2` and needs
+   `libstdc++.so.6`, and this system has neither. `pyproject.nix` corrects that
+   with `autoPatchelfHook`; a graph node runs no setup hook, so the node calls
+   `pkgs.auto-patchelf` itself. **The planner decides which node needs it**,
+   from the tag of the wheel that `packaging` already parsed, so a pure Python
+   node takes no dependency on a compiler library.
+
+   **A local project installs as a PEP 660 editable.** The node builds the
+   editable wheel from a copy of the project in the store, and then rewrites
+   the path that the wheel recorded, the way `pyproject.nix` does in
+   `build/hooks/editable_hook`. The rewrite wraps the replacement in
+   `os.path.expandvars`, so the environment reads whichever tree
+   `$DDRN_EDITABLE_ROOT` names when the interpreter starts:
+
+   ```text
+   import sys; import os.path; sys.path.append(os.path.expandvars('$DDRN_EDITABLE_ROOT/src'))
+   ```
+
    The environment runs, and it is a virtual environment and not a directory
    with a wrapper:
 
    ```text
-   interpreter  /nix/store/w9pzpvlp…-demo-venv/bin/python
-   prefix       /nix/store/w9pzpvlp…-demo-venv
+   interpreter  /nix/store/rwl64yg3…-demo-venv/bin/python
+   prefix       /nix/store/rwl64yg3…-demo-venv
    idna         3.18 xn--eckwd4c7c.xn--zckzah
+   ninja        1.13.0
+   editable     /nix/store/90hmi2q7…-myapp
+     hello from the tree that the check derivation named
    distributions
      certifi==2024.8.30
      charset-normalizer==3.4.4
      idna==3.18
+     myapp==0.1.0
+     ninja==1.13.0
    entry points ['idna=idna.cli:main']
+   ninja
+     1.13.0.git.kitware.jobserver-pipe-1
    console script
      idna xn--eckwd4c7c.xn--zckzah
+     myapp hello from the tree that the check derivation named
    ```
 
    `bin/idna` is a console script that the installer wrote, for a package that
    the graph built from source, with a backend the planner resolved from the
-   lock file.
+   lock file. `bin/ninja` is a binary that came from an index, and it runs
+   because the node that installed it patched it.
+
+   `run.sh` then builds the check a second time, against a second tree, and
+   both checks read `rwl64yg3…-demo-venv`. **One environment, two sources, no
+   rebuild.** That is what the reference to a variable buys, and it is why
+   `pyproject.nix` writes one.
 
 ### Two patches of this repository meet the default branch differently
 

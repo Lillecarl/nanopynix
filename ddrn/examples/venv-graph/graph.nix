@@ -60,17 +60,33 @@ let
 
   site = "lib/python${pythonVersion}/site-packages";
 
+  basePath = "${tool.coreutils}/bin:${tool.unzip}/bin:${tool.gnutar}/bin:${tool.gzip}/bin:${tool.python}/bin";
+
   mk =
     args:
     derivation (
       {
         inherit system site;
         builder = "${tool.bash}/bin/bash";
-        PATH = "${tool.coreutils}/bin:${tool.unzip}/bin:${tool.gnutar}/bin:${tool.gzip}/bin:${tool.python}/bin";
+        PATH = basePath;
       }
       // args
       // floating
     );
+
+  # **What a node needs to patch a binary, and nothing that a node does not.**
+  # `auto-patchelf` reads the loader of this system from the `nix-support` of
+  # the bintools wrapper, and it calls `patchelf`, so both belong to the node
+  # that patches. A pure Python wheel gets none of this, and so takes no
+  # dependency on a compiler library at all.
+  patchelfInputs = {
+    PATH = "${basePath}:${tool.patchelf}/bin";
+    autoPatchelf = "${tool.autoPatchelf}/bin/auto-patchelf";
+    NIX_BINTOOLS = "${tool.bintools}";
+    # `libgcc_s` and `libstdc++` live here, and a manylinux binary needs both.
+    # `auto-patchelf` adds the libc of this system on its own, from `orig-libc`.
+    patchelfLibs = "${tool.gccLib}/lib";
+  };
 
   # The `site-packages` of a node that this graph builds. A node output floats,
   # so this is a downstream placeholder until the node is built.
@@ -95,15 +111,37 @@ let
         wheel = fetched node.artifact;
       }
     else if node.kind == "wheel" then
+      mk (
+        {
+          name = node.name;
+          args = [
+            "-c"
+            ". ${script.installWheel}"
+          ];
+          wheel = fetched node.artifact;
+          wheelName = node.artifact.filename;
+          inherit installerPath;
+        }
+        # **The planner read the tag of the wheel, so it knows this.** A wheel
+        # whose platform tag is not `any` carries a binary that was linked
+        # against another Linux.
+        // (if node.platform then patchelfInputs else { })
+      )
+    else if node.kind == "editable" then
       mk {
         name = node.name;
         args = [
           "-c"
-          ". ${script.installWheel}"
+          ''exec "${tool.python}/bin/python3" "${script.buildEditable}"''
         ];
-        wheel = fetched node.artifact;
-        wheelName = node.artifact.filename;
+        source = builtins.storePath node.source;
+        # A literal path names one tree forever. A reference to a variable is
+        # the same bytes for every tree, so one environment reads whichever
+        # tree the variable names, and nothing rebuilds.
+        editableRoot = node.root;
         inherit installerPath;
+        inherit (node) backend;
+        backendPath = builtins.concatStringsSep ":" (map sitePath node.backendPath);
       }
     else if node.kind == "sdist" then
       mk {

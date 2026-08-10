@@ -12,8 +12,10 @@ builds the source would have to exist before the plan runs.
 
 This planner emits a graph:
 
-- one node for each wheel, which unpacks it;
+- one node for each wheel, which installs it;
 - one node for each source distribution, which runs its PEP 517 backend;
+- one node for each local project, which runs the PEP 660 backend of that
+  project and then redirects the install at a tree outside the store;
 - one node for the environment, which composes the members.
 
 **The source distribution is the case that motivates the whole lab.** `idna`
@@ -27,7 +29,10 @@ Every packaging decision below is made by `packaging`, which is the reference
 implementation of the packaging PEPs, and none of it is expressed in the Nix
 language:
 
-- PEP 508 environment markers, through `packaging.markers`;
+- PEP 508 environment markers and requirements, through `packaging.markers`
+  and `packaging.requirements`;
+- PEP 440 version specifiers, through `packaging.specifiers`;
+- PEP 503 name normalisation, through `packaging.utils.canonicalize_name`;
 - PEP 425 and PEP 600 compatibility tags, through `packaging.tags` and
   `packaging.utils.parse_wheel_filename`.
 """
@@ -37,18 +42,24 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tomllib
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from nanopynix_bindings import expr as nix_expr, store as nix_store
 from packaging.markers import Marker
+from packaging.requirements import Requirement
 from packaging.tags import Tag
-from packaging.utils import parse_wheel_filename
+from packaging.utils import canonicalize_name, parse_wheel_filename
 
 import nanopynix
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+#: The backend that PEP 517 names when a project declares no `build-backend`.
+FALLBACK_BACKEND = "setuptools.build_meta:__legacy__"
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,11 +101,75 @@ class Artifact:
         """The name of the node that builds this artefact."""
         return f"{self.package}-{self.version}"
 
+    @property
+    def is_platform_wheel(self) -> bool:
+        """Whether this wheel carries a binary, which its tag already says.
+
+        A wheel tagged `any` runs on every platform, so it holds no compiled
+        code. Any other tag names one platform, and the node that installs it
+        needs the loader and the libraries of this system.
+        """
+        if self.kind != "wheel":
+            return False
+        _, _, _, wheel_tags = parse_wheel_filename(self.filename)
+        return not any(tag.platform == "any" for tag in wheel_tags)
+
     def as_plan(self) -> dict[str, str]:
         # `filename` is the name that the index gave this artefact.
         # `install-wheel.sh` needs it, because the store path of the fetch has
         # a hash in front of that name and `installer` reads the name.
         return {"drv": self.drv, "out": self.out, "filename": self.filename}
+
+
+@dataclass(frozen=True, slots=True)
+class Target:
+    """What this environment runs on, in the terms that `packaging` uses.
+
+    The planner runs on one machine and plans for another, so the target is a
+    value and not a property of the interpreter that reads this file.
+    """
+
+    #: The PEP 425 tags this environment accepts.
+    tags: frozenset[Tag]
+    #: The PEP 508 marker environment.
+    markers: dict[str, str]
+
+    def accepts(self, marker: str | None) -> bool:
+        """Whether a PEP 508 marker holds for this target."""
+        if marker is None:
+            return True
+        return Marker(marker).evaluate(self.markers)
+
+
+@dataclass(frozen=True, slots=True)
+class Editable:
+    """One local project, and the tree that its install must read.
+
+    `source` is a copy of the project inside the store, which the backend
+    reads. `root` is what the install redirects to, and it is either a literal
+    path or a reference to a variable that the environment reads at run time.
+    """
+
+    name: str
+    source: str
+    root: str
+
+    @property
+    def pyproject(self) -> dict[str, Any]:
+        """The `pyproject.toml` of the project, read from the store copy."""
+        with Path(self.source, "pyproject.toml").open("rb") as handle:
+            return tomllib.load(handle)
+
+    def build_system(self) -> tuple[str, list[Requirement]]:
+        """The PEP 517 backend of this project, and what the backend needs.
+
+        This is the same declaration that a source distribution carries, and
+        the planner resolves it the same way. PEP 517 gives the fallback for a
+        project that declares no backend.
+        """
+        table = self.pyproject.get("build-system", {})
+        backend = table.get("build-backend", FALLBACK_BACKEND)
+        return backend, [Requirement(text) for text in table.get("requires", [])]
 
 
 @dataclass
@@ -127,6 +202,10 @@ class Plan:
             "name": name,
             "kind": kind,
             "artifact": artifact.as_plan(),
+            # `graph.nix` gives a node the loader and the libraries of this
+            # system only when the tag of the wheel says that the node needs
+            # them. The tag is what `packaging` already parsed.
+            "platform": artifact.is_platform_wheel,
         }
         if kind == "sdist":
             if artifact.backend is None:
@@ -136,10 +215,28 @@ class Plan:
         self.nodes.append(entry)
         return name
 
-    def member(self, artifact: Artifact, name: str) -> None:
-        """Mark a node as a member of the environment, and not only a build input."""
+    def editable_node(self, editable: Editable, backend: str, backend_path: list[str]) -> str:
+        """Add the node that builds one local project as an editable."""
+        self.nodes.append(
+            {
+                "name": editable.name,
+                "kind": "editable",
+                "platform": False,
+                "source": editable.source,
+                "root": editable.root,
+                "backend": backend,
+                "backendPath": backend_path,
+            }
+        )
+        return editable.name
+
+    def member(self, name: str, label: str) -> None:
+        """Mark a node as a member of the environment, and not only a build input.
+
+        `label` is the line that the manifest of the environment carries.
+        """
         self.members.append(name)
-        self.installed.append(f"{artifact.package}=={artifact.version}")
+        self.installed.append(label)
 
 
 def env(name: str) -> str:
@@ -175,14 +272,7 @@ def target_tags(python_version: str, platform: str) -> set[Tag]:
     return tags
 
 
-def marker_applies(marker: str | None, environment: dict[str, str]) -> bool:
-    """Whether a PEP 508 marker holds for this target."""
-    if marker is None:
-        return True
-    return Marker(marker).evaluate(environment)
-
-
-def wheel_rank(artifact: Artifact, accepted: set[Tag]) -> int | None:
+def wheel_rank(artifact: Artifact, accepted: frozenset[Tag]) -> int | None:
     """How well a wheel fits, lower being better, or ``None`` for no fit.
 
     A platform-specific wheel outranks a pure one, which is what pip does:
@@ -197,29 +287,39 @@ def wheel_rank(artifact: Artifact, accepted: set[Tag]) -> int | None:
 
 def choose(
     artifacts: Iterable[Artifact],
-    package: str,
-    accepted: set[Tag],
-    environment: dict[str, str],
+    requirement: Requirement,
+    target: Target,
 ) -> Artifact | None:
-    """The one artefact of `package` that this target should use.
+    """The one artefact that satisfies `requirement` on this target.
 
     A wheel wins over a source distribution, and among wheels the best tag
     wins. A source distribution is the answer only when no wheel fits, which
     is what makes the build path of this example run.
+
+    **The name of a requirement is not the name of a package until PEP 503
+    normalises it.** A project asks for `flit_core`, and the index calls it
+    `flit-core`. The version range is PEP 440, and `packaging` answers both.
     """
+    package = canonicalize_name(requirement.name)
     best_wheel: tuple[int, Artifact] | None = None
     sdist: Artifact | None = None
 
     for artifact in artifacts:
-        if artifact.package != package:
+        if canonicalize_name(artifact.package) != package:
             continue
-        if not marker_applies(artifact.marker, environment):
+        if artifact.version not in requirement.specifier:
+            print(
+                f"plan: {artifact.filename}: {artifact.version} is outside {requirement}",
+                file=sys.stderr,
+            )
+            continue
+        if not target.accepts(artifact.marker):
             print(f"plan: {artifact.filename}: marker excludes this target", file=sys.stderr)
             continue
         if artifact.kind == "sdist":
             sdist = artifact
             continue
-        score = wheel_rank(artifact, accepted)
+        score = wheel_rank(artifact, target.tags)
         if score is None:
             continue
         if best_wheel is None or score < best_wheel[0]:
@@ -230,12 +330,35 @@ def choose(
     return sdist
 
 
+def resolve_backend(
+    plan: Plan,
+    artifacts: list[Artifact],
+    requirements: Iterable[Requirement],
+    target: Target,
+    subject: str,
+) -> list[str]:
+    """Give each backend of `requirements` a node, and name those nodes.
+
+    **This is the step that one derivation cannot express.** The backend comes
+    from the same lock file as the thing it builds, so neither the backend node
+    nor the node that reads it can exist before the plan runs.
+    """
+    names: list[str] = []
+    for requirement in requirements:
+        dependency = choose(artifacts, requirement, target)
+        if dependency is None:
+            raise RuntimeError(f"{subject}: no artefact of the lock file satisfies '{requirement}'")
+        names.append(plan.node(dependency, dependency.kind))
+        print(f"plan:   backend {dependency.filename} for {requirement}", file=sys.stderr)
+    return names
+
+
 def resolve(
     artifacts: list[Artifact],
     roots: list[str],
     installer: str,
-    accepted: set[Tag],
-    environment: dict[str, str],
+    editables: list[Editable],
+    target: Target,
 ) -> Plan:
     """Turn the lock file into the graph that builds the environment."""
     plan = Plan()
@@ -245,33 +368,42 @@ def resolve(
     # `.dist-info` and each console script. Nothing can install the installer
     # itself, so its node unzips the wheel and puts it on a path. This is the
     # same bootstrap that `pip` performs, and it is one node of the graph.
-    bootstrap = choose(artifacts, installer, accepted, environment)
+    bootstrap = choose(artifacts, Requirement(installer), target)
     if bootstrap is None:
         raise RuntimeError(f"the installer '{installer}' is not in the lock file")
     plan.installer = plan.node(bootstrap, "unpack")
     print(f"plan:   installer {bootstrap.filename} (unpacked to bootstrap)", file=sys.stderr)
 
     for package in roots:
-        chosen = choose(artifacts, package, accepted, environment)
+        chosen = choose(artifacts, Requirement(package), target)
         if chosen is None:
             print(f"plan: {package}: no artefact fits this target", file=sys.stderr)
             continue
 
         backend_path: list[str] = []
         if chosen.kind == "sdist":
-            # **The backend is resolved from the same lock file, and it becomes
-            # a node of the same graph.** This is the step that one derivation
-            # cannot express.
-            for requirement in chosen.backend_requires:
-                dependency = choose(artifacts, requirement, accepted, environment)
-                if dependency is None:
-                    raise RuntimeError(f"{chosen.filename}: the backend '{requirement}' is not in the lock file")
-                backend_path.append(plan.node(dependency, dependency.kind))
-                print(f"plan:   backend {dependency.filename}", file=sys.stderr)
+            backend_path = resolve_backend(
+                plan,
+                artifacts,
+                [Requirement(text) for text in chosen.backend_requires],
+                target,
+                chosen.filename,
+            )
 
         name = plan.node(chosen, chosen.kind, backend_path=backend_path)
-        plan.member(chosen, name)
-        print(f"plan: {package}: {chosen.filename} ({chosen.kind})", file=sys.stderr)
+        plan.member(name, f"{chosen.package}=={chosen.version}")
+        binary = " (binary)" if chosen.is_platform_wheel else ""
+        print(f"plan: {package}: {chosen.filename} ({chosen.kind}){binary}", file=sys.stderr)
+
+    for editable in editables:
+        # **A local project declares a build backend the same way an sdist
+        # does.** The planner reads that declaration from the project itself,
+        # and resolves it against the same lock file.
+        backend, requirements = editable.build_system()
+        backend_path = resolve_backend(plan, artifacts, requirements, target, f"{editable.name} (editable)")
+        name = plan.editable_node(editable, backend, backend_path)
+        plan.member(name, f"{editable.name} (editable, from {editable.root})")
+        print(f"plan: {editable.name}: editable through {backend}, reading {editable.root}", file=sys.stderr)
 
     return plan
 
@@ -314,17 +446,24 @@ def main() -> int:
 
     python_version = env("PYTHON_VERSION")
     platform = env("TARGET_PLATFORM")
-    environment = {
-        "sys_platform": env("TARGET_SYS_PLATFORM"),
-        "platform_system": "Linux",
-        "os_name": "posix",
-        "python_version": python_version,
-        "platform_machine": platform.rsplit("_", 1)[-1],
-        "implementation_name": "cpython",
-    }
+    target = Target(
+        tags=frozenset(target_tags(python_version, platform)),
+        markers={
+            "sys_platform": env("TARGET_SYS_PLATFORM"),
+            "platform_system": "Linux",
+            "os_name": "posix",
+            "python_version": python_version,
+            "platform_machine": platform.rsplit("_", 1)[-1],
+            "implementation_name": "cpython",
+        },
+    )
 
-    accepted = target_tags(python_version, platform)
-    plan = resolve(artifacts, menu["roots"], menu["installer"], accepted, environment)
+    editables = [
+        Editable(name=name, source=spec["source"], root=spec["root"])
+        for name, spec in sorted(menu.get("editables", {}).items())
+    ]
+
+    plan = resolve(artifacts, menu["roots"], menu["installer"], editables, target)
 
     print(
         f"==> {len(plan.nodes)} nodes, {len(plan.members)} of them in the environment, from {len(artifacts)} artefacts",
