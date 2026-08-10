@@ -1,0 +1,215 @@
+{
+  "comment": "A hand-made stand-in for uv.lock. Every artefact of every package is listed, and the planner decides which ones this host needs. idna is listed as an sdist only, so the planner must build it, and both the backend that builds it and the installer that installs it are other nodes of the same graph.",
+  "requires-python": ">=3.14",
+  "roots": [
+    "certifi",
+    "charset-normalizer",
+    "colorama",
+    "idna"
+  ],
+  "artifacts": [
+    {
+      "package": "certifi",
+      "version": "2024.8.30",
+      "filename": "certifi-2024.8.30-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/12/90/3c9ff0512038035f59d279fddeb79f5f1eccd8859f06d6163c58798b9487/certifi-2024.8.30-py3-none-any.whl",
+      "sha256": "922820b53db7a7257ffbda3f597266d435245903d80737e34f8a45ff3e3230d8",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "colorama",
+      "version": "0.4.6",
+      "filename": "colorama-0.4.6-py2.py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl",
+      "sha256": "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6",
+      "marker": "sys_platform == \"win32\"",
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-cp314-cp314-macosx_10_13_universal2.whl",
+      "url": "https://files.pythonhosted.org/packages/2a/35/7051599bd493e62411d6ede36fd5af83a38f37c4767b92884df7301db25d/charset_normalizer-3.4.4-cp314-cp314-macosx_10_13_universal2.whl",
+      "sha256": "da3326d9e65ef63a817ecbcc0df6e94463713b754fe293eaa03da99befb9a5bd",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+      "url": "https://files.pythonhosted.org/packages/10/9a/97c8d48ef10d6cd4fcead2415523221624bf58bcf68a802721a6bc807c8f/charset_normalizer-3.4.4-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+      "sha256": "8af65f14dc14a79b924524b1e7fffe304517b2bff5a58bf64f30b98bbc5079eb",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-cp314-cp314-manylinux2014_armv7l.manylinux_2_17_armv7l.manylinux_2_31_armv7l.whl",
+      "url": "https://files.pythonhosted.org/packages/10/bf/979224a919a1b606c82bd2c5fa49b5c6d5727aa47b4312bb27b1734f53cd/charset_normalizer-3.4.4-cp314-cp314-manylinux2014_armv7l.manylinux_2_17_armv7l.manylinux_2_31_armv7l.whl",
+      "sha256": "74664978bb272435107de04e36db5a9735e78232b85b77d45cfb38f758efd33e",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-cp314-cp314-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl",
+      "url": "https://files.pythonhosted.org/packages/ba/33/0ad65587441fc730dc7bd90e9716b30b4702dc7b617e6ba4997dc8651495/charset_normalizer-3.4.4-cp314-cp314-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl",
+      "sha256": "752944c7ffbfdd10c074dc58ec2d5a8a4cd9493b314d367c14d24c17684ddd14",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-cp314-cp314-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl",
+      "url": "https://files.pythonhosted.org/packages/67/ed/331d6b249259ee71ddea93f6f2f0a56cfebd46938bde6fcc6f7b9a3d0e09/charset_normalizer-3.4.4-cp314-cp314-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl",
+      "sha256": "d1f13550535ad8cff21b8d757a3257963e951d96e20ec82ab44bc64aeb62a191",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/67/ff/f6b948ca32e4f2a4576aa129d8bed61f2e0543bf9f5f2b7fc3758ed005c9/charset_normalizer-3.4.4-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "ecaae4149d99b1c9e7b88bb03e3221956f68fd6d50be2ef061b2381b61d20838",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-cp314-cp314-manylinux_2_31_riscv64.manylinux_2_39_riscv64.whl",
+      "url": "https://files.pythonhosted.org/packages/16/85/276033dcbcc369eb176594de22728541a925b2632f9716428c851b149e83/charset_normalizer-3.4.4-cp314-cp314-manylinux_2_31_riscv64.manylinux_2_39_riscv64.whl",
+      "sha256": "cb6254dc36b47a990e59e1068afacdcd02958bdcce30bb50cc1700a8b9d624a6",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-cp314-cp314-musllinux_1_2_aarch64.whl",
+      "url": "https://files.pythonhosted.org/packages/9e/f2/6a2a1f722b6aba37050e626530a46a68f74e63683947a8acff92569f979a/charset_normalizer-3.4.4-cp314-cp314-musllinux_1_2_aarch64.whl",
+      "sha256": "c8ae8a0f02f57a6e61203a31428fa1d677cbe50c93622b4149d5c0f319c1d19e",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-cp314-cp314-musllinux_1_2_armv7l.whl",
+      "url": "https://files.pythonhosted.org/packages/60/bb/2186cb2f2bbaea6338cad15ce23a67f9b0672929744381e28b0592676824/charset_normalizer-3.4.4-cp314-cp314-musllinux_1_2_armv7l.whl",
+      "sha256": "47cc91b2f4dd2833fddaedd2893006b0106129d4b94fdb6af1f4ce5a9965577c",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-cp314-cp314-musllinux_1_2_ppc64le.whl",
+      "url": "https://files.pythonhosted.org/packages/7d/a5/bf6f13b772fbb2a90360eb620d52ed8f796f3c5caee8398c3b2eb7b1c60d/charset_normalizer-3.4.4-cp314-cp314-musllinux_1_2_ppc64le.whl",
+      "sha256": "82004af6c302b5d3ab2cfc4cc5f29db16123b1a8417f2e25f9066f91d4411090",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-cp314-cp314-musllinux_1_2_riscv64.whl",
+      "url": "https://files.pythonhosted.org/packages/df/c5/d1be898bf0dc3ef9030c3825e5d3b83f2c528d207d246cbabe245966808d/charset_normalizer-3.4.4-cp314-cp314-musllinux_1_2_riscv64.whl",
+      "sha256": "2b7d8f6c26245217bd2ad053761201e9f9680f8ce52f0fcd8d0755aeae5b2152",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-cp314-cp314-musllinux_1_2_s390x.whl",
+      "url": "https://files.pythonhosted.org/packages/a5/42/90c1f7b9341eef50c8a1cb3f098ac43b0508413f33affd762855f67a410e/charset_normalizer-3.4.4-cp314-cp314-musllinux_1_2_s390x.whl",
+      "sha256": "799a7a5e4fb2d5898c60b640fd4981d6a25f1c11790935a44ce38c54e985f828",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-cp314-cp314-musllinux_1_2_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/76/be/4d3ee471e8145d12795ab655ece37baed0929462a86e72372fd25859047c/charset_normalizer-3.4.4-cp314-cp314-musllinux_1_2_x86_64.whl",
+      "sha256": "99ae2cffebb06e6c22bdc25801d7b30f503cc87dbd283479e7b606f70aff57ec",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-cp314-cp314-win32.whl",
+      "url": "https://files.pythonhosted.org/packages/b0/6f/8f7af07237c34a1defe7defc565a9bc1807762f672c0fde711a4b22bf9c0/charset_normalizer-3.4.4-cp314-cp314-win32.whl",
+      "sha256": "f9d332f8c2a2fcbffe1378594431458ddbef721c1769d78e2cbc06280d8155f9",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-cp314-cp314-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/4b/51/8ade005e5ca5b0d80fb4aff72a3775b325bdc3d27408c8113811a7cbe640/charset_normalizer-3.4.4-cp314-cp314-win_amd64.whl",
+      "sha256": "8a6562c3700cce886c5be75ade4a5db4214fda19fede41d9792d100288d8f94c",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-cp314-cp314-win_arm64.whl",
+      "url": "https://files.pythonhosted.org/packages/da/5f/6b8f83a55bb8278772c5ae54a577f3099025f9ade59d0136ac24a0df4bde/charset_normalizer-3.4.4-cp314-cp314-win_arm64.whl",
+      "sha256": "de00632ca48df9daf77a2c65a484531649261ec9f25489917f09e455cb09ddb2",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "charset-normalizer",
+      "version": "3.4.4",
+      "filename": "charset_normalizer-3.4.4-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/0a/4c/925909008ed5a988ccbb72dcc897407e5d6d3bd72410d69e051fc0c14647/charset_normalizer-3.4.4-py3-none-any.whl",
+      "sha256": "7a32c560861a02ff789ad905a2fe94e3f840803362c84fecf1851cb4cf3dc37f",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "flit-core",
+      "version": "4.0.2",
+      "filename": "flit_core-4.0.2-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/40/79/099ca4ec8c22b6462577ef933f90eed4c47cdcf6473d2cfcad275c3ce232/flit_core-4.0.2-py3-none-any.whl",
+      "sha256": "8d80717e28d982b41594ed5b14d4e89fbc5bad55473fde27994a3101db18a94e",
+      "kind": "wheel",
+      "marker": null
+    },
+    {
+      "package": "idna",
+      "version": "3.18",
+      "filename": "idna-3.18.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/cd/63/9496c57188a2ee585e0f1db071d75089a11e98aa86eb99d9d7618fc1edce/idna-3.18.tar.gz",
+      "sha256": "ffb385a7e039654cef1ab9ef32c6fafe283c0c0467bba1d9029738ce4a14a848",
+      "kind": "sdist",
+      "marker": null,
+      "backend": "flit_core.buildapi",
+      "backend-requires": [
+        "flit-core"
+      ]
+    },
+    {
+      "package": "installer",
+      "version": "1.0.1",
+      "filename": "installer-1.0.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/26/48/bedf3ba4163e7db392c9d4cbdfc8217423196c8fccbe5a404a0f094fde63/installer-1.0.1-py3-none-any.whl",
+      "sha256": "011d045df8b954ced7dde3a7e42ae4418da40ecda7990f2d11d5ed7c146fd98b",
+      "kind": "wheel",
+      "marker": null
+    }
+  ],
+  "installer": "installer"
+}
