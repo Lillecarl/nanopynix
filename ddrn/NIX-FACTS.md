@@ -461,6 +461,98 @@ that store, and not from a shell outside it. `check.nix` interpolates
 `builtins.outputOf planner.outPath "out"` into an ordinary derivation, which is
 also the consumer side of the whole feature.
 
+### A binary wheel, and the loader that it names
+
+**A manylinux wheel names a loader that this system does not have.** Measured
+on `ninja-1.13.0-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl`,
+which ships an ELF executable at `ninja-1.13.0.data/scripts/ninja`:
+
+```text
+interpreter: /lib64/ld-linux-x86-64.so.2
+needed:      libstdc++.so.6 libm.so.6 libgcc_s.so.1 libpthread.so.0 libc.so.6
+rpath:       ''
+```
+
+Running that file gives `Could not start dynamically linked executable`, and
+neither `libstdc++.so.6` nor `libgcc_s.so.1` is on the default search path of
+this system.
+
+**`auto-patchelf` of nixpkgs corrects both, and a graph node calls it
+directly.** `pyproject.nix` puts `autoPatchelfHook` in `nativeBuildInputs`
+(`build/hacks/default.nix`), but a node of this graph is a plain `derivation`
+and runs no setup hook. `pkgs.auto-patchelf` is the program that the hook
+calls. It needs `patchelf` on the path, and it needs `NIX_BINTOOLS` to name a
+bintools wrapper: it reads the loader from `nix-support/dynamic-linker` and the
+libc from `nix-support/orig-libc`. The same file, after the node installed it:
+
+```text
+interpreter: /nix/store/l8si8gnv…-glibc-2.42-67/lib/ld-linux-x86-64.so.2
+rpath:       /nix/store/0iv8glcs…-gcc-15.3.0-lib/lib:/nix/store/kw26hfd5…-gcc-15.3.0-libgcc/lib
+```
+
+**A shared library of a wheel often needs no patch, and an executable always
+does.** The two extension modules of `charset_normalizer` need `libc.so.6` and
+`libpthread.so.0` and nothing else, and the interpreter that loads them has
+already loaded both, so they work with no RPATH at all. The failure appears
+when the wheel carries an executable, or a library that needs more than libc.
+
+**The tag of a wheel says which node needs this.** A wheel tagged `any` carries
+no compiled code, so the planner marks only the other ones. Measured: the node
+of `certifi` references itself and nothing else, and the node of `ninja`
+references `gcc-15.3.0-lib`, `gcc-15.3.0-libgcc` and `glibc`. Every one of
+those three is already in the closure of `python3`, so the environment grew by
+0.4 MiB, which is the size of `ninja`.
+
+### An editable install, and how it survives the store
+
+**A PEP 660 wheel carries a path, and not code.** `flit_core` writes one file,
+`myapp.pth`, whose whole content is the directory that the backend ran in.
+Under Nix that directory is a copy of the project inside the store, which is
+read only. So the install has to be redirected after it is made.
+
+**`os.path.expandvars` is what makes the redirection outlive the build.**
+`pyproject.nix` wraps every replaced path in it (`build/hooks/editable_hook`,
+`patch_editable.py`), and the reason is a store path: a literal root is part of
+what the node builds, so a different root gives a different environment. A
+reference to a variable is the same bytes for every tree. Measured, from the
+node output:
+
+```text
+import sys; import os.path; sys.path.append(os.path.expandvars('$DDRN_EDITABLE_ROOT/src'))
+```
+
+`ddrn/examples/venv-graph/run.sh` builds two check derivations that name two
+different trees, and both read `rwl64yg3…-demo-venv`. One environment, two
+sources, no rebuild.
+
+**A `.pth` line that is a bare path cannot expand a variable.** `site` runs a
+line that starts with `import`, and appends any other line to `sys.path`
+verbatim. So the rewrite has to turn the path into code, which is what
+`patch_pth` of `pyproject.nix` does and what this lab copies.
+
+**A backend that writes an import finder needs more than a text rewrite.**
+setuptools puts the build path inside a string literal of a generated `.py`
+file. `pyproject.nix` rewrites that literal as a concrete syntax tree, with
+`libcst`, so that it changes the literal and nothing else. This lab uses
+`flit_core`, which writes the `.pth` form only, and raises rather than pretend
+to handle the other form.
+
+**The editable node holds no source.** Measured, the whole output:
+
+```text
+bin/myapp
+lib/python3.14/site-packages/myapp.pth
+lib/python3.14/site-packages/myapp-0.1.0.dist-info/{METADATA,RECORD,WHEEL,entry_points.txt}
+```
+
+**A local project declares its backend the way a source distribution does, and
+the planner resolves both against the same lock file.** The planner reads
+`build-system.requires` from the `pyproject.toml` of the project, parses each
+entry as a PEP 508 requirement, normalises the name by PEP 503, and matches the
+version by PEP 440. Measured: `myapp` asks for `flit_core >=3.11,<5`, the lock
+file calls that package `flit-core`, and the node that the `idna` source
+distribution already needed is the node that the editable gets.
+
 ## Deriving paths
 
 **A `SingleDerivedPath` names a derivation only when it is the `drvPath` field

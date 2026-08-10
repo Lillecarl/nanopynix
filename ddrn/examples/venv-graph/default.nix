@@ -25,6 +25,20 @@
   # builds this derivation. `run.sh` passes the store path of
   # `nanopynixMaster.pythonSet.mkVirtualEnv`.
   nanopynixEnv,
+  # One entry for each local project to install as a PEP 660 editable.
+  #
+  #   src   the project tree, which Nix copies into the store. The backend
+  #         reads it, and the environment does not.
+  #   root  what the install redirects to. A literal path names one tree
+  #         forever. A reference to a variable, which is the default, keeps
+  #         the environment the same bytes for every tree, so the tree can
+  #         change with no rebuild.
+  editables ? {
+    myapp = {
+      src = ./fixtures/myapp;
+      root = "$DDRN_EDITABLE_ROOT";
+    };
+  },
 }:
 
 let
@@ -75,13 +89,27 @@ let
       gnutar = "${pkgs.gnutar}";
       gzip = "${pkgs.gzip}";
       python = "${pkgs.python3}";
+      # The three below reach only a node that installs a binary wheel.
+      patchelf = "${pkgs.patchelf}";
+      # `pkgs.autoPatchelfHook` is a setup hook, and a graph node runs no setup
+      # hook. `pkgs.auto-patchelf` is the program that the hook calls.
+      autoPatchelf = "${pkgs.auto-patchelf}";
+      bintools = "${pkgs.stdenv.cc.bintools}";
+      gccLib = "${pkgs.stdenv.cc.cc.lib}";
     };
     scripts = {
       unpackWheel = "${./scripts/unpack-wheel.sh}";
       installWheel = "${./scripts/install-wheel.sh}";
       buildSdist = "${./scripts/build-sdist.sh}";
+      buildEditable = "${./scripts/build-editable.py}";
       makeVenv = "${./scripts/make-venv.py}";
     };
+    # The planner reads the `pyproject.toml` of each tree below, and resolves
+    # the backend that the tree asks for against the same lock file.
+    editables = pkgs.lib.mapAttrs (_: spec: {
+      source = "${spec.src}";
+      inherit (spec) root;
+    }) editables;
   };
 in
 derivation {

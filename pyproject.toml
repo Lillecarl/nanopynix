@@ -13,6 +13,10 @@ extraPaths = [
   # only, and it is not installed into the dev environment: a planner reaches
   # it through PYTHONPATH inside a build sandbox.
   "ddrn/src",
+  # `myapp`, the local project that `ddrn/examples/venv-graph` installs as a
+  # PEP 660 editable. The graph builds it, and `scripts/check.py` imports it
+  # from inside the environment that the graph made.
+  "ddrn/examples/venv-graph/fixtures/myapp/src",
   # `_bench_utils`, which the benchmark modules and their conftest import by
   # bare name -- the directory goes on `sys.path` by pytest's rootdir rule
   # rather than being a package.

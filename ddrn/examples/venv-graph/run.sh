@@ -129,3 +129,38 @@ check="$("$nix_patched/bin/nix" build \
 "$nix_patched/bin/nix" --store "$store" \
   --extra-experimental-features "$features" \
   store cat "$check"
+
+# **The editable proof.** The environment holds `myapp` as a PEP 660 editable,
+# and the `.pth` that the graph installed expands `$DDRN_EDITABLE_ROOT` when
+# the interpreter starts. So a second tree reads back differently from the
+# **same** environment, and nothing about the environment is rebuilt.
+echo "==> the same environment, a different tree"
+other="$work/other-tree"
+rm -rf "$other"
+cp -R "$here/fixtures/myapp" "$other"
+chmod -R u+w "$other"
+sed -i 's|^WHICH_TREE = .*|WHICH_TREE = "a tree that this run wrote a minute ago"|' \
+  "$other/src/myapp/__init__.py"
+
+check_other="$("$nix_patched/bin/nix" build \
+  --store "$store" \
+  --file "$here/check.nix" \
+  --argstr nanopynixEnv "$nanopynix_env" \
+  --arg editableTree "$other" \
+  --impure \
+  --no-link --print-out-paths --print-build-logs \
+  --extra-experimental-features "$features")"
+
+"$nix_patched/bin/nix" --store "$store" \
+  --extra-experimental-features "$features" \
+  store cat "$check_other"
+
+# The environment is one store path, and both checks read it. Prove that,
+# rather than say it: each check derivation names its input.
+echo "==> both checks read the same environment:"
+for path in "$check" "$check_other"; do
+  "$nix_patched/bin/nix" --store "$store" \
+    --extra-experimental-features "$features" \
+    path-info --json --json-format 1 "$path" |
+    grep -o '[a-z0-9]\{32\}-demo-venv' | sort -u
+done

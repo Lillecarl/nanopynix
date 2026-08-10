@@ -7,12 +7,16 @@ environment finds its own `site-packages`.
 
 from __future__ import annotations
 
+import os
 import sys
 from importlib import metadata
+from typing import cast
 
 import certifi
 import charset_normalizer
 import idna
+import myapp
+import ninja  # pyright: ignore[reportMissingImports] -- only the graph installs this, from a wheel of the lock file
 
 
 def main() -> int:
@@ -21,6 +25,15 @@ def main() -> int:
     print(f"idna         {idna.__version__} {idna.encode('ドメイン.テスト').decode()}")
     print(f"certifi      {certifi.where().rsplit('/', 1)[-1]}")
     print(f"charset      {charset_normalizer.__version__}")
+    ninja_version = cast("str", ninja.__version__)  # pyright: ignore[reportUnknownMemberType] -- the import above is unresolved, so this attribute has no type
+    print(f"ninja        {ninja_version}")
+
+    # **The editable reads a tree that is not in this environment.** The `.pth`
+    # of `myapp` expands `$DDRN_EDITABLE_ROOT` when the interpreter starts, so
+    # this line reports whichever tree the check derivation named.
+    print(f"editable     {os.environ['DDRN_EDITABLE_ROOT']}")
+    print(f"  {myapp.greet()}")
+    print(f"  loaded from {myapp.__file__}")
 
     # **This is what `unzip` cannot give.** A distribution is discoverable only
     # when an installer wrote its `.dist-info`, with `RECORD` and `METADATA`.

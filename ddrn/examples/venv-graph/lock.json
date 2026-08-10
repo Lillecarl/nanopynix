@@ -5,7 +5,8 @@
     "certifi",
     "charset-normalizer",
     "colorama",
-    "idna"
+    "idna",
+    "ninja"
   ],
   "artifacts": [
     {
@@ -15,15 +16,6 @@
       "url": "https://files.pythonhosted.org/packages/12/90/3c9ff0512038035f59d279fddeb79f5f1eccd8859f06d6163c58798b9487/certifi-2024.8.30-py3-none-any.whl",
       "sha256": "922820b53db7a7257ffbda3f597266d435245903d80737e34f8a45ff3e3230d8",
       "marker": null,
-      "kind": "wheel"
-    },
-    {
-      "package": "colorama",
-      "version": "0.4.6",
-      "filename": "colorama-0.4.6-py2.py3-none-any.whl",
-      "url": "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl",
-      "sha256": "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6",
-      "marker": "sys_platform == \"win32\"",
       "kind": "wheel"
     },
     {
@@ -180,6 +172,15 @@
       "kind": "wheel"
     },
     {
+      "package": "colorama",
+      "version": "0.4.6",
+      "filename": "colorama-0.4.6-py2.py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl",
+      "sha256": "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6",
+      "marker": "sys_platform == \"win32\"",
+      "kind": "wheel"
+    },
+    {
       "package": "flit-core",
       "version": "4.0.2",
       "filename": "flit_core-4.0.2-py3-none-any.whl",
@@ -198,7 +199,7 @@
       "marker": null,
       "backend": "flit_core.buildapi",
       "backend-requires": [
-        "flit-core"
+        "flit_core >=3.11,<5"
       ]
     },
     {
@@ -209,6 +210,24 @@
       "sha256": "011d045df8b954ced7dde3a7e42ae4418da40ecda7990f2d11d5ed7c146fd98b",
       "kind": "wheel",
       "marker": null
+    },
+    {
+      "package": "ninja",
+      "version": "1.13.0",
+      "filename": "ninja-1.13.0-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+      "url": "https://files.pythonhosted.org/packages/8e/de/6e1cd6b84b412ac1ef327b76f0641aeb5dcc01e9d3f9eee0286d0c34fd93/ninja-1.13.0-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+      "sha256": "3d00c692fb717fd511abeb44b8c5d00340c36938c12d6538ba989fe764e79630",
+      "marker": null,
+      "kind": "wheel"
+    },
+    {
+      "package": "ninja",
+      "version": "1.13.0",
+      "filename": "ninja-1.13.0-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/ed/de/0e6edf44d6a04dabd0318a519125ed0415ce437ad5a1ec9b9be03d9048cf/ninja-1.13.0-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "fb46acf6b93b8dd0322adc3a4945452a4e774b75b91293bafcc7b7f8e6517dfa",
+      "marker": null,
+      "kind": "wheel"
     }
   ],
   "installer": "installer"
