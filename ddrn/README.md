@@ -56,6 +56,7 @@ chroot store and the Nix that it needs:
 $ ddrn/examples/submitted/run.sh        # builder-rpc-v0, driven by the nix CLI
 $ ddrn/examples/submitted-graph/run.sh  # the same, driven by nanopynix
 $ ddrn/examples/evaluated-graph/run.sh  # the evaluator in the sandbox, patched Nix
+$ ddrn/examples/venv-graph/run.sh       # a Python environment, as a graph
 ```
 
 ## How it works
@@ -141,6 +142,8 @@ on nothing that the planner invented.
 pre-instantiated fetches. That is enough for a venv. It is not enough for a
 build graph in which one generated derivation feeds another, such as compiling
 an sdist whose build backend is itself resolved from the lock.
+`ddrn/examples/venv-graph` is that same environment once `builder-rpc-v0`
+removes the limit, and it does compile such an sdist.
 
 I tried nesting, a planner that emits a planner, as a way around this.
 Upstream tests `builtins.outputOf (builtins.outputOf ...)` in
@@ -548,7 +551,7 @@ is correct; only the prediction is missing.
 
 ## Next steps
 
-Each of the six steps below is done.
+Each of the seven steps below is done.
 
 1. **Done.** `nix/nix-master.nix` builds a Nix from the default branch, and
    `nanopynixMaster` in `default.nix` is the nanopynix scope over it. It is
@@ -585,10 +588,63 @@ Each of the six steps below is done.
    `planner`, and the root is named `graph`. It needs the three changes to Nix
    that `ddrn/UPSTREAM.md` gives, and it writes no ATerm.
 
-What remains is the case that motivated all of it: rewrite
-`ddrn/examples/venv` as a graph, with one derivation for each wheel, one for
-each install step, and an sdist path that resolves its own build backend.
-That is the case `uv2nix` handles and a plain dynamic derivation cannot.
+7. **Done.** `ddrn/examples/venv-graph` is `ddrn/examples/venv` as a graph, and
+   it is the case that motivated all of it. One node installs each wheel with
+   `pypa/installer`, one node builds each source distribution with its PEP 517
+   backend, and one node composes a real virtual environment with
+   `venv.EnvBuilder`.
+
+   **The builders follow `pyproject.nix`**, which installs with
+   `pypa/installer` and merges the members with a script that rewrites the
+   shebang of each console script. Both matter: `importlib.metadata` finds a
+   package only when an installer wrote its `.dist-info`, and a console script
+   runs the wrong interpreter until the shebang points at the `bin/python` of
+   the environment.
+
+   **The installer is itself a node of the graph.** The planner resolves it
+   from the same lock file, and its node unpacks the wheel rather than
+   installing it, because nothing can install the installer. That is the
+   bootstrap `pip` performs, expressed as one node.
+
+   **`idna` is in the lock file as a source distribution only.** Its
+   `pyproject.toml` asks for `flit_core`, the planner resolves that name
+   against the same lock file, and the wheel of `flit_core` becomes another
+   node of the same graph. Measured:
+
+   ```text
+   node: idna-3.18
+     inputDrvs:
+       fr6sp6rp…-idna-3.18.tar.gz.drv
+       hlr53jdq…-flit-core-4.0.2.drv
+     backendPath: /1pf0x0b8…/lib/python3.14/site-packages
+     backend: flit_core.buildapi
+   ```
+
+   `backendPath` is a downstream placeholder, so the output path of the
+   backend is not known until the backend is built. Neither node of that pair
+   can exist before the plan runs, and a planner that emits one derivation can
+   express neither. That is the case `uv2nix` handles and a plain dynamic
+   derivation cannot.
+
+   The environment runs, and it is a virtual environment and not a directory
+   with a wrapper:
+
+   ```text
+   interpreter  /nix/store/w9pzpvlp…-demo-venv/bin/python
+   prefix       /nix/store/w9pzpvlp…-demo-venv
+   idna         3.18 xn--eckwd4c7c.xn--zckzah
+   distributions
+     certifi==2024.8.30
+     charset-normalizer==3.4.4
+     idna==3.18
+   entry points ['idna=idna.cli:main']
+   console script
+     idna xn--eckwd4c7c.xn--zckzah
+   ```
+
+   `bin/idna` is a console script that the installer wrote, for a package that
+   the graph built from source, with a backend the planner resolved from the
+   lock file.
 
 ### Two patches of this repository meet the default branch differently
 

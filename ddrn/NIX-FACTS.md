@@ -309,6 +309,158 @@ the *resolved* derivation: a floating child has a real output path once it is
 built, and resolution rewrites the placeholder to it. This is ordinary for a
 content-addressed graph, and it is not a symptom.
 
+## A pre-instantiated menu, and how a planner uses one
+
+**`builtins.appendContext` turns a bare output path back into a dependency.**
+`src/libexpr/primops/context.cc:304`, the `outputs` branch, makes a
+`NixStringContextElem::Built` for each named output of the key:
+
+```cpp
+context.emplace(NixStringContextElem::Built{
+    .drvPath = makeConstantStorePathRef(namePath),
+    .output = std::string{outputName},
+});
+```
+
+So `builtins.appendContext out { ${drv} = { outputs = [ "out" ]; }; }` gives a
+string that *is* the output path and that *depends on* the derivation. A
+derivation that interpolates it records `drv` as an input.
+
+**That primop calls `ensurePath` on the key** (same file, line 275), so it
+reaches the allowlist entry of this lab. A planner cannot use a
+pre-instantiated menu without it.
+
+**The two `unsafeDiscard*` builtins are what keep the menu lazy, and they are
+the inverse of the line above.** `unsafeDiscardOutputDependency` leaves the
+`.drv` as an input source while the output stays unbuilt.
+`unsafeDiscardStringContext` gives the output path with no dependency at all.
+
+**`builtins.toJSON` keeps the string context of what it serialises.** So a
+menu of store paths in one environment variable makes every path in it an
+input source of the derivation. `ddrn/examples/venv-graph/default.nix` passes
+21 artefacts, 6 tools and 3 scripts that way, in `DDRN_MENU`.
+
+## Python packaging, measured
+
+**A graph whose nodes the planner chose, and whose shape it decided, builds and
+runs.** `ddrn/examples/venv-graph` resolved 21 artefacts down to 4 nodes, 3 of
+them members of the environment:
+
+```text
+plan: certifi: certifi-2024.8.30-py3-none-any.whl (wheel)
+plan: charset-normalizer: charset_normalizer-3.4.4-cp314-cp314-manylinux2014_x86_64…whl (wheel)
+plan: colorama-0.4.6-py2.py3-none-any.whl: marker excludes this target
+plan:   backend flit_core-4.0.2-py3-none-any.whl
+plan: idna: idna-3.18.tar.gz (sdist)
+```
+
+**One generated derivation feeds another, and the second one could not exist
+before the plan ran.** `nix derivation show` of the `idna` node:
+
+```text
+node: idna-3.18
+  inputDrvs:
+    fr6sp6rp…-idna-3.18.tar.gz.drv
+    hlr53jdq…-flit-core-4.0.2.drv
+  backendPath: /1pf0x0b8…/lib/python3.14/site-packages
+  backend: flit_core.buildapi
+```
+
+`backendPath` is a downstream placeholder, because the backend node floats.
+The planner read `flit_core` from the `pyproject.toml` requirement recorded in
+the lock file, resolved that name against the same lock file, and made the
+wheel of it a node.
+
+**A PEP 517 backend builds offline with nothing but itself on `PYTHONPATH`.**
+Measured outside Nix first, and then inside the sandbox:
+`flit_core.buildapi.build_wheel` over the `idna` sdist gives
+`idna-3.18-py3-none-any.whl`, with no network and no index.
+
+**The environment runs.** `idna.encode("ドメイン.テスト")` gives
+`xn--eckwd4c7c.xn--zckzah`, from a package that the graph built from source.
+
+**A change to the planner rebuilds the planner and nothing else.** A later edit
+to `plan.py` changed the store path of the planner, so the planner ran again.
+It submitted the same root, `x6bjdmvp…-demo-venv.drv`, and the environment
+stayed at `9jsa78yq…-demo-venv`. The graph is a function of the decisions, and
+not of the source that made them, so content addressing stops the rebuild at
+the planner. This is the property that the single-derivation form cannot have:
+there, one install step holds every wheel, and any change rebuilds all of
+them.
+
+### Installing a wheel, and what `unzip` does not do
+
+**`unzip` is not an install.** `pyproject.nix` uses `pypa/installer`
+(`build/hooks/pypa-install-hook`), and the difference is visible from inside
+the environment: `importlib.metadata.distributions()` finds a package only when
+an installer wrote its `.dist-info`, with `RECORD` and `METADATA`. A console
+script exists only when an installer read `entry_points.txt` and wrote it.
+
+**The installer is a node of the graph, and it bootstraps by unpacking.**
+Nothing can install the installer, so the planner gives that one artefact a
+node that unzips it. Every other node then installs with it. This is the
+bootstrap that `pip` performs, expressed as one node.
+
+**A store path is not a wheel file name.** `installer` reads the name of the
+file to learn which `.dist-info` the wheel must carry, and a store path puts a
+hash in front of that name:
+
+```text
+installer.sources._WheelFileBadDistInfo: Wheel .dist-info directory doesn't
+match wheel filename (filename='/nix/store/m5r5inpx…-certifi-2024.8.30-py3-none-any.whl',
+dist_info='certifi-2024.8.30.dist-info')
+```
+
+So the wheel goes under its own name first. nixpkgs and `pyproject.nix` install
+from a `dist` directory for the same reason.
+
+**A console script needs its shebang rewritten.** The shebang that `installer`
+writes names the interpreter that ran the install, which is the one in the
+store, and that interpreter does not see the environment. `pyproject.nix` calls
+the fix `write_bin`. Match the shebang on the *name* of the interpreter, and
+not on its whole path: `installer` takes the shebang from `sys.executable`, and
+CPython reports that after it resolves the symlink, so an install run through
+`python3` gives a shebang that names `python3.14`.
+
+**`venv.EnvBuilder` gives a real environment.** The result has `pyvenv.cfg`,
+`bin/python` and `bin/activate`, and `sys.prefix` is the environment, so an
+import needs no `PYTHONPATH`. Measured from inside:
+
+```text
+interpreter  /nix/store/w9pzpvlp…-demo-venv/bin/python
+prefix       /nix/store/w9pzpvlp…-demo-venv
+entry points ['idna=idna.cli:main']
+```
+
+**Bytecode makes an installed package self-referential.** `installer` compiles
+`.pyc` by default, and a `.pyc` embeds the absolute path of its source, which
+is inside the output. Measured on `certifi`: 6 files hold the hash of their own
+store path, and `path-info` records the path in its own `references`. A
+floating content-addressed output takes this in its stride, because Nix
+computes the hash modulo the self-reference.
+
+**Unresolved, and it belongs to the harness and not to the graph.**
+`nix copy --from <chroot store>` of such a path into the daemon of this
+machine, which runs Nix 2.34, fails:
+
+```text
+error: ca hash mismatch importing path '/nix/store/2h0bgg8v…-certifi-2024.8.30';
+         specified: sha256:1bq7qm90rqvml05gzii2ic6w9kyq8knjmnmasd188v1iwasl68yz
+         got:       sha256:0dnahkz7iaic6q5bpr7dixwsj76yr83g056d8hjcjphydjv3c4hz
+```
+
+The path has a self-reference, so the two sides have to agree on the hash
+modulo that reference. **This is not root-caused.** The graph itself is not
+affected: `ddrn/examples/venv-graph/check.nix` runs the environment inside the
+store that holds it, and it passes.
+
+**A check of a store output runs as a derivation.** Every symlink that
+`make-venv.py` writes is absolute, as every store path is, and a chroot store
+puts the store under a prefix. Those symlinks resolve from inside a build of
+that store, and not from a shell outside it. `check.nix` interpolates
+`builtins.outputOf planner.outPath "out"` into an ordinary derivation, which is
+also the consumer side of the whole feature.
+
 ## Deriving paths
 
 **A `SingleDerivedPath` names a derivation only when it is the `drvPath` field
