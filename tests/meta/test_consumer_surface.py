@@ -4,7 +4,7 @@ CLAUDE.md states two rules about this boundary, and nothing checked either one.
 ``pynix`` must depend on the public APIs of ``nanopynix``, and a narrow
 dependency on a private module is acceptable only when a redesign is not
 justified. Measured before this file existed: 30 private import sites across
-``pynix``, ``ekn`` and ``nanopynix-helpers``, and none of them recorded the
+``pynix`` and ``nanopynix-helpers``, and none of them recorded the
 decision. The rule was clear, it was written down, and nothing looked.
 
 Three gates, and they are not the same kind of thing.
@@ -110,7 +110,6 @@ _CONSTRUCTS = (
 # own value. The protocols express this with an invariant type parameter, which
 # is honest and which is exactly what makes them non-substitutable here.
 CONSUMER_ENGINE_ANNOTATIONS: dict[tuple[str, str], str] = {
-    ("ekn/src/ekn/eval.py", "Session"): _CONSTRUCTS,
     ("pynix/src/pynix/_util.py", "Session"): _CONSTRUCTS,
     ("pynix/src/pynix/_util.py", "Store"): _OWN_STORE,
     ("pynix/src/pynix/_lsp/_context.py", "Session"): _CONSTRUCTS,

@@ -589,7 +589,7 @@ let
         for sha in $commits; do
           subject="$(git log -1 --format=%s "$sha")"
           # A space is legal inside the parentheses, because this repository
-          # writes a multi-scope subject as `(nanopynix, ekn)`.
+          # writes a multi-scope subject as `(nanopynix, pynix)`.
           if ! printf '%s\n' "$subject" | grep -Eq '^[a-z]+(\([a-z0-9._/, -]+\))?!?: .+'; then
             echo "::error::$sha: not a Conventional Commits subject: $subject"
             status=1

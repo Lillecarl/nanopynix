@@ -310,7 +310,7 @@ def _log_event(request_id: int) -> LogEventProto:
 async def test_the_outbox_discards_the_oldest_log_line():
     """The oldest, because the end of a log is the part worth keeping.
 
-    ``nanopynix_helpers.build`` and ``ekn.eval`` both scan a capture for the
+    ``nanopynix_helpers.build`` scans a capture for the
     fixed-output hash mismatch Nix prints next to the failure.
     """
     outbox = LogOutbox(maxsize=3)
@@ -471,7 +471,7 @@ def test_callback_bus_normalises_the_wire_event_to_the_model():
     """Both engines' subscribers see the model, never the proto it subclasses.
 
     This is the invariant that lets `Session.subscribe` state its type, and
-    that removed ekn's need to import the proto class to narrow against.
+    that removed a consumer's need to import the proto class to narrow against.
     """
     bus = CallbackBus()
     seen: list[LogEvent | None] = []

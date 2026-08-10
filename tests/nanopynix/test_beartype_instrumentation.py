@@ -209,7 +209,7 @@ _UNDECORATABLE_PATTERN = re.compile(r"BeartypeClawDecorWarning: .*? ([\w.]+)\(\)
 # where beartype never installed would emit no warnings and pass vacuously.
 _INSTRUMENTED_IMPORT_PROBE = """
 import beartype.roar
-import nanopynix, nanopynix_helpers, pynix, ekn
+import nanopynix, nanopynix_helpers, pynix
 from nanopynix.settings import normalize_nix_path
 
 try:

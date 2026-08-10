@@ -23,9 +23,9 @@ let
   # This replaces a `python.withPackages` list that had to name each
   # project's `.dependencies` by hand, because `withPackages` drops
   # applications together with everything they propagate -- the bug that left
-  # `kr8s` out and four ekn test modules uncollectable. A venv has no such
-  # rule: `mkVirtualEnv` resolves the declared graph, so a dependency cannot
-  # go missing without the resolution failing loudly.
+  # a native dependency out and a whole group of test modules uncollectable. A
+  # venv has no such rule: `mkVirtualEnv` resolves the declared graph, so a
+  # dependency cannot go missing without the resolution failing loudly.
   #
   # Built, not editable, unlike the dev shell. An editable install bakes an
   # absolute non-store path into the derivation, and this runner deliberately
@@ -41,7 +41,6 @@ let
     nanopynix = [ "test" ];
     nanopynix-helpers = [ ];
     pynix = [ "test" ];
-    ekn = [ ];
   };
 
   # Interpolating this path literal copies it into the store and substitutes

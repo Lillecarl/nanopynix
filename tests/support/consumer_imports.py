@@ -60,7 +60,6 @@ if TYPE_CHECKING:
 # root. `tests/` is absent on purpose -- see the module docstring.
 CONSUMER_ROOTS = (
     "pynix/src",
-    "ekn/src",
     "nanopynix-helpers/src",
     "docs",
 )

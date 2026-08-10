@@ -106,53 +106,51 @@ let
       };
     };
 
-    nanopynix = _pySelf: rendered: nixLinked rendered // {
-      # No LD_PRELOAD of the TSAN runtime here, deliberately. It used to be
-      # set, reasoning that the bindings get dlopen()ed into whatever process
-      # imports nanopynix -- but a derivation's `env` is its *build*
-      # environment and reaches no consumer, so it never served that purpose.
-      # What it did do was preload libtsan into every process this build runs,
-      # `uv` included, and TSAN then reported data races inside uv's own Rust
-      # code and failed the build with exit 66 -- before a single test ran.
-      # That is the whole reason all three test-tsan-* jobs were red.
-      #
-      # Nothing here needs it: this is the pure-Python distribution, the
-      # builders have no `pythonImportsCheck` equivalent (see the comment on
-      # nanopynix-proto above), so no phase of this build ever imports
-      # nanopynix and nothing dlopens the instrumented .so.
-      #
-      # The two places that genuinely need the preload still have it, both
-      # scoped to a process that really does load the extension:
-      # nanopynix-bindings/package.nix (stubgen + pythonImportsCheck) and
-      # nanopynix/tests.nix's runner script (the pytest process itself).
-      meta = rendered.meta // {
-        license = lib.licenses.lgpl21Plus;
-        platforms = lib.platforms.unix;
+    nanopynix =
+      _pySelf: rendered:
+      nixLinked rendered
+      // {
+        # No LD_PRELOAD of the TSAN runtime here, deliberately. It used to be
+        # set, reasoning that the bindings get dlopen()ed into whatever process
+        # imports nanopynix -- but a derivation's `env` is its *build*
+        # environment and reaches no consumer, so it never served that purpose.
+        # What it did do was preload libtsan into every process this build runs,
+        # `uv` included, and TSAN then reported data races inside uv's own Rust
+        # code and failed the build with exit 66 -- before a single test ran.
+        # That is the whole reason all three test-tsan-* jobs were red.
+        #
+        # Nothing here needs it: this is the pure-Python distribution, the
+        # builders have no `pythonImportsCheck` equivalent (see the comment on
+        # nanopynix-proto above), so no phase of this build ever imports
+        # nanopynix and nothing dlopens the instrumented .so.
+        #
+        # The two places that genuinely need the preload still have it, both
+        # scoped to a process that really does load the extension:
+        # nanopynix-bindings/package.nix (stubgen + pythonImportsCheck) and
+        # nanopynix/tests.nix's runner script (the pytest process itself).
+        meta = rendered.meta // {
+          license = lib.licenses.lgpl21Plus;
+          platforms = lib.platforms.unix;
+        };
       };
-    };
 
-    nanopynix-helpers = _pySelf: rendered: nixLinked rendered // {
-      meta = rendered.meta // {
-        platforms = lib.platforms.unix;
+    nanopynix-helpers =
+      _pySelf: rendered:
+      nixLinked rendered
+      // {
+        meta = rendered.meta // {
+          platforms = lib.platforms.unix;
+        };
       };
-    };
 
-    ekn = _pySelf: rendered: nixLinked rendered // {
-      # `cacert` was a `nativeBuildInputs` entry only so `postInstall` could
-      # point git at a CA bundle while generating completions. Completions
-      # are generated outside the package now (see `mkApp`), because a
-      # builders package has no propagated dependencies and so cannot run
-      # its own entry point during its build.
-      meta = rendered.meta // {
-        platforms = lib.platforms.unix;
+    pynix =
+      _pySelf: rendered:
+      nixLinked rendered
+      // {
+        meta = rendered.meta // {
+          platforms = lib.platforms.unix;
+        };
       };
-    };
-
-    pynix = _pySelf: rendered: nixLinked rendered // {
-      meta = rendered.meta // {
-        platforms = lib.platforms.unix;
-      };
-    };
 
     pytest-agent = _pySelf: rendered: {
       meta = rendered.meta // {
@@ -188,7 +186,6 @@ let
     grpclib-transports = { };
     nanopynix = { };
     nanopynix-helpers = { };
-    ekn = { };
     pynix = { };
     # In the set so the dev shell can install it editable -- pytest-agent is
     # developed here alongside everything else. Deliberately *not* in the

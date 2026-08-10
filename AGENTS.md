@@ -31,12 +31,12 @@ runtime. `ruff-strict.toml` gives the reason and the measurement behind it.
 another rule.
 
 CI runs those three commands, `ruff format --check`, `shellcheck` over
-`scripts/`, the test suite of `grpclib-transports`, and one run of `ekn` with
-no trust store, in the `static-checks` job. Each one is a derivation in
+`scripts/`, and the test suite of `grpclib-transports`, in the `static-checks`
+job. Each one is a derivation in
 `nix/checks.nix`, and each is a package. Build them to run a gate the way CI
 runs it, in a sandbox and not in the dev shell:
 
-- nix build --file . --no-link --keep-going checks.lint checks.lint-strict checks.format checks.types checks.shell checks.grpclib-transports checks.pytest-agent checks.ekn-sandbox
+- nix build --file . --no-link --keep-going checks.lint checks.lint-strict checks.format checks.types checks.shell checks.grpclib-transports checks.pytest-agent
 
 Do not use `nix flake check` for this. That command evaluates every package,
 and `packages.shell` cannot evaluate in a pure flake evaluation.

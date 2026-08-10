@@ -6,16 +6,27 @@
       url = "github:pyproject-nix/pyproject.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # A test fixture, and nothing else. `pynix`'s LSP ships an
+    # `EasykubenixDialect` (pynix/src/pynix/_lsp/_easykubenix.py), and the
+    # scenarios in tests/pynix/test_lsp/easykubenix/ drive it against a real
+    # easykubenix module tree rather than a hand-rolled `lib.evalModules`
+    # stand-in -- which is the only way to test a dialect that exists to
+    # understand that repository's actual option structure.
+    #
+    # Nothing this repository *builds* comes from here. The `ekn` CLI used to
+    # live in this tree and was moved to easykubenix, which owns it outright:
+    # ekn reads a fixed Nix-to-JSON schema that easykubenix's own modules
+    # produce, so the two have to change together, and pynix no longer has an
+    # `ekn` subcommand.
     easykubenix = {
       url = "github:Lillecarl/easykubenix";
       inputs.nixpkgs.follows = "nixpkgs";
-      # easykubenix depends on a *published* nanopynix. Cutting that off is
-      # simply correct: we *are* nanopynix, and testing ekn against a
-      # months-old published copy of it is not what anyone wants. It also
+      # easykubenix depends on a *published* nanopynix, and this input exists
+      # to supply Nix modules, not a Python closure. Cutting the return edge
       # keeps that copy's own inputs -- grpclib-transports among them -- out
-      # of this lockfile entirely, which matters because grpclib-transports
-      # is vendored here now (grpclib-transports/) and a second, published
-      # copy of it in the closure would be a confusing thing to reason about.
+      # of this lockfile entirely, which matters because grpclib-transports is
+      # vendored here now (grpclib-transports/) and a second, published copy
+      # of it in the closure would be a confusing thing to reason about.
       inputs.nanopynix.follows = "";
       # One flake-compatish in this lockfile, and not two. Without this,
       # easykubenix pins its own copy, Nix names one node `flake-compatish`

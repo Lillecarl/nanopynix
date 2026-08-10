@@ -579,13 +579,11 @@ let
   # existing.** It was written by hand until this file could read the
   # attribute set directly, and a gate that nobody added here ran nowhere.
   #
-  # `grpclib-transports`, `pytest-agent` and `ekn-sandbox` are the odd ones
-  # out, each being a run rather than a static tool. All three are here rather
-  # than in the `test-*` matrix because all three are version-independent:
-  # that matrix exists to run one suite against each supported Nix version.
-  # Neither subproject links Nix at all, and `ekn-sandbox` asks whether `ekn`
-  # can start where there is no trust store, which no Nix version changes.
-  # Three copies of any of them would be three identical runs.
+  # `grpclib-transports` and `pytest-agent` are the odd ones out, each being a
+  # run rather than a static tool. Both are here rather than in the `test-*`
+  # matrix because both are version-independent: that matrix exists to run one
+  # suite against each supported Nix version, and neither subproject links Nix
+  # at all. Three copies of either would be three identical runs.
   mkStaticChecksJob =
     {
       ref ? null,
