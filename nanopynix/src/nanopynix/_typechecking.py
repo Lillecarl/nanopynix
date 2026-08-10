@@ -34,8 +34,8 @@ actually imported -- that's a real constraint the guard existed to avoid, not
 a bug in this flag, and is handled case by case rather than assumed away.
 
 This module is deliberately dependency-free and is imported by name from
-`pynix`, `ekn` and `nanopynix_helpers` as well as from `nanopynix` itself. It
-is shared test-instrumentation plumbing rather than library API, so it stays
+`pynix` and `nanopynix_helpers` as well as from `nanopynix` itself. It is
+shared test-instrumentation plumbing rather than library API, so it stays
 private (a public re-export would be surface with no caller outside this
 repository); the usual "consumers depend on public nanopynix APIs" rule is
 waived here rather than silently broken.

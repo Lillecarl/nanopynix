@@ -62,7 +62,8 @@ justify existing at all.
 # Tracked: the value-reading API, measured
 
 Ordered by measured cost, not by how appealing the change is. "Consumer
-sites" counts `pynix/src` + `ekn/src` + `docs` only -- not nanopynix's own
+sites" counted `pynix/src` + `ekn/src` + `docs` when it was measured; `ekn`
+has since moved to easykubenix. Not nanopynix's own
 layers (each method spans ~6: protocol, proto, worker, client, inproc,
 binding) and not tests.
 

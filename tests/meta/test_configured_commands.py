@@ -86,10 +86,9 @@ def test_every_command_writes_a_usage_failure_to_stderr() -> None:
     Measured before the override existed: ``pynix derivation show <path>`` put
     2165 bytes on stdout and left stderr empty.
 
-    **The subject is the method, and not a shared base class.** ``pynix`` and
-    ``ekn`` each carry their own base, because ``pynix`` imports ``ekn.cli``
-    and tolerates that import failing, so ekn must not import pynix back. The
-    rule that matters is the behaviour they have in common.
+    **The subject is the method, and not a shared base class.** The rule is
+    about behaviour, not inheritance: a command satisfies it by not keeping
+    clypi's own ``print_help``, however it gets there.
     """
     offenders = sorted(
         cmd.__name__ for cmd in _command_tree(Pynix) if cmd.print_help.__func__ is Command.print_help.__func__

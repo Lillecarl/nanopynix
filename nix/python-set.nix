@@ -5,7 +5,7 @@
 # propagation, and `withPackages` keeps only derivations that are importable
 # modules. A `buildPythonApplication` is therefore dropped from an environment
 # *together with everything it propagates* -- which is how the test runner
-# silently lost `kr8s` (it was reachable only through `ekn`, an application).
+# silently lost a native dependency reachable only through an application.
 # pyproject.nix's builders put runtime dependencies in `passthru` instead and
 # assemble real virtualenvs, so there is no propagation to fall off and no
 # module/application distinction to be caught by.

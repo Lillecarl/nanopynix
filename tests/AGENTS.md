@@ -17,7 +17,6 @@ here and to read the results. This file only says where a file belongs.
 | `tests/gates/` | the static gates of CI, run as tools | one gate |
 | `tests/nanopynix/` | the library, by subsystem | one behaviour of nanopynix |
 | `tests/pynix/` | the CLI and the LSP server | one command or one editor request |
-| `tests/ekn/` | the ekn deployment tool | one ekn behaviour |
 | `tests/nanopynix_helpers/` | the helpers package | one helper |
 | `tests/support/` | fixtures, drivers and scanners. **No tests.** | — |
 | `tests/_subprocess_startup/` | `sitecustomize.py` for a spawned interpreter | — |

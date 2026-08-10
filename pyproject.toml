@@ -6,7 +6,6 @@ extraPaths = [
   "nanopynix/src",
   "nanopynix-helpers/src",
   "pynix/src",
-  "ekn/src",
   "pytest-agent/src",
   "grpclib-transports/src",
   # `_bench_utils`, which the benchmark modules and their conftest import by

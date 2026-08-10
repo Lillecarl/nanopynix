@@ -28,8 +28,8 @@ def _yaml12_loader() -> type[Any]:
     # C scanner/parser/composer still calls back into the same Python-level
     # Resolver/SafeConstructor machinery add_implicit_resolver/add_constructor
     # mutate, so this custom-tag setup carries over unchanged -- just faster
-    # (see ekn/git.py's flatten_manifests for the same swap on the dump side,
-    # benchmarked ~7.5x).
+    # (easykubenix's ekn makes the same swap on the dump side in its own
+    # gitops.py, benchmarked ~7.5x).
     class Loader(yaml.CSafeLoader):  # type: ignore[reportUnknownBaseType] -- PyYAML stubs may be incomplete
         pass
 

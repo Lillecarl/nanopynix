@@ -397,25 +397,57 @@ let
                 inherit (final) version;
               };
 
-              pythonSet = ps.mkPythonSet {
-                inherit python;
-                # Sourced from nixpkgs: the build systems, plus the whole
-                # third-party runtime closure, plus our own native extension.
-                # `python.pkgs` already resolved every one of those names, so
-                # the roots are just the propagated inputs nixpkgs computed --
-                # no second hand-written dependency list to fall out of date.
-                nixpkgsRoots = [
-                  final.nanopynix-bindings
-                ]
-                ++ ps.nixpkgsRootsFor {
+              /*
+                This repo's Python closure, optionally widened by a consumer's
+                own projects.
+
+                The parameters exist for a consumer that builds one of *its
+                own* pyproject.toml projects against this closure --
+                easykubenix does, for its `ekn` CLI. Adding the project to the
+                overlay is not enough on its own: a set's nixpkgs packages are
+                lifted once, from the roots `mkPythonSet` is seeded with, and
+                the lifting machinery is internal to nix/python-set.nix. So a
+                dependency that only the consumer's project declares (`kr8s`,
+                for `ekn`) has no way into the set after the fact -- an
+                `overrideScope` can add the project but not the closure it
+                needs. Passing `projectRoots` here reads that project's
+                pyproject.toml alongside ours and resolves its dependencies
+                the same way, which is the only place that can happen.
+
+                Type: pythonSetWith :: AttrSet -> AttrSet
+              */
+              pythonSetWith =
+                {
+                  # Consumer pyproject.toml directories, read for their
+                  # third-party dependencies exactly as ours are. Their own
+                  # names are excluded from the nixpkgs lookup automatically
+                  # (see `nixpkgsRootsFor`), since `overlay` supplies them.
+                  projectRoots ? [ ],
+                  # The consumer's own projects, as a standard overlay.
+                  # Composed *over* ours, so it can also replace one of them.
+                  overlay ? (_final: _prev: { }),
+                }:
+                ps.mkPythonSet {
                   inherit python;
-                  inherit (final.pyPackages) projectRoots;
-                  # A nixpkgs Python package, but this scope's own -- lifted
-                  # in as a root above rather than looked up by name.
-                  exclude = [ "nanopynix-bindings" ];
+                  # Sourced from nixpkgs: the build systems, plus the whole
+                  # third-party runtime closure, plus our own native extension.
+                  # `python.pkgs` already resolved every one of those names, so
+                  # the roots are just the propagated inputs nixpkgs computed --
+                  # no second hand-written dependency list to fall out of date.
+                  nixpkgsRoots = [
+                    final.nanopynix-bindings
+                  ]
+                  ++ ps.nixpkgsRootsFor {
+                    inherit python;
+                    projectRoots = final.pyPackages.projectRoots ++ projectRoots;
+                    # A nixpkgs Python package, but this scope's own -- lifted
+                    # in as a root above rather than looked up by name.
+                    exclude = [ "nanopynix-bindings" ];
+                  };
+                  overlay = lib.composeExtensions final.pyPackages.built overlay;
                 };
-                overlay = final.pyPackages.built;
-              };
+
+              pythonSet = final.pythonSetWith { };
 
               # The same set with our projects swapped for editable installs.
               # `mkVirtualEnv` from here gives a venv whose site-packages
@@ -425,6 +457,11 @@ let
               inherit (final.pythonSet)
                 nanopynix-proto
                 nanopynix-helpers
+                # The pytest plugin, developed here alongside everything else.
+                # Exported because a consumer's test suite may want it too --
+                # see the note on the outer `inherit` for the one way to take
+                # it that actually works.
+                pytest-agent
                 ;
 
               nanopynix = final.pythonSet.nanopynix // {
@@ -438,30 +475,6 @@ let
                   # so they need them exactly as the released program does.
                   inherit tofuCoreSchemaTool storeExecTool;
                 };
-              };
-
-              # ekn's own Python source lives here (migrated from
-              # easykubenix/ekn), so it is built against exactly the
-              # nanopynix/nanopynix-bindings built in this same scope, with no
-              # cross-repo source reference. easykubenix consumes this
-              # build's output (`nanopynix.ekn`) for its own
-              # parseYamlStream.nix IFD fallback rather than building its own.
-              #
-              # A release build is `mkApplication` over a venv: the venv has
-              # the real dependency closure, and mkApplication symlinks out
-              # just the parts of the package's own `$out` that belong in a
-              # program, leaving site-packages behind.
-              ekn = mkApp {
-                name = "ekn";
-                inherit (final) pythonSet;
-                completions.var = "_EKN_COMPLETE";
-                # `ekn` imports pygit2, which initialises OpenSSL at import
-                # and refuses to start where there is no trust store. Three
-                # easykubenix derivations run `ekn` inside a build sandbox,
-                # which is exactly that. See issue #62. `pynix` needs no
-                # bundle: it imports no OpenSSL consumer at start-up, and Nix
-                # itself holds the certificates for the fetching it drives.
-                caBundle = true;
               };
 
               pynix = mkApp {
@@ -844,7 +857,13 @@ lib.throwIf (unlistedVariants != [ ])
       nanopynix-bindings
       nanopynix-helpers
       nanopynix-proto
-      ekn
+      # `nanopynix.pytest-agent` is the *package*, built in this repo's
+      # `pythonSet`. A consumer that assembles its own venv should not add it
+      # from here -- mixing a package built in one builders set into another
+      # set's venv does not resolve. Name it in that venv's own spec instead
+      # (`pytest-agent = [ ];`), which works because `pythonSetWith` composes
+      # this repo's project overlay into the consumer's set.
+      pytest-agent
       pynix
       pynixDevEnv
       shell
@@ -852,11 +871,15 @@ lib.throwIf (unlistedVariants != [ ])
       checks
       # For a consumer that builds one of *its own* projects against this
       # repo's Python closure. easykubenix owns `ekn`'s source and renders it
-      # on its own side (see `ps` and `mkApp` below), so it needs the set that
-      # already resolved `nanopynix`, `nanopynix-helpers`, `clypi` and `kr8s`.
-      # An `overrideScope` over this replacing the one `ekn` entry is the
-      # whole of it.
+      # on its own side, using `ps` and `mkApp` below.
+      #
+      # `pythonSetWith` is the one to reach for when that project has a
+      # dependency this repo does not declare -- it seeds the set from the
+      # consumer's pyproject.toml as well as ours, which is the only point at
+      # which a nixpkgs package can enter. `pythonSet` is `pythonSetWith { }`,
+      # for consumers that just want the closure as it stands.
       pythonSet
+      pythonSetWith
       ;
 
     inherit
@@ -882,10 +905,11 @@ lib.throwIf (unlistedVariants != [ ])
       # pyproject.toml; `mkApp` turns one of those into a release application.
       #
       # `mkApp` is the part a consumer cannot do without. Its `caBundle`
-      # wrapper is the fix for issue #62, and easykubenix runs `ekn` inside a
-      # Nix build sandbox -- which has no trust store -- from three
-      # derivations. An `ekn` built without that wrapper cannot start there at
-      # all. See nix/mk-app.nix and the `ekn-sandbox` gate in nix/checks.nix.
+      # wrapper is the fix for issue #62: a program that initialises OpenSSL
+      # at import (anything pulling in pygit2) cannot start inside a Nix build
+      # sandbox, which has no trust store. easykubenix runs its `ekn` CLI in
+      # exactly that position from three derivations, and gates it on its own
+      # side. See nix/mk-app.nix.
       ps
       mkApp
       ;

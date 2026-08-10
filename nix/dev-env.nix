@@ -14,7 +14,7 @@
 # appears here with it (see nix/py-packages.nix).
 #
 # Exported as `pynixDevEnv` so other repos can drop a live, hot-reloading
-# `pynix`/`ekn` into their own devShell or direnv without rebuilding on every
+# `pynix` into their own devShell or direnv without rebuilding on every
 # edit here: each project's editable root is this checkout's own absolute
 # path, so the generated path hooks resolve straight back here at import time
 # with nothing for the consumer to export. Does not include nanopynix's own
@@ -31,15 +31,7 @@ editablePythonSet.mkVirtualEnv "nanopynix-dev-env" (
   {
     nanopynix = [ "test" ];
     nanopynix-helpers = [ "test" ];
-    # `ekn` as well as `test`: pynix declares an optional dependency on ekn,
-    # and enabling it here is what lets the two cross-import each other's
-    # modules from one venv -- which a real application-to-application
-    # dependency cannot do without a derivation cycle.
-    pynix = [
-      "test"
-      "ekn"
-    ];
-    ekn = [ ];
+    pynix = [ "test" ];
     pytest-agent = [ ];
     # Already in the venv as a dependency of `nanopynix`; named here for its
     # `test` extra, which is what puts `greeter-proto`, `asyncssh` and `rich`

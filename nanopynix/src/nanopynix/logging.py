@@ -87,9 +87,9 @@ the rule reaches both engines."""
 _CAPTURE_MAX_EVENTS = 100_000
 """How many events one :class:`LogCapture` keeps before it discards the oldest.
 
-The oldest, not the newest: ``nanopynix_helpers.build`` and ``ekn.eval`` both
-scan a capture for the fixed-output hash mismatch that Nix prints next to the
-failure, so the end of the log is the part worth keeping."""
+The oldest, not the newest: ``nanopynix_helpers.build`` scans a capture for
+the fixed-output hash mismatch that Nix prints next to the failure, so the end
+of the log is the part worth keeping."""
 
 _CAPTURE_WAIT_TIMEOUT_SECONDS = 60.0
 """How long :class:`LogCapture` waits for a ``request_finalized`` marker.
@@ -442,7 +442,7 @@ class CallbackBus:
     engines -- so each subscriber began with ``isinstance(raw, LogEventProto)``
     and ``LogEvent.from_proto(raw)``. That is a workaround, not an API, and it
     was not one a caller outside this repository could write: nanopynix
-    exports the subclass and not the base, so ``ekn`` reached into
+    exports the subclass and not the base, so a consumer had to reach into
     ``nanopynix_proto`` to get a class to test against. Normalising once here
     is what lets :meth:`Session.subscribe` state the type it delivers.
     """

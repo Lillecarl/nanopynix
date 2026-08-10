@@ -39,7 +39,7 @@
   # Give the program a default CA bundle. For a program that initialises
   # OpenSSL at start-up and so cannot start at all where there is no trust
   # store -- which is every Nix build sandbox. See issue #62, and the
-  # `nanopynix-check-ekn-sandbox` gate in nix/checks.nix.
+  # `ekn-sandbox` gate easykubenix keeps over its own CLI.
   caBundle ? false,
 }:
 

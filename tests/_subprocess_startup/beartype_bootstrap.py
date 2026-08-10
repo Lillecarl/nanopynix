@@ -23,7 +23,7 @@ import os
 # beartype's import hook to instrument. nanopynix_proto is absent too -- it is
 # betterproto2-generated code, not hand-written, so checking it would flag
 # generator quirks rather than our own bugs.
-PACKAGES = ("nanopynix", "nanopynix_helpers", "pynix", "ekn")
+PACKAGES = ("nanopynix", "nanopynix_helpers", "pynix")
 
 ENV_VAR = "NANOPYNIX_BEARTYPING"
 
