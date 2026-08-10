@@ -850,6 +850,13 @@ lib.throwIf (unlistedVariants != [ ])
       shell
       nanopynix-docs
       checks
+      # For a consumer that builds one of *its own* projects against this
+      # repo's Python closure. easykubenix owns `ekn`'s source and renders it
+      # on its own side (see `ps` and `mkApp` below), so it needs the set that
+      # already resolved `nanopynix`, `nanopynix-helpers`, `clypi` and `kr8s`.
+      # An `overrideScope` over this replacing the one `ekn` entry is the
+      # whole of it.
+      pythonSet
       ;
 
     inherit
@@ -870,5 +877,16 @@ lib.throwIf (unlistedVariants != [ ])
       ciVersionMatrix
       tofuCoreSchemaTool
       storeExecTool
+      # The seam onto pyproject.nix's builders, exported for the same reason
+      # `pythonSet` above is. `ps.mkProject` renders a project from its own
+      # pyproject.toml; `mkApp` turns one of those into a release application.
+      #
+      # `mkApp` is the part a consumer cannot do without. Its `caBundle`
+      # wrapper is the fix for issue #62, and easykubenix runs `ekn` inside a
+      # Nix build sandbox -- which has no trust store -- from three
+      # derivations. An `ekn` built without that wrapper cannot start there at
+      # all. See nix/mk-app.nix and the `ekn-sandbox` gate in nix/checks.nix.
+      ps
+      mkApp
       ;
   }
