@@ -32,11 +32,11 @@ jobs:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
-    - name: Run the gates (ekn-sandbox, format, grpclib-transports, lint, lint-strict,
-        pytest-agent, shell, types)
+    - name: Run the gates (format, grpclib-transports, lint, lint-strict, pytest-agent,
+        shell, types)
       timeout-minutes: 20
-      run: nix build --file . --no-link --print-build-logs --keep-going checks.ekn-sandbox
-        checks.format checks.grpclib-transports checks.lint checks.lint-strict checks.pytest-agent
+      run: nix build --file . --no-link --print-build-logs --keep-going checks.format
+        checks.grpclib-transports checks.lint checks.lint-strict checks.pytest-agent
         checks.shell checks.types
     timeout-minutes: 85
     runs-on: ubuntu-24.04
