@@ -16,6 +16,7 @@ import nanopynix
 from nanopynix._typechecking import BEARTYPING
 from pynix._settings import ConfiguredCommand, PynixCommand, store_option
 from pynix._util import eval_session, print_json
+from pynix.target import select_attr
 
 if TYPE_CHECKING or BEARTYPING:
     from nanopynix import AsyncValue
@@ -51,10 +52,14 @@ class Show(ConfiguredCommand):
 
         async with eval_session(self.store) as (_nix, _store, session):
             outputs = await session.eval_flake(base_ref)
+            # `select_attr`, and no candidate search. `nix flake show` starts
+            # at the root of the outputs on purpose: it shows what the flake
+            # provides, so a prefix that hid the other outputs would defeat
+            # the command.
             if flake_attr:
-                outputs = _navigate(outputs, flake_attr)
+                outputs = await select_attr(outputs, flake_attr)
             if self.attrpath:
-                outputs = _navigate(outputs, self.attrpath)
+                outputs = await select_attr(outputs, self.attrpath)
 
             tree = Tree(f"[bold]{self.flake_ref}[/bold]")
             await _build_tree(tree, outputs, nanopynix.NixType, budget=_TreeBudget())
@@ -81,12 +86,6 @@ class Info(ConfiguredCommand):
     @override
     async def run(self) -> None:
         await _print_flake_metadata(self.flake_ref, store_uri=self.store)
-
-
-def _navigate(root: AsyncValue, attrpath: str) -> AsyncValue:
-    for part in attrpath.split("."):
-        root = root.attr(part)
-    return root
 
 
 async def _build_tree(  # noqa: C901 -- tracked complexity/arg-count debt, see TODO.md

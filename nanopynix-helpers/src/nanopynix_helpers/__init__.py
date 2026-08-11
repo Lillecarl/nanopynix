@@ -10,8 +10,14 @@ from nanopynix_helpers.build import (
     build_with_fod_update as build_with_fod_update,
 )
 from nanopynix_helpers.eval_target import (
+    AttrPathNotFoundError as AttrPathNotFoundError,
+    AttrPathSearch as AttrPathSearch,
     EvaluationTargetError as EvaluationTargetError,
+    parse_attr_path as parse_attr_path,
     select_attr as select_attr,
+    select_attr_path as select_attr_path,
+    select_flake_attr as select_flake_attr,
+    show_attr_paths as show_attr_paths,
 )
 from nanopynix_helpers.fod import (
     FodHashLiteral as FodHashLiteral,

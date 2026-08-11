@@ -41,6 +41,7 @@ from pynix.target import (
     file_option,
     flake_option,
     load_repl_target,
+    repl_attr_search,
 )
 
 if TYPE_CHECKING or BEARTYPING:
@@ -531,7 +532,7 @@ async def _load_initial_target(repl: AsyncReplSession[Any], target: EvaluationTa
     """Load a command-line target into the persistent REPL scope."""
     if target.file is None and target.flake is None:
         return []
-    value = await load_repl_target(target, repl)
+    value = await load_repl_target(target, repl, attr_search=repl_attr_search())
     names = await repl.add_attrs(value)
     print_formatted_text(f"Added {len(names)} variables: {' '.join(names)}")
     return names

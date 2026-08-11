@@ -40,6 +40,7 @@ from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
     attr_option,
+    base_attr_search,
     evaluate_target,
     file_option,
     flake_option,
@@ -285,7 +286,7 @@ async def _require_a_local_file(target: EvaluationTarget) -> None:
 
 async def _evaluate_build_target(target: EvaluationTarget, session: Any) -> ValueProxy:
     try:
-        return await evaluate_target(target, session, auto_call_file=True)
+        return await evaluate_target(target, session, auto_call_file=True, attr_search=base_attr_search())
     except EvaluationTargetError as exc:
         raise BuildTargetError(str(exc)) from exc
 
