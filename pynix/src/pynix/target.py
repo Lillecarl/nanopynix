@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 from anyio import Path as AsyncPath
 from clypi import arg
-from nanopynix_helpers import EvaluationTargetError as EvaluationTargetError, select_attr as select_attr
+from nanopynix_helpers import (
+    AttrPathSearch as AttrPathSearch,
+    EvaluationTargetError as EvaluationTargetError,
+    select_attr as select_attr,
+    select_flake_attr as select_flake_attr,
+)
 
 import nanopynix
 from nanopynix import NixType
@@ -152,6 +157,83 @@ def _is_lookup_path(candidate: str) -> bool:
     return len(candidate) > 2 and candidate.startswith("<") and candidate.endswith(">")  # noqa: PLR2004 -- '<' and '>' plus one character, which is the rule in lookup_file_arg
 
 
+# --- the attribute-path search of each command -------------------------------
+#
+# `nix` gives every installable command two lists, and a fragment such as
+# `#hello` is resolved against them rather than read as one path.
+# `SourceExprCommand` in `src/libcmd/installables.cc` holds the base pair, and
+# each command overrides it. These functions are that table, and each one names
+# the file of the `nix` source that decides it.
+#
+# **The system comes from this process.** Under the rpc engine Nix lives in the
+# worker, and the worker holds the settings that decide the answer, so a worker
+# configured with a different `eval-system` would disagree. Issue #114 tracks
+# that, and every caller here goes through one function so that the repair has
+# one seam.
+
+
+def _eval_system() -> str:
+    """Return the system that names each attribute of the search."""
+    return nanopynix.current_system()
+
+
+def base_attr_search() -> AttrPathSearch:
+    """The pair of `SourceExprCommand`, which `build` and `eval` use."""
+    system = _eval_system()
+    return AttrPathSearch(
+        prefixes=(f"packages.{system}.", f"legacyPackages.{system}."),
+        defaults=(f"packages.{system}.default", f"defaultPackage.{system}"),
+    )
+
+
+def dev_shell_attr_search() -> AttrPathSearch:
+    """The pair of `nix develop`, from `src/nix/develop.cc`."""
+    system = _eval_system()
+    base = base_attr_search()
+    return AttrPathSearch(
+        prefixes=(f"devShells.{system}.", *base.prefixes),
+        defaults=(f"devShells.{system}.default", f"devShell.{system}", *base.defaults),
+    )
+
+
+def repl_attr_search() -> AttrPathSearch:
+    """The pair of `nix repl`, from `src/nix/repl.cc`.
+
+    `CmdRepl` overrides the defaults to one empty path, and it leaves the
+    prefixes alone. So `pynix repl --flake <ref>` puts every output of the
+    flake into scope, and `--flake <ref>#hello` still finds
+    `packages.<system>.hello`.
+
+    An empty path selects the value itself, because Nix's path parser reads
+    no component from an empty string.
+    """
+    return AttrPathSearch(prefixes=base_attr_search().prefixes, defaults=("",))
+
+
+def app_attr_search() -> AttrPathSearch:
+    """The pair of `nix run` and `nix bundle`, from `src/nix/run.cc`.
+
+    No command uses this yet. It is here because `run` is issue #84, and the
+    table belongs in one place rather than beside the command that arrives
+    last.
+    """
+    system = _eval_system()
+    base = base_attr_search()
+    return AttrPathSearch(
+        prefixes=(f"apps.{system}.", *base.prefixes),
+        defaults=(f"apps.{system}.default", f"defaultApp.{system}", *base.defaults),
+    )
+
+
+def formatter_attr_search() -> AttrPathSearch:
+    """The pair of `nix fmt`, from `src/nix/formatter.cc`.
+
+    It has no prefix, so a fragment names the output exactly. Issue #89 adds
+    the command.
+    """
+    return AttrPathSearch(prefixes=(), defaults=(f"formatter.{_eval_system()}",))
+
+
 @dataclass(frozen=True)
 class EvaluationTarget:
     """A file or flake evaluation source with an optional attribute selector."""
@@ -186,9 +268,15 @@ async def evaluate_target[ValueT: AsyncValue](
     session: AsyncEvalSession[ValueT],
     *,
     auto_call_file: bool = False,
+    attr_search: AttrPathSearch | None = None,
 ) -> ValueT:
     """Evaluate *target* in *session* and apply its attribute selectors."""
-    value, locked = await evaluate_target_locked(target, session, auto_call_file=auto_call_file)
+    value, locked = await evaluate_target_locked(
+        target,
+        session,
+        auto_call_file=auto_call_file,
+        attr_search=attr_search,
+    )
     if locked is not None:
         await locked.release()
     return value
@@ -199,6 +287,7 @@ async def evaluate_target_locked[ValueT: AsyncValue](
     session: AsyncEvalSession[ValueT],
     *,
     auto_call_file: bool = False,
+    attr_search: AttrPathSearch | None = None,
 ) -> tuple[ValueT, AsyncLockedFlake | None]:
     """Evaluate *target*, and also hand back the flake lock when there is one.
 
@@ -214,6 +303,15 @@ async def evaluate_target_locked[ValueT: AsyncValue](
     The flake branch is ``lock_flake`` and then ``eval``, where it used to be
     ``eval_flake``. Those two do the same work with the same flags --
     ``eval_flake`` is the pair in one call, and it throws the lock away.
+
+    *attr_search* names the candidates that the fragment of ``--flake``
+    resolves against, and a command that copies a ``nix`` subcommand passes
+    the pair of that subcommand. ``None`` reads the fragment as one exact
+    path, which is right for a command that ``nix`` has not got.
+
+    **The search reaches ``--flake`` only.** ``nix`` builds an
+    ``InstallableAttrPath`` for a ``--file`` target, and that class applies no
+    prefix: `parseInstallables` hands it the raw path.
     """
     target.validate(required=True)
     locked: AsyncLockedFlake | None = None
@@ -234,7 +332,9 @@ async def evaluate_target_locked[ValueT: AsyncValue](
         ref, _, flake_attr = target.flake.partition("#")
         locked = await session.lock_flake(ref)
         value = cast("ValueT", await locked.eval())
-        if flake_attr:
+        if attr_search is not None:
+            value, _found = await select_flake_attr(value, attr_search, flake_attr or None, flake_ref=ref)
+        elif flake_attr:
             value = await select_attr(value, flake_attr)
 
     if target.attr:
@@ -264,7 +364,12 @@ async def derivation_path(value: AsyncValue) -> str:
     return path
 
 
-async def load_repl_target[ValueT: AsyncValue](target: EvaluationTarget, repl: AsyncReplSession[ValueT]) -> ValueT:
+async def load_repl_target[ValueT: AsyncValue](
+    target: EvaluationTarget,
+    repl: AsyncReplSession[ValueT],
+    *,
+    attr_search: AttrPathSearch | None = None,
+) -> ValueT:
     """Load *target* into a REPL, preserving Nix's ``:load`` file semantics."""
     target.validate(required=True)
     if target.file is not None:
@@ -275,4 +380,4 @@ async def load_repl_target[ValueT: AsyncValue](target: EvaluationTarget, repl: A
         if target.attr:
             value = await select_attr(value, target.attr)
         return value
-    return await evaluate_target(target, repl)
+    return await evaluate_target(target, repl, attr_search=attr_search)

@@ -12,6 +12,7 @@ from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
     attr_option,
+    base_attr_search,
     evaluate_target,
     file_option,
     flake_option,
@@ -50,7 +51,7 @@ class Eval(ConfiguredCommand):
         async with eval_session(self.store) as (_nix, _store, session):
             try:
                 root = (
-                    await evaluate_target(target, session, auto_call_file=True)
+                    await evaluate_target(target, session, auto_call_file=True, attr_search=base_attr_search())
                     if expr is None
                     else await session.string(expr)
                 )

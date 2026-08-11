@@ -63,6 +63,7 @@ from pynix.target import (
     EvaluationTargetError,
     attr_option,
     derivation_path,
+    dev_shell_attr_search,
     evaluate_target_locked,
     file_option,
     flake_option,
@@ -311,7 +312,9 @@ async def build_dev_env(
             locked: AsyncLockedFlake | None = None
             try:
                 try:
-                    root, locked = await evaluate_target_locked(target, session, auto_call_file=True)
+                    root, locked = await evaluate_target_locked(
+                        target, session, auto_call_file=True, attr_search=dev_shell_attr_search()
+                    )
                     drv_path = await derivation_path(root)
                 except EvaluationTargetError as exc:
                     report_and_exit(exc)

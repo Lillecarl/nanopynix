@@ -11,6 +11,7 @@ from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
     attr_option,
+    base_attr_search,
     derivation_path,
     evaluate_target,
     file_option,
@@ -44,7 +45,7 @@ class Show(ConfiguredCommand):
         async with store_session(self.store) as (nix, store):
             async with nix.eval(store) as session:
                 try:
-                    root = await evaluate_target(target, session, auto_call_file=True)
+                    root = await evaluate_target(target, session, auto_call_file=True, attr_search=base_attr_search())
                 except EvaluationTargetError as exc:
                     report_and_exit(exc)
 

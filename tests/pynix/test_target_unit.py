@@ -24,11 +24,17 @@ import pytest
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
+    app_attr_search,
+    base_attr_search,
+    dev_shell_attr_search,
     evaluate_target,
+    formatter_attr_search,
+    repl_attr_search,
     resolve_file_reference,
     select_attr,
 )
 
+import nanopynix
 from nanopynix.rpc import EvalSession, ValueProxy
 from nanopynix.settings import NixFlakeSettings
 
@@ -286,3 +292,68 @@ async def test_a_fragment_selects_after_the_file(tmp_path: Path, monkeypatch: py
     result = await evaluate_target(target, _FakeSession(file_value=root))
 
     assert result is leaf
+
+
+# --- the attribute-path search of each command ------------------------------
+#
+# One test for each command that copies a `nix` subcommand. The lists that
+# `nix` uses are in `src/libcmd/installables.cc`, `src/nix/develop.cc`,
+# `src/nix/run.cc` and `src/nix/formatter.cc`, and each test names the order
+# that the matching file decides.
+
+
+def test_the_base_search_matches_source_expr_command() -> None:
+    system = nanopynix.current_system()
+    search = base_attr_search()
+
+    assert search.prefixes == (f"packages.{system}.", f"legacyPackages.{system}.")
+    assert search.defaults == (f"packages.{system}.default", f"defaultPackage.{system}")
+
+
+def test_the_dev_shell_search_puts_dev_shells_in_front() -> None:
+    system = nanopynix.current_system()
+    search = dev_shell_attr_search()
+
+    assert search.prefixes == (
+        f"devShells.{system}.",
+        f"packages.{system}.",
+        f"legacyPackages.{system}.",
+    )
+    assert search.defaults == (
+        f"devShells.{system}.default",
+        f"devShell.{system}",
+        f"packages.{system}.default",
+        f"defaultPackage.{system}",
+    )
+
+
+def test_the_app_search_puts_apps_in_front() -> None:
+    system = nanopynix.current_system()
+    search = app_attr_search()
+
+    assert search.prefixes[0] == f"apps.{system}."
+    assert search.prefixes[1:] == base_attr_search().prefixes
+    assert search.defaults[:2] == (f"apps.{system}.default", f"defaultApp.{system}")
+    assert search.defaults[2:] == base_attr_search().defaults
+
+
+def test_the_formatter_search_has_no_prefix() -> None:
+    system = nanopynix.current_system()
+    search = formatter_attr_search()
+
+    assert search.prefixes == ()
+    assert search.defaults == (f"formatter.{system}",)
+
+
+def test_the_repl_search_defaults_to_the_root() -> None:
+    """`CmdRepl` overrides its defaults to one empty path, and keeps the prefixes.
+
+    An empty path selects the outputs themselves, so `pynix repl --flake <ref>`
+    puts every output into scope. The prefixes still apply to a fragment.
+    """
+    search = repl_attr_search()
+
+    assert search.defaults == ("",)
+    assert search.prefixes == base_attr_search().prefixes
+    assert search.candidates(None) == ("",)
+    assert search.candidates("hello")[-1] == "hello"
