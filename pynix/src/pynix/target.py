@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import structlog
 from anyio import Path as AsyncPath
 from clypi import arg
 from nanopynix_helpers import (
@@ -18,9 +19,14 @@ from nanopynix_helpers import (
 import nanopynix
 from nanopynix import NixType
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
+from nanopynix.exceptions import ThrownError
 
 if TYPE_CHECKING or BEARTYPING:
+    from collections.abc import Awaitable, Callable
+
     from nanopynix import AsyncEvalSession, AsyncLockedFlake, AsyncReplSession, AsyncValue
+
+logger = structlog.get_logger("pynix.target")
 
 _FLAKE_PREFIX = "flake:"
 
@@ -58,8 +64,13 @@ def flake_option() -> str | None:
 class FileReference:
     """A resolved ``--file`` argument."""
 
-    argument: str
-    """What the evaluator receives. It is the reference with no fragment."""
+    arguments: tuple[str, ...]
+    """What the evaluator receives, best first, with no fragment.
+
+    Almost every shape resolves to one string. A bare name gives two, because
+    such a name reaches the lookup path and the flake registry both, and the
+    lookup path answers first.
+    """
 
     fragment: str | None
     """The attribute path after the first ``#``, or ``None``."""
@@ -93,27 +104,35 @@ async def resolve_file_reference(raw: str) -> FileReference:
     The first addition is the fragment. ``--flake`` splits on ``#`` already,
     and ``--file`` did not, so an attribute path had to go in ``--attr``.
 
-    The second is a bare flake reference. ``github:NixOS/nixpkgs`` and the
-    indirect name ``nixpkgs`` reach the evaluator as ``flake:`` plus the
-    reference, which is the branch that fetches the tree. The file inside that
-    tree is then evaluated as an ordinary Nix file. This does not read
-    ``flake.nix``, and it is not ``--flake``.
+    The second is a bare name. ``github:NixOS/nixpkgs`` reaches the evaluator
+    as ``flake:`` plus the reference, which is the branch that fetches the
+    tree. The file inside that tree is then evaluated as an ordinary Nix file.
+    This does not read ``flake.nix``, and it is not ``--flake``.
 
-    Six rules apply, in this order:
+    Seven rules apply, in this order:
 
     1. the whole argument names a local path that exists;
     2. the part before the first ``#`` names a local path that exists;
     3. that part starts with ``.``, ``/`` or ``~``, so it is a path that is
        absent;
-    4. it is a ``<name>`` lookup path;
+    4. it is a ``<name>`` lookup path already;
     5. Nix fetches it already, which is a pseudo-URL or the ``flake:`` prefix;
-    6. anything else becomes ``flake:`` plus the reference.
+    6. it names a scheme, such as ``github:``, so it is a flake reference;
+    7. anything else is a bare name, and it gives two candidates:
+       ``<name>`` first, and ``flake:name`` second.
 
     Rule 1 and rule 2 are why ``-f nixpkgs`` still reads a directory named
     ``nixpkgs`` in the working directory. Rule 3 is why an absent
     ``./default.nix`` reports a missing file, and not a missing flake. Write
-    a relative path with ``./``, because rule 6 reads a bare word as a
-    reference.
+    a relative path with ``./``, because rule 7 reads a bare word as a name.
+
+    **Rule 7 asks the lookup path before it asks the registry, because
+    ``--file`` is the old-style door.** ``NIX_PATH`` is how a name became a
+    tree before flakes existed, so ``-f nixpkgs#hello`` is
+    ``nix-build '<nixpkgs>' -A hello`` and reaches the same tree. The registry
+    answers only when the lookup path holds no such name. See
+    :func:`open_file_reference`, which decides that from what the evaluator
+    reports rather than from a copy of the rules of ``EvalState::findFile``.
     """
     if not raw:
         raise EvaluationTargetError("--file needs a value")
@@ -126,7 +145,7 @@ async def resolve_file_reference(raw: str) -> FileReference:
     # holds a '#' is rare, and the caller who has one wrote it deliberately.
     whole = await _existing_local_path(raw)
     if whole is not None:
-        return FileReference(argument=raw, fragment=None, local_path=whole)
+        return FileReference(arguments=(raw,), fragment=None, local_path=whole)
 
     head, _, tail = raw.partition("#")
     fragment = tail or None
@@ -135,21 +154,80 @@ async def resolve_file_reference(raw: str) -> FileReference:
 
     local = await _existing_local_path(head)
     if local is not None:
-        return FileReference(argument=head, fragment=fragment, local_path=local)
+        return FileReference(arguments=(head,), fragment=fragment, local_path=local)
 
     # A path that the caller wrote as a path stays a path, even when the file
     # is absent. Otherwise a typed `-f ./buidl.nix` would reach the registry,
     # and the caller would read an error about a flake instead of the missing
     # file. `local_path` stays None, because nothing is there to rewrite.
     if head.startswith(("./", "../", "/", "~/")) or head in {".", "..", "~"}:
-        return FileReference(argument=head, fragment=fragment, local_path=None)
+        return FileReference(arguments=(head,), fragment=fragment, local_path=None)
 
     # Ask Nix which strings it fetches itself. Repeating the list of schemes
     # here would make this file disagree with the evaluator as soon as Nix adds
     # one, and the disagreement would show as a fetch of 'flake:https://...'.
-    handled = nanopynix.is_pseudo_url(head) or head.startswith(_FLAKE_PREFIX) or _is_lookup_path(head)
-    argument = head if handled else f"{_FLAKE_PREFIX}{head}"
-    return FileReference(argument=argument, fragment=fragment, local_path=None)
+    if nanopynix.is_pseudo_url(head) or head.startswith(_FLAKE_PREFIX) or _is_lookup_path(head):
+        return FileReference(arguments=(head,), fragment=fragment, local_path=None)
+
+    # A reference that names its scheme goes to the registry alone. `github:` is
+    # a flake reference and nothing else, so a lookup path named 'github:NixOS'
+    # would be an accident. A name with no ':' is the ambiguous one.
+    if ":" in head:
+        return FileReference(arguments=(f"{_FLAKE_PREFIX}{head}",), fragment=fragment, local_path=None)
+
+    return FileReference(
+        arguments=(f"<{head}>", f"{_FLAKE_PREFIX}{head}"),
+        fragment=fragment,
+        local_path=None,
+    )
+
+
+# The two messages that `EvalState::findFile` raises when the lookup path
+# holds no such name (`src/libexpr/eval.cc`). The second is the pure-evaluation
+# form, and it means the same thing here: the lookup path cannot answer.
+_SEARCH_PATH_MISS = (
+    "was not found in the Nix search path",
+    "in pure evaluation mode",
+)
+
+
+def _is_a_search_path_miss(exc: ThrownError) -> bool:
+    """Report whether *exc* says the lookup path holds no such name.
+
+    The class alone is not enough. `builtins.throw` raises the same class, so a
+    `default.nix` that was found and then rejected its arguments would look
+    identical, and the fallback would report a missing flake instead of the
+    real failure.
+    """
+    return any(marker in exc.msg_without_ansi for marker in _SEARCH_PATH_MISS)
+
+
+async def open_file_reference[ValueT: AsyncValue](
+    reference: FileReference,
+    opener: Callable[[str], Awaitable[ValueT]],
+) -> ValueT:
+    """Open the first candidate of *reference* that the evaluator can resolve.
+
+    *opener* is `session.file` or `repl.load_file`, so a REPL keeps its own
+    ``:load`` semantics.
+
+    **Only a miss in the lookup path moves to the next candidate.** A name that
+    the lookup path holds, whose file then fails to evaluate, raises that
+    failure. Falling back there would answer a broken `<nixpkgs>` with a
+    message about a flake, which is a worse error and a wrong one.
+    """
+    last: ThrownError | None = None
+    for candidate in reference.arguments:
+        try:
+            return await opener(candidate)
+        except ThrownError as exc:
+            if not _is_a_search_path_miss(exc):
+                raise
+            logger.debug("pynix file reference not in the lookup path", candidate=candidate)
+            last = exc
+    if last is None:  # pragma: no cover -- a reference always holds a candidate
+        raise EvaluationTargetError("--file resolved to no candidate")
+    raise last
 
 
 def _is_lookup_path(candidate: str) -> bool:
@@ -317,7 +395,7 @@ async def evaluate_target_locked[ValueT: AsyncValue](
     locked: AsyncLockedFlake | None = None
     if target.file is not None:
         reference = await resolve_file_reference(target.file)
-        value = await session.file(reference.argument)
+        value = await open_file_reference(reference, session.file)
         # Auto-call first, then the fragment. The root of a fetched tree is
         # usually a function, and its attributes only exist after the call.
         # `--attr` has behaved this way since it existed, and the fragment is
@@ -374,7 +452,7 @@ async def load_repl_target[ValueT: AsyncValue](
     target.validate(required=True)
     if target.file is not None:
         reference = await resolve_file_reference(target.file)
-        value = await repl.load_file(reference.argument)
+        value = await open_file_reference(reference, repl.load_file)
         if reference.fragment:
             value = await select_attr(value, reference.fragment)
         if target.attr:
