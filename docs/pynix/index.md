@@ -54,6 +54,14 @@ A reference that no local path matches is fetched, and the file inside the
 fetched tree is evaluated as an ordinary Nix file. This does not read
 `flake.nix`, which is what `--flake` reads.
 
+**A bare name asks the lookup path first, and the flake registry second.**
+`--file` is the old-style door, and `NIX_PATH` is how a name became a tree
+before flakes existed. `pynix eval --file nixpkgs#lib.version` therefore reads
+`<nixpkgs>`, and it agrees with `nix-instantiate --eval '<nixpkgs>' -A
+lib.version`. The registry answers only when the lookup path holds no such
+name. A reference that names its scheme, such as `github:NixOS/nixpkgs`, skips
+the lookup path.
+
 `--flake` resolves its `#` fragment the way the `nix` CLI resolves one. The
 fragment is not one attribute path: each command holds a list of prefixes,
 and the first path that resolves is the answer. `pynix build --flake

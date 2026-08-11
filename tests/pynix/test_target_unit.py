@@ -24,17 +24,20 @@ import pytest
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
+    FileReference,
     app_attr_search,
     base_attr_search,
     dev_shell_attr_search,
     evaluate_target,
     formatter_attr_search,
+    open_file_reference,
     repl_attr_search,
     resolve_file_reference,
     select_attr,
 )
 
 import nanopynix
+from nanopynix.exceptions import ThrownError
 from nanopynix.rpc import EvalSession, ValueProxy
 from nanopynix.settings import NixFlakeSettings
 
@@ -132,7 +135,7 @@ async def test_a_local_file_keeps_its_whole_argument(tmp_path: Path, monkeypatch
 
     reference = await resolve_file_reference("weird#name.nix")
 
-    assert reference.argument == "weird#name.nix"
+    assert reference.arguments == ("weird#name.nix",)
     assert reference.fragment is None
     assert reference.local_path == Path("weird#name.nix")
 
@@ -144,7 +147,7 @@ async def test_a_local_file_splits_its_fragment(tmp_path: Path, monkeypatch: pyt
 
     reference = await resolve_file_reference("default.nix#packages.hello")
 
-    assert reference.argument == "default.nix"
+    assert reference.arguments == ("default.nix",)
     assert reference.fragment == "packages.hello"
     assert reference.local_path == Path("default.nix")
 
@@ -156,7 +159,7 @@ async def test_a_local_directory_wins_over_the_registry(tmp_path: Path, monkeypa
 
     reference = await resolve_file_reference("nixpkgs")
 
-    assert reference.argument == "nixpkgs"
+    assert reference.arguments == ("nixpkgs",)
     assert reference.local_path == Path("nixpkgs")
 
 
@@ -169,7 +172,7 @@ async def test_a_written_path_stays_a_path_when_it_is_absent(
 
     reference = await resolve_file_reference(raw)
 
-    assert reference.argument == raw
+    assert reference.arguments == (raw,)
     assert reference.local_path is None
 
 
@@ -178,7 +181,7 @@ async def test_a_written_path_still_splits_its_fragment(tmp_path: Path, monkeypa
 
     reference = await resolve_file_reference("./missing.nix#a.b")
 
-    assert reference.argument == "./missing.nix"
+    assert reference.arguments == ("./missing.nix",)
     assert reference.fragment == "a.b"
 
 
@@ -199,7 +202,7 @@ async def test_the_evaluator_keeps_what_it_resolves_itself(
 
     reference = await resolve_file_reference(raw)
 
-    assert reference.argument == raw
+    assert reference.arguments == (raw,)
     assert reference.local_path is None
 
 
@@ -209,29 +212,41 @@ async def test_a_pseudo_url_survives_its_double_slash(tmp_path: Path, monkeypatc
 
     reference = await resolve_file_reference("https://example.com/x.tar.gz")
 
-    assert reference.argument == "https://example.com/x.tar.gz"
+    assert reference.arguments == ("https://example.com/x.tar.gz",)
 
 
 @pytest.mark.parametrize(
     ("raw", "argument"),
     [
         ("github:NixOS/nixpkgs", "flake:github:NixOS/nixpkgs"),
-        ("nixpkgs", "flake:nixpkgs"),
-        ("nixpkgs/nixos-25.05", "flake:nixpkgs/nixos-25.05"),
         ("git+https://example.com/x", "flake:git+https://example.com/x"),
         ("path:/tmp/tree", "flake:path:/tmp/tree"),
     ],
 )
-async def test_a_reference_gets_the_flake_prefix(
+async def test_a_reference_that_carries_a_scheme_goes_straight_to_the_registry(
     raw: str, argument: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Rule 6: the branch of lookup_file_arg that fetches the tree."""
+    """Rule 6: the lookup path never holds a name such as `github:owner/repo`."""
     monkeypatch.chdir(tmp_path)
 
     reference = await resolve_file_reference(raw)
 
-    assert reference.argument == argument
+    assert reference.arguments == (argument,)
     assert reference.fragment is None
+    assert reference.local_path is None
+
+
+@pytest.mark.parametrize("raw", ["nixpkgs", "nixpkgs/nixos-25.05"])
+async def test_a_bare_name_asks_the_lookup_path_before_the_registry(
+    raw: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rule 7: `--file` is the old-style door, and NIX_PATH is how a name became
+    a tree before flakes existed."""
+    monkeypatch.chdir(tmp_path)
+
+    reference = await resolve_file_reference(raw)
+
+    assert reference.arguments == (f"<{raw}>", f"flake:{raw}")
     assert reference.local_path is None
 
 
@@ -240,7 +255,7 @@ async def test_a_reference_splits_its_fragment(tmp_path: Path, monkeypatch: pyte
 
     reference = await resolve_file_reference("github:NixOS/nixpkgs/nixos-25.05#lib.version")
 
-    assert reference.argument == "flake:github:NixOS/nixpkgs/nixos-25.05"
+    assert reference.arguments == ("flake:github:NixOS/nixpkgs/nixos-25.05",)
     assert reference.fragment == "lib.version"
 
 
@@ -249,7 +264,7 @@ async def test_an_empty_fragment_is_no_fragment(tmp_path: Path, monkeypatch: pyt
 
     reference = await resolve_file_reference("nixpkgs#")
 
-    assert reference.argument == "flake:nixpkgs"
+    assert reference.arguments == ("<nixpkgs>", "flake:nixpkgs")
     assert reference.fragment is None
 
 
@@ -357,3 +372,80 @@ def test_the_repl_search_defaults_to_the_root() -> None:
     assert search.prefixes == base_attr_search().prefixes
     assert search.candidates(None) == ("",)
     assert search.candidates("hello")[-1] == "hello"
+
+
+# --- open_file_reference ----------------------------------------------------
+#
+# The candidate list of a bare name reaches the evaluator one at a time, and
+# only a miss in the lookup path moves to the next one. These tests drive the
+# opener with a double, so each branch is reachable without a lookup path that
+# the test machine happens to hold.
+
+
+def _search_path_miss(name: str) -> ThrownError:
+    """The error `EvalState::findFile` raises when the lookup path has no *name*."""
+    return ThrownError(
+        "ThrownError",
+        f"error: file '{name}' was not found in the Nix search path (add it using $NIX_PATH or -I)",
+    )
+
+
+class _RecordingOpener:
+    """An opener that answers from a table, and remembers what it was asked."""
+
+    def __init__(self, answers: dict[str, _FakeValue | Exception]) -> None:
+        self.answers = answers
+        self.asked: list[str] = []
+
+    async def __call__(self, candidate: str) -> _FakeValue:
+        self.asked.append(candidate)
+        answer = self.answers.get(candidate)
+        if answer is None:
+            raise _search_path_miss(candidate.strip("<>"))
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+async def test_the_lookup_path_answers_before_the_registry() -> None:
+    value = _FakeValue()
+    opener = _RecordingOpener({"<nixpkgs>": value})
+    reference = FileReference(arguments=("<nixpkgs>", "flake:nixpkgs"), fragment=None, local_path=None)
+
+    assert await open_file_reference(reference, opener) is value
+    assert opener.asked == ["<nixpkgs>"]
+
+
+async def test_the_registry_answers_when_the_lookup_path_has_no_such_name() -> None:
+    value = _FakeValue()
+    opener = _RecordingOpener({"flake:nixpkgs": value})
+    reference = FileReference(arguments=("<nixpkgs>", "flake:nixpkgs"), fragment=None, local_path=None)
+
+    assert await open_file_reference(reference, opener) is value
+    assert opener.asked == ["<nixpkgs>", "flake:nixpkgs"]
+
+
+async def test_a_found_name_that_fails_to_evaluate_keeps_its_own_error() -> None:
+    """The reason the class alone is not enough to decide the fallback.
+
+    `builtins.throw` raises `ThrownError` too, so a `<nixpkgs>` that the lookup
+    path holds and whose file then rejects its arguments must report that, and
+    not a message about a flake.
+    """
+    opener = _RecordingOpener({"<nixpkgs>": ThrownError("ThrownError", "error: this expression refuses to evaluate")})
+    reference = FileReference(arguments=("<nixpkgs>", "flake:nixpkgs"), fragment=None, local_path=None)
+
+    with pytest.raises(ThrownError, match="refuses to evaluate"):
+        await open_file_reference(reference, opener)
+
+    assert opener.asked == ["<nixpkgs>"]
+
+
+async def test_the_last_error_survives_when_no_candidate_answers() -> None:
+    opener = _RecordingOpener({})
+    reference = FileReference(arguments=("<nixpkgs>", "flake:nixpkgs"), fragment=None, local_path=None)
+
+    with pytest.raises(ThrownError, match="Nix search path"):
+        await open_file_reference(reference, opener)
+
+    assert opener.asked == ["<nixpkgs>", "flake:nixpkgs"]
