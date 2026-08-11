@@ -1972,6 +1972,19 @@ void nanopynix_bind_expr(nb::module_ &m) {
         auto entries = nix::EvalSettings::parseNixPath(value);
         return {entries.begin(), entries.end()};
     }, "value"_a = nb::none());
+    // A lambda over `std::string`, and not the static itself: `isPseudoUrl`
+    // takes a `std::string_view`, which would need <nanobind/stl/string_view.h>
+    // and a temporary that outlives the call. One copy of a short string is
+    // the cheaper answer.
+    m.def("is_pseudo_url",
+          [](const std::string &value) { return nix::EvalSettings::isPseudoUrl(value); }, "value"_a,
+          "Report whether `lookup_file_arg` downloads this string as a tarball.\n\n"
+          "True for a `channel:` reference, and for a URL whose scheme Nix "
+          "downloads (`http`, `https`, `file`, `channel`, `git`, `s3`, `ssh`).\n\n"
+          "This is the first test that `eval_file` and `EvalState.file` apply to "
+          "their argument, so a caller that classifies such an argument itself "
+          "asks this rather than repeating the list of schemes. The list belongs "
+          "to Nix, and it changes with the Nix version.");
     m.def("list_eval_settings_metadata_json", []() {
         bool readOnlyMode = false;
         nix::EvalSettings evalSettings{readOnlyMode};

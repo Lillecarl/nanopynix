@@ -12,7 +12,7 @@ Build a Nix derivation value
 
 | Argument | Type | Help |
 | --- | --- | --- |
-| `--file` | `Path or None` | Evaluate FILE as a Nix expression. (default: `None`) |
+| `--file` | `str or None` | Evaluate FILE as a Nix expression. FILE is a path, a lookup path, a URL, or a flake reference, and it may end with '#' and an attribute path. (default: `None`) |
 | `--attr` | `str or None` | Dot-separated attribute path within the evaluation result. (default: `None`) |
 | `--flake` | `str or None` | Evaluate FLAKE, optionally with a '#'-separated attribute path. (default: `None`) |
 | `--store` | `str` | Store URI to build with. (default: `'auto'`) |
@@ -55,7 +55,7 @@ Evaluate a Nix expression and print the result as JSON
 | Argument | Type | Help |
 | --- | --- | --- |
 | `--expr` | `str or None` | Nix expression to evaluate. Reads from stdin if not provided. (default: `None`) |
-| `--file` | `Path or None` | Evaluate FILE as a Nix expression. (default: `None`) |
+| `--file` | `str or None` | Evaluate FILE as a Nix expression. FILE is a path, a lookup path, a URL, or a flake reference, and it may end with '#' and an attribute path. (default: `None`) |
 | `--attr` | `str or None` | Dot-separated attribute path within the evaluation result. (default: `None`) |
 | `--flake` | `str or None` | Evaluate FLAKE, optionally with a '#'-separated attribute path. (default: `None`) |
 | `--store` | `str` | Store URI to evaluate with. (default: `'auto'`) |
@@ -75,7 +75,7 @@ Examples:
 
 | Argument | Type | Help |
 | --- | --- | --- |
-| `--file` | `Path or None` | Evaluate FILE as a Nix expression. (default: `None`) |
+| `--file` | `str or None` | Evaluate FILE as a Nix expression. FILE is a path, a lookup path, a URL, or a flake reference, and it may end with '#' and an attribute path. (default: `None`) |
 | `--attr` | `str or None` | Dot-separated attribute path within the evaluation result. (default: `None`) |
 | `--flake` | `str or None` | Evaluate FLAKE, optionally with a '#'-separated attribute path. (default: `None`) |
 | `--store` | `str` | Store URI to use. (default: `'auto'`) |
@@ -94,7 +94,7 @@ Examples:
 
 | Argument | Type | Help |
 | --- | --- | --- |
-| `--file` | `Path or None` | Evaluate FILE as a Nix expression. (default: `None`) |
+| `--file` | `str or None` | Evaluate FILE as a Nix expression. FILE is a path, a lookup path, a URL, or a flake reference, and it may end with '#' and an attribute path. (default: `None`) |
 | `--attr` | `str or None` | Dot-separated attribute path within the evaluation result. (default: `None`) |
 | `--flake` | `str or None` | Evaluate FLAKE, optionally with a '#'-separated attribute path. (default: `None`) |
 | `--store` | `str` | Store URI to build with. (default: `'auto'`) |
@@ -162,7 +162,7 @@ Search NixOS module options, using a cached, offline index.
 | Argument | Type | Help |
 | --- | --- | --- |
 | `query` | `str or None` | Search query. Omit to just (re)build the index. (default: `None`) |
-| `--file` | `Path or None` | Evaluate FILE as a Nix expression. (default: `None`) |
+| `--file` | `str or None` | Evaluate FILE as a Nix expression. FILE is a path, a lookup path, a URL, or a flake reference, and it may end with '#' and an attribute path. (default: `None`) |
 | `--attr` | `str or None` | Dot-separated attribute path within the evaluation result. (default: `None`) |
 | `--flake` | `str or None` | Evaluate FLAKE, optionally with a '#'-separated attribute path. (default: `None`) |
 | `--options-attr` | `str` | Attribute path to the options tree, relative to the target. (default: `'options'`) |
@@ -191,7 +191,7 @@ Examples:
 
 | Argument | Type | Help |
 | --- | --- | --- |
-| `--file` | `Path or None` | Evaluate FILE as a Nix expression. (default: `None`) |
+| `--file` | `str or None` | Evaluate FILE as a Nix expression. FILE is a path, a lookup path, a URL, or a flake reference, and it may end with '#' and an attribute path. (default: `None`) |
 | `--attr` | `str or None` | Dot-separated attribute path within the evaluation result. (default: `None`) |
 | `--flake` | `str or None` | Evaluate FLAKE, optionally with a '#'-separated attribute path. (default: `None`) |
 | `--store` | `str` | Store URI to build with. (default: `'auto'`) |
@@ -207,7 +207,7 @@ Open an interactive Nix evaluation session.
 | Argument | Type | Help |
 | --- | --- | --- |
 | `--store` | `str` | Store URI to evaluate with. (default: `'auto'`) |
-| `--file` | `Path or None` | Evaluate FILE as a Nix expression. (default: `None`) |
+| `--file` | `str or None` | Evaluate FILE as a Nix expression. FILE is a path, a lookup path, a URL, or a flake reference, and it may end with '#' and an attribute path. (default: `None`) |
 | `--attr` | `str or None` | Dot-separated attribute path within the evaluation result. (default: `None`) |
 | `--flake` | `str or None` | Evaluate FLAKE, optionally with a '#'-separated attribute path. (default: `None`) |
 

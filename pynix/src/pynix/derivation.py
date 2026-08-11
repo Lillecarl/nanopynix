@@ -1,11 +1,6 @@
 from __future__ import annotations
 
 import json
-
-# A real import, not a TYPE_CHECKING one: clypi resolves the annotations on
-# the command below at runtime to build its argument parser, so `Path` has to
-# exist as an object and not just as a lazy PEP 563 string.
-from pathlib import Path
 from typing import Any, override
 
 import structlog
@@ -33,7 +28,7 @@ class Show(ConfiguredCommand):
       pynix derivation show --flake .#hello
       pynix derivation show --flake nixpkgs#python3Packages.requests"""
 
-    file: Path | None = file_option()
+    file: str | None = file_option()
     attr: str | None = attr_option()
     flake: str | None = flake_option()
     store: str = store_option("Store URI to use.")

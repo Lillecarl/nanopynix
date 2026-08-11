@@ -46,7 +46,7 @@ def _cache_path(target: EvaluationTarget, options_attr: str, lib_attr: str) -> P
 
 
 def _target_description(target: EvaluationTarget) -> str:
-    base = str(target.file) if target.file is not None else (target.flake or "<unknown>")
+    base = target.file if target.file is not None else (target.flake or "<unknown>")
     return f"{base}#{target.attr}" if target.attr else base
 
 
@@ -64,7 +64,7 @@ class Osearch(ConfiguredCommand):
     """Search NixOS module options, using a cached, offline index."""
 
     query: Positional[str | None] = arg(None, help="Search query. Omit to just (re)build the index.")
-    file: Path | None = file_option()
+    file: str | None = file_option()
     attr: str | None = attr_option()
     flake: str | None = flake_option()
     options_attr: str = arg("options", help="Attribute path to the options tree, relative to the target.")

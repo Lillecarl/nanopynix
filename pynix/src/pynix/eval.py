@@ -1,11 +1,6 @@
 from __future__ import annotations
 
 import sys
-
-# A real import, not a TYPE_CHECKING one: clypi resolves the annotations on
-# the command below at runtime to build its argument parser, so `Path` has to
-# exist as an object and not just as a lazy PEP 563 string.
-from pathlib import Path
 from typing import override
 
 import structlog
@@ -29,7 +24,7 @@ class Eval(ConfiguredCommand):
     """Evaluate a Nix expression and print the result as JSON"""
 
     expr: str | None = arg(None, help="Nix expression to evaluate. Reads from stdin if not provided.")
-    file: Path | None = file_option()
+    file: str | None = file_option()
     attr: str | None = attr_option()
     flake: str | None = flake_option()
     store: str = store_option("Store URI to evaluate with.")

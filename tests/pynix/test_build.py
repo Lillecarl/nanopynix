@@ -277,7 +277,29 @@ async def test_build_update_fod_without_file_errors(
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "--update-fod currently requires --file" in captured.err
+    assert "--update-fod requires --file to name a local file" in captured.err
+
+
+async def test_build_update_fod_with_a_fetched_file_errors(
+    shared_nix_environment: NixTestEnvironment,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--file now accepts a reference, and --update-fod still needs a local file.
+
+    ``<nixpkgs>`` resolves through the lookup path into the store, which is
+    read-only. The guard refuses it before any evaluation starts, so this test
+    needs no network and no lookup path that exists.
+    """
+    cmd = Pynix.parse(
+        ["build", "--file", "<nixpkgs>", "--update-fod", *shared_nix_environment.pynix_store_args()],
+    )
+
+    with pytest.raises(SystemExit):
+        await cmd.astart()
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--update-fod requires --file to name a local file" in captured.err
 
 
 async def test_build_dry_run_without_update_fod_errors(
@@ -555,7 +577,7 @@ runCommand "payload" {
             nixpkgs_path,
         ),
     )
-    target = EvaluationTarget(file=nix_file, attr=None, flake=None)
+    target = EvaluationTarget(file=str(nix_file), attr=None, flake=None)
 
     async def _always_false(*_args: object, **_kwargs: object) -> bool:
         return False
@@ -609,7 +631,7 @@ runCommand "payload" {
             nixpkgs_path,
         ),
     )
-    target = EvaluationTarget(file=nix_file, attr=None, flake=None)
+    target = EvaluationTarget(file=str(nix_file), attr=None, flake=None)
 
     def _rewrite_with_still_wrong_hash(source: str, literal: Any, _got: str) -> str:
         return _real_replace_fod_hash(source, literal, "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
