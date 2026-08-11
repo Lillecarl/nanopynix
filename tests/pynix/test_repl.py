@@ -286,7 +286,7 @@ async def test_repl_loads_file_target_into_initial_scope(monkeypatch: Any) -> No
     monkeypatch.setattr("pynix.repl.print_formatted_text", output.append)
     repl = _Repl()
 
-    names = await _load_initial_target(repl, EvaluationTarget(file=Path("default.nix"), attr=None, flake=None))
+    names = await _load_initial_target(repl, EvaluationTarget(file="default.nix", attr=None, flake=None))
 
     assert names == ["answer"]
     assert repl.loaded_files == ["default.nix"]
@@ -529,7 +529,7 @@ def test_repl_accepts_file_and_attr_options() -> None:
     command = Pynix.parse(["repl", "--file", "default.nix", "--attr", "pkgs"])
 
     assert isinstance(command.subcommand, Repl)
-    assert command.subcommand.file == Path("default.nix")
+    assert command.subcommand.file == "default.nix"
     assert command.subcommand.attr == "pkgs"
 
 

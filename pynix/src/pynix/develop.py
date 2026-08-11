@@ -123,7 +123,7 @@ class PrintDevEnv(ConfiguredCommand):
       pynix print-dev-env --file default.nix --attr hello
       pynix print-dev-env --flake .#hello --json"""
 
-    file: Path | None = file_option()
+    file: str | None = file_option()
     attr: str | None = attr_option()
     flake: str | None = flake_option()
     store: str = store_option("Store URI to build with.")
@@ -156,7 +156,7 @@ class Develop(ConfiguredCommand):
       pynix develop --flake .# -- make -j4
       pynix develop --flake .# -- bash -c 'make | less'"""
 
-    file: Path | None = file_option()
+    file: str | None = file_option()
     attr: str | None = attr_option()
     flake: str | None = flake_option()
     store: str = store_option("Store URI to build with.")

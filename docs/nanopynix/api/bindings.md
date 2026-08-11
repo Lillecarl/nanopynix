@@ -31,7 +31,8 @@ Lifecycle and extension points
   store type, and each one has its own contract below.
 
 Plain queries and constructors
-: `build_info`, `current_system`, `get_verbosity`, `list_settings`,
+: `build_info`, `current_system`, `get_verbosity`, `is_pseudo_url`,
+  `list_settings`,
   `open_store`, `eval_file`, `parse_flake_ref`, `get_flake`, `lock_flake`,
   `input_from_url` and `input_from_attrs` read state or build an object. They
   are safe to call, and the classes `EvalState`, `Value`, `BuildMode` and
@@ -155,6 +156,15 @@ the ownership rule that a bare `Value` has not got.
 
 `eval_file` evaluates one `.nix` file and returns the resulting `Value`.
 
+`is_pseudo_url` reports whether Nix downloads a string as a tarball, rather
+than reading it as a path. It is the first test that `eval_file` and
+`EvalState.file` apply to their argument: `channel:nixos-unstable` and a URL
+with a scheme that Nix fetches both answer `True`, and `github:NixOS/nixpkgs`,
+`<nixpkgs>` and `./default.nix` all answer `False`. Ask this when you classify
+such an argument yourself, because the list of schemes belongs to Nix and it
+moves with the Nix version. `pynix` uses it to decide which `--file` arguments
+it hands over unchanged.
+
 `register_primop` adds a Python function to `builtins`. Registration is
 process-wide and permanent, so a name can be claimed once. `Session(primops=...)`
 is the supported route, and it also gives the rpc engine a way to run the
@@ -174,6 +184,8 @@ as unexpected rather than deliberate.
 .. autoclass:: nanopynix_bindings.expr.Value
 
 .. autofunction:: nanopynix_bindings.expr.eval_file
+
+.. autofunction:: nanopynix_bindings.expr.is_pseudo_url
 
 .. autofunction:: nanopynix_bindings.expr.register_primop
 

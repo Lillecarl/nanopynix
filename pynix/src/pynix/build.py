@@ -60,7 +60,7 @@ def _no_sandbox_paths() -> list[str]:
 class Build(ConfiguredCommand):
     """Build a Nix derivation value"""
 
-    file: Path | None = file_option()
+    file: str | None = file_option()
     attr: str | None = attr_option()
     flake: str | None = flake_option()
     store: str = store_option("Store URI to build with.")
@@ -135,8 +135,8 @@ class Build(ConfiguredCommand):
             target.validate(required=True)
         except EvaluationTargetError as exc:
             report_and_exit(exc)
-        if self.update_fod and target.file is None:
-            error_exit("--update-fod currently requires --file")
+        if self.update_fod:
+            await _require_a_local_file(target)
         if self.dry_run and not self.update_fod:
             error_exit("--dry-run requires --update-fod")
 
@@ -269,6 +269,20 @@ async def _promote_to_host_store(nix: Any, store: Any, outputs: dict[str, str]) 
         await store.copy_closure(paths, host, check_sigs=False)
 
 
+async def _require_a_local_file(target: EvaluationTarget) -> None:
+    """Refuse ``--update-fod`` unless ``--file`` names a local file.
+
+    ``--update-fod`` writes the new hash back into the source. A fetched tree
+    lives in the store, which is read-only, and a lookup path resolves to one.
+    """
+    try:
+        reference = await target.file_reference()
+    except EvaluationTargetError as exc:
+        report_and_exit(exc)
+    if reference is None or reference.local_path is None:
+        error_exit("--update-fod requires --file to name a local file")
+
+
 async def _evaluate_build_target(target: EvaluationTarget, session: Any) -> ValueProxy:
     try:
         return await evaluate_target(target, session, auto_call_file=True)
@@ -297,6 +311,12 @@ async def _build_target(  # noqa: PLR0913 -- tracked complexity/arg-count debt, 
         logger.info("pynix build target evaluated")
         return root
 
+    # The local file, and not the raw argument. --update-fod rewrites the hash
+    # in the source, so a fetched tree in the store and a lookup path have no
+    # file to rewrite. `run()` refuses both before it reaches this point.
+    reference = await target.file_reference()
+    source_file = reference.local_path if reference is not None else None
+
     try:
         return await build_with_fod_update(
             _evaluate,
@@ -305,7 +325,7 @@ async def _build_target(  # noqa: PLR0913 -- tracked complexity/arg-count debt, 
             evaluation_store=evaluation_store,
             build_store=build_store,
             update_fod=update_fod,
-            source_file=target.file,
+            source_file=source_file,
             dry_run=dry_run,
             on_hash_update=_print_diff,
         )

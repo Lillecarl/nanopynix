@@ -8,7 +8,15 @@
 
 from __future__ import annotations
 
-from nanopynix_bindings.expr import EvalState, PrimopError, Value, eval_file, init_libexpr, register_primop
+from nanopynix_bindings.expr import (
+    EvalState,
+    PrimopError,
+    Value,
+    eval_file,
+    init_libexpr,
+    is_pseudo_url,
+    register_primop,
+)
 from nanopynix_bindings.fetchers import input_from_attrs, input_from_url
 from nanopynix_bindings.flake import get_flake, lock_flake, parse_flake_ref
 from nanopynix_bindings.store import (
@@ -313,6 +321,7 @@ __all__ = [
     "input_from_attrs",
     "input_from_url",
     "install_logger",
+    "is_pseudo_url",
     "list_eval_settings_metadata",
     "list_fetch_settings_metadata",
     "list_flake_settings_metadata",

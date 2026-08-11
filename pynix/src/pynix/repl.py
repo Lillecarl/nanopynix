@@ -661,7 +661,7 @@ class Repl(ConfiguredCommand):
     """Open an interactive Nix evaluation session."""
 
     store: str = store_option("Store URI to evaluate with.")
-    file: Path | None = file_option()
+    file: str | None = file_option()
     attr: str | None = attr_option()
     flake: str | None = flake_option()
 
@@ -695,7 +695,7 @@ class Repl(ConfiguredCommand):
                         raise SystemExit(1) from exc
                     initial_sources: list[tuple[str, str]] = []
                     if target.file is not None:
-                        initial_sources.append((":load", str(target.file)))
+                        initial_sources.append((":load", target.file))
                     elif target.flake is not None:
                         initial_sources.append((":load-flake", target.flake))
                     await _run_repl_loop(
