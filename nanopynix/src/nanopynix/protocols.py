@@ -733,6 +733,20 @@ class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](AsyncVerbosityController
         ...
 
     @abstractmethod
+    async def set_eval_counters_enabled(self, enabled: bool) -> bool:
+        """Turn the evaluation counters on, or off, and report the new state.
+
+        The counters back the numeric fields of :meth:`statistics`. Nix leaves
+        them off unless ``NIX_SHOW_STATS`` is set, because each increment costs
+        an atomic write.
+
+        **The scope is a process, and not this evaluator.** On ``rpc`` that
+        process is the worker, which is why the call goes over the wire rather
+        than setting a static here. See :meth:`statistics`, and issue #118.
+        """
+        ...
+
+    @abstractmethod
     async def statistics(self) -> dict[str, Any]:
         """Report what this evaluator did, as ``NIX_SHOW_STATS=1 nix`` reports it.
 
@@ -745,10 +759,21 @@ class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](AsyncVerbosityController
         Nix decides the fields, and it changes them between versions. Read a
         field that a version supplies, and do not require one.
 
-        **Two fields count the process, and not this evaluator.** ``nrExprs``
-        and ``nrThunks`` are static counters of ``libnixexpr``, so a process
-        with two evaluators reports the sum of both in each one. Every other
-        counted field belongs to this evaluator alone.
+        .. warning::
+
+           **This report is unreliable when one process holds more than one
+           evaluator.** Two things belong to the process, and not to this
+           evaluator:
+
+           * ``nrExprs`` and ``nrThunks`` are static counters of
+             ``libnixexpr``, so each evaluator reports the sum of every
+             evaluator in the process.
+           * The switch that turns counting on is one static as well, so an
+             evaluator cannot count while another beside it does not.
+
+           The other thirteen counted fields belong to this evaluator alone,
+           and they are correct. Issue #118 tracks the repair, and the reason
+           that upstream Nix keeps a static.
 
         :raises RuntimeError: on Nix 2.31, which has no such report. Read
             ``build_info()["capabilities"]["eval_statistics"]`` first.

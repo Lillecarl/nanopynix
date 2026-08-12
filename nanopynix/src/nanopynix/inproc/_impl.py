@@ -1527,6 +1527,10 @@ class EvalSession(AsyncEvalSession["Value"]):
     async def statistics(self) -> dict[str, Any]:
         return json.loads(await self.run(self._require_raw().statistics_json))
 
+    async def set_eval_counters_enabled(self, enabled: bool) -> bool:
+        nanopynix_expr.set_eval_counters_enabled(enabled)
+        return nanopynix_expr.eval_counters_enabled()
+
 
 class ReplSession(EvalSession, AsyncReplSession["Value"]):
     """An :class:`EvalSession` with a persistent Nix lexical scope.
