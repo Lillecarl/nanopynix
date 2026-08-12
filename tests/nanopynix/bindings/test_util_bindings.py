@@ -21,6 +21,9 @@ def test_build_info_reports_compile_time_compatibility() -> None:
         "eval_state_mem",
         "dynamic_primop_registration",
         "store_impl_read_derivation",
+        # `EvalState.statistics_json`, and the two counter functions. The
+        # count-calls patch reaches 2.34 and later, and not 2.31.
+        "eval_statistics",
         # The one capability here that the Nix version does not decide. It
         # comes from `-Dgc=disabled`, which the AddressSanitizer variant
         # builds because libexpr refuses ASAN together with a conservative

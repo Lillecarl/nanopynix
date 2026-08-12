@@ -52,10 +52,18 @@ if TYPE_CHECKING:
     from tests.support.nix_environment import NixTestEnvironment
 
 
-#: The eight eval settings Nix reads while it builds the evaluator. Restated
+#: The nine eval settings Nix reads while it builds the evaluator. Restated
 #: here on purpose: if the model changes, this list is what notices.
+#:
+#: `count-calls` is the one that this repository adds, in
+#: `nix-2.35-count-calls.patch`. The evaluator reads it into a `const` member,
+#: so it belongs here beside the eight that Nix ships. 2.31 takes no patch and
+#: has no such setting, and the model names it on every version even so: the
+#: model is Python, and a field that appears and disappears with the Nix
+#: version would be a worse surface than one that raises when it is used.
 CONSTRUCTION_TIME_EVAL_SETTINGS = frozenset(
     {
+        "count-calls",
         "eval-profile-file",
         "eval-profiler",
         "eval-profiler-frequency",
