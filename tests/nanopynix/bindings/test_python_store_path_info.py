@@ -1042,6 +1042,8 @@ class TestTheUndispatchableCaseIsSaidOutLoud:
     unreachable in each build this repository makes. Remove that branch from
     the bindings and this test goes with it, and nothing is left asserting an
     absence with no control. Do not instead re-add a version below the floor.
+    Issue #129 tracks that removal, together with the other 32 branches that
+    the floor made dead.
     """
 
     def test_a_build_with_dispatch_says_nothing(self) -> None:
