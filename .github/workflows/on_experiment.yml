@@ -12,6 +12,14 @@ env:
         description: Branch, tag, or FULL 40-character sha to check out
         required: false
         default: ci-develop
+      runner:
+        type: choice
+        description: Runner to use
+        required: false
+        default: ubuntu-24.04
+        options:
+        - ubuntu-24.04
+        - ubuntu-24.04-arm
       matrix:
         type: string
         description: JSON matrix, for example {"arm":["a","b"],"run":[1,2]}
@@ -21,14 +29,6 @@ env:
         type: string
         description: Attribute of ci/experiments.nix to run
         required: true
-      runner:
-        type: choice
-        description: Runner to use
-        required: false
-        default: ubuntu-24.04
-        options:
-        - ubuntu-24.04
-        - ubuntu-24.04-arm
 jobs:
   experiment:
     steps:

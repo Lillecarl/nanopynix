@@ -4,10 +4,32 @@ let
     steps
     caps
     mkJob
+    withCond
     withTimeout
     ;
 
-  branch = "develop";
+  # **A dispatch can select one job, and a scheduled run always takes them
+  # all.** `on_commit.nix` carries the same expression, and the wheel jobs are
+  # why this workflow needs it too: each one builds the whole closure, so a run
+  # to test one of them must not start the entire nightly.
+  #
+  # `update-lockfile` never takes this condition. Every job below needs it for
+  # the flake it tests and for the version matrix it reads.
+  dispatchable = builtins.mapAttrs (
+    name: job:
+    withCond "github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',${name},')" job
+  );
+
+  # **A dispatch tests the branch that it names, and a scheduled run tests
+  # `develop`.** `github.ref_name` is the default branch on a scheduled run,
+  # and the default branch of this repository is `develop`, so the schedule
+  # keeps the behaviour that the literal gave it.
+  #
+  # A dispatch needs the other half. The job selection above lets you run one
+  # job of this workflow, and a checkout of `develop` then builds code that the
+  # job under test does not have. That is how the wheel jobs arrived: neither
+  # one can run before it reaches `develop`, and each one costs hours.
+  branch = "\${{ github.ref_name }}";
   lockArtifact = "flake-lock";
   updateJob = "update-lockfile";
 
@@ -113,6 +135,7 @@ let
           };
         };
       };
+
   };
 in
 workflow.evalWorkflow {
@@ -120,7 +143,16 @@ workflow.evalWorkflow {
   env = workflow.workflowEnv;
   on = {
     schedule = [ { cron = "17 3 * * *"; } ];
-    workflow_dispatch = null;
+    workflow_dispatch = {
+      inputs = {
+        jobs = {
+          description = "Comma-separated job IDs to run; leave empty for the full matrix";
+          required = false;
+          type = "string";
+          default = "";
+        };
+      };
+    };
   };
   jobs = {
     update-lockfile = mkJob {
@@ -162,29 +194,62 @@ workflow.evalWorkflow {
       ];
     };
   }
-  // allTestJobs
-  // {
-    docs-build = workflow.mkDocsBuildJob {
-      needs = builtins.attrNames allTestJobs;
-      ref = branch;
-      inherit lockArtifact;
-    };
-    docs-deploy = workflow.mkDocsDeployJob { needs = "docs-build"; };
-    update-lockfile-commit = mkJob {
-      needs = "docs-deploy";
-      permissions = {
-        contents = "write";
+  // dispatchable (
+    allTestJobs
+    // {
+      # **The wheel, on each architecture, and here rather than on every
+      # commit.** This build compiles the whole closure with a compiler wrapper
+      # of its own, so it shares no derivation with the test jobs and cachix
+      # holds none of it until this job has run. `ci/workflows/lib.nix` gives the
+      # measurement behind the cap.
+      #
+      # A scheduled run also tests a freshly updated flake, which is what this
+      # job most needs: three of the four defects of issue #120 came from the
+      # toolchain under it, and a bumped nixpkgs is how the next one arrives.
+      wheel-x86_64 = workflow.mkWheelJob {
+        ref = branch;
+        inherit lockArtifact;
+        needs = [ updateJob ];
       };
-      steps = [
-        (steps.checkout { ref = branch; })
-        (steps.downloadArtifact { artifactName = lockArtifact; })
-        (withTimeout caps.autoCommit {
-          uses = "step-security/git-auto-commit-action@main";
-          "with" = {
-            commit_message = "nix flake update";
-          };
-        })
-      ];
-    };
-  };
+
+      # **A native arm64 runner, and never emulation.** GitHub supplies
+      # `ubuntu-24.04-arm` to a public repository, and this host registers binfmt
+      # for aarch64, so an x86-64 runner would silently build the whole closure
+      # under qemu.
+      #
+      # It runs the smoke test as well, because the runner is the architecture of
+      # the wheel. That is the one thing the community builder cannot give: a
+      # foreign-architecture container does not start on the machine that builds
+      # the aarch64 wheel by hand today.
+      wheel-aarch64 = workflow.mkWheelJob {
+        runner = "ubuntu-24.04-arm";
+        ref = branch;
+        inherit lockArtifact;
+        needs = [ updateJob ];
+      };
+
+      docs-build = workflow.mkDocsBuildJob {
+        needs = builtins.attrNames allTestJobs;
+        ref = branch;
+        inherit lockArtifact;
+      };
+      docs-deploy = workflow.mkDocsDeployJob { needs = "docs-build"; };
+      update-lockfile-commit = mkJob {
+        needs = "docs-deploy";
+        permissions = {
+          contents = "write";
+        };
+        steps = [
+          (steps.checkout { ref = branch; })
+          (steps.downloadArtifact { artifactName = lockArtifact; })
+          (withTimeout caps.autoCommit {
+            uses = "step-security/git-auto-commit-action@main";
+            "with" = {
+              commit_message = "nix flake update";
+            };
+          })
+        ];
+      };
+    }
+  );
 }
