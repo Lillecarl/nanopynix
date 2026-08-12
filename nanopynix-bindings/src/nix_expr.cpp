@@ -1498,9 +1498,11 @@ static void bind_eval_state(nb::module_ &m) {
         .def("statistics_json", &PyEvalState::statistics_json,
              "Return the evaluation statistics of this evaluator, as a JSON document.\n\n"
              "The report holds the same fields that `NIX_SHOW_STATS=1 nix` prints. The\n"
-             "`nrExprs` and `nrThunks` fields count the process, because Nix keeps those\n"
-             "two counters in a static. Every other counted field belongs to this\n"
-             "evaluator alone.\n\n"
+             "report is unreliable when one process holds more than one evaluator:\n"
+             "`nrExprs` and `nrThunks` count the process, because Nix keeps those two\n"
+             "counters in a static, and so does the switch that turns counting on. The\n"
+             "other thirteen counted fields belong to this evaluator alone. Issue #118\n"
+             "tracks the repair.\n\n"
              "`primops`, `functions` and `attributes` tables need the `count-calls` eval\n"
              "setting, which is off by default because the counting costs time.\n\n"
              "Raises RuntimeError on Nix 2.31, which has no such report.")
@@ -2016,7 +2018,9 @@ void nanopynix_bind_expr(nb::module_ &m) {
           "The counters back the numeric fields of `EvalState.statistics_json`, such\n"
           "as `values`, `envs` and `nrFunctionCalls`. Nix leaves them off unless\n"
           "`NIX_SHOW_STATS` is set, because each increment costs an atomic write.\n\n"
-          "This setting belongs to the process, and not to one evaluator.");
+          "This setting belongs to the process, and not to one evaluator, so an\n"
+          "evaluator cannot count while another one beside it does not. Issue #118\n"
+          "tracks the repair, and the reason that Nix keeps a static.");
     m.def("eval_counters_enabled", []() { return nix::Counter::enabled; },
           "Report whether the evaluation counters of the process are on.");
 #endif

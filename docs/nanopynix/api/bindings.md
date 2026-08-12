@@ -31,7 +31,8 @@ Lifecycle and extension points
   store type, and each one has its own contract below.
 
 Plain queries and constructors
-: `build_info`, `current_system`, `get_verbosity`, `is_pseudo_url`,
+: `build_info`, `current_system`, `eval_counters_enabled`, `get_verbosity`,
+  `is_pseudo_url`,
   `list_settings`,
   `open_store`, `eval_file`, `parse_flake_ref`, `get_flake`, `lock_flake`,
   `input_from_url` and `input_from_attrs` read state or build an object. They
@@ -156,6 +157,18 @@ the ownership rule that a bare `Value` has not got.
 
 `eval_file` evaluates one `.nix` file and returns the resulting `Value`.
 
+`set_eval_counters_enabled` turns the evaluation counters on, and
+`eval_counters_enabled` reports their state. The counters back the numeric
+fields of `EvalState.statistics_json`, and Nix leaves them off unless
+`NIX_SHOW_STATS` is set, because each increment costs an atomic write.
+
+**Both name the process, and not one evaluator.** `nix::Counter::enabled` is a
+static of `libnixexpr`, so an evaluator cannot count while another one beside
+it does not, and the `nrExprs` and `nrThunks` fields count every evaluator in
+the process. The report is therefore unreliable when one process holds more
+than one evaluator. Issue #118 tracks the repair, and issue #119 holds a
+measurement of the engines disagreeing that has no explanation yet.
+
 `is_pseudo_url` reports whether Nix downloads a string as a tarball, rather
 than reading it as a path. It is the first test that `eval_file` and
 `EvalState.file` apply to their argument: `channel:nixos-unstable` and a URL
@@ -184,6 +197,10 @@ as unexpected rather than deliberate.
 .. autoclass:: nanopynix_bindings.expr.Value
 
 .. autofunction:: nanopynix_bindings.expr.eval_file
+
+.. autofunction:: nanopynix_bindings.expr.eval_counters_enabled
+
+.. autofunction:: nanopynix_bindings.expr.set_eval_counters_enabled
 
 .. autofunction:: nanopynix_bindings.expr.is_pseudo_url
 
