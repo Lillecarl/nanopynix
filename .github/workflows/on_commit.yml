@@ -64,26 +64,21 @@ jobs:
     - commit-subjects
     - static-checks
     - test-asan-git
-    - test-asan-nix_2_31
     - test-asan-nix_2_34
     - test-asan-nix_2_35
     - test-daemon-git
-    - test-daemon-nix_2_31
     - test-daemon-nix_2_34
     - test-daemon-nix_2_35
     - test-local-git
-    - test-local-nix_2_31
     - test-local-nix_2_34
     - test-local-nix_2_35
     - test-nogc-git
-    - test-nogc-nix_2_31
     - test-nogc-nix_2_34
     - test-nogc-nix_2_35
     - test-tsan-git
     - test-tsan-nix_2_34
     - test-tsan-nix_2_35
     - test-ubsan-git
-    - test-ubsan-nix_2_31
     - test-ubsan-nix_2_34
     - test-ubsan-nix_2_35
     steps:
@@ -178,46 +173,6 @@ jobs:
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-asan-git,')
-  test-asan-nix_2_31:
-    env:
-      CI_STEP: ciSteps.nix_2_31-asan
-    steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
-    - timeout-minutes: 15
-      uses: cachix/install-nix-action@master
-      with:
-        extra_nix_config: |
-          experimental-features = nix-command flakes
-    - timeout-minutes: 15
-      uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Build the ASAN CI step package (nix_2_31)
-      timeout-minutes: 60
-      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
-    - name: Enable Nix sandbox namespaces
-      timeout-minutes: 10
-      run: nix run --file . ciSteps.enable-sandbox-namespaces
-    - name: Run ASAN-instrumented suite (nix_2_31, local backend)
-      timeout-minutes: 60
-      run: ./result/bin/nanopynix-ci suite
-    - name: Run the concurrency soak (ASAN, nix_2_31)
-      timeout-minutes: 15
-      run: ./result/bin/nanopynix-ci soak
-    - name: Upload ASAN output (nix_2_31)
-      timeout-minutes: 15
-      uses: actions/upload-artifact@main
-      with:
-        name: asan-report-nix_2_31
-        path: ${{ github.workspace }}/asan-output-nix_2_31.log
-      if: ${{ !cancelled() }}
-    timeout-minutes: 215
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-asan-nix_2_31,')
   test-asan-nix_2_34:
     env:
       CI_STEP: ciSteps.nix_2_34-asan
@@ -331,39 +286,6 @@ jobs:
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-nogc-git,')
-  test-nogc-nix_2_31:
-    env:
-      CI_STEP: ciSteps.nix_2_31-nogc
-    steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
-    - timeout-minutes: 15
-      uses: cachix/install-nix-action@master
-      with:
-        extra_nix_config: |
-          experimental-features = nix-command flakes
-    - timeout-minutes: 15
-      uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Build the no-collector CI step package (nix_2_31)
-      timeout-minutes: 30
-      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
-    - name: Enable Nix sandbox namespaces
-      timeout-minutes: 10
-      run: nix run --file . ciSteps.enable-sandbox-namespaces
-    - name: Run the suite without a collector (nix_2_31, local backend)
-      timeout-minutes: 30
-      run: ./result/bin/nanopynix-ci suite
-    - name: Run the concurrency soak (no collector, nix_2_31)
-      timeout-minutes: 15
-      run: ./result/bin/nanopynix-ci soak
-    timeout-minutes: 140
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-nogc-nix_2_31,')
   test-nogc-nix_2_34:
     env:
       CI_STEP: ciSteps.nix_2_34-nogc
@@ -470,46 +392,6 @@ jobs:
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-ubsan-git,')
-  test-ubsan-nix_2_31:
-    env:
-      CI_STEP: ciSteps.nix_2_31-ubsan
-    steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
-    - timeout-minutes: 15
-      uses: cachix/install-nix-action@master
-      with:
-        extra_nix_config: |
-          experimental-features = nix-command flakes
-    - timeout-minutes: 15
-      uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Build the UBSAN CI step package (nix_2_31)
-      timeout-minutes: 60
-      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
-    - name: Enable Nix sandbox namespaces
-      timeout-minutes: 10
-      run: nix run --file . ciSteps.enable-sandbox-namespaces
-    - name: Run UBSAN-instrumented suite (nix_2_31, local backend)
-      timeout-minutes: 30
-      run: ./result/bin/nanopynix-ci suite
-    - name: Run the concurrency soak (UBSAN, nix_2_31)
-      timeout-minutes: 15
-      run: ./result/bin/nanopynix-ci soak
-    - name: Upload UBSAN output (nix_2_31)
-      timeout-minutes: 15
-      uses: actions/upload-artifact@main
-      with:
-        name: ubsan-report-nix_2_31
-        path: ${{ github.workspace }}/ubsan-output-nix_2_31.log
-      if: ${{ !cancelled() }}
-    timeout-minutes: 185
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-ubsan-nix_2_31,')
   test-ubsan-nix_2_34:
     env:
       CI_STEP: ciSteps.nix_2_34-ubsan
@@ -790,77 +672,6 @@ jobs:
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-git,')
-  test-daemon-nix_2_31:
-    env:
-      CI_STEP: ciSteps.nix_2_31
-      BACKEND: daemon
-    steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
-    - timeout-minutes: 15
-      uses: cachix/install-nix-action@master
-      with:
-        extra_nix_config: |
-          experimental-features = nix-command flakes
-    - timeout-minutes: 15
-      uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Build the CI step package for Nix nix_2_31
-      timeout-minutes: 30
-      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
-    - name: Verify test runner closure after build
-      timeout-minutes: 15
-      run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    - name: Enable Nix sandbox namespaces
-      timeout-minutes: 10
-      run: nix run --file . ciSteps.enable-sandbox-namespaces
-    - name: Test nanopynix against Nix nix_2_31 (full suite, daemon backend)
-      timeout-minutes: 30
-      run: ./result/bin/nanopynix-ci suite
-    - name: Run the concurrency soak (nix_2_31, daemon backend)
-      timeout-minutes: 15
-      run: ./result/bin/nanopynix-ci soak
-    - name: Upload test output
-      timeout-minutes: 15
-      uses: actions/upload-artifact@main
-      with:
-        name: test-output-daemon-nix_2_31
-        path: ${{ github.workspace }}/test-gdb-output.log
-      if: ${{ !cancelled() }}
-    - name: Upload Boehm GC thread registration log
-      timeout-minutes: 15
-      uses: actions/upload-artifact@main
-      with:
-        name: gc-thread-debug-daemon-nix_2_31
-        path: ${{ github.workspace }}/gc-thread-debug.log
-      if: ${{ !cancelled() }}
-    - name: Upload coverage reports to Codecov
-      timeout-minutes: 10
-      uses: codecov/codecov-action@main
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ${{ github.workspace }}/coverage.xml
-        flags: daemon-nix_2_31
-      if: ${{ !cancelled() }}
-    - name: Upload test results to Codecov
-      timeout-minutes: 10
-      uses: codecov/codecov-action@main
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ${{ github.workspace }}/junit.xml
-        flags: daemon-nix_2_31
-        report_type: test_results
-      if: ${{ !cancelled() }}
-    - name: Verify test runner closure after tests
-      timeout-minutes: 15
-      run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    timeout-minutes: 220
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-daemon-nix_2_31,')
   test-daemon-nix_2_34:
     env:
       CI_STEP: ciSteps.nix_2_34
@@ -1074,77 +885,6 @@ jobs:
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-git,')
-  test-local-nix_2_31:
-    env:
-      CI_STEP: ciSteps.nix_2_31
-      BACKEND: local
-    steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
-    - timeout-minutes: 15
-      uses: cachix/install-nix-action@master
-      with:
-        extra_nix_config: |
-          experimental-features = nix-command flakes
-    - timeout-minutes: 15
-      uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Build the CI step package for Nix nix_2_31
-      timeout-minutes: 30
-      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
-    - name: Verify test runner closure after build
-      timeout-minutes: 15
-      run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    - name: Enable Nix sandbox namespaces
-      timeout-minutes: 10
-      run: nix run --file . ciSteps.enable-sandbox-namespaces
-    - name: Test nanopynix against Nix nix_2_31 (full suite, local backend)
-      timeout-minutes: 30
-      run: ./result/bin/nanopynix-ci suite
-    - name: Run the concurrency soak (nix_2_31, local backend)
-      timeout-minutes: 15
-      run: ./result/bin/nanopynix-ci soak
-    - name: Upload test output
-      timeout-minutes: 15
-      uses: actions/upload-artifact@main
-      with:
-        name: test-output-local-nix_2_31
-        path: ${{ github.workspace }}/test-gdb-output.log
-      if: ${{ !cancelled() }}
-    - name: Upload Boehm GC thread registration log
-      timeout-minutes: 15
-      uses: actions/upload-artifact@main
-      with:
-        name: gc-thread-debug-local-nix_2_31
-        path: ${{ github.workspace }}/gc-thread-debug.log
-      if: ${{ !cancelled() }}
-    - name: Upload coverage reports to Codecov
-      timeout-minutes: 10
-      uses: codecov/codecov-action@main
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ${{ github.workspace }}/coverage.xml
-        flags: local-nix_2_31
-      if: ${{ !cancelled() }}
-    - name: Upload test results to Codecov
-      timeout-minutes: 10
-      uses: codecov/codecov-action@main
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ${{ github.workspace }}/junit.xml
-        flags: local-nix_2_31
-        report_type: test_results
-      if: ${{ !cancelled() }}
-    - name: Verify test runner closure after tests
-      timeout-minutes: 15
-      run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    timeout-minutes: 220
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-local-nix_2_31,')
   test-local-nix_2_34:
     env:
       CI_STEP: ciSteps.nix_2_34

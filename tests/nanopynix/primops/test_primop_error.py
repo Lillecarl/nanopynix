@@ -18,8 +18,6 @@ from nanopynix import PrimopError
 from nanopynix.models import PrimOpSpec
 from nanopynix.rpc import Session
 
-pytestmark = pytest.mark.nix_version(minimum="2.32")
-
 
 def raise_primop_error(_value: object) -> object:
     raise PrimopError("line one\nline two\nline three")

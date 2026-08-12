@@ -1025,43 +1025,31 @@ class TestTheUndispatchableCaseIsSaidOutLoud:
     warns at store-open time and ``build_info()`` carries the fact as a
     capability.
 
-    The two tests below are each other's other half, and only one of them runs
-    on any given build: a version marker rather than a runtime ``if``, so the
-    reason a test did not run appears in the report rather than as a silent
-    pass. Only the 2.31 job exercises the warning; a green 2.34 run says
-    nothing about it, which is why the ``maximum`` test exists at all.
+    **This class had two halves, and 2.31 took one of them away.** The other
+    half asserted the warning is emitted, under ``maximum="2.32"``, and 2.31
+    was the only job that ran it. Issue #126 raised the supported floor to
+    2.34, so that test could never run again and it is gone.
+
+    What went with it is a positive control, and this is a real loss rather
+    than a tidy-up. The test that remains asserts an *absence*, so it also
+    passes when the collector captures nothing at all. That is not
+    hypothetical: an earlier draft of :func:`_warnings_from_opening` read the
+    wrong tuple index, this test passed anyway, and the 2.31 half is what
+    failed and said so.
+
+    **The follow-up that closes the hole is to delete the warning.** Every
+    supported version dispatches, so the ``#if`` branch that emits it is now
+    unreachable in each build this repository makes. Remove that branch from
+    the bindings and this test goes with it, and nothing is left asserting an
+    absence with no control. Do not instead re-add a version below the floor.
     """
 
-    @pytest.mark.nix_version(maximum="2.32", reason="the warning only exists where dispatch does not")
-    def test_a_build_without_dispatch_warns_when_a_store_implements_it(self) -> None:
-        class ImplementsIt(nanopynix.StoreImpl):
-            def read_derivation(self, path: str) -> str:
-                return RECORDED_DRV_ATERM
-
-        warnings = _warnings_from_opening(ImplementsIt)
-
-        assert any("read_derivation" in text for text in warnings), warnings
-        # The capability is the branchable form of the same fact, and a caller
-        # told to consult it must find it false here.
-        assert _dispatch_is_available("read_derivation") is False
-
-    @pytest.mark.nix_version(minimum="2.32", reason="a dispatching build has nothing to warn about")
     def test_a_build_with_dispatch_says_nothing(self) -> None:
-        """The inverse: a build that *can* dispatch must not warn about it.
+        """A build that *can* dispatch must not warn about it.
 
-        The guard being dropped -- warning on every version rather than only
-        where dispatch is missing -- is the mistake only this half can catch,
-        measured: with the ``#if`` replaced by ``#if 1``, the 2.31 test above
-        stays green, because on 2.31 the two conditions are the same. A guard
-        *inverted* rather than dropped fails both halves and needs neither.
-
-        This half asserts an absence, so on its own it would also pass with a
-        collector that captured nothing. What rules that out is that both
-        halves call the same :func:`_warnings_from_opening`, and the 2.31 job
-        asserts a *presence* through it. Neither version proves the pair
-        alone; the matrix does. Stated because it was nearly missed: an
-        earlier draft of the helper read the wrong tuple index and this test
-        passed anyway, while the 2.31 one failed and said so.
+        Read the class docstring before trusting this test: it asserts an
+        absence, and the half that proved the collector works at all left with
+        Nix 2.31.
         """
 
         class ImplementsIt(nanopynix.StoreImpl):

@@ -13,9 +13,6 @@ if TYPE_CHECKING:
     from nanopynix.models import JsonValue
 
 
-pytestmark = pytest.mark.nix_version(minimum="2.32")
-
-
 def _as_dict(v: JsonValue) -> dict[str, JsonValue]:
     assert isinstance(v, dict)
     return v

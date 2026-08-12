@@ -17,7 +17,7 @@ configurations name a machine or a bucket that does not exist. ``test_stores.py`
 opens the two local models for real; that is the whole of the opening coverage,
 and this module adds none.
 
-Five limits are real and are not defects of this library. Each has its own
+Four limits are real and are not defects of this library. Each has its own
 test below, so the boundary is pinned rather than only avoided by the
 strategies:
 
@@ -33,13 +33,11 @@ strategies:
 4. **A store type with two schemes has two spellings for one of them.**
    Naming ``https`` on an :class:`~nanopynix.stores.HttpBinaryCache` renders
    the same URI as leaving it unset, so the parser returns the unset one.
-5. **Nix 2.31 carries fewer characters in the path part of an authority.**
-   An authority is a host and then a path, and Nix reads the two halves with
-   different code. The host half escapes the same way on every supported
-   version. Nix 2.31 decodes the path half while parsing and re-renders it
-   decoded, so the escaping is undone before the URI is read back. That is a
-   limit of that Nix and not of this library, so the path alphabet below
-   narrows there and nothing in ``nanopynix.stores`` branches on the version.
+
+A fifth limit was here until issue #126 raised the supported floor to Nix 2.34.
+Nix 2.31 decoded the path part of an authority while parsing and re-rendered it
+decoded, so the escaping never reached the reader. The path alphabet below
+narrowed there, and one test recorded what that Nix lost. Both are gone.
 
 Everything else goes in unescaped and comes back whole, including a control
 character, a NUL and an emoji. That was measured on every supported version,
@@ -48,13 +46,11 @@ so the alphabets below exclude nothing for merely being unusual.
 
 from __future__ import annotations
 
-import string
 from types import UnionType
-from typing import TYPE_CHECKING, Any, Literal, Union, cast, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Literal, Union, get_args, get_origin
 
 import pytest
 from hypothesis import given, settings, strategies as st
-from nanopynix_bindings import store as nanopynix_store
 
 from nanopynix import stores
 from nanopynix.settings import field_is_supported
@@ -73,24 +69,6 @@ if TYPE_CHECKING:
 #: sanitiser rather than the code. A render-and-parse cycle takes 0.09 ms
 #: uninstrumented, so the budget below is a fraction of a second.
 _PROPERTY = settings(max_examples=200, deadline=None, database=None)
-
-
-def nix_decodes_the_path_part() -> bool:
-    """Does this Nix percent-decode the path part of a store URI authority?
-
-    Nix 2.34 leaves it as the URI wrote it, so the escaping in
-    ``StoreConfig._base`` survives and every character round-trips. Nix 2.31
-    decodes it while parsing and re-renders it decoded, so the escaping is
-    undone before anything reads the URI back.
-
-    Measured here rather than in ``nanopynix.stores``, and asked rather than
-    inferred from a version number. The library escapes and unescapes the same
-    way on both versions -- that is correct for the host part everywhere, and
-    it is the best available answer for the path part on a Nix that undoes it.
-    Only the alphabet this module generates from needs to know the difference.
-    """
-    probe = cast("dict[str, Any]", nanopynix_store.parse_store_reference("file:///a%23b"))  # type: ignore[reportUnknownArgumentType] -- C++ extension without type stubs
-    return probe["authority"] == "/a#b"
 
 
 #: Every character a setting may hold. A newline, a NUL and an emoji all
@@ -118,23 +96,14 @@ _HOST_PIECE = st.text(
     max_size=8,
 )
 
-#: Every character Nix 2.31 carries through the path part of an authority: the
-#: unreserved set of RFC 3986, its sub-delimiters, and the structural
-#: characters. Measured over the whole of ASCII, escaped and unescaped -- each
-#: character outside this set either makes that Nix refuse the URI, or, for
-#: ``#`` and ``?``, makes it read the URI as ending there.
-_PATH_LITERAL = sorted(set(string.ascii_letters + string.digits + "-._~" + "!$&'()*+,;="))
-
-#: One piece of the path part, which is the half that differs by version. See
-#: :func:`nix_decodes_the_path_part` for the measurement.
-_PATH_PIECE = (
-    st.text(alphabet=st.sampled_from(_PATH_LITERAL), min_size=1, max_size=8)
-    if nix_decodes_the_path_part()
-    else _HOST_PIECE
-)
-
 #: An absolute path, for a store whose authority is a directory or a socket.
-_PATH_AUTHORITY = st.lists(_PATH_PIECE, min_size=1, max_size=3).map(lambda parts: "/" + "/".join(parts))
+#:
+#: The same alphabet as the host part, because every supported Nix carries the
+#: path part the same way. This used to pick between two alphabets: Nix 2.31
+#: decoded the path part while parsing and re-rendered it decoded, so the
+#: escaping never reached the reader, and a narrower alphabet was the only way
+#: to generate from it. Issue #126 raised the floor above that version.
+_PATH_AUTHORITY = st.lists(_HOST_PIECE, min_size=1, max_size=3).map(lambda parts: "/" + "/".join(parts))
 
 #: A host, in each of the four shapes Nix accepts.
 _HOST_AUTHORITY = st.one_of(
@@ -347,10 +316,6 @@ def test_an_empty_list_setting_is_not_written_at_all() -> None:
     ["/var/cache/a&b", "/var/cache/a?b", "/var/cache/a#b", "/var/cache/a b", "/var/cache/a%b", "/var/cache/a%26b"],
     ids=["ampersand", "question", "hash", "space", "percent", "encoded-ampersand"],
 )
-@pytest.mark.skipif(
-    nix_decodes_the_path_part(),
-    reason="this Nix decodes the path part of an authority and re-renders it raw, so escaping cannot survive",
-)
 def test_the_path_part_of_an_authority_is_escaped_like_a_parameter(path: str) -> None:
     """A cache directory is a path, and a path may hold a URI metacharacter.
 
@@ -397,48 +362,6 @@ def test_the_host_part_of_an_authority_is_escaped_on_every_version(host: str) ->
     assert isinstance(reparsed, stores.Ssh)
     assert reparsed.host == host
     assert reparsed.uri() == uri
-
-
-@pytest.mark.skipif(
-    not nix_decodes_the_path_part(),
-    reason="this Nix keeps the escaping, so the test above shows these paths surviving instead",
-)
-def test_nix_2_31_does_not_carry_the_path_part_of_an_authority() -> None:
-    """What that Nix does with the six paths above. Recorded, not corrected.
-
-    Nix 2.31 decodes the path part while parsing and re-renders it decoded, so
-    ``uri()`` hands back the raw character and the escaping never reaches the
-    reader. Measured, and it fails in three ways:
-
-    - ``&`` still survives, because Nix reads it as a separator only after a
-      ``?``.
-    - a space and a bare ``%`` make ``parse`` refuse the URI, which is a good
-      answer.
-    - ``?`` and ``#`` truncate the value in silence, and ``%26`` comes back as
-      ``&``, which is a different value again.
-
-    Not corrected, because the correction would be a version branch in
-    ``nanopynix.stores`` that exists for one Nix on life support. The library
-    escapes and unescapes the same way everywhere; this test says what that
-    costs on 2.31, so nobody has to rediscover it. Delete it with the 2.31
-    support.
-    """
-    survives = stores.FileBinaryCache(path="/var/cache/a&b")
-    assert stores.parse(survives.uri()) == survives
-
-    for path in ("/var/cache/a b", "/var/cache/a%b"):
-        with pytest.raises(ValueError, match="Nix cannot read"):
-            stores.parse(stores.FileBinaryCache(path=path).uri())
-
-    for path, comes_back in (
-        ("/var/cache/a#b", "/var/cache/a"),
-        ("/var/cache/a?b", "/var/cache/a"),
-        ("/var/cache/a%26b", "/var/cache/a&b"),
-    ):
-        reparsed = stores.parse(stores.FileBinaryCache(path=path).uri())
-        note(**{f"lost/{path}": repr(reparsed)})
-        assert isinstance(reparsed, stores.FileBinaryCache)
-        assert reparsed.path == comes_back, "if this Nix now carries the character, delete this test"
 
 
 @pytest.mark.parametrize(

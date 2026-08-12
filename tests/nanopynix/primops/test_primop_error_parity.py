@@ -49,7 +49,6 @@ from nanopynix.rpc._primop_wire import MARKER, decode, encode
 if TYPE_CHECKING:
     from tests.support.nix_environment import NixTestEnvironment
 
-pytestmark = pytest.mark.nix_version(minimum="2.32")
 
 _HERE = "tests.nanopynix.primops.test_primop_error_parity"
 
