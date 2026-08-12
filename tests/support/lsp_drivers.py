@@ -42,12 +42,35 @@ class InProcessDriver:
         self._server = server
         self._versions: dict[str, int] = {}
 
+    async def settle(self) -> None:
+        """Wait for the warm-up that `_sync_document` starts and does not await.
+
+        `_handlers._sync_document` runs `_warm_module_args` as a background
+        task, and that is deliberate: the docstring above it says a real
+        editor cannot wait for the module arguments of a file to resolve. So
+        `_sync_document` returns while they are still unresolved, and a hover
+        on one of them answers `None`.
+
+        This driver calls that function directly, so it returns at once and
+        the race is wide open. `WireDriver` needs no such wait, because a
+        JSON-RPC round trip usually outlasts the warm-up. That is why the
+        `[wire-...]` parametrisation of `tests/pynix/test_lsp_scenarios.py`
+        stayed green while `[in_process-...]` failed, and why it failed on a
+        loaded CI runner and never on a development machine.
+
+        `tests/pynix/test_shared_eval_cache.py` waits the same way, for the
+        same reason.
+        """
+        for task in list(self._server.warm_tasks):
+            await task
+
     async def open(self, uri: str, text: str) -> None:
         self._versions[uri] = 1
         self._server.workspace.put_text_document(
             types.TextDocumentItem(uri=uri, language_id="nix", version=1, text=text),
         )
         await _sync_document(self._server, uri)
+        await self.settle()
 
     async def edit(self, uri: str, edit_range: types.Range, text: str) -> None:
         self._versions[uri] += 1
@@ -56,6 +79,7 @@ class InProcessDriver:
             types.TextDocumentContentChangePartial(range=edit_range, text=text),
         )
         await _sync_document(self._server, uri)
+        await self.settle()
 
     async def hover(self, uri: str, position: types.Position) -> types.Hover | None:
         return await _hover(self._server, types.HoverParams(types.TextDocumentIdentifier(uri), position))
