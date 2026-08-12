@@ -38,9 +38,9 @@ jobs:
         checks.grpclib-transports checks.lint checks.lint-strict checks.pytest-agent
         checks.shell checks.types
     timeout-minutes: 75
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',static-checks,')
-    runs-on: ubuntu-24.04
   commit-subjects:
     steps:
     - timeout-minutes: 10
@@ -56,9 +56,9 @@ jobs:
       timeout-minutes: 15
       run: nix run --file . ciSteps.commit-subjects
     timeout-minutes: 55
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',commit-subjects,')
-    runs-on: ubuntu-24.04
   docs-build:
     needs:
     - commit-subjects
@@ -115,8 +115,8 @@ jobs:
       with:
         path: public
     timeout-minutes: 125
-    if: github.ref == 'refs/heads/develop'
     runs-on: ubuntu-24.04
+    if: github.ref == 'refs/heads/develop'
   docs-deploy:
     needs: docs-build
     steps:
@@ -127,6 +127,7 @@ jobs:
         timeout: 900000
       id: deployment
     timeout-minutes: 35
+    runs-on: ubuntu-24.04
     permissions:
       pages: write
       id-token: write
@@ -137,7 +138,6 @@ jobs:
       group: pages
       cancel-in-progress: false
     if: github.ref == 'refs/heads/develop'
-    runs-on: ubuntu-24.04
   test-asan-git:
     env:
       CI_STEP: ciSteps.git-asan
@@ -175,9 +175,9 @@ jobs:
         path: ${{ github.workspace }}/asan-output-git.log
       if: ${{ !cancelled() }}
     timeout-minutes: 215
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-asan-git,')
-    runs-on: ubuntu-24.04
   test-asan-nix_2_31:
     env:
       CI_STEP: ciSteps.nix_2_31-asan
@@ -215,9 +215,9 @@ jobs:
         path: ${{ github.workspace }}/asan-output-nix_2_31.log
       if: ${{ !cancelled() }}
     timeout-minutes: 215
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-asan-nix_2_31,')
-    runs-on: ubuntu-24.04
   test-asan-nix_2_34:
     env:
       CI_STEP: ciSteps.nix_2_34-asan
@@ -255,9 +255,9 @@ jobs:
         path: ${{ github.workspace }}/asan-output-nix_2_34.log
       if: ${{ !cancelled() }}
     timeout-minutes: 215
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-asan-nix_2_34,')
-    runs-on: ubuntu-24.04
   test-asan-nix_2_35:
     env:
       CI_STEP: ciSteps.nix_2_35-asan
@@ -295,9 +295,9 @@ jobs:
         path: ${{ github.workspace }}/asan-output-nix_2_35.log
       if: ${{ !cancelled() }}
     timeout-minutes: 215
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-asan-nix_2_35,')
-    runs-on: ubuntu-24.04
   test-nogc-git:
     env:
       CI_STEP: ciSteps.git-nogc
@@ -328,9 +328,9 @@ jobs:
       timeout-minutes: 15
       run: ./result/bin/nanopynix-ci soak
     timeout-minutes: 140
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-nogc-git,')
-    runs-on: ubuntu-24.04
   test-nogc-nix_2_31:
     env:
       CI_STEP: ciSteps.nix_2_31-nogc
@@ -361,9 +361,9 @@ jobs:
       timeout-minutes: 15
       run: ./result/bin/nanopynix-ci soak
     timeout-minutes: 140
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-nogc-nix_2_31,')
-    runs-on: ubuntu-24.04
   test-nogc-nix_2_34:
     env:
       CI_STEP: ciSteps.nix_2_34-nogc
@@ -394,9 +394,9 @@ jobs:
       timeout-minutes: 15
       run: ./result/bin/nanopynix-ci soak
     timeout-minutes: 140
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-nogc-nix_2_34,')
-    runs-on: ubuntu-24.04
   test-nogc-nix_2_35:
     env:
       CI_STEP: ciSteps.nix_2_35-nogc
@@ -427,9 +427,9 @@ jobs:
       timeout-minutes: 15
       run: ./result/bin/nanopynix-ci soak
     timeout-minutes: 140
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-nogc-nix_2_35,')
-    runs-on: ubuntu-24.04
   test-ubsan-git:
     env:
       CI_STEP: ciSteps.git-ubsan
@@ -467,9 +467,9 @@ jobs:
         path: ${{ github.workspace }}/ubsan-output-git.log
       if: ${{ !cancelled() }}
     timeout-minutes: 185
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-ubsan-git,')
-    runs-on: ubuntu-24.04
   test-ubsan-nix_2_31:
     env:
       CI_STEP: ciSteps.nix_2_31-ubsan
@@ -507,9 +507,9 @@ jobs:
         path: ${{ github.workspace }}/ubsan-output-nix_2_31.log
       if: ${{ !cancelled() }}
     timeout-minutes: 185
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-ubsan-nix_2_31,')
-    runs-on: ubuntu-24.04
   test-ubsan-nix_2_34:
     env:
       CI_STEP: ciSteps.nix_2_34-ubsan
@@ -547,9 +547,9 @@ jobs:
         path: ${{ github.workspace }}/ubsan-output-nix_2_34.log
       if: ${{ !cancelled() }}
     timeout-minutes: 185
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-ubsan-nix_2_34,')
-    runs-on: ubuntu-24.04
   test-ubsan-nix_2_35:
     env:
       CI_STEP: ciSteps.nix_2_35-ubsan
@@ -587,9 +587,9 @@ jobs:
         path: ${{ github.workspace }}/ubsan-output-nix_2_35.log
       if: ${{ !cancelled() }}
     timeout-minutes: 185
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-ubsan-nix_2_35,')
-    runs-on: ubuntu-24.04
   test-tsan-git:
     env:
       CI_STEP: ciSteps.git-tsan
@@ -630,9 +630,9 @@ jobs:
           ${{ github.workspace }}/soak-git-run*.json
       if: ${{ !cancelled() }}
     timeout-minutes: 170
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan-git,')
-    runs-on: ubuntu-24.04
   test-tsan-nix_2_34:
     env:
       CI_STEP: ciSteps.nix_2_34-tsan
@@ -673,9 +673,9 @@ jobs:
           ${{ github.workspace }}/soak-nix_2_34-run*.json
       if: ${{ !cancelled() }}
     timeout-minutes: 170
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan-nix_2_34,')
-    runs-on: ubuntu-24.04
   test-tsan-nix_2_35:
     env:
       CI_STEP: ciSteps.nix_2_35-tsan
@@ -716,9 +716,9 @@ jobs:
           ${{ github.workspace }}/soak-nix_2_35-run*.json
       if: ${{ !cancelled() }}
     timeout-minutes: 170
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan-nix_2_35,')
-    runs-on: ubuntu-24.04
   test-daemon-git:
     env:
       CI_STEP: ciSteps.git
@@ -787,9 +787,9 @@ jobs:
       timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     timeout-minutes: 220
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-git,')
-    runs-on: ubuntu-24.04
   test-daemon-nix_2_31:
     env:
       CI_STEP: ciSteps.nix_2_31
@@ -858,9 +858,9 @@ jobs:
       timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     timeout-minutes: 220
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-nix_2_31,')
-    runs-on: ubuntu-24.04
   test-daemon-nix_2_34:
     env:
       CI_STEP: ciSteps.nix_2_34
@@ -929,9 +929,9 @@ jobs:
       timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     timeout-minutes: 220
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-nix_2_34,')
-    runs-on: ubuntu-24.04
   test-daemon-nix_2_35:
     env:
       CI_STEP: ciSteps.nix_2_35
@@ -1000,9 +1000,9 @@ jobs:
       timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     timeout-minutes: 220
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-nix_2_35,')
-    runs-on: ubuntu-24.04
   test-local-git:
     env:
       CI_STEP: ciSteps.git
@@ -1071,9 +1071,9 @@ jobs:
       timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     timeout-minutes: 220
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-git,')
-    runs-on: ubuntu-24.04
   test-local-nix_2_31:
     env:
       CI_STEP: ciSteps.nix_2_31
@@ -1142,9 +1142,9 @@ jobs:
       timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     timeout-minutes: 220
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-nix_2_31,')
-    runs-on: ubuntu-24.04
   test-local-nix_2_34:
     env:
       CI_STEP: ciSteps.nix_2_34
@@ -1213,9 +1213,9 @@ jobs:
       timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     timeout-minutes: 220
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-nix_2_34,')
-    runs-on: ubuntu-24.04
   test-local-nix_2_35:
     env:
       CI_STEP: ciSteps.nix_2_35
@@ -1284,6 +1284,6 @@ jobs:
       timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     timeout-minutes: 220
+    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-nix_2_35,')
-    runs-on: ubuntu-24.04

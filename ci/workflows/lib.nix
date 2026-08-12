@@ -166,6 +166,33 @@ let
     versionMatrix = 20;
     # One commit and one push, by an action.
     autoCommit = 10;
+    # **The whole wheel closure, from cold.** This build is not the ordinary
+    # `nix build` of a Nix version: `nix/cxx-stdenv.nix` gives the closure its
+    # own compiler wrapper, so cachix holds none of it until this job has run
+    # once, and boost, openssl and Nix itself all compile here.
+    #
+    # Measured on `build-box.nix-community.org`, which has 12 cores: 53
+    # derivations. A GitHub runner has 4.
+    #
+    # **360 minutes is the hard limit of a job, and `mkJob` derives the job cap
+    # from this number.** The other steps of the job and `jobSlack` add 95, so
+    # a build cap above 265 gives a job cap that GitHub never applies: it stops
+    # the job at its own limit instead, and the run reports a cancellation
+    # rather than the step that ran out of time. This number keeps the derived
+    # cap at 335.
+    #
+    # **A cold build may not fit, and cachix is the answer rather than a larger
+    # number.** No cap can exceed the limit above, so a closure that needs more
+    # than 4 hours on 4 cores never goes green from cold. Push the closure that
+    # a build-box run already made, and the first scheduled run is a fetch.
+    wheelBuild = 240;
+    # `scripts/wheel-inspect.sh` unzips the wheel and reads each object with
+    # `readelf`. It takes seconds.
+    wheelInspect = 10;
+    # `scripts/wheel-smoke.sh` pulls a Rocky Linux 9 image, installs an
+    # interpreter with `uv`, and evaluates. The pull and the interpreter are
+    # the whole of it.
+    wheelSmoke = 20;
   };
 
   # The cap of a job, derived from the caps of its steps.
@@ -611,6 +638,73 @@ let
       }
     );
 
+  # The wheel, built and then read. Issue #120 asks for this job, and it gives
+  # the four defects that reached a finished build while no gate read any of
+  # `nix/cxx-stdenv.nix`, `nix/cxx-runtime.nix`, `nix/lower-glibc.py`,
+  # `nix/closure.nix` or `nix/nix-closure.nix`.
+  #
+  # **`auditwheel` is the floor gate, and it runs inside the build.**
+  # `nix/wheel.nix` repairs to `manylinux_2_34` and `auditwheel` refuses a tag
+  # that the objects do not support, so a raised floor fails `nix build` and
+  # never reaches the steps below. Measured twice on 2026-08-12, both times as
+  # "cannot repair ... because of the presence of too-recent versioned
+  # symbols". So this job needs no floor check of its own, and the two steps
+  # below answer what the build cannot.
+  #
+  # **One job for each architecture, and never emulation.** `runs-on` carries
+  # the difference and nothing else does: `nix/cxx-stdenv.nix` reads
+  # `stdenv.hostPlatform`, so an arm64 runner builds the aarch64 wheel with no
+  # cross configuration. An x86-64 runner with binfmt would build the same
+  # wheel under qemu, and it would take many hours.
+  mkWheelJob =
+    {
+      runner ? "ubuntu-24.04",
+      # `scripts/wheel-smoke.sh` runs the wheel, so it needs an interpreter of
+      # the wheel's own architecture. That is what the native runner gives.
+      smoke ? true,
+      ref ? null,
+      lockArtifact ? null,
+      needs ? [ ],
+    }:
+    mkJob (
+      lib.optionalAttrs (needs != [ ]) { inherit needs; }
+      // {
+        runs-on = runner;
+        # `wheel-smoke.sh` takes the container runtime from here. It defaults to
+        # podman, and a GitHub runner carries docker.
+        env.WHEEL_SMOKE_RUNTIME = "docker";
+        steps = [
+          (steps.checkout { inherit ref; })
+        ]
+        ++ lib.optional (lockArtifact != null) (steps.downloadArtifact { artifactName = lockArtifact; })
+        ++ [
+          (steps.installNix { })
+          (steps.cachix { })
+          {
+            name = "Build the wheel";
+            timeout-minutes = caps.wheelBuild;
+            run = "nix build --file . nanopynixWheel --out-link result-wheel --print-build-logs";
+          }
+          {
+            # Reads the files and runs nothing, so it answers for either
+            # architecture. It fails when an object asks the host for a C++
+            # standard library.
+            name = "Read the wheel";
+            timeout-minutes = caps.wheelInspect;
+            run = "./scripts/wheel-inspect.sh result-wheel";
+          }
+        ]
+        ++ lib.optional smoke {
+          # The check that reads nothing and runs everything: it installs the
+          # wheel on a distribution whose glibc is the floor exactly, and
+          # evaluates with it.
+          name = "Load the wheel on Rocky Linux 9";
+          timeout-minutes = caps.wheelSmoke;
+          run = "./scripts/wheel-smoke.sh result-wheel";
+        };
+      }
+    );
+
   # The one part of the commit convention that a machine can check.
   # `ci/steps.nix` carries the rule, and the two parts it deliberately leaves
   # alone.
@@ -725,6 +819,7 @@ in
     mkAsanTestJob
     mkNoGCTestJob
     mkStaticChecksJob
+    mkWheelJob
     mkCommitSubjectJob
     mkDocsBuildJob
     mkDocsDeployJob

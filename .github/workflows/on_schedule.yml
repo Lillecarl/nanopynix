@@ -5,7 +5,13 @@ name: On schedule
 env:
   FLAKE_COMPATISH_DISABLE_OVERRIDES: '1'
 'on':
-  workflow_dispatch: null
+  workflow_dispatch:
+    inputs:
+      jobs:
+        type: string
+        description: Comma-separated job IDs to run; leave empty for the full matrix
+        required: false
+        default: ''
   schedule:
   - cron: 17 3 * * *
 jobs:
@@ -16,7 +22,7 @@ jobs:
     - timeout-minutes: 10
       uses: actions/checkout@main
       with:
-        ref: develop
+        ref: ${{ github.ref_name }}
     - timeout-minutes: 10
       uses: actions/download-artifact@main
       with:
@@ -40,6 +46,8 @@ jobs:
         checks.shell checks.types
     timeout-minutes: 85
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',static-checks,')
   docs-build:
     needs:
     - static-checks
@@ -52,7 +60,7 @@ jobs:
     - timeout-minutes: 10
       uses: actions/checkout@main
       with:
-        ref: develop
+        ref: ${{ github.ref_name }}
     - timeout-minutes: 10
       uses: actions/download-artifact@main
       with:
@@ -84,6 +92,8 @@ jobs:
         path: public
     timeout-minutes: 135
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',docs-build,')
   docs-deploy:
     needs: docs-build
     steps:
@@ -94,6 +104,7 @@ jobs:
         timeout: 900000
       id: deployment
     timeout-minutes: 35
+    runs-on: ubuntu-24.04
     permissions:
       pages: write
       id-token: write
@@ -103,7 +114,8 @@ jobs:
     concurrency:
       group: pages
       cancel-in-progress: false
-    runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',docs-deploy,')
   test-regular:
     env:
       CI_STEP: ciSteps.${{ matrix.version }}
@@ -114,7 +126,7 @@ jobs:
     - timeout-minutes: 10
       uses: actions/checkout@main
       with:
-        ref: develop
+        ref: ${{ github.ref_name }}
     - timeout-minutes: 10
       uses: actions/download-artifact@main
       with:
@@ -183,6 +195,8 @@ jobs:
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
     timeout-minutes: 230
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-regular,')
     strategy:
       fail-fast: false
       matrix:
@@ -199,7 +213,7 @@ jobs:
     - timeout-minutes: 10
       uses: actions/checkout@main
       with:
-        ref: develop
+        ref: ${{ github.ref_name }}
     - timeout-minutes: 10
       uses: actions/download-artifact@main
       with:
@@ -236,6 +250,8 @@ jobs:
       if: ${{ !cancelled() }}
     timeout-minutes: 195
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-ubsan,')
     strategy:
       fail-fast: false
       matrix:
@@ -249,7 +265,7 @@ jobs:
     - timeout-minutes: 10
       uses: actions/checkout@main
       with:
-        ref: develop
+        ref: ${{ github.ref_name }}
     - timeout-minutes: 10
       uses: actions/download-artifact@main
       with:
@@ -289,6 +305,8 @@ jobs:
       if: ${{ !cancelled() }}
     timeout-minutes: 180
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-tsan,')
     strategy:
       fail-fast: false
       matrix:
@@ -302,7 +320,7 @@ jobs:
     - timeout-minutes: 10
       uses: actions/checkout@main
       with:
-        ref: develop
+        ref: ${{ github.ref_name }}
     - timeout-minutes: 10
       uses: actions/download-artifact@main
       with:
@@ -332,6 +350,8 @@ jobs:
       run: ./result/bin/nanopynix-ci soak
     timeout-minutes: 150
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-nogc,')
     strategy:
       fail-fast: false
       matrix:
@@ -345,7 +365,7 @@ jobs:
     - timeout-minutes: 10
       uses: actions/checkout@main
       with:
-        ref: develop
+        ref: ${{ github.ref_name }}
     - timeout-minutes: 10
       uses: actions/download-artifact@main
       with:
@@ -382,6 +402,8 @@ jobs:
       if: ${{ !cancelled() }}
     timeout-minutes: 225
     runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-asan,')
     strategy:
       fail-fast: false
       matrix:
@@ -397,7 +419,7 @@ jobs:
     - timeout-minutes: 10
       uses: actions/checkout@main
       with:
-        ref: develop
+        ref: ${{ github.ref_name }}
     - timeout-minutes: 15
       uses: cachix/install-nix-action@master
       with:
@@ -423,13 +445,89 @@ jobs:
         path: flake.lock
     timeout-minutes: 110
     runs-on: ubuntu-24.04
+  wheel-x86_64:
+    env:
+      WHEEL_SMOKE_RUNTIME: docker
+    needs:
+    - update-lockfile
+    steps:
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+      with:
+        ref: ${{ github.ref_name }}
+    - timeout-minutes: 10
+      uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Build the wheel
+      timeout-minutes: 240
+      run: nix build --file . nanopynixWheel --out-link result-wheel --print-build-logs
+    - name: Read the wheel
+      timeout-minutes: 10
+      run: ./scripts/wheel-inspect.sh result-wheel
+    - name: Load the wheel on Rocky Linux 9
+      timeout-minutes: 20
+      run: ./scripts/wheel-smoke.sh result-wheel
+    timeout-minutes: 335
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',wheel-x86_64,')
+  wheel-aarch64:
+    env:
+      WHEEL_SMOKE_RUNTIME: docker
+    needs:
+    - update-lockfile
+    steps:
+    - timeout-minutes: 10
+      uses: actions/checkout@main
+      with:
+        ref: ${{ github.ref_name }}
+    - timeout-minutes: 10
+      uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+    - timeout-minutes: 15
+      uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    - timeout-minutes: 15
+      uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+    - name: Build the wheel
+      timeout-minutes: 240
+      run: nix build --file . nanopynixWheel --out-link result-wheel --print-build-logs
+    - name: Read the wheel
+      timeout-minutes: 10
+      run: ./scripts/wheel-inspect.sh result-wheel
+    - name: Load the wheel on Rocky Linux 9
+      timeout-minutes: 20
+      run: ./scripts/wheel-smoke.sh result-wheel
+    timeout-minutes: 335
+    runs-on: ubuntu-24.04-arm
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',wheel-aarch64,')
   update-lockfile-commit:
     needs: docs-deploy
     steps:
     - timeout-minutes: 10
       uses: actions/checkout@main
       with:
-        ref: develop
+        ref: ${{ github.ref_name }}
     - timeout-minutes: 10
       uses: actions/download-artifact@main
       with:
@@ -439,6 +537,8 @@ jobs:
       with:
         commit_message: nix flake update
     timeout-minutes: 45
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
-    runs-on: ubuntu-24.04
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',update-lockfile-commit,')
