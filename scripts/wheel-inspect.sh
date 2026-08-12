@@ -98,7 +98,7 @@ echo "payload : $(numfmt --to=iec "$bytes")"
 
 if [ "$cxx11_total" -ne 0 ]; then
     echo
-    echo "FAIL: the wheel carries the libstdc++ ABI. The zig closure is meant to" >&2
+    echo "FAIL: the wheel carries the libstdc++ ABI. The wheel closure is meant to" >&2
     echo "      remove it, so a package fell back to the stdenv of nixpkgs." >&2
     exit 1
 fi

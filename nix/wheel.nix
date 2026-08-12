@@ -1,6 +1,6 @@
-# The PyPI wheel: `auditwheel repair` over the zig build of the extension.
+# The PyPI wheel: `auditwheel repair` over the wheel build of the extension.
 #
-# `nanopynixZig.nanopynix-bindings` builds an extension whose libraries live in
+# `nanopynixForWheel.nanopynix-bindings` builds an extension whose libraries live in
 # the Nix store, and it links each one through an RPATH. A wheel cannot do
 # that. `auditwheel repair` copies each library into `nanopynix_bindings.libs/`,
 # gives each file name a hash suffix, rewrites every RPATH to `$ORIGIN`, and
@@ -22,18 +22,22 @@
   # addition, and `pip` reports that as a corrupt wheel.
   wheel,
   unzip,
-  # `nix/wheel-licenses.nix`, built with the package set of the zig closure. It
+  # `nix/wheel-licenses.nix`, built with the package set of the wheel closure. It
   # carries the licence text of each package, a soname map over the whole
   # closure, and the licence of each package as JSON.
   licenses,
-  # The zig build. A gcc build gets a `manylinux_2_38` tag, which is what this
-  # whole closure exists to avoid.
+  # The wheel build. A build with the stdenv of nixpkgs gets a `manylinux_2_38`
+  # tag, which is what this whole closure exists to avoid.
   bindings,
-  # The one C++ runtime of the closure, from `nix/zig-cxx-runtime.nix`. The
+  # The one C++ runtime of the closure, from `nix/cxx-runtime.nix`. The
   # gate below reads its soname, so that the name lives in the file that
   # decides it and not in two places.
   cxxRuntime,
-  # The same number as `nix/zig-stdenv.nix` targets. `auditwheel` refuses a tag
+  # `nix/lower-glibc.py`, as a program. `nix/cxx-stdenv.nix` builds it and runs
+  # it at the fixup of each package. This build runs the same program over the
+  # extension inside the wheel, which that hook cannot reach.
+  lowerGlibc,
+  # The same number as `nix/cxx-stdenv.nix` lowers to. `auditwheel` refuses a tag
   # that the objects do not support, so a mismatch here fails the build rather
   # than shipping a wheel that does not load.
   glibcVersion ? "2.34",
@@ -87,6 +91,30 @@ runCommand "nanopynix-bindings-wheel-${platform}"
     cp ${bindings.dist}/*.whl .
     chmod +w ./*.whl
 
+    # **The wheel carries its own copy of the extension, and the setup hook of
+    # `nix/cxx-stdenv.nix` cannot reach that copy.** That hook runs `find` over
+    # each output at fixup, and a `.so` inside a zip is not a file that `find`
+    # returns. `buildPythonPackage` packs the wheel in the build phase and
+    # installs *from* it, so the copy in `$out` is lowered and the copy in
+    # `dist` is not. This build reads `dist`.
+    #
+    # Measured, and it cost a whole remote build to find: `$out` held
+    # `_ext.abi3.so` at `GLIBC_2.34` with no `__isoc23_` name left, and the same
+    # file inside the wheel held one `__isoc23_strtoul@GLIBC_2.38`. `auditwheel`
+    # then reported `GLIBC_2.38` against `libc.so.6` and named no object.
+    #
+    # **Before the repair, and this is also the gate.** `nix/lower-glibc.py`
+    # exits 1 and names the object and the symbol, so a future object that a
+    # rename cannot reach fails here rather than in the refusal of `auditwheel`,
+    # which says only that the wheel has "too-recent versioned symbols".
+    echo "--- floor ---"
+    wheel unpack --dest raw ./*.whl
+    raw=$(echo raw/*/)
+    find "$raw" -type f \( -name '*.so' -o -name '*.so.*' \) -print0 \
+      | xargs -0 -r ${lib.getExe lowerGlibc} --target ${glibcVersion}
+    rm ./*.whl
+    wheel pack --dest-dir . "$raw"
+
     echo "--- before ---"
     auditwheel show ./*.whl
 
@@ -113,7 +141,7 @@ runCommand "nanopynix-bindings-wheel-${platform}"
     #
     # **Here, and not in `nix/checks.nix`.** Those gates run in the
     # `static-checks` job, and this one reads a built wheel. Putting it there
-    # would build the whole zig closure for every lint run. Here it is a step of
+    # would build the whole wheel closure for every lint run. Here it is a step of
     # the build that makes the thing it reads, so no wheel exists without it.
     echo "--- gates ---"
     python3 ${./wheel-gates.py} "$unpacked" ${toString payloadCeiling} ${cxxRuntime.soname} \

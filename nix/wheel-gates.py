@@ -12,12 +12,12 @@ glibc floor needs no gate of its own, and a gcc build that raises the floor to
 
 The four gates below cover what stays silent:
 
-1. **One C++ runtime.** Issue #112: zig links libc++ and libc++abi statically
-   into every shared object, so the wheel held six C++ runtimes and one library
-   destroyed a static object of another. `nix/zig-cxx-runtime.nix` gives them
-   one runtime instead. A build that loses that flag links, installs, imports,
+1. **One C++ runtime.** Issue #112: a build that links the C++ standard library
+   statically into every shared object gives the wheel one runtime per library,
+   and one library then destroys a static object of another.
+   `nix/cxx-runtime.nix` gives them one shared runtime instead. A build that loses that flag links, installs, imports,
    evaluates `1 + 1`, and then ends the process on the first error.
-2. **No C++ standard library of the host.** A C++ object from outside the zig
+2. **No C++ standard library of the host.** A C++ object from outside the
    closure can meet the glibc floor and still bring a second standard library.
    No object of this wheel may name one in `DT_NEEDED`.
 3. **A payload ceiling.** The payload was 90 MiB before the trim of issue #111.
@@ -42,7 +42,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-# ELF64, which both targets are. `nix/zig-stdenv.nix` builds `x86_64-linux-gnu`
+# ELF64, which both targets are. `nix/cxx-stdenv.nix` builds `x86_64-linux-gnu`
 # and `aarch64-linux-gnu`, and there is no 32-bit wheel.
 #
 # **This reads the file, and does not call `readelf`.** pyelftools would do the
@@ -219,7 +219,7 @@ def check_one_cxx_runtime(objects: dict[Path, Elf], runtime: str) -> list[str]:
         return [
             "these objects carry a C++ runtime of their own:",
             *(f"    {name}" for name in wrong),
-            f"  Only `{runtime}*.so*` may. Read nix/zig-cxx-runtime.nix and issue #112:",
+            f"  Only `{runtime}*.so*` may. Read nix/cxx-runtime.nix and issue #112:",
             "  a second runtime means one library destroys a static object of another,",
             "  and the wheel imports and evaluates before it ends the process.",
         ]
@@ -243,8 +243,8 @@ def check_no_foreign_cxx_runtime(objects: dict[Path, Elf]) -> list[str]:
         return [
             "these objects name a C++ standard library of the host:",
             *(f"    {name} needs {library}" for name, library in found),
-            "  The whole closure is the libc++ of zig, from nix/zig-stdenv.nix, and",
-            "  nix/zig-cxx-runtime.nix links one copy of it into the wheel. A second",
+            "  The whole closure takes one C++ runtime, from nix/cxx-stdenv.nix, and",
+            "  nix/cxx-runtime.nix links one copy of it into the wheel. A second",
             "  standard library in the process is the defect of issue #112.",
         ]
     return []
@@ -256,7 +256,7 @@ def check_payload(unpacked: Path, ceiling: int) -> list[str]:
     if total > ceiling:
         return [
             f"the payload is {total / 1024 / 1024:.1f} MiB, over the ceiling of {ceiling / 1024 / 1024:.1f} MiB.",
-            "  Read nix/zig-nix.nix for the trim of issue #111. A debug build, an",
+            "  Read nix/nix-closure.nix for the trim of issue #111. A debug build, an",
             "  object that lost its strip, or a library that joined the closure each",
             "  gives this, and each one builds a wheel that installs.",
         ]

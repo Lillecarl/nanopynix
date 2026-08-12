@@ -12,7 +12,7 @@
 # first:
 #
 # - The build closure is not the wheel. `zlib`, `attr`, `lzo` and `libev` are
-#   built by `nix/zig-nix.nix` and are *not* in the wheel: `zlib` is on the
+#   built by `nix/nix-closure.nix` and are *not* in the wheel: `zlib` is on the
 #   `manylinux` whitelist, and the other three reach no shipped object. A
 #   notice derived from the closure would claim a GPL library that is not
 #   there. `sonames.tsv` below therefore maps a file name to a package, and
@@ -48,7 +48,7 @@
 }:
 
 {
-  # Every package that `nix/zig-nix.nix` rebuilt, plus the collector and the
+  # Every package that `nix/nix-closure.nix` rebuilt, plus the collector and the
   # Nix components. The soname map covers all of them, so a library that
   # becomes bundled later is named in the error rather than reported as
   # unknown.
@@ -81,17 +81,17 @@ let
         The GPL covers the getfacl and setfacl tools.
       '';
     };
-    nanopynix-zig-cxx-runtime = {
-      spdx = "Apache-2.0 WITH LLVM-exception";
+    nanopynix-cxx-runtime = {
+      spdx = "GPL-3.0-or-later WITH GCC-exception-3.1";
       note = ''
-        libc++ and libc++abi of the LLVM project, which zig ships and which
-        `nix/zig-cxx-runtime.nix` links into one shared library.
-        Each of the two `LICENSE.TXT` files opens with "The LLVM Project is
-        under the Apache License v2.0 with LLVM Exceptions", so the expression
-        is one licence with an exception. nixpkgs has no single attribute for
-        that, and `meta.license` therefore lists the two parts separately,
-        which would render as `Apache-2.0 AND LLVM-exception` and say
-        something else.
+        libstdc++ of gcc, which `nix/cxx-runtime.nix` links into one shared
+        library with a private soname. nixpkgs records `GPL-3.0-or-later` for
+        gcc, which is the compiler. `COPYING.RUNTIME` of the same source adds
+        the GCC Runtime Library Exception to the runtime libraries, and that
+        exception is what lets a product which links this library carry its own
+        terms. nixpkgs has no attribute for the exception, so `meta.license`
+        lists the two parts separately and would otherwise render as
+        `GPL-3.0-or-later AND GCC-exception-3.1`, which says something else.
       '';
     };
     libgit2 = {
@@ -196,11 +196,12 @@ let
     s2n-tls = awsLicense;
     aws-crt-cpp = awsLicense;
 
-    # The one C++ runtime of the closure. `nix/zig-cxx-runtime.nix` says why
-    # the wheel carries it. The two files differ, so both travel.
-    nanopynix-zig-cxx-runtime = [
-      "libcxx/LICENSE.TXT"
-      "libcxxabi/LICENSE.TXT"
+    # The one C++ runtime of the closure. `nix/cxx-runtime.nix` says why the
+    # wheel carries it. `COPYING3` is the licence and `COPYING.RUNTIME` is the
+    # exception that makes a linked product distributable, so both travel.
+    nanopynix-cxx-runtime = [
+      "COPYING3"
+      "COPYING.RUNTIME"
     ];
   };
 
@@ -223,10 +224,10 @@ let
     let
       package = packages.${name};
       # A package that carries its own licence text in its output, because it
-      # has no source archive to unpack. `nanopynix-zig-cxx-runtime` is the
-      # one: it is built from the archives that zig materialises, and its three
-      # `LICENSE.TXT` files come from the tree of zig. Naming that tree as
-      # `src` here would copy the whole of zig into the store for three files.
+      # has no source archive to unpack. No package needs it now: the C++
+      # runtime is built from `libstdc++.a` and carries the source of gcc as
+      # its own `src`, so the ordinary path below reads its two licence files
+      # out of that tree.
       licenseRoot = package.licenseRoot or null;
     in
     if licenseRoot != null then

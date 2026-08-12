@@ -153,16 +153,16 @@ let
   # to.
   patchedBoehmGC = boehmgc.patchBoehmGC pkgs.nixDependencies.boehmgc;
 
-  # Every C and C++ library of the closure, from the zig stdenv. The file
+  # Every C and C++ library of the closure, rebuilt for the wheel. The file
   # gives the package list, the payload trim and the corrections that each
   # package needs.
   #
   # **At the top level, and not in the `let` of `nanopynixForNixVersions`.**
-  # `nanopynixWheel` reads `zigLibs` to name the licence of each library that
+  # `nanopynixWheel` reads `wheelLibs` to name the licence of each library that
   # rides in the wheel, and that binding is a sibling of this one. Neither this
   # import nor `patchedBoehmGC` above reads an argument of that function, so
   # both moved out whole.
-  zigNix = import ./nix/zig-nix.nix {
+  wheelNix = import ./nix/nix-closure.nix {
     inherit lib pkgs;
     boehmgc = patchedBoehmGC;
     python = pythonBase;
@@ -318,15 +318,16 @@ let
       # bad as it sounds so long as evaluation just takes place within
       # short-lived processes". An RPC worker is such a process.
       gc ? true,
-      # Whether the whole C and C++ closure comes from the zig stdenv, which
-      # targets an old glibc so that a PyPI wheel runs off NixOS.
+      # Whether the whole C and C++ closure is rebuilt for a PyPI wheel, which
+      # lowers the glibc floor and gives the closure one private C++ runtime so
+      # that the wheel runs off NixOS.
       #
       # A whole scope, and for the same reason as the sanitizer above: a wheel
       # takes the highest glibc floor of everything that it carries, so one
       # library of the stdenv of nixpkgs holds the whole wheel at `GLIBC_2.38`.
-      # `nix/zig-nix.nix` names each package, and issue #111 holds the
+      # `nix/nix-closure.nix` names each package, and issue #111 holds the
       # measurements.
-      zig ? false,
+      wheel ? false,
     }:
     assert lib.assertMsg (!(sanitizer.requiresNoGC or false) || !gc) ''
       The ${sanitizer.name} sanitizer needs `gc = false`.
@@ -632,8 +633,8 @@ let
           suffix =
             if sanitizer != null then
               "-${sanitizer.suffix}"
-            else if zig then
-              "-zig"
+            else if wheel then
+              "-wheel"
             else if !gc then
               "-nogc"
             else
@@ -675,8 +676,8 @@ let
       # Last, so this is the final word on the stdenv of the scope. It writes
       # `nix-expr` too, and `applyBoehmGCPatch` above writes the same
       # attribute: the later one wins, and the collector that it names is the
-      # patched one rebuilt with zig, so the patch survives the order.
-      ++ lib.optional zig (lib.mapAttrs (_: zigNix.applyZigOverrides))
+      # patched one rebuilt for the wheel, so the patch survives the order.
+      ++ lib.optional wheel (lib.mapAttrs (_: wheelNix.applyWheelOverrides))
       ++ [ (lib.mapAttrs' rename) ]
     );
 
@@ -709,33 +710,33 @@ let
   #
   # Every CI job comes from that set: `tests` maps it to one
   # `nanopynix-tests-<name>` package for each entry, and `ciVersionMatrix`
-  # groups the same names into the matrices. Adding "-zig" there would put a
+  # groups the same names into the matrices. Adding "-wheel" there would put a
   # from-source rebuild of the whole C and C++ closure into the per-commit
   # matrix, on every version. That closure leaves the binary cache by
   # construction, because lowering the glibc floor is what it is for.
   #
   # So it lives here, reachable by name for a person who wants a wheel, and
-  # invisible to the matrices. `variantSuffixes` needs no "-zig" entry for the
+  # invisible to the matrices. `variantSuffixes` needs no "-wheel" entry for the
   # same reason: `unlistedVariants` reads `nanopynixVersionsInternal`, and this
   # is not in it.
   #
   # One version only. A wheel carries one Nix, which is the whole reason a
   # wheel removes the ABI matrix.
-  nanopynixZig = (nanopynixForNixVersions { zig = true; }).nix_2_34-zig;
+  nanopynixForWheel = (nanopynixForNixVersions { wheel = true; }).nix_2_34-wheel;
 
   # The wheel itself. `nix/wheel.nix` runs `auditwheel repair` over the
   # extension above, which bundles each library and writes the `manylinux` tag.
   # Off the matrices for the same reason as the build it reads.
   # The licence text of every library that the wheel bundles. The package set
-  # is the whole zig closure plus the collector and the five Nix components,
+  # is the whole rebuilt closure plus the collector and the five Nix components,
   # which is every library that can end up in `nanopynix_bindings.libs/`.
   nanopynixWheelLicenses = pkgs.callPackage ./nix/wheel-licenses.nix { } {
-    packages = zigNix.zigLibs // {
-      boehmgc = zigNix.zigBoehmGC;
+    packages = wheelNix.wheelLibs // {
+      boehmgc = wheelNix.wheelBoehmGC;
       # The one C++ runtime of the closure. Every C++ object of the wheel names
       # it, so the wheel carries it and the notice has to describe it.
-      nanopynix-zig-cxx-runtime = zigNix.zigStdenv.cxxRuntime;
-      inherit (nanopynixZig)
+      nanopynix-cxx-runtime = wheelNix.cxxRuntime;
+      inherit (nanopynixForWheel)
         nix-util
         nix-store
         nix-expr
@@ -748,8 +749,9 @@ let
   nanopynixWheel = pkgs.callPackage ./nix/wheel.nix {
     inherit (pkgs.python3Packages) auditwheel wheel;
     licenses = nanopynixWheelLicenses;
-    inherit (zigNix.zigStdenv) cxxRuntime;
-    bindings = nanopynixZig.nanopynix-bindings.override {
+    inherit (wheelNix) cxxRuntime;
+    inherit (wheelNix.cxxStdenv) lowerGlibc;
+    bindings = nanopynixForWheel.nanopynix-bindings.override {
       # **The Nix version is in the name, and not in the version.**
       #
       # PyPI holds one name for one project, and this project builds one
@@ -767,7 +769,7 @@ let
       # the extension links, so `nix2-34` covers 2.34.8 and 2.34.9, and the
       # exact version stays in `build_info()` and in the metadata.
       pypiName = "nanopynix-bindings-nix${
-        lib.replaceStrings [ "." ] [ "-" ] (lib.versions.majorMinor nanopynixZig.version)
+        lib.replaceStrings [ "." ] [ "-" ] (lib.versions.majorMinor nanopynixForWheel.version)
       }";
 
       # **Here, and in no other build.** One `cp313-abi3` wheel imports on
@@ -910,11 +912,11 @@ lib.throwIf (unlistedVariants != [ ])
       flake
       pkgs
       nanopynixVersions
-      nanopynixZig
+      nanopynixForWheel
       # The C and C++ closure that the wheel bundles, and the stdenv that
-      # builds it. `zigStdenv.cxxRuntime` is the one C++ runtime of that
-      # closure, and it is a build of its own that has its own gate.
-      zigNix
+      # builds it. `cxxRuntime` is the one C++ runtime of that closure, and it
+      # is a build of its own that has its own gate.
+      wheelNix
       nanopynixWheel
       nanopynixWheelLicenses
       pyproject-nix
