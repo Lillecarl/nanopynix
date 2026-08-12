@@ -171,21 +171,28 @@ let
     # own compiler wrapper, so cachix holds none of it until this job has run
     # once, and boost, openssl and Nix itself all compile here.
     #
-    # Measured on `build-box.nix-community.org`, which has 12 cores: 53
-    # derivations. A GitHub runner has 4.
+    # **Measured on the runner, from cold.** Run 31605397637 is the first run
+    # of this job, so cachix held none of the closure. The build compiled 95
+    # derivations on `ubuntu-24.04` in 40 minutes, and 96 on `ubuntu-24.04-arm`
+    # in 34 minutes. The rest of each closure came from `cache.nixos.org`: 296
+    # paths and 229 paths.
+    #
+    # 120 gives three times the measurement. The number that a cap must beat is
+    # the build that hangs, and not the build that is slow: a step that stops
+    # after 2 hours reports the hang, and a step that stops after 4 hours
+    # reports the same hang and spends twice as much of the runner.
     #
     # **360 minutes is the hard limit of a job, and `mkJob` derives the job cap
     # from this number.** The other steps of the job and `jobSlack` add 95, so
     # a build cap above 265 gives a job cap that GitHub never applies: it stops
     # the job at its own limit instead, and the run reports a cancellation
-    # rather than the step that ran out of time. This number keeps the derived
-    # cap at 335.
+    # rather than the step that ran out of time.
     #
-    # **A cold build may not fit, and cachix is the answer rather than a larger
-    # number.** No cap can exceed the limit above, so a closure that needs more
-    # than 4 hours on 4 cores never goes green from cold. Push the closure that
-    # a build-box run already made, and the first scheduled run is a fetch.
-    wheelBuild = 240;
+    # **A bump of nixpkgs is the case that can exceed this.** The 296 paths
+    # above are substitutions, and a flake update can land on a revision that
+    # `cache.nixos.org` has not built yet. The step then compiles them as well.
+    # Raise this number when that happens, and record the run that measured it.
+    wheelBuild = 120;
     # `scripts/wheel-inspect.sh` unzips the wheel and reads each object with
     # `readelf`. It takes seconds.
     wheelInspect = 10;
