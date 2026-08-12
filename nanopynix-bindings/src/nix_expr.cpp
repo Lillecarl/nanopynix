@@ -2023,6 +2023,24 @@ void nanopynix_bind_expr(nb::module_ &m) {
           "tracks the repair, and the reason that Nix keeps a static.");
     m.def("eval_counters_enabled", []() { return nix::Counter::enabled; },
           "Report whether the evaluation counters of the process are on.");
+#else
+    // The module keeps one surface across every supported Nix. A name that
+    // exists on 2.34 and not on 2.31 breaks the import of `nanopynix` itself,
+    // because `__init__.py` names it, and then every test of that version
+    // fails at collection. `nix::Counter` does not exist here, so these two
+    // answer without it. `capabilities["eval_statistics"]` is the test to
+    // make before a caller reaches this.
+    m.def("set_eval_counters_enabled",
+          [](bool) {
+              throw std::runtime_error(
+                  "the evaluation counters need Nix 2.34 or later. The patch that exposes "
+                  "the statistics does not apply to 2.31, so there is nothing to count. "
+                  "Read `build_info()[\"capabilities\"][\"eval_statistics\"]` first.");
+          },
+          "enabled"_a, "Raise, because this Nix has no evaluation statistics.");
+    m.def("eval_counters_enabled", []() { return false; },
+          "Report whether the evaluation counters of the process are on. This Nix has "
+          "no such counters, so the answer is always False.");
 #endif
 
     m.def("is_pseudo_url",
