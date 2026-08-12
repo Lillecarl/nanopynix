@@ -26,7 +26,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import anyio
-import pytest
 from grpclib_transports.stdio import stdio_worker_with_backchannel
 from nanopynix_proto.nix.worker import InitRequest, ShutdownRequest, WorkerServiceStub
 
@@ -74,7 +73,6 @@ async def test_a_stdio_worker_evaluates(rpc_session: RpcSessionFactory) -> None:
         assert await (await evaluator.string("1 + 1")).as_int() == 2
 
 
-@pytest.mark.nix_version(minimum="2.32")
 async def test_an_rpc_primop_reaches_the_client_over_stdio(
     shared_nix_environment: NixTestEnvironment,
 ) -> None:

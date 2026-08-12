@@ -355,6 +355,27 @@ The subprocess inherits file descriptor 2 from the parent.
 Do not add a separate stderr pipe. Such a pipe is redundant, and it confuses
 the logging abstraction of Nix with the stderr of the operating system.
 
+# The supported Nix versions
+
+**`supportedNixFloor` in `default.nix` names the oldest Nix that this
+repository supports. It is 2.34.** One number moves the whole matrix, because
+every variant reads it. The versions that CI builds are 2.34, 2.35 and `git`.
+
+Two rules follow from it:
+
+- **Do not add a version branch to library code to keep an old Nix alive.**
+  Gate the test instead, and give the gate the upstream defect and the issue
+  to read. `tests/support/nix_markers.py` holds the markers, and each one
+  names what it excludes and why.
+- **Do not write a gate that the floor already answers.** A marker such as
+  `minimum="2.32"` can never skip a test when the floor is 2.34, so it reads
+  as a live constraint and is not one. Issue #126 removed nine of those.
+
+Raise the floor when an old version costs more than it reports. Issue #126 is
+the example to copy: it measured the skips, the run time and the gates that
+the version alone reached, and it recorded what the removal cost as well as
+what it saved.
+
 # Test failure discipline
 
 Do not assume that a failed test is unrelated, flaky, or pre-existing.

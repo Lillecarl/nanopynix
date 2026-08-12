@@ -51,13 +51,11 @@ class TestSettings:
         assert "keep-going" in metadata
         assert isinstance(metadata["keep-going"].description, str)
 
-    @pytest.mark.nix_version(minimum="2.32")
     def test_settings_model_matches_registered_nix_settings(self):
         drift = nanopynix.check_settings_model_drift()
         assert drift.missing == []
         assert drift.extra == []
 
-    @pytest.mark.nix_version(minimum="2.32")
     def test_optional_settings_models_match_their_surfaces(self):
         drift = nanopynix.check_all_settings_model_drift(include_optional=True)
         assert set(drift) == {"global", "eval", "fetch", "flake"}

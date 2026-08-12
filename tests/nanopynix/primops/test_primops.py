@@ -8,14 +8,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-import pytest
 from nanopynix_bindings import store as nanopynix_store
 
 if TYPE_CHECKING:
     import nanopynix
     from tests.support.nix_environment import NixTestEnvironment
-
-pytestmark = pytest.mark.nix_version(minimum="2.32")
 
 
 class TestRegisterPrimop:

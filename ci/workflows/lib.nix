@@ -445,8 +445,9 @@ let
   # The full suite under UndefinedBehaviorSanitizer, against one Nix version.
   #
   # UBSan runs on its own rather than beside TSAN, although the two combine.
-  # The TSAN matrix skips 2.31, and 2.31 is the one version where the
-  # ownership rules that UBSan is here to check differ. See nix/sanitizer.nix.
+  # One sanitizer for each job keeps a red job attributable to one sanitizer.
+  # The reason used to be 2.31, which the TSAN matrix skipped, and issue #126
+  # dropped that version. See nix/sanitizer.nix.
   #
   # The AddressSanitizer job is `mkAsanTestJob` below, and it needs a libexpr
   # with no collector. `mkNoGCTestJob` is that build without the sanitizer.

@@ -14,8 +14,6 @@ import pytest
 from nanopynix.primops import jsonschema_primops
 from nanopynix.rpc import Session
 
-pytestmark = pytest.mark.nix_version(minimum="2.32")
-
 _ASSETS = Path(__file__).parent / "assets"
 _WIDGET_SCHEMA = _ASSETS / "widget-schema.json"
 _MALFORMED_SCHEMA = _ASSETS / "malformed-schema.json"

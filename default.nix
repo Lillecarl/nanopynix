@@ -133,9 +133,8 @@ let
   # `nanopynixForNixVersions` asserts on it.
   #
   # UBSan runs on its own rather than beside TSAN, although the two combine.
-  # The TSAN matrix skips 2.31 (see `nanopynixForNixVersions` below), and 2.31
-  # is the one version where the ownership rules that UBSan is here to check
-  # differ. On its own it runs everywhere.
+  # Each one then reports against a build that the other did not instrument,
+  # so a finding names one sanitizer and not a pair of them.
   sanitizers = {
     tsan = pkgs.callPackage ./nix/sanitizer.nix { name = "thread"; };
     ubsan = pkgs.callPackage ./nix/sanitizer.nix { name = "undefined"; };
@@ -175,13 +174,6 @@ let
   # race without any behavior change for single-threaded use.
   emptyBindingsPatch = ./nix/patches/nix-thread-local-empty-bindings.patch;
 
-  # printValueAsJSON recurses without consulting max-call-depth on 2.31, so a
-  # cyclic value with no `outPath`/`__toString` to stop at overflows the C++
-  # stack and SIGSEGVs the process instead of raising -- and nanopynix reaches
-  # that function from `Value.to_python()`. Upstream's own one-line fix,
-  # already present from 2.34 on; see the patch header for the provenance.
-  valueToJsonCallDepthPatch = ./nix/patches/nix-2.31-value-to-json-call-depth.patch;
-
   # The base environment of an evaluator holds one slot for each name that
   # `createBaseEnv` registers, and `BASE_ENV_SIZE` fixes the count at 128 with
   # no bound check on either write. Nix itself needs 119 of those slots, and
@@ -208,12 +200,10 @@ let
   # and never meets this; nanopynix gives each evaluator its own thread, so it
   # does. ThreadSanitizer found it -- see issue #90, and the patch header.
   #
-  # Two files for one change, because `describe` is byte-identical in 2.31,
-  # 2.34, 2.35 and git, and `emitTreeAttrs` is not: 2.31 writes the call on
-  # one line and takes no `state.mem`. The hunks cannot be shared, so each
-  # file carries both of its own.
+  # One file, since 2.31 left the matrix. That version needed a second copy of
+  # this patch: `describe` was byte-identical everywhere, and `emitTreeAttrs`
+  # was not, because 2.31 wrote the call on one line and took no `state.mem`.
   gmtimePatch = ./nix/patches/nix-gmtime-not-thread-safe.patch;
-  gmtimePatch231 = ./nix/patches/nix-2.31-gmtime-not-thread-safe.patch;
 
   # `EvalState::printStatistics` writes its report to stderr, or to the file
   # that `NIX_SHOW_STATS_PATH` names. nanopynix embeds the evaluator, so it can
@@ -259,30 +249,29 @@ let
       gmtimePatch
       countCallsPatch235
     ];
-    # 2.31 is the one version that gets neither the same list nor the
-    # default. emptyBindingsPatch is absent because 2.31's surrounding
-    # attr-set.cc/.hh source doesn't match its hunks (confirmed by trying),
-    # and 2.31 is the lowest-priority supported version, so it goes without
-    # that patch rather than with a broken one -- revisit if/when 2.31
-    # support is reconsidered.
-    #
-    # valueToJsonCallDepthPatch is 2.31-only in the other direction: 2.34+
-    # already carry it upstream, and applying it there would fail on the
-    # context it's trying to add.
-    #
-    # baseEnvSizePatch applies to every version. The three hunks have identical
-    # context in 2.31, 2.34 and 2.35, so only the line numbers move.
-    #
-    # gmtimePatch231 is the 2.31 form of the same repair that gmtimePatch
-    # makes everywhere else. Only its `emitTreeAttrs` hunk differs.
-    "2.31" = [
-      valueToJsonCallDepthPatch
-      baseEnvSizePatch
-      gmtimePatch231
-    ];
   };
 
   patchesFor = scope: nixPatches.${lib.versions.majorMinor scope.version} or nixPatches.default;
+
+  # **The oldest Nix that this repository supports.** Every variant reads it,
+  # so one number moves the whole matrix.
+  #
+  # 2.31 was the version below it, and issue #126 holds the measurement that
+  # removed it. On one commit, the `test-local` job skipped 107 tests on 2.31
+  # and 13 on 2.35, and it took 12m22s against 7m39s. It was the job with the
+  # least signal and the longest run. `ci/render.py` also cannot run on 2.31 at
+  # all, because primop registration is broken there and upstream does not plan
+  # to correct it.
+  #
+  # **2.34 and not 2.32, because 2.32 and 2.33 do not exist to build.** nixpkgs
+  # carries `nixComponents_2_32` and `nixComponents_2_33`, and evaluating
+  # either one throws. `isNixScope` already dropped both, so a floor of "2.32"
+  # would select the same versions while naming one that no job can build.
+  #
+  # Raise this number when the next version earns the same measurement. Do not
+  # add a version-specific branch to library code to keep an old one alive --
+  # `AGENTS.md` gives that rule, and this floor is what makes it affordable.
+  supportedNixFloor = "2.34";
 
   # Builds one full nanopynix scope per modular Nix component set nixpkgs
   # exposes, optionally with ThreadSanitizer instrumentation applied to nix
@@ -645,21 +634,12 @@ let
     lib.pipe pkgs.nixVersions (
       [
         (lib.filterAttrs isNixScope)
+        # **The supported floor, and every variant obeys it.** `git` passes
+        # too: `majorMinor` of a `2.35pre...` version is `2.35`.
+        (lib.filterAttrs (
+          _: scope: lib.versionAtLeast (lib.versions.majorMinor scope.version) supportedNixFloor
+        ))
       ]
-      # 2.31 predates the "make emptyBindings a global constant" refactor
-      # (nix commit 4df1a3ca7, first in 2.32.0) and still carries its own
-      # nrExprs++ as a plain unsigned long (fixed upstream by counter.hh's
-      # atomic Counter type, also post-2.31) -- both are known, unfixed
-      # races on this version alone, so TSAN just reports/aborts on
-      # long-since-fixed bugs rather than anything actionable. Skip building
-      # a TSAN variant for it entirely instead of chasing that noise.
-      # TSAN only. UBSan keeps 2.31, and needs it: the ownership rules that
-      # differ between versions -- `fetchers::Settings` living inside
-      # `fetchers::Input` on 2.31 and not after -- are exactly what it is
-      # there to check.
-      ++ lib.optional (sanitizer != null && sanitizer.name == "thread") (
-        lib.filterAttrs (_: scope: lib.versions.majorMinor scope.version != "2.31")
-      )
       ++ [
         (lib.mapAttrs (_: patchNixScope))
         (lib.mapAttrs (_: extendNixScope))
@@ -825,10 +805,20 @@ let
   # the drift check is what proves each gate is set correctly: a field the
   # running Nix does not have shows up as `extra`, and a gate that hides a
   # field the running Nix does have shows up as `missing`. Neither can be seen
-  # from one version. Measured: the gate refuses 31 of the 32 fields on 2.31,
-  # 15 on 2.34 and 1 on 2.35, so each version reaches a different part of the
-  # check. Dropping a version deletes that coverage in silence, because the
-  # remaining jobs stay green.
+  # from one version. Dropping a version deletes that coverage in silence,
+  # because the remaining jobs stay green.
+  #
+  # **Issue #126 dropped 2.31 anyway, and this is what it cost.** The gate
+  # refused 31 of the 32 fields on 2.31, 15 on 2.34 and 1 on 2.35, so 2.31 was
+  # the only job that saw a `since("2.34")` field refused. Those gates are now
+  # true on every supported version, so the drift check never exercises them.
+  # They are not dead -- a consumer can link an older Nix by hand -- but
+  # nothing here proves them any more.
+  #
+  # That was a considered trade, and the measurement that bought it is in
+  # `supportedNixFloor` above. The rule still holds for 2.34: it is the only
+  # version that refuses a `since("2.35")` field, and dropping it would repeat
+  # the loss with nothing left to catch it.
   ciVersionMatrix =
     let
       names = map (lib.removePrefix "nanopynix-tests-") (builtins.attrNames tests);
