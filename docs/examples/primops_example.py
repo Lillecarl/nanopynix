@@ -1,7 +1,7 @@
 """Register custom Python primops and use the built-in YAML primops.
 
 Requires Nix >= 2.32 — primop registration is broken on Nix 2.31 and isn't
-expected to be fixed there.
+expected to be fixed there. Every supported Nix meets that: the floor is 2.34.
 
 Run with::
 
