@@ -1498,6 +1498,9 @@ static void bind_eval_state(nb::module_ &m) {
         .def("statistics_json", &PyEvalState::statistics_json,
              "Return the evaluation statistics of this evaluator, as a JSON document.\n\n"
              "The report holds the same fields that `NIX_SHOW_STATS=1 nix` prints. The\n"
+             "`nrExprs` and `nrThunks` fields count the process, because Nix keeps those\n"
+             "two counters in a static. Every other counted field belongs to this\n"
+             "evaluator alone.\n\n"
              "`primops`, `functions` and `attributes` tables need the `count-calls` eval\n"
              "setting, which is off by default because the counting costs time.\n\n"
              "Raises RuntimeError on Nix 2.31, which has no such report.")

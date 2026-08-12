@@ -745,6 +745,11 @@ class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](AsyncVerbosityController
         Nix decides the fields, and it changes them between versions. Read a
         field that a version supplies, and do not require one.
 
+        **Two fields count the process, and not this evaluator.** ``nrExprs``
+        and ``nrThunks`` are static counters of ``libnixexpr``, so a process
+        with two evaluators reports the sum of both in each one. Every other
+        counted field belongs to this evaluator alone.
+
         :raises RuntimeError: on Nix 2.31, which has no such report. Read
             ``build_info()["capabilities"]["eval_statistics"]`` first.
         """
