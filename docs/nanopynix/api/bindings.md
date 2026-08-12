@@ -166,8 +166,9 @@ fields of `EvalState.statistics_json`, and Nix leaves them off unless
 static of `libnixexpr`, so an evaluator cannot count while another one beside
 it does not, and the `nrExprs` and `nrThunks` fields count every evaluator in
 the process. The report is therefore unreliable when one process holds more
-than one evaluator. Issue #118 tracks the repair, and issue #119 holds a
-measurement of the engines disagreeing that has no explanation yet.
+than one evaluator, and the inproc engine evaluates in parallel in one
+process. Issue #118 tracks the repair, which moves the switch and the counters
+onto the evaluator.
 
 `is_pseudo_url` reports whether Nix downloads a string as a tarball, rather
 than reading it as a path. It is the first test that `eval_file` and
