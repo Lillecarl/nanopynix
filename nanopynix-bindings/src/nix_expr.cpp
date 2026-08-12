@@ -769,6 +769,23 @@ std::vector<std::string> PyEvalState::repl_add_attrs(PyValue attrs) {
     return names;
 }
 
+std::string PyEvalState::statistics_json() const {
+    checkThread();
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_34
+    // `statisticsJSON` walks the counter tables of the evaluator, and the
+    // report of a large evaluation is not small. The GIL is not needed for
+    // either, so a second thread keeps running while this one builds it.
+    nb::gil_scoped_release release;
+    return state->statisticsJSON();
+#else
+    throw std::runtime_error(
+        "evaluation statistics need Nix 2.34 or later. The patch that exposes "
+        "them does not apply to 2.31, so this build has no report to give. "
+        "Read `build_info()[\"capabilities\"][\"eval_statistics\"]` before "
+        "you call this function.");
+#endif
+}
+
 std::vector<std::string> PyEvalState::repl_scope_names() const {
     checkThread();
     if (repl_env == nullptr || !repl_static_env)
@@ -1478,6 +1495,12 @@ static void bind_eval_state(nb::module_ &m) {
              "line"_a, "path"_a = "<string>", nb::keep_alive<0, 1>())
         .def("repl_add_attrs", &PyEvalState::repl_add_attrs, "attrs"_a)
         .def("repl_scope_names", &PyEvalState::repl_scope_names)
+        .def("statistics_json", &PyEvalState::statistics_json,
+             "Return the evaluation statistics of this evaluator, as a JSON document.\n\n"
+             "The report holds the same fields that `NIX_SHOW_STATS=1 nix` prints. The\n"
+             "`primops`, `functions` and `attributes` tables need the `count-calls` eval\n"
+             "setting, which is off by default because the counting costs time.\n\n"
+             "Raises RuntimeError on Nix 2.31, which has no such report.")
         .def("reset_file_cache", &PyEvalState::reset_file_cache)
         .def("alloc_value", &PyEvalState::alloc_value, nb::keep_alive<0, 1>())
         .def("value_from_python", &PyEvalState::value_from_python, "obj"_a, nb::keep_alive<0, 1>());
@@ -1976,6 +1999,25 @@ void nanopynix_bind_expr(nb::module_ &m) {
     // takes a `std::string_view`, which would need <nanobind/stl/string_view.h>
     // and a temporary that outlives the call. One copy of a short string is
     // the cheaper answer.
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_34
+    // `nix::Counter::enabled` is one static for the whole process, and Nix
+    // sets it from `NIX_SHOW_STATS` when libnixexpr loads. Every increment of
+    // every counter tests it, so Nix made it a static on purpose: a per
+    // evaluator flag would be a shared write on the hot path of the evaluator.
+    // The scope of this function is therefore the process, and not one
+    // evaluator, and `statistics` reports zero for each counted field until
+    // something turns it on.
+    m.def("set_eval_counters_enabled",
+          [](bool enabled) { nix::Counter::enabled = enabled; }, "enabled"_a,
+          "Turn the evaluation counters of the process on, or off.\n\n"
+          "The counters back the numeric fields of `EvalState.statistics_json`, such\n"
+          "as `values`, `envs` and `nrFunctionCalls`. Nix leaves them off unless\n"
+          "`NIX_SHOW_STATS` is set, because each increment costs an atomic write.\n\n"
+          "This setting belongs to the process, and not to one evaluator.");
+    m.def("eval_counters_enabled", []() { return nix::Counter::enabled; },
+          "Report whether the evaluation counters of the process are on.");
+#endif
+
     m.def("is_pseudo_url",
           [](const std::string &value) { return nix::EvalSettings::isPseudoUrl(value); }, "value"_a,
           "Report whether `lookup_file_arg` downloads this string as a tarball.\n\n"

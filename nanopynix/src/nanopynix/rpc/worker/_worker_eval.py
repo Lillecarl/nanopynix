@@ -52,6 +52,8 @@ from nanopynix_proto.nix.eval import (
     EvalFileRequest,
     EvalFlakeRequest,
     EvalServiceBase,
+    EvalStatisticsRequest,
+    EvalStatisticsResponse,
     EvalStringRequest,
     FindFlakeInputRequest,
     FindFlakeInputResponse,
@@ -87,6 +89,8 @@ from nanopynix_proto.nix.eval import (
     ReplScopeNamesResponse,
     ResetFileCacheRequest,
     ResetFileCacheResponse,
+    SetEvalCountersRequest,
+    SetEvalCountersResponse,
     SetEvalVerbosityRequest,
     SetEvalVerbosityResponse,
     TypeNameRequest,
@@ -379,6 +383,15 @@ class EvalServiceHandler(EvalServiceBase):
     def reset_file_cache(self, message: ResetFileCacheRequest) -> ResetFileCacheResponse:
         self._get_es(message.eval_handle).reset_file_cache()
         return ResetFileCacheResponse()
+
+    @worker_op
+    def eval_statistics(self, message: EvalStatisticsRequest) -> EvalStatisticsResponse:
+        return EvalStatisticsResponse(json=self._get_es(message.eval_handle).statistics_json())
+
+    @worker_op
+    def set_eval_counters(self, message: SetEvalCountersRequest) -> SetEvalCountersResponse:
+        nanopynix_expr.set_eval_counters_enabled(message.enabled)
+        return SetEvalCountersResponse(enabled=nanopynix_expr.eval_counters_enabled())
 
     # Named for the wire op, not the client method: the RPC is ForceJson and
     # really does transfer JSON. ValueProxy.to_python() decodes it.

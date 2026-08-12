@@ -1,0 +1,269 @@
+Give the evaluator a readable statistics report, and count calls safely.
+
+nanopynix embeds the evaluator, and it needs three things that upstream Nix
+does not give an embedded caller.
+
+**A report that a caller can read.** `EvalState::printStatistics` builds the
+report and then writes it, to stderr or to the file that `NIX_SHOW_STATS_PATH`
+names. A library caller can use neither. This patch splits the function: a new
+`statisticsJSON` builds the report and returns it, and `printStatistics` keeps
+its behavior and calls the new function. No output changes.
+
+**A setting, rather than an environment variable.** `countCalls` came from
+`getEnv("NIX_COUNT_CALLS")` at the moment the evaluator was constructed, so
+the choice belonged to the whole process. nanopynix gives each evaluator its
+own settings, and it builds an evaluator while other evaluators run, so
+`setenv` from one thread is a data race. `count-calls` is now an ordinary
+`EvalSettings` option. The environment variable still turns counting on, so a
+program that already uses it keeps working.
+
+**Counters that two evaluators can share.** `primOpCalls`, `functionCalls` and
+`attrSelects` were `boost::unordered_flat_map`, and `nix` the command writes
+them from one thread only. nanopynix gives each evaluator its own thread, so
+two threads write the same map. They are `boost::concurrent_flat_map` here,
+behind a `ref`, and each write is a `try_emplace_or_visit`. The read in
+`statisticsJSON` uses `visit_all`.
+
+One upstream defect goes with them. `printStatistics` wrote
+`auto list = topObj["attributes"]`, which copies the value out of the
+document, so every attribute count was built and then discarded. The `&` is
+here.
+
+This file applies to 2.35 and to git. `nix-2.34-count-calls.patch` is the same
+change for 2.34, where only the line numbers differ. 2.31 gets neither: see
+the `nixPatches` comment in `default.nix`.
+
+--- a/src/libexpr/eval.cc	1970-01-01 01:00:01.000000000 +0100
++++ b/src/libexpr/eval.cc	2026-08-12 08:33:27.224004358 +0200
+@@ -320,6 +320,10 @@
+     , baseEnv(mem.allocEnv(BASE_ENV_SIZE))
+ #endif
+     , staticBaseEnv{std::make_shared<StaticEnv>(nullptr, nullptr)}
++    , countCalls(settings.countCalls || getEnv("NIX_COUNT_CALLS").value_or("0") != "0")
++    , primOpCalls(make_ref<decltype(primOpCalls)::element_type>())
++    , functionCalls(make_ref<decltype(functionCalls)::element_type>())
++    , attrSelects(make_ref<decltype(attrSelects)::element_type>())
+ {
+ #ifndef _WIN32
+     static std::once_flag stackSizeBumped;
+@@ -335,8 +339,6 @@
+     corepkgsFS->setPathDisplay("<nix", ">");
+     internalFS->setPathDisplay("«nix-internal»", "");
+ 
+-    countCalls = getEnv("NIX_COUNT_CALLS").value_or("0") != "0";
+-
+     static_assert(sizeof(Env) <= 16, "environment must be <= 16 bytes");
+ 
+     /* Construct the Nix expression search path. */
+@@ -938,7 +940,7 @@
+         forceAttrs(*env->values[0], fromWith->pos, "while evaluating the first subexpression of a with expression");
+         if (auto j = env->values[0]->attrs()->get(var.name)) {
+             if (countCalls) [[unlikely]]
+-                attrSelects[j->pos]++;
++                attrSelects->try_emplace_or_visit(j->pos, 1, [](auto & i) { i.second++; });
+             return j->value;
+         }
+         if (!fromWith->parentWith) [[unlikely]]
+@@ -1477,7 +1479,7 @@
+             vAttrs = j->value;
+             pos2 = j->pos;
+             if (state.countCalls)
+-                state.attrSelects[pos2]++;
++                state.attrSelects->try_emplace_or_visit(pos2, 1, [](auto & i) { i.second++; });
+         }
+ 
+         state.forceValue(*vAttrs, (pos2 ? pos2 : this->pos));
+@@ -1689,7 +1691,7 @@
+ 
+                 nrPrimOpCalls++;
+                 if (countCalls)
+-                    primOpCalls[fn->name]++;
++                    primOpCalls->try_emplace_or_visit(fn->name, 1, [](auto & i) { i.second++; });
+ 
+                 try {
+                     fn->impl(*this, vCur.determinePos(noPos), args.data(), vCur);
+@@ -1734,7 +1736,7 @@
+                 auto fn = primOp->primOp();
+                 nrPrimOpCalls++;
+                 if (countCalls)
+-                    primOpCalls[fn->name]++;
++                    primOpCalls->try_emplace_or_visit(fn->name, 1, [](auto & i) { i.second++; });
+ 
+                 try {
+                     // TODO:
+@@ -1805,7 +1807,7 @@
+ // prevents tail-call optimisation.
+ void EvalState::incrFunctionCall(ExprLambda * fun)
+ {
+-    functionCalls[fun]++;
++    functionCalls->try_emplace_or_visit(fun, 1, [](auto & i) { i.second++; });
+ }
+ 
+ void EvalState::autoCallFunction(const Bindings & args, Value & fun, Value & res)
+@@ -3051,7 +3053,7 @@
+     }
+ }
+ 
+-void EvalState::printStatistics()
++std::string EvalState::statisticsJSON()
+ {
+     std::chrono::microseconds cpuTimeDuration = getCpuUserTime();
+     float cpuTime = std::chrono::duration_cast<std::chrono::duration<float>>(cpuTimeDuration).count();
+@@ -3073,10 +3075,6 @@
+     auto gcCycles = getGCCycles();
+ #endif
+ 
+-    auto outPath = getEnv("NIX_SHOW_STATS_PATH").value_or("-");
+-    std::fstream fs;
+-    if (outPath != "-")
+-        fs.open(outPath, std::fstream::out);
+     json topObj = json::object();
+     topObj["cpuTime"] = cpuTime;
+     topObj["time"] = {
+@@ -3132,11 +3130,16 @@
+ #endif
+ 
+     if (countCalls) {
+-        topObj["primops"] = primOpCalls;
++        {
++            auto & obj = topObj["primops"];
++            obj = json::object();
++            primOpCalls->visit_all([&](auto & i) { obj[i.first] = i.second; });
++        }
+         {
+             auto & list = topObj["functions"];
+             list = json::array();
+-            for (auto & [fun, count] : functionCalls) {
++            functionCalls->visit_all([&](auto & i) {
++                auto & [fun, count] = i;
+                 json obj = json::object();
+                 if (fun->name)
+                     obj["name"] = (std::string_view) symbols[fun->name];
+@@ -3150,12 +3153,12 @@
+                 }
+                 obj["count"] = count;
+                 list.push_back(obj);
+-            }
++            });
+         }
+         {
+-            auto list = topObj["attributes"];
++            auto & list = topObj["attributes"];
+             list = json::array();
+-            for (auto & i : attrSelects) {
++            attrSelects->visit_all([&](auto & i) {
+                 json obj = json::object();
+                 if (auto pos = positions[i.first]) {
+                     if (auto path = std::get_if<SourcePath>(&pos.origin))
+@@ -3165,7 +3168,7 @@
+                 }
+                 obj["count"] = i.second;
+                 list.push_back(obj);
+-            }
++            });
+         }
+     }
+ 
+@@ -3175,10 +3178,19 @@
+         auto & list = topObj["symbols"];
+         symbols.dump([&](std::string_view s) { list.emplace_back(s); });
+     }
++    return topObj.dump(2);
++}
++
++void EvalState::printStatistics()
++{
++    auto rendered = statisticsJSON();
++    auto outPath = getEnv("NIX_SHOW_STATS_PATH").value_or("-");
+     if (outPath == "-") {
+-        std::cerr << topObj.dump(2) << std::endl;
++        std::cerr << rendered << std::endl;
+     } else {
+-        fs << topObj.dump(2) << std::endl;
++        std::fstream fs;
++        fs.open(outPath, std::fstream::out);
++        fs << rendered << std::endl;
+     }
+ }
+ 
+--- a/src/libexpr/include/nix/expr/eval-settings.hh	1970-01-01 01:00:01.000000000 +0100
++++ b/src/libexpr/include/nix/expr/eval-settings.hh	2026-08-12 08:33:27.222854620 +0200
+@@ -244,6 +244,20 @@
+           - or the prefix is a URI scheme ended by a colon `:` and the URI has the same scheme.
+         )"};
+ 
++    Setting<bool> countCalls{
++        this,
++        false,
++        "count-calls",
++        R"(
++          If set to `true`, the evaluator counts each primop call, each
++          function call and each attribute selection. `statisticsJSON`
++          then reports the three tables, and `NIX_SHOW_STATS` prints them.
++
++          The counting costs time and memory, so it is off by default. The
++          `NIX_COUNT_CALLS` environment variable turns it on as well, and
++          it stays for the programs that already use it.
++        )"};
++
+     Setting<bool> traceFunctionCalls{
+         this,
+         false,
+--- a/src/libexpr/include/nix/expr/eval.hh	1970-01-01 01:00:01.000000000 +0100
++++ b/src/libexpr/include/nix/expr/eval.hh	2026-08-12 08:33:27.225952777 +0200
+@@ -1041,6 +1041,15 @@
+     void printStatistics();
+ 
+     /**
++     * Return the same statistics as `printStatistics`, as a JSON document.
++     *
++     * A caller that embeds the evaluator reads the statistics with this
++     * function. `printStatistics` writes to a file or to stderr, which an
++     * embedded evaluator cannot use.
++     */
++    std::string statisticsJSON();
++
++    /**
+      * Perform a full memory garbage collection - not incremental.
+      *
+      * @return true if Nix was built with GC and a GC was performed, false if not.
+@@ -1109,21 +1118,21 @@
+     Counter nrPrimOpCalls;
+     Counter nrFunctionCalls;
+ 
+-    bool countCalls;
++    const bool countCalls;
+ 
+-    typedef boost::unordered_flat_map<std::string, size_t, StringViewHash, std::equal_to<>> PrimOpCalls;
+-    PrimOpCalls primOpCalls;
++    typedef boost::concurrent_flat_map<std::string, size_t, StringViewHash, std::equal_to<>> PrimOpCalls;
++    const ref<PrimOpCalls> primOpCalls;
+ 
+-    typedef boost::unordered_flat_map<ExprLambda *, size_t> FunctionCalls;
+-    FunctionCalls functionCalls;
++    typedef boost::concurrent_flat_map<ExprLambda *, size_t> FunctionCalls;
++    const ref<FunctionCalls> functionCalls;
+ 
+     /** Evaluation/call profiler. */
+     MultiEvalProfiler profiler;
+ 
+     void incrFunctionCall(ExprLambda * fun);
+ 
+-    typedef boost::unordered_flat_map<PosIdx, size_t, std::hash<PosIdx>> AttrSelects;
+-    AttrSelects attrSelects;
++    typedef boost::concurrent_flat_map<PosIdx, size_t, std::hash<PosIdx>> AttrSelects;
++    const ref<AttrSelects> attrSelects;
+ 
+     friend struct ExprOpUpdate;
+     friend struct ExprOpConcatLists;
+--- a/src/libexpr/primops.cc	1970-01-01 01:00:01.000000000 +0100
++++ b/src/libexpr/primops.cc	2026-08-12 08:33:27.218466315 +0200
+@@ -3133,7 +3133,7 @@
+     auto i = state.getAttr(state.symbols.create(attr), args[1]->attrs(), "in the attribute set under consideration");
+     // !!! add to stack trace?
+     if (state.countCalls && i->pos)
+-        state.attrSelects[i->pos]++;
++        state.attrSelects->try_emplace_or_visit(i->pos, 1, [](auto & j) { j.second++; });
+     state.forceValue(*i->value, pos);
+     v = *i->value;
+ }

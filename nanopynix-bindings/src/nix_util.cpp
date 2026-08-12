@@ -384,6 +384,10 @@ static void _log_test(const std::string & msg) {
 static nb::dict build_info() {
     nb::dict capabilities;
     capabilities["logger_unique_ptr"] = NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35;
+    // `EvalState.statistics_json`. The patch that splits the report out of
+    // `printStatistics` reaches 2.34 and every later version, and 2.31 gets
+    // no patch at all -- see the `nixPatches` comment in `default.nix`.
+    capabilities["eval_statistics"] = NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_34;
 #if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
     capabilities["build_result_sum"] = false;
     capabilities["eval_state_mem"] = false;

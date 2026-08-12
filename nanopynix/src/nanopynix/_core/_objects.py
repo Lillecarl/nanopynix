@@ -497,6 +497,9 @@ class CoreEvalState:
     def reset_file_cache(self) -> None:
         self.require_raw().reset_file_cache()
 
+    def statistics_json(self) -> str:
+        return self.require_raw().statistics_json()
+
     def value_from_python(self, value: Any) -> CoreValue:
         return self.wrap_value(self.require_raw().value_from_python(_unwrap_local_values(value)))
 
