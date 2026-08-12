@@ -733,6 +733,24 @@ class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](AsyncVerbosityController
         ...
 
     @abstractmethod
+    async def statistics(self) -> dict[str, Any]:
+        """Report what this evaluator did, as ``NIX_SHOW_STATS=1 nix`` reports it.
+
+        The report holds the counts of the values, the environments and the
+        attribute sets, the time, and the state of the collector. The
+        ``primops``, ``functions`` and ``attributes`` tables need the
+        ``count-calls`` eval setting, which is off by default because the
+        counting costs time.
+
+        Nix decides the fields, and it changes them between versions. Read a
+        field that a version supplies, and do not require one.
+
+        :raises RuntimeError: on Nix 2.31, which has no such report. Read
+            ``build_info()["capabilities"]["eval_statistics"]`` first.
+        """
+        ...
+
+    @abstractmethod
     async def lock_flake(
         self,
         ref: str,

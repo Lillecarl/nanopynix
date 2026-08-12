@@ -138,6 +138,15 @@ struct PyEvalState {
     std::optional<PyValue> repl_process_line(const std::string &line, const std::string &path = "<string>");
     std::vector<std::string> repl_add_attrs(PyValue attrs);
     std::vector<std::string> repl_scope_names() const;
+
+    /// The evaluation statistics of this evaluator, as a JSON document.
+    ///
+    /// `nix` the command writes the same report when `NIX_SHOW_STATS` is set,
+    /// and it writes it to stderr or to a file. An embedded evaluator reads
+    /// neither, so `nix-2.35-count-calls.patch` splits a `statisticsJSON` out
+    /// of `EvalState::printStatistics`. That patch reaches 2.34 and every
+    /// later version, and it does not reach 2.31.
+    std::string statistics_json() const;
     void reset_file_cache();
     PyValue alloc_value();
 

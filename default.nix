@@ -215,25 +215,49 @@ let
   gmtimePatch = ./nix/patches/nix-gmtime-not-thread-safe.patch;
   gmtimePatch231 = ./nix/patches/nix-2.31-gmtime-not-thread-safe.patch;
 
+  # `EvalState::printStatistics` writes its report to stderr, or to the file
+  # that `NIX_SHOW_STATS_PATH` names. nanopynix embeds the evaluator, so it can
+  # read neither. The patch splits a `statisticsJSON` out of that function,
+  # turns `count-calls` into an ordinary `EvalSettings` option, and makes the
+  # three call-count maps concurrent. The patch header gives the reason for
+  # each part, and the upstream defect that the third part corrects.
+  #
+  # Two files for one change, because the line numbers differ. The 2.35 file
+  # covers git as well: `lib.versions.majorMinor` reads git's
+  # "2.35pre20260619_f8bb823a" as "2.35", and the patch applies there with an
+  # offset and no fuzz.
+  countCallsPatch234 = ./nix/patches/nix-2.34-count-calls.patch;
+  countCallsPatch235 = ./nix/patches/nix-2.35-count-calls.patch;
+
   # Which patches to apply to a given nix version's modular component set,
   # keyed by that version's own major.minor (e.g. "2.34"), with `default`
   # as the fallback for anything without its own entry (git's rolling
   # pre-release version string, any future point release, ...).
   nixPatches = {
+    # A version with no entry of its own. The countCalls patch is the 2.35
+    # file, which is the newest one. A future version whose source moved fails
+    # here, at the patch, and that is the failure to want: the bindings gate
+    # the statistics on the version number, so a silent absence would instead
+    # break the build of the bindings.
     default = [
       emptyBindingsPatch
       baseEnvSizePatch
       gmtimePatch
+      countCallsPatch235
     ];
     "2.34" = [
       emptyBindingsPatch
       baseEnvSizePatch
       gmtimePatch
+      countCallsPatch234
     ];
+    # git resolves to this entry too, because its version string reads as
+    # "2.35". The countCalls patch is the 2.35 file for that reason.
     "2.35" = [
       emptyBindingsPatch
       baseEnvSizePatch
       gmtimePatch
+      countCallsPatch235
     ];
     # 2.31 is the one version that gets neither the same list nor the
     # default. emptyBindingsPatch is absent because 2.31's surrounding

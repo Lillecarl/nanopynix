@@ -643,12 +643,16 @@ class NixEvalSettings(NixConfigModel):
     * ``eval_system`` backs ``builtins.currentSystem``, which
       ``createBaseEnv`` registers with ``addConstant`` while constructing the
       evaluator.
+    * ``count_calls`` becomes a ``const`` member of the evaluator, which the
+      constructor reads once. ``nix-2.35-count-calls.patch`` adds the setting,
+      and 2.31 has neither the setting nor the report that reads the counters.
     """
 
     allow_import_from_derivation: bool | None = _live()
     allow_unsafe_native_code_during_evaluation: bool | None = _live()
     allowed_uris: list[str] | None = _live()
     abort_on_warn: bool | None = _live()
+    count_calls: bool | None = _construction()
     debugger_on_trace: bool | None = _live()
     debugger_on_warn: bool | None = _live()
     eval_attrset_update_layer_rhs_threshold: int | None = _live()

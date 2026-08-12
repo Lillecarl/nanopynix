@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import itertools
+import json
 import os
 import threading
 from functools import partial
@@ -1522,6 +1523,9 @@ class EvalSession(AsyncEvalSession["Value"]):
 
     async def reset_file_cache(self) -> None:
         await self.run(self._require_raw().reset_file_cache)
+
+    async def statistics(self) -> dict[str, Any]:
+        return json.loads(await self.run(self._require_raw().statistics_json))
 
 
 class ReplSession(EvalSession, AsyncReplSession["Value"]):

@@ -16,6 +16,8 @@ service EvalService {
   rpc ReplAddAttrs(ReplAddAttrsRequest) returns (ReplAddAttrsResponse);
   rpc ReplScopeNames(ReplScopeNamesRequest) returns (ReplScopeNamesResponse);
   rpc ResetFileCache(ResetFileCacheRequest) returns (ResetFileCacheResponse);
+  rpc EvalStatistics(EvalStatisticsRequest) returns (EvalStatisticsResponse);
+  rpc SetEvalCounters(SetEvalCountersRequest) returns (SetEvalCountersResponse);
   // ForceJson is the only deep conversion. There used to be a ForceDeep
   // alongside it returning a DeepValue tree; it was a second, hand-rolled
   // walk that died on any derivation, and its one distinguishing feature --
@@ -149,6 +151,34 @@ message ResetFileCacheRequest {
   int64 eval_handle = 100;
 }
 message ResetFileCacheResponse {}
+
+message EvalStatisticsRequest {
+  int64 request_id = 1000;
+  int64 eval_handle = 100;
+}
+// The report travels as the JSON text that the evaluator built, and not as a
+// message of typed fields. Nix decides what the report holds, and it changes
+// the fields between versions, so a typed message here would have to change
+// with each one.
+message EvalStatisticsResponse {
+  string json = 1;
+}
+
+// `nix::Counter::enabled` is one static for the whole process. The worker is a
+// separate process from the client, so the client setting its own static does
+// nothing there, and this operation carries the value across.
+//
+// `eval_handle` is here because the eval proxy puts one into each request of
+// this service, and the field must exist to receive it. The worker ignores it:
+// the scope of the counters is the process, and not one evaluator.
+message SetEvalCountersRequest {
+  int64 request_id = 1000;
+  int64 eval_handle = 100;
+  bool enabled = 1;
+}
+message SetEvalCountersResponse {
+  bool enabled = 1;
+}
 
 message ForceJsonRequest {
   int64 request_id = 1000;

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import queue
 import threading
 import weakref
@@ -37,6 +38,7 @@ from nanopynix_proto.nix.eval import (
     EvalFileRequest,
     EvalFlakeRequest,
     EvalServiceBase,
+    EvalStatisticsRequest,
     EvalStringRequest,
     FindFlakeInputRequest,
     FlakeMetadataJsonRequest,
@@ -57,6 +59,7 @@ from nanopynix_proto.nix.eval import (
     ReplProcessLineRequest,
     ReplScopeNamesRequest,
     ResetFileCacheRequest,
+    SetEvalCountersRequest,
     SetEvalVerbosityRequest,
     TypeNameRequest,
     UpdateInputsList,
@@ -1336,6 +1339,20 @@ class EvalSession(AsyncEvalSession["ValueProxy"]):
 
     async def reset_file_cache(self, *, timeout: float | None = None) -> None:
         await self._ensure_proxy().reset_file_cache(ResetFileCacheRequest())
+
+    async def statistics(self, *, timeout: float | None = None) -> dict[str, Any]:
+        response = await self._ensure_proxy().eval_statistics(EvalStatisticsRequest())
+        return json.loads(response.json)
+
+    async def set_eval_counters_enabled(self, enabled: bool, *, timeout: float | None = None) -> bool:
+        """Turn the evaluation counters of the worker process on, or off.
+
+        The counters back the numeric fields of :meth:`statistics`. They belong
+        to the process, and the worker is a different process from this one, so
+        :func:`nanopynix.set_eval_counters_enabled` here does not reach them.
+        """
+        response = await self._ensure_proxy().set_eval_counters(SetEvalCountersRequest(enabled=enabled))
+        return response.enabled
 
 
 class ReplSession(EvalSession, AsyncReplSession["ValueProxy"]):

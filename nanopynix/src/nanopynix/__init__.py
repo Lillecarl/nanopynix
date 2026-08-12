@@ -12,10 +12,12 @@ from nanopynix_bindings.expr import (
     EvalState,
     PrimopError,
     Value,
+    eval_counters_enabled,
     eval_file,
     init_libexpr,
     is_pseudo_url,
     register_primop,
+    set_eval_counters_enabled,
 )
 from nanopynix_bindings.fetchers import input_from_attrs, input_from_url
 from nanopynix_bindings.flake import get_flake, lock_flake, parse_flake_ref
@@ -308,6 +310,7 @@ __all__ = [
     "current_system",
     "enable_experimental_feature",
     "enter_overlay_namespace",
+    "eval_counters_enabled",
     "eval_file",
     "from_yaml",
     "from_yaml11",
@@ -337,6 +340,7 @@ __all__ = [
     "register_store_implementation",
     "remove_logger",
     "rpc",
+    "set_eval_counters_enabled",
     "set_manager_title",
     "set_verbosity",
     "store_exec_prefix",
