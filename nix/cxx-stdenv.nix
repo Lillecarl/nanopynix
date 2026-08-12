@@ -64,9 +64,17 @@
 # Thirteen objects of the closure carried it, and `auditwheel` reported it
 # beside `GLIBC_2.38` as a reason to refuse `manylinux_2_34`.
 #
-# aarch64 is untouched. Its default is `desc` as well, but the marker is a
-# correction to the x86-64 implementation and glibc defines the symbol there
-# only. Traditional TLS on aarch64 would cost speed for nothing.
+# **aarch64 is untouched, and that is measured and not assumed.** The same probe
+# under aarch64 gcc 15 emits no marker at any dialect:
+#
+#   <default>                 absent
+#   -mtls-dialect=trad        absent
+#   -mtls-dialect=desc        absent
+#
+# The marker is a correction to the x86-64 implementation, and glibc defines the
+# symbol there only. So aarch64 keeps TLS descriptors, which are faster, and the
+# flag would buy nothing. `nix/lower-glibc.py` reports any `GLIBC_ABI_*` node it
+# meets, so a later compiler that changes this fails the build that made it.
 #
 # `nix-support/cc-cflags` is the seam. `add-flags.sh` reads that file into
 # `NIX_CFLAGS_COMPILE`, so a C compilation takes the flag as well as a C++ one.

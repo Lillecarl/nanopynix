@@ -37,10 +37,19 @@ the real name, and the real name is therefore already in `.dynstr` as a suffix
 of it. So the edit is a nine-byte bump of `st_name`, and no section resizes and
 no offset in the file moves.
 
-The version index then moves to `GLIBC_2.2.5`, which is the base node of x86-64
-and of aarch64 and defines every name this file touches. A node that loses every
-referent is renamed to that one as well, because an entry left in
-`.gnu.version_r` keeps the floor high with no symbol behind it.
+The version index then moves to the base node of the architecture, which defines
+every name this file touches. A node that loses every referent is renamed to
+that one as well, because an entry left in `.gnu.version_r` keeps the floor high
+with no symbol behind it.
+
+**The base node is a property of the architecture, and the two differ.** x86-64
+uses `GLIBC_2.2.5` and aarch64 uses `GLIBC_2.17`, because glibc added aarch64 in
+2.17. This file therefore reads `e_machine` and never assumes one of them.
+Measured on the aarch64 build: a hard-coded `GLIBC_2.2.5` is absent from every
+aarch64 object, so the rewrite found no base node and lowered nothing at all.
+Verified against the aarch64 `libc.so.6` and `libm.so.6` of glibc 2.42: every
+`__isoc23_` target and each of `fmod`, `fmodf` and `fmodl` is defined at
+`GLIBC_2.17`.
 
 **This runs at the fixup of each package, and not on the wheel.** `auditwheel`
 reads each library through the RPATH of the extension, and those paths are in
@@ -73,9 +82,15 @@ SYM_SIZE = 24
 SHDR_SIZE = 64
 ISOC23 = b"__isoc23_"
 
-# The node that defines every name this file moves a symbol to. It is the base
-# node of both supported architectures, so it is present in every object.
-BASE_NODE = b"GLIBC_2.2.5"
+# The node that defines every name this file moves a symbol to, by `e_machine`.
+# The head of this file gives the measurement behind each entry. An architecture
+# that is absent here is a failure, and never a silent pass.
+EM_X86_64 = 62
+EM_AARCH64 = 183
+BASE_NODES = {
+    EM_X86_64: b"GLIBC_2.2.5",
+    EM_AARCH64: b"GLIBC_2.17",
+}
 
 # A name that is not an `__isoc23_` rename but that the base node still defines.
 # glibc 2.38 gave `fmod` a second node, and the first one remains.
@@ -113,6 +128,7 @@ class Elf:
 
     def __init__(self, data: bytearray) -> None:
         self.data = data
+        self.machine: int = struct.unpack_from("<H", data, 0x12)[0]
         shoff: int = struct.unpack_from("<Q", data, 0x28)[0]
         shnum: int = struct.unpack_from("<H", data, 0x3C)[0]
         shstrndx: int = struct.unpack_from("<H", data, 0x3E)[0]
@@ -170,8 +186,11 @@ class Versions(NamedTuple):
     nodes: dict[int, bytes]
     # The offset of the `Elf64_Vernaux` entry of each version index.
     entry_at: dict[int, int]
-    # The index of `GLIBC_2.2.5`, which every lowered symbol moves onto.
+    # The index of the base node, which every lowered symbol moves onto.
     base: int
+    # The name of that node. It differs by architecture, so it is read from the
+    # object and never assumed.
+    base_name: bytes
 
 
 def elf_hash(name: bytes) -> int:
@@ -222,12 +241,27 @@ def _lower_symbols(
     return changed, remaining
 
 
-def _abi_markers(versions: Versions) -> list[str]:
+def _abi_markers(nodes: dict[int, bytes]) -> list[str]:
     """Report each `GLIBC_ABI_*` node. A rename cannot reach one, and must not."""
     return [
         f"{node.decode()} -- {ABI_MARKERS.get(node, 'No correction is on record for this marker.')}"
-        for node in versions.nodes.values()
+        for node in nodes.values()
         if node.startswith(b"GLIBC_ABI_")
+    ]
+
+
+def _unreachable(nodes: dict[int, bytes], ceiling: tuple[int, ...], base_name: bytes) -> list[str]:
+    """Report each node above the ceiling when the object omits the base node.
+
+    A rename moves a symbol onto an entry that is already in `.gnu.version_r`.
+    With no such entry there is nowhere to point, and this file adds none: a new
+    entry resizes the section and moves every offset after it.
+    """
+    return [
+        f"{node.decode()} -- the object does not reference {base_name.decode()}, so a rename has no entry to point at."
+        for node in sorted(
+            {name for name in nodes.values() if name.startswith(b"GLIBC_") and version_key(name) > ceiling}
+        )
     ]
 
 
@@ -246,7 +280,7 @@ def _rename_unused_nodes(
     for index, node in versions.nodes.items():
         if index in used or not node.startswith(b"GLIBC_") or version_key(node) <= ceiling:
             continue
-        struct.pack_into("<I", data, versions.entry_at[index], elf_hash(BASE_NODE))
+        struct.pack_into("<I", data, versions.entry_at[index], elf_hash(versions.base_name))
         struct.pack_into("<I", data, versions.entry_at[index] + 8, base_name_off)
 
 
@@ -264,15 +298,26 @@ def lower(path: Path, ceiling: tuple[int, ...]) -> tuple[int, list[str]]:
         return 0, []
 
     nodes, entry_at = read_version_nodes(elf, verneed, elf.sections[dynsym.link].offset)
-    base = next((i for i, name in nodes.items() if name == BASE_NODE), None)
+    # A marker has no symbol, so `_lower_symbols` never sees one. It is a failure
+    # whether or not this object has anything to lower, so it is collected here
+    # and it survives each early return below.
+    markers = _abi_markers(nodes)
+
+    base_name = BASE_NODES.get(elf.machine)
+    if base_name is None:
+        return 0, [*markers, f"e_machine {elf.machine} has no base version node on record."]
+
+    # **An absent base node is a failure, and not an early return.** It was an
+    # early return, and the aarch64 build then lowered nothing and reported
+    # nothing: `GLIBC_2.2.5` was hard-coded, and no aarch64 object holds it.
+    base = next((i for i, name in nodes.items() if name == base_name), None)
     if base is None:
-        return 0, []
-    versions = Versions(nodes=nodes, entry_at=entry_at, base=base)
+        return 0, [*markers, *_unreachable(nodes, ceiling, base_name)]
+
+    versions = Versions(nodes=nodes, entry_at=entry_at, base=base, base_name=base_name)
 
     changed, remaining = _lower_symbols(elf, dynsym, versym, versions, ceiling)
-    # A marker has no symbol, so the loop above never sees one. It is a failure
-    # whether or not this object had anything to lower.
-    remaining += _abi_markers(versions)
+    remaining += markers
     if not changed:
         return 0, remaining
 
@@ -299,7 +344,7 @@ def main() -> int:
 
         changed, remaining = lower(path, ceiling)
         if changed:
-            sys.stdout.write(f"lower-glibc: {path.name}: {changed} symbols lowered to {BASE_NODE.decode()}\n")
+            sys.stdout.write(f"lower-glibc: {path.name}: {changed} symbols lowered to the base node\n")
         if remaining:
             failed = True
             listed = "".join(f"  {symbol}\n" for symbol in sorted(set(remaining)))
