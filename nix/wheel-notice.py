@@ -7,7 +7,7 @@ redistributor to carry the licence text and the copyright notice. This module
 writes both, and it fails the build when it cannot.
 
 **It reads the objects that are in the wheel.** The build closure is larger:
-`nix/zig-nix.nix` also builds zlib, attr, lzo and libev, and `auditwheel`
+`nix/nix-closure.nix` also builds zlib, attr, lzo and libev, and `auditwheel`
 bundles none of the four. A notice taken from the closure would name a GPL
 library that the wheel does not carry.
 
@@ -157,7 +157,7 @@ def main() -> int:
         sys.stderr.write(
             "wheel-notice: these objects belong to no package of the closure:\n"
             + "".join(f"  {name}\n" for name in sorted(unresolved))
-            + "  A library reached the wheel from outside `nix/zig-nix.nix`, so its\n"
+            + "  A library reached the wheel from outside `nix/nix-closure.nix`, so its\n"
             "  licence is unknown. Add the package to that file.\n"
         )
         return 1

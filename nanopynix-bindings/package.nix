@@ -206,8 +206,8 @@ buildPythonPackage (
         # that a `catch` clause names then gets a *local* `type_info` here,
         # which the loader cannot merge with the copy that `libnixexpr.so`
         # exports. libstdc++ falls back to comparing the two by name and still
-        # matches. The libc++abi that zig links compares them by address, so it
-        # never matches, and the zig build broke in two ways at once:
+        # matches. A libc++abi compares them by address, so it never matches,
+        # and the wheel build broke in two ways at once when it used one:
         #
         # 1. Every Nix error reached Python as `SystemError`, "exception could
         #    not be translated". No clause of `src/nix_errors.cpp` matched --
@@ -228,20 +228,18 @@ buildPythonPackage (
         #   -fvisibility=default                         correct
         #   gcc, -fvisibility=hidden                     correct
         #
-        # `-D_LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION=3` does **not** correct
-        # it: that macro changes an inline comparison in `<typeinfo>`, and the
-        # comparison that decides a `catch` is inside the libc++abi that zig
-        # already built.
-        #
-        # **Here, and not in `nix/zig-stdenv.nix`.** On the whole closure the
+        # **Here, and not in `nix/cxx-stdenv.nix`.** On the whole closure the
         # flag hides the API of every C library that exports by default
         # visibility. `attr` was the first to stop: `libattr.so` built, and the
         # `attr` tool beside it could not link against it
         # (`undefined symbol: attr_get`).
         #
-        # It applies to the gcc build as well. That build is correct without
-        # it, because libstdc++ compares by name, but one flag for both keeps
-        # the two builds the same shape.
+        # **Every build here is a libstdc++ build now, so the flag guards
+        # nothing that is measured today.** The table above says gcc with
+        # `-fvisibility=hidden` alone is correct, because libstdc++ compares by
+        # name. It stays because it costs nothing and it keeps the extension
+        # correct if a build with a libc++ ever returns; removing it is a
+        # rebuild of the closure to prove a result the table already gives.
         #
         # cc-wrapper appends `NIX_CFLAGS_COMPILE` after the command line that
         # cmake writes, so this wins over nanobind's `-fvisibility=hidden`.

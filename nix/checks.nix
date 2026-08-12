@@ -65,12 +65,6 @@ let
       # `check-shell` below. `writeShellApplication` shellchecks only the
       # scripts that it generates, and none of these is one of those.
       ../scripts
-      # The one hand-written shell file outside `scripts/`. `runCommand` puts
-      # it through `substitute`, which reads no script and checks nothing, so
-      # it arrived under the same gap that `scripts/` was in. It is the C
-      # compiler of the whole zig closure, so a fault in it is a fault in every
-      # package of that closure.
-      ../nix/zig-cc-wrapper.sh
       # The licence step of the wheel build. It runs inside a derivation, so
       # no test imports it and only these gates read it. It is also the check
       # that stops an unattributed library reaching PyPI, so a fault in it is
@@ -79,6 +73,11 @@ let
       # The gate step of the same build, and here for the same reason. A
       # fault in it is a gate that passes, which is worse than no gate.
       ../nix/wheel-gates.py
+      # The rewrite that lowers the glibc floor of every object of the wheel
+      # closure. It runs as a setup hook inside each build, so no test imports
+      # it either, and a fault in it is a wheel that installs and then fails to
+      # load on the oldest host it claims.
+      ../nix/lower-glibc.py
       # Tracked, and therefore in scope, although it holds one module and no
       # project of its own. With it the gate reads 259 Python files, which is
       # what `ruff format --check .` reads in the dev shell. Without it the
@@ -158,21 +157,12 @@ in
   # nanopynix/tests.nix and no hand-written file, so these three grew without a
   # gate. `-x` follows a `source`, and the scripts are the only shell here.
   #
-  # `nix/zig-cc-wrapper.sh` joins them, in a second command and not in that
-  # one. Three things make it separate:
-  #
-  # - It is `sh` and the others are bash, and one invocation takes one shell.
-  # - Its shebang is `@shell@`, the placeholder that `substitute` replaces with
-  #   the real path, so SC2239 reports it and the report is wrong.
-  # - **The rule and the reason live here, and not in the file.** `substitute`
-  #   copies that file into the store, so its hash is the hash of the C
-  #   compiler of the zig closure. A comment in it rebuilds all 39 packages.
-  #   Measured: three lines of `# shellcheck ...` asked for a rebuild of the
-  #   whole closure, and this repository builds that closure on a shared
-  #   machine of nix-community.
+  # The wheel closure needed a compiler wrapper of its own until it moved back
+  # onto the gcc stdenv of nixpkgs, and that wrapper was the second command
+  # here. It is gone, and so is the exception it needed.
   shell = mkCheck "shell" [
     shellcheck
-  ] "shellcheck -x scripts/*.sh && shellcheck -x --shell=sh -e SC2239 nix/zig-cc-wrapper.sh";
+  ] "shellcheck -x scripts/*.sh";
 
   # The vendored library's own suite. See this file's header for why it is a
   # gate here and not a check phase.
