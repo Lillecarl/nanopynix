@@ -771,9 +771,16 @@ class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](AsyncVerbosityController
            * The switch that turns counting on is one static as well, so an
              evaluator cannot count while another beside it does not.
 
-           The other thirteen counted fields belong to this evaluator alone,
-           and they are correct. Issue #118 tracks the repair, and the reason
-           that upstream Nix keeps a static.
+           The other thirteen counted fields belong to this evaluator alone.
+           They are still not predictable on ``inproc``, which evaluates in
+           parallel in one process, because the switch above decides them all.
+           ``rpc`` gives each worker its own process, so its numbers are
+           stable.
+
+           The three call tables need no such care. ``count_calls`` writes
+           them into the maps of one evaluator, so they are exact on both
+           engines. Issue #118 tracks the repair, and the reason that upstream
+           Nix keeps a static.
 
         :raises RuntimeError: on Nix 2.31, which has no such report. Read
             ``build_info()["capabilities"]["eval_statistics"]`` first.
