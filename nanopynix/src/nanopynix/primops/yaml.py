@@ -2,8 +2,10 @@
 
 .. note::
    Primop registration (both these YAML primops and custom
-   ``Session(primops=..., primop_callables=...)`` registration) is broken on
-   Nix 2.31 and is not expected to be fixed there — it requires Nix >= 2.32.
+   ``Session(primops=..., primop_callables=...)`` registration) requires
+   Nix >= 2.32. Every supported Nix meets that, because ``supportedNixFloor``
+   is 2.34. Registration is broken on Nix 2.31 and is not expected to be fixed
+   there, which matters only if you link that version yourself.
 """
 
 from __future__ import annotations

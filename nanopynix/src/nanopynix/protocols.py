@@ -782,8 +782,10 @@ class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](AsyncVerbosityController
            engines. Issue #118 tracks the repair, and the reason that upstream
            Nix keeps a static.
 
-        :raises RuntimeError: on Nix 2.31, which has no such report. Read
-            ``build_info()["capabilities"]["eval_statistics"]`` first.
+           ``build_info()["capabilities"]["eval_statistics"]`` reports whether
+           this build has the report at all. It is ``True`` on every supported
+           Nix, because the patch that exposes the statistics reaches 2.34 and
+           later, and ``supportedNixFloor`` is 2.34.
         """
         ...
 

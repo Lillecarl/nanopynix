@@ -506,11 +506,7 @@ std::string PyValue::repr() {
 static nix::SourcePath lookup_file_arg(nix::EvalState &state, std::string_view s) {
     if (nix::EvalSettings::isPseudoUrl(s)) {
         auto accessor = nix::fetchers::downloadTarball(
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-            state.store,
-#else
             *state.store,
-#endif
             state.fetchSettings, nix::EvalSettings::resolvePseudoUrl(s));
         auto storePath = nix::fetchToStore(
             state.fetchSettings, *state.store, nix::SourcePath(accessor), nix::FetchMode::Copy);
@@ -521,14 +517,8 @@ static nix::SourcePath lookup_file_arg(nix::EvalState &state, std::string_view s
         nix::experimentalFeatureSettings.require(nix::Xp::Flakes);
         auto flakeRef =
             nix::parseFlakeRef(state.fetchSettings, std::string(s.substr(6)), {}, true, false);
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        // resolve()/lazyFetch() read the fetch settings off the store's own
-        // state before 2.32; they grew explicit Settings parameters after.
-        auto [accessor, lockedRef] = flakeRef.resolve(state.store).lazyFetch(state.store);
-#else
         auto [accessor, lockedRef] = flakeRef.resolve(state.fetchSettings, *state.store)
                                          .lazyFetch(state.fetchSettings, *state.store);
-#endif
         auto storePath = nix::fetchToStore(
             state.fetchSettings, *state.store, nix::SourcePath(accessor), nix::FetchMode::Copy,
             lockedRef.input.getName());
@@ -539,11 +529,7 @@ static nix::SourcePath lookup_file_arg(nix::EvalState &state, std::string_view s
     if (s.size() > 2 && s.front() == '<' && s.back() == '>')
         return state.findFile(std::string(s.substr(1, s.size() - 2)));
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    return state.rootPath(nix::absPath(s));
-#else
     return state.rootPath(nix::absPath(std::filesystem::path{s}).string());
-#endif
 }
 
 // =========================================================================
@@ -571,11 +557,7 @@ void PyEvalState::begin_repl() {
 
     constexpr size_t repl_env_size = 32768;
     repl_static_env = std::make_shared<nix::StaticEnv>(nullptr, state->staticBaseEnv);
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    repl_env = &state->allocEnv(repl_env_size);
-#else
     repl_env = &state->mem.allocEnv(repl_env_size);
-#endif
     repl_env->up = &state->baseEnv;
     repl_displ = 0;
     // The one place the size is named. Every bounds check reads it back from
@@ -662,54 +644,6 @@ std::optional<PyValue> PyEvalState::repl_process_line(const std::string &line, c
     nb::gil_scoped_release release;
     auto basePath = state->rootPath(nix::CanonPath(path));
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    // Nix 2.31 has no parseReplBindings(). Preserve the core REPL contract
-    // with simple identifier assignments; newer Nix versions use its full
-    // binding parser below (including inherit forms).
-    auto trim = [](std::string_view value) {
-        auto first = value.find_first_not_of(" \t\n\r");
-        if (first == std::string_view::npos)
-            return std::string_view{};
-        return value.substr(first, value.find_last_not_of(" \t\n\r") - first + 1);
-    };
-    auto is_identifier = [](std::string_view name) {
-        if (name.empty() || !(std::isalpha(static_cast<unsigned char>(name.front())) || name.front() == '_'))
-            return false;
-        for (char ch : name.substr(1)) {
-            if (!(std::isalnum(static_cast<unsigned char>(ch)) || ch == '_' || ch == '-' || ch == '\''))
-                return false;
-        }
-        return true;
-    };
-    size_t assignment = std::string::npos;
-    for (size_t i = 0; i < line.size(); ++i) {
-        if (line[i] != '=')
-            continue;
-        bool adjacentEquals = (i > 0 && line[i - 1] == '=') || (i + 1 < line.size() && line[i + 1] == '=');
-        if (!adjacentEquals) {
-            assignment = i;
-            break;
-        }
-    }
-    if (assignment != std::string::npos) {
-        auto name = trim(std::string_view(line).substr(0, assignment));
-        auto expression = trim(std::string_view(line).substr(assignment + 1));
-        if (!expression.empty() && expression.back() == ';')
-            expression = trim(expression.substr(0, expression.size() - 1));
-        if (is_identifier(name) && !expression.empty()) {
-            auto *parsedExpr = state->parseExprFromString(std::string(expression), basePath, repl_static_env);
-            nix::Value &value(*state->allocValue());
-            value.mkThunk(repl_env, parsedExpr);
-            repl_bind(state->symbols.create(name), value);
-            return std::nullopt;
-        }
-    }
-    auto *parsedExpr = state->parseExprFromString(line, basePath, repl_static_env);
-    auto *value = state->allocValue();
-    parsedExpr->eval(*state, *repl_env, *value);
-    state->forceValue(*value, nix::noPos);
-    return PyValue(value, this, alive);
-#else
     nix::ExprAttrs *bindings = nullptr;
     try {
         bindings = state->parseReplBindings(line, basePath, repl_static_env);
@@ -734,7 +668,6 @@ std::optional<PyValue> PyEvalState::repl_process_line(const std::string &line, c
         repl_bind(symbol, value);
     }
     return std::nullopt;
-#endif
 }
 
 std::vector<std::string> PyEvalState::repl_add_attrs(PyValue attrs) {
@@ -771,19 +704,11 @@ std::vector<std::string> PyEvalState::repl_add_attrs(PyValue attrs) {
 
 std::string PyEvalState::statistics_json() const {
     checkThread();
-#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_34
     // `statisticsJSON` walks the counter tables of the evaluator, and the
     // report of a large evaluation is not small. The GIL is not needed for
     // either, so a second thread keeps running while this one builds it.
     nb::gil_scoped_release release;
     return state->statisticsJSON();
-#else
-    throw std::runtime_error(
-        "evaluation statistics need Nix 2.34 or later. The patch that exposes "
-        "them does not apply to 2.31, so this build has no report to give. "
-        "Read `build_info()[\"capabilities\"][\"eval_statistics\"]` before "
-        "you call this function.");
-#endif
 }
 
 std::vector<std::string> PyEvalState::repl_scope_names() const {
@@ -1148,15 +1073,11 @@ static void python_to_value(
         v.mkFloat(nb::cast<double>(obj));
     } else if (nb::isinstance<nb::str>(obj)) {
         auto s = nb::cast<std::string>(obj);
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        v.mkString(s);
-#else
         if (context.empty()) {
             v.mkString(s, state.mem);
         } else {
             v.mkString(s, context, state.mem);
         }
-#endif
     } else if (nb::isinstance<nb::list>(obj)) {
         auto pyList = nb::cast<nb::list>(obj);
         auto builder = state.buildList(pyList.size());
@@ -1225,16 +1146,8 @@ static void python_to_value(
                 .name = anon_name,
                 .args = arg_names,
                 .arity = static_cast<size_t>(arity),
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-                .doc = nullptr,
-#else
                 .doc = std::nullopt,
-#endif
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-                .fun = impl,
-#else
                 .impl = impl,
-#endif
             }));
 
             v.mkPrimOp(anon.get());
@@ -1338,11 +1251,6 @@ static void register_primop(
     const std::string &doc,
     nb::object callback)
 {
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    throw std::runtime_error(
-        "register_primop is unsupported by Nix " NANOPYNIX_NIX_VERSION
-        ": this Nix version has a fixed-capacity builtin attribute set");
-#else
     // Store callback in registry
     auto &reg = py_primop_registry();
     auto [it, _] = reg.insert_or_assign(name, PyPrimOpCallback{callback, arity, doc});
@@ -1358,22 +1266,13 @@ static void register_primop(
         .name = name,
         .args = arg_names,
         .arity = static_cast<size_t>(arity),
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        .doc = registered.doc.empty() ? nullptr : registered.doc.c_str(),
-#else
         .doc = registered.doc.empty() ? std::optional<std::string>{} : std::optional<std::string>{registered.doc},
-#endif
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        .fun = impl,
-#else
         .impl = impl,
-#endif
     };
 
     // Register globally
     nix::RegisterPrimOp r(std::move(*p));
     delete p;
-#endif
 }
 
 // =========================================================================
@@ -2004,7 +1903,6 @@ void nanopynix_bind_expr(nb::module_ &m) {
     // takes a `std::string_view`, which would need <nanobind/stl/string_view.h>
     // and a temporary that outlives the call. One copy of a short string is
     // the cheaper answer.
-#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_34
     // `nix::Counter::enabled` is one static for the whole process, and Nix
     // sets it from `NIX_SHOW_STATS` when libnixexpr loads. Every increment of
     // every counter tests it, so Nix made it a static on purpose: a per
@@ -2023,25 +1921,6 @@ void nanopynix_bind_expr(nb::module_ &m) {
           "tracks the repair, and the reason that Nix keeps a static.");
     m.def("eval_counters_enabled", []() { return nix::Counter::enabled; },
           "Report whether the evaluation counters of the process are on.");
-#else
-    // The module keeps one surface across every supported Nix. A name that
-    // exists on 2.34 and not on 2.31 breaks the import of `nanopynix` itself,
-    // because `__init__.py` names it, and then every test of that version
-    // fails at collection. `nix::Counter` does not exist here, so these two
-    // answer without it. `capabilities["eval_statistics"]` is the test to
-    // make before a caller reaches this.
-    m.def("set_eval_counters_enabled",
-          [](bool) {
-              throw std::runtime_error(
-                  "the evaluation counters need Nix 2.34 or later. The patch that exposes "
-                  "the statistics does not apply to 2.31, so there is nothing to count. "
-                  "Read `build_info()[\"capabilities\"][\"eval_statistics\"]` first.");
-          },
-          "enabled"_a, "Raise, because this Nix has no evaluation statistics.");
-    m.def("eval_counters_enabled", []() { return false; },
-          "Report whether the evaluation counters of the process are on. This Nix has "
-          "no such counters, so the answer is always False.");
-#endif
 
     m.def("is_pseudo_url",
           [](const std::string &value) { return nix::EvalSettings::isPseudoUrl(value); }, "value"_a,

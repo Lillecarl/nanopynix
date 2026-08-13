@@ -54,27 +54,15 @@
 namespace nb = nanobind;
 using namespace nb::literals;
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-using NixGCAction = nix::GCOptions::GCAction;
-constexpr auto gcReturnLive = nix::GCOptions::gcReturnLive;
-constexpr auto gcReturnDead = nix::GCOptions::gcReturnDead;
-constexpr auto gcDeleteDead = nix::GCOptions::gcDeleteDead;
-constexpr auto gcDeleteSpecific = nix::GCOptions::gcDeleteSpecific;
-#else
 using NixGCAction = nix::GCAction;
 constexpr auto gcReturnLive = nix::GCAction::gcReturnLive;
 constexpr auto gcReturnDead = nix::GCAction::gcReturnDead;
 constexpr auto gcDeleteDead = nix::GCAction::gcDeleteDead;
 constexpr auto gcDeleteSpecific = nix::GCAction::gcDeleteSpecific;
-#endif
 
 template<typename Path>
 static std::string nix_path_to_string(const Path &path) {
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    return path;
-#else
     return path.string();
-#endif
 }
 
 // =========================================================================
@@ -132,11 +120,7 @@ static nb::dict path_info_to_dict(nix::Store &s, const nix::ValidPathInfo &info)
     // this file already has and it is correct for every version actually built
     // (2.31, 2.34, 2.35); the exact release that changed it was not measured.
     nb::list sigs;
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    for (auto &sig : info.sigs) sigs.append(sig);
-#else
     for (auto &sig : nix::Signature::toStrings(info.sigs)) sigs.append(sig);
-#endif
     d["sigs"] = sigs;
 
     return d;
@@ -178,16 +162,9 @@ static std::shared_ptr<nix::Store> open_store_default() {
 }
 
 static void close_store(nix::Store &store) {
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    // Nix 2.31 has no RemoteStore::shutdownConnections(). The Python owner
-    // drops its final shared_ptr immediately after this call, so the
-    // RemoteStore destructor closes the pooled daemon connections via RAII.
-    (void) store;
-#else
     if (auto *remote_store = dynamic_cast<nix::RemoteStore *>(&store)) {
         remote_store->shutdownConnections();
     }
-#endif
 }
 
 static void process_connection(std::shared_ptr<nix::Store> store, int fd, bool trusted, bool recursive) {
@@ -705,15 +682,6 @@ static nix::StorePath write_dev_shell_derivation(
 
         // Drop the derivation checks. A dev shell is not the build, so the
         // reference checks that the build declares must not apply to it.
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        // 2.31 erases the flat variables and leaves `outputChecks` inside a
-        // structured-attrs derivation alone. Matched rather than corrected,
-        // so that `print-dev-env` agrees with the `nix` of the same version.
-        drv.env.erase("allowedReferences");
-        drv.env.erase("allowedRequisites");
-        drv.env.erase("disallowedReferences");
-        drv.env.erase("disallowedRequisites");
-#else
         if (drv.structuredAttrs) {
             drv.structuredAttrs->structuredAttrs.erase("outputChecks");
         } else {
@@ -722,35 +690,12 @@ static nix::StorePath write_dev_shell_derivation(
             drv.env.erase("disallowedReferences");
             drv.env.erase("disallowedRequisites");
         }
-#endif
         drv.env.erase("name");
 
         drv.name += "-env";
         drv.env.emplace("name", drv.name);
         drv.inputSrcs.insert(script_path);
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        if (nix::experimentalFeatureSettings.isEnabled(nix::Xp::CaDerivations)) {
-            for (auto &output : drv.outputs) {
-                output.second = nix::DerivationOutput::Deferred{};
-                drv.env[output.first] = nix::hashPlaceholder(output.first);
-            }
-        } else {
-            for (auto &output : drv.outputs) {
-                output.second = nix::DerivationOutput::Deferred{};
-                drv.env[output.first] = "";
-            }
-            // `Store` still derives from `StoreDirConfig` on this version, so
-            // `makeOutputPath` is on the store itself and not on `.config`.
-            auto hashes_modulo = nix::hashDerivationModulo(s, drv, true);
-            for (auto &output : drv.outputs) {
-                auto out_path = s.makeOutputPath(output.first, hashes_modulo.hashes.at(output.first), drv.name);
-                output.second = nix::DerivationOutput::InputAddressed{.path = out_path};
-                drv.env[output.first] = s.printStorePath(out_path);
-            }
-        }
-        result.emplace(nix::writeDerivation(s, drv));
-#else
         // Only the two addressed kinds become deferred. CAFloating, Deferred
         // and Impure already have no path to invalidate.
         for (auto &[output_name, output] : drv.outputs) {
@@ -768,7 +713,6 @@ static nix::StorePath write_dev_shell_derivation(
         }
         drv.fillInOutputPaths(s);
         result.emplace(s.writeDerivation(drv));
-#endif
     }
     return *result;
 }

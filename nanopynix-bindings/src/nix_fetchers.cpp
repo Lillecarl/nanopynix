@@ -54,13 +54,7 @@ struct PyInput {
 
     std::optional<std::string> get_fingerprint(nix::Store &store) const {
         nb::gil_scoped_release release;
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        return input.getFingerprint(nix::ref<nix::Store>(store.shared_from_this()));
-#elif NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35
         return input.getFingerprint(store);
-#else
-        return input.getFingerprint(store);
-#endif
     }
 };
 

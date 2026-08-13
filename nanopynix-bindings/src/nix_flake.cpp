@@ -124,9 +124,7 @@ struct PyLockedFlake {
                 nix::CanonPath(relPath),
                 lockFileStr + "\n",
                 std::nullopt);
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-            // SourcePath did not expose a cache invalidation hook yet.
-#elif NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35
             locked->flake.lockFilePath().invalidateCache();
 #else
             // SourcePath cache invalidation was removed in Nix 2.35.
@@ -207,17 +205,11 @@ static PyLockedFlake lock_flake(
     }
 
     for (const auto &input : input_updates) {
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        if (input.empty())
-            throw std::runtime_error("input path cannot be empty: '" + input + "'");
-        lockFlags.inputUpdates.insert(nix::flake::parseInputAttrPath(input));
-#else
         auto path = nix::flake::NonEmptyInputAttrPath::parse(input);
         if (!path)
             throw std::runtime_error(
                 "input path cannot be empty: '" + input + "'");
         lockFlags.inputUpdates.insert(*path);
-#endif
     }
 
     std::unique_ptr<nix::flake::LockedFlake> locked;
@@ -288,15 +280,11 @@ static std::string metadata_json(PyEvalState &es, PyLockedFlake &lf) {
         // all three.
         j["path"] = store->printStorePath(store->toStorePath(flake.path.path.abs()).first);
         j["locks"] = lockedFlake.lockFile.toJSON().first;
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-        // getFingerprint took a `ref<Store>` until Nix 2.32, and takes a `Store &`
-        // from that version on. This is the only version difference in the whole
-        // lock-file surface: `InputAttrPath`, `Node::Edge`, `findInput` and
-        // `toJSON` are identical in Nix 2.31, 2.34 and 2.35.
-        auto fingerprint = lockedFlake.getFingerprint(nix::ref<nix::Store>(store), es.fetchSettings);
-#else
+        // No version difference is left in the whole lock-file surface:
+        // `InputAttrPath`, `Node::Edge`, `findInput`, `toJSON` and
+        // `getFingerprint` are identical in Nix 2.34 and 2.35. `getFingerprint`
+        // took a `ref<Store>` below the supported floor.
         auto fingerprint = lockedFlake.getFingerprint(*store, es.fetchSettings);
-#endif
         if (fingerprint)
             j["fingerprint"] = fingerprint->to_string(nix::HashFormat::Base16, false);
 

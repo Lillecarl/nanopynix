@@ -54,12 +54,10 @@ exactly as the store it delegates to. For five of the fifteen it *runs* the
 middle without *pinning* it: see :data:`DELEGATION_INDISTINGUISHABLE_FROM_BASE`,
 which names them and says, per operation, what was measured.
 
-``TestTheUndispatchableCaseIsSaidOutLoud`` covers the one name on that list
-that some builds cannot dispatch at all. There the dead method is unavoidable
--- Nix declares ``Store::readDerivation`` non-virtual before 2.32 -- so what is
-pinned instead is that it is *announced*, by a warning at store-open time and a
-``build_info()`` capability. Its two tests are version-marked rather than
-runtime-branched, so a build that skipped one says so in the report.
+Every operation on that list dispatches on every supported Nix. One did not:
+``Store::readDerivation`` was non-virtual before 2.32, so a store's override
+was never called, and a class here pinned the warning that said so. Issue #126
+raised the floor to 2.34 and issue #129 deleted both the warning and the class.
 
 Registration is process-global and cannot be undone, so each store here gets a
 unique scheme; otherwise re-registering under a parametrized run would raise.
@@ -68,13 +66,12 @@ unique scheme; otherwise re-registering under a parametrized run would raise.
 from __future__ import annotations
 
 import itertools
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
-from nanopynix_bindings import store as nanopynix_store, util as nanopynix_util
+from nanopynix_bindings import store as nanopynix_store
 
 import nanopynix
-from nanopynix import LogCollector
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -528,23 +525,10 @@ INVOCATIONS: dict[str, Callable[[Any], Any]] = {
     "read_derivation": lambda s: s.read_derivation(nanopynix_store.StorePath(f"{BOGUS}.drv")),
 }
 
-# Operations the interface advertises everywhere but only *dispatches* on some
-# builds, and the `build_info()` capability that says which.
-#
-# There is exactly one, and it is not a soft spot in the interface: keeping
-# `read_derivation` in `DISPATCHABLE_METHODS` on every version is what makes a
-# 2.31 store's override visible at all -- `__init_subclass__` only records names
-# that list contains. The gate belongs here rather than as a skip on the whole
-# sweep, so that the other fourteen operations stay covered on 2.31.
-CAPABILITY_GATED: dict[str, str] = {"read_derivation": "store_impl_read_derivation"}
-
-
-def _dispatch_is_available(name: str) -> bool:
-    capability = CAPABILITY_GATED.get(name)
-    if capability is None:
-        return True
-    info: Any = nanopynix.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- build_info from C++ extension has no stubs
-    return cast("dict[str, bool]", info["capabilities"])[capability]
+# A `CAPABILITY_GATED` table stood here, mapping `read_derivation` to the
+# `build_info()` capability that said whether a build could dispatch it. Every
+# supported Nix dispatches every operation on the list now, so each reader of
+# that table skipped nothing. Issue #129 removed it with the branch it guarded.
 
 
 # A derivation in Nix's own ATerm spelling, which is what a Python store returns
@@ -711,17 +695,11 @@ class TestTheWholeDispatchableInterface:
         this test exists not to do. Whether an operation *answers* is asserted
         by its own test just below; the only claim here is that it arrived.
 
-        Operations in ``CAPABILITY_GATED`` are passed over on a build that
-        cannot dispatch them, rather than skipping the sweep: "this Nix has no
-        hook for it" and "the hook is wired to nothing" are different claims,
-        and only the second is a defect.
         """
         store = register_and_open(RecordingStore)
 
         never_dispatched: list[str] = []
         for name, invoke in INVOCATIONS.items():
-            if not _dispatch_is_available(name):
-                continue
             RecordingStore.calls = []
             outcome(lambda i=invoke: i(store))
             if name not in RecordingStore.calls:
@@ -892,8 +870,6 @@ class TestReadDerivationIsServedByNixSOwnParser:
         from ``env`` distinguishes "parsed" from "handed back", which asserting
         on ``builder`` or ``system`` alone would not.
         """
-        if not _dispatch_is_available("read_derivation"):
-            pytest.skip("this Nix cannot dispatch read_derivation")
         RecordingStore.calls = []
         store = register_and_open(RecordingStore)
 
@@ -915,8 +891,6 @@ class TestReadDerivationIsServedByNixSOwnParser:
         because that is the only thing telling a caller *which* store object was
         unreadable.
         """
-        if not _dispatch_is_available("read_derivation"):
-            pytest.skip("this Nix cannot dispatch read_derivation")
 
         class ReturnsGarbage(nanopynix.StoreImpl):
             def read_derivation(self, path: str) -> str:
@@ -970,8 +944,6 @@ class TestReadDerivationIsServedByNixSOwnParser:
         types, since on a path that is not a derivation both sides raise
         ``Error`` and only the message says which failure it was.
         """
-        if not _dispatch_is_available("read_derivation"):
-            pytest.skip("this Nix cannot dispatch read_derivation")
 
         class Delegating(nanopynix.StoreImpl):
             underlying_store = store
@@ -988,80 +960,6 @@ class TestReadDerivationIsServedByNixSOwnParser:
             store.read_derivation(store_seeded_path)
 
         assert str(delegated.value) == str(direct.value)
-
-
-def _warnings_from_opening(python_store_cls: type[Any]) -> list[str]:
-    """Nix *warnings* emitted while opening a store of ``python_store_cls``.
-
-    ``nix::warn`` goes to ``nix::logger``, not to Python's ``warnings``
-    module, so neither ``pytest.warns`` nor ``caplog`` sees it. Installing a
-    collector for the duration of the open is the only way to observe it, and
-    ``drain()`` is the synchronous side of that collector -- ``open_store`` is
-    a blocking call with no event loop to stream from.
-
-    ``PyLogger`` overrides ``Logger::warn`` outright rather than letting it
-    fall through to ``log(lvlWarn, ...)``, so a warning arrives as its own
-    ``"warn"`` action with the text at index 3, where an ordinary ``"msg"``
-    carries a level first and the text at index 4. Selecting on the action is
-    therefore part of the assertion, not plumbing: it distinguishes a warning
-    from an info line that happens to mention the same method.
-    """
-    collector = LogCollector()
-    nanopynix_util.install_logger(collector.callback)
-    try:
-        register_and_open(python_store_cls)
-    finally:
-        nanopynix_util.remove_logger()
-    return [event[3] for event in collector.drain() if event[2] == "warn"]
-
-
-class TestTheUndispatchableCaseIsSaidOutLoud:
-    """What a build that cannot dispatch ``read_derivation`` does about it.
-
-    ``Store::readDerivation`` is non-virtual before Nix 2.32, so there is no
-    hook to install and a store's override is never called. The defect that
-    would produce -- a method that exists, type-checks and is silently dead --
-    is exactly what the rest of this file exists to prevent, so the 2.31 build
-    warns at store-open time and ``build_info()`` carries the fact as a
-    capability.
-
-    **This class had two halves, and 2.31 took one of them away.** The other
-    half asserted the warning is emitted, under ``maximum="2.32"``, and 2.31
-    was the only job that ran it. Issue #126 raised the supported floor to
-    2.34, so that test could never run again and it is gone.
-
-    What went with it is a positive control, and this is a real loss rather
-    than a tidy-up. The test that remains asserts an *absence*, so it also
-    passes when the collector captures nothing at all. That is not
-    hypothetical: an earlier draft of :func:`_warnings_from_opening` read the
-    wrong tuple index, this test passed anyway, and the 2.31 half is what
-    failed and said so.
-
-    **The follow-up that closes the hole is to delete the warning.** Every
-    supported version dispatches, so the ``#if`` branch that emits it is now
-    unreachable in each build this repository makes. Remove that branch from
-    the bindings and this test goes with it, and nothing is left asserting an
-    absence with no control. Do not instead re-add a version below the floor.
-    Issue #129 tracks that removal, together with the other 32 branches that
-    the floor made dead.
-    """
-
-    def test_a_build_with_dispatch_says_nothing(self) -> None:
-        """A build that *can* dispatch must not warn about it.
-
-        Read the class docstring before trusting this test: it asserts an
-        absence, and the half that proved the collector works at all left with
-        Nix 2.31.
-        """
-
-        class ImplementsIt(nanopynix.StoreImpl):
-            def read_derivation(self, path: str) -> str:
-                return RECORDED_DRV_ATERM
-
-        warnings = _warnings_from_opening(ImplementsIt)
-
-        assert not [text for text in warnings if "read_derivation" in text], warnings
-        assert _dispatch_is_available("read_derivation") is True
 
 
 def outcome(call: Callable[[], Any]) -> tuple[str, Any]:
@@ -1163,8 +1061,6 @@ class TestEveryOperationDelegates:
         exception type for the same reason -- an operation that raises on both
         is still delegating, whereas one that raises only when wrapped is not.
         """
-        if not _dispatch_is_available(name):
-            pytest.skip(f"this Nix cannot dispatch {name}, so there is no delegation branch")
 
         class Delegating(nanopynix.StoreImpl):
             underlying_store = store
