@@ -30,6 +30,8 @@
   pyright,
   shellcheck,
   pythonSet,
+  nixos,
+  pynixd,
 }:
 let
   # Only the trees the gates read. An allowlist, and not the shared denylist
@@ -177,6 +179,32 @@ let
     pynixd = [ "test" ];
   };
 
+  # A minimum NixOS configuration, so that the module of pynixd is evaluated.
+  # `nixos` needs a boot loader, a root filesystem and a state version before
+  # it evaluates anything at all, and none of the three says anything about
+  # pynixd.
+  evalModule =
+    settings:
+    (nixos {
+      # `settings` goes in `imports`, and is not merged with `//`. The
+      # operator replaces a whole key, so `{ services.pynixd.package = ...; }
+      # // { services.pynixd.enable = true; }` loses the package.
+      imports = [
+        ../pynixd/nix/nixos
+        settings
+      ];
+      boot.loader.grub.enable = false;
+      fileSystems."/" = {
+        device = "/dev/null";
+        fsType = "ext4";
+      };
+      system.stateVersion = "25.05";
+      services.pynixd.package = pynixd;
+    }).config;
+
+  enabled = evalModule { services.pynixd.enable = true; };
+  disabled = evalModule { };
+
   mkCheck =
     name: nativeBuildInputs: command:
     runCommand "nanopynix-check-${name}" { inherit nativeBuildInputs; } ''
@@ -252,6 +280,30 @@ in
   pynixd = mkCheck "pynixd" [
     pynixdEnv
   ] "cd pynixd && python -m pytest -p no:cacheprovider tests/unit";
+
+  # The NixOS module of pynixd, evaluated. It is the only module this
+  # repository ships, and `flake.nix` exposes it as `nixosModules.pynixd`.
+  # Nothing else reads it, so without this gate a rename of an option or a
+  # type error would first be seen by a person rebuilding their system.
+  #
+  # The second half is a regression test. `environment.systemPackages` used to
+  # sit in a second element of a `mkMerge`, outside the `mkIf cfg.enable`, so
+  # importing the module installed pynixd whether or not the service was
+  # enabled. A module that does something when it is disabled cannot be
+  # imported and left alone.
+  nixos-module =
+    let
+      unit = enabled.systemd.services.pynixd.serviceConfig;
+      installedWhenEnabled = builtins.elem pynixd enabled.environment.systemPackages;
+      installedWhenDisabled = builtins.elem pynixd disabled.environment.systemPackages;
+    in
+    assert unit.ExecStart == "${lib.getExe pynixd} daemon";
+    assert enabled.environment.etc."pynixd/pynixd.json".source != null;
+    assert installedWhenEnabled;
+    assert !installedWhenDisabled;
+    runCommand "nanopynix-check-nixos-module" { } ''
+      echo "services.pynixd evaluates, and installs nothing while disabled" > "$out"
+    '';
 
   # The plugin every other suite in this repository reports through, gated for
   # the first time. See this file's header.
