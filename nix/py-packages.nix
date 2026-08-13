@@ -157,6 +157,12 @@ let
         platforms = lib.platforms.unix;
       };
     };
+
+    test-support = _pySelf: rendered: {
+      meta = rendered.meta // {
+        platforms = lib.platforms.unix;
+      };
+    };
   };
 
   # Per-project options. No `extras` here on purpose: the renderer's `extras`
@@ -187,6 +193,9 @@ let
     nanopynix = { };
     nanopynix-helpers = { };
     pynix = { };
+    # The helpers that every suite here shares. Editable like the rest, so a
+    # change to a helper is live in the dev shell without a rebuild.
+    test-support = { };
     # In the set so the dev shell can install it editable -- pytest-agent is
     # developed here alongside everything else. Deliberately *not* in the
     # test runner's venv: it auto-activates on import and would start writing

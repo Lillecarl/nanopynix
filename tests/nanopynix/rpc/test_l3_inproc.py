@@ -33,7 +33,7 @@ from nanopynix.rpc.client._pool import WorkerClient
 from nanopynix.rpc.client._session import EvalSession, ValueReleasedError
 from nanopynix.rpc.client.store import StoreHandle
 from nanopynix.rpc.worker._worker import WorkerServiceHandler, WorkerState, worker_service_factory
-from tests.support.git import init_flake_repo
+from test_support.git_fixtures import init_flake_repo
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

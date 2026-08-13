@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 
 import anyio
 
-from tests.support.subprocess_output import run_process
+from test_support.subprocess_output import run_process
 
 if TYPE_CHECKING:
     from pathlib import Path

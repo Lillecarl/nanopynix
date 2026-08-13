@@ -17,7 +17,7 @@ import nanopynix
 from nanopynix._ansi import strip_ansi
 from nanopynix.exceptions import StoreError
 from pynix import Pynix
-from tests.support.git import init_flake_repo
+from test_support.git_fixtures import init_flake_repo
 from tests.support.nix_environment import with_nixpkgs
 
 if TYPE_CHECKING:

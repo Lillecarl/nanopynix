@@ -12,7 +12,7 @@ import pytest
 from nanopynix_bindings import expr as nanopynix_expr
 
 import nanopynix
-from tests.support.notes import note
+from test_support.notes import note
 
 if TYPE_CHECKING:
     from collections.abc import Callable

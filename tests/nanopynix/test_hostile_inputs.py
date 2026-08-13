@@ -45,7 +45,7 @@ from nanopynix_proto.nix.eval import AttrRequest
 import nanopynix
 from nanopynix import stores
 from nanopynix.exceptions import EvalSessionClosedError
-from tests.support.notes import note
+from test_support.notes import note
 from tests.support.worker_death import expect_the_worker_to_die
 
 if TYPE_CHECKING:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import atexit
-import functools
 import importlib
 import importlib.util
 import inspect
@@ -21,15 +20,14 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 # early; see the hook's module docstring.
 importlib.import_module("tests.support.beartype_hook")
 
-import anyio  # noqa: E402 -- see hook install above
 import coverage  # noqa: E402 -- see hook install above
 import pytest  # noqa: E402 -- see hook install above
 from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util  # noqa: E402 -- see hook install above
 
 import nanopynix  # noqa: E402 -- see hook install above
 from nanopynix.settings import DEFAULT_EXPERIMENTAL_FEATURES  # noqa: E402 -- see hook install above
-from tests.support.hang_report import hang_report  # noqa: E402 -- see hook install above
-from tests.support.subprocess_output import run_process  # noqa: E402 -- see hook install above
+from test_support.deadline import with_test_timeout  # noqa: E402 -- see hook install above
+from test_support.subprocess_output import run_process  # noqa: E402 -- see hook install above
 
 pytest_plugins = (
     "tests.support.lsp_environment",
@@ -38,35 +36,14 @@ pytest_plugins = (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Generator, Iterable, Iterator
+    from collections.abc import Generator, Iterable, Iterator
 
     from tests.support.nix_environment import NixTestEnvironment
 
-# Async tests can hang indefinitely on a wedged subprocess/pipe instead of
-# failing (e.g. a Nix worker that stops responding never raises an error, it
-# just never wakes the awaiting task up). Every async test gets wrapped in
-# this deadline so a hang becomes a clear TimeoutError on that one test
-# instead of the whole pytest run — and therefore the whole CI job — never
-# returning. Override via NANOPYNIX_TEST_TIMEOUT for slower environments.
-_ASYNC_TEST_TIMEOUT = float(os.environ.get("NANOPYNIX_TEST_TIMEOUT", "120"))
-
-
-def _with_test_timeout(func: Callable[..., Awaitable[None]]) -> Callable[..., Awaitable[None]]:
-    @functools.wraps(func)
-    async def wrapper(*args: object, **kwargs: object) -> None:
-        try:
-            with anyio.fail_after(_ASYNC_TEST_TIMEOUT):
-                await func(*args, **kwargs)
-        except TimeoutError as exc:
-            # A bare TimeoutError says the test took too long and nothing
-            # about what it waited for. Five of them in one CI job (#44) gave
-            # six lines between them, so the only next step was to run CI
-            # again. The note names the tasks and threads that were still
-            # alive, which is the difference between evidence and a re-run.
-            exc.add_note(hang_report(_ASYNC_TEST_TIMEOUT))
-            raise
-
-    return wrapper
+# The deadline that turns a hung async test into a TimeoutError carrying a
+# report of what was still alive. Issue #130 moved it to `test_support`: it
+# names no Nix concept, and a suite that is not this one needs it just as much.
+# `tests/harness/` used to hold its test; `test-support/tests/` does now.
 
 
 def _pytest_agent_installed() -> bool:
@@ -184,7 +161,7 @@ def pytest_configure(config: pytest.Config):
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:  # noqa: ARG001 -- hookspec signature requires config arg
     for item in items:
         if isinstance(item, pytest.Function) and inspect.iscoroutinefunction(item.obj):
-            item.obj = _with_test_timeout(item.obj)
+            item.obj = with_test_timeout(item.obj)
 
     # pytest-forked's fork() only keeps the calling thread; any lock another
     # thread held at fork time stays locked forever in the child. By the time

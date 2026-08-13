@@ -25,7 +25,7 @@ import nanopynix
 from nanopynix import stores
 from nanopynix.namespace import OverlayNamespace
 from nanopynix.settings import NIX_2_34, NixStoreDefaults, field_is_supported, running_nix_version
-from tests.support.notes import note
+from test_support.notes import note
 
 if TYPE_CHECKING:
     from pathlib import Path

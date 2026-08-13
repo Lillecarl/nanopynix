@@ -23,7 +23,7 @@ from nanopynix._core._extract import (
     locked_node,
 )
 from nanopynix.models import StorePath
-from tests.support.git import init_flake_repo
+from test_support.git_fixtures import init_flake_repo
 
 if TYPE_CHECKING:
     import nanopynix

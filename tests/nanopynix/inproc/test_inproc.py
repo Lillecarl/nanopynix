@@ -21,9 +21,9 @@ import nanopynix
 from nanopynix import Derivation, GcResult, MissingInfo, NixType, StorePath, inproc, yaml_primops
 from nanopynix._ansi import strip_ansi
 from nanopynix.settings import NixEvalSettings, normalize_nix_path
-from tests.support.git import init_flake_repo
+from test_support.git_fixtures import init_flake_repo
+from test_support.notes import note
 from tests.support.nix_markers import NIX_GC_ROOTS_BUG
-from tests.support.notes import note
 
 if TYPE_CHECKING:
     from tests.support.nix_environment import InprocSessionFactory, NixTestEnvironment

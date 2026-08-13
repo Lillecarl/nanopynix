@@ -28,7 +28,7 @@ from nanopynix.logging import (
     events_dropped_event,
 )
 from nanopynix.models import LogEvent
-from tests.support.notes import note
+from test_support.notes import note
 
 if TYPE_CHECKING:
     from collections.abc import Callable

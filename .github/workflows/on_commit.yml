@@ -128,10 +128,10 @@ jobs:
         useDaemon: false
       timeout-minutes: 15
     - name: Run the gates (format, grpclib-transports, lint, lint-strict, pytest-agent,
-        shell, types)
+        shell, test-support, types)
       run: nix build --file . --no-link --print-build-logs --keep-going checks.format
         checks.grpclib-transports checks.lint checks.lint-strict checks.pytest-agent
-        checks.shell checks.types
+        checks.shell checks.test-support checks.types
       timeout-minutes: 20
   test-asan-git:
     runs-on: ubuntu-24.04

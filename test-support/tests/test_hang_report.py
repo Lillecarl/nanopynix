@@ -18,8 +18,8 @@ import threading
 import anyio
 import pytest
 
-from tests import conftest
-from tests.support.hang_report import hang_report, live_threads, pending_tasks
+from test_support import deadline
+from test_support.hang_report import hang_report, live_threads, pending_tasks
 
 _MARKER = "hang_report_parked_here"
 
@@ -127,17 +127,19 @@ async def _never_answers() -> None:
 
 
 async def test_the_deadline_wrapper_attaches_the_report(monkeypatch: pytest.MonkeyPatch) -> None:
-    """End to end, over the real wrapper that ``tests/conftest.py`` installs.
+    """End to end, over the real wrapper that each suite's conftest installs.
 
-    ``_with_test_timeout`` is what the collection hook wraps every async test
+    ``with_test_timeout`` is what the collection hook wraps every async test
     in, so this drives that function rather than rebuilding its shape. A
     rebuild would keep passing if the wrapper stopped attaching the note.
 
     The deadline is patched down instead of waited out: the real one is 120
     seconds, and this test must not take that long to prove one `add_note`.
+    Patching the module attribute works because the wrapper reads it when it
+    runs, not when it is built.
     """
-    monkeypatch.setattr(conftest, "_ASYNC_TEST_TIMEOUT", 0.05)
-    wrapped = conftest._with_test_timeout(_never_answers)
+    monkeypatch.setattr(deadline, "ASYNC_TEST_TIMEOUT", 0.05)
+    wrapped = deadline.with_test_timeout(_never_answers)
 
     with pytest.raises(TimeoutError) as caught:
         await wrapped()

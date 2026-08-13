@@ -21,6 +21,20 @@ here and to read the results. This file only says where a file belongs.
 | `tests/support/` | fixtures, drivers and scanners. **No tests.** | — |
 | `tests/_subprocess_startup/` | `sitecustomize.py` for a spawned interpreter | — |
 
+One test tree is outside `tests/`, and issue #130 put it there:
+
+| directory | holds | scope of one test |
+|---|---|---|
+| `test-support/src/test_support/` | helpers that name no Nix concept | — |
+| `test-support/tests/` | the tests of those helpers | one helper behaviour |
+
+**A helper goes in `test-support/` when a second project needs it and it names
+no Nix concept.** `tests/support/` imports as `tests.support.<name>`, which
+only the repository rootdir resolves, so `grpclib-transports` and
+`pytest-agent` could reach none of it. `test-support` is an ordinary package,
+and any project can declare it. Read `test-support/src/test_support/__init__.py`
+for the measurement that chose the split.
+
 `tests/nanopynix/` is the large one, and it groups by the layer under test:
 `bindings/` for the compiled Nix bindings, `core/` for the direct runtime
 helpers, `inproc/` and `rpc/` for the two engines, `primops/` for the Nix
@@ -34,7 +48,7 @@ other test would notice was broken.**
 
 `tests/support/` is full of helpers, and most of them need no test of their
 own: the test that uses a helper fails when the helper breaks. A few do not
-have that property, and they are what this directory is for. The first one is
+have that property, and they are what this directory is for. The first one was
 `hang_report.py`, which runs only when a test has already hit its deadline. If
 it returned an empty string, every run would stay green and the report would
 be silently useless at the one moment it matters.
@@ -42,6 +56,10 @@ be silently useless at the one moment it matters.
 Ask whether a bug in the helper makes some other test fail. When the answer is
 yes, write no test here. When the answer is "no, it just stops helping", the
 helper needs its own test, and this is where the test goes.
+
+**The same rule applies in `test-support/tests/`, and the test goes beside the
+helper.** `hang_report.py` and `subprocess_output.py` moved to `test-support/`,
+so their tests moved with them.
 
 ## The rule for `tests/gates/`
 

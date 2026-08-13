@@ -57,6 +57,7 @@ let
       ../grpclib-transports
       ../pynix
       ../pytest-agent
+      ../test-support
       ../tests
       ../tools
       ../docs
@@ -105,6 +106,7 @@ let
     # The `test` extra, because pyright reads grpclib-transports' own tests
     # and benchmarks and they import `greeter`, `asyncssh` and `rich`.
     grpclib-transports = [ "test" ];
+    test-support = [ "test" ];
   };
 
   # A second venv, holding this one library and its test extra and nothing
@@ -124,6 +126,15 @@ let
   # right answer when the distribution metadata is really there.
   pytestAgentEnv = pythonSet.mkVirtualEnv "pytest-agent-test-env" {
     pytest-agent = [ "test" ];
+  };
+
+  # And a fourth. `test-support` holds the helpers that every suite here shares
+  # and that name no Nix concept, so its own suite must not reach anything that
+  # does: a venv with nanopynix in it would let a helper grow a dependency on
+  # the library and nothing would report it. That is the rule this project
+  # exists to keep, so the venv is what enforces it.
+  testSupportEnv = pythonSet.mkVirtualEnv "test-support-test-env" {
+    test-support = [ "test" ];
   };
 
   mkCheck =
@@ -196,6 +207,21 @@ in
     export PYTEST_AGENT_NO_AUTODETECT=1
     python -m pytest -p no:cacheprovider pytest-agent/tests
   '';
+
+  # The shared helpers, gated for the same reason as the two gates above: the
+  # repository suite collects `tests/` and not this directory, so without this
+  # the suite of the project that every other suite depends on would run
+  # nowhere.
+  #
+  # The directory, and not `test-support/tests`. This project carries its own
+  # `pytest.ini`, so pointing pytest at the project makes `testpaths` and
+  # `anyio_mode` apply. Read that file: without `anyio_mode`, every async test
+  # here fails rather than skips.
+  #
+  # `-p no:cacheprovider` for the read-only store path, as above.
+  test-support = mkCheck "test-support" [
+    testSupportEnv
+  ] "python -m pytest -p no:cacheprovider test-support";
 
   # No drift gate here, although issue #22 asks for one. Both
   # `check_all_settings_model_drift(include_optional=True)` and
