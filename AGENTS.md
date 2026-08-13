@@ -395,6 +395,44 @@ This file follows these rules, and it is the example to copy. Apply the rules
 to text that you write or change. Do not rewrite other existing prose only to
 make that prose comply.
 
+# Licensing
+
+**The repository is Apache-2.0. `nanopynix-bindings` alone is
+LGPL-2.1-or-later.** The root `LICENSE` holds the Apache text, and
+`LICENSE.LGPL-2.1` beside it holds the other. Each project carries a copy of
+the one that applies to it, because `license-files` cannot name a path above
+the source root of a distribution.
+
+The bindings link libnixexpr and libnixstore. Nix publishes those under
+LGPL-2.1-or-later, so the licence of that project follows the library it
+links. Every other project imports the bindings at run time and links nothing.
+
+**Keep "or-later" on the bindings.** Apache-2.0 and LGPL-2.1 are incompatible
+in one direction: the patent grant of Apache-2.0 adds a term that version 2.1
+does not permit a licensee to add. That direction is code moving *into* the
+bindings from an Apache-2.0 project here, and "or-later" is what makes the
+move legal, because the bindings can be taken as LGPL-3.0 and Apache-2.0 is
+compatible with LGPL-3.0. Remove "or-later" and that move becomes a licence
+violation, silently.
+
+The other direction needs no argument. Section 6 of the LGPL exists for a work
+that uses the library, and an Apache-2.0 work that imports the bindings is
+that work.
+
+**`pynix` states both licences, because it ships both.**
+`pynix/src/pynix/get-env.sh` is Nix's own script, vendored under
+LGPL-2.1-or-later, because Nix compiles it into the `nix` binary as a
+file-static string and a consumer of the libraries has to carry a copy. Its
+`license` is `Apache-2.0 AND LGPL-2.1-or-later`, and it carries both licence
+files. `AND`, and not `OR`: a recipient gets each file under the licence that
+file names. The two do not combine, because `pynix` runs that script rather
+than links it.
+
+`tests/meta/test_licensing.py` holds each part of this that a machine can
+check: every project states a licence, the bindings state the LGPL one, every
+other project states the Apache one, and every `license-files` entry names a
+file that is really there.
+
 # Design notes
 
 **In Nix, the term "stderr" means logging. It does not mean the stderr of the

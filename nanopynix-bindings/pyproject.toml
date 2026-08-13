@@ -19,6 +19,12 @@ requires-python = ">=3.13"
 #
 # PEP 639 says a `License ::` classifier and a `license` expression must not
 # both appear, so the classifier is gone.
+#
+# **This is the one LGPL project of the repository, and everything else is
+# Apache-2.0.** This project links libnixexpr and libnixstore, which Nix
+# publishes under LGPL-2.1-or-later, so the licence follows the library. The
+# root `LICENSE` is the Apache text, and `LICENSE.LGPL-2.1` beside it is this
+# one. `AGENTS.md` says why the two live together without a conflict.
 license = "LGPL-2.1-or-later"
 license-files = [ "LICENSE" ]
 classifiers = [

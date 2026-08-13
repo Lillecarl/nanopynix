@@ -29,7 +29,7 @@ requires-python = ">=3.13"
 dependencies = ["nanopynix", "test-support", "pytest", "anyio", "beartype", "coverage"]
 
 # The same PEP 639 fields as `nanopynix/pyproject.toml`, and the same reason.
-license = "LGPL-2.1-or-later"
+license = "Apache-2.0"
 license-files = [ "LICENSE" ]
 classifiers = [
   "Programming Language :: Python :: 3",

@@ -94,7 +94,7 @@ let
       };
 
       meta = rendered.meta // {
-        license = lib.licenses.lgpl21Plus;
+        license = lib.licenses.asl20;
         platforms = lib.platforms.unix;
       };
     };
@@ -155,7 +155,7 @@ let
         # nanopynix-bindings/package.nix (stubgen + pythonImportsCheck) and
         # nanopynix/tests.nix's runner script (the pytest process itself).
         meta = rendered.meta // {
-          license = lib.licenses.lgpl21Plus;
+          license = lib.licenses.asl20;
           platforms = lib.platforms.unix;
         };
       };
@@ -214,7 +214,7 @@ let
       nixLinked rendered
       // {
         meta = rendered.meta // {
-          license = lib.licenses.lgpl21Plus;
+          license = lib.licenses.asl20;
           platforms = lib.platforms.unix;
         };
       };

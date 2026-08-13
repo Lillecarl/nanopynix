@@ -21,11 +21,14 @@ dependencies = [
   "setproctitle",
 ]
 
-# PEP 639, and the same reasoning as `nanopynix-bindings/pyproject.toml`. The
-# classifier is a name, and `license-files` is what puts the text in the built
-# artifact. The file is a copy of the one at the root of the repository,
-# because the source root of this project is `nanopynix/`.
-license = "LGPL-2.1-or-later"
+# PEP 639. The classifier is a name, and `license-files` is what puts the text
+# in the built artifact. The file is a copy of the one at the root of the
+# repository, because the source root of this project is `nanopynix/`.
+#
+# Apache-2.0, and not the LGPL-2.1-or-later of `nanopynix-bindings`. That
+# project links libnixexpr and libnixstore, and this one imports it at
+# runtime. `AGENTS.md` says why the two live together without a conflict.
+license = "Apache-2.0"
 license-files = [ "LICENSE" ]
 classifiers = [
   "Programming Language :: Python :: 3",
