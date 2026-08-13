@@ -25,7 +25,11 @@ extraPaths = [
   "nanopynix-testing/src/nanopynix_testing/_subprocess_startup",
   "docs",
 ]
-exclude = ["**/result*"]
+# `pynixd/` is imported and not integrated. See the same note in `ruff.toml`:
+# that tree keeps its own pyright settings at `pynixd/pyproject.toml`, and a
+# strict run from here reported 7629 errors on the day of the import. Issue
+# #131 removes this entry, one gate at a time.
+exclude = ["**/result*", "pynixd"]
 
 [[tool.pyright.executionEnvironments]]
 root = "nanopynix-bindings/src"
