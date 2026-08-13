@@ -1,0 +1,165 @@
+"""Request-local goal registry and daemon request entrypoints."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from typing import TYPE_CHECKING, Any
+
+import anyio
+
+from ..serde import (
+    BuildDerivationRequest,
+    BuildMode,
+    BuildPathsRequest,
+    BuildPathsResponse,
+    BuildPathsWithResultsRequest,
+    QueryMissingRequest,
+    QueryMissingResponse,
+)
+from .build_derivation import BuildDerivationGoal
+from .ensure import EnsureDerivedPathGoal
+from .keys import BuildDerivationKey, EnsureDerivedPathKey, SubstitutePathKey
+from .query_missing import QueryMissingPlanGoal
+from .requests import BuildPathsWithResultsGoal
+from .results import result_succeeded
+from .substitute import SubstitutePathGoal, substituter_fingerprint
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from ..connection import ClientConn
+    from ..context import PynixdContext
+    from ..derived_path import DerivedPath
+    from ..serde.ids import BuildId
+    from ..store import Store
+    from ..store_path import StorePath
+    from .goal import Goal
+
+
+def _derivation_fingerprint(request: BuildDerivationRequest) -> str:
+    payload = request.derivation.model_dump(mode="json")
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+class GoalEngine:
+    """Request-local active-goal registry and request entrypoint."""
+
+    def __init__(self, ctx: PynixdContext) -> None:
+        self.ctx = ctx
+        self._lock = anyio.Lock()
+        self._goals: dict[Any, Goal[Any]] = {}
+        self.substitution_import_limiter = anyio.Semaphore(4)
+
+    async def subscribe_build(self, build_id: BuildId, client: ClientConn) -> bool:
+        """Subscribe *client* to real-time log output for the given *build_id*."""
+        scheduler = self.ctx.scheduler
+        if scheduler is None:
+            return False
+        return await scheduler.queue.subscribe(build_id, client, cancel_on_unsubscribe=True)
+
+    async def unsubscribe_build(self, build_id: BuildId, client: ClientConn) -> None:
+        """Unsubscribe *client* from real-time log output for the given *build_id*."""
+        scheduler = self.ctx.scheduler
+        if scheduler is None:
+            return
+        await scheduler.queue.unsubscribe(build_id, client)
+
+    async def build_paths(self, request: BuildPathsRequest, client: ClientConn | None = None) -> BuildPathsResponse:
+        """Execute a BuildPaths request, returning a simple success/failure response."""
+        _require_normal_build_mode(request.build_mode)
+        response = await self.build_paths_with_results(
+            BuildPathsWithResultsRequest(
+                derived_paths=request.derived_paths,
+                build_mode=request.build_mode,
+            ),
+            client=client,
+        )
+        return BuildPathsResponse(value=0 if all(result_succeeded(item.result) for item in response.results) else 1)
+
+    async def build_paths_with_results(
+        self,
+        request: BuildPathsWithResultsRequest,
+        client: ClientConn | None = None,
+    ):
+        """Execute a BuildPathsWithResults request, returning per-path results."""
+        _require_normal_build_mode(request.build_mode)
+        return await BuildPathsWithResultsGoal(self, request, client).result()
+
+    async def query_missing(self, request: QueryMissingRequest) -> QueryMissingResponse:
+        """Execute a read-only QueryMissing request, classifying paths as build/substitute/unknown."""
+        return await QueryMissingPlanGoal(self, request).result()
+
+    async def get_ensure_derived_path_goal(
+        self,
+        path: DerivedPath,
+        build_mode: int,
+        substituter_ids: tuple[str, ...],
+    ) -> EnsureDerivedPathGoal:
+        """Return a deduplicated EnsureDerivedPathGoal for the given derived path."""
+        key = EnsureDerivedPathKey(str(path), substituter_fingerprint(substituter_ids))
+        async with self._lock:
+            goal = self._goals.get(key)
+            if goal is None:
+                goal = EnsureDerivedPathGoal(self, path, build_mode, substituter_ids)
+                self._goals[key] = goal
+            if not isinstance(goal, EnsureDerivedPathGoal):
+                raise TypeError(f"goal key collision for {key}")
+            return goal
+
+    async def get_build_derivation_goal(self, request: BuildDerivationRequest) -> BuildDerivationGoal:
+        """Return a deduplicated BuildDerivationGoal for the given build request."""
+        key = BuildDerivationKey(str(request.drv_path), _derivation_fingerprint(request))
+        async with self._lock:
+            goal = self._goals.get(key)
+            if goal is None:
+                goal = BuildDerivationGoal(self, request)
+                self._goals[key] = goal
+            if not isinstance(goal, BuildDerivationGoal):
+                raise TypeError(f"goal key collision for {key}")
+            return goal
+
+    async def get_substitute_path_goal(
+        self,
+        path: StorePath,
+        substituter_ids: tuple[str, ...],
+    ) -> SubstitutePathGoal:
+        """Return a deduplicated SubstitutePathGoal for the given store path."""
+        key = SubstitutePathKey(str(path), substituter_fingerprint(substituter_ids))
+        async with self._lock:
+            goal = self._goals.get(key)
+            if goal is None:
+                goal = SubstitutePathGoal(self, path, substituter_ids)
+                self._goals[key] = goal
+            if not isinstance(goal, SubstitutePathGoal):
+                raise TypeError(f"goal key collision for {key}")
+            return goal
+
+    def substituter_ids(self) -> tuple[str, ...]:
+        """Return the store IDs of all configured substituter stores (skipping local)."""
+        return tuple(
+            str(store_id)
+            for store_id, store in self.ctx.stores.items()
+            if str(store_id) != "local" and store.no_schedule
+        )
+
+    def substituter_stores(self) -> Iterable[Store]:
+        """Yield healthy substituter stores, ordered by store ID."""
+        local_id = "local"
+        ids = set(self.substituter_ids())
+        return (
+            store
+            for store_id, store in sorted(self.ctx.stores.items(), key=lambda item: str(item[0]))
+            if str(store_id) != local_id and str(store_id) in ids and store.is_healthy
+        )
+
+
+def _require_normal_build_mode(build_mode: int) -> None:
+    if build_mode == BuildMode.NORMAL:
+        return
+    try:
+        name = BuildMode(build_mode).name
+    except ValueError:
+        name = f"unknown({build_mode})"
+    raise RuntimeError(f"pynixd goal system only supports BuildMode.NORMAL for now; got {name}")
