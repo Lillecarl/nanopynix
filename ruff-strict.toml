@@ -11,6 +11,23 @@ line-length = 120
 # Reporting on it from the repository root would say that 356 files are
 # wrong, when what is true is that a second project has not yet adopted the
 # conventions of this one. Remove this line in #131, one gate at a time.
+#
+# **The asyncio question of #131 is answered, and the answer is a port.**
+# `TID251` below bans the raw asyncio primitives. pynixd is an asyncio
+# program, so the shape of the grpclib-transports exemption was the expected
+# answer, and it is the wrong one here: `pynixd/__main__.py` already starts
+# the program with `anyio.run(backend="asyncio", ...)`, so every anyio
+# primitive already works in it, and four modules already used them. The 48
+# uses were ported instead -- 13 in the library, 35 in its tests -- and
+# `pynixd/ruff.toml` bans the same names, so `checks.lint` holds the port.
+# `tests/meta/test_asyncio_ban.py` keeps the two lists equal.
+#
+# One case needed a shape rather than a rename. `anyio.Event` has no
+# `clear()`, and `ResourceGate` re-armed three of them, so `PressureFlag` in
+# `pynixd/monitor.py` replaces the event instead of resetting it.
+#
+# Note that this line matches the *basename* `pynixd`, so it also excludes
+# `pynixd/pynixd/`, which is 291 of the 1024 findings.
 extend-exclude = ["pynixd"]
 
 [lint]
