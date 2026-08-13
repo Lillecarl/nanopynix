@@ -5,7 +5,7 @@ Run with::
     direnv exec . python ci/render.py
 
 You do not have to remember that command.
-``tests/nanopynix/test_ci_workflows.py`` calls :func:`render_workflows` on
+``nanopynix/tests/test_ci_workflows.py`` calls :func:`render_workflows` on
 every pytest run, compares the result against the checked-in YAML, and writes
 the fresh render when the two differ -- so an edit under ``ci/workflows/`` that
 was never rendered fails the suite *and* arrives already corrected.
@@ -84,7 +84,7 @@ def order_keys(value: Any) -> Any:
     ``runs-on`` and ``name`` and reaching no output, moved 150 lines across 32
     hunks of ``on_commit.yml`` and 58 lines across 14 hunks of
     ``on_schedule.yml``. The same probe against this function changes nothing.
-    ``tests/nanopynix/test_ci_workflows.py`` holds the invariant.
+    ``nanopynix/tests/test_ci_workflows.py`` holds the invariant.
 
     A Python dict does have an order, and this function is where the rendering
     picks one. ``builtins.toJSON`` sorts the names on the way out, so the input
@@ -147,7 +147,7 @@ async def render_workflows() -> dict[Path, str]:
         # `builtins.toYAML`, and issue #121 moved the render to `builtins.toJSON`
         # plus the `to_yaml` of Python. A registered primop that no expression
         # calls reads as a requirement of the render and is not one.
-        # `tests/nanopynix/rpc/client/test_eval_rpc.py` covers the primop.
+        # `nanopynix/tests/rpc/client/test_eval_rpc.py` covers the primop.
         Session(experimental_features=["nix-command", "flakes"]) as session,
         session.store() as store,
         session.eval(store) as eval_,

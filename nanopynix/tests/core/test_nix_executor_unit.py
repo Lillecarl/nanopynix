@@ -144,7 +144,7 @@ def test_shutdown_is_idempotent() -> None:
 # These use a plain blocking Python callable rather than Nix. What is under
 # test is the executor's own bookkeeping around a cancel: whether it waits, how
 # long, and what it does when the wait runs out. Nix decides whether the work
-# really stops, and the tests in tests/nanopynix/inproc/test_inproc_cancel.py
+# really stops, and the tests in nanopynix/tests/inproc/test_inproc_cancel.py
 # cover that half.
 
 

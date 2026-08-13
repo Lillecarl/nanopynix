@@ -5,13 +5,13 @@ Run with::
     python docs/examples/stores_example.py
 
 Its own file rather than a region of ``store_example.py``, because that one is
-given an isolated seeded store by ``tests/nanopynix/test_examples.py``. This
+given an isolated seeded store by ``nanopynix/tests/test_examples.py``. This
 example brings its own store, so it needs none of that.
 """
 
 # ruff: noqa: T201
 # The printed output is the example. These are run by hand and by
-# tests/nanopynix/test_examples.py; a logger would hide the very thing
+# nanopynix/tests/test_examples.py; a logger would hide the very thing
 # they exist to show.
 
 from __future__ import annotations

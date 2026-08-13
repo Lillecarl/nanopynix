@@ -11,7 +11,7 @@ The worker now also sends a ``nix.common.ErrorIdentity`` in the status
 trailer. These tests drive a real worker into each raise site and assert the
 class on the client side, which is the only place the round trip is visible.
 
-:mod:`tests.nanopynix.rpc.test_status_details` unit-tests the encoding, the
+:mod:`rpc.test_status_details` unit-tests the encoding, the
 allowlist and the status-code table. This file is the end-to-end half, and it
 is deliberately small: one case per resolution path, not one per raise site.
 """

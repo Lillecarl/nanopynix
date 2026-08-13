@@ -12,7 +12,7 @@ therefore already corrected in the working copy: read the diff and commit it.
 
 It is not in ``tests/meta/``, although it reads the repository like the tests
 there do. A meta test runs no Nix, and this one evaluates the flake to learn
-which Nix versions the test matrix covers. ``tests/nanopynix/test_examples.py``
+which Nix versions the test matrix covers. ``nanopynix/tests/test_examples.py``
 is the same case: a staleness gate on generated content that has to execute
 the generator.
 

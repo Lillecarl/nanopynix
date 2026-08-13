@@ -24,7 +24,7 @@ enough on its own:
    ours, and must keep falling through to nanobind's default translator.
    Nothing about (1) or (2) would notice if we started swallowing them.
 
-Promote to ``tests/nanopynix`` if it earns its keep; it overlaps the same
+Promote to ``nanopynix/tests`` if it earns its keep; it overlaps the same
 boundary A that ``test_error_matrix.py`` records, and the two should probably
 land together (see TODO.md item 8 / task #78).
 """
@@ -271,7 +271,7 @@ def test_interrupted_is_not_folded_into_the_error_hierarchy() -> None:
     Asserted structurally rather than by provoking a real interrupt: setting
     Nix's global interrupt flag in-process poisons every later eval in the
     session, which is the same upstream behaviour that already forces
-    ``tests/nanopynix/bindings/test_daemon_protocol.py`` to skip. What this
+    ``nanopynix/tests/bindings/test_daemon_protocol.py`` to skip. What this
     pins is the consequence that matters -- ``except Exception`` must not
     swallow a cancellation.
     """

@@ -33,7 +33,7 @@ def _as_dict(v: JsonValue) -> dict[str, JsonValue]:
 # instead is `as_dict()`: one level, data leaves and function leaves side by
 # side, each read or called on its own. See
 # test_the_callables_are_reachable_through_as_dict below, and the same shape
-# exercised for both engines in tests/nanopynix/test_engine_parity_semantics.py.
+# exercised for both engines in nanopynix/tests/test_engine_parity_semantics.py.
 #
 # This helper stays because these tests assert the *data* wholesale, which is
 # what removeAttrs is for.

@@ -7,7 +7,7 @@ and every second answer this repository grew was a subset of Nix's.
 
 There were three of them, and the scanner docstring in
 ``tests/support/ansi_regexes.py`` gives each one and what it missed. Prose said
-"do not do this" in one place only -- ``tests/nanopynix/test_hostile_inputs.py``
+"do not do this" in one place only -- ``nanopynix/tests/test_hostile_inputs.py``
 asserts that no colour code reaches one exception -- and prose that covers one
 call site is how the other two appeared. CLAUDE.md gives the remedy: a
 convention that a machine can check belongs here.

@@ -12,7 +12,7 @@ gives every later read a happens-before edge to that write.
 
 **A second write anywhere gives the race back**, whatever value it writes, and
 that is why this test reads the source rather than the running process.
-``tests/nanopynix/test_verbosity.py`` covers the runtime half: it asserts that
+``nanopynix/tests/test_verbosity.py`` covers the runtime half: it asserts that
 ``get_log_ceiling()`` does not move while a session changes its verbosity. A
 write that lands before any test runs, or one that rewrites the same value, is
 invisible to that assertion and plain to this one.

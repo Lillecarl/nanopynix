@@ -17,7 +17,7 @@ Three boundaries, which the error pipeline used to conflate:
 
 This began as a temporary recording of what both engines *actually* raise,
 used to find CIP3's error-pipeline defects; it is kept because three of its
-invariants have no other home. :mod:`tests.nanopynix.test_engine_parity_semantics`
+invariants have no other home. :mod:`test_engine_parity_semantics`
 covers "both engines raise the same type" for eval failures in a far more
 readable form -- what only this file covers is:
 
@@ -34,7 +34,7 @@ on either side, so a missed wiring looks exactly like success everywhere else.
 Run with both backends -- plain ``pytest`` is local-only, so the daemon half
 silently vanishes and every cell looks identical::
 
-    pytest tests/nanopynix/test_error_boundaries.py --nix-test-backends local,daemon
+    pytest nanopynix/tests/test_error_boundaries.py --nix-test-backends local,daemon
 """
 
 from __future__ import annotations
@@ -161,7 +161,7 @@ async def _collect_engine(
     results: dict[str, dict[str, Any]] = {}
     # `Any` is not laziness -- it is the finding. The *stores* do share a static
     # type now (both satisfy `nanopynix.protocols.AsyncStore`, pinned by
-    # tests/nanopynix/test_protocols.py), but the sessions do not, so
+    # nanopynix/tests/test_protocols.py), but the sessions do not, so
     # engine-agnostic code like this still cannot be typed: pyright rejects
     # `nix.eval(store)` because inproc.Session and rpc.Session are unrelated
     # nominal types. Note that even `AsyncStore` does not buy a caller
@@ -202,7 +202,7 @@ async def _drv_path(eval_session: Any, expr: str) -> str:
     now a preference rather than a necessity: the reasons it used to give are
     all gone. ``attr()`` is sync on both engines, so it is no longer the "one
     remaining asymmetry on this route" -- and ``SEMANTIC_LEDGER`` in
-    :mod:`tests.nanopynix.test_engine_parity_semantics`, which this pointed at
+    :mod:`test_engine_parity_semantics`, which this pointed at
     for it, is empty. ``as_string`` is on both engines, and ``coerce_str``,
     whose refusal of store-path context is why ``unsafeDiscardStringContext``
     is here, no longer exists at all. Asking Nix for the path in one expression

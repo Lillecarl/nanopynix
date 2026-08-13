@@ -20,7 +20,7 @@ status discarded and its ``repr`` used as the message.
 :mod:`nanopynix.rpc._primop_wire` explains the repair.
 
 **This file compares the rendered text, and that is deliberate.**
-``tests/nanopynix/test_engine_parity_semantics.py`` compares exception types
+``nanopynix/tests/test_engine_parity_semantics.py`` compares exception types
 and says why it does not compare messages. It cannot cover this: all three
 paths already produce ``EvalError``, on both engines, before and after the
 repair. Nix wraps whatever a primop raises into its own evaluation failure, so
@@ -50,7 +50,12 @@ if TYPE_CHECKING:
     from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
-_HERE = "tests.nanopynix.primops.test_primop_error_parity"
+# The dotted name the worker imports in its own subprocess, rooted at the
+# suite directory. `pythonpath = tests` in `nanopynix/pytest.ini` is what
+# puts that directory on the path, and the repository `pytest.ini` names it
+# too. Issue #130 moved the suite out from under `tests/`, so the old
+# `tests.nanopynix.primops....` no longer resolves.
+_HERE = "primops.test_primop_error_parity"
 
 
 class CallerOwnError(RuntimeError):

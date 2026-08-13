@@ -1,6 +1,6 @@
 """Same store, same operation, both engines -- do they *behave* the same?
 
-The store half of :mod:`tests.nanopynix.test_engine_parity_semantics`, which
+The store half of :mod:`test_engine_parity_semantics`, which
 covers eval only. It exists because the store's two cross-engine divergences
 were both found by hand-probing rather than by any gate:
 
@@ -11,7 +11,7 @@ were both found by hand-probing rather than by any gate:
   ``parse_store_path("x")`` answered ``NixError`` on one engine and
   ``BadStorePathError`` on the other.
 
-:mod:`tests.nanopynix.test_engine_parity` could see neither: both engines had
+:mod:`test_engine_parity` could see neither: both engines had
 the same method names and the same parameter lists throughout. Both are fixed
 -- path normalisation and derived-path parsing now live in the shared
 ``CoreStore``, which both engines call -- and this file is what keeps them
@@ -40,7 +40,7 @@ that moves both of them equally still reads as agreement. Normalisation is now
 shared, which makes that the likely shape of the next one. Measured: deleting
 the absolutization from ``CoreStore._store_path`` turns the two relative-path
 cases below red and leaves the malformed ones green, because both engines
-degrade together. ``tests/nanopynix/bindings/test_store_empty_path.py`` is what
+degrade together. ``nanopynix/tests/bindings/test_store_empty_path.py`` is what
 pins those to an absolute expected type -- the same experiment turns *it* red
 on ``x`` and ``garbage``. The two files are complements, and neither is
 sufficient alone.
@@ -532,7 +532,7 @@ async def test_a_bare_drv_means_every_output_on_both_engines(
     ``Store`` calls it, so this asks whether *both* of them do. The bindings
     deliberately do not --
     ``test_a_bare_derivation_is_opaque_here_and_selects_no_outputs`` in
-    ``tests/nanopynix/bindings/test_l1_store_bindings.py`` is that half --
+    ``nanopynix/tests/bindings/test_l1_store_bindings.py`` is that half --
     which means nothing below this layer would catch an engine that dropped
     the call.
 

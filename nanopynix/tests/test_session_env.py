@@ -15,7 +15,7 @@ supposed to remove.
 
 The passthrough is asserted here for rpc only. inproc runs Nix in this process,
 so ``env`` there is an assignment to ``os.environ`` of the pytest process, and
-``tests/nanopynix/inproc/test_inproc_process_env.py`` asserts it in a
+``nanopynix/tests/inproc/test_inproc_process_env.py`` asserts it in a
 subprocess -- for the reason that module's docstring gives.
 """
 

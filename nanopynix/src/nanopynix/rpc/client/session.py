@@ -79,7 +79,7 @@ stopped outside this deadline, in a ``finally``, by a ``WorkerClient.close``
 that shields its own teardown.
 
 Not a caller-facing knob -- see the ``Session.close:params`` entry in
-tests/nanopynix/test_engine_parity.py for why rpc's close takes no parameters
+nanopynix/tests/test_engine_parity.py for why rpc's close takes no parameters
 where inproc's takes three."""
 
 

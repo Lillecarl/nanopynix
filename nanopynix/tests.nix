@@ -62,7 +62,7 @@ in
     coreutils
     gdb
     # Nix runs `git` off PATH to fetch a `git+file:` or a dirty `path:` flake
-    # input, so `tests/nanopynix/bindings/test_flake.py` needs one. The host
+    # input, so `nanopynix/tests/bindings/test_flake.py` needs one. The host
     # git worked until the ASAN job, which sets LD_PRELOAD to the sanitizer
     # runtime. That runtime links against the glibc of this closure, and the
     # loader then gives the host git a mix of two glibcs:

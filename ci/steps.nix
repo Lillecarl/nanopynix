@@ -391,11 +391,11 @@ let
   # the reason.** That run reached a 120-minute cap and reported 806 tests,
   # 742 passed, 10 failed, 0 AddressSanitizer reports, killed inside that
   # suite's `test_lsp.py`. All ten failures were in the pynix suite, and none
-  # were in `tests/nanopynix`, so nothing is lost by the cut and the whole
+  # were in `nanopynix/tests`, so nothing is lost by the cut and the whole
   # failure set goes with it. Only instrumented code reports:
-  # nanopynix-bindings, the Nix libraries and boost. `tests/nanopynix` drives
+  # nanopynix-bindings, the Nix libraries and boost. `nanopynix/tests` drives
   # that surface directly, and the pynix suite reaches the bindings only
-  # along paths `tests/nanopynix` already covers.
+  # along paths `nanopynix/tests` already covers.
   #
   # Issue #130 moved that suite to `pynix/tests/`, so the path here moved
   # with it. The runner passes no path of its own and reads `testpaths` from

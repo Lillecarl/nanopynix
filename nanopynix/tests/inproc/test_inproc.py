@@ -116,7 +116,7 @@ async def test_inproc_repl_supports_shared_protocol_operations(
         # scope for the evaluator methods -- the whole point of the subclassing
         # and the one thing a delegating wrapper could not express. rpc has
         # asserted this since it was written (test_repl_session_persists_bindings
-        # in tests/nanopynix/rpc/client/test_eval_rpc.py); inproc evaluated in
+        # in nanopynix/tests/rpc/client/test_eval_rpc.py); inproc evaluated in
         # the base scope instead and raised UndefinedVarError.
         assert await (await repl.string("answer + 1")).as_int() == 43
         assert await (await repl.file(str(nix_file))).as_int() == 43
@@ -154,7 +154,7 @@ async def test_inproc_concurrent_eval_sessions_have_independent_pure_eval(
             # nanopynix.EvalError, not the raw nanobind nanopynix_expr.EvalError:
             # inproc translates Nix binding exceptions onto the public hierarchy
             # at its call chokepoint, so both engines raise the same type for
-            # the same failure. tests/nanopynix/rpc/client/test_pure_eval.py
+            # the same failure. nanopynix/tests/rpc/client/test_pure_eval.py
             # asserts the identical expectation for the rpc engine.
             with pytest.raises(nanopynix.EvalError, match="currentTime"):
                 await pure.string("builtins.currentTime")
@@ -479,7 +479,7 @@ async def test_inproc_store_collect_garbage_return_dead(inproc_session: InprocSe
 
 # ── GC roots ────────────────────────────────────────────────────────────
 # The four root methods reached inproc late: rpc had them from the start and
-# tests/nanopynix/test_engine_parity.py carried them as rpc-only DEFECTs. What
+# nanopynix/tests/test_engine_parity.py carried them as rpc-only DEFECTs. What
 # is exercised here is the capability itself, not the plumbing -- an
 # application's whole reason for making a root is that the collector then
 # refuses to take the path.

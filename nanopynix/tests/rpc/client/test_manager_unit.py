@@ -9,7 +9,7 @@ These are "dumb coverage" tests: each one pins down a single small branch
 directly, without an RPC round trip.
 
 Scalar (de)serialization coverage for the shared codec itself lives in
-tests/nanopynix/core/test_codec.py, not here -- _manager.py no longer
+nanopynix/tests/core/test_codec.py, not here -- _manager.py no longer
 defines its own copy.
 """
 
@@ -125,7 +125,7 @@ async def test_manager_primop_service_handler_encodes_a_caller_exception() -> No
 
     What replaces it is stricter, not looser: the message must decode to the
     exact text Nix renders. See :mod:`nanopynix.rpc._primop_wire`, and
-    ``tests/nanopynix/primops/test_primop_error_parity.py`` for the end-to-end
+    ``nanopynix/tests/primops/test_primop_error_parity.py`` for the end-to-end
     proof that all three primop paths now read the same.
 
     The two tests above still expect a ``GRPCError``. Those failures come from

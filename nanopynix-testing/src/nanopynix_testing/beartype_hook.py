@@ -30,7 +30,7 @@ installed package is importable from the first line of the run.
 
 **A suite that loses the hook still reports every test as passed.** The
 failure is silent, which is why the registration is one line in one file per
-project rather than a convention. ``tests/nanopynix/test_beartype_instrumentation.py``
+project rather than a convention. ``nanopynix/tests/test_beartype_instrumentation.py``
 is what catches its absence.
 
 This module also puts ``_subprocess_startup`` beside it on ``PYTHONPATH`` so

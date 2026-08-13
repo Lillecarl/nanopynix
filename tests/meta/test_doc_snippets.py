@@ -8,7 +8,7 @@ at module level is a ``SyntaxError``.
 
 The mechanism is in ``tests/support/doc_snippets.py``. A snippet carries an
 ``<!-- example: file#region -->`` pointer, and this file asserts that the block
-equals that region. ``tests/nanopynix/test_examples.py`` runs the example, so
+equals that region. ``nanopynix/tests/test_examples.py`` runs the example, so
 the two together give what #23 asks for: **the suite fails when a published
 snippet stops working.** Neither half is sufficient. Execution alone lets a
 page drift from the code it claims to show, and equality alone proves two
@@ -52,14 +52,14 @@ UNMIRRORED: dict[str, str] = {
         "Needs a reachable remote host and a bastion in front of it, which is "
         "the whole point of the block: `NIX_SSHOPTS` exists because "
         "`ProxyJump` has no store-URI equivalent. "
-        "`tests/nanopynix/test_session_env.py::"
+        "`nanopynix/tests/test_session_env.py::"
         "test_the_worker_reads_the_value_the_session_named` asserts the "
         "mechanism the block relies on, with a name no Nix reads."
     ),
     "docs/nanopynix/api/store.md:22": (
         "Two calls that need a derivation to build, and the block shows that "
         "they agree rather than what either returns. "
-        "`tests/nanopynix/test_store_engine_parity_semantics.py::"
+        "`nanopynix/tests/test_store_engine_parity_semantics.py::"
         "test_a_bare_drv_means_every_output_on_both_engines` asserts that "
         "same equality on both engines, so the claim on the page does run."
     ),

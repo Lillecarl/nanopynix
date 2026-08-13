@@ -25,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # `pytest.ini`: the repository's own, and one per project since issue #130.
 SUITE_ROOTS = (
     REPO_ROOT / "tests",
+    REPO_ROOT / "nanopynix" / "tests",
     REPO_ROOT / "test-support" / "tests",
     REPO_ROOT / "nanopynix-helpers" / "tests",
     REPO_ROOT / "pynix" / "tests",

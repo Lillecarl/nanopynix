@@ -34,7 +34,7 @@ from pathlib import Path
 import pytest
 
 from nanopynix_testing.nix_runtime import IN_PROCESS_EVALUATOR_FIXTURES, hosts_an_evaluator
-from tests.support.suite_roots import SCANNED_ROOTS, check_roster
+from tests.support.suite_roots import SCANNED_ROOTS, SUITE_ROOTS, check_roster
 from tests.support.suppressions import iter_python_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -49,14 +49,14 @@ FIXTURE_DIRS = SCANNED_ROOTS
 # Modules that construct an in-process session and are still safe to run
 # against a build with no collector. Each entry states why.
 #
-# `tests/nanopynix/inproc/test_inproc_process_env.py` is not here, and the
+# `nanopynix/tests/inproc/test_inproc_process_env.py` is not here, and the
 # reason is worth reading before adding it back. That module builds its
 # session inside a source string that it hands to a subprocess, so the scanner
 # never sees a construction and `test_every_ledger_entry_still_constructs`
 # rejects the entry as stale. The outcome is correct either way: the session
 # lives in a process that the test ends, so it returns its memory.
 LEDGER: dict[str, str] = {
-    "tests/nanopynix/test_error_boundaries.py": (
+    "nanopynix/tests/test_error_boundaries.py": (
         "builds a Session over dummy:// for its store errors, and never calls eval()"
     ),
 }
@@ -140,10 +140,15 @@ def fixture_names(source: str) -> set[str]:
 
 
 def test_the_scanner_can_see_the_test_tree() -> None:
-    """Fail loudly if the gate is pointed somewhere with no tests in it."""
-    assert TESTS_DIR.is_dir(), f"{TESTS_DIR} is missing"
-    modules = [path for path in iter_python_files(TESTS_DIR) if path.name.startswith("test_")]
-    assert len(modules) > 50, f"only {len(modules)} test module(s) under {TESTS_DIR}; the path is wrong"
+    """Fail loudly if the gate is pointed somewhere with no tests in it.
+
+    Every suite root, and not `tests/` alone. Issue #130 moved the library's
+    suite to `nanopynix/tests/`, and this check went on passing against a
+    `tests/` that no longer held the tests it was counting.
+    """
+    check_roster()
+    modules = [path for root in SUITE_ROOTS for path in iter_python_files(root) if path.name.startswith("test_")]
+    assert len(modules) > 50, f"only {len(modules)} test module(s) under {SUITE_ROOTS}; the path is wrong"
 
 
 def test_the_scanner_finds_each_construction() -> None:
@@ -188,7 +193,8 @@ def test_each_named_fixture_still_exists() -> None:
 def test_every_direct_construction_is_marked_or_in_the_ledger() -> None:
     """The second decay mode: a direct construction that no fixture reveals."""
     unmarked: list[str] = []
-    for path in iter_python_files(TESTS_DIR):
+    check_roster()
+    for path in (p for root in SUITE_ROOTS for p in iter_python_files(root)):
         if not path.name.startswith("test_"):
             continue
         relative = str(path.relative_to(REPO_ROOT))

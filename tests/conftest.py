@@ -4,11 +4,20 @@
 directory and below, so a suite that moves into its own project loses every
 fixture declared here. The Nix session fixtures are now
 ``nanopynix_testing.fixtures``, and the deadline and the ``agent_notes``
-stand-in are ``test_support.plugin``. beartype's import hook is loaded by
-``-p`` from ``pytest.ini``, so nothing here has to run before an import.
+stand-in are ``test_support.plugin``.
 
-What stays is what belongs to *this* run and to no project: the order that
-collection must take, and the hard exit that ends the session.
+**This file registers no plugin.** ``pytest.ini`` names every one of them
+with ``-p``, and that file gives the reason: ``pytest_plugins`` is legal
+only in a top-level conftest, so a rule that holds here breaks in each
+project. One route for the whole repository is the only route that works
+from the repository root and from a project alike.
+
+What stays is what belongs to *this* run and to no project: the hard exit
+that ends the session.
+
+The order that collection must take moved to ``test_support.plugin`` with
+the suites. It was here, and here it reached ``tests/`` alone, so the
+``forked`` tests of ``nanopynix/tests/`` ran unordered and the run wedged.
 """
 
 from __future__ import annotations
@@ -20,50 +29,16 @@ from typing import TYPE_CHECKING
 import coverage
 import pytest
 
-pytest_plugins = (
-    "test_support.plugin",
-    "nanopynix_testing.nix_environment",
-    "nanopynix_testing.nix_runtime",
-    "nanopynix_testing.fixtures",
-)
+# Session scope, and anyio's own `anyio_backend` is module scope. Both are
+# global plugins now that `pytest.ini` registers ours with `-p`, and anyio
+# wins that tie -- every session-scoped fixture that requests it then fails
+# with `ScopeMismatch`. A conftest beats any plugin, so importing the fixture
+# here settles it. `nanopynix/tests/conftest.py` carries the same import and
+# the full account.
+from nanopynix_testing.nix_environment import anyio_backend as anyio_backend
 
 if TYPE_CHECKING:
     from collections.abc import Generator
-
-
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Order the run. The deadline is `test_support.plugin`'s hook, not this.
-
-    pytest-forked's fork() only keeps the calling thread; any lock another
-    thread held at fork time stays locked forever in the child. By the time
-    any other test has touched Nix (L1 init, an inproc.Session's thread
-    executor, an L3 worker/daemon subprocess, pynix's live-log manager
-    thread), the pytest process is "multithreading-dirty" and forking it is
-    a deadlock risk, not just slow. Run every @pytest.mark.forked test
-    first, before anything else has a chance to spawn those threads.
-    The static gates run second. A lint error or a type error is the cheapest
-    finding in the run and needs no Nix, so it belongs near the front rather
-    than behind several minutes of store work.
-
-    After the forked tests, and not before them: each gate runs a tool
-    through `anyio.open_process`, and the asyncio child watcher gives that
-    child a thread of its own. The fork rule above keeps the first word.
-
-    **This stays at the root, and did not go to a plugin.** It orders the
-    markers of this repository's own suite, and `tests/gates/` exists only
-    here. A project's own suite has one directory and nothing to order.
-    """
-
-    def rank(item: pytest.Item) -> int:
-        if item.get_closest_marker("forked") is not None:
-            return 0
-        if item.get_closest_marker("static_gate") is not None:
-            return 1
-        return 2
-
-    # `sorted` is stable, so every group keeps the order collection gave it,
-    # including the shuffle that pytest-randomly applies.
-    items.sort(key=rank)
 
 
 def _save_coverage_before_hard_exit() -> None:

@@ -46,7 +46,7 @@ _EXPRESSION = re.compile(r"\$\{\{")
 
 # The rendered YAML, not `ci/workflows/*.nix`. The rule is about what GitHub
 # runs, and the renderer is free to build a body however it likes as long as
-# the result is one line. `tests/nanopynix/test_ci_workflows.py` is what keeps
+# the result is one line. `nanopynix/tests/test_ci_workflows.py` is what keeps
 # the rendered file current with its source; this module reads the file that
 # CI actually executes.
 _WORKFLOWS = sorted(_WORKFLOW_DIR.glob("*.yml"))

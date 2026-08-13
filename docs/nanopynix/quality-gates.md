@@ -12,9 +12,9 @@ direnv exec . ruff format --check
 direnv exec . ruff check
 direnv exec . ruff check --config ruff-strict.toml
 direnv exec . pyright
-direnv exec . pytest tests/nanopynix/test_settings.py tests/nanopynix/test_stores.py \
-                     tests/nanopynix/test_models.py tests/nanopynix/test_exceptions_classify.py \
-                     tests/nanopynix/test_protocols.py tests/nanopynix/test_engine_parity.py
+direnv exec . pytest nanopynix/tests/test_settings.py nanopynix/tests/test_stores.py \
+                     nanopynix/tests/test_models.py nanopynix/tests/test_exceptions_classify.py \
+                     nanopynix/tests/test_protocols.py nanopynix/tests/test_engine_parity.py
 ```
 
 Policy: all four static gates report zero. `ruff-strict.toml` stays at zero
@@ -24,7 +24,7 @@ findings; a new finding comes from the change under review. Never pass
 ## Every pull request — the correctness gate
 
 ```
-direnv exec . timeout 1500 pytest tests --nix-test-backends local,daemon
+direnv exec . timeout 1500 pytest --nix-test-backends local,daemon
 ```
 
 Policy: no failures, no new skips. A skip that is new must name the capability

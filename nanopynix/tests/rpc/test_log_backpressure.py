@@ -11,7 +11,7 @@ So a caller who ran synchronous work stopped the Nix thread inside the C++
 logger callback. It presented as a hang in an ``await``, with no error
 anywhere.
 
-:mod:`tests.nanopynix.test_logging` unit-tests each buffer. This file is the
+:mod:`test_logging` unit-tests each buffer. This file is the
 end-to-end half: it holds the client's event loop closed and asserts the
 evaluation finishes anyway.
 """

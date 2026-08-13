@@ -238,7 +238,7 @@ async def test_an_unknown_experimental_feature_is_a_bare_runtime_error(
     for one bad setting and a ``NixError`` for another.
 
     That asymmetry is worth removing, and the removal belongs in the bindings
-    rather than here: ``tests/nanopynix/bindings/test_util.py`` pins the
+    rather than here: ``nanopynix/tests/bindings/test_util.py`` pins the
     ``RuntimeError`` as ``enable_experimental_feature``'s own contract, so
     changing it is a change to that binding and to that test. Pinned here so
     the inconsistency is written down where a caller meets it.

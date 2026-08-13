@@ -257,7 +257,7 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
      kept in sync).
 
      Three things that design must keep doing, all pinned by
-     `tests/nanopynix/test_exception_translation.py`: the catch-all fires; it
+     `nanopynix/tests/test_exception_translation.py`: the catch-all fires; it
      does not shadow the specific subclasses; and it does not overreach
      -- standard C++ exceptions (`std::bad_alloc`, nlohmann-json,
      our own `std::out_of_range` in `list_get`) have no clause and must
@@ -415,7 +415,7 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
    re-own all of them. The cost is termination, not transport -- functions
    already cross the wire fine via `attr()`/`apply()`.
 
-   Recorded in `tests/nanopynix/primops/test_ipaddress_primops.py`'s
+   Recorded in `nanopynix/tests/primops/test_ipaddress_primops.py`'s
    `test_the_callables_are_reachable_through_as_dict`, on the primop's own
    docstring, and for both engines in the semantic parity matrix.
 
@@ -445,7 +445,7 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
 
 8. ~~**`test_engine_parity.py` compares signatures**, so "same name, same
    signature, different behaviour" passes.~~ -- DONE.
-   `tests/nanopynix/test_engine_parity_semantics.py` is the other half:
+   `nanopynix/tests/test_engine_parity_semantics.py` is the other half:
    `(expression, operation)` run on both engines, outcomes compared as
    either a returned value or an exception *type*. 25 success cases, 19
    failure cases.
@@ -461,7 +461,7 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
    unification of `attr` should delete both entries.
 
    `tests/temp/` is gone. `test_exception_translation.py` moved to
-   `tests/nanopynix/` unchanged; the matrix moved to
+   `nanopynix/tests/` unchanged; the matrix moved to
    `test_error_boundaries.py`, keeping the three invariants the semantic
    layer does not cover (store/build failures across both backends,
    `NixError`-catchability, and `nix::ErrorInfo` compared field by field

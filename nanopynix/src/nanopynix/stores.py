@@ -631,7 +631,7 @@ def _with_connection_pool(config: StoreConfig) -> StoreConfig:
     not state this". A field default that is not ``None`` makes that unsayable:
     ``parse("unix://")`` would answer a store carrying a limit the URI never
     carried, and rendering it again would not give ``unix://`` back.
-    ``tests/nanopynix/test_stores_properties.py`` asserts both directions, and
+    ``nanopynix/tests/test_stores_properties.py`` asserts both directions, and
     it is what found this.
 
     So the number goes on at the moment a store is opened, and not on the model

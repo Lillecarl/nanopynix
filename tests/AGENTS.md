@@ -10,27 +10,44 @@ here and to read the results. This file only says where a file belongs.
 
 ## The map
 
+`tests/` now holds what belongs to the repository and to no single project.
+Everything else moved out in issue #130, so that a Nix invocation reads one
+project and not the whole checkout.
+
 | directory | holds | scope of one test |
 |---|---|---|
 | `tests/meta/` | self-checks: the repository examined as text and structure | the repository |
 | `tests/gates/` | the static gates of CI, run as tools | one gate |
-| `tests/nanopynix/` | the library, by subsystem | one behaviour of nanopynix |
 | `tests/support/` | scanners for the self-checks. **No tests.** | — |
 
-`tests/harness/` and `tests/pynix/` are gone. Issue #130 moved each suite
-beside the project it tests, so that a Nix invocation reads one project and
-not the whole repository:
+Each project carries its own suite, its own `pytest.ini` and therefore its own
+rootdir:
+
+| directory | holds | scope of one test |
+|---|---|---|
+| `nanopynix/tests/` | the library, by subsystem | one behaviour of nanopynix |
+| `nanopynix-helpers/tests/` | the pure helper package | one helper behaviour |
+| `pynix/tests/` | the CLI and the LSP server | one command or one editor request |
+| `pynix/tests/support/` | the LSP client, drivers, markers and scenarios. **No tests.** | — |
+| `test-support/tests/` | the tests of the generic helpers | one helper behaviour |
+
+And the two projects that hold the shared test layer, and no test of the
+library at all:
 
 | directory | holds | scope of one test |
 |---|---|---|
 | `test-support/src/test_support/` | helpers that name no Nix concept | — |
-| `test-support/tests/` | the tests of those helpers | one helper behaviour |
 | `nanopynix-testing/src/nanopynix_testing/` | fixtures and markers that name Nix | — |
 | `nanopynix-testing/.../_subprocess_startup/` | `sitecustomize.py` for a spawned interpreter | — |
-| `nanopynix-helpers/tests/` | the pure helper package | one helper behaviour |
-| `pynix/tests/` | the CLI and the LSP server | one command or one editor request |
-| `pynix/tests/support/` | the LSP client, drivers, markers and scenarios. **No tests.** | — |
-| `nanopynix-helpers/tests/` | the helpers package | one helper |
+
+`tests/harness/`, `tests/pynix/` and `tests/nanopynix/` are gone. The rule that
+`tests/harness/` carried is below, under the heading that replaces it.
+
+**Every plugin is registered in a `pytest.ini` with `-p`, and never with
+`pytest_plugins` in a conftest.** `pytest_plugins` is legal only in a
+top-level conftest, so the same file is legal in a run of its own project and
+illegal in a run from the repository root. Each `pytest.ini` records this, and
+so does the repository's own.
 
 **A helper leaves `tests/support/` when a second project needs it.**
 `tests/support/` imports as `tests.support.<name>`, which only the repository
@@ -53,7 +70,7 @@ checking and still passes every test, so the loss is silent. It names
 `nanopynix`, `nanopynix_helpers` and `pynix` in its package list, which is why
 it is in `nanopynix-testing` and not in `test-support`.
 
-`tests/nanopynix/` is the large one, and it groups by the layer under test:
+`nanopynix/tests/` is the large one, and it groups by the layer under test:
 `bindings/` for the compiled Nix bindings, `core/` for the direct runtime
 helpers, `inproc/` and `rpc/` for the two engines, `primops/` for the Nix
 primops, and the top level for what crosses those layers -- settings routing,
@@ -189,12 +206,12 @@ What lives there now:
 | `test_core_has_no_getattr.py` | no `_core/` class forwards an unlisted name to a binding, untyped |
 | `test_ansi_filtering.py` | no module writes its own regular expression for an ANSI escape sequence |
 
-`tests/nanopynix/test_examples.py` is the case that clarifies the rule. Its
+`nanopynix/tests/test_examples.py` is the case that clarifies the rule. Its
 purpose is a staleness gate on the documentation, which sounds like a meta
 test, but it *executes* each example against a real store. It is an
 integration test, and it stays out.
 
-`tests/nanopynix/test_ci_workflows.py` is the same case, and it goes one step
+`nanopynix/tests/test_ci_workflows.py` is the same case, and it goes one step
 further: it is a staleness gate on `.github/workflows/*.yml` that *rewrites*
 the stale file before it fails. It evaluates the flake to render, so it is not
 a meta test. Copy that shape for a generated file whose generator needs Nix,
@@ -237,12 +254,12 @@ beartype was on.
 
 Several meta tests compare a set derived from the tree against a literal
 restated in the test file -- `CONSUMER_PRIVATE_IMPORTS` here, `WIRE_CLASSES` in
-`tests/nanopynix/test_exceptions_classify.py`. The friction is the point: the
+`nanopynix/tests/test_exceptions_classify.py`. The friction is the point: the
 literal cannot update itself, so a new member fails the suite until a person
 decides whether it belongs. Write the reason in the literal, next to the entry.
 
 The shape is not only for `tests/meta/`. `URI_PART_STRATEGIES` in
-`tests/nanopynix/test_stores_properties.py` is the same thing in an ordinary
+`nanopynix/tests/test_stores_properties.py` is the same thing in an ordinary
 test: it derives every field that names part of a store URI, and holds that set
 against a literal that says what each field may hold. Use the shape wherever a
 test needs a judgement that the code cannot supply.

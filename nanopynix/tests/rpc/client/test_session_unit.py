@@ -459,7 +459,7 @@ class TestValueProxyLifecycle:
     # WrongNixTypeError without touching the worker. Both described
     # client-side type checking, which is exactly what force_as was deleted
     # for: as_int() asks the worker, so Nix decides and both engines raise the
-    # same NixTypeError. tests/nanopynix/test_scalar_accessor_semantics.py
+    # same NixTypeError. nanopynix/tests/test_scalar_accessor_semantics.py
     # covers the replacement against real values on both engines.
 
     async def test_call_json_arg_uses_explicit_wire_arg(self):

@@ -117,7 +117,7 @@ patch in place:
 
 ### Two evaluators are enough for #70
 
-The full suite died once in `tests/nanopynix/rpc/test_log_backpressure.py`,
+The full suite died once in `nanopynix/tests/rpc/test_log_backpressure.py`,
 with two `nix-eval_0` threads live, in `nix::ExprVar::eval`. The earlier note
 said "the four-evaluator test", and that is too narrow.
 
@@ -294,12 +294,12 @@ timing. Use a post-mortem core through `coredumpctl`.
 
 The selection of #53, before the fix, crashed 6 times in 6, in 48 seconds:
 
-    pytest tests/nanopynix/test_logging.py tests/nanopynix/test_verbosity.py \
-        tests/nanopynix/inproc tests/nanopynix/bindings
+    pytest nanopynix/tests/test_logging.py nanopynix/tests/test_verbosity.py \
+        nanopynix/tests/inproc nanopynix/tests/bindings
 
 #70 needs the whole suite:
 
-    pytest tests
+    pytest
 
 Raise `GC_FREE_SPACE_DIVISOR` to make the collector run more often. Set
 `GC_DONT_GC=1` to take the collector out of the picture, which is the control

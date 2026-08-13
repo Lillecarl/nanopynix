@@ -1,13 +1,17 @@
 # Useful commands
 
+A bare `pytest` runs every suite: `testpaths` in `pytest.ini` names each
+project's own. `pytest tests` now selects the self-checks and the static
+gates alone, because issue #130 moved each suite beside its project.
+
 A plain `pytest` invocation uses `--nix-test-backends local` only. This backend
 runs in-process and uses one store. CI tests the daemon backend separately, in
 the `test-daemon-*` matrix jobs and in the TSan workflows. Those jobs pass
 `--nix-test-backends local,daemon`. Pass `--nix-test-backends local,daemon`
 yourself to reproduce a daemon failure on your machine.
 
-- direnv exec . timeout 500 pytest tests
-- direnv exec . timeout 500 pytest tests --cov --cov-report=term-missing --cov-report= # coverage report. It includes the Nix worker subprocess that multiprocessing starts with the forkserver. See the `sitecustomize.py` of `nanopynix_testing`, which that project's `beartype_hook` puts on PYTHONPATH.
+- direnv exec . timeout 500 pytest
+- direnv exec . timeout 500 pytest --cov --cov-report=term-missing --cov-report= # coverage report. It includes the Nix worker subprocess that multiprocessing starts with the forkserver. See the `sitecustomize.py` of `nanopynix_testing`, which that project's `beartype_hook` puts on PYTHONPATH.
 
 The coverage table has approximately 88 lines, so agent mode does not print the
 table to the terminal. The terminal shows `[pytest-agent] coverage: NN%` for

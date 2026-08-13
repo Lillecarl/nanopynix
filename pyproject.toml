@@ -16,6 +16,7 @@ extraPaths = [
   # grpclib-transports/tests/test_examples.py runs.
   "grpclib-transports/docs/examples",
   "tests",
+  "nanopynix/tests",
   "pynix/tests",
   # Reached by a bare `import beartype_bootstrap` from both the sitecustomize
   # shim beside it and `nanopynix_testing.beartype_hook`, because the
@@ -48,6 +49,10 @@ reportPrivateUsage = "none"
 # for `pynix/tests/` what the one above says for `tests/`: issue #130 moved the
 # suite out from under that root, and 18 reports appeared with no code change.
 # Each suite that moves needs its own entry.
+[[tool.pyright.executionEnvironments]]
+root = "nanopynix/tests"
+reportPrivateUsage = "none"
+
 [[tool.pyright.executionEnvironments]]
 root = "pynix/tests"
 reportPrivateUsage = "none"

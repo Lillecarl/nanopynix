@@ -15,11 +15,11 @@ store, the evaluator and ``repo_root``.
 
 ``support.lsp_environment`` is this suite's own. It supplies ``lsp_server``
 and ``lsp_wire``, and ``support/`` is a package inside the suite because
-nothing outside the suite reads it.
+nothing outside the suite reads it. This file imports those two fixtures
+rather than registering the module as a plugin; the import below says why.
 
-beartype's import hook is not registered here. It has to run before ``pynix``
-is imported, and this file imports ``pynix`` at the top, so ``pynix/pytest.ini``
-loads it with ``-p`` instead. That file gives the reason.
+Every other plugin, beartype's import hook included, is named with ``-p`` in
+``pynix/pytest.ini``. That file gives the reason.
 """
 
 from __future__ import annotations
@@ -48,15 +48,23 @@ from structlog.exceptions import DropEvent
 
 import pynix
 from _shared_sessions import FAITHFUL_SESSIONS_ENV_VAR, SharedSessions
+
+# Session scope, and anyio's own `anyio_backend` is module scope. Both are
+# global plugins now that `pytest.ini` registers ours with `-p`, and anyio
+# wins that tie -- every session-scoped fixture that requests it then fails
+# with `ScopeMismatch`. A conftest beats any plugin, so importing the fixture
+# here settles it. `nanopynix/tests/conftest.py` carries the same import and
+# the full account.
+from nanopynix_testing.nix_environment import anyio_backend as anyio_backend
 from pynix import Pynix
 
-pytest_plugins = (
-    "test_support.plugin",
-    "nanopynix_testing.nix_environment",
-    "nanopynix_testing.nix_runtime",
-    "nanopynix_testing.fixtures",
-    "support.lsp_environment",
-)
+# The two LSP fixtures, re-exported so that this conftest supplies them to
+# every test below it. An import and not a `pytest_plugins` entry, and not a
+# `-p` name either: `pytest_plugins` is legal only in a top-level conftest, and
+# `-p` is processed before `sys.path` reaches this suite, so `support` is not
+# importable that early. `pytest.ini` explains both. A fixture that a conftest
+# imports is a fixture that conftest defines, which is all this needs to be.
+from support.lsp_environment import lsp_server as lsp_server, lsp_wire as lsp_wire
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Generator, Iterator
