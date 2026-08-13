@@ -121,9 +121,23 @@ Three things follow from an `exec` that no start method above can give:
 - **It sets the environment before Nix loads.** Every other start method has
   the library loaded before a worker exists. See the refused names below.
 
-It costs about what `spawn` costs — roughly 900 ms against 49 ms for a warm
-`forkserver` — because both import nanopynix into a fresh interpreter. Two
-things do not travel: `worker_preload` buys nothing, and a directory this
+It costs about what `spawn` costs, because both import nanopynix into a fresh
+interpreter. Measured over four sessions each, best of four, where the session
+opens a store and reads its directories:
+
+| start method | cost |
+| --- | --- |
+| `stdio` | 643 ms |
+| `spawn` | 679 ms |
+| `forkserver`, warm | 47 ms |
+
+The first two were roughly 900 ms until issue #127 removed one protoc option
+from the generated protocol. That option cost 0.254 s of import time in every
+process that speaks the protocol, and a fresh interpreter is exactly such a
+process. The `forkserver` number did not move, because a fork inherits the
+import.
+
+Two things do not travel: `worker_preload` buys nothing, and a directory this
 process added to `sys.path` at run time is not there. Set `PYTHONPATH`, or
 install the package.
 

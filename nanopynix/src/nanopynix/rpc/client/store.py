@@ -349,10 +349,11 @@ class Store(AsyncStore):
         )
         return response.path
 
-    @no_runtime_type_check  # action is validated for untyped callers by pydantic
-    # request construction below (CollectGarbageRequest raises ValidationError
-    # for an unmapped action); beartype's parameter check would otherwise
-    # intercept before that construction runs.
+    @no_runtime_type_check  # action validates its own membership in GcAction at
+    # runtime for untyped callers (see the guard below); beartype's parameter
+    # check would otherwise intercept before that guard runs and raise its own
+    # exception type instead of the documented ValueError. `_core/_objects.py`
+    # carries the same decorator, for the same reason.
     async def collect_garbage(
         self,
         action: GcAction,
@@ -374,7 +375,21 @@ class Store(AsyncStore):
 
         Returns:
             The paths affected and total bytes freed.
+
+        Raises:
+            ValueError: The action is not a member of
+                :class:`~nanopynix_proto.nix.store.GcAction`.
         """
+        # **This guard used to be a side effect of one protoc option.**
+        # `nanopynix-proto/generated.nix` passed `pydantic_dataclasses`, so
+        # `CollectGarbageRequest(action=...)` below raised a pydantic
+        # `ValidationError` for an unmapped action, and that class subclasses
+        # `ValueError`. Issue #127 removed the option, which costs 0.254 s of
+        # import time in every process that speaks the protocol, and this
+        # method is the one caller that read the validation. The check is now
+        # explicit, and it says the same thing as the inproc engine.
+        if action not in GcAction:
+            raise ValueError(f"unsupported garbage-collection action: {action!r}")
         response = await self.rpc.collect_garbage(
             CollectGarbageRequest(
                 action=action,

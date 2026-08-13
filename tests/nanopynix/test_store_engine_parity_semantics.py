@@ -436,27 +436,28 @@ async def test_an_unmapped_gc_action_is_a_ValueError_on_both_engines(  # noqa: N
     inproc_session: InprocSessionFactory,
     rpc_session: RpcSessionFactory,
 ) -> None:
-    """The one store divergence the wire forces, asserted at the level that agrees.
+    """Both engines refuse an unmapped ``GcAction``, and they say the same thing.
 
-    Every other case here compares exception *type names*. This one cannot:
-    inproc rejects an unmapped ``GcAction`` in the shared ``CoreStore`` and
-    raises ``ValueError``, while rpc never reaches the shared layer -- a proto
-    enum field cannot carry an arbitrary object, so pydantic rejects it during
-    request construction and raises its own ``ValidationError``.
+    **This test used to record a divergence, and the divergence is gone.**
+    inproc rejected the action in the shared ``CoreStore`` and raised
+    ``ValueError``, while rpc never reached that layer: the protocol was
+    generated with the ``pydantic_dataclasses`` option of protoc, so building
+    the request raised a pydantic ``ValidationError``. The two agreed only
+    because ``ValidationError`` subclasses ``ValueError``, so this test matched
+    either message and lived outside the main comparison table for that reason.
 
-    That asymmetry is forced by serialisation rather than chosen, so it is not
-    a defect to be retired. What a caller actually branches on still agrees,
-    because pydantic's ``ValidationError`` subclasses ``ValueError``: one
-    ``except ValueError`` is correct on both engines. Asserting exactly that,
-    in its own test, keeps the main comparison table strict instead of
-    quietly loosening one entry in it.
+    Issue #127 removed the option, which cost 0.254 s of import time in every
+    process that speaks the protocol. ``Store.collect_garbage`` of the rpc
+    engine now makes the check itself, with the message the inproc engine
+    already used, so the two engines agree on the message and not only on the
+    class. The assertion below is the tighter one that this allows.
 
     The action is rejected before any collection happens, so this is safe to
     run against the suite's shared store.
     """
     for factory in (inproc_session, rpc_session):
         async with factory() as session, session.store() as store:
-            with pytest.raises(ValueError, match=r"unsupported garbage-collection action|validation error"):
+            with pytest.raises(ValueError, match=r"^unsupported garbage-collection action: "):
                 await store.collect_garbage(object())  # type: ignore[arg-type] -- exercising the unmapped-action guard
 
 
