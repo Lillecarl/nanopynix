@@ -13,7 +13,6 @@ dependencies = [
   "nanopynix-proto",
   "grpclib-transports",
   "anyio>=4.14",
-  "coolname",
   "janus",
   "jsonschema",
   "pydantic",
