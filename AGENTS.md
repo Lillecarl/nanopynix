@@ -40,7 +40,7 @@ reach, in the `static-checks` job. Each one is a derivation in
 `nix/checks.nix`, and each is a package. Build them to run a gate the way CI
 runs it, in a sandbox and not in the dev shell:
 
-- nix build --file . --no-link --keep-going checks.lint checks.lint-strict checks.format checks.types checks.shell checks.grpclib-transports checks.pytest-agent checks.test-support checks.nanopynix-helpers checks.nix-daemon-protocol checks.pynixd
+- nix build --file . --no-link --keep-going checks.lint checks.lint-strict checks.format checks.types checks.shell checks.grpclib-transports checks.pytest-agent checks.test-support checks.nanopynix-helpers checks.nix-daemon-protocol checks.pynixd checks.nixos-module
 
 Do not use `nix flake check` for this. That command evaluates every package,
 and `packages.shell` cannot evaluate in a pure flake evaluation.
@@ -244,6 +244,13 @@ at #131.
 file is the source of truth for that project, and this file does not replace
 it. Its three-tier execution pattern, its build queue and its rule of one
 pytest process at a time are all in there.
+
+**The NixOS module lives at `pynixd/nix/nixos/`, and `flake.nix` exposes it
+as `nixosModules.pynixd`.** It is the one NixOS module this repository ships.
+The wrapper in `flake.nix` sets `services.pynixd.package`; the module file
+states no default, because the default it had read `pynixd/default.nix` and
+that project's own `flake.lock`, which built a second pynixd pinned apart from
+the one this repository tests. `checks.nixos-module` evaluates it.
 
 **Lix is not supported.** The project supported it, through `LIX_BIN` and the
 `--client-bin`, `--local-bin` and `--builder-bin` options. Every one of those

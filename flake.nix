@@ -85,6 +85,24 @@
       devShells = forAllSystems (system: {
         default = eachDefNix.${system}.shell;
       });
+      # The one NixOS module this repository ships, and the answer issue #131
+      # asked for. Not per-system: a module is evaluated by the configuration
+      # that imports it, which knows its own system.
+      #
+      # The wrapper is what sets `services.pynixd.package`. The module file
+      # itself states no default: it used to read `pynixd/default.nix` and
+      # that project's own `flake.lock`, which built a second pynixd, pinned
+      # apart from the one this repository tests.
+      #
+      # `checks.nixos-module` evaluates the module, so a rename or a type
+      # error fails a gate rather than a rebuild on someone's machine.
+      nixosModules.pynixd =
+        { pkgs, lib, ... }:
+        {
+          imports = [ ./pynixd/nix/nixos ];
+          services.pynixd.package = lib.mkDefault eachDefNix.${pkgs.stdenv.hostPlatform.system}.pynixd;
+        };
+      nixosModules.default = inputs.self.nixosModules.pynixd;
       legacyPackages = forAllSystems (system: inputs.nixpkgs.legacyPackages.${system});
       lib = inputs.nixpkgs.lib;
     };

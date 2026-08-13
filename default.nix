@@ -508,6 +508,16 @@ let
                   storeExecTool
                 ];
               };
+              # The daemon proxy, as a release application. It needs no
+              # `pathInputs`: it speaks the daemon protocol itself and shells
+              # out to no tool. Issue #131 added it, so that
+              # `nixosModules.pynixd` can default `services.pynixd.package` to
+              # a build of this repository rather than to a second, separately
+              # pinned one under `pynixd/default.nix`.
+              pynixd = mkApp {
+                name = "pynixd";
+                inherit (final) pythonSet;
+              };
               shell = final.callPackage ./nix/shell.nix { inherit tofuCoreSchemaTool storeExecTool; };
               # A live, editable-install `pynix`/`ekn` env (no devtools --
               # see nix/shell.nix for the full interactive nanopynix shell),
@@ -882,6 +892,9 @@ lib.throwIf (unlistedVariants != [ ])
       # this repo's project overlay into the consumer's set.
       pytest-agent
       pynix
+      # The daemon proxy of `pynixd/`. `nixosModules.pynixd` in `flake.nix`
+      # defaults `services.pynixd.package` to this one.
+      pynixd
       pynixDevEnv
       shell
       nanopynix-docs
