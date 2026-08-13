@@ -86,7 +86,7 @@ class _ProviderSchemaEntry(BaseModel):
 class ProviderSchemas(BaseModel):
     """The parsed shape of ``tofu providers schema -json``'s output.
 
-    Real shape (confirmed against the ``tests/pynix/test_lsp/terranix/``
+    Real shape (confirmed against the ``pynix/tests/test_lsp/terranix/``
     fixture): top-level key is ``provider_schemas``, keyed by
     ``<registry-host>/<namespace>/<type>`` (e.g.
     ``registry.opentofu.org/hashicorp/random``).

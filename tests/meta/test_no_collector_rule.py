@@ -34,6 +34,7 @@ from pathlib import Path
 import pytest
 
 from nanopynix_testing.nix_runtime import IN_PROCESS_EVALUATOR_FIXTURES, hosts_an_evaluator
+from tests.support.suite_roots import SCANNED_ROOTS, check_roster
 from tests.support.suppressions import iter_python_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -41,8 +42,9 @@ TESTS_DIR = REPO_ROOT / "tests"
 
 # Where a fixture may be *defined*, which is not where a test module lives.
 # Issue #130 moved `inproc_session` and its peers into `nanopynix-testing`, and
-# a scan of `tests/` alone then reported that the rule matched nothing.
-FIXTURE_DIRS = (TESTS_DIR, REPO_ROOT / "nanopynix-testing")
+# a scan of `tests/` alone then reported that the rule matched nothing. The
+# roster is shared, so the next move edits one file.
+FIXTURE_DIRS = SCANNED_ROOTS
 
 # Modules that construct an in-process session and are still safe to run
 # against a build with no collector. Each entry states why.
@@ -171,6 +173,7 @@ def test_the_marker_reader_works_both_ways() -> None:
 def test_each_named_fixture_still_exists() -> None:
     """The first decay mode: a rename that leaves the rule matching nothing."""
     defined: set[str] = set()
+    check_roster()
     for directory in FIXTURE_DIRS:
         for path in iter_python_files(directory):
             defined |= fixture_names(path.read_text(encoding="utf-8"))

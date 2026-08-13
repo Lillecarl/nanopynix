@@ -193,7 +193,7 @@ def test_the_scanner_sees_an_internal_module_with_a_public_looking_name() -> Non
     """``nanopynix.rpc.client`` has no underscore, and is internal anyway.
 
     This and the test below are what the retired
-    ``tests/pynix/test_import_boundaries.py`` used to cover on its own. The
+    ``pynix/tests/test_import_boundaries.py`` used to cover on its own. The
     underscore rule sees neither shape, so deleting that guard without
     ``INTERNAL_PREFIXES`` would have lost the coverage.
     """

@@ -24,8 +24,8 @@ import pytest_lsp
 from lsprotocol import types
 from pytest_lsp import ClientServerConfig, LanguageClient, client_capabilities
 
-from tests.support.lsp_client import complete_at, definition_at, hover_at, open_document
-from tests.support.lsp_cursor import cursor_after
+from support.lsp_client import complete_at, definition_at, hover_at, open_document
+from support.lsp_cursor import cursor_after
 
 _MODULE_SYSTEM = (Path(__file__).parent / "test_lsp" / "module_system").resolve()
 

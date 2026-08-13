@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from lsprotocol import types
 from pynix._lsp._handlers import _completion, _sync_document
 
-from tests.support.lsp_environment import asset
+from support.lsp_environment import asset
 
 if TYPE_CHECKING:
     from pynix._lsp._handlers import PynixLanguageServer

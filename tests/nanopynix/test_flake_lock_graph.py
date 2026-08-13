@@ -10,7 +10,7 @@ Two doors replace it, and this file asks a different question of each:
 
 * :meth:`~nanopynix.protocols.AsyncLockedFlake.metadata_json` renders the whole
   graph, because Nix renders it. The oracle for that is
-  ``nix flake metadata --json``, and it lives in ``tests/pynix/test_flake_metadata.py``
+  ``nix flake metadata --json``, and it lives in ``pynix/tests/test_flake_metadata.py``
   where the command that prints it lives.
 * :meth:`~nanopynix.protocols.AsyncLockedFlake.find_input` answers one question
   about the graph. That is the door ``pynix develop`` needs, and it is what
@@ -142,7 +142,7 @@ async def test_metadata_json_carries_the_whole_graph(
     """``locks`` must hold every node, and the ``follows`` edge as an edge.
 
     ``nix flake metadata --json`` is the oracle for the exact bytes, in
-    ``tests/pynix/test_flake_metadata.py``. What this pins is the property that made the
+    ``pynix/tests/test_flake_metadata.py``. What this pins is the property that made the
     old map wrong: the graph reaches Python whole.
 
     ``LockFile::toJSON`` writes a ``follows`` edge as a *list* -- the attribute

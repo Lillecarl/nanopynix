@@ -1,4 +1,4 @@
-"""Marker/scenario-driven LSP tests -- see tests/support/lsp_markers.py and lsp_scenario.py.
+"""Marker/scenario-driven LSP tests -- see pynix/tests/support/lsp_markers.py and lsp_scenario.py.
 
 Each scenario below runs twice: once against ``InProcessDriver`` (direct
 handler calls, no wire protocol) and once against ``WireDriver`` wrapping the
@@ -22,9 +22,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.support.lsp_drivers import InProcessDriver, WireDriver
-from tests.support.lsp_environment import asset
-from tests.support.lsp_scenario import (
+from support.lsp_drivers import InProcessDriver, WireDriver
+from support.lsp_environment import asset
+from support.lsp_scenario import (
     Delete,
     ExpectCompletion,
     ExpectDefinition,
@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     import pytest_lsp
     from pynix._lsp._handlers import PynixLanguageServer
 
-    from tests.support.lsp_scenario import LspDriver
+    from support.lsp_scenario import LspDriver
 
 _LOCAL_NIX = asset("terranix/modules/local.nix")
 _NULL_NIX = asset("terranix/modules/null.nix")

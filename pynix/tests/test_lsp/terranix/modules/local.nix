@@ -7,7 +7,7 @@
 # wrapper for the other half: it sets $TF_DATA_DIR from that same directory.
 #
 # LSPOINT/LSSTART/LSEND/LSLINE comments below are scenario markers for
-# tests/pynix/test_lsp_scenarios.py (see tests/support/lsp_markers.py) --
+# pynix/tests/test_lsp_scenarios.py (see pynix/tests/support/lsp_markers.py) --
 # not part of the terranix config itself.
 { lib, ... }:
 {

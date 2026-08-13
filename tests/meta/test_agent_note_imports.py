@@ -24,15 +24,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-TESTS_ROOT = REPO_ROOT / "tests"
-TEST_SUPPORT_ROOT = REPO_ROOT / "test-support"
-NOTES = TEST_SUPPORT_ROOT / "src" / "test_support" / "notes.py"
+from tests.support.suite_roots import REPO_ROOT, SCANNED_ROOTS, check_roster
 
-# Both trees, because issue #130 moved the helper out of `tests/` and a scanner
-# that reads one tree would stop seeing the other. `test-support/` holds a
-# suite of its own as well as the helper.
-SCAN_ROOTS = (TESTS_ROOT, TEST_SUPPORT_ROOT)
+TESTS_ROOT = REPO_ROOT / "tests"
+NOTES = REPO_ROOT / "test-support" / "src" / "test_support" / "notes.py"
 
 # The two modules whose job is to detect the plugin. Everything else goes
 # through test_support.notes.
@@ -48,7 +43,8 @@ _IMPORT = re.compile(r"^\s*(?:from|import)\s+pytest_agent\b", re.MULTILINE)
 
 
 def _scanned() -> list[Path]:
-    found = [path for root in SCAN_ROOTS for path in root.rglob("*.py")]
+    check_roster()
+    found = [path for root in SCANNED_ROOTS for path in root.rglob("*.py")]
     return sorted(path for path in found if ".pytest-agent" not in path.parts)
 
 

@@ -5,7 +5,7 @@
 # there and never see this file. cd into *this* directory first (it covers
 # both fixture subdirectories below, so either one works as $PWD):
 #
-#   cd ~/Code/nanopynix/tests/pynix/test_lsp   # direnv active, so `pynix` resolves on PATH
+#   cd ~/Code/nanopynix/pynix/tests/test_lsp   # direnv active, so `pynix` resolves on PATH
 #   hx module_system/config1.nix
 #   hx terranix/modules/random.nix
 #

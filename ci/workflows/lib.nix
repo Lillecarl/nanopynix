@@ -119,7 +119,7 @@ let
     #
     # The third raised the three deadlines and got *slower* per test, because
     # each failure then waited out a longer clock. `ci/steps.nix` answers both
-    # halves: it drops `tests/pynix`, where all ten of that run's failures
+    # halves: it drops `pynix/tests`, where all ten of that run's failures
     # were, and brings the deadlines back to a middle ground. The remaining
     # selection is about 600 tests, and the passing rate of run 30895974566
     # puts that inside 60 minutes. This is the measurement that confirms it.

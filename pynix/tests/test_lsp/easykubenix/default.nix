@@ -54,6 +54,6 @@ in
   # file, then reads the path off disk. Without a `nix-build -A openApiSchema`
   # first, every easykubenix scenario fails with FileNotFoundError on a path
   # that is perfectly valid and simply absent. See
-  # `tests/pynix/conftest.py`'s `easykubenix_openapi_schema` fixture.
+  # `pynix/tests/conftest.py`'s `easykubenix_openapi_schema` fixture.
   openApiSchema = k8sOpenApiSchema;
 }

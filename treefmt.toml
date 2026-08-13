@@ -5,7 +5,7 @@ includes = ["*.nix"]
 # them is destructive rather than merely noisy.
 #
 # Most of them carry marker comments whose caret column is load-bearing --
-# `tests/support/lsp_markers.py` reads `#      vLSPOINT8"g"` as "the position
+# `pynix/tests/support/lsp_markers.py` reads `#      vLSPOINT8"g"` as "the position
 # under this caret, which must be a `g`", and the comments sit at column 0 so
 # the carets line up with the code below them. nixfmt indents a comment to
 # match its enclosing block, which slides every caret sideways; running it
@@ -18,14 +18,14 @@ includes = ["*.nix"]
 # only those two would silence that error and leave the marker files to be
 # re-broken on the next run, so the whole fixture tree is out of scope.
 #
-# Deliberately not excluded: `tests/pynix/test_osearch/*.nix`, which are
+# Deliberately not excluded: `pynix/tests/test_osearch/*.nix`, which are
 # ordinary option-tree fixtures with no markers and nothing positional.
 #
 # Scoped to this formatter rather than made a global exclude because the one
 # non-Nix file in the tree, `.helix/languages.toml`, is an editor config for
 # driving the server by hand -- taplo formats it cleanly and should keep doing
 # so.
-excludes = ["tests/pynix/test_lsp/**"]
+excludes = ["pynix/tests/test_lsp/**"]
 
 [formatter.toml]
 command = "taplo"

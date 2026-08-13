@@ -1,6 +1,6 @@
 """Thin convenience wrappers around pytest-lsp's ``LanguageClient``.
 
-Real e2e tests (see ``tests/pynix/test_lsp_e2e.py``) drive a genuine `pynix
+Real e2e tests (see ``pynix/tests/test_lsp_e2e.py``) drive a genuine `pynix
 lsp` subprocess over real stdio JSON-RPC. Without these, every test would
 hand-roll ``DidOpenTextDocumentParams``/``CompletionParams``/``HoverParams``
 boilerplate; these wrap that up so a test reads as "open this file, then

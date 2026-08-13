@@ -16,7 +16,7 @@ extraPaths = [
   # grpclib-transports/tests/test_examples.py runs.
   "grpclib-transports/docs/examples",
   "tests",
-  "tests/pynix",
+  "pynix/tests",
   # Reached by a bare `import beartype_bootstrap` from both the sitecustomize
   # shim beside it and `nanopynix_testing.beartype_hook`, because the
   # directory goes on PYTHONPATH rather than being a package -- see that
@@ -41,6 +41,15 @@ reportMissingModuleSource = "none"
 
 [[tool.pyright.executionEnvironments]]
 root = "tests"
+reportPrivateUsage = "none"
+
+# A suite reads the private surface of the thing it tests, and the LSP drivers
+# call `pynix._lsp._handlers._hover` and its peers directly. This entry says
+# for `pynix/tests/` what the one above says for `tests/`: issue #130 moved the
+# suite out from under that root, and 18 reports appeared with no code change.
+# Each suite that moves needs its own entry.
+[[tool.pyright.executionEnvironments]]
+root = "pynix/tests"
 reportPrivateUsage = "none"
 
 [[tool.pyright.executionEnvironments]]

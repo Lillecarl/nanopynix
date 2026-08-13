@@ -15,8 +15,8 @@ from pynix._lsp._syntax import (
     top_level_symbols,
 )
 
-from tests.support.lsp_cursor import cursor_after
-from tests.support.lsp_environment import asset
+from support.lsp_cursor import cursor_after
+from support.lsp_environment import asset
 
 if TYPE_CHECKING:
     from pynix._lsp._handlers import PynixLanguageServer
@@ -184,7 +184,7 @@ def test_cursor_after_narrows_the_search_with_a_needle() -> None:
 # These drive the real handler functions directly (not a stdio subprocess,
 # unlike test_lsp_e2e.py) against nix files checked into test_lsp/, so header
 # directives and relative imports behave exactly as they would for a real
-# user's file on disk. `lsp_server` comes from tests/support/lsp_environment.py.
+# user's file on disk. `lsp_server` comes from pynix/tests/support/lsp_environment.py.
 
 
 async def test_hover_resolves_a_real_evaluated_value(lsp_server: PynixLanguageServer) -> None:
