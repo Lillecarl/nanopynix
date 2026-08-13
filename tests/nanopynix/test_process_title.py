@@ -36,19 +36,44 @@ def test_manager_title_selection_is_used_by_later_sessions(monkeypatch: pytest.M
 
 def test_worker_title_uses_nanopynix_and_two_word_slug(monkeypatch: pytest.MonkeyPatch) -> None:
     titles: list[str] = []
-    word_counts: list[int] = []
     monkeypatch.setattr(process_title, "setproctitle", titles.append)
+    monkeypatch.setattr(process_title, "generate_slug", lambda: "quiet-otter")
 
-    def generate_slug(words: int) -> str:
-        word_counts.append(words)
-        return "quiet-otter"
+    returned = process_title.set_worker_title()
 
-    monkeypatch.setattr(process_title, "generate_slug", generate_slug)
-
-    process_title.set_worker_title()
-
-    assert word_counts == [2]
     assert titles == ["nanopynix (quiet-otter)"]
+    assert returned == "quiet-otter", "the caller stores this as worker_subname"
+
+
+def test_the_slug_is_two_words_from_the_two_lists() -> None:
+    """The generator itself, which ``coolname`` used to provide.
+
+    The test above passes a double, so it says nothing about the words. Issue
+    #108 replaced the dependency with two lists in the module, and this is what
+    reads them.
+    """
+    for _ in range(50):
+        slug = process_title.generate_slug()
+        adjective, separator, noun = slug.partition("-")
+
+        assert separator == "-", f"{slug!r} is not two words joined by a hyphen"
+        assert adjective in process_title._ADJECTIVES, f"{adjective!r} is not in the adjective list"
+        assert noun in process_title._NOUNS, f"{noun!r} is not in the noun list"
+
+
+def test_the_slug_lists_are_large_enough_to_tell_workers_apart() -> None:
+    """A guard on the lists, not on the generator.
+
+    The slug needs no uniqueness -- nothing reads it back, and the pid tells
+    two workers apart. It does have to be worth reading, and a list that shrank
+    to a handful of words would make every title look the same while every test
+    above still passed.
+    """
+    combinations = len(process_title._ADJECTIVES) * len(process_title._NOUNS)
+
+    assert combinations >= 1000, f"{combinations} slugs is too few to tell two workers apart in ps"
+    assert len(set(process_title._ADJECTIVES)) == len(process_title._ADJECTIVES), "a duplicate adjective"
+    assert len(set(process_title._NOUNS)) == len(process_title._NOUNS), "a duplicate noun"
 
 
 def test_session_sets_manager_title(monkeypatch: pytest.MonkeyPatch) -> None:
