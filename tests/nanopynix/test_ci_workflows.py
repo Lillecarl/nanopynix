@@ -1,10 +1,10 @@
 """Gate: the checked-in GitHub Actions workflows match ci/workflows/*.nix.
 
 ``.github/workflows/*.yml`` is generated. ``ci/render.py`` produces it from
-``ci/workflows/on_*.nix`` through nanopynix's own ``builtins.toYAML`` primop,
-and until now nothing ran that renderer except a person who remembered to.
-A change to a job builder that was never rendered left CI running the previous
-matrix, and every job stayed green while doing so.
+``ci/workflows/on_*.nix`` with nanopynix, and until now nothing ran that
+renderer except a person who remembered to. A change to a job builder that was
+never rendered left CI running the previous matrix, and every job stayed green
+while doing so.
 
 **This test renders again and rewrites the checked-in files when they differ**,
 so a pytest run is what drives the generation. The failure it reports is
@@ -28,7 +28,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import anyio
 import pytest
@@ -39,13 +39,13 @@ if TYPE_CHECKING:
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RENDERER = _REPO_ROOT / "ci" / "render.py"
 
-# Dynamic primop registration is broken on Nix 2.31 and is not expected to be
-# fixed there, and the renderer needs `builtins.toYAML` -- see
-# nanopynix.primops. Every other supported version renders, so the gate still
-# runs on each of them. The guard below carries no such marker: it reads the
-# tree and never evaluates anything, so it must report a missing renderer on
-# every version.
-_requires_dynamic_primops = pytest.mark.nix_capability("dynamic_primop_registration")
+# **No `nix_capability` marker.** The gate below used to carry
+# `nix_capability("dynamic_primop_registration")`, because the renderer
+# registered `yaml_primops()` and called `builtins.toYAML`, and Nix 2.31 could
+# not register a primop. Two changes removed both halves: issue #126 raised
+# `supportedNixFloor` to 2.34, so that capability reports `true` on every
+# supported version, and issue #121 moved the render to `builtins.toJSON` and
+# the `to_yaml` of Python, so the renderer registers no primop at all.
 
 
 def _load_renderer() -> ModuleType:
@@ -77,7 +77,53 @@ def test_renderer_is_present() -> None:
         )
 
 
-@_requires_dynamic_primops
+def test_ordering_ignores_the_order_it_receives() -> None:
+    """The invariant of issue #121, checked without running Nix.
+
+    A Nix attribute set is keyed by ``Symbol``, and the evaluator interns a
+    symbol the first time it parses the name. ``builtins.toYAML`` therefore
+    rendered the members in the order the names were first read anywhere, so
+    one new attribute in ``ci/workflows/lib.nix`` moved keys in workflows the
+    edit never named. Measured with a probe attribute that adds five names near
+    the top of that file: 32 hunks and 150 changed lines in ``on_commit.yml``,
+    none of which changed a value.
+
+    ``order_keys`` answers it by reading no input order at all. The test feeds
+    it the same document twice, with every mapping reversed the second time.
+    """
+    document: dict[str, Any] = {
+        "name": "w",
+        "jobs": {
+            "b": {"steps": [{"run": "x", "name": "s", "timeout-minutes": 1}], "runs-on": "r"},
+            "a": {"if": "c", "runs-on": "r", "steps": []},
+        },
+    }
+
+    def reverse_mappings(value: Any) -> Any:
+        # `cast`, for the reason `order_keys` in ci/render.py gives: `isinstance`
+        # narrows an `Any` to an unknown element type, and that narrowing wins
+        # over a declared one.
+        if isinstance(value, dict):
+            items = cast("dict[str, Any]", value)
+            return {key: reverse_mappings(items[key]) for key in reversed(list(items))}
+        if isinstance(value, list):
+            entries = cast("list[Any]", value)
+            return [reverse_mappings(entry) for entry in entries]
+        return value
+
+    renderer = _load_renderer()
+
+    assert renderer.order_keys(document) == renderer.order_keys(reverse_mappings(document))
+    # `==` on a dict ignores order, so it cannot see the defect on its own.
+    assert list(renderer.order_keys(document)["jobs"]) == ["a", "b"]
+    assert list(renderer.order_keys(document)["jobs"]["b"]) == ["runs-on", "steps"]
+    assert list(renderer.order_keys(document)["jobs"]["b"]["steps"][0]) == [
+        "name",
+        "run",
+        "timeout-minutes",
+    ]
+
+
 async def test_checked_in_workflows_are_current() -> None:
     renderer = _load_renderer()
     rendered = await renderer.render_workflows()

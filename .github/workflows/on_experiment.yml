@@ -2,78 +2,78 @@
 # Edit ci/workflows/on_experiment.nix; a pytest run renders this file again.
 
 name: Experiment
-env:
-  FLAKE_COMPATISH_DISABLE_OVERRIDES: '1'
 'on':
   workflow_dispatch:
     inputs:
-      ref:
+      experiment:
+        description: Attribute of ci/experiments.nix to run
+        required: true
         type: string
+      matrix:
+        default: '{"run":[1]}'
+        description: JSON matrix, for example {"arm":["a","b"],"run":[1,2]}
+        required: false
+        type: string
+      ref:
+        default: ci-develop
         description: Branch, tag, or FULL 40-character sha to check out
         required: false
-        default: ci-develop
+        type: string
       runner:
-        type: choice
-        description: Runner to use
-        required: false
         default: ubuntu-24.04
+        description: Runner to use
         options:
         - ubuntu-24.04
         - ubuntu-24.04-arm
-      matrix:
-        type: string
-        description: JSON matrix, for example {"arm":["a","b"],"run":[1,2]}
         required: false
-        default: '{"run":[1]}'
-      experiment:
-        type: string
-        description: Attribute of ci/experiments.nix to run
-        required: true
+        type: choice
+env:
+  FLAKE_COMPATISH_DISABLE_OVERRIDES: '1'
 jobs:
   experiment:
+    runs-on: ${{ inputs.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.matrix) }}
+    timeout-minutes: 160
     steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
-    - timeout-minutes: 15
-      uses: cachix/install-nix-action@master
+    - uses: actions/checkout@main
+      timeout-minutes: 10
+    - uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
+      timeout-minutes: 15
     - name: Check the ref
+      run: nix run --file . ciSteps.check-dispatch-ref
       env:
         REF: ${{ inputs.ref }}
       timeout-minutes: 10
-      run: nix run --file . ciSteps.check-dispatch-ref
-    - timeout-minutes: 10
-      uses: actions/checkout@main
+    - uses: actions/checkout@main
       with:
         ref: ${{ inputs.ref }}
-    - timeout-minutes: 15
-      uses: cachix/cachix-action@master
+      timeout-minutes: 10
+    - uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
+      timeout-minutes: 15
     - name: Enable Nix sandbox namespaces
-      timeout-minutes: 10
       run: nix run --file . ciSteps.enable-sandbox-namespaces
+      timeout-minutes: 10
     - name: Run ${{ inputs.experiment }}
+      run: nix run --file . "experiments.$EXPERIMENT"
       env:
         EXPERIMENT: ${{ inputs.experiment }}
         MATRIX_JSON: ${{ toJSON(matrix) }}
       timeout-minutes: 60
-      run: nix run --file . "experiments.$EXPERIMENT"
     - name: Keep the evidence of a failed cell
-      timeout-minutes: 15
       uses: actions/upload-artifact@main
+      if: ${{ failure() }}
       with:
         name: experiment-${{ inputs.experiment }}-${{ strategy.job-index }}
         path: |
           /tmp/core.*
           .pytest-agent/
-      if: ${{ failure() }}
-    timeout-minutes: 160
-    runs-on: ${{ inputs.runner }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(inputs.matrix) }}
+      timeout-minutes: 15

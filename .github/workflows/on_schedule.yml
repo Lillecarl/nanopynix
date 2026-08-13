@@ -2,53 +2,21 @@
 # Edit ci/workflows/on_schedule.nix; a pytest run renders this file again.
 
 name: On schedule
-env:
-  FLAKE_COMPATISH_DISABLE_OVERRIDES: '1'
 'on':
+  schedule:
+  - cron: 17 3 * * *
   workflow_dispatch:
     inputs:
       jobs:
-        type: string
+        default: ''
         description: Comma-separated job IDs to run; leave empty for the full matrix
         required: false
-        default: ''
-  schedule:
-  - cron: 17 3 * * *
+        type: string
+env:
+  FLAKE_COMPATISH_DISABLE_OVERRIDES: '1'
 jobs:
-  static-checks:
-    needs:
-    - update-lockfile
-    steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
-      with:
-        ref: ${{ github.ref_name }}
-    - timeout-minutes: 10
-      uses: actions/download-artifact@main
-      with:
-        name: flake-lock
-    - timeout-minutes: 15
-      uses: cachix/install-nix-action@master
-      with:
-        extra_nix_config: |
-          experimental-features = nix-command flakes
-    - timeout-minutes: 15
-      uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Run the gates (format, grpclib-transports, lint, lint-strict, pytest-agent,
-        shell, types)
-      timeout-minutes: 20
-      run: nix build --file . --no-link --print-build-logs --keep-going checks.format
-        checks.grpclib-transports checks.lint checks.lint-strict checks.pytest-agent
-        checks.shell checks.types
-    timeout-minutes: 85
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',static-checks,')
   docs-build:
+    runs-on: ubuntu-24.04
     needs:
     - static-checks
     - test-asan
@@ -56,489 +24,521 @@ jobs:
     - test-regular
     - test-tsan
     - test-ubsan
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',docs-build,')
+    timeout-minutes: 135
     steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
+    - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
-    - timeout-minutes: 10
-      uses: actions/download-artifact@main
+      timeout-minutes: 10
+    - uses: actions/download-artifact@main
       with:
         name: flake-lock
-    - timeout-minutes: 15
-      uses: cachix/install-nix-action@master
+      timeout-minutes: 10
+    - uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - timeout-minutes: 15
-      uses: cachix/cachix-action@master
+      timeout-minutes: 15
+    - uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
+      timeout-minutes: 15
     - name: Build documentation
-      timeout-minutes: 30
       run: nix build --file . nanopynix-docs --out-link result --print-build-logs
         --print-out-paths
+      timeout-minutes: 30
     - name: Verify docs closure
-      timeout-minutes: 15
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
+      timeout-minutes: 15
     - name: Prepare Pages artifact
-      timeout-minutes: 10
       run: nix run --file . ciSteps.prepare-pages
-    - timeout-minutes: 15
-      uses: actions/upload-pages-artifact@main
+      timeout-minutes: 10
+    - uses: actions/upload-pages-artifact@main
       with:
         path: public
-    timeout-minutes: 135
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',docs-build,')
+      timeout-minutes: 15
   docs-deploy:
+    runs-on: ubuntu-24.04
     needs: docs-build
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',docs-deploy,')
+    permissions:
+      id-token: write
+      pages: write
+    concurrency:
+      cancel-in-progress: false
+      group: pages
+    timeout-minutes: 35
     steps:
     - name: Deploy to GitHub Pages
-      timeout-minutes: 20
+      id: deployment
       uses: actions/deploy-pages@main
       with:
         timeout: 900000
-      id: deployment
-    timeout-minutes: 35
-    runs-on: ubuntu-24.04
-    permissions:
-      pages: write
-      id-token: write
+      timeout-minutes: 20
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    concurrency:
-      group: pages
-      cancel-in-progress: false
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',docs-deploy,')
-  test-regular:
-    env:
-      CI_STEP: ciSteps.${{ matrix.version }}
-      BACKEND: ${{ matrix.backend }}
-    needs:
-    - update-lockfile
-    steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
-      with:
-        ref: ${{ github.ref_name }}
-    - timeout-minutes: 10
-      uses: actions/download-artifact@main
-      with:
-        name: flake-lock
-    - timeout-minutes: 15
-      uses: cachix/install-nix-action@master
-      with:
-        extra_nix_config: |
-          experimental-features = nix-command flakes
-    - timeout-minutes: 15
-      uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Build the CI step package for Nix ${{ matrix.version }}
-      timeout-minutes: 30
-      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
-    - name: Verify test runner closure after build
-      timeout-minutes: 15
-      run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    - name: Enable Nix sandbox namespaces
-      timeout-minutes: 10
-      run: nix run --file . ciSteps.enable-sandbox-namespaces
-    - name: Test nanopynix against Nix ${{ matrix.version }} (full suite, ${{ matrix.backend
-        }} backend)
-      timeout-minutes: 30
-      run: ./result/bin/nanopynix-ci suite
-    - name: Run the concurrency soak (${{ matrix.version }}, ${{ matrix.backend }}
-        backend)
-      timeout-minutes: 15
-      run: ./result/bin/nanopynix-ci soak
-    - name: Upload test output
-      timeout-minutes: 15
-      uses: actions/upload-artifact@main
-      with:
-        name: test-output-${{ matrix.backend }}-${{ matrix.version }}
-        path: ${{ github.workspace }}/test-gdb-output.log
-      if: ${{ !cancelled() }}
-    - name: Upload Boehm GC thread registration log
-      timeout-minutes: 15
-      uses: actions/upload-artifact@main
-      with:
-        name: gc-thread-debug-${{ matrix.backend }}-${{ matrix.version }}
-        path: ${{ github.workspace }}/gc-thread-debug.log
-      if: ${{ !cancelled() }}
-    - name: Upload coverage reports to Codecov
-      timeout-minutes: 10
-      uses: codecov/codecov-action@main
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ${{ github.workspace }}/coverage.xml
-        flags: ${{ matrix.backend }}-${{ matrix.version }}
-      if: ${{ !cancelled() }}
-    - name: Upload test results to Codecov
-      timeout-minutes: 10
-      uses: codecov/codecov-action@main
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ${{ github.workspace }}/junit.xml
-        flags: ${{ matrix.backend }}-${{ matrix.version }}
-        report_type: test_results
-      if: ${{ !cancelled() }}
-    - name: Verify test runner closure after tests
-      timeout-minutes: 15
-      run: nix store verify --recursive --no-trust "$(readlink -f result)"
-    timeout-minutes: 230
+  static-checks:
     runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-regular,')
-    strategy:
-      fail-fast: false
-      matrix:
-        version: ${{ fromJson(needs.update-lockfile.outputs.regular_versions) }}
-        backend:
-        - daemon
-        - local
-  test-ubsan:
-    env:
-      CI_STEP: ciSteps.${{ matrix.version }}
     needs:
     - update-lockfile
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',static-checks,')
+    timeout-minutes: 85
     steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
+    - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
-    - timeout-minutes: 10
-      uses: actions/download-artifact@main
+      timeout-minutes: 10
+    - uses: actions/download-artifact@main
       with:
         name: flake-lock
-    - timeout-minutes: 15
-      uses: cachix/install-nix-action@master
+      timeout-minutes: 10
+    - uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - timeout-minutes: 15
-      uses: cachix/cachix-action@master
+      timeout-minutes: 15
+    - uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
-    - name: Build the UBSAN CI step package (${{ matrix.version }})
-      timeout-minutes: 60
-      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
-    - name: Enable Nix sandbox namespaces
-      timeout-minutes: 10
-      run: nix run --file . ciSteps.enable-sandbox-namespaces
-    - name: Run UBSAN-instrumented suite (${{ matrix.version }}, local backend)
-      timeout-minutes: 30
-      run: ./result/bin/nanopynix-ci suite
-    - name: Run the concurrency soak (UBSAN, ${{ matrix.version }})
       timeout-minutes: 15
-      run: ./result/bin/nanopynix-ci soak
-    - name: Upload UBSAN output (${{ matrix.version }})
-      timeout-minutes: 15
-      uses: actions/upload-artifact@main
-      with:
-        name: ubsan-report-${{ matrix.version }}
-        path: ${{ github.workspace }}/ubsan-output-${{ matrix.version }}.log
-      if: ${{ !cancelled() }}
-    timeout-minutes: 195
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-ubsan,')
-    strategy:
-      fail-fast: false
-      matrix:
-        version: ${{ fromJson(needs.update-lockfile.outputs.ubsan_versions) }}
-  test-tsan:
-    env:
-      CI_STEP: ciSteps.${{ matrix.version }}
-    needs:
-    - update-lockfile
-    steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
-      with:
-        ref: ${{ github.ref_name }}
-    - timeout-minutes: 10
-      uses: actions/download-artifact@main
-      with:
-        name: flake-lock
-    - timeout-minutes: 15
-      uses: cachix/install-nix-action@master
-      with:
-        extra_nix_config: |
-          experimental-features = nix-command flakes
-    - timeout-minutes: 15
-      uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Build the TSAN CI step package (${{ matrix.version }})
-      timeout-minutes: 45
-      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
-    - name: Enable Nix sandbox namespaces
-      timeout-minutes: 10
-      run: nix run --file . ciSteps.enable-sandbox-namespaces
-    - name: Run TSAN-instrumented concurrency soak (five seeds, local+daemon backends)
-      timeout-minutes: 25
-      run: ./result/bin/nanopynix-ci soak-seeds
-    - name: Run TSAN-instrumented concurrency tests (single pass, local+daemon backends)
+    - name: Run the gates (format, grpclib-transports, lint, lint-strict, pytest-agent,
+        shell, types)
+      run: nix build --file . --no-link --print-build-logs --keep-going checks.format
+        checks.grpclib-transports checks.lint checks.lint-strict checks.pytest-agent
+        checks.shell checks.types
       timeout-minutes: 20
-      run: ./result/bin/nanopynix-ci broad
-    - name: Upload TSAN output (${{ matrix.version }})
-      timeout-minutes: 15
-      uses: actions/upload-artifact@main
-      with:
-        name: tsan-race-report-${{ matrix.version }}
-        path: |
-          ${{ github.workspace }}/tsan-output-${{ matrix.version }}.log
-          ${{ github.workspace }}/tsan-output-broad-${{ matrix.version }}.log
-          ${{ github.workspace }}/soak-${{ matrix.version }}-run*.json
-      if: ${{ !cancelled() }}
-    timeout-minutes: 180
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-tsan,')
-    strategy:
-      fail-fast: false
-      matrix:
-        version: ${{ fromJson(needs.update-lockfile.outputs.tsan_versions) }}
-  test-nogc:
-    env:
-      CI_STEP: ciSteps.${{ matrix.version }}
-    needs:
-    - update-lockfile
-    steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
-      with:
-        ref: ${{ github.ref_name }}
-    - timeout-minutes: 10
-      uses: actions/download-artifact@main
-      with:
-        name: flake-lock
-    - timeout-minutes: 15
-      uses: cachix/install-nix-action@master
-      with:
-        extra_nix_config: |
-          experimental-features = nix-command flakes
-    - timeout-minutes: 15
-      uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Build the no-collector CI step package (${{ matrix.version }})
-      timeout-minutes: 30
-      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
-    - name: Enable Nix sandbox namespaces
-      timeout-minutes: 10
-      run: nix run --file . ciSteps.enable-sandbox-namespaces
-    - name: Run the suite without a collector (${{ matrix.version }}, local backend)
-      timeout-minutes: 30
-      run: ./result/bin/nanopynix-ci suite
-    - name: Run the concurrency soak (no collector, ${{ matrix.version }})
-      timeout-minutes: 15
-      run: ./result/bin/nanopynix-ci soak
-    timeout-minutes: 150
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',test-nogc,')
-    strategy:
-      fail-fast: false
-      matrix:
-        version: ${{ fromJson(needs.update-lockfile.outputs.nogc_versions) }}
   test-asan:
-    env:
-      CI_STEP: ciSteps.${{ matrix.version }}
+    runs-on: ubuntu-24.04
     needs:
     - update-lockfile
-    steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
-      with:
-        ref: ${{ github.ref_name }}
-    - timeout-minutes: 10
-      uses: actions/download-artifact@main
-      with:
-        name: flake-lock
-    - timeout-minutes: 15
-      uses: cachix/install-nix-action@master
-      with:
-        extra_nix_config: |
-          experimental-features = nix-command flakes
-    - timeout-minutes: 15
-      uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Build the ASAN CI step package (${{ matrix.version }})
-      timeout-minutes: 60
-      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
-    - name: Enable Nix sandbox namespaces
-      timeout-minutes: 10
-      run: nix run --file . ciSteps.enable-sandbox-namespaces
-    - name: Run ASAN-instrumented suite (${{ matrix.version }}, local backend)
-      timeout-minutes: 60
-      run: ./result/bin/nanopynix-ci suite
-    - name: Run the concurrency soak (ASAN, ${{ matrix.version }})
-      timeout-minutes: 15
-      run: ./result/bin/nanopynix-ci soak
-    - name: Upload ASAN output (${{ matrix.version }})
-      timeout-minutes: 15
-      uses: actions/upload-artifact@main
-      with:
-        name: asan-report-${{ matrix.version }}
-        path: ${{ github.workspace }}/asan-output-${{ matrix.version }}.log
-      if: ${{ !cancelled() }}
-    timeout-minutes: 225
-    runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-asan,')
     strategy:
       fail-fast: false
       matrix:
         version: ${{ fromJson(needs.update-lockfile.outputs.asan_versions) }}
+    env:
+      CI_STEP: ciSteps.${{ matrix.version }}
+    timeout-minutes: 225
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: ${{ github.ref_name }}
+      timeout-minutes: 10
+    - uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+      timeout-minutes: 10
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+      timeout-minutes: 15
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+      timeout-minutes: 15
+    - name: Build the ASAN CI step package (${{ matrix.version }})
+      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
+      timeout-minutes: 60
+    - name: Enable Nix sandbox namespaces
+      run: nix run --file . ciSteps.enable-sandbox-namespaces
+      timeout-minutes: 10
+    - name: Run ASAN-instrumented suite (${{ matrix.version }}, local backend)
+      run: ./result/bin/nanopynix-ci suite
+      timeout-minutes: 60
+    - name: Run the concurrency soak (ASAN, ${{ matrix.version }})
+      run: ./result/bin/nanopynix-ci soak
+      timeout-minutes: 15
+    - name: Upload ASAN output (${{ matrix.version }})
+      uses: actions/upload-artifact@main
+      if: ${{ !cancelled() }}
+      with:
+        name: asan-report-${{ matrix.version }}
+        path: ${{ github.workspace }}/asan-output-${{ matrix.version }}.log
+      timeout-minutes: 15
+  test-nogc:
+    runs-on: ubuntu-24.04
+    needs:
+    - update-lockfile
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-nogc,')
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.update-lockfile.outputs.nogc_versions) }}
+    env:
+      CI_STEP: ciSteps.${{ matrix.version }}
+    timeout-minutes: 150
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: ${{ github.ref_name }}
+      timeout-minutes: 10
+    - uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+      timeout-minutes: 10
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+      timeout-minutes: 15
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+      timeout-minutes: 15
+    - name: Build the no-collector CI step package (${{ matrix.version }})
+      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
+      timeout-minutes: 30
+    - name: Enable Nix sandbox namespaces
+      run: nix run --file . ciSteps.enable-sandbox-namespaces
+      timeout-minutes: 10
+    - name: Run the suite without a collector (${{ matrix.version }}, local backend)
+      run: ./result/bin/nanopynix-ci suite
+      timeout-minutes: 30
+    - name: Run the concurrency soak (no collector, ${{ matrix.version }})
+      run: ./result/bin/nanopynix-ci soak
+      timeout-minutes: 15
+  test-regular:
+    runs-on: ubuntu-24.04
+    needs:
+    - update-lockfile
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-regular,')
+    strategy:
+      fail-fast: false
+      matrix:
+        backend:
+        - daemon
+        - local
+        version: ${{ fromJson(needs.update-lockfile.outputs.regular_versions) }}
+    env:
+      BACKEND: ${{ matrix.backend }}
+      CI_STEP: ciSteps.${{ matrix.version }}
+    timeout-minutes: 230
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: ${{ github.ref_name }}
+      timeout-minutes: 10
+    - uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+      timeout-minutes: 10
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+      timeout-minutes: 15
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+      timeout-minutes: 15
+    - name: Build the CI step package for Nix ${{ matrix.version }}
+      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
+      timeout-minutes: 30
+    - name: Verify test runner closure after build
+      run: nix store verify --recursive --no-trust "$(readlink -f result)"
+      timeout-minutes: 15
+    - name: Enable Nix sandbox namespaces
+      run: nix run --file . ciSteps.enable-sandbox-namespaces
+      timeout-minutes: 10
+    - name: Test nanopynix against Nix ${{ matrix.version }} (full suite, ${{ matrix.backend
+        }} backend)
+      run: ./result/bin/nanopynix-ci suite
+      timeout-minutes: 30
+    - name: Run the concurrency soak (${{ matrix.version }}, ${{ matrix.backend }}
+        backend)
+      run: ./result/bin/nanopynix-ci soak
+      timeout-minutes: 15
+    - name: Upload test output
+      uses: actions/upload-artifact@main
+      if: ${{ !cancelled() }}
+      with:
+        name: test-output-${{ matrix.backend }}-${{ matrix.version }}
+        path: ${{ github.workspace }}/test-gdb-output.log
+      timeout-minutes: 15
+    - name: Upload Boehm GC thread registration log
+      uses: actions/upload-artifact@main
+      if: ${{ !cancelled() }}
+      with:
+        name: gc-thread-debug-${{ matrix.backend }}-${{ matrix.version }}
+        path: ${{ github.workspace }}/gc-thread-debug.log
+      timeout-minutes: 15
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@main
+      if: ${{ !cancelled() }}
+      with:
+        files: ${{ github.workspace }}/coverage.xml
+        flags: ${{ matrix.backend }}-${{ matrix.version }}
+        token: ${{ secrets.CODECOV_TOKEN }}
+      timeout-minutes: 10
+    - name: Upload test results to Codecov
+      uses: codecov/codecov-action@main
+      if: ${{ !cancelled() }}
+      with:
+        files: ${{ github.workspace }}/junit.xml
+        flags: ${{ matrix.backend }}-${{ matrix.version }}
+        report_type: test_results
+        token: ${{ secrets.CODECOV_TOKEN }}
+      timeout-minutes: 10
+    - name: Verify test runner closure after tests
+      run: nix store verify --recursive --no-trust "$(readlink -f result)"
+      timeout-minutes: 15
+  test-tsan:
+    runs-on: ubuntu-24.04
+    needs:
+    - update-lockfile
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-tsan,')
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.update-lockfile.outputs.tsan_versions) }}
+    env:
+      CI_STEP: ciSteps.${{ matrix.version }}
+    timeout-minutes: 180
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: ${{ github.ref_name }}
+      timeout-minutes: 10
+    - uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+      timeout-minutes: 10
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+      timeout-minutes: 15
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+      timeout-minutes: 15
+    - name: Build the TSAN CI step package (${{ matrix.version }})
+      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
+      timeout-minutes: 45
+    - name: Enable Nix sandbox namespaces
+      run: nix run --file . ciSteps.enable-sandbox-namespaces
+      timeout-minutes: 10
+    - name: Run TSAN-instrumented concurrency soak (five seeds, local+daemon backends)
+      run: ./result/bin/nanopynix-ci soak-seeds
+      timeout-minutes: 25
+    - name: Run TSAN-instrumented concurrency tests (single pass, local+daemon backends)
+      run: ./result/bin/nanopynix-ci broad
+      timeout-minutes: 20
+    - name: Upload TSAN output (${{ matrix.version }})
+      uses: actions/upload-artifact@main
+      if: ${{ !cancelled() }}
+      with:
+        name: tsan-race-report-${{ matrix.version }}
+        path: |
+          ${{ github.workspace }}/tsan-output-${{ matrix.version }}.log
+          ${{ github.workspace }}/tsan-output-broad-${{ matrix.version }}.log
+          ${{ github.workspace }}/soak-${{ matrix.version }}-run*.json
+      timeout-minutes: 15
+  test-ubsan:
+    runs-on: ubuntu-24.04
+    needs:
+    - update-lockfile
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-ubsan,')
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.update-lockfile.outputs.ubsan_versions) }}
+    env:
+      CI_STEP: ciSteps.${{ matrix.version }}
+    timeout-minutes: 195
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: ${{ github.ref_name }}
+      timeout-minutes: 10
+    - uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+      timeout-minutes: 10
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+      timeout-minutes: 15
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+      timeout-minutes: 15
+    - name: Build the UBSAN CI step package (${{ matrix.version }})
+      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
+      timeout-minutes: 60
+    - name: Enable Nix sandbox namespaces
+      run: nix run --file . ciSteps.enable-sandbox-namespaces
+      timeout-minutes: 10
+    - name: Run UBSAN-instrumented suite (${{ matrix.version }}, local backend)
+      run: ./result/bin/nanopynix-ci suite
+      timeout-minutes: 30
+    - name: Run the concurrency soak (UBSAN, ${{ matrix.version }})
+      run: ./result/bin/nanopynix-ci soak
+      timeout-minutes: 15
+    - name: Upload UBSAN output (${{ matrix.version }})
+      uses: actions/upload-artifact@main
+      if: ${{ !cancelled() }}
+      with:
+        name: ubsan-report-${{ matrix.version }}
+        path: ${{ github.workspace }}/ubsan-output-${{ matrix.version }}.log
+      timeout-minutes: 15
   update-lockfile:
+    runs-on: ubuntu-24.04
     outputs:
       asan_versions: ${{ steps.versions.outputs.asan_versions }}
       nogc_versions: ${{ steps.versions.outputs.nogc_versions }}
       regular_versions: ${{ steps.versions.outputs.regular_versions }}
       tsan_versions: ${{ steps.versions.outputs.tsan_versions }}
       ubsan_versions: ${{ steps.versions.outputs.ubsan_versions }}
+    timeout-minutes: 110
     steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
+    - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
-    - timeout-minutes: 15
-      uses: cachix/install-nix-action@master
+      timeout-minutes: 10
+    - uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
           experimental-features = nix-command flakes
-    - timeout-minutes: 15
-      uses: cachix/cachix-action@master
+      timeout-minutes: 15
+    - uses: cachix/cachix-action@master
       with:
         name: lillecarl
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
+      timeout-minutes: 15
     - name: Update flake inputs
-      timeout-minutes: 20
       run: nix flake update
-    - name: Compute Nix version matrices
       timeout-minutes: 20
-      run: nix run --file . ciSteps.version-matrix
+    - name: Compute Nix version matrices
       id: versions
-    - timeout-minutes: 15
-      uses: actions/upload-artifact@main
+      run: nix run --file . ciSteps.version-matrix
+      timeout-minutes: 20
+    - uses: actions/upload-artifact@main
       with:
         name: flake-lock
         path: flake.lock
-    timeout-minutes: 110
-    runs-on: ubuntu-24.04
-  wheel-x86_64:
-    env:
-      WHEEL_SMOKE_RUNTIME: docker
-    needs:
-    - update-lockfile
-    steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
-      with:
-        ref: ${{ github.ref_name }}
-    - timeout-minutes: 10
-      uses: actions/download-artifact@main
-      with:
-        name: flake-lock
-    - timeout-minutes: 15
-      uses: cachix/install-nix-action@master
-      with:
-        extra_nix_config: |
-          experimental-features = nix-command flakes
-    - timeout-minutes: 15
-      uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Build the wheel
-      timeout-minutes: 120
-      run: nix build --file . nanopynixWheel --out-link result-wheel --print-build-logs
-    - name: Read the wheel
-      timeout-minutes: 10
-      run: ./scripts/wheel-inspect.sh result-wheel
-    - name: Load the wheel on Rocky Linux 9
-      timeout-minutes: 20
-      run: ./scripts/wheel-smoke.sh result-wheel
-    timeout-minutes: 215
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',wheel-x86_64,')
-  wheel-aarch64:
-    env:
-      WHEEL_SMOKE_RUNTIME: docker
-    needs:
-    - update-lockfile
-    steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
-      with:
-        ref: ${{ github.ref_name }}
-    - timeout-minutes: 10
-      uses: actions/download-artifact@main
-      with:
-        name: flake-lock
-    - timeout-minutes: 15
-      uses: cachix/install-nix-action@master
-      with:
-        extra_nix_config: |
-          experimental-features = nix-command flakes
-    - timeout-minutes: 15
-      uses: cachix/cachix-action@master
-      with:
-        name: lillecarl
-        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        useDaemon: false
-    - name: Build the wheel
-      timeout-minutes: 120
-      run: nix build --file . nanopynixWheel --out-link result-wheel --print-build-logs
-    - name: Read the wheel
-      timeout-minutes: 10
-      run: ./scripts/wheel-inspect.sh result-wheel
-    - name: Load the wheel on Rocky Linux 9
-      timeout-minutes: 20
-      run: ./scripts/wheel-smoke.sh result-wheel
-    timeout-minutes: 215
-    runs-on: ubuntu-24.04-arm
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',wheel-aarch64,')
+      timeout-minutes: 15
   update-lockfile-commit:
-    needs: docs-deploy
-    steps:
-    - timeout-minutes: 10
-      uses: actions/checkout@main
-      with:
-        ref: ${{ github.ref_name }}
-    - timeout-minutes: 10
-      uses: actions/download-artifact@main
-      with:
-        name: flake-lock
-    - timeout-minutes: 10
-      uses: step-security/git-auto-commit-action@main
-      with:
-        commit_message: nix flake update
-    timeout-minutes: 45
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
+    needs: docs-deploy
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',update-lockfile-commit,')
+    permissions:
+      contents: write
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: ${{ github.ref_name }}
+      timeout-minutes: 10
+    - uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+      timeout-minutes: 10
+    - uses: step-security/git-auto-commit-action@main
+      with:
+        commit_message: nix flake update
+      timeout-minutes: 10
+  wheel-aarch64:
+    runs-on: ubuntu-24.04-arm
+    needs:
+    - update-lockfile
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',wheel-aarch64,')
+    env:
+      WHEEL_SMOKE_RUNTIME: docker
+    timeout-minutes: 215
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: ${{ github.ref_name }}
+      timeout-minutes: 10
+    - uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+      timeout-minutes: 10
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+      timeout-minutes: 15
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+      timeout-minutes: 15
+    - name: Build the wheel
+      run: nix build --file . nanopynixWheel --out-link result-wheel --print-build-logs
+      timeout-minutes: 120
+    - name: Read the wheel
+      run: ./scripts/wheel-inspect.sh result-wheel
+      timeout-minutes: 10
+    - name: Load the wheel on Rocky Linux 9
+      run: ./scripts/wheel-smoke.sh result-wheel
+      timeout-minutes: 20
+  wheel-x86_64:
+    runs-on: ubuntu-24.04
+    needs:
+    - update-lockfile
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',wheel-x86_64,')
+    env:
+      WHEEL_SMOKE_RUNTIME: docker
+    timeout-minutes: 215
+    steps:
+    - uses: actions/checkout@main
+      with:
+        ref: ${{ github.ref_name }}
+      timeout-minutes: 10
+    - uses: actions/download-artifact@main
+      with:
+        name: flake-lock
+      timeout-minutes: 10
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+      timeout-minutes: 15
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+      timeout-minutes: 15
+    - name: Build the wheel
+      run: nix build --file . nanopynixWheel --out-link result-wheel --print-build-logs
+      timeout-minutes: 120
+    - name: Read the wheel
+      run: ./scripts/wheel-inspect.sh result-wheel
+      timeout-minutes: 10
+    - name: Load the wheel on Rocky Linux 9
+      run: ./scripts/wheel-smoke.sh result-wheel
+      timeout-minutes: 20
