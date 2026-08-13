@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import gc
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -294,6 +295,123 @@ class TestPathInfo:
         # deriver is None: this path was seeded directly, not built by a derivation
         deriver = info["deriver"]
         assert deriver is None or isinstance(deriver, str)
+
+
+class TestValidPathInfoType:
+    """``query_path_info_typed`` — the spike of issue #141.
+
+    ``query_path_info`` converts each of the nine fields into a dictionary,
+    and it renders every reference through the store, before the caller reads
+    one of them. ``query_path_info_typed`` returns a bound type that reads a
+    field when the caller asks for it.
+
+    Two things must hold, and each one has a test below. Both methods must
+    report the same data. The ``nix::ref<T>`` caster must carry the result:
+    ``Store::queryPathInfo`` returns ``ref<const ValidPathInfo>``, nanobind
+    ships no holder for it, and without the caster the call raises a
+    ``TypeError`` at run time although the module compiles.
+    """
+
+    def test_the_ref_caster_carries_the_result(self, store: Any, store_seeded_path: Any):
+        """Without ``nix_ref_caster.hh`` this raises ``TypeError``."""
+        info = store.query_path_info_typed(store_seeded_path)
+        assert type(info).__name__ == "ValidPathInfo"
+
+    def test_each_field_agrees_with_the_dict(self, store: Any, store_seeded_path: Any):
+        """Both methods report the same value for each of the nine fields.
+
+        The bound type renders a path itself. It reads
+        ``UnkeyedValidPathInfo::storeDir``, which is what
+        ``Store::printStorePath`` reads, so it needs no store to make the
+        ``/nix/store/...`` text.
+        """
+        d = store.query_path_info(store_seeded_path)
+        t = store.query_path_info_typed(store_seeded_path)
+
+        assert t.path == d["path"]
+        assert sorted(t.references) == sorted(d["references"])
+        assert t.deriver == d["deriver"]
+        assert t.nar_hash == d["nar_hash"]
+        assert t.nar_size == d["nar_size"]
+        assert t.registration_time == d["registration_time"]
+        assert t.ca == d["ca"]
+        assert t.ultimate == d["ultimate"]
+        assert list(t.sigs) == list(d["sigs"])
+
+    def test_the_store_dir_comes_from_the_path_info(self, store: Any, store_seeded_path: Any):
+        """The field that makes the rendering above possible.
+
+        `nix::Store` is not involved. A relocated store gives each object its
+        own store directory, and this field is the one Nix reads.
+        """
+        t = store.query_path_info_typed(store_seeded_path)
+        assert t.store_dir == store.get_store_dir()
+        assert t.path == f"{t.store_dir}/{t.store_path.to_string()}"
+
+    def test_a_field_of_a_bound_type_outlives_its_parent(self, store: Any, store_seeded_path: Any):
+        """``def_ro`` gives ``rv_policy::reference_internal``.
+
+        The field is a reference into the parent, and not a copy, so the child
+        must keep the parent alive. A copy would pass this test as well, and
+        ``test_a_bound_field_is_not_a_copy`` below tells the two apart.
+        """
+        info = store.query_path_info_typed(store_seeded_path)
+        path = info.store_path
+        expected = path.to_string()
+        del info
+        gc.collect()
+        assert path.to_string() == expected
+
+    def test_a_bound_field_is_not_a_copy(self, store: Any, store_seeded_path: Any):
+        """``path`` is a bound type, and ``references`` is an STL container.
+
+        nanobind returns the first as a reference into the parent, so two
+        reads give the same object. The second is a ``def_prop_ro``, so each
+        read builds a new list. A caller that reads ``references`` in a loop
+        pays the whole rendering each time, and must bind the value once.
+        """
+        info = store.query_path_info_typed(store_seeded_path)
+        assert info.store_path is info.store_path
+        assert info.references is not info.references
+
+
+class TestMissingPathsType:
+    """``query_missing_typed`` — the general form of the #141 spike.
+
+    ``nix::ValidPathInfo`` renders its own paths, because it carries a store
+    directory. ``nix::MissingPaths`` carries none, and neither does
+    ``nix::BasicDerivation``, so that property is luck and not a rule.
+
+    ``PyMissingPaths`` supplies the missing half: it holds the struct and the
+    store directory of the store that answered the query. The bound type then
+    renders itself in the same way, and it still reads no ``nix::Store``. This
+    is the shape the remaining helpers need.
+    """
+
+    def test_each_field_agrees_with_the_dict(self, store: Any, store_seeded_path: Any):
+        d = store.query_missing([store_seeded_path])
+        t = store.query_missing_typed([store_seeded_path])
+
+        assert sorted(t.will_build) == sorted(d["will_build"])
+        assert sorted(t.will_substitute) == sorted(d["will_substitute"])
+        assert sorted(t.unknown) == sorted(d["unknown"])
+        assert t.download_size == d["download_size"]
+        assert t.nar_size == d["nar_size"]
+
+    def test_the_wrapper_carries_the_store_dir(self, store: Any, store_seeded_path: Any):
+        """The field that replaces the ``nix::Store`` the helper used to take."""
+        t = store.query_missing_typed([store_seeded_path])
+        assert t.store_dir == store.get_store_dir()
+
+    def test_an_unknown_path_is_reported_as_unknown(self, store: Any):
+        """A non-vacuous case: the seeded path leaves all three sets empty.
+
+        A bogus path lands in exactly one of them, so this test fails if the
+        wrapper renders the wrong set or drops the store directory.
+        """
+        bogus = nanopynix_store.StorePath("00000000000000000000000000000000-bogus")
+        t = store.query_missing_typed([bogus])
+        assert t.unknown == [f"{store.get_store_dir()}/{bogus.to_string()}"]
 
 
 class TestOpenStore:
