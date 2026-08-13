@@ -63,10 +63,11 @@ let
       # `check-format` report on it, and a gate that reads less than a
       # developer's own `ruff check .` gives two answers to one question.
       #
-      # It costs 3.5 MiB in the source of every gate here, and an edit to any
-      # part of pynixd rebuilds all of them. Issue #131 takes most of that
-      # back: `todo/`, `research/`, `ai/` and the rest of the agent-workflow
-      # trees leave the repository, and they are the bulk of it.
+      # An edit to any part of pynixd rebuilds all of them. Issue #131 took
+      # 320 KiB of that back: `todo/`, `research/`, `ai/` and the rest of the
+      # agent-workflow trees left the repository. The open work in them is
+      # issues #133 to #137, and the reference material moved to
+      # `pynixd/docs/notes/`.
       ../pynixd
       ../pynix
       ../pytest-agent

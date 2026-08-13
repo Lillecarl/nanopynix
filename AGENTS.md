@@ -245,6 +245,14 @@ file is the source of truth for that project, and this file does not replace
 it. Its three-tier execution pattern, its build queue and its rule of one
 pytest process at a time are all in there.
 
+**The work of pynixd is tracked in issues, like the rest of this repository.**
+It arrived with 54 files of agent-workflow notes -- `todo/`, `research/`,
+`ai/`, `progress.md`, `recurring.md`, `REASONIX.md`, `opencode.json` and the
+rest. Issue #131 read them: the finished ones are gone, the open ones are
+issues #133 to #137, and the reference material on how Nix behaves is at
+`pynixd/docs/notes/`. Do not start a second such tree. Put a task in an issue,
+and put a finding about Nix in `docs/notes/`.
+
 **The NixOS module lives at `pynixd/nix/nixos/`, and `flake.nix` exposes it
 as `nixosModules.pynixd`.** It is the one NixOS module this repository ships.
 The wrapper in `flake.nix` sets `services.pynixd.package`; the module file
