@@ -17,3 +17,14 @@ htmlcov
 # find, and ignored so that it stays out of the source that every
 # nanopynix-tests-* derivation reads with `cd ${../.}`.
 .test-runs/
+
+# Reports and diagnostics that a test run writes into the repository root.
+# `ci/steps.nix` writes each one and uploads it as a CI artefact, and nothing
+# reads any of them back. All five were tracked until now, so every run put
+# its output into the working copy and a later commit carried it: one of them
+# added about 6000 lines of noise to a commit that changed no test.
+coverage.xml
+junit.xml
+gc-thread-debug.log
+test-gdb-output.log
+nanopynix-test-store-paths.txt
