@@ -45,11 +45,11 @@ from nanopynix_proto.nix.eval import AttrRequest
 import nanopynix
 from nanopynix import stores
 from nanopynix.exceptions import EvalSessionClosedError
+from nanopynix_testing.worker_death import expect_the_worker_to_die
 from test_support.notes import note
-from tests.support.worker_death import expect_the_worker_to_die
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 #: A handle no worker issues. Handle 0 is the wire's "none", so it is a
 #: different case and has its own test.
@@ -402,7 +402,7 @@ async def test_a_value_proxy_says_so_after_the_worker_dies(
         proxy = _eval_proxy(evaluator)
         worker: Any = proxy._worker  # type: ignore[reportPrivateUsage] -- killing the worker is the point
         # This kill is deliberate, and `Session.close` must not report it as a
-        # crash when the block below ends. See tests/support/worker_death.py.
+        # crash when the block below ends. See nanopynix_testing.worker_death.
         expect_the_worker_to_die(session)
         worker._worker_proc.kill()  # type: ignore[reportPrivateUsage] -- as above
 

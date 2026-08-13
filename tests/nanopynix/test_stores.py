@@ -30,7 +30,7 @@ from test_support.notes import note
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
+    from nanopynix_testing.nix_environment import InprocSessionFactory, RpcSessionFactory
 
 
 #: One instance of every model, covering the authority, the scheme override,

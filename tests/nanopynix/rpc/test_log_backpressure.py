@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 import anyio
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import RpcSessionFactory
+    from nanopynix_testing.nix_environment import RpcSessionFactory
 
 # Enough log lines to overrun the worker's buffers several times over while the
 # client is not reading. `builtins.trace` emits one event for each element, at

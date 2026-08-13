@@ -57,7 +57,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from nanopynix import StorePath
-    from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
+    from nanopynix_testing.nix_environment import InprocSessionFactory, RpcSessionFactory
 
 # A well-formed store path that no store will ever contain. What is under test
 # is whether the argument *parses*; an unknown derivation is a perfectly good

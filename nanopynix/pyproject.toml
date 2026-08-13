@@ -38,6 +38,12 @@ test = [
   # import. `pygit2` went with `git_fixtures` and is a dependency of that
   # project now, so it is not named twice here.
   "test-support",
+  # The other half of the same move: the fixtures and markers that do name a
+  # Nix concept. That project depends on this one, so this line closes a loop
+  # in the declared graph. It is not a build cycle: an extra reaches no
+  # derivation input, and `mkVirtualEnv` resolves it once (nix/py-packages.nix
+  # gives the mechanism).
+  "nanopynix-testing",
   "pytest",
   "pytest-dependency",
   "pytest-cov",

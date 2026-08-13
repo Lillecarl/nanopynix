@@ -1,6 +1,6 @@
 """Run the suite against itself, concurrently, so ThreadSanitizer sees more.
 
-`tests/support/soak.py` holds the driver and says why this exists. This module
+`nanopynix_testing.soak` holds the driver and says why this exists. This module
 is only the two entry points, one for each engine, and the report a failure
 prints.
 
@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.support.soak import (
+from nanopynix_testing.soak import (
     BorrowedSession,
     deal_lanes,
     discover_roster,
@@ -25,8 +25,8 @@ from tests.support.soak import (
 )
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
-    from tests.support.soak import SoakCandidate, SoakResult
+    from nanopynix_testing.nix_environment import InprocSessionFactory, RpcSessionFactory
+    from nanopynix_testing.soak import SoakCandidate, SoakResult
 
 pytestmark = pytest.mark.soak
 
@@ -53,7 +53,7 @@ def _report(result: SoakResult, engine: str) -> str:
         lines.append("")
     lines.append(
         "Each one is a finding: either the test found a real defect, or it assumes "
-        "it is alone. Fix it, or add it to DENYLIST in tests/support/soak.py with the reason."
+        "it is alone. Fix it, or add it to DENYLIST in nanopynix_testing.soak with the reason."
     )
     return "\n".join(lines)
 

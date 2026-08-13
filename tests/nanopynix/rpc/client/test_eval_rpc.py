@@ -26,7 +26,7 @@ from nanopynix._ansi import strip_ansi
 from test_support.git_fixtures import init_flake_repo
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import NixTestEnvironment, RpcSessionFactory
+    from nanopynix_testing.nix_environment import NixTestEnvironment, RpcSessionFactory
 
 requires_dynamic_primops = pytest.mark.nix_capability("dynamic_primop_registration")
 

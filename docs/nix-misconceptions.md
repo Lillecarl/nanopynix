@@ -76,7 +76,7 @@ To talk about a store somewhere else, say so:
 **Why it matters here:** a test that opens `local` believing it has an
 isolated store is talking to the real system store. Every store fixture in
 this repo passes an explicit `root=` for exactly that reason (see
-`tests/support/nix_environment.py`), and a store path is not executable at the
+`nanopynix_testing.nix_environment`), and a store path is not executable at the
 path it reports when the store is relocated.
 
 ## Adding to this file

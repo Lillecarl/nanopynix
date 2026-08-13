@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
+    from nanopynix_testing.nix_environment import InprocSessionFactory, RpcSessionFactory
 
 REPL_ENV_CAPACITY = 32768
 """``repl_env_size`` in ``PyEvalState::begin_repl``; see the module docstring."""

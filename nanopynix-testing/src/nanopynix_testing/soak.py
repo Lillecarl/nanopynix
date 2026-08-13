@@ -47,6 +47,11 @@ if TYPE_CHECKING:
 _FACTORY_FIXTURES = ("inproc_session", "rpc_session")
 _SUPPLIED_FIXTURES = frozenset({*_FACTORY_FIXTURES, "tmp_path"})
 
+# How far `_describe` unwraps a nested `ExceptionGroup`. A task group inside a
+# task group gives two levels, and a report deeper than three names the shape
+# of the nesting rather than the defect.
+_MAX_GROUP_DEPTH = 3
+
 # A mark that means the test cannot join a lane. `live_gc` destroys the shared
 # store under its peers, `forked` asks for a process the driver does not give,
 # and the three skip/xfail marks mean the outcome is already decided.
@@ -521,7 +526,7 @@ async def run_soak(
         """
         head = "".join(traceback.format_exception_only(exc)).strip()
         nested = getattr(exc, "exceptions", None)
-        if not nested or depth >= 3:
+        if not nested or depth >= _MAX_GROUP_DEPTH:
             return head
         indent = "  " * (depth + 1)
         inner = "\n".join(f"{indent}{_describe(sub, depth + 1)}" for sub in cast("Sequence[BaseException]", nested))

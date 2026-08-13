@@ -365,7 +365,7 @@ Two rules follow from it:
 
 - **Do not add a version branch to library code to keep an old Nix alive.**
   Gate the test instead, and give the gate the upstream defect and the issue
-  to read. `tests/support/nix_markers.py` holds the markers, and each one
+  to read. `nanopynix_testing.nix_markers` holds the markers, and each one
   names what it excludes and why.
 - **Do not write a gate that the floor already answers.** A marker such as
   `minimum="2.32"` can never skip a test when the floor is 2.34, so it reads

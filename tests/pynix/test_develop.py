@@ -28,14 +28,14 @@ from pynix.develop import (
 
 from nanopynix.models import LockedNode
 from nanopynix.protocols import AsyncLockedFlake
+from nanopynix_testing.nix_environment import with_nixpkgs
 from pynix import Pynix
-from tests.support.nix_environment import with_nixpkgs
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 #: A store path, with the hash reduced to a placeholder. pynix and nix build a
 #: *different* ``-env`` derivation, because pynix's vendored ``get-env.sh``

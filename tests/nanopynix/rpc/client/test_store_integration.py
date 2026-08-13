@@ -29,10 +29,10 @@ from nanopynix_proto.nix.store import (
 )
 
 from nanopynix import Derivation, GcResult, MissingInfo, PathInfo, StorePath
-from tests.support.nix_markers import NIX_GC_ROOTS_BUG
+from nanopynix_testing.nix_markers import NIX_GC_ROOTS_BUG
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
 async def _create_derivation(eval: Any) -> StorePath:

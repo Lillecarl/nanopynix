@@ -9,7 +9,7 @@ from pynix import Pynix
 
 if TYPE_CHECKING:
     from nanopynix.models import StorePath
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
 async def test_path_info(

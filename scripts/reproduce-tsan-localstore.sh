@@ -8,7 +8,7 @@
 # SQLite and store-path state is retained between processes.
 #
 # A seed fixes which tests overlap, so a run that finds a race can be run
-# again.  See tests/support/soak.py.
+# again.  See nanopynix_testing.soak.
 
 set -euo pipefail
 

@@ -16,15 +16,15 @@ from pynix.target import EvaluationTarget
 import nanopynix
 from nanopynix._ansi import strip_ansi
 from nanopynix.exceptions import StoreError
+from nanopynix_testing.nix_environment import with_nixpkgs
 from pynix import Pynix
 from test_support.git_fixtures import init_flake_repo
-from tests.support.nix_environment import with_nixpkgs
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from nanopynix.rpc import Store, ValueProxy
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
 async def _fixed_output_derivations_in_value(

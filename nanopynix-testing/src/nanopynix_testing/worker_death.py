@@ -27,5 +27,8 @@ def expect_the_worker_to_die(session: nanopynix.rpc.Session) -> None:
     test that uses this asserts exactly that, and would not be worth keeping
     if this silenced it.
     """
-    manager: Any = session._manager  # type: ignore[reportPrivateUsage] -- the deliberate-death seam; see WorkerClient.unexpected_death
-    manager._expected_worker_death = True
+    # This module *is* the seam, so it reaches past the public API on purpose.
+    # See `WorkerClient.unexpected_death` for the flag that these two lines
+    # set, and this module's docstring for why no public call can set it.
+    manager: Any = session._manager  # type: ignore[reportPrivateUsage] -- the deliberate-death seam  # noqa: SLF001 -- same reason
+    manager._expected_worker_death = True  # noqa: SLF001 -- same seam, one line later

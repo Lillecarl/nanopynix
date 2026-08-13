@@ -25,7 +25,7 @@ import pytest
 from nanopynix.exceptions import EvaluatorAbandonedError
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
+    from nanopynix_testing.nix_environment import InprocSessionFactory, RpcSessionFactory
 
 # Value printing polls checkInterrupt(), so Nix answers this one.
 INTERRUPTIBLE = "builtins.genList (x: x) 12000000"

@@ -26,24 +26,25 @@ from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util  #
 
 import nanopynix  # noqa: E402 -- see hook install above
 from nanopynix.settings import DEFAULT_EXPERIMENTAL_FEATURES  # noqa: E402 -- see hook install above
+
+# `with_test_timeout` turns a hung async test into a TimeoutError that carries
+# a report of what was still alive. Issue #130 moved it and `run_process` to
+# `test_support`: neither names a Nix concept, and a suite that is not this one
+# needs both just as much. `tests/harness/` held the test of the deadline;
+# `test-support/tests/` holds it now.
 from test_support.deadline import with_test_timeout  # noqa: E402 -- see hook install above
 from test_support.subprocess_output import run_process  # noqa: E402 -- see hook install above
 
 pytest_plugins = (
     "tests.support.lsp_environment",
-    "tests.support.nix_environment",
-    "tests.support.nix_runtime",
+    "nanopynix_testing.nix_environment",
+    "nanopynix_testing.nix_runtime",
 )
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterable, Iterator
 
-    from tests.support.nix_environment import NixTestEnvironment
-
-# The deadline that turns a hung async test into a TimeoutError carrying a
-# report of what was still alive. Issue #130 moved it to `test_support`: it
-# names no Nix concept, and a suite that is not this one needs it just as much.
-# `tests/harness/` used to hold its test; `test-support/tests/` does now.
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
 def _pytest_agent_installed() -> bool:
@@ -90,7 +91,7 @@ def pytest_addoption(parser: pytest.Parser):
         default=False,
         help="run tests that perform destructive live Nix garbage collection",
     )
-    # The concurrency soak. See tests/support/soak.py for what these drive.
+    # The concurrency soak. See nanopynix_testing.soak for what these drive.
     parser.addoption(
         "--soak-seed",
         type=int,
@@ -316,7 +317,7 @@ def _configure_worker_local_stores(_init: None) -> Iterator[None]:  # type: igno
 def store(l1_nix_environment: NixTestEnvironment) -> Iterator[Any]:
     """Open this run's isolated local/native-daemon Store.
 
-    Backed by ``l1_nix_environment`` (see tests/support/nix_environment.py),
+    Backed by ``l1_nix_environment`` (see ``nanopynix_testing.nix_environment``),
     never the host Nix installation's own store. Sync tests cannot depend on
     the async ``shared_nix_environment``, hence the dedicated sync fixture.
     """

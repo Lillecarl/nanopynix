@@ -21,17 +21,17 @@ import nanopynix
 from nanopynix import Derivation, GcResult, MissingInfo, NixType, StorePath, inproc, yaml_primops
 from nanopynix._ansi import strip_ansi
 from nanopynix.settings import NixEvalSettings, normalize_nix_path
+from nanopynix_testing.nix_markers import NIX_GC_ROOTS_BUG
 from test_support.git_fixtures import init_flake_repo
 from test_support.notes import note
-from tests.support.nix_markers import NIX_GC_ROOTS_BUG
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import InprocSessionFactory, NixTestEnvironment
+    from nanopynix_testing.nix_environment import InprocSessionFactory, NixTestEnvironment
 
 # The whole module is the in-process engine, and several tests build an
 # `inproc.Session` directly rather than through the `inproc_session` fixture.
 # Marking the module rather than those tests keeps the rule from going stale
-# when the next direct one arrives. See tests/support/nix_runtime.py.
+# when the next direct one arrives. See nanopynix_testing.nix_runtime.
 pytestmark = pytest.mark.evaluator_in_process
 
 requires_dynamic_primops = pytest.mark.nix_capability("dynamic_primop_registration")

@@ -9,13 +9,13 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
     from pathlib import Path
 
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 import pynix._util as util_module
 import pytest
 
+from nanopynix_testing.nix_environment import with_nixpkgs
 from pynix import Pynix
-from tests.support.nix_environment import with_nixpkgs
 
 
 def _store_path_basename(path: str) -> str:

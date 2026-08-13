@@ -10,7 +10,7 @@ import pytest
 from pynix import Pynix
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 _FIXTURE_DIR = Path(__file__).parent / "test_osearch"
 _SYSTEM_NIX = _FIXTURE_DIR / "system.nix"

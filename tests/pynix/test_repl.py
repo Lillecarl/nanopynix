@@ -54,7 +54,7 @@ from nanopynix.verbosity import LogLevelInput, normalize_log_level
 from pynix import Pynix
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
 class _Prompt:

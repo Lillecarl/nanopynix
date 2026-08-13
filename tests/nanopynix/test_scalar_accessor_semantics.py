@@ -28,7 +28,7 @@ from nanopynix import NixError, NixEvalSettings, NixTypeError
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
+    from nanopynix_testing.nix_environment import InprocSessionFactory, RpcSessionFactory
 
 # A sentinel meaning "this accessor must raise its family's error for this value".
 RAISES = object()

@@ -19,7 +19,7 @@ from nanopynix import LogEvent, StoreClosedError, StoreError
 from nanopynix.rpc import Session, WorkerDiedError, WorkerSignaledError
 from nanopynix.rpc.client import _pool as pool_module, session as session_module
 from nanopynix.rpc.worker._worker import worker_child_teardown
-from tests.support.worker_death import expect_the_worker_to_die
+from nanopynix_testing.worker_death import expect_the_worker_to_die
 
 if TYPE_CHECKING:
     from collections.abc import Generator

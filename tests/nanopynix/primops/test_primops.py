@@ -12,7 +12,7 @@ from nanopynix_bindings import store as nanopynix_store
 
 if TYPE_CHECKING:
     import nanopynix
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
 class TestRegisterPrimop:

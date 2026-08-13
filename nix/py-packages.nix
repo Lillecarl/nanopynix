@@ -163,6 +163,19 @@ let
         platforms = lib.platforms.unix;
       };
     };
+
+    # `nixLinked`, because this project imports nanopynix and therefore reaches
+    # the bindings. A fixture built against one Nix version does not fit
+    # another, exactly as the library it tests does not.
+    nanopynix-testing =
+      _pySelf: rendered:
+      nixLinked rendered
+      // {
+        meta = rendered.meta // {
+          license = lib.licenses.lgpl21Plus;
+          platforms = lib.platforms.unix;
+        };
+      };
   };
 
   # Per-project options. No `extras` here on purpose: the renderer's `extras`
@@ -196,6 +209,10 @@ let
     # The helpers that every suite here shares. Editable like the rest, so a
     # change to a helper is live in the dev shell without a rebuild.
     test-support = { };
+    # The half of those helpers that names a Nix concept. Separate from
+    # `test-support` so that a project which never loads Nix can still take
+    # the other half.
+    nanopynix-testing = { };
     # In the set so the dev shell can install it editable -- pytest-agent is
     # developed here alongside everything else. Deliberately *not* in the
     # test runner's venv: it auto-activates on import and would start writing

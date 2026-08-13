@@ -48,7 +48,7 @@ from test_support.git_fixtures import init_flake_repo
 from test_support.notes import note
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
 #: The nine eval settings Nix reads while it builds the evaluator. Restated

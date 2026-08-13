@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from nanopynix.models import StorePath
-    from tests.support.nix_environment import InprocSessionFactory, NixTestEnvironment, RpcSessionFactory
+    from nanopynix_testing.nix_environment import InprocSessionFactory, NixTestEnvironment, RpcSessionFactory
 
 # One record is five lines plus one line for each reference: the path, the NAR
 # hash, the NAR size, the deriver, and the number of references.

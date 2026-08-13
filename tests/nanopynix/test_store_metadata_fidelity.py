@@ -39,7 +39,7 @@ from test_support.subprocess_output import run_process
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support.nix_environment import InprocSessionFactory, NixTestEnvironment, RpcSessionFactory
+    from nanopynix_testing.nix_environment import InprocSessionFactory, NixTestEnvironment, RpcSessionFactory
 
 # A derivation that uses structured attrs, with two attributes -- one scalar
 # and one nested -- that exist *only* in the __json payload.
