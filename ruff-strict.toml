@@ -1,6 +1,18 @@
 target-version = "py313"
 line-length = 120
 
+# `pynixd/` is imported and not integrated, and issue #131 is the work that
+# changes that. The merge that brought it in preserved both histories and
+# changed no file, so that tree still carries its own `ruff.toml`, its own
+# pyright settings and its own conventions, now at `pynixd/ruff.toml` and
+# `pynixd/pyproject.toml`. Measured on the day of the import: 28 findings
+# here, 2 files that `ruff format` would rewrite, and 7629 pyright errors.
+#
+# Reporting on it from the repository root would say that 356 files are
+# wrong, when what is true is that a second project has not yet adopted the
+# conventions of this one. Remove this line in #131, one gate at a time.
+extend-exclude = ["pynixd"]
+
 [lint]
 select = [
   # Pyflakes

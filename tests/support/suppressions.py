@@ -59,6 +59,14 @@ if TYPE_CHECKING:
 
 # Directories that are not first-party source: build outputs, caches, and the
 # scratch trees. `result*` are nix build symlinks, which may dangle.
+#
+# **`pynixd` is first-party source and it is here anyway.** That tree arrived
+# by a merge of two histories that changed no file, so it still carries the
+# conventions of the repository it came from: 137 of its suppressions do not
+# have the ` -- <reason>` this scanner asks for. Reporting all 137 says that
+# tree is wrong, and what is true is that a second project has not adopted
+# this convention yet. Issue #131 is the work that adopts it, and this entry
+# leaves with that work.
 _SKIP_DIRS = frozenset(
     {
         ".direnv",
@@ -69,6 +77,7 @@ _SKIP_DIRS = frozenset(
         ".ruff_cache",
         "__pycache__",
         "node_modules",
+        "pynixd",
         "tmp",
     }
 )

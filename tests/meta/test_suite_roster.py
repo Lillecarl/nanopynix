@@ -35,8 +35,14 @@ from tests.support.suite_roots import REPO_ROOT, SUITE_ROOTS, check_roster
 # gives it its own per-file ignores, because the ban on the raw `asyncio`
 # primitives is right for nanopynix and wrong for a library whose subject is
 # `asyncio.Protocol` callbacks.
+# `pynixd` is here for a different reason, and a temporary one. It arrived by
+# a merge of two histories that changed no file, so its suite still runs under
+# its own conventions and no scanner of this repository should read it yet.
+# Issue #131 is the work that integrates it, and that work removes this entry
+# and adds `pynixd/tests` to the roster.
 EXEMPT_INIS = {
     "grpclib-transports/pytest.ini",
+    "pynixd/pytest.ini",
 }
 
 
