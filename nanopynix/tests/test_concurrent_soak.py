@@ -4,7 +4,7 @@
 is only the two entry points, one for each engine, and the report a failure
 prints.
 
-The soak lives at the top level of `tests/nanopynix/` because it crosses both
+The soak lives at the top level of `nanopynix/tests/` because it crosses both
 engines, which is what this directory is for.
 """
 
@@ -41,7 +41,7 @@ def _report(result: SoakResult, engine: str) -> str:
     lines = [
         f"{len(result.failures)} of {len(result.events)} soaked tests failed under concurrency.",
         "Replay this exact composition with:",
-        f"  pytest tests/nanopynix/test_concurrent_soak.py -k {engine} --soak-seed={result.seed} --capture=no",
+        f"  pytest nanopynix/tests/test_concurrent_soak.py -k {engine} --soak-seed={result.seed} --capture=no",
         "",
     ]
     for event in result.failures:

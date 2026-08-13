@@ -111,7 +111,7 @@ let
     # the same cap, and it measured 12 minutes locally: a fork for each
     # in-process test costs about half again as much as one process.
     suite = 30;
-    # `tests/nanopynix` under ASAN. Three runs measured the way here:
+    # `nanopynix/tests` under ASAN. Three runs measured the way here:
     #
     #   30860160011  686 tests, stopped at a 60-minute cap
     #   30883251498  686 tests, stopped at a 60-minute cap

@@ -1,6 +1,6 @@
 """Same expression, same operation, both engines -- do they *behave* the same?
 
-:mod:`tests.nanopynix.test_engine_parity` compares members and parameter
+:mod:`test_engine_parity` compares members and parameter
 lists, so "same name, same signature, different behaviour" passes it. Every
 CIP3 finding was exactly that shape, which is why the signature ledger caught
 none of them. This is the other half of the harness, seeded from the failure
@@ -262,7 +262,7 @@ FAILURE_CASES: list[Case] = [
     Case("infinite_recursion", "let x = x; in x", lambda v: v.to_python()),
     # ASAN fails a CHECK of its own while this one unwinds; see #71 and the
     # sweep recorded beside RUNAWAY_RECURSION in
-    # tests/nanopynix/test_scalar_accessor_semantics.py.
+    # nanopynix/tests/test_scalar_accessor_semantics.py.
     Case(
         "runaway_recursion",
         "let f = n: f (n + 1); in f 0",

@@ -6,12 +6,12 @@ Run with::
 
 The ``region`` markers below are what ``README.md`` shows. See
 ``tests/meta/test_doc_snippets.py`` -- the page must match this file, and
-``tests/nanopynix/test_examples.py`` runs the file.
+``nanopynix/tests/test_examples.py`` runs the file.
 """
 
 # ruff: noqa: T201
 # The printed output is the example. These are run by hand and by
-# tests/nanopynix/test_examples.py; a logger would hide the very thing
+# nanopynix/tests/test_examples.py; a logger would hide the very thing
 # they exist to show.
 
 from __future__ import annotations

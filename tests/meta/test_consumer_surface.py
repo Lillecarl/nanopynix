@@ -19,7 +19,7 @@ of ``__all__`` against the module itself belongs to #15, not here.)
 The private gate is a **ledger**. Whether to promote a private name is a
 judgement, not a derivation, so the literal below carries the decision and a
 diff against the tree makes a new one visible. This is the same shape as
-``WIRE_CLASSES`` in ``tests/nanopynix/test_exceptions_classify.py``, and it is
+``WIRE_CLASSES`` in ``nanopynix/tests/test_exceptions_classify.py``, and it is
 deliberate friction: the set cannot update itself.
 
 The engine-annotation gate is a **second ledger**, and it asks a different

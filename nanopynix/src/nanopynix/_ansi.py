@@ -9,7 +9,7 @@ pattern ``\x1B\[\d+(;\d+){0,2}m``. That pattern reads one shape of one
 sequence: an SGR sequence of at most three numeric parameters. It covers the
 macros in Nix's ``ansicolor.hh`` that Nix uses today, and it leaves these
 three behind. Each one is measured, and each one is a test in
-``tests/nanopynix/bindings/test_util_bindings.py``:
+``nanopynix/tests/bindings/test_util_bindings.py``:
 
 - An OSC 8 hyperlink, ``\x1b]8;;http://x\x1b\a\x1b]8;;\x1b\``. The pattern
   returns the whole input unchanged. Nix returns ``a``, and Nix has a test of

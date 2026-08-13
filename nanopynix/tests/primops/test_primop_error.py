@@ -34,14 +34,14 @@ def _test_primops() -> list[PrimOpSpec]:
             arity=1,
             args=["value"],
             doc="raises PrimopError with a multi-line message, for testing",
-            import_path="tests.nanopynix.primops.test_primop_error:raise_primop_error",
+            import_path="primops.test_primop_error:raise_primop_error",
         ),
         PrimOpSpec(
             name="testRaiseUnexpected",
             arity=1,
             args=["value"],
             doc="raises a plain KeyError, for testing the type-name-prefix fallback",
-            import_path="tests.nanopynix.primops.test_primop_error:raise_unexpected",
+            import_path="primops.test_primop_error:raise_unexpected",
         ),
     ]
 

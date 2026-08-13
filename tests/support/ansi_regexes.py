@@ -11,7 +11,7 @@ was still narrower than Nix's:
 
 - the ``strip-ansi`` package, ``\x1B\[\d+(;\d+){0,2}m``, an SGR sequence of at
   most three numeric parameters;
-- ``tests/nanopynix/primops/test_primop_error_parity.py``,
+- ``nanopynix/tests/primops/test_primop_error_parity.py``,
   ``\x1b\[[0-9;]*m``, any SGR sequence;
 - ``nanopynix_helpers.fod``, ``\x1b\[[0-?]*[ -/]*[@-~]``, any CSI sequence.
 
@@ -22,7 +22,7 @@ first one leaves ``\x1b[38;2;255;0;0m`` in place, because a 24-bit colour
 carries five parameters and the pattern reads three. The first and the second
 one keep ``\x1b[2K``, which does not end in ``m``.
 
-``tests/nanopynix/bindings/test_util_bindings.py`` holds the same three
+``nanopynix/tests/bindings/test_util_bindings.py`` holds the same three
 sequences against the filter that this repository now uses.
 
 **The ban is on re-implementing the filter, not on the escape character.** A

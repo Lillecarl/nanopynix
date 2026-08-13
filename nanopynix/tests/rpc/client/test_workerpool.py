@@ -344,7 +344,7 @@ async def _collect(nix: Session, events: list[LogEvent]) -> None:
 # is gone. See issue #12.
 #
 # All four are `forked`, and not `concurrency` as issue #12 asks. Both parts
-# were measured, not chosen. Unmarked, the run of tests/nanopynix/rpc failed
+# were measured, not chosen. Unmarked, the run of nanopynix/tests/rpc failed
 # twice: once inside test_a_killed_worker_still_lets_the_eval_session_close,
 # and once in test_worker_initializes_nix_on_dedicated_thread -- an unrelated
 # test several files later, with two leaked StreamTerminatedErrors. Adding
@@ -660,7 +660,7 @@ async def test_a_terminal_interrupt_does_not_kill_the_worker():
 
     Only ``WorkerClient`` may stop a worker, and a terminal is not
     ``WorkerClient``. Cancellation still reaches the worker over the wire, as
-    gRPC handler cancellation -- see tests/nanopynix/test_cancel_engine_parity.py.
+    gRPC handler cancellation -- see nanopynix/tests/test_cancel_engine_parity.py.
     """
     with anyio.fail_after(60):
         async with Session() as nix, nix.store() as store, nix.eval(store) as ev:

@@ -1,7 +1,7 @@
 """Direct unit tests for nanopynix.primops.yaml.
 
 The only existing coverage goes through real worker RPC round-trips in
-tests/nanopynix/rpc/client/test_eval_rpc.py, which the module's own docstring
+nanopynix/tests/rpc/client/test_eval_rpc.py, which the module's own docstring
 notes is broken on Nix 2.31. These dumb coverage tests exercise the pure
 Python parsing/rendering logic directly so it stays covered regardless of
 that upstream primop-registration issue.

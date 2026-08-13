@@ -40,7 +40,7 @@ That is a floor to hold, not a finish line. This file compares *names* --
 members, and parameter lists -- so it is blind to two classes with different
 names for the same thing (which is how the object-lifetime exceptions diverged
 unnoticed) and to two identical signatures that behave differently.
-:mod:`tests.nanopynix.test_engine_parity_semantics` is the other half, and the
+:mod:`test_engine_parity_semantics` is the other half, and the
 one that grows from here.
 """
 
@@ -220,7 +220,7 @@ LEDGER: dict[str, str] = {
     # caller and nothing at all in-process. It is `_store_handle` now.
     # Nothing else. Every remaining Store operation exists on both engines,
     # and `nanopynix.protocols.AsyncStore` declares them, so a new one added to
-    # a single engine fails conformance in tests/nanopynix/test_protocols.py
+    # a single engine fails conformance in nanopynix/tests/test_protocols.py
     # before it can reach this ledger.
     # ── EvalSession ────────────────────────────────────────────────
     "EvalSession.run:inproc-only": "TRANSPORT: dispatches onto the evaluator's dedicated thread. Public for the same reason as `Session.run`.",

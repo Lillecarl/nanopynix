@@ -259,7 +259,7 @@ async def test_add_perm_root_and_indirect_root(
 
         # The same thing through the public wrappers, which the raw-proxy calls
         # above never touch. inproc has these too now, so this is the rpc half
-        # of a parity claim -- see tests/nanopynix/inproc/test_inproc.py's
+        # of a parity claim -- see nanopynix/tests/inproc/test_inproc.py's
         # "GC roots" block.
         assert await store.add_perm_root(seeded_store_path, str(public_root_path)) == str(public_root_path)
         assert public_root_path.readlink() == Path(seeded_store_path)

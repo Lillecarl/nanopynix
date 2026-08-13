@@ -6,7 +6,7 @@ passed ``Session(config=...)``, and no engine has ever had a ``config``
 parameter.
 
 ``docs/examples/*_example.py`` already runs under
-``tests/nanopynix/test_examples.py``. This module joins the two, so a published
+``nanopynix/tests/test_examples.py``. This module joins the two, so a published
 block is a **view of code that runs** rather than a second copy of it.
 
 **Why a mirror and not ``literalinclude``.** #23 suggests including each block

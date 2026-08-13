@@ -18,7 +18,7 @@ happens-before relations, so it reports two unordered accesses whether or not
 the harmful timing occurred. What must come back is the *composition* -- which
 tests were in flight together -- and a seed gives that.
 
-`tests/nanopynix/test_concurrent_soak.py` is the test that calls this, and
+`nanopynix/tests/test_concurrent_soak.py` is the test that calls this, and
 `tests/meta/test_soak_roster.py` keeps the denylist below honest.
 """
 
@@ -63,12 +63,12 @@ _MAX_GROUP_DEPTH = 3
 # lane, so a fork test that needs a *second* Session cannot have one -- the
 # borrowed one is already open, and `open()` returns before it reaches the
 # process guard the test is about. Measured, on the TSan job of
-# `tests/nanopynix/test_fork_safety.py`: "assert 'ok' == 'ForkedSessionError'".
+# `nanopynix/tests/test_fork_safety.py`: "assert 'ok' == 'ForkedSessionError'".
 _DISQUALIFYING_MARKS = frozenset({"live_gc", "forked", "forks_the_process", "skip", "skipif", "xfail"})
 
 # Only the library's own tests. `pynix/tests/` drives a CLI and an LSP server
 # through subprocesses, which puts no extra thread into this process.
-_ROSTER_ROOT = Path("tests/nanopynix")
+_ROSTER_ROOT = Path("nanopynix/tests")
 
 # A test that cannot share a lane, and the reason it cannot.
 #
@@ -76,15 +76,15 @@ _ROSTER_ROOT = Path("tests/nanopynix")
 # the reason.** `tests/meta/test_soak_roster.py` fails on an entry with no
 # reason, and on an entry whose test no longer exists.
 DENYLIST: dict[str, str] = {
-    "tests/nanopynix/inproc/test_inproc.py::test_inproc_session_rejects_second_concurrent_session": (
+    "nanopynix/tests/inproc/test_inproc.py::test_inproc_session_rejects_second_concurrent_session": (
         "asserts that _InprocProcessGuard refuses a second Session. Every lane borrows the one "
         "Session, so there is never a second one to refuse."
     ),
-    "tests/nanopynix/inproc/test_inproc.py::test_inproc_copy_closure_rejects_a_store_from_another_session": (
+    "nanopynix/tests/inproc/test_inproc.py::test_inproc_copy_closure_rejects_a_store_from_another_session": (
         "needs two distinct Sessions to make a Store foreign to the second one. Its own docstring "
         "says the two are sequential, and a borrowed Session cannot be either of them."
     ),
-    "tests/nanopynix/inproc/test_inproc.py::test_inproc_session_log_stream_yields_events": (
+    "nanopynix/tests/inproc/test_inproc.py::test_inproc_session_log_stream_yields_events": (
         "reads the first event off the session-wide log stream and asserts it is its own. Every "
         "lane emits into that same stream, so the first event belongs to whichever lane won."
     ),
@@ -95,11 +95,11 @@ DENYLIST: dict[str, str] = {
     # the same hazard for the store collector, and the roster already excludes
     # that mark; these two reach the *Boehm* collector through a helper, which
     # no mark records.
-    "tests/nanopynix/inproc/test_inproc.py::test_a_collected_value_gives_its_root_back_to_the_collector": (
+    "nanopynix/tests/inproc/test_inproc.py::test_a_collected_value_gives_its_root_back_to_the_collector": (
         "forces a Boehm collection through _root_bytes. The heap it collects is shared with "
         "every other lane, and a peer mid-evaluation segfaults."
     ),
-    "tests/nanopynix/inproc/test_inproc.py::test_a_dropped_parent_gives_its_root_back_while_a_child_lives": (
+    "nanopynix/tests/inproc/test_inproc.py::test_a_dropped_parent_gives_its_root_back_while_a_child_lives": (
         "forces a Boehm collection through _root_bytes. See the entry above."
     ),
     # The *session's* verbosity is one setting for the whole session, so a lane
@@ -116,11 +116,11 @@ DENYLIST: dict[str, str] = {
     # entry of their own -- and they would be redundant here anyway, because
     # each drives both engines from one body and `_candidates_in` takes only a
     # test that names exactly one factory fixture.
-    "tests/nanopynix/test_verbosity.py::test_a_change_of_level_reaches_a_thread_that_already_ran": (
+    "nanopynix/tests/test_verbosity.py::test_a_change_of_level_reaches_a_thread_that_already_ran": (
         "writes the verbosity of the borrowed Session and reads it back. A peer that writes the "
         "same one setting in between makes the read report the peer's level."
     ),
-    "tests/nanopynix/inproc/test_inproc.py::test_inproc_session_verbosity_roundtrip": (
+    "nanopynix/tests/inproc/test_inproc.py::test_inproc_session_verbosity_roundtrip": (
         "writes and reads the same session-wide verbosity. See the entry above. It was in the "
         "roster before the entry above joined it, and it passed only because it was the sole writer."
     ),
@@ -131,7 +131,7 @@ DENYLIST: dict[str, str] = {
     # while it does. That is what failed
     # `test_inproc_session_subscribe_receives_log_events` at seed 4, on all
     # three TSAN jobs of run 31047537102 and on `test-nogc-git` before them.
-    "tests/nanopynix/test_verbosity.py::test_nix_filters_at_a_pinned_ceiling_that_no_call_moves": (
+    "nanopynix/tests/test_verbosity.py::test_nix_filters_at_a_pinned_ceiling_that_no_call_moves": (
         "walks the session-wide verbosity through error/debug/vomit/notice. A peer waiting for an "
         "lvlInfo event gets nothing while the level is 'error'."
     ),
@@ -147,11 +147,11 @@ DENYLIST: dict[str, str] = {
     # So the rule is not "skip these under ASAN". A test whose failure mode is
     # a dead process cannot share a lane on any build, and the roster reads
     # neither the sanitizer nor a skip mark.
-    "tests/nanopynix/test_scalar_accessor_semantics.py::test_inproc_reports_runaway_recursion_at_nixs_default_depth": (
+    "nanopynix/tests/test_scalar_accessor_semantics.py::test_inproc_reports_runaway_recursion_at_nixs_default_depth": (
         "drives the evaluator to Nix's recursion limit. A regression aborts the process rather "
         "than failing the test, which would end every peer lane too."
     ),
-    "tests/nanopynix/test_scalar_accessor_semantics.py::test_rpc_reports_runaway_recursion_at_nixs_default_depth": (
+    "nanopynix/tests/test_scalar_accessor_semantics.py::test_rpc_reports_runaway_recursion_at_nixs_default_depth": (
         "drives the worker to Nix's recursion limit. See the entry above. The worker dies rather "
         "than answering, and a peer that shares the worker gets the same dead connection."
     ),
@@ -169,7 +169,7 @@ DENYLIST: dict[str, str] = {
     #
     # Seen in CI run 30916818149 at seed 5, and again in run 30920512961 at
     # seed 4 after the entries above changed the roster.
-    "tests/nanopynix/inproc/test_inproc.py::test_a_collected_value_releases_its_nix_root": (
+    "nanopynix/tests/inproc/test_inproc.py::test_a_collected_value_releases_its_nix_root": (
         "expects one step of the event loop to drop asyncio's handle on the last awaited result. "
         "A lane never has an idle loop, so the handle outlives the step and the roots stay."
     ),
@@ -183,11 +183,11 @@ DENYLIST: dict[str, str] = {
     # its own behaviour under concurrency -- it dictates everybody else's.
     # This is the same rule as the two runaway recursion entries above: a test
     # whose method harms its peers cannot share a lane, whatever it measures.
-    "tests/nanopynix/rpc/test_log_backpressure.py::test_the_capture_says_what_the_stall_cost": (
+    "nanopynix/tests/rpc/test_log_backpressure.py::test_the_capture_says_what_the_stall_cost": (
         "holds the shared event loop closed with `time.sleep`, which stalls every peer lane for "
         "three seconds. Seen failing in CI run 30925089313."
     ),
-    "tests/nanopynix/rpc/test_log_backpressure.py::test_a_client_that_stops_reading_does_not_stop_the_evaluation": (
+    "nanopynix/tests/rpc/test_log_backpressure.py::test_a_client_that_stops_reading_does_not_stop_the_evaluation": (
         "holds the shared event loop closed with `time.sleep`. See the entry above; it is the "
         "same helper and the same three seconds."
     ),
@@ -384,6 +384,16 @@ def _closes_its_session(node: ast.AsyncFunctionDef, factory: str) -> bool:
 
 
 def _module_name(path: Path) -> str:
+    """The dotted name of a test module, from its path *inside the suite*.
+
+    Not from the repository root. Issue #130 moved the suite to
+    ``nanopynix/tests/``, and a name built from the repository root then
+    reads ``nanopynix.tests.<...>``, which resolves ``nanopynix`` to the
+    installed package and raises ``ModuleNotFoundError``. The suite
+    directory is on ``sys.path`` -- ``pythonpath`` in both `pytest.ini`
+    files puts it there -- so the name inside the suite is the one that
+    imports.
+    """
     return ".".join(path.with_suffix("").parts)
 
 
@@ -418,12 +428,16 @@ def discover_roster(*, root: Path, engine: str | None = None) -> list[SoakCandid
     """
     roster: list[SoakCandidate] = []
     for path in sorted((root / _ROSTER_ROOT).rglob("test_*.py")):
+        # Two anchors, on purpose: the nodeid names the file from the
+        # repository root, because that is what a `pytest` command and the
+        # DENYLIST keys use; the module name is rooted at the suite.
         relative = path.relative_to(root)
+        importable = path.relative_to(root / _ROSTER_ROOT)
         tree = ast.parse(path.read_text(encoding="utf-8"))
         eligible = list(_candidates_in(tree))
         if not eligible:
             continue
-        module = importlib.import_module(_module_name(relative))
+        module = importlib.import_module(_module_name(importable))
         for name, factory, wants_tmp_path in eligible:
             nodeid = f"{relative.as_posix()}::{name}"
             if nodeid in DENYLIST:

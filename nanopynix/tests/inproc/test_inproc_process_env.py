@@ -13,7 +13,7 @@ suite opens its sessions with neither. A session naming either could therefore
 not open here at all -- the guard would refuse it before ``open`` reached the
 line under test.
 
-``tests/nanopynix/test_session_env.py`` holds the refusal rules, which the two
+``nanopynix/tests/test_session_env.py`` holds the refusal rules, which the two
 engines share, and the rpc half of the passthrough.
 """
 

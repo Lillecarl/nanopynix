@@ -709,7 +709,7 @@ async def worker_child_teardown(handlers: Collection[WorkerServices]) -> None:
     ``Collection[WorkerServices]`` and not the transport's
     ``Collection[IServable]``: that protocol is not ``@runtime_checkable``, so
     naming it would leave this whole function silently unchecked by beartype.
-    The ledger in ``tests/nanopynix/test_beartype_instrumentation.py`` records
+    The ledger in ``nanopynix/tests/test_beartype_instrumentation.py`` records
     the same mistake, and the same correction. The call site carries the one
     cast this costs, because a parameter is contravariant.
 

@@ -5,7 +5,7 @@ lifetime mechanics, but callers can depend on these shared operation shapes.
 Protocols deliberately describe only behaviour common to both transports.
 See :mod:`nanopynix.store` and :mod:`nanopynix.inproc` for the two
 implementations, checked against these protocols in
-``tests/nanopynix/test_protocols.py``.
+``nanopynix/tests/test_protocols.py``.
 
 Every protocol here is ``@runtime_checkable``. That is not for callers to reach
 for ``isinstance`` in place of static typing -- it stays a structural check on
@@ -43,7 +43,7 @@ Python 3.14, plus the dict. rpc's ``Store``, ``ValueProxy``, ``EvalSession``
 and ``ReplSession`` are all ``__slots__``-based, and one ``ValueProxy`` exists
 per Nix value. The check is easy to get wrong:
 ``getattr(protocol, "__slots__")`` answers ``()`` from ``Protocol`` itself even
-when the body omits it, so ``tests/nanopynix/test_protocols.py`` asks
+when the body omits it, so ``nanopynix/tests/test_protocols.py`` asks
 ``vars(protocol)`` instead.
 """
 
@@ -199,7 +199,7 @@ class AsyncValue(Protocol):
     #
     # These three were the last members of the shared surface this protocol
     # could not describe, because inproc awaited `attr`/`list_get` and took a
-    # single `call` argument. tests/nanopynix/test_engine_parity.py's ledger
+    # single `call` argument. nanopynix/tests/test_engine_parity.py's ledger
     # carried them as Value.attr:async, Value.list_get:async and
     # Value.call:params.
 
@@ -877,7 +877,7 @@ class AsyncSession[
     :meth:`store` returns one. So a *bare* ``AsyncSession`` means
     ``AsyncSession[AsyncStore, ...]``, and neither engine is one -- correctly,
     because an engine's ``eval`` must reject the other engine's store. Annotate
-    with the parameters solved, as ``tests/nanopynix/test_protocols.py`` does,
+    with the parameters solved, as ``nanopynix/tests/test_protocols.py`` does,
     and not with the bare name.
 
     The evaluator bounds are ``[Any]`` and not the bare protocol names.

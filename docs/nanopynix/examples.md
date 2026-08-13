@@ -2,7 +2,7 @@
 
 Every example on this page lives under `docs/examples/` in the repository
 and is executed as part of the test suite
-(`tests/nanopynix/test_examples.py`). If the API changes in a way that
+(`nanopynix/tests/test_examples.py`). If the API changes in a way that
 breaks one of these, CI fails — the examples can't silently go stale.
 
 ## Evaluating Nix expressions

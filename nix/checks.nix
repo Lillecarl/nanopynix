@@ -12,8 +12,9 @@
 # `grpclib-transports` and `pytest-agent` are the two gates here that run
 # tests rather than a static tool, and both are here because nothing else
 # would run them. Each subproject carries its own pytest configuration, and
-# the repository's own test runner (nanopynix/tests.nix) collects `tests/`
-# and not those, so a suite that nobody names runs nowhere.
+# the repository's own test runner (nanopynix/tests.nix) collects what
+# `testpaths` in the repository `pytest.ini` names, so a suite that nobody
+# names runs nowhere.
 #
 # The two arrived at that state differently. `grpclib-transports` used to run
 # by itself: the project came from a separate repository as a nixpkgs
@@ -139,10 +140,12 @@ let
     test-support = [ "test" ];
   };
 
-  # And a fifth. `nanopynix-helpers` carries its own suite since issue #130,
-  # and the repository run collects `tests/` only, so without this the suite
-  # would run nowhere. Its `test` extra reaches `nanopynix[test]`, which is
-  # what supplies pytest, `test-support` and `nanopynix-testing`.
+  # And a fifth. `nanopynix-helpers` carries its own suite since issue #130.
+  # The repository run reaches it through `testpaths`, and this gate is what
+  # proves the suite also stands up alone, under its own rootdir and with
+  # only this project's dependencies. Its `test` extra reaches
+  # `nanopynix[test]`, which supplies pytest, `test-support` and
+  # `nanopynix-testing`.
   helpersEnv = pythonSet.mkVirtualEnv "nanopynix-helpers-test-env" {
     nanopynix-helpers = [ "test" ];
   };
@@ -252,7 +255,7 @@ in
   # No drift gate here either, although issue #22 asks for one. Both
   # `check_all_settings_model_drift(include_optional=True)` and
   # `check_all_store_model_drift()` already run inside the test suite
-  # (tests/nanopynix/bindings/test_util.py, tests/nanopynix/test_stores.py),
+  # (nanopynix/tests/bindings/test_util.py, nanopynix/tests/test_stores.py),
   # and CI runs that suite against every supported Nix version on both
   # backends. A derivation here would check one version, so it would be
   # strictly weaker than what already runs, and slower to build than the four

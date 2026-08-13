@@ -139,7 +139,7 @@ def test_protocol_static_conformance() -> None:
 # Members both engines have that the protocol deliberately does not declare,
 # with why. Each must name a real reason -- "no signature is true of both
 # engines" -- not "we did not get to it". Every one of these is also recorded
-# in tests/nanopynix/test_engine_parity.py, which is where the work to remove
+# in nanopynix/tests/test_engine_parity.py, which is where the work to remove
 # it is tracked; this table only records that the protocol is knowingly silent.
 UNDECLARED: dict[str, str] = {}
 
