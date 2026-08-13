@@ -25,9 +25,8 @@ pytestmark = [pytest.mark.concurrency, pytest.mark.evaluator_in_process]
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from conftest import StorePathRecorder
-
     from nanopynix.models import BuildResult, LogEvent, StorePath
+    from nanopynix_testing.fixtures import StorePathRecorder
 
 # Must match nanopynix_testing.nix_environment's NixTestEnvironment.settings --
 # nanopynix.inproc.Session settings are process-global and cannot be
