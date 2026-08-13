@@ -47,6 +47,26 @@ if TYPE_CHECKING:
 _FACTORY_FIXTURES = ("inproc_session", "rpc_session")
 _SUPPLIED_FIXTURES = frozenset({*_FACTORY_FIXTURES, "tmp_path"})
 
+# A fixture that a *plugin* asks for, and not the author of the test.
+#
+# `anyio_mode = auto` makes anyio write `usefixtures("anyio_backend")` onto
+# each async test **function object**, in `pytest_pycollect_makeitem`. That is
+# the function this module reads, so a module that pytest already imported
+# hands back a test that asks for a fixture its author never named.
+#
+# The driver runs every lane inside `anyio.create_task_group`, so the backend
+# is already chosen and the request is already met. A test that names
+# `anyio_backend` as a *parameter* is still refused, because `_candidates_in`
+# reads the signature against `_SUPPLIED_FIXTURES` alone.
+#
+# **This dropped 23 of 111 tests in CI run 31710004856, on all twelve test
+# jobs, and the floor gate passed on 52 against 50.** Only the modules at the
+# top of `nanopynix/tests/` were hit: pytest imports those under the same
+# name this scanner uses, so both get the one module object. A module in a
+# subdirectory takes a dotted name here and a bare one in pytest, so the
+# scanner reads its own untouched copy.
+_PLUGIN_INJECTED_FIXTURES = frozenset({"anyio_backend"})
+
 # How far `_describe` unwraps a nested `ExceptionGroup`. A task group inside a
 # task group gives two levels, and a report deeper than three names the shape
 # of the nesting rather than the defect.
@@ -313,9 +333,12 @@ def _wants_an_unsupplied_fixture(module: Any, func: Any) -> bool:
     without it, they cancel inside a window that has not opened yet and assert
     on an executor that was never poisoned -- which reads exactly like a
     concurrency failure, and is not one.
+
+    ``_PLUGIN_INJECTED_FIXTURES`` comes off first, and that constant says why.
     """
     for mark in _all_marks(module, func):
-        if mark.name == "usefixtures" and not set(mark.args) <= _SUPPLIED_FIXTURES:
+        wanted = set(mark.args) - _PLUGIN_INJECTED_FIXTURES
+        if mark.name == "usefixtures" and not wanted <= _SUPPLIED_FIXTURES:
             return True
     return False
 
