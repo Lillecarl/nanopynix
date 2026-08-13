@@ -7,6 +7,23 @@ name = "pynix"
 version = "0.1.0"
 description = "End-to-end harness that consumes nanopynix as a library dependency"
 requires-python = ">=3.13"
+# PEP 639, and two licences rather than one. The code of this project is
+# Apache-2.0, like the rest of the repository. It also ships
+# `src/pynix/get-env.sh`, which is Nix's own script vendored under
+# LGPL-2.1-or-later -- Nix compiles that script into the `nix` binary as a
+# file-static string, so it is in no library and a consumer has to carry a
+# copy. `docs/pynix/develop.md` says the rest.
+#
+# `AND`, and not `OR`: the sdist and the wheel carry both, and a recipient
+# gets each file under the licence that file names. The two do not combine,
+# because the script is a separate work that this project runs rather than
+# links, so the Apache-2.0 patent term never has to reach LGPL-2.1 code.
+#
+# Both files are copies of the ones at the root of the repository, because the
+# source root of this project is this directory, and a path above it is not in
+# the sdist.
+license = "Apache-2.0 AND LGPL-2.1-or-later"
+license-files = [ "LICENSE", "LICENSE.LGPL-2.1" ]
 dependencies = [
   "nanopynix",
   "nanopynix-helpers",

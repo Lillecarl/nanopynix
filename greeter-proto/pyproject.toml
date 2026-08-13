@@ -12,6 +12,15 @@ version = "0.1.0"
 description = "Demo gRPC protobuf definitions for the grpclib-transports tests (betterproto2 compiled)"
 authors = [{ name = "Carl Andersson", email = "github@lillecarl.com" }]
 requires-python = ">=3.13"
+# PEP 639. The repository is Apache-2.0. `nanopynix-bindings` alone is
+# LGPL-2.1-or-later, because that project links libnixexpr and libnixstore,
+# and `AGENTS.md` says why the two live together without a conflict.
+#
+# The file is a copy of the one at the root of the repository, because the
+# source root of this project is this directory, and a path above it is not in
+# the sdist.
+license = "Apache-2.0"
+license-files = [ "LICENSE" ]
 # Declared here rather than in the Nix package, because a builders project
 # takes its runtime dependencies from this file alone. These are what the
 # generated modules import: betterproto2 and grpclib for the service stubs,
