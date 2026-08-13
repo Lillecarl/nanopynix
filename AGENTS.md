@@ -35,12 +35,12 @@ runtime. `ruff-strict.toml` gives the reason and the measurement behind it.
 another rule.
 
 CI runs those three commands, `ruff format --check`, `shellcheck` over
-`scripts/`, and the test suite of `grpclib-transports`, in the `static-checks`
-job. Each one is a derivation in
+`scripts/`, and the suite of each subproject that the repository run does not
+reach, in the `static-checks` job. Each one is a derivation in
 `nix/checks.nix`, and each is a package. Build them to run a gate the way CI
 runs it, in a sandbox and not in the dev shell:
 
-- nix build --file . --no-link --keep-going checks.lint checks.lint-strict checks.format checks.types checks.shell checks.grpclib-transports checks.pytest-agent
+- nix build --file . --no-link --keep-going checks.lint checks.lint-strict checks.format checks.types checks.shell checks.grpclib-transports checks.pytest-agent checks.test-support checks.nanopynix-helpers checks.nix-daemon-protocol
 
 Do not use `nix flake check` for this. That command evaluates every package,
 and `packages.shell` cannot evaluate in a pure flake evaluation.
@@ -214,6 +214,40 @@ commands:
 - `agent_notes` and `from pytest_agent import note` get a value out of a test,
   and also out of the code under test. Use them instead of a separate
   `python -c` command.
+
+# pynixd
+
+`pynixd/` is a subproject of this repository, and not a third-party
+dependency. It is a Nix daemon protocol proxy and a distributed build cache,
+in pure Python over AsyncSSH. It sits between a Nix client and a set of remote
+builders, and it caches queries, removes duplicate builds and schedules across
+backends. `pynixd/nix-daemon-protocol/` is the wire package under it, and it
+is a separate distribution because it holds the codecs alone and depends on no
+part of pynixd.
+
+**It implements in Python what nanopynix binds from C++.** `pynixd/wire.py`,
+`nar.py`, `drv_parser.py` and `store/daemon.py` answer questions that
+`nanopynix-bindings` answers through libnixstore. That is the reason the two
+trees are in one repository, and it is not a fault to correct: this suite
+already speaks the real protocol to a real `nix-daemon` through
+`--nix-test-backends local,daemon`, so a Python implementation of the other
+end is a differential test of both. Issue #131 holds the work that integrates
+the project, and it names what is decided and what is not.
+
+**It arrived by a merge of two histories that changed no file**, so it still
+carries its own conventions. Four gates of this repository excluded it, and
+two of the four take it now: `check-lint` and `check-format`. `ruff-strict`
+and pyright still exclude it, and each exclusion names its reason and points
+at #131.
+
+**Read `pynixd/AGENTS.md` before you change anything under `pynixd/`.** That
+file is the source of truth for that project, and this file does not replace
+it. Its three-tier execution pattern, its build queue and its rule of one
+pytest process at a time are all in there.
+
+**Lix is not supported.** The project supported it, through `LIX_BIN` and the
+`--client-bin`, `--local-bin` and `--builder-bin` options. Every one of those
+is gone. Do not add a branch for a second implementation of Nix.
 
 # Issues, and how a commit closes one
 
