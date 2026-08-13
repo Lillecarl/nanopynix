@@ -57,7 +57,7 @@ from nanopynix.settings import field_is_supported
 from nanopynix.stores import (
     _uri_part_of,  # type: ignore[reportPrivateUsage] -- the library's own reading of a field's URI role
 )
-from tests.support.notes import note
+from test_support.notes import note
 
 if TYPE_CHECKING:
     from collections.abc import Callable

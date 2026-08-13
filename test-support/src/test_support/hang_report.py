@@ -120,7 +120,10 @@ def live_threads() -> str:
     separates "the evaluator is still working" from "the evaluator is gone".
     """
     try:
-        frames = sys._current_frames()
+        # `sys._current_frames()` is the only way to reach the frame of a
+        # thread other than this one, and reading a parked thread's frame is
+        # this module's whole subject.
+        frames = sys._current_frames()  # type: ignore[reportPrivateUsage] -- no public API reaches another thread's frame  # noqa: SLF001 -- same reason
     except Exception as exc:
         return f"no thread state: {exc}"
 

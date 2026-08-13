@@ -26,7 +26,7 @@ import sys
 import pytest
 
 from nanopynix.settings import DEFAULT_EXPERIMENTAL_FEATURES
-from tests.support.subprocess_output import CompletedProcess, run_process
+from test_support.subprocess_output import CompletedProcess, run_process
 
 # Report the features Nix actually has on, straight after the entry point under
 # test -- before this module's fix, only what nix.conf happened to supply.

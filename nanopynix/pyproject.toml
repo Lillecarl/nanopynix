@@ -33,12 +33,16 @@ classifiers = [
 
 [project.optional-dependencies]
 test = [
+  # The helpers this repository shares and that name no Nix concept. Issue #130
+  # moved them out of `tests/support/`, which only the repository rootdir could
+  # import. `pygit2` went with `git_fixtures` and is a dependency of that
+  # project now, so it is not named twice here.
+  "test-support",
   "pytest",
   "pytest-dependency",
   "pytest-cov",
   "pytest-forked",
   "pytest-xdist",
-  "pygit2",
   "beartype",
   "hypothesis",
 ]

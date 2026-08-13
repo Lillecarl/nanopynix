@@ -44,8 +44,8 @@ from nanopynix.settings import (
     reject_construction_time_keys,
     render_for_scope,
 )
-from tests.support.git import init_flake_repo
-from tests.support.notes import note
+from test_support.git_fixtures import init_flake_repo
+from test_support.notes import note
 
 if TYPE_CHECKING:
     from tests.support.nix_environment import NixTestEnvironment

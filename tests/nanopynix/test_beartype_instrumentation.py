@@ -27,7 +27,7 @@ import pytest
 
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix.settings import normalize_nix_path, normalize_nix_settings
-from tests.support.subprocess_output import run_process
+from test_support.subprocess_output import run_process
 
 # An `int` is wrong for both functions probed below -- `normalize_nix_path`
 # takes `str | Sequence[str] | None`, `normalize_nix_settings` takes

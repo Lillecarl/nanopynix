@@ -27,8 +27,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from pynix import Pynix
-from tests.support.git import init_linked_flakes
-from tests.support.subprocess_output import run_process
+from test_support.git_fixtures import init_linked_flakes
+from test_support.subprocess_output import run_process
 
 if TYPE_CHECKING:
     from pathlib import Path

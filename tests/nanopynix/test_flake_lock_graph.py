@@ -16,7 +16,7 @@ Two doors replace it, and this file asks a different question of each:
   about the graph. That is the door ``pynix develop`` needs, and it is what
   this file covers.
 
-The fixture is three local git flakes (:func:`tests.support.git.init_linked_flakes`),
+The fixture is three local git flakes (:func:`test_support.git_fixtures.init_linked_flakes`),
 so nothing here reaches the network.
 """
 
@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.support.git import init_linked_flakes
+from test_support.git_fixtures import init_linked_flakes
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -42,7 +42,7 @@ import sys
 
 import pytest
 
-from tests.support.notes import note
+from test_support.notes import note
 
 #: The most modules ``import nanopynix`` may load.
 #:

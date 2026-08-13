@@ -384,6 +384,11 @@ ignorelist = ["eval"]
 # paths (not real temp-file usage), skip -> None annotations, and compare
 # against unnamed literal expected values
 "tests/**" = ["SLF001", "S101", "S108", "ANN201", "PLR2004"]
+# The same allowances, for the same reason: this is a test suite. Only
+# `test-support/tests`, and not `test-support/src` -- the source of a shared
+# helper gets no blanket exemption, so the one private access it makes
+# carries an inline noqa naming the rule.
+"test-support/tests/**" = ["SLF001", "S101", "S108", "ANN201", "PLR2004"]
 # doc/example snippets use bare assert and illustrative literal comparisons
 "docs/**" = ["S101", "PLR2004"]
 # dev-tooling subprocess/git-plumbing harness, not shipped production code.
@@ -502,6 +507,11 @@ known-first-party = [
   "nanopynix_flake",
   "nanopynix_store",
   "nanopynix_util",
+  # Named here, unlike `nanopynix` and `pynix`, which ruff finds by itself:
+  # with no `src` setting it looks for a directory of the same name beside
+  # this file, and this package is at `test-support/src/test_support`. Add a
+  # project the same way when its directory name and its module name differ.
+  "test_support",
 ]
 
 [format]

@@ -24,7 +24,7 @@ import sys
 
 import anyio
 
-from tests.support.subprocess_output import run_process
+from test_support.subprocess_output import run_process
 
 # Far above the 64 KiB pipe buffer of Linux, in each direction. The margin is
 # deliberate and large: the two pipes are not the only buffer between the

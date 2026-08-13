@@ -8,7 +8,7 @@ import pytest
 from nanopynix_bindings import errors as nanopynix_errors, flake as nanopynix_flake
 
 import nanopynix
-from tests.support.git import commit_files, init_flake_repo, init_repo
+from test_support.git_fixtures import commit_files, init_flake_repo, init_repo
 
 if TYPE_CHECKING:
     from pathlib import Path

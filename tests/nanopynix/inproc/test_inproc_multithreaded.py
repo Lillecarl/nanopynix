@@ -15,7 +15,7 @@ import pytest
 from nanopynix_bindings import util as nanopynix_util
 
 from nanopynix import EvalSessionClosedError, NixSettings, inproc
-from tests.support.notes import note
+from test_support.notes import note
 
 # `_session` below builds an `inproc.Session` directly rather than through the
 # `inproc_session` fixture, so the no-collector rule in

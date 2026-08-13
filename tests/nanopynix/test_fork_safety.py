@@ -50,7 +50,7 @@ from nanopynix._wire import HandleKind
 from nanopynix.exceptions import ForkedSessionError
 from nanopynix.rpc.client._session import _DeferredReleases
 from nanopynix.settings import NanopynixSettings, resolve_worker_start
-from tests.support.subprocess_output import run_process
+from test_support.subprocess_output import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine

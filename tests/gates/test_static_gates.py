@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.support.subprocess_output import run_process
+from test_support.subprocess_output import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

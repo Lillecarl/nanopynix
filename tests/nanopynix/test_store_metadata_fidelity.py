@@ -34,7 +34,7 @@ import anyio
 import pytest
 
 from nanopynix.models import DerivationOutputs
-from tests.support.subprocess_output import run_process
+from test_support.subprocess_output import run_process
 
 if TYPE_CHECKING:
     from pathlib import Path
