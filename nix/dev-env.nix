@@ -37,6 +37,11 @@ editablePythonSet.mkVirtualEnv "nanopynix-dev-env" (
     # `test` extra, which is what puts `greeter-proto`, `asyncssh` and `rich`
     # in reach so `pytest grpclib-transports` runs from the dev shell.
     grpclib-transports = [ "test" ];
+    # The daemon proxy that the merge of issue #131 brought in, editable like
+    # every other project here. `nix-daemon-protocol` arrives as its
+    # dependency, so it needs no entry of its own. The `test` extra is what
+    # makes `pytest pynixd` run from the dev shell.
+    pynixd = [ "test" ];
   }
   // extraSpec
 )
