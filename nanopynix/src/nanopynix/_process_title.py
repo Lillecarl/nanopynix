@@ -3,8 +3,41 @@
 from __future__ import annotations
 
 import secrets
+import sys
 
-from setproctitle import setproctitle
+from setproctitle import setproctitle as _setproctitle
+
+
+def _discard_process_title(title: str) -> None:
+    """Ignore the title. See ``setproctitle`` below for why, on macOS."""
+
+
+#: What actually sets the title, and a no-op on macOS.
+#:
+#: setproctitle's Darwin backend rewrites the name ``ps`` shows by going
+#: through private CoreFoundation bundle APIs, and that path faults on current
+#: macOS::
+#:
+#:     darwin_set_process_title
+#:       CFBundleGetFunctionPointerForName
+#:         _CFBundleLoadExecutableAndReturnError
+#:           os_log_type_enabled
+#:             _os_log_preferences_refresh   EXC_BAD_ACCESS / SIGSEGV
+#:
+#: That killed every rpc worker at startup, so `ekn eval` of a one-line
+#: attribute died with SIGSEGV before evaluating anything -- and it looked like
+#: an evaluator or GC problem, because the client only ever reports that its
+#: worker was signalled.
+#:
+#: **A no-op is the whole fix, because the title has no reader.** This module's
+#: own note above says it is "a name that only a person reading ``ps`` ever
+#: sees", and `set_worker_title` returns the slug separately for the one caller
+#: that keeps it.
+#:
+#: Swapped here rather than branched inside `set_process_title`, so that
+#: function stays one line and the tests -- which monkeypatch this name --
+#: exercise identical code on either platform.
+setproctitle = _discard_process_title if sys.platform == "darwin" else _setproctitle
 
 _manager_project_name = "nanopynix"
 
