@@ -592,11 +592,30 @@ let
           base_sha="$(jq -r '.before // ""' "$GITHUB_EVENT_PATH")"
         fi
 
+        # pynixd arrived by a merge of two histories, in issue #131, and this
+        # commit is the tip of what that merge brought in. Its 272 commits
+        # predate this repository and follow conventions of their own. A
+        # rewrite of a published history is not worth making them conform, so
+        # the range below excludes them.
+        #
+        # **This is not one push.** The gate reads `before..HEAD`, so every
+        # branch that takes the import merge for the first time sees all 272
+        # again: `develop` did, and `main` does next. Without the exclusion
+        # that push checks 834 subjects, reports 272 failures that no person
+        # can act on, and makes `docs-build` and `docs-deploy` skip.
+        imported_tip="e7b3a3d4eb58e827de0f68c26cceeb7b010e818b"
+        exclude=()
+        if git cat-file -e "$imported_tip^{commit}" 2>/dev/null; then
+          exclude=("^$imported_tip")
+        else
+          echo "the pynixd import tip is not in this clone; checking the whole range"
+        fi
+
         # `before` is the all-zero sha for a new branch, and it names a commit
         # that the remote no longer has after a force push. The range means
         # nothing in either case, so check the head alone.
         if [ -n "$base_sha" ] && git cat-file -e "$base_sha^{commit}" 2>/dev/null; then
-          commits="$(git rev-list --no-merges "$base_sha..$head_sha")"
+          commits="$(git rev-list --no-merges "$base_sha..$head_sha" "''${exclude[@]}")"
         else
           echo "no usable base commit; checking $head_sha alone"
           commits="$(git rev-list --no-merges -1 "$head_sha")"
