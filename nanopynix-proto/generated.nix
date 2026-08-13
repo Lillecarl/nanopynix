@@ -53,6 +53,22 @@ runCommand "nanopynix-proto-source"
     # annotated, so mark the package as typed for downstream consumers.
     touch "$out/src/nanopynix_proto/py.typed"
 
+    # **No `pydantic_dataclasses` option.** That option made each message a
+    # pydantic dataclass rather than a plain one, and issue #127 measured what
+    # it cost: 0.254 s of import time in every process that speaks the
+    # protocol, which is 57% of the generated code. Each rpc worker of
+    # `worker_start="spawn"` or `"stdio"` paid it.
+    #
+    # It bought one thing, and one caller read it. The wire format is the same
+    # either way -- the same message serialises to the same bytes -- and a
+    # pydantic dataclass is not a `BaseModel`, so `model_dump` and
+    # `model_validate` were absent in both variants. What it gave was a check
+    # of the type at construction, which pyright already makes before the line
+    # runs. `Store.collect_garbage` in `rpc/client/store.py` was the one place
+    # that read the check at runtime, and it now makes that check itself.
+    #
+    # Do not add the option back to get validation. Write the check where the
+    # value arrives, as that method does.
     protoc \
       --proto_path="$src" \
       --proto_path=${pythonEnv}/${python.sitePackages} \
@@ -60,7 +76,6 @@ runCommand "nanopynix-proto-source"
       --python_betterproto2_opt=client_generation=async \
       --python_betterproto2_opt=server_generation=async \
       --python_betterproto2_opt=google_protobuf_descriptors \
-      --python_betterproto2_opt=pydantic_dataclasses \
       common.proto \
       store.proto \
       eval.proto \
