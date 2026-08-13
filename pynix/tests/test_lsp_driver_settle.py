@@ -10,7 +10,7 @@ while the warm-up still runs. A hover on a module argument then answers
 ``None``, and the scenario reads a race as a defect.
 
 **No other test notices when this wait goes away.** The scenarios in
-``tests/pynix/test_lsp_scenarios.py`` pass on a development machine, where the
+``pynix/tests/test_lsp_scenarios.py`` pass on a development machine, where the
 warm-up wins the race every time. They fail on a loaded CI runner. Run
 31618055409 failed in two jobs and in two different ways -- one
 ``expected a hover result, got None`` and one 120s deadline -- while 14 jobs
@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from tests.support.lsp_drivers import InProcessDriver
+from support.lsp_drivers import InProcessDriver
 
 if TYPE_CHECKING:
     from pynix._lsp._handlers import PynixLanguageServer

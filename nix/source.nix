@@ -24,7 +24,7 @@
   the name alone cannot separate them from the caches.
 
   Removing `.git` also corrects a local failure: libgit2 refuses a root-owned
-  repository, so `tests/pynix/test_real_store_scenario.py` failed whenever a
+  repository, so `pynix/tests/test_real_store_scenario.py` failed whenever a
   colocated `.git` travelled into the store copy.
 */
 { lib }:

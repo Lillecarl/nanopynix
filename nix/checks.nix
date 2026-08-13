@@ -240,7 +240,16 @@ in
     testSupportEnv
   ] "python -m pytest -p no:cacheprovider test-support";
 
-  # No drift gate here, although issue #22 asks for one. Both
+  # **No gate for the pynix suite, and that is not an oversight.** Issue #130
+  # moved it to `pynix/tests/`, and the two gates above exist because a moved
+  # suite would otherwise run nowhere. That suite is different: it drives a
+  # real store, a real evaluator and `nix-build`, so it runs in the CI matrix
+  # against every supported Nix version and both backends. The repository
+  # `pytest.ini` names it in `testpaths`, which is what the packaged runner
+  # reads. A derivation here would check one version inside a sandbox with no
+  # network, so it would be strictly weaker than what already runs.
+  #
+  # No drift gate here either, although issue #22 asks for one. Both
   # `check_all_settings_model_drift(include_optional=True)` and
   # `check_all_store_model_drift()` already run inside the test suite
   # (tests/nanopynix/bindings/test_util.py, tests/nanopynix/test_stores.py),

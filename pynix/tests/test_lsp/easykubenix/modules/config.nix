@@ -24,8 +24,8 @@
 # own keys -- see `EasykubenixDialect._namespace_names`) has something
 # real to suggest.
 #
-# Marker comments below are for tests/pynix/test_lsp_scenarios.py
-# (see tests/support/lsp_markers.py) -- not part of the easykubenix
+# Marker comments below are for pynix/tests/test_lsp_scenarios.py
+# (see pynix/tests/support/lsp_markers.py) -- not part of the easykubenix
 # config itself.
 { lib, pkgs, ... }:
 {

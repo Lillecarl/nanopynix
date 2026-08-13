@@ -1,7 +1,7 @@
 """Shared cursor-position arithmetic for LSP tests.
 
-Both the in-process handler tests (``tests/pynix/test_lsp.py``) and the
-real-subprocess protocol tests (``tests/pynix/test_lsp_e2e.py``) need to turn
+Both the in-process handler tests (``pynix/tests/test_lsp.py``) and the
+real-subprocess protocol tests (``pynix/tests/test_lsp_e2e.py``) need to turn
 "the position just after this bit of text in a fixture" into an LSP
 ``Position``. Centralizing that here means it's implemented (and tested)
 once, instead of as a dozen near-identical ``lines``/``index`` blocks spread

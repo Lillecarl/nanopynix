@@ -505,12 +505,18 @@ combine-as-imports = true
 # an annotation cannot be resolved.
 required-imports = ["from __future__ import annotations"]
 known-first-party = [
+  # `support` and `_shared_sessions` are `pynix/tests/`'s own modules.
+  # pytest puts that directory on `sys.path` because the suite has no
+  # `__init__.py`, so they are importable by bare name and isort cannot
+  # tell them from a third-party package without being told.
+  "_shared_sessions",
   "nanopynix",
   "nanopynix_expr",
   "nanopynix_fetchers",
   "nanopynix_flake",
   "nanopynix_store",
   "nanopynix_util",
+  "support",
   # Named here, unlike `nanopynix` and `pynix`, which ruff finds by itself:
   # with no `src` setting it looks for a directory of the same name beside
   # this file, and these two are at `test-support/src/test_support` and

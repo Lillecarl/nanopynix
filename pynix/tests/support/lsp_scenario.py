@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from lsprotocol import types
 
-from tests.support.lsp_markers import Marker, parse_markers
+from support.lsp_markers import Marker, parse_markers
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

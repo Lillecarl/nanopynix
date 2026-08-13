@@ -66,7 +66,7 @@ _MAX_GROUP_DEPTH = 3
 # `tests/nanopynix/test_fork_safety.py`: "assert 'ok' == 'ForkedSessionError'".
 _DISQUALIFYING_MARKS = frozenset({"live_gc", "forked", "forks_the_process", "skip", "skipif", "xfail"})
 
-# Only the library's own tests. `tests/pynix/` drives a CLI and an LSP server
+# Only the library's own tests. `pynix/tests/` drives a CLI and an LSP server
 # through subprocesses, which puts no extra thread into this process.
 _ROSTER_ROOT = Path("tests/nanopynix")
 

@@ -103,7 +103,7 @@ in
     # This runner is the gate, so it always takes the faithful path: every
     # pynix command opens its own worker, store and evaluator, exactly as the
     # real CLI does. The dev-shell default shares them across commands
-    # (tests/pynix/_shared_sessions.py) -- ~25% faster on tests/pynix, but by
+    # (pynix/tests/_shared_sessions.py) -- ~25% faster on that suite, but by
     # construction blind to anything that needs a command to get a *fresh*
     # process, store handle or evaluator. That trade belongs in the local
     # edit-run loop, not in the run that decides whether a change is good.

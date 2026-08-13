@@ -13,7 +13,7 @@ openApiSchemaPath }``:
   ``.options``/``._module`` all present), exactly what ``_module_system.py``
   expects from a ``moduleEntry``. Unlike terranix, easykubenix's own
   ``default.nix`` already exposes this directly via ``passthru.eval`` -- no
-  un-hiding workaround needed (see ``tests/pynix/test_lsp/easykubenix/
+  un-hiding workaround needed (see ``pynix/tests/test_lsp/easykubenix/
   default.nix``).
 - ``openApiSchemaPath`` -- a string filesystem path to a Kubernetes OpenAPI
   v2 (``swagger.json``-shaped) JSON document, however the calling project
@@ -22,7 +22,7 @@ openApiSchemaPath }``:
   pynix only ever reads the path; producing it is the calling project's
   concern, same as ``tofu``/``module`` are for terranix.
 
-(``tests/pynix/test_lsp/easykubenix/default.nix`` is the reference
+(``pynix/tests/test_lsp/easykubenix/default.nix`` is the reference
 implementation of this contract.)
 
 ``kubernetes.nix``'s object bodies (``kubernetes.objects.<namespace>.

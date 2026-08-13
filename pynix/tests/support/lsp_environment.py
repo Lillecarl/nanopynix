@@ -29,12 +29,15 @@ if TYPE_CHECKING:
 
     from nanopynix_testing.nix_environment import RpcSessionFactory
 
-LSP_ASSETS_ROOT = Path(__file__).resolve().parents[1] / "pynix" / "test_lsp"
+# `parents[1]` is the suite root, `pynix/tests/`. Issue #130 moved this
+# module from `tests/support/`, where the same expression reached
+# `tests/` and needed a `pynix` component to get here.
+LSP_ASSETS_ROOT = Path(__file__).resolve().parents[1] / "test_lsp"
 _logger = logging.getLogger(__name__)
 
 
 def asset(name: str) -> Path:
-    """Path to a checked-in LSP test fixture under ``tests/pynix/test_lsp/``."""
+    """Path to a checked-in LSP test fixture under ``pynix/tests/test_lsp/``."""
     return LSP_ASSETS_ROOT / name
 
 

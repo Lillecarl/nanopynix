@@ -4,7 +4,8 @@
 directory and below, so a suite that moves into its own project loses every
 fixture declared here. The Nix session fixtures are now
 ``nanopynix_testing.fixtures``, and the deadline and the ``agent_notes``
-stand-in are ``test_support.plugin``.
+stand-in are ``test_support.plugin``. beartype's import hook is loaded by
+``-p`` from ``pytest.ini``, so nothing here has to run before an import.
 
 What stays is what belongs to *this* run and to no project: the order that
 collection must take, and the hard exit that ends the session.
@@ -12,26 +13,15 @@ collection must take, and the hard exit that ends the session.
 
 from __future__ import annotations
 
-import importlib
 import os
 import sys
 from typing import TYPE_CHECKING
 
-# Installs beartype's import hook and arranges the same for subprocesses; must
-# run before `import nanopynix` below. A plain
-# `import nanopynix_testing.beartype_hook` statement would be fair game for
-# ruff's isort, which sorts `nanopynix` ahead of it -- exactly backwards.
-# Routing the side effect through a function call keeps it outside anything
-# isort will reorder. See the hook's module docstring for the `-p` route,
-# which issue #130 made possible and which this file does not take.
-importlib.import_module("nanopynix_testing.beartype_hook")
-
-import coverage  # noqa: E402 -- see hook install above
-import pytest  # noqa: E402 -- see hook install above
+import coverage
+import pytest
 
 pytest_plugins = (
     "test_support.plugin",
-    "tests.support.lsp_environment",
     "nanopynix_testing.nix_environment",
     "nanopynix_testing.nix_runtime",
     "nanopynix_testing.fixtures",

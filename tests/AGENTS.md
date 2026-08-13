@@ -13,14 +13,13 @@ here and to read the results. This file only says where a file belongs.
 | directory | holds | scope of one test |
 |---|---|---|
 | `tests/meta/` | self-checks: the repository examined as text and structure | the repository |
-| `tests/harness/` | the test machinery itself, which no other test asserts | one harness behaviour |
 | `tests/gates/` | the static gates of CI, run as tools | one gate |
 | `tests/nanopynix/` | the library, by subsystem | one behaviour of nanopynix |
-| `tests/pynix/` | the CLI and the LSP server | one command or one editor request |
-| `tests/support/` | scanners and the LSP drivers. **No tests.** | — |
+| `tests/support/` | scanners for the self-checks. **No tests.** | — |
 
-The shared helpers and the first moved suite are outside `tests/`, and issue
-#130 put them there:
+`tests/harness/` and `tests/pynix/` are gone. Issue #130 moved each suite
+beside the project it tests, so that a Nix invocation reads one project and
+not the whole repository:
 
 | directory | holds | scope of one test |
 |---|---|---|
@@ -28,6 +27,9 @@ The shared helpers and the first moved suite are outside `tests/`, and issue
 | `test-support/tests/` | the tests of those helpers | one helper behaviour |
 | `nanopynix-testing/src/nanopynix_testing/` | fixtures and markers that name Nix | — |
 | `nanopynix-testing/.../_subprocess_startup/` | `sitecustomize.py` for a spawned interpreter | — |
+| `nanopynix-helpers/tests/` | the pure helper package | one helper behaviour |
+| `pynix/tests/` | the CLI and the LSP server | one command or one editor request |
+| `pynix/tests/support/` | the LSP client, drivers, markers and scenarios. **No tests.** | — |
 | `nanopynix-helpers/tests/` | the helpers package | one helper |
 
 **A helper leaves `tests/support/` when a second project needs it.**
@@ -57,25 +59,28 @@ helpers, `inproc/` and `rpc/` for the two engines, `primops/` for the Nix
 primops, and the top level for what crosses those layers -- settings routing,
 engine parity, the error taxonomy.
 
-## The rule for `tests/harness/`
+## The rule for a test of the harness itself
 
 **A harness test asserts a thing every other test depends on, and that no
 other test would notice was broken.**
 
-`tests/support/` is full of helpers, and most of them need no test of their
-own: the test that uses a helper fails when the helper breaks. A few do not
-have that property, and they are what this directory is for. The first one was
+A support directory is full of helpers, and most of them need no test of
+their own: the test that uses a helper fails when the helper breaks. A few do
+not have that property, and they are what this rule is for. The first one was
 `hang_report.py`, which runs only when a test has already hit its deadline. If
 it returned an empty string, every run would stay green and the report would
 be silently useless at the one moment it matters.
 
 Ask whether a bug in the helper makes some other test fail. When the answer is
-yes, write no test here. When the answer is "no, it just stops helping", the
-helper needs its own test, and this is where the test goes.
+yes, write no test. When the answer is "no, it just stops helping", the helper
+needs its own test.
 
-**The same rule applies in `test-support/tests/`, and the test goes beside the
-helper.** `hang_report.py` and `subprocess_output.py` moved to `test-support/`,
-so their tests moved with them.
+**The test goes beside the helper, and `tests/harness/` no longer exists.**
+`hang_report.py` and `subprocess_output.py` are tested from
+`test-support/tests/`. `InProcessDriver` is tested from
+`pynix/tests/test_lsp_driver_settle.py`, which sits among the tests that use
+it. One directory for a rule that produced three files was a directory that
+had to be split the moment each suite moved.
 
 ## The rule for `tests/gates/`
 

@@ -1,12 +1,12 @@
 """Installs beartype's import hook before any of our own packages are imported.
 
-Imported from the top of a suite's ``conftest.py``, ahead of everything else
-there::
+Each suite loads it from its own ``pytest.ini``::
 
-    importlib.import_module("nanopynix_testing.beartype_hook")
+    addopts = -p nanopynix_testing.beartype_hook
 
-That import has to happen before ``import nanopynix`` and cannot be moved
-anywhere later, which rules out both of the tidier-looking alternatives:
+A ``-p`` plugin loads during command-line parsing, which is earlier than the
+first conftest, so no conftest has to order its own imports around the hook.
+The two alternatives are both worse, and one of them does not work at all:
 
 * pytest-beartype's own ``beartype_packages`` ini option applies the hook from
   its ``pytest_configure`` hookimpl. Every plugin's ``pytest_configure`` runs
@@ -14,22 +14,24 @@ anywhere later, which rules out both of the tidier-looking alternatives:
   therefore nanopynix. By then the target packages are imported and
   unhookable, and it silently no-ops with a "not checkable by beartype"
   warning.
-* ``-p nanopynix_testing.beartype_hook`` in ``addopts`` is early enough --
-  plugins named that way load during command-line parsing. It named
-  ``tests.support.beartype_hook`` until issue #130, and that name did not
-  resolve: ``-p`` is processed before the ``pythonpath`` ini setting and
-  before rootdir reaches ``sys.path``, so the repository root was not
-  importable yet and it died with ``No module named 'tests'``. **This module
-  is an installed package now, so that objection no longer holds.** The
-  conftest import stays because it is what every suite already does, and
-  because one route is easier to reason about than two.
+* An ``importlib.import_module`` call at the top of a ``conftest.py`` is early
+  enough, and every suite took that route until issue #130. It leaves the
+  ordering fragile in one specific way: ``ruff check --fix`` alphabetizes an
+  import block, and ``nanopynix`` sorts before this module -- exactly
+  backwards. It also cannot serve a conftest that imports the instrumented
+  package at its own top, which ``pynix/tests/conftest.py`` does.
 
-Being a conftest import makes the ordering fragile in one specific way:
-``ruff check --fix`` alphabetizes that block, and ``nanopynix`` sorts before
-``nanopynix_testing.beartype_hook`` -- exactly backwards. A conftest therefore
-routes the side effect through ``importlib.import_module`` rather than an
-import statement, which leaves isort nothing to reorder; see the comment
-there.
+``-p`` was not available until issue #130. The plugin name was
+``tests.support.beartype_hook``, and that name did not resolve: ``-p`` is
+processed before the ``pythonpath`` ini setting and before rootdir reaches
+``sys.path``, so the repository root was not importable yet and it died with
+``No module named 'tests'``. This module is an installed package now, and an
+installed package is importable from the first line of the run.
+
+**A suite that loses the hook still reports every test as passed.** The
+failure is silent, which is why the registration is one line in one file per
+project rather than a convention. ``tests/nanopynix/test_beartype_instrumentation.py``
+is what catches its absence.
 
 This module also puts ``_subprocess_startup`` beside it on ``PYTHONPATH`` so
 that freshly exec'd subprocesses -- above all the multiprocessing forkserver

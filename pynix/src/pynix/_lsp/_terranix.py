@@ -22,12 +22,12 @@ moduleSystem, tofu }``:
   exactly the shape ``_module_system.py`` expects from a NixOS
   ``moduleEntry``. terranix's own public wrapper never exposes this (see
   ``terranix`` above), so a directive has to build it by hand; see
-  ``tests/pynix/test_lsp/terranix/default.nix`` for the reference
+  ``pynix/tests/test_lsp/terranix/default.nix`` for the reference
   construction.
 - ``tofu`` -- a derivation with a ``bin/tofu``-shaped executable already
   wired (via ``-chdir`` or equivalent) to operate on ``module``.
 
-(``tests/pynix/test_lsp/terranix/default.nix`` is the reference
+(``pynix/tests/test_lsp/terranix/default.nix`` is the reference
 implementation of this contract.)
 
 Unlike NixOS's options tree, Terraform provider resource/attribute schemas

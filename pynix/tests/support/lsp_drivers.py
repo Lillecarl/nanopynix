@@ -54,11 +54,11 @@ class InProcessDriver:
         This driver calls that function directly, so it returns at once and
         the race is wide open. `WireDriver` needs no such wait, because a
         JSON-RPC round trip usually outlasts the warm-up. That is why the
-        `[wire-...]` parametrisation of `tests/pynix/test_lsp_scenarios.py`
+        `[wire-...]` parametrisation of `pynix/tests/test_lsp_scenarios.py`
         stayed green while `[in_process-...]` failed, and why it failed on a
         loaded CI runner and never on a development machine.
 
-        `tests/pynix/test_shared_eval_cache.py` waits the same way, for the
+        `pynix/tests/test_shared_eval_cache.py` waits the same way, for the
         same reason.
         """
         for task in list(self._server.warm_tasks):

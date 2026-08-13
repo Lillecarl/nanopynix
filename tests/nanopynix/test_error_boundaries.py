@@ -105,7 +105,7 @@ def _info_diff(case: str, rpc: dict[str, Any] | None, inproc_: dict[str, Any] | 
 def _fod_expr(nixpkgs: str) -> str:
     """A fixed-output derivation whose declared hash cannot match its output.
 
-    ``outputHash = ""`` is the same fixture ``tests/pynix/test_build.py`` uses
+    ``outputHash = ""`` is the same fixture ``pynix/tests/test_build.py`` uses
     to drive ``--update-fod``; the build always reports a hash mismatch.
     """
     return with_nixpkgs(

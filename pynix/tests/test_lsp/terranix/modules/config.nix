@@ -13,8 +13,8 @@
 # not it's wrapped in `config`. This fixture pins that down as a real
 # regression test rather than something only checked by hand once.
 #
-# The marker comment below is for tests/pynix/test_lsp_scenarios.py (see
-# tests/support/lsp_markers.py) -- not part of the terranix config itself.
+# The marker comment below is for pynix/tests/test_lsp_scenarios.py (see
+# pynix/tests/support/lsp_markers.py) -- not part of the terranix config itself.
 { ... }:
 {
   config = {

@@ -38,7 +38,7 @@
 #   attrset-valued binding.
 #
 # Marker comments below are scenario markers for
-# tests/pynix/test_lsp_scenarios.py (see tests/support/lsp_markers.py) --
+# pynix/tests/test_lsp_scenarios.py (see pynix/tests/support/lsp_markers.py) --
 # not part of the easykubenix config itself.
 { lib, pkgs, ... }:
 {

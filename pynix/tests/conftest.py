@@ -3,6 +3,24 @@
 # that lack type stubs.  Member types, variable types, private imports,
 # unknown argument types, and lambdas without type context are inherent to the
 # test infrastructure.
+"""What this suite needs, and the scenario objects that only it uses.
+
+Issue #130 moved the suite here from ``tests/pynix/``, so that a Nix
+invocation reads one project and not the whole repository. Everything the root
+``tests/conftest.py`` used to supply is now registered below.
+
+``nanopynix_testing.fixtures`` is present here and absent from the helpers
+suite: these tests drive a real CLI against a real store, so they need the
+store, the evaluator and ``repo_root``.
+
+``support.lsp_environment`` is this suite's own. It supplies ``lsp_server``
+and ``lsp_wire``, and ``support/`` is a package inside the suite because
+nothing outside the suite reads it.
+
+beartype's import hook is not registered here. It has to run before ``pynix``
+is imported, and this file imports ``pynix`` at the top, so ``pynix/pytest.ini``
+loads it with ``-p`` instead. That file gives the reason.
+"""
 
 from __future__ import annotations
 
@@ -29,8 +47,16 @@ import structlog
 from structlog.exceptions import DropEvent
 
 import pynix
+from _shared_sessions import FAITHFUL_SESSIONS_ENV_VAR, SharedSessions
 from pynix import Pynix
-from tests.pynix._shared_sessions import FAITHFUL_SESSIONS_ENV_VAR, SharedSessions
+
+pytest_plugins = (
+    "test_support.plugin",
+    "nanopynix_testing.nix_environment",
+    "nanopynix_testing.nix_runtime",
+    "nanopynix_testing.fixtures",
+    "support.lsp_environment",
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Generator, Iterator
@@ -340,10 +366,14 @@ class PynixStoreScenario:
 
 
 @pytest.fixture(scope="session")
-def easykubenix_openapi_schema(repo_root: Path) -> str:
+def easykubenix_openapi_schema() -> str:
     """Realise the pinned Kubernetes OpenAPI schema the easykubenix scenarios read.
 
-    ``tests/pynix/test_lsp/easykubenix/default.nix`` interpolates a ``fetchurl``
+    The entry point is found relative to this file rather than to ``repo_root``.
+    Issue #130 moved the suite, and a path spelled out from the repository root
+    is a second place that has to be edited when it moves again.
+
+    ``test_lsp/easykubenix/default.nix`` beside this file interpolates a ``fetchurl``
     derivation into ``openApiSchemaPath``, and nothing on the path from there to
     the assertion ever *builds* it -- the LSP evaluates that file and then reads
     the resulting path straight off disk. So on any machine where the fetch has
@@ -355,7 +385,7 @@ def easykubenix_openapi_schema(repo_root: Path) -> str:
     function), and a session-scoped async fixture would need the whole suite's
     event loop to outlive it for no benefit.
     """
-    entry = repo_root / "tests/pynix/test_lsp/easykubenix/default.nix"
+    entry = Path(__file__).parent / "test_lsp" / "easykubenix" / "default.nix"
     result = subprocess.run(  # noqa: S603 -- fixed argv, no shell, paths from the repo itself
         ["nix-build", "--no-out-link", str(entry), "-A", "openApiSchema"],  # noqa: S607 -- nix-build resolved from PATH, as everywhere else in this suite
         capture_output=True,
@@ -398,7 +428,7 @@ async def _shared_pynix_sessions(  # type: ignore[reportUnusedFunction] -- pytes
     anyio_backend: str,  # noqa: ARG001 -- see below; requested for its side effect on the fixture closure
 ) -> AsyncIterator[None]:
     """Share one Nix session/store/evaluator across pynix commands, unless CI
-    asked for the faithful per-command path -- see tests/pynix/_shared_sessions.py.
+    asked for the faithful per-command path -- see _shared_sessions.py beside this file.
 
     `anyio_backend` is unused in the body and load-bearing anyway. anyio's
     plugin only wraps an async fixture when `anyio_backend` is in the
@@ -410,7 +440,7 @@ async def _shared_pynix_sessions(  # type: ignore[reportUnusedFunction] -- pytes
     internal `assert not self._finalizers`.
 
     Which test comes first depends on selection, so this passed for `pytest
-    tests` and failed for `pytest tests/pynix/test_repl.py`, whose first test
+    tests` and failed for `pytest pynix/tests/test_repl.py`, whose first test
     is sync: exactly backwards from what makes a bug easy to find. Naming the
     fixture here pulls it into every test's closure and settles it.
     """
