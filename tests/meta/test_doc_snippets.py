@@ -48,7 +48,7 @@ UNMIRRORED: dict[str, str] = {
         "copies a closure into the host `daemon` store. CI runners differ on "
         "the first, and the second writes outside any store this suite owns."
     ),
-    "docs/nanopynix/api/process.md:136": (
+    "docs/nanopynix/api/process.md:150": (
         "Needs a reachable remote host and a bastion in front of it, which is "
         "the whole point of the block: `NIX_SSHOPTS` exists because "
         "`ProxyJump` has no store-URI equivalent. "
@@ -147,13 +147,27 @@ def test_every_python_block_is_mirrored_or_recorded() -> None:
     declared = set(UNMIRRORED)
 
     added = sorted(unmirrored - declared)
+    stale = sorted(declared - unmirrored)
+
+    # **A key of UNMIRRORED holds a line number, so text above a block moves
+    # it.** That case reports one added key and one stale key of the same page,
+    # and the two messages below then send the reader to write an example and
+    # to delete a record, when the whole correction is one number. Prose above
+    # a block is an ordinary edit, so this happens to a person who changed no
+    # code at all. Name it first.
+    moved = sorted((was, now) for was in stale for now in added if was.rsplit(":", 1)[0] == now.rsplit(":", 1)[0])
+    assert not moved, (
+        f"{len(moved)} UNMIRRORED entr(y/ies) name a line that moved. An edit above the block "
+        "shifted it, and the block itself may be unchanged. Correct the line number rather than "
+        "add or delete a record:\n" + "\n".join(f"  {was} -> {now}" for was, now in moved)
+    )
+
     assert not added, (
         f"{len(added)} published Python block(s) point at no example, so nothing runs them.\n"
         f"Add `<!-- example: <file>#<region> -->` directly above the fence and put the code in "
         f"{EXAMPLES_DIR}/, or record why it cannot run in UNMIRRORED in this file: {added}"
     )
 
-    stale = sorted(declared - unmirrored)
     assert not stale, f"{len(stale)} UNMIRRORED entr(y/ies) no longer match a block. Delete them: {stale}"
 
 
