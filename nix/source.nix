@@ -41,6 +41,14 @@ let
     "__pycache__"
     "node_modules"
   ];
+
+  skipFiles = [
+    "coverage.xml"
+    "junit.xml"
+    "gc-thread-debug.log"
+    "test-gdb-output.log"
+    "nanopynix-test-store-paths.txt"
+  ];
 in
 lib.cleanSourceWith {
   name = "nanopynix-source";
@@ -55,5 +63,11 @@ lib.cleanSourceWith {
       # `.coverage` is a file, and a local run writes a new one every time.
       || base == ".coverage"
       || lib.hasPrefix ".coverage." base
+      # The reports and diagnostics of a run, written into the repository
+      # root. `.gitignore` covers them too. Here as well, because this filter
+      # is what keeps a local working copy out of the store: a developer who
+      # ran the suite would otherwise rebuild every derivation that reads this
+      # source, for a file that no build reads.
+      || builtins.elem base skipFiles
     );
 }
