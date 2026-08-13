@@ -1,10 +1,12 @@
 #include <nanobind/nanobind.h>
 
 #include "nanopynix_modules.hh"
+#include "nix_ref_caster.hh"
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
+#include <nanobind/stl/set.h>
 #include <nanobind/typing.h>
 
 #include <filesystem>
@@ -149,6 +151,87 @@ static void bind_store_path(nb::module_ &m) {
 }
 
 // =========================================================================
+// ValidPathInfo — the same data as path_info_to_dict, as a type
+// =========================================================================
+//
+// The spike of issue #141. `path_info_to_dict` above converts each of the
+// nine fields, and it renders every reference through the store, before the
+// caller reads one of them. This type reads a field when the caller asks for
+// it.
+//
+// Two fields need a `def_prop_ro`, and each names the reason:
+//
+//   * `nar_hash`: `Hash::to_string` takes a format and a with-type flag, so
+//     there is no field to expose. The format matches the dictionary.
+//   * `ca` and `sigs`: a free function renders each one.
+//
+// **A `ValidPathInfo` knows its store directory.**
+// `UnkeyedValidPathInfo::storeDir` holds it, and `StoreDirConfig::printStorePath`
+// is `(storeDir + "/").append(path.to_string())` and nothing more. So this
+// type renders a path itself, in C++, and it needs no `nix::Store`.
+//
+// `path`, `references` and `deriver` therefore carry the same strings that
+// the dictionary carries. Each one renders when the caller reads it, and the
+// measurement of issue #141 says why that matters: `references` is the whole
+// cost of `path_info_to_dict`, and a caller that reads `nar_size` alone
+// should not pay it.
+//
+// `store_path` gives the `nix::StorePath` itself, for a caller that wants to
+// compare or to hash a path and never needs the text.
+static void bind_valid_path_info(nb::module_ &m) {
+    nb::class_<nix::ValidPathInfo>(m, "ValidPathInfo")
+        .def_ro("store_dir", &nix::ValidPathInfo::storeDir)
+        .def_ro("store_path", &nix::ValidPathInfo::path)
+        .def_prop_ro("path",
+                     [](const nix::ValidPathInfo &i) {
+                         return (i.storeDir + "/").append(i.path.to_string());
+                     })
+        .def_prop_ro("references",
+                     [](const nix::ValidPathInfo &i) {
+                         nb::list refs;
+                         for (auto &r : i.references)
+                             refs.append((i.storeDir + "/").append(r.to_string()));
+                         return refs;
+                     })
+        .def_prop_ro("deriver",
+                     [](const nix::ValidPathInfo &i) -> std::optional<std::string> {
+                         if (!i.deriver)
+                             return std::nullopt;
+                         return (i.storeDir + "/").append(i.deriver->to_string());
+                     })
+        .def_ro("nar_size", &nix::ValidPathInfo::narSize)
+        .def_ro("ultimate", &nix::ValidPathInfo::ultimate)
+        .def_prop_ro("nar_hash",
+                     [](const nix::ValidPathInfo &i) {
+                         return i.narHash.to_string(nix::HashFormat::SRI, true);
+                     })
+        // The dictionary reports an unset registration time as `None`, and
+        // the C++ field is `0`. Keep that, so both methods agree.
+        .def_prop_ro("registration_time",
+                     [](const nix::ValidPathInfo &i) -> std::optional<std::int64_t> {
+                         if (!i.registrationTime)
+                             return std::nullopt;
+                         return static_cast<std::int64_t>(i.registrationTime);
+                     })
+        .def_prop_ro("ca",
+                     [](const nix::ValidPathInfo &i) -> std::optional<std::string> {
+                         if (!i.ca)
+                             return std::nullopt;
+                         return nix::renderContentAddress(*i.ca);
+                     })
+        .def_prop_ro("sigs",
+                     [](const nix::ValidPathInfo &i) {
+                         nb::list sigs;
+                         for (auto &sig : nix::Signature::toStrings(i.sigs))
+                             sigs.append(sig);
+                         return sigs;
+                     })
+        .def("__repr__", [](const nix::ValidPathInfo &i) {
+            return "ValidPathInfo('" + std::string(i.path.to_string()) + "')";
+        });
+}
+
+// =========================================================================
 // Store — bound directly via shared_ptr<Store>
 // =========================================================================
 
@@ -185,6 +268,21 @@ static nb::dict query_path_info(nix::Store &s, const nix::StorePath &path) {
         info.emplace(s.queryPathInfo(path));
     }
     return path_info_to_dict(s, **info);
+}
+
+// The same query, as the bound type. The spike of issue #141 keeps both, so
+// that a test can compare them and nothing downstream changes.
+//
+// The return type is `nix::ref<const nix::ValidPathInfo>`, which
+// `nix_ref_caster.hh` carries. `const_pointer_cast` is safe here, because the
+// bound type exposes each field read-only.
+static nix::ref<nix::ValidPathInfo> query_path_info_typed(nix::Store &s, const nix::StorePath &path) {
+    std::optional<nix::ref<const nix::ValidPathInfo>> info;
+    {
+        nb::gil_scoped_release release;
+        info.emplace(s.queryPathInfo(path));
+    }
+    return nix::ref<nix::ValidPathInfo>(std::const_pointer_cast<nix::ValidPathInfo>(info->get_ptr()));
 }
 
 // The text behind `nix-store --dump-db`, which `nix-store --load-db` reads
@@ -300,6 +398,55 @@ static nb::dict query_missing(nix::Store &s, const nix::DerivedPaths &paths) {
 // an output selector, which is exactly how inproc and rpc came to disagree.
 static nb::dict query_missing_paths(nix::Store &s, const nb::sequence &paths) {
     return query_missing(s, parse_derived_paths(s, derived_path_strings(paths, "query_missing"), "query_missing"));
+}
+
+// The general form of the #141 spike.
+//
+// `nix::ValidPathInfo` renders its own paths, because
+// `UnkeyedValidPathInfo::storeDir` holds the store directory.
+// `nix::MissingPaths` holds no such field, and neither does
+// `nix::BasicDerivation`, so that property is luck and not a rule.
+//
+// This wrapper supplies the missing half. It holds the struct and the store
+// directory of the store that answered the query, so the bound type renders
+// itself in the same way and still needs no `nix::Store` at read time. The
+// same shape serves each remaining helper, because a store directory is the
+// only thing `Store::printStorePath` reads.
+struct PyMissingPaths {
+    nix::MissingPaths missing;
+    std::string store_dir;
+
+    nb::list render(const nix::StorePathSet &paths) const {
+        nb::list out;
+        for (auto &p : paths)
+            out.append((store_dir + "/").append(p.to_string()));
+        return out;
+    }
+};
+
+static void bind_missing_paths(nb::module_ &m) {
+    // The Python name is not `MissingPaths`: `store.pat` already gives that name
+    // to the `TypedDict` that `query_missing` returns, and one module cannot
+    // carry two meanings for one name. The pair reads like `PathInfo` beside
+    // `ValidPathInfo`, where the dictionary keeps the short name.
+    nb::class_<PyMissingPaths>(m, "MissingPathsInfo")
+        .def_ro("store_dir", &PyMissingPaths::store_dir)
+        .def_prop_ro("will_build", [](const PyMissingPaths &p) { return p.render(p.missing.willBuild); })
+        .def_prop_ro("will_substitute",
+                     [](const PyMissingPaths &p) { return p.render(p.missing.willSubstitute); })
+        .def_prop_ro("unknown", [](const PyMissingPaths &p) { return p.render(p.missing.unknown); })
+        .def_prop_ro("download_size", [](const PyMissingPaths &p) { return p.missing.downloadSize; })
+        .def_prop_ro("nar_size", [](const PyMissingPaths &p) { return p.missing.narSize; });
+}
+
+static PyMissingPaths query_missing_paths_typed(nix::Store &s, const nb::sequence &paths) {
+    auto derived = parse_derived_paths(s, derived_path_strings(paths, "query_missing"), "query_missing");
+    nix::MissingPaths m;
+    {
+        nb::gil_scoped_release release;
+        m = s.queryMissing(derived);
+    }
+    return PyMissingPaths{std::move(m), s.storeDir};
 }
 
 // --- Collective queries ---
@@ -849,6 +996,7 @@ static void bind_store(nb::module_ &m) {
         .def("write_dev_shell_derivation", &write_dev_shell_derivation, "drv_path"_a, "get_env_script"_a)
         // Path info
         .def("query_path_info", &query_path_info, "path"_a)
+        .def("query_path_info_typed", &query_path_info_typed, "path"_a)
         .def("dump_db", &dump_db, "paths"_a, "show_derivers"_a = true, "show_hash"_a = true)
         .def("query_path_from_hash_part",
              [](nix::Store &s, const std::string &h) { return s.queryPathFromHashPart(h); },
@@ -859,6 +1007,7 @@ static void bind_store(nb::module_ &m) {
         .def("copy_closure", &copy_closure,
              "paths"_a, "dest_store"_a, "repair"_a = false, "check_sigs"_a = true, "substitute"_a = false)
         .def("query_missing", &query_missing_paths, "paths"_a)
+        .def("query_missing_typed", &query_missing_paths_typed, "paths"_a)
         // Derivations
         .def("query_derivation_outputs", &query_derivation_outputs, "path"_a)
         .def("query_valid_derivers", &query_valid_derivers, "path"_a)
@@ -974,6 +1123,8 @@ void nanopynix_bind_store(nb::module_ &m) {
     }
 
     bind_store_path(m);
+    bind_valid_path_info(m);
+    bind_missing_paths(m);
     bind_store(m);
 
     // ── Pure utility functions (no init required) ───────────────

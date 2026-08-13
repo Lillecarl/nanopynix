@@ -92,6 +92,29 @@ nanopynix_bindings.store.Store.get_build_log:
 nanopynix_bindings.store.Store.query_path_info:
     def query_path_info(self, path: StorePath) -> PathInfo: ...
 
+# Both properties build an `nb::list`, which stubgen reports as a bare `list`.
+# Each one holds strings. See bind_valid_path_info() in nix_store.cpp.
+nanopynix_bindings.store.ValidPathInfo.references:
+    @property
+    def references(self) -> list[str]: ...
+
+nanopynix_bindings.store.ValidPathInfo.sigs:
+    @property
+    def sigs(self) -> list[str]: ...
+
+# The three sets of `MissingPathsInfo`, for the same reason.
+nanopynix_bindings.store.MissingPathsInfo.will_build:
+    @property
+    def will_build(self) -> list[str]: ...
+
+nanopynix_bindings.store.MissingPathsInfo.will_substitute:
+    @property
+    def will_substitute(self) -> list[str]: ...
+
+nanopynix_bindings.store.MissingPathsInfo.unknown:
+    @property
+    def unknown(self) -> list[str]: ...
+
 # Derived paths, not store paths: a plain .drv means all of that derivation's
 # outputs and a ^ separator selects specific ones, which only the string form
 # can carry. StorePath stays accepted so existing direct-API callers keep
