@@ -96,42 +96,11 @@ inline nb::dict to_dict(
     return d;
 }
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-/// Pre-2.32 Nix has one flat status enum covering success and failure alike.
+/// Nix splits the build status into a success half and a failure half.
 ///
-/// It has no `HashMismatch`: that member arrived with the 2.32 split, so a
-/// fixed-output hash mismatch reports under one of the neighbouring failure
-/// names here. The Python side maps whatever it is given and falls back to
-/// plain `BuildError` for a name it does not know, so the older vocabulary
-/// being shorter costs detail rather than correctness.
-inline std::string status_str(nix::BuildResult::Status s) {
-    using enum nix::BuildResult::Status;
-    switch (s) {
-        case Built:                  return "built";
-        case Substituted:            return "substituted";
-        case AlreadyValid:           return "already-valid";
-        case ResolvesToAlreadyValid: return "resolves-to-already-valid";
-        case PermanentFailure:       return "permanent-failure";
-        case InputRejected:          return "input-rejected";
-        case OutputRejected:         return "output-rejected";
-        case TransientFailure:       return "transient-failure";
-        case CachedFailure:          return "cached-failure";
-        case TimedOut:               return "timed-out";
-        case MiscFailure:            return "misc-failure";
-        case DependencyFailed:       return "dependency-failed";
-        case LogLimitExceeded:       return "log-limit-exceeded";
-        case NotDeterministic:       return "not-deterministic";
-        case NoSubstituters:         return "no-substituters";
-    }
-    return "unknown";
-}
-
-inline nb::dict from_kbr(const nix::KeyedBuildResult &kbr, const nix::StoreDirConfig &store) {
-    auto result = static_cast<nix::BuildResult>(kbr);
-    auto [drv_path, outputs] = derived_path_parts(kbr.path, store);
-    return to_dict(drv_path, outputs, result.success(), status_str(result.status), result.errorMsg);
-}
-#else
+/// Nix 2.31 had one flat enum instead, and no `HashMismatch` at all: that
+/// member arrived with the split. Issue #126 raised the supported floor to
+/// 2.34, so the flat form is gone from here.
 inline std::string success_status_str(nix::BuildResult::Success::Status s) {
     using enum nix::BuildResult::Success::Status;
     switch (s) {
@@ -170,6 +139,5 @@ inline nb::dict from_kbr(const nix::KeyedBuildResult &kbr, const nix::StoreDirCo
         return to_dict(path, outputs, false, failure_status_str(failure->status), failure->msg());
     return to_dict(path, outputs, false, "unknown", "");
 }
-#endif
 
 }  // namespace nanopynix::build_result

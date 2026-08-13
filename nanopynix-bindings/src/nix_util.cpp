@@ -385,23 +385,21 @@ static nb::dict build_info() {
     nb::dict capabilities;
     capabilities["logger_unique_ptr"] = NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_35;
     // `EvalState.statistics_json`. The patch that splits the report out of
-    // `printStatistics` reaches 2.34 and every later version, and 2.31 gets
-    // no patch at all -- see the `nixPatches` comment in `default.nix`.
-    capabilities["eval_statistics"] = NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_34;
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    capabilities["build_result_sum"] = false;
-    capabilities["eval_state_mem"] = false;
-    capabilities["dynamic_primop_registration"] = false;
-    // Whether `nanopynix.StoreImpl.read_derivation` is dispatched at all --
-    // `nix::Store::readDerivation` is non-virtual before 2.32, so there is no
-    // hook to install. See `py_store_impl.hh`'s dispatch-list comment.
-    capabilities["store_impl_read_derivation"] = false;
-#else
+    // `printStatistics` reaches 2.34 and every later version, so every
+    // supported build carries it -- see the `nixPatches` comment in
+    // `default.nix`.
+    capabilities["eval_statistics"] = true;
+    // **These four are constant, and they stay in the dict.** Each one was
+    // false below Nix 2.32, and issue #126 raised the supported floor to 2.34.
+    // A caller reads a capability rather than a version number, so removing a
+    // key would break that caller for no gain; a key that reports `true` on
+    // every build costs one line. `store_impl_read_derivation` says whether
+    // `nanopynix.StoreImpl.read_derivation` is dispatched at all, which needs
+    // `nix::Store::readDerivation` to be virtual.
     capabilities["build_result_sum"] = true;
     capabilities["eval_state_mem"] = true;
     capabilities["dynamic_primop_registration"] = true;
     capabilities["store_impl_read_derivation"] = true;
-#endif
 
     // Whether libexpr in this build has the Boehm collector.
     //
@@ -611,14 +609,7 @@ void nanopynix_bind_util(nb::module_ &m) {
           "s"_a,
           "Percent-decode string per RFC 3986.");
     m.def("fix_git_url", [](const std::string &url) -> std::string {
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-            auto normalized = nix::fixGitURL(url);
-            if (normalized.starts_with("git+"))
-                normalized.erase(0, 4);
-            return normalized;
-#else
             return nix::fixGitURL(url).to_string();
-#endif
           },
           "url"_a,
           "Normalize SCP-style and git+https:// URLs to proper URL format.");

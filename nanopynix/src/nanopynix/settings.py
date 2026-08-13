@@ -645,7 +645,7 @@ class NixEvalSettings(NixConfigModel):
       evaluator.
     * ``count_calls`` becomes a ``const`` member of the evaluator, which the
       constructor reads once. ``nix-2.35-count-calls.patch`` adds the setting,
-      and 2.31 has neither the setting nor the report that reads the counters.
+      and every supported Nix takes that patch.
     """
 
     allow_import_from_derivation: bool | None = _live()

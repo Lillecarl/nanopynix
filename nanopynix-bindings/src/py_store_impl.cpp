@@ -59,22 +59,10 @@ PyStoreMethods PyStoreMethods::resolve(const nb::object &py_store) {
     NANOPYNIX_STORE_DISPATCH_METHODS(NANOPYNIX_STORE_RESOLVE_FLAG)
 #undef NANOPYNIX_STORE_RESOLVE_FLAG
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    // The one operation this build cannot dispatch, said out loud rather than
-    // left to be discovered. `readDerivation` is non-virtual here, so there is
-    // no hook; the store still opens and every other operation works, which is
-    // why this warns instead of throwing -- one unsupported method should not
-    // cost a caller the whole store, and `dynamic_primop_registration` sets the
-    // same precedent by degrading rather than refusing. What it must not do is
-    // stay quiet, since the failure it would otherwise produce is a method that
-    // exists, type-checks, and is never called.
-    if (methods.read_derivation)
-        nix::warn(
-            "this store implements read_derivation, which the linked Nix (%s) cannot dispatch: "
-            "Store::readDerivation is not virtual before 2.32, so the method will not be called. "
-            "nanopynix.build_info()['capabilities']['store_impl_read_derivation'] reports this.",
-            NANOPYNIX_NIX_VERSION);
-#endif
+    // A warning stood here for the one operation a pre-2.32 build could not
+    // dispatch: `Store::readDerivation` was non-virtual, so a store's override
+    // was never called. Issue #126 raised the supported floor to 2.34, and
+    // every supported version dispatches it, so there is nothing to warn about.
     return methods;
 }
 
@@ -184,13 +172,8 @@ void PyStoreImpl::queryPathInfoUncached(
             auto d = nb::cast<nb::dict>(result);
             auto info = std::make_shared<nix::ValidPathInfo>(
                 nix::StorePath(path.to_string()),
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-                nix::UnkeyedValidPathInfo(nix::Hash::dummy)
-#else
                 nix::UnkeyedValidPathInfo(
-                    static_cast<const nix::StoreDirConfig &>(*this), nix::Hash::dummy)
-#endif
-            );
+                    static_cast<const nix::StoreDirConfig &>(*this), nix::Hash::dummy));
             if (auto v = dict_entry(d, "nar_hash"))
                 info->narHash = nix::Hash::parseAny(nb::cast<std::string>(*v), nix::HashAlgorithm::SHA256);
             if (auto v = dict_entry(d, "nar_size")) info->narSize = nb::cast<uint64_t>(*v);
@@ -207,11 +190,7 @@ void PyStoreImpl::queryPathInfoUncached(
             if (auto v = dict_entry(d, "sigs")) {
                 for (auto sig : nb::cast<nb::list>(*v)) {
                     auto text = nb::cast<std::string>(nb::borrow<nb::object>(sig));
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-                    info->sigs.insert(text);
-#else
                     info->sigs.insert(nix::Signature::parse(text));
-#endif
                 }
             }
             callback(info);
@@ -232,12 +211,7 @@ void PyStoreImpl::queryPathInfoUncached(
 
 void PyStoreImpl::queryRealisationUncached(
     const nix::DrvOutput & id,
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-    nix::Callback<std::shared_ptr<const nix::Realisation>> callback
-#else
-    nix::Callback<std::shared_ptr<const nix::UnkeyedRealisation>> callback
-#endif
-    ) noexcept
+    nix::Callback<std::shared_ptr<const nix::UnkeyedRealisation>> callback) noexcept
 {
     if (underlying) { underlying->queryRealisation(id, std::move(callback)); return; }
     callback(nullptr);
@@ -286,13 +260,10 @@ nix::ref<nix::SourceAccessor> PyStoreImpl::getFSAccessor(bool requireValidPath) 
     return nix::make_ref<nix::MemorySourceAccessor>();
 }
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-#else
 std::shared_ptr<nix::SourceAccessor> PyStoreImpl::getFSAccessor(const nix::StorePath & path, bool requireValidPath) {
     if (underlying) return underlying->getFSAccessor(path, requireValidPath);
     return nullptr;
 }
-#endif
 
 std::optional<nix::TrustedFlag> PyStoreImpl::isTrustedClient() {
     if (underlying) return underlying->isTrustedClient();
@@ -505,8 +476,6 @@ nix::MissingPaths PyStoreImpl::queryMissing(const std::vector<nix::DerivedPath> 
     return nix::Store::queryMissing(targets);
 }
 
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_32
-#else
 nix::Derivation PyStoreImpl::readDerivation(const nix::StorePath & drvPath) {
     // The one dispatched operation whose Python return value is a
     // *serialization* rather than a rendering: the ATerm text of the `.drv`,
@@ -548,7 +517,6 @@ nix::Derivation PyStoreImpl::readDerivation(const nix::StorePath & drvPath) {
     if (underlying) return underlying->readDerivation(drvPath);
     return nix::Store::readDerivation(drvPath);
 }
-#endif
 
 // --- not dispatched into Python; see the dispatch list in the header ---
 
