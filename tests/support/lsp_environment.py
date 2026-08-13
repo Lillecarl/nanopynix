@@ -1,6 +1,6 @@
 """Shared PynixLanguageServer test fixtures, wired to a real evaluator.
 
-Mirrors ``tests/support/nix_environment.py``'s pattern for reusable test
+Mirrors ``nanopynix_testing.nix_environment``'s pattern for reusable test
 infrastructure: any ``test_lsp_*.py`` file can request ``lsp_server`` (or
 ``lsp_wire``) without re-deriving the pygls ``Workspace``/``Session``/
 ``Store`` wiring.
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
     from pynix._lsp._handlers import PynixLanguageServer
 
-    from tests.support.nix_environment import RpcSessionFactory
+    from nanopynix_testing.nix_environment import RpcSessionFactory
 
 LSP_ASSETS_ROOT = Path(__file__).resolve().parents[1] / "pynix" / "test_lsp"
 _logger = logging.getLogger(__name__)

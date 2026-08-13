@@ -19,7 +19,7 @@ from test_support.notes import note
 
 # `_session` below builds an `inproc.Session` directly rather than through the
 # `inproc_session` fixture, so the no-collector rule in
-# tests/support/nix_runtime.py cannot see it in the fixture closure.
+# nanopynix_testing.nix_runtime cannot see it in the fixture closure.
 pytestmark = [pytest.mark.concurrency, pytest.mark.evaluator_in_process]
 
 if TYPE_CHECKING:
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     from nanopynix.models import BuildResult, LogEvent, StorePath
 
-# Must match tests/support/nix_environment.py's NixTestEnvironment.settings --
+# Must match nanopynix_testing.nix_environment's NixTestEnvironment.settings --
 # nanopynix.inproc.Session settings are process-global and cannot be
 # reinitialized differently within one interpreter (see
 # ``_InprocProcessGuard`` in ``nanopynix.inproc``), and that fixture's
@@ -548,7 +548,7 @@ async def test_inproc_parallel_batch_builds_use_multiple_store_workers(
 # exclusion never matched a three-part version, so 2.34.8 and 2.35.0 ran it;
 # a Nix built from git reports `2.35pre...`, which parses to exactly two
 # parts, so `"2.35"` matched and the *fixed* build was the one that skipped.
-# `_version_in_exclusions` in tests/support/nix_runtime.py is corrected now.
+# `_version_in_exclusions` in nanopynix_testing.nix_runtime is corrected now.
 #
 # **The marker is gone rather than corrected, because the runs it was hiding
 # say it is obsolete.** With it in place the test ran under TSAN on 2.34 and

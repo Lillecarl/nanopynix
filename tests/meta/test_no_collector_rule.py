@@ -3,7 +3,7 @@
 A build with ``enableGC = false`` leaks by design. Nix's own package option
 says so, and it gives the condition under which that is acceptable: evaluation
 takes place within short-lived processes. An RPC worker is such a process. The
-pytest process is not, so :mod:`tests.support.nix_runtime` skips every test
+pytest process is not, so :mod:`nanopynix_testing.nix_runtime` skips every test
 that builds an evaluator inside it when the linked build has no collector.
 
 **That rule has two decay modes, and this module gates both.**
@@ -33,11 +33,16 @@ from pathlib import Path
 
 import pytest
 
-from tests.support.nix_runtime import IN_PROCESS_EVALUATOR_FIXTURES, hosts_an_evaluator
+from nanopynix_testing.nix_runtime import IN_PROCESS_EVALUATOR_FIXTURES, hosts_an_evaluator
 from tests.support.suppressions import iter_python_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TESTS_DIR = REPO_ROOT / "tests"
+
+# Where a fixture may be *defined*, which is not where a test module lives.
+# Issue #130 moved `inproc_session` and its peers into `nanopynix-testing`, and
+# a scan of `tests/` alone then reported that the rule matched nothing.
+FIXTURE_DIRS = (TESTS_DIR, REPO_ROOT / "nanopynix-testing")
 
 # Modules that construct an in-process session and are still safe to run
 # against a build with no collector. Each entry states why.
@@ -166,13 +171,14 @@ def test_the_marker_reader_works_both_ways() -> None:
 def test_each_named_fixture_still_exists() -> None:
     """The first decay mode: a rename that leaves the rule matching nothing."""
     defined: set[str] = set()
-    for path in iter_python_files(TESTS_DIR):
-        defined |= fixture_names(path.read_text(encoding="utf-8"))
+    for directory in FIXTURE_DIRS:
+        for path in iter_python_files(directory):
+            defined |= fixture_names(path.read_text(encoding="utf-8"))
     missing = sorted(IN_PROCESS_EVALUATOR_FIXTURES - defined)
     assert not missing, (
-        f"IN_PROCESS_EVALUATOR_FIXTURES names {missing}, and no fixture under {TESTS_DIR} is called that. "
+        f"IN_PROCESS_EVALUATOR_FIXTURES names {missing}, and no fixture in {FIXTURE_DIRS} is called that. "
         "The no-collector rule now finds fewer tests than it did. Point "
-        "IN_PROCESS_EVALUATOR_FIXTURES in tests/support/nix_runtime.py at the new name."
+        "IN_PROCESS_EVALUATOR_FIXTURES in nanopynix_testing.nix_runtime at the new name."
     )
 
 

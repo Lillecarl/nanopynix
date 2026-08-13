@@ -39,11 +39,11 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
 
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 # The L3 worker of this module runs in the pytest process, which is the whole
 # point of the module, so its evaluator has no process to die with. See the
-# no-collector rule in tests/support/nix_runtime.py.
+# no-collector rule in nanopynix_testing.nix_runtime.
 pytestmark = [pytest.mark.l3_inproc, pytest.mark.evaluator_in_process]
 
 

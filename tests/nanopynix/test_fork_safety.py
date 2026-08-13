@@ -56,7 +56,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
     from multiprocessing.connection import Connection
 
-    from tests.support.nix_environment import InprocSessionFactory, NixTestEnvironment, RpcSessionFactory
+    from nanopynix_testing.nix_environment import InprocSessionFactory, NixTestEnvironment, RpcSessionFactory
 
 #: How long the child gives one operation before it calls the operation hung.
 _OPERATION_DEADLINE_SECONDS = 10.0
@@ -70,7 +70,7 @@ Outcome = tuple[str, str]
 # runs beside seven others, and a fork of a process in the middle of that work
 # keeps only the calling thread. The soak also lends one Session to every lane,
 # so the test below that needs a *second* Session cannot have one. See
-# `_DISQUALIFYING_MARKS` in tests/support/soak.py for the measurement.
+# `_DISQUALIFYING_MARKS` in nanopynix_testing.soak for the measurement.
 pytestmark = [pytest.mark.anyio, pytest.mark.forks_the_process]
 
 

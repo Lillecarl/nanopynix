@@ -40,7 +40,7 @@ import nanopynix
 from nanopynix import NixEvalSettings
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
 # ════════════════════════════════════════════════════════════════════

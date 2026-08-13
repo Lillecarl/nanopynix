@@ -509,9 +509,11 @@ known-first-party = [
   "nanopynix_util",
   # Named here, unlike `nanopynix` and `pynix`, which ruff finds by itself:
   # with no `src` setting it looks for a directory of the same name beside
-  # this file, and this package is at `test-support/src/test_support`. Add a
-  # project the same way when its directory name and its module name differ.
+  # this file, and these two are at `test-support/src/test_support` and
+  # `nanopynix-testing/src/nanopynix_testing`. Add a project the same way when
+  # its directory name and its module name differ.
   "test_support",
+  "nanopynix_testing",
 ]
 
 [format]

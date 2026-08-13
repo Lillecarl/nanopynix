@@ -21,19 +21,28 @@ here and to read the results. This file only says where a file belongs.
 | `tests/support/` | fixtures, drivers and scanners. **No tests.** | — |
 | `tests/_subprocess_startup/` | `sitecustomize.py` for a spawned interpreter | — |
 
-One test tree is outside `tests/`, and issue #130 put it there:
+The helpers are outside `tests/`, and issue #130 put them there:
 
 | directory | holds | scope of one test |
 |---|---|---|
 | `test-support/src/test_support/` | helpers that name no Nix concept | — |
 | `test-support/tests/` | the tests of those helpers | one helper behaviour |
+| `nanopynix-testing/src/nanopynix_testing/` | fixtures and markers that name Nix | — |
 
-**A helper goes in `test-support/` when a second project needs it and it names
-no Nix concept.** `tests/support/` imports as `tests.support.<name>`, which
-only the repository rootdir resolves, so `grpclib-transports` and
-`pytest-agent` could reach none of it. `test-support` is an ordinary package,
-and any project can declare it. Read `test-support/src/test_support/__init__.py`
-for the measurement that chose the split.
+**A helper leaves `tests/support/` when a second project needs it.**
+`tests/support/` imports as `tests.support.<name>`, which only the repository
+rootdir resolves, so `grpclib-transports` and `pytest-agent` could reach none
+of it, and a suite that moves into its own project could not either. Both
+projects above are ordinary packages, and any project can declare one.
+
+**One rule picks between them: does the helper name a Nix concept?** A store,
+an evaluator, a linked Nix version and a worker process are Nix concepts, and
+a helper that names one goes to `nanopynix-testing`. Everything else goes to
+`test-support`, which must stay useful to a project that never loads Nix. Each
+project's `__init__.py` carries the measurement behind its own contents.
+
+What stays in `tests/support/` is what only this repository's own suite reads:
+the scanners of the meta tests, the beartype hook, and the LSP drivers.
 
 `tests/nanopynix/` is the large one, and it groups by the layer under test:
 `bindings/` for the compiled Nix bindings, `core/` for the direct runtime
@@ -103,7 +112,7 @@ reached 5 GB resident with 14.6 GB of swap, and then the kernel killed it;
 forked, it passed 2077 tests at a 3 GB peak.
 
 **No flag selects this, and none should.** `build_info` publishes a `boehm_gc`
-capability, and `tests/support/nix_runtime.py` reads it at collection time. A
+capability, and `nanopynix_testing.nix_runtime` reads it at collection time. A
 build with a collector marks nothing and skips nothing.
 
 That module holds the rule, and it finds most tests through the fixture
@@ -128,7 +137,7 @@ from a collector failure, and `=only` selects the subset for a measurement.
 ## The rule for a test that kills a worker
 
 **A test that signals an rpc worker must call
-`tests.support.worker_death.expect_the_worker_to_die` first.**
+`nanopynix_testing.worker_death.expect_the_worker_to_die` first.**
 
 `Session.close` raises `WorkerSignaledError` for a worker that a signal killed
 and that nothing in this process asked to stop, so that a crash inside a run

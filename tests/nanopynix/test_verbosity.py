@@ -10,7 +10,7 @@ from nanopynix import LogLevel, normalize_log_level
 from nanopynix.rpc import Session
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
+    from nanopynix_testing.nix_environment import InprocSessionFactory, RpcSessionFactory
 
 
 @pytest.mark.parametrize(

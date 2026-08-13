@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 # Locking a flake needs an evaluator, and this module builds one in the pytest
 # process for every test -- through the `eval_state` fixture, and directly
-# where a test needs its own fetch settings. See tests/support/nix_runtime.py.
+# where a test needs its own fetch settings. See nanopynix_testing.nix_runtime.
 pytestmark = pytest.mark.evaluator_in_process
 
 

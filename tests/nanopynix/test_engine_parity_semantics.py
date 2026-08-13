@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     # `_params` below has to name the private module.
     from _pytest.mark.structures import ParameterSet
 
-    from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
+    from nanopynix_testing.nix_environment import InprocSessionFactory, RpcSessionFactory
 
 
 # ── Adapters for divergences the signature ledger already records ────

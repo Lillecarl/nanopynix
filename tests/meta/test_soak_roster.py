@@ -1,6 +1,6 @@
 """The concurrency soak keeps its reach, and its exclusions keep their reasons.
 
-:mod:`tests.support.soak` runs the tests that already exist, concurrently, so
+:mod:`nanopynix_testing.soak` runs the tests that already exist, concurrently, so
 that ThreadSanitizer watches a wide surface instead of the few tests somebody
 wrote to overlap on purpose. Its roster discovers itself, which is what makes
 it grow with the suite -- and which gives it two decay modes.
@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.support.soak import DENYLIST, discover_roster, roster_hash
+from nanopynix_testing.soak import DENYLIST, discover_roster, roster_hash
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -35,7 +35,7 @@ def test_the_soak_still_reaches_a_useful_number_of_tests(engine: str) -> None:
     roster = discover_roster(root=REPO_ROOT, engine=engine)
     assert len(roster) >= _MINIMUM[engine], (
         f"the {engine} soak roster fell to {len(roster)}, below the floor of {_MINIMUM[engine]}. "
-        f"A condition in tests/support/soak.py went too wide, or a fixture was renamed. "
+        f"A condition in nanopynix_testing.soak went too wide, or a fixture was renamed. "
         f"A soak that runs nothing reports no race exactly like a clean tree does."
     )
 
@@ -52,13 +52,13 @@ def test_every_denied_test_still_exists() -> None:
         source = REPO_ROOT / path
         if not source.is_file() or f"async def {name}(" not in source.read_text(encoding="utf-8"):
             stale.append(nodeid)
-    assert not stale, "DENYLIST in tests/support/soak.py names tests that no longer exist:\n  " + "\n  ".join(stale)
+    assert not stale, "DENYLIST in nanopynix_testing.soak names tests that no longer exist:\n  " + "\n  ".join(stale)
 
 
 def test_every_denied_test_says_why() -> None:
     thin = [nodeid for nodeid, reason in DENYLIST.items() if len(reason.split()) < 8]
     assert not thin, (
-        "each DENYLIST entry in tests/support/soak.py states why the test cannot share a lane. "
+        "each DENYLIST entry in nanopynix_testing.soak states why the test cannot share a lane. "
         "These say too little to act on:\n  " + "\n  ".join(thin)
     )
 
@@ -87,7 +87,7 @@ def test_a_denied_test_is_not_also_excluded_by_the_scanner() -> None:
 
     redundant = sorted(set(unfiltered) - (without - reachable))
     assert not redundant, (
-        "these DENYLIST entries in tests/support/soak.py change nothing, because a scanner "
+        "these DENYLIST entries in nanopynix_testing.soak change nothing, because a scanner "
         "condition already excludes them:\n  " + "\n  ".join(redundant)
     )
 

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from nanopynix.models import PrimOpSpec
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
 def _rpc_double(x: int) -> int:

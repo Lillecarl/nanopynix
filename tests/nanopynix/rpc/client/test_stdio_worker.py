@@ -34,10 +34,10 @@ from nanopynix.rpc import WorkerDiedError, WorkerSignaledError
 from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC
 from nanopynix.rpc._worker_argv import worker_argv
 from nanopynix.settings import NanopynixSettings
-from tests.support.worker_death import expect_the_worker_to_die
+from nanopynix_testing.worker_death import expect_the_worker_to_die
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import NixTestEnvironment, RpcSessionFactory
+    from nanopynix_testing.nix_environment import NixTestEnvironment, RpcSessionFactory
 
 STDIO = NanopynixSettings(worker_start="stdio")
 

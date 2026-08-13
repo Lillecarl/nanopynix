@@ -32,7 +32,7 @@ from test_support.git_fixtures import init_linked_flakes
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
+    from nanopynix_testing.nix_environment import InprocSessionFactory, RpcSessionFactory
 
 # Every test here locks a flake, which needs an evaluator.
 pytestmark = pytest.mark.evaluator_in_process

@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nanopynix-testing"
+version = "0.1.0"
+description = "Test fixtures and pytest markers that know about Nix"
+authors = [{ name = "nanopynix contributors" }]
+requires-python = ">=3.13"
+# `nanopynix`, because every module here names a concept of the library: a
+# store, an evaluator, a linked Nix version, a worker process. That dependency
+# is what separates this project from `test-support`, and it is why the two
+# are separate at all.
+#
+# `pytest` is a runtime dependency here and not a test extra. These modules
+# declare fixtures and markers, so a consumer imports them through pytest and
+# there is nothing to import without it.
+dependencies = ["nanopynix", "pytest", "anyio"]
+
+# The same PEP 639 fields as `nanopynix/pyproject.toml`, and the same reason.
+license = "LGPL-2.1-or-later"
+license-files = [ "LICENSE" ]
+classifiers = [
+  "Programming Language :: Python :: 3",
+]
+
+[project.urls]
+Homepage = "https://github.com/lillecarl/nanopynix"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nanopynix_testing"]

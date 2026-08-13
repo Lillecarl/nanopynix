@@ -14,7 +14,7 @@ from nanopynix import NixEvalSettings, NixType, current_system
 from nanopynix.exceptions import EvalError
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
 @pytest.mark.anyio

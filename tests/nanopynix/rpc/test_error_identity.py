@@ -29,7 +29,7 @@ from nanopynix_proto.nix.eval import AsScalarRequest, ConfigureEvalRequest, List
 from nanopynix.exceptions import NixError, NixTypeError, SettingNotLiveError, exception_from_wire
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import RpcSessionFactory
+    from nanopynix_testing.nix_environment import RpcSessionFactory
 
 # A handle the registry has certainly never allocated. `_handle_registry.get`
 # raises KeyError for it.

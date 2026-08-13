@@ -20,7 +20,7 @@ import pytest
 import nanopynix
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import InprocSessionFactory
+    from nanopynix_testing.nix_environment import InprocSessionFactory
 
 # (expression, the accessors that must raise for it)
 WRONG_TYPE_CASES = [

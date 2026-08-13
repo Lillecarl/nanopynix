@@ -25,7 +25,7 @@ from pynix import Pynix
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 _STRUCTLOG = re.compile(r"^\d{4}-\d{2}-\d{2}\s")
 

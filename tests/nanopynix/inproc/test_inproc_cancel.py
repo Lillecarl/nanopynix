@@ -39,7 +39,7 @@ from nanopynix.exceptions import EvaluatorAbandonedError
 
 if TYPE_CHECKING:
     from nanopynix.inproc import EvalSession
-    from tests.support.nix_environment import InprocSessionFactory
+    from nanopynix_testing.nix_environment import InprocSessionFactory
 
 # Value printing calls checkInterrupt() per node (value-to-json.cc:17), so this
 # is interruptible. It takes 2.2s on a 4-core development machine.

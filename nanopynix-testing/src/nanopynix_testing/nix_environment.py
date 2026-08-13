@@ -28,6 +28,12 @@ if TYPE_CHECKING:
     RpcSessionFactory = Callable[..., nanopynix.rpc.Session]
     InprocSessionFactory = Callable[..., nanopynix.inproc.Session]
 
+# Tries at removing a temporary store root. A Nix worker can finish releasing a
+# store entry just after its shutdown acknowledgement, so `ENOTEMPTY` here is a
+# race and not a failure. Twenty tries at 0.05 s is one second, which is longer
+# than any release measured.
+_RMTREE_ATTEMPTS = 20
+
 
 @dataclass
 class _Daemon:
@@ -138,13 +144,13 @@ async def _force_rmtree(path: Path) -> None:
                 path_to_fix.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
         function(raw_path)
 
-    for attempt in range(20):
+    for attempt in range(_RMTREE_ATTEMPTS):
         if not await anyio.Path(path).exists():
             return
         try:
             shutil.rmtree(path, onexc=onexc)
         except OSError as error:
-            if error.errno != errno.ENOTEMPTY or attempt == 19:
+            if error.errno != errno.ENOTEMPTY or attempt == _RMTREE_ATTEMPTS - 1:
                 raise
             # A Nix worker can finish releasing a store entry just after its
             # RPC shutdown acknowledgement. Retry its one filesystem race

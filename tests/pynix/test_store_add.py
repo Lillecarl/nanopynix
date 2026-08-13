@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
     import pytest
 
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
 async def test_nanopynix_add_to_store_imports_file(

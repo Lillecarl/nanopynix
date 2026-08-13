@@ -12,7 +12,7 @@ import pytest
 from nanopynix_bindings import store as nanopynix_store
 
 from nanopynix.models import StorePath
-from tests.support.nix_markers import NIX_GC_ROOTS_BUG
+from nanopynix_testing.nix_markers import NIX_GC_ROOTS_BUG
 
 if TYPE_CHECKING:
     from pathlib import Path

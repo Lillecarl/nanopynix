@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from nanopynix.logging import BusSubscription
-    from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
+    from nanopynix_testing.nix_environment import InprocSessionFactory, RpcSessionFactory
 
 
 class _LogTestModule(Protocol):

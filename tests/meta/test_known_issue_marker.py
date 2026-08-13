@@ -13,7 +13,7 @@ reason and nothing else, so the reason has to carry both the text and the
 bound that fired. A skip that says only "known issue" tells the next person
 to look at the source, and they will not.
 
-`tests/support/nix_runtime.py` holds the decision as a pure function for
+`nanopynix_testing.nix_runtime` holds the decision as a pure function for
 exactly this reason: the alternative is driving a whole pytest collection to
 find out what one marker does.
 """
@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.support.nix_runtime import NixVersion, known_issue_skip_reason
+from nanopynix_testing.nix_runtime import NixVersion, known_issue_skip_reason
 
 _2_34 = NixVersion.parse("2.34.8")
 _2_31 = NixVersion.parse("2.31.2")

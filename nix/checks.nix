@@ -58,6 +58,7 @@ let
       ../pynix
       ../pytest-agent
       ../test-support
+      ../nanopynix-testing
       ../tests
       ../tools
       ../docs
@@ -107,6 +108,7 @@ let
     # and benchmarks and they import `greeter`, `asyncssh` and `rich`.
     grpclib-transports = [ "test" ];
     test-support = [ "test" ];
+    nanopynix-testing = [ ];
   };
 
   # A second venv, holding this one library and its test extra and nothing

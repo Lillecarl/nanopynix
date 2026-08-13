@@ -13,7 +13,7 @@ from pynix import Pynix
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
 def _parse_json_output(out: str) -> object:

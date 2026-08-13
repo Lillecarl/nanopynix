@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from pathlib import Path
 
-    from tests.support.nix_environment import InprocSessionFactory
+    from nanopynix_testing.nix_environment import InprocSessionFactory
 
 # Every store entry point that turns a caller-supplied string into a
 # nix::StorePath. Named rather than discovered, so that adding a path-taking

@@ -33,7 +33,7 @@ from test_support.subprocess_output import run_process
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
 async def _nix_flake_metadata(flake: Path, store_uri: str) -> dict[str, Any]:

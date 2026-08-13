@@ -70,7 +70,7 @@ def _driver_for(request: pytest.FixtureRequest) -> LspDriver:
 
     The cost of that laziness is that the discarded fixture also leaves the
     test's declared fixture closure, and ``nix_backend`` is parametrized off
-    that closure (``tests/support/nix_runtime.py``'s ``pytest_generate_tests``
+    that closure (``nanopynix_testing.nix_runtime``'s ``pytest_generate_tests``
     keys on ``metafunc.fixturenames``). Each fixture below therefore keeps
     naming ``nix_backend`` for its parametrizing side effect -- see the
     comment there.

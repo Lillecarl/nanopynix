@@ -17,7 +17,7 @@ from pynix import Pynix
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
 
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
 async def test_nanopynix_store_get_build_log_from_populated_store(

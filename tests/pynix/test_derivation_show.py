@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING
 import pytest
 
 from nanopynix._ansi import strip_ansi
+from nanopynix_testing.nix_environment import with_nixpkgs
 from pynix import Pynix
-from tests.support.nix_environment import with_nixpkgs
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
 async def test_show_file(

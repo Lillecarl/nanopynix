@@ -20,7 +20,7 @@ a function with a local static from one version to the next, so a per-version
 set would give one caller two answers for one program. ``NIX_USER_CONF_FILES``
 is the example that is already measured: Nix 2.31 reads it at static
 initialisation, and 2.34 reads it in ``loadConfFile``. See
-``tests/support/nix_markers.py``.
+``nanopynix_testing.nix_markers``.
 
 Every refused name has a route that works, and each message names it.
 """

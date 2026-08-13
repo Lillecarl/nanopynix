@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
     from structlog.typing import EventDict, WrappedLogger
 
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 _CURRENT_PYNIX_TEST: ContextVar[str] = ContextVar("_CURRENT_PYNIX_TEST", default="unknown")
 

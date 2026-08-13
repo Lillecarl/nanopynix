@@ -30,7 +30,7 @@ import nanopynix.rpc
 from nanopynix._env import OWNED_BY_NANOPYNIX, READ_WHILE_LIBSTORE_LOADS
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import RpcSessionFactory
+    from nanopynix_testing.nix_environment import RpcSessionFactory
 
 #: A name no Nix and no test fixture reads, so its only source is this module.
 PROBE = "NANOPYNIX_TEST_ENV_PROBE"

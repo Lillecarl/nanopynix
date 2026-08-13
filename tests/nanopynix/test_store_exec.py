@@ -31,7 +31,7 @@ import nanopynix
 from test_support.subprocess_output import run_process
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import InprocSessionFactory, RpcSessionFactory
+    from nanopynix_testing.nix_environment import InprocSessionFactory, RpcSessionFactory
 
 # The interpreter of this process, and **not** `/bin/sh`.
 #

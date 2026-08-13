@@ -128,7 +128,7 @@ let
     # 45 seconds in the TSAN jobs of run 30930842932, which is the slow build.
     soak = 15;
     # Five runs of the concurrency soak, one per seed. Each run deals every
-    # eligible test into eight overlapping lanes -- see tests/support/soak.py.
+    # eligible test into eight overlapping lanes -- see nanopynix_testing.soak.
     tsanStress = 25;
     tsanBroad = 20;
     # `nix build` of every gate, which takes about a minute between them.
@@ -236,7 +236,7 @@ let
 
   # A single cachix/install-nix-action (multi-user) install suffices for every
   # job now: the test suite owns its own daemon and local store paths
-  # entirely (see tests/support/nix_environment.py), so the CI runner's own
+  # entirely (see nanopynix_testing.nix_environment), so the CI runner's own
   # Nix install mode no longer affects what gets exercised. The remaining
   # local/daemon axis lives in `--nix-test-backends`, not in how Nix itself
   # was installed.
@@ -507,7 +507,7 @@ let
   # and it runs in 16 seconds rather than 86. The whole suite forked: 2077
   # passed, 13 skipped, 3 GB peak, 12 minutes.
   #
-  # `tests/support/nix_runtime.py` holds the rule, and
+  # `nanopynix_testing.nix_runtime` holds the rule, and
   # `tests/meta/test_no_collector_rule.py` keeps it from going stale. Four
   # tests skip separately, through the `boehm_gc` capability that `build_info`
   # publishes: three measure the collector, and one abandons an evaluator in

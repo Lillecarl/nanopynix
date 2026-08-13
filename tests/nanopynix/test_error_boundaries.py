@@ -48,10 +48,10 @@ from nanopynix_bindings import errors as nanopynix_errors
 import nanopynix
 from nanopynix import inproc
 from nanopynix.exceptions import translate_nix_exception
-from tests.support.nix_environment import with_nixpkgs
+from nanopynix_testing.nix_environment import with_nixpkgs
 
 if TYPE_CHECKING:
-    from tests.support.nix_environment import NixTestEnvironment
+    from nanopynix_testing.nix_environment import NixTestEnvironment
 
 # A syntactically valid store path (Nix base32 omits e/o/u/t) that is not, and
 # will never be, present -- so `query_path_info` fails on lookup rather than on
