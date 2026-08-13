@@ -106,6 +106,20 @@ not run a Git porcelain command such as `git status`, `git diff`, `git commit`,
 `git checkout`, or `git reset`. Use a Git command only when the user asks for
 Git, or when a tool needs Git plumbing.
 
+**Commit each piece of work when that piece is complete and its tests pass.
+Do not collect several pieces into one commit at the end of a task.** One
+commit says one thing, and a reader can find the change that caused a defect.
+A commit that holds a package change, a defect correction and a removal
+answers no question about any of the three.
+
+The rule is a size rule as well. When a task gives two answers that stand
+alone, write two commits. `jj split <paths> -m "..."` divides the working copy
+after the fact, so the size of the commit is a decision that you take at the
+end and not at the start.
+
+Finish each task on an empty commit. Run `jj new` when the last commit of the
+task is complete, so the next task does not land inside it.
+
 `pynix` is the dogfooding consumer of nanopynix. `pynix` must depend on the
 public APIs of `nanopynix`. If `pynix` needs a library capability of general
 use, add that capability to nanopynix, and do not import a private
