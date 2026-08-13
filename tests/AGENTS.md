@@ -55,6 +55,20 @@ rootdir resolves, so `grpclib-transports` and `pytest-agent` could reach none
 of it, and a suite that moves into its own project could not either. Both
 projects above are ordinary packages, and any project can declare one.
 
+**`grpclib-transports` is what shows the split works.** Its `pytest.ini`
+registers `test_support.plugin` and nothing else, so that suite gets the
+per-test deadline, the hang report behind it and the note shim, and it loads
+no `nix_environment`, no beartype hook and none of nanopynix's markers. Its
+own copy of a sandbox check is gone: `test_support.environment` holds the one
+`in_nix_build_sandbox`. That subproject keeps its own rootdir, and its
+`pytest.ini` gives the reasons that are still correct.
+
+**`tests/meta/test_test_layer_boundaries.py` is the gate on the order of the
+two layers.** `test_support` imports no `nanopynix`, no `nanopynix_testing`
+and no suite; `nanopynix_testing` imports no suite. It reads the imports with
+`ast`, so a name under `if TYPE_CHECKING:` counts -- the venv of
+`nix/checks.nix` catches only an import that runs.
+
 **One rule picks between them: does the helper name a Nix concept?** A store,
 an evaluator, a linked Nix version and a worker process are Nix concepts, and
 a helper that names one goes to `nanopynix-testing`. Everything else goes to
