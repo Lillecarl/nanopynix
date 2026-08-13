@@ -139,6 +139,14 @@ let
     test-support = [ "test" ];
   };
 
+  # And a fifth. `nanopynix-helpers` carries its own suite since issue #130,
+  # and the repository run collects `tests/` only, so without this the suite
+  # would run nowhere. Its `test` extra reaches `nanopynix[test]`, which is
+  # what supplies pytest, `test-support` and `nanopynix-testing`.
+  helpersEnv = pythonSet.mkVirtualEnv "nanopynix-helpers-test-env" {
+    nanopynix-helpers = [ "test" ];
+  };
+
   mkCheck =
     name: nativeBuildInputs: command:
     runCommand "nanopynix-check-${name}" { inherit nativeBuildInputs; } ''
@@ -215,6 +223,13 @@ in
   # the suite of the project that every other suite depends on would run
   # nowhere.
   #
+  # The suite of the helpers package, which moved beside the package that it
+  # tests. The directory and not `nanopynix-helpers/tests`, for the same
+  # reason as the gate below: this project carries its own `pytest.ini`.
+  nanopynix-helpers = mkCheck "nanopynix-helpers" [
+    helpersEnv
+  ] "python -m pytest -p no:cacheprovider nanopynix-helpers";
+
   # The directory, and not `test-support/tests`. This project carries its own
   # `pytest.ini`, so pointing pytest at the project makes `testpaths` and
   # `anyio_mode` apply. Read that file: without `anyio_mode`, every async test
