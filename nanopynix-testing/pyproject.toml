@@ -16,7 +16,11 @@ requires-python = ">=3.13"
 # `pytest` is a runtime dependency here and not a test extra. These modules
 # declare fixtures and markers, so a consumer imports them through pytest and
 # there is nothing to import without it.
-dependencies = ["nanopynix", "pytest", "anyio"]
+# `test-support` for the subprocess runner that `nixpkgs_path` calls. The two
+# projects split by whether a module names a Nix concept, and a dependency in
+# this direction is what that split expects: the Nix-aware half may use the
+# generic half, and never the reverse.
+dependencies = ["nanopynix", "test-support", "pytest", "anyio"]
 
 # The same PEP 639 fields as `nanopynix/pyproject.toml`, and the same reason.
 license = "LGPL-2.1-or-later"
