@@ -33,7 +33,7 @@ def _directories_with_a_pyproject() -> list[Path]:
 
 def test_no_directory_holds_a_ruff_config_that_ruff_ignores() -> None:
     """A `[tool.ruff]` beside a `ruff.toml` is dead, and it does not look dead."""
-    shadowed = []
+    shadowed: list[str] = []
     for directory in _directories_with_a_pyproject():
         dedicated = [name for name in DEDICATED if (directory / name).is_file()]
         if not dedicated:
