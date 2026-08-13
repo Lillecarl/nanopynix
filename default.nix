@@ -259,9 +259,10 @@ let
   # 2.31 was the version below it, and issue #126 holds the measurement that
   # removed it. On one commit, the `test-local` job skipped 107 tests on 2.31
   # and 13 on 2.35, and it took 12m22s against 7m39s. It was the job with the
-  # least signal and the longest run. `ci/render.py` also cannot run on 2.31 at
-  # all, because primop registration is broken there and upstream does not plan
-  # to correct it.
+  # least signal and the longest run. `ci/render.py` also could not run on 2.31
+  # at all, because primop registration is broken there and upstream does not
+  # plan to correct it. That second reason no longer holds on its own: issue
+  # #121 moved the renderer off `builtins.toYAML`, so it registers no primop.
   #
   # **2.34 and not 2.32, because 2.32 and 2.33 do not exist to build.** nixpkgs
   # carries `nixComponents_2_32` and `nixComponents_2_33`, and evaluating
