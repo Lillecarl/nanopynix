@@ -23,8 +23,61 @@
 
 #include <fcntl.h>
 #include <pthread.h>
-#include <sys/syscall.h>
 #include <unistd.h>
+#ifndef __APPLE__
+// Darwin ships this header but defines no `SYS_gettid`. See the three
+// wrappers below for what stands in.
+#include <sys/syscall.h>
+#endif
+
+// Three things this file asks the OS that Linux and Darwin answer
+// differently. Each is used by the collector-owner machinery further down,
+// and each has exactly one honest Darwin equivalent.
+namespace {
+
+// The calling thread's OS-level id.
+//
+// Used for two things only: a diagnostic line, and a non-zero sentinel
+// saying the collector's owner thread has started. Neither needs the number
+// to mean anything beyond "unique to this thread, stable while it runs",
+// which is true of both of these.
+long osThreadId() {
+#ifdef __APPLE__
+    // Darwin has no `gettid`. `pthread_threadid_np` is its equivalent, and
+    // it is the same number `ps -M` and the debugger show.
+    uint64_t tid = 0;
+    pthread_threadid_np(nullptr, &tid);
+    return static_cast<long>(tid);
+#else
+    return static_cast<long>(syscall(SYS_gettid));
+#endif
+}
+
+// Whether the caller is the process's first thread.
+bool isMainThread() {
+#ifdef __APPLE__
+    return pthread_main_np() != 0;
+#else
+    // On Linux the main thread is the one whose thread id equals the pid.
+    return syscall(SYS_gettid) == getpid();
+#endif
+}
+
+// Name the CALLING thread.
+//
+// Darwin's `pthread_setname_np` takes only the name and can name no thread
+// but the caller's; Linux's takes the thread as well. Narrowing the wrapper
+// to the calling thread is what makes the two the same function rather than
+// a partial one -- and it is all any call site here wants.
+void setCallingThreadName(const char *name) {
+#ifdef __APPLE__
+    pthread_setname_np(name);
+#else
+    pthread_setname_np(pthread_self(), name);
+#endif
+}
+
+} // namespace
 
 // For `NIX_USE_BOEHMGC`, which decides whether the collector exists at all in
 // this build. Included before <gc/gc.h> because the macro is what gates that
@@ -1479,7 +1532,7 @@ struct GcThreadRegistration {
         // Releasing it from a `thread_local` destructor would instead call
         // into the collector during static teardown, after the interpreter
         // finalizes, which is the one moment nothing else here runs.
-        if (syscall(SYS_gettid) == getpid())
+        if (isMainThread())
             return;
         if (GC_unregister_my_thread() != GC_SUCCESS)
             throw std::runtime_error("could not unregister this thread from Boehm GC");
@@ -1548,7 +1601,7 @@ static void gc_thread_debug_log(const char *event) {
         return;
     char line[256];
     int length = std::snprintf(line, sizeof(line), "[nanopynix-gc-thread-debug] tid=%ld event=%s\n",
-                               static_cast<long>(syscall(SYS_gettid)), event);
+                               osThreadId(), event);
     if (length <= 0)
         return;
     size_t remaining = static_cast<size_t>(length) < sizeof(line) ? static_cast<size_t>(length)
@@ -1690,8 +1743,8 @@ void nanopynix_start_gc_owner_thread() {
         std::promise<void> ready;
         std::future<void> started = ready.get_future();
         std::thread owner([&ready] {
-            pthread_setname_np(pthread_self(), "nix-gc-owner");
-            gc_owner_thread_id.store(static_cast<long>(syscall(SYS_gettid)), std::memory_order_release);
+            setCallingThreadName("nix-gc-owner");
+            gc_owner_thread_id.store(osThreadId(), std::memory_order_release);
             nix::initGC();
 #if NIX_USE_BOEHMGC
             // TEMPORARY, for issue #70. Remove it with the issue.
