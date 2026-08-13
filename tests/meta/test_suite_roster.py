@@ -43,6 +43,12 @@ from tests.support.suite_roots import REPO_ROOT, SUITE_ROOTS, check_roster
 EXEMPT_INIS = {
     "grpclib-transports/pytest.ini",
     "pynixd/pytest.ini",
+    # The wire protocol package under `pynixd/`. It has a gate of its own now,
+    # `checks.nix-daemon-protocol`, so its suite runs the way CI runs it. It
+    # stays out of the roster because no scanner of this repository should
+    # read a suite of pynixd until issue #131 gives pynixd the conventions of
+    # this repository.
+    "pynixd/nix-daemon-protocol/pytest.ini",
 }
 
 

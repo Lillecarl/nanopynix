@@ -56,6 +56,12 @@ let
       ../nanopynix-proto
       ../greeter-proto
       ../grpclib-transports
+      # Only this subproject of `pynixd/`, and not the whole tree of it. The
+      # gate below reads this suite, and nothing here reads the rest: an
+      # allowlist of `../pynixd` would put 3.5 MiB in the source of every gate
+      # in this file and rebuild all of them on an edit to any part of pynixd.
+      # Issue #131 widens this when the other suites of pynixd get a gate.
+      ../pynixd/nix-daemon-protocol
       ../pynix
       ../pytest-agent
       ../test-support
@@ -150,6 +156,15 @@ let
     nanopynix-helpers = [ "test" ];
   };
 
+  # And a sixth. `nix-daemon-protocol` is the wire package under `pynixd/`,
+  # and its suite is the pure half of what pynixd tests: no daemon, no Nix
+  # binary and no SSH, so it is the suite of that project that a sandbox can
+  # run. A venv holding this project alone is what proves the package stands
+  # up without pynixd, which is the reason it is a separate distribution.
+  protocolEnv = pythonSet.mkVirtualEnv "nix-daemon-protocol-test-env" {
+    nix-daemon-protocol = [ "test" ];
+  };
+
   mkCheck =
     name: nativeBuildInputs: command:
     runCommand "nanopynix-check-${name}" { inherit nativeBuildInputs; } ''
@@ -203,6 +218,18 @@ in
   grpclib-transports = mkCheck "grpclib-transports" [
     grpclibEnv
   ] "python -m pytest -p no:cacheprovider grpclib-transports/tests";
+
+  # The wire protocol package that arrived with pynixd, gated for the same
+  # reason as the gate above it: nothing else runs this suite. `testpaths` in
+  # the repository `pytest.ini` names no directory of `pynixd/`, and the
+  # packaged runner reads that file.
+  #
+  # `tests`, spelled out, for the same reason as the gate above it: an
+  # explicit argument replaces `testpaths`, and the project also carries a
+  # `benchmarks` directory that measures rather than gates.
+  nix-daemon-protocol = mkCheck "nix-daemon-protocol" [
+    protocolEnv
+  ] "python -m pytest -p no:cacheprovider pynixd/nix-daemon-protocol/tests";
 
   # The plugin every other suite in this repository reports through, gated for
   # the first time. See this file's header.
