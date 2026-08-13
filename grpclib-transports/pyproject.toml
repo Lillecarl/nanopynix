@@ -28,7 +28,11 @@ ssh = ["asyncssh"]
 # environment. `rich` is what the benchmarks render their tables with.
 # `anyio` is absent because it is a runtime dependency above; `pytest-anyio`
 # mode comes from pytest.ini.
-test = ["asyncssh", "greeter-proto", "pytest", "rich"]
+#
+# `test-support` is the generic test layer of issue #130, and `pytest.ini`
+# registers its plugin. It is a *test* dependency and it must stay one: this
+# project ships four transports, and none of them may reach a test helper.
+test = ["asyncssh", "greeter-proto", "pytest", "rich", "test-support"]
 
 # No `docs` extra. This project's sphinx pages are part of the one nanopynix
 # site (docs/grpclib-transports/), so the docs toolchain is declared once, in
