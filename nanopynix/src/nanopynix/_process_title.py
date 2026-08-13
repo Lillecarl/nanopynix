@@ -8,7 +8,12 @@ import sys
 from setproctitle import setproctitle as _setproctitle
 
 
-def _discard_process_title(title: str) -> None:
+# pyright evaluates ``sys.platform`` statically, so it reads the selection
+# below as one branch and not as two. Off macOS the branch that names this
+# function is dead code, the only access to the name goes with it, and
+# ``reportUnusedFunction`` fires. The function is used, on the platform that
+# it exists for.
+def _discard_process_title(title: str) -> None:  # pyright: ignore[reportUnusedFunction] -- see the note above
     """Ignore the title. See ``setproctitle`` below for why, on macOS."""
 
 
