@@ -8,6 +8,10 @@
 
 from __future__ import annotations
 
+import importlib
+import types
+import typing
+
 from nanopynix_bindings.expr import (
     EvalState,
     PrimopError,
@@ -41,7 +45,7 @@ from nanopynix_bindings.util import (
 from nanopynix_proto.nix.common import LogLevel
 from nanopynix_proto.nix.store import GcAction as GcAction
 
-from nanopynix import inproc as inproc, rpc as rpc, stores as stores
+from nanopynix import stores as stores
 from nanopynix._ansi import strip_ansi as strip_ansi
 from nanopynix._process_title import set_manager_title as set_manager_title
 from nanopynix.exceptions import (
@@ -159,6 +163,55 @@ from nanopynix.settings import (
 from nanopynix.store_exec import STORE_EXEC_TOOL as STORE_EXEC_TOOL, store_exec_prefix as store_exec_prefix
 from nanopynix.store_impl import DISPATCHABLE_METHODS as DISPATCHABLE_METHODS, StoreImpl as StoreImpl
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
+
+# `import types` and `import typing`, rather than `from ... import` of the two
+# names this module needs from them. Two rules of this repository meet here:
+#
+# - `tests/meta/test_public_surface.py` fails on a public name that the package
+#   binds and `__all__` does not carry. It exempts a *module*, because
+#   `from nanopynix.x import y` binds one as a side effect, so `types` and
+#   `typing` pass where `ModuleType` and `TYPE_CHECKING` did not.
+# - beartype wraps `__getattr__` and resolves its return annotation when the
+#   function runs. A `TYPE_CHECKING`-only `ModuleType` therefore makes every
+#   `from nanopynix import rpc` raise `BeartypeCallHintForwardRefException:
+#   Forward reference "ModuleType" unimportable`, which is a collection error
+#   and not a type error.
+#
+# Neither import costs anything: `types` and `typing` are both in
+# `sys.modules` before this module loads.
+if typing.TYPE_CHECKING:
+    # The two engines, for the type checker only. `__getattr__` below imports
+    # each one at first use, and a type checker cannot read that.
+    from nanopynix import inproc as inproc, rpc as rpc
+
+#: The submodules that :func:`__getattr__` imports at first use.
+#:
+#: **A program uses one engine, and used to pay for both.** This module read
+#: ``from nanopynix import inproc, rpc``, so an inproc program loaded the whole
+#: rpc client and an rpc program loaded inproc. Neither could be avoided,
+#: because an ``import nanopynix.inproc`` runs the ``__init__`` of the package
+#: first. Issue #123 measured it: 786.4 ms and 566 modules before, 673.2 ms and
+#: 526 modules after.
+#:
+#: A module ``__getattr__`` (PEP 562) is the shape this repository permits.
+#: It is a package-level construct and not an import inside a function, so the
+#: ban in ``CLAUDE.md`` does not reach it, and ``from nanopynix import rpc``
+#: keeps working: ``IMPORT_FROM`` falls back to ``getattr`` on the module.
+_LAZY_SUBMODULES = frozenset({"inproc", "rpc"})
+
+
+def __getattr__(name: str) -> types.ModuleType:
+    """Import an engine at first use, and cache it in the module namespace.
+
+    Writing the result into ``globals()`` means this runs once for each
+    engine. Python calls a module ``__getattr__`` only when the ordinary
+    attribute lookup fails, so the second access reads the global directly.
+    """
+    if name in _LAZY_SUBMODULES:
+        module = importlib.import_module(f"nanopynix.{name}")
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def init_libstore(load_config: bool = True) -> None:
