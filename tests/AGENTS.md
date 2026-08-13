@@ -47,10 +47,16 @@ have no equivalent here: one pytest process at a time, because the functional
 tests share `/tmp/pynixd-stores` and a session server, and a store path under
 that prefix and no other.
 
-**Only `pynixd/nix-daemon-protocol/tests/` has a gate today**, as
-`checks.nix-daemon-protocol`. That suite needs no daemon, no Nix binary and no
-SSH, so a sandbox can run it. The other two need all three, so they run on a
-developer's machine and nowhere else yet.
+**Two of those suites have a gate**: `checks.nix-daemon-protocol` and
+`checks.pynixd`. Neither needs a daemon, a Nix binary or SSH, so a build
+sandbox can run both. `pynixd/tests/unit/` holds one group that does need a
+Nix binary, the live probes of `test_drv_parser.py`, and that group skips
+when `nix` is not on PATH.
+
+**`pynixd/tests/functional/` has no gate, and it needs all three.** It runs on
+a developer's machine and nowhere else yet. Run it from any directory: issue
+#131 anchored `TEST_NIX` on a file, and
+`tests/meta/test_pynixd_suite_is_relocatable.py` keeps it that way.
 
 And the two projects that hold the shared test layer, and no test of the
 library at all:

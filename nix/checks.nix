@@ -169,6 +169,14 @@ let
     nix-daemon-protocol = [ "test" ];
   };
 
+  # And a seventh, for pynixd itself. Only its unit suite runs here. The
+  # functional suite drives a real `nix`, a real daemon and a real SSH
+  # session, and a build sandbox offers none of the three, so a gate that ran
+  # it would report the sandbox rather than the code.
+  pynixdEnv = pythonSet.mkVirtualEnv "pynixd-test-env" {
+    pynixd = [ "test" ];
+  };
+
   mkCheck =
     name: nativeBuildInputs: command:
     runCommand "nanopynix-check-${name}" { inherit nativeBuildInputs; } ''
@@ -234,6 +242,16 @@ in
   nix-daemon-protocol = mkCheck "nix-daemon-protocol" [
     protocolEnv
   ] "python -m pytest -p no:cacheprovider pynixd/nix-daemon-protocol/tests";
+
+  # The unit suite of pynixd, and only the unit suite. See `pynixdEnv` for why
+  # the functional half stays out.
+  #
+  # The directory of the project, and not `pynixd/tests/unit`, would collect
+  # the functional suite through `testpaths`, so the argument is the directory
+  # that this gate runs.
+  pynixd = mkCheck "pynixd" [
+    pynixdEnv
+  ] "cd pynixd && python -m pytest -p no:cacheprovider tests/unit";
 
   # The plugin every other suite in this repository reports through, gated for
   # the first time. See this file's header.

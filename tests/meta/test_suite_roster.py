@@ -42,6 +42,11 @@ from tests.support.suite_roots import REPO_ROOT, SUITE_ROOTS, check_roster
 # and adds `pynixd/tests` to the roster.
 EXEMPT_INIS = {
     "grpclib-transports/pytest.ini",
+    # `checks.pynixd` runs the unit half of this suite the way CI runs it, and
+    # the functional half needs a Nix binary, a daemon and SSH, so no gate
+    # runs it. The ini stays exempt for the reason above and not for want of a
+    # gate: a scanner of this repository must not hold that suite to a
+    # nanopynix rule until #131 gives pynixd these conventions.
     "pynixd/pytest.ini",
     # The wire protocol package under `pynixd/`. It has a gate of its own now,
     # `checks.nix-daemon-protocol`, so its suite runs the way CI runs it. It
