@@ -17,6 +17,28 @@
 }:
 
 let
+  cleanSource = import ./clean-source.nix { inherit lib; };
+
+  /*
+    One project's directory, filtered, as the `src` of its derivation.
+
+    **A raw `root + "/${name}"` copies the working directory of that project,
+    and issue #130 put a test suite in every one of them.** A local run then
+    writes `.pytest-agent/` inside the project, and that directory becomes part
+    of the source: measured at 27 MiB of 36 MiB for `nanopynix`. Size is the
+    smaller half. The directory changes on every run, so every local `pytest`
+    gave the package a new source hash and rebuilt it, along with everything
+    downstream.
+
+    Only the built overlay takes this. An editable install must point at the
+    real checkout, so it keeps the unfiltered path -- a store path there would
+    stop the install being live, which is the whole point of it.
+  */
+  projectSource = name: cleanSource {
+    src = root + "/${name}";
+    name = "${name}-source";
+  };
+
   protoSrc = callPackage (root + "/nanopynix-proto/generated.nix") { inherit python; };
   greeterSrc = callPackage (root + "/greeter-proto/generated.nix") { inherit python; };
 
@@ -231,7 +253,7 @@ in
     lib.mapAttrs (
       name: _opts:
       pySelf.callPackage (ps.mkProject {
-        projectRoot = root + "/${name}";
+        projectRoot = projectSource name;
         inherit python;
         extra = extraFor.${name} pySelf;
       }) { }
