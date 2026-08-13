@@ -17,12 +17,13 @@ ignore = [
 ignorelist = ["eval"]
 
 [lint.per-file-ignores]
-"tests/**" = [
+# `**/tests/**` and not `tests/**`: issue #130 gives each project its own
+# suite, so an entry per project would be a list that the next move forgets to
+# extend. It reaches a suite only, never a `src/`. See `ruff-strict.toml`,
+# which carries the same glob and the full argument.
+"**/tests/**" = [
   "SLF001",
 ] # tests intentionally inspect private implementation state
-"test-support/tests/**" = [
-  "SLF001",
-] # same reason as `tests/**` above
 
 [lint.isort]
 combine-as-imports = true

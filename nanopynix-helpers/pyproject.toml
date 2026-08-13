@@ -11,6 +11,11 @@ requires-python = ">=3.10"
 dependencies = ["nanopynix", "tree-sitter", "tree-sitter-nix"]
 
 [project.optional-dependencies]
+# `nanopynix[test]` carries pytest and the two projects this suite registers
+# in `tests/conftest.py`: `test-support` for the plugin, and
+# `nanopynix-testing` for the beartype hook. Named through nanopynix rather
+# than directly, because this suite imports `nanopynix.rpc` and
+# `nanopynix_proto` as well and would need that extra either way.
 test = ["nanopynix[test]"]
 
 [project.urls]

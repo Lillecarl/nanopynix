@@ -17,10 +17,10 @@ here and to read the results. This file only says where a file belongs.
 | `tests/gates/` | the static gates of CI, run as tools | one gate |
 | `tests/nanopynix/` | the library, by subsystem | one behaviour of nanopynix |
 | `tests/pynix/` | the CLI and the LSP server | one command or one editor request |
-| `tests/nanopynix_helpers/` | the helpers package | one helper |
 | `tests/support/` | scanners and the LSP drivers. **No tests.** | — |
 
-The helpers are outside `tests/`, and issue #130 put them there:
+The shared helpers and the first moved suite are outside `tests/`, and issue
+#130 put them there:
 
 | directory | holds | scope of one test |
 |---|---|---|
@@ -28,6 +28,7 @@ The helpers are outside `tests/`, and issue #130 put them there:
 | `test-support/tests/` | the tests of those helpers | one helper behaviour |
 | `nanopynix-testing/src/nanopynix_testing/` | fixtures and markers that name Nix | — |
 | `nanopynix-testing/.../_subprocess_startup/` | `sitecustomize.py` for a spawned interpreter | — |
+| `nanopynix-helpers/tests/` | the helpers package | one helper |
 
 **A helper leaves `tests/support/` when a second project needs it.**
 `tests/support/` imports as `tests.support.<name>`, which only the repository

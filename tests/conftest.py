@@ -1,18 +1,18 @@
 """What is left at the root once each suite can carry its own fixtures.
 
-**The Nix session fixtures moved to ``nanopynix_testing.fixtures`` in issue
-#130.** A conftest reaches its own directory and below, so a suite that moves
-into its own project loses every fixture declared here. What stays are the
-three things that belong to *this run* rather than to any one suite: the
-beartype hook, the stand-in for pytest-agent's ``agent_notes``, and the two
-whole-session hooks below.
+**Everything reusable moved out in issue #130.** A conftest reaches its own
+directory and below, so a suite that moves into its own project loses every
+fixture declared here. The Nix session fixtures are now
+``nanopynix_testing.fixtures``, and the deadline and the ``agent_notes``
+stand-in are ``test_support.plugin``.
+
+What stays is what belongs to *this* run and to no project: the order that
+collection must take, and the hard exit that ends the session.
 """
 
 from __future__ import annotations
 
 import importlib
-import importlib.util
-import inspect
 import os
 import sys
 from typing import TYPE_CHECKING
@@ -29,14 +29,8 @@ importlib.import_module("nanopynix_testing.beartype_hook")
 import coverage  # noqa: E402 -- see hook install above
 import pytest  # noqa: E402 -- see hook install above
 
-# `with_test_timeout` turns a hung async test into a TimeoutError that carries
-# a report of what was still alive. Issue #130 moved it and `run_process` to
-# `test_support`: neither names a Nix concept, and a suite that is not this one
-# needs both just as much. `tests/harness/` held the test of the deadline;
-# `test-support/tests/` holds it now.
-from test_support.deadline import with_test_timeout  # noqa: E402 -- see hook install above
-
 pytest_plugins = (
+    "test_support.plugin",
     "tests.support.lsp_environment",
     "nanopynix_testing.nix_environment",
     "nanopynix_testing.nix_runtime",
@@ -47,56 +41,29 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
 
-def _pytest_agent_installed() -> bool:
-    return importlib.util.find_spec("pytest_agent") is not None
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Order the run. The deadline is `test_support.plugin`'s hook, not this.
 
+    pytest-forked's fork() only keeps the calling thread; any lock another
+    thread held at fork time stays locked forever in the child. By the time
+    any other test has touched Nix (L1 init, an inproc.Session's thread
+    executor, an L3 worker/daemon subprocess, pynix's live-log manager
+    thread), the pytest process is "multithreading-dirty" and forking it is
+    a deadlock risk, not just slow. Run every @pytest.mark.forked test
+    first, before anything else has a chance to spawn those threads.
+    The static gates run second. A lint error or a type error is the cheapest
+    finding in the run and needs no Nix, so it belongs near the front rather
+    than behind several minutes of store work.
 
-if not _pytest_agent_installed():
+    After the forked tests, and not before them: each gate runs a tool
+    through `anyio.open_process`, and the asyncio child watcher gives that
+    child a thread of its own. The fork rule above keeps the first word.
 
-    class _NoopNotes:
-        """Stand-in for pytest-agent's ``agent_notes``, for runs without the plugin."""
+    **This stays at the root, and did not go to a plugin.** It orders the
+    markers of this repository's own suite, and `tests/gates/` exists only
+    here. A project's own suite has one directory and nothing to order.
+    """
 
-        def note(self, **values: object) -> None:
-            """Discard the recording. Notes are observability, never an assertion."""
-
-    @pytest.fixture
-    def agent_notes() -> _NoopNotes:
-        """``agent_notes`` when pytest-agent is not installed.
-
-        The packaged test runner (``nanopynix/tests.nix``) deliberately leaves
-        pytest-agent out -- it auto-activates on import, and that runner is what
-        CI executes. Without this fallback, every test that records a note
-        errors at *collection* with "fixture 'agent_notes' not found", so it
-        fails in CI on every Nix version and both backends while passing in any
-        dev shell. That is how ``test_error_detail_survives_every_boundary``
-        failed: not on its own subject matter at all.
-
-        Defined only when the real plugin is absent, so a normal run still gets
-        pytest-agent's own fixture rather than this one -- a conftest fixture
-        would otherwise shadow the plugin's.
-        """
-        return _NoopNotes()
-
-
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:  # noqa: ARG001 -- hookspec signature requires config arg
-    for item in items:
-        if isinstance(item, pytest.Function) and inspect.iscoroutinefunction(item.obj):
-            item.obj = with_test_timeout(item.obj)
-
-    # pytest-forked's fork() only keeps the calling thread; any lock another
-    # thread held at fork time stays locked forever in the child. By the time
-    # any other test has touched Nix (L1 init, an inproc.Session's thread
-    # executor, an L3 worker/daemon subprocess, pynix's live-log manager
-    # thread), the pytest process is "multithreading-dirty" and forking it is
-    # a deadlock risk, not just slow. Run every @pytest.mark.forked test
-    # first, before anything else has a chance to spawn those threads.
-    # The static gates run second. A lint error or a type error is the cheapest
-    # finding in the run and needs no Nix, so it belongs near the front rather
-    # than behind several minutes of store work.
-    #
-    # After the forked tests, and not before them: each gate runs a tool
-    # through `anyio.open_process`, and the asyncio child watcher gives that
-    # child a thread of its own. The fork rule above keeps the first word.
     def rank(item: pytest.Item) -> int:
         if item.get_closest_marker("forked") is not None:
             return 0

@@ -383,12 +383,16 @@ ignorelist = ["eval"]
 # assert (pytest idiom), reference fake/illustrative "/tmp/..." fixture
 # paths (not real temp-file usage), skip -> None annotations, and compare
 # against unnamed literal expected values
-"tests/**" = ["SLF001", "S101", "S108", "ANN201", "PLR2004"]
-# The same allowances, for the same reason: this is a test suite. Only
-# `test-support/tests`, and not `test-support/src` -- the source of a shared
-# helper gets no blanket exemption, so the one private access it makes
-# carries an inline noqa naming the rule.
-"test-support/tests/**" = ["SLF001", "S101", "S108", "ANN201", "PLR2004"]
+#
+# **`**/tests/**` and not `tests/**`.** Issue #130 gives each project its own
+# suite, so a new `<project>/tests/` appears with every move and an entry per
+# project would be a list that a move forgets to extend. The glob matches the
+# repository's own `tests/` as well.
+#
+# It reaches a suite only, and never a `src/`: the source of a shared helper
+# gets no blanket exemption, so the private accesses in `test-support/src` and
+# `nanopynix-testing/src` carry inline noqa comments naming the rule.
+"**/tests/**" = ["SLF001", "S101", "S108", "ANN201", "PLR2004"]
 # doc/example snippets use bare assert and illustrative literal comparisons
 "docs/**" = ["S101", "PLR2004"]
 # dev-tooling subprocess/git-plumbing harness, not shipped production code.
