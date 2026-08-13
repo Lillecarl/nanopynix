@@ -18,13 +18,13 @@ import sys
 from typing import TYPE_CHECKING
 
 # Installs beartype's import hook and arranges the same for subprocesses; must
-# run before `import nanopynix` below. A plain `import tests.support.
-# beartype_hook` statement would be fair game for ruff's isort, which sorts
-# `nanopynix` ahead of it -- exactly backwards. Routing the side effect
-# through a function call keeps it outside anything isort will reorder.
-# `-p` in pytest.ini would be earlier still but cannot resolve the name that
-# early; see the hook's module docstring.
-importlib.import_module("tests.support.beartype_hook")
+# run before `import nanopynix` below. A plain
+# `import nanopynix_testing.beartype_hook` statement would be fair game for
+# ruff's isort, which sorts `nanopynix` ahead of it -- exactly backwards.
+# Routing the side effect through a function call keeps it outside anything
+# isort will reorder. See the hook's module docstring for the `-p` route,
+# which issue #130 made possible and which this file does not take.
+importlib.import_module("nanopynix_testing.beartype_hook")
 
 import coverage  # noqa: E402 -- see hook install above
 import pytest  # noqa: E402 -- see hook install above

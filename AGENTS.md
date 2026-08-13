@@ -7,7 +7,7 @@ the `test-daemon-*` matrix jobs and in the TSan workflows. Those jobs pass
 yourself to reproduce a daemon failure on your machine.
 
 - direnv exec . timeout 500 pytest tests
-- direnv exec . timeout 500 pytest tests --cov --cov-report=term-missing --cov-report= # coverage report. It includes the Nix worker subprocess that multiprocessing starts with the forkserver. See tests/_subprocess_startup/sitecustomize.py, which tests/support/beartype_hook.py puts on PYTHONPATH.
+- direnv exec . timeout 500 pytest tests --cov --cov-report=term-missing --cov-report= # coverage report. It includes the Nix worker subprocess that multiprocessing starts with the forkserver. See the `sitecustomize.py` of `nanopynix_testing`, which that project's `beartype_hook` puts on PYTHONPATH.
 
 The coverage table has approximately 88 lines, so agent mode does not print the
 table to the terminal. The terminal shows `[pytest-agent] coverage: NN%` for

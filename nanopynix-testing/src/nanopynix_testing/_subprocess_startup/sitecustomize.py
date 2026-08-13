@@ -5,7 +5,7 @@ directory is on `sys.path` (via the `PYTHONPATH` environment variable).
 nanopynix's Nix worker is forked from a `multiprocessing` forkserver helper,
 which is itself a freshly exec'd interpreter rather than a fork of the pytest
 process, so it inherits neither of the two things set up below. Getting this
-directory onto `PYTHONPATH` is handled by tests/support/beartype_hook.py,
+directory onto `PYTHONPATH` is handled by `nanopynix_testing.beartype_hook`,
 which is loaded before anything else (see its docstring).
 
 Both entries are no-ops unless their environment variable is set, so importing

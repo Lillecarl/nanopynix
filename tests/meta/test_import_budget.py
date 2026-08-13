@@ -79,10 +79,10 @@ print(json.dumps({
 def _probe() -> dict[str, object]:
     """Import ``nanopynix`` in a clean interpreter and report what it loaded.
 
-    ``PYTHONPATH`` is removed rather than inherited. ``tests/support``
-    puts ``tests/_subprocess_startup`` on it so that a spawned interpreter
-    starts beartype and coverage, and both of those import modules of their
-    own. Inheriting it would make the count depend on whether the suite ran
+    ``PYTHONPATH`` is removed rather than inherited.
+    ``nanopynix_testing.beartype_hook`` puts its ``_subprocess_startup``
+    directory on it so that a spawned interpreter starts beartype and
+    coverage, and both of those import modules of their own. Inheriting it would make the count depend on whether the suite ran
     with ``--cov``, which is the one thing a budget must not do.
     """
     env = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
