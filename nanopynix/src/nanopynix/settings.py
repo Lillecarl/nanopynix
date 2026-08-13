@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import sys
 import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self, cast, get_args, get_origin, override
@@ -974,15 +975,40 @@ interpreter for each worker rather than forking one prepared parent. See
 def resolve_worker_start(worker_start: Literal["auto", "forkserver", "spawn"]) -> str:
     """Turn :attr:`NanopynixSettings.worker_start` into a start method name.
 
-    Only ``auto`` needs resolving, and it asks one question: is this process a
-    fork? A forked child cannot start a forkserver worker at all, so ``auto``
-    answers ``spawn`` there and ``forkserver`` everywhere else.
+    Only ``auto`` needs resolving, and it asks two questions.
+
+    **Is this process a fork?** A forked child cannot start a forkserver worker
+    at all, so ``auto`` answers ``spawn`` there.
+
+    **Is this macOS?** A forkserver child is a process that forked and never
+    exec'd, and on Darwin libdispatch and CoreFoundation do not survive that.
+    ``initLibStore`` reaches both through libcurl, which asks the system for
+    its proxy configuration the first time it initialises::
+
+        nix::initLibStore
+          curl_global_init -> Curl_macos_init
+            SCDynamicStoreCopyProxiesWithOptions
+              CFPreferencesCopyAppValueWithContainerAndConfiguration
+                dispatch_apply          EXC_BAD_ACCESS / SIGSEGV
+
+    So every worker died the moment it initialised Nix, and the client saw
+    only "rpc worker N was killed by SIGSEGV". Note where that call sits: the
+    worker initialises libstore, which is right -- the forkserver holds
+    nothing but the loaded libraries. The problem is not *where* Nix is
+    initialised, it is that the process doing it got there through ``fork()``.
+
+    Nothing preloads under ``spawn`` and each worker execs a fresh
+    interpreter, which is slower (see :attr:`NanopynixSettings.worker_start`
+    for the measured difference) -- and is the only start method that works
+    here at all.
 
     Called for each worker rather than once, because a process can become a
     fork between one session and the next.
     """
     if worker_start != "auto":
         return worker_start
+    if sys.platform == "darwin":
+        return "spawn"
     return "spawn" if process_is_forked() else "forkserver"
 
 
