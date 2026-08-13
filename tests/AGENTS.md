@@ -31,6 +31,27 @@ rootdir:
 | `pynix/tests/support/` | the LSP client, drivers, markers and scenarios. **No tests.** | — |
 | `test-support/tests/` | the tests of the generic helpers | one helper behaviour |
 
+`pynixd/` is the fourth project with a suite, and it keeps the conventions
+of the repository it came from until issue #131 changes them:
+
+| directory | holds | scope of one test |
+|---|---|---|
+| `pynixd/tests/unit/` | the pure logic of the daemon proxy | one function or one model |
+| `pynixd/tests/functional/` | the proxy against a real `nix` client | one operation, end to end |
+| `pynixd/tests/_conftest/` | the fixtures, hooks and helpers of that suite. **No tests.** | — |
+| `pynixd/nix-daemon-protocol/tests/` | the wire codecs, with no daemon | one message on the wire |
+
+**Read `pynixd/AGENTS.md` before you write a test there.** That file holds the
+rules of that project, and this file does not replace it. Two of its rules
+have no equivalent here: one pytest process at a time, because the functional
+tests share `/tmp/pynixd-stores` and a session server, and a store path under
+that prefix and no other.
+
+**Only `pynixd/nix-daemon-protocol/tests/` has a gate today**, as
+`checks.nix-daemon-protocol`. That suite needs no daemon, no Nix binary and no
+SSH, so a sandbox can run it. The other two need all three, so they run on a
+developer's machine and nowhere else yet.
+
 And the two projects that hold the shared test layer, and no test of the
 library at all:
 
