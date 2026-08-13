@@ -401,6 +401,24 @@ let
   # with it. The runner passes no path of its own and reads `testpaths` from
   # the repository `pytest.ini`, which names each project's suite.
   #
+  # **`--ignore-glob` and not `--ignore`, and the move is the reason.**
+  # `--ignore` prunes a directory that pytest reaches by *recursion*, and it
+  # does not touch a path that pytest was given as an argument. Every entry
+  # of `testpaths` is such an argument. Before the move, `testpaths` named
+  # `tests` and `--ignore=tests/pynix` pruned a subdirectory of it. After the
+  # move, `pynix/tests` is a `testpaths` entry, so the same flag reads as a
+  # live exclusion and excludes nothing.
+  #
+  # Measured on this tree: 2674 tests collected, 2674 with
+  # `--ignore=pynix/tests`, and 2199 with the glob below. The suite holds
+  # 475, which is the difference. CI run 31712183826 is where it showed:
+  # the ASAN jobs ran the pynix suite for the first time and 11 of its tests
+  # failed on the host `bash`, which cannot load beside the glibc that the
+  # sanitizer runtime pulls in.
+  #
+  # `tests/meta/test_ci_step_policy.py` now fails on an `--ignore` that names
+  # a `testpaths` entry, so this cannot go quiet again.
+  #
   # **The no-collector suite keeps pytest's capture, and the sanitized ones do
   # not.** A sanitizer writes its report to stderr from inside the process, so
   # capture would hold that report in the buffer of whichever test was running
@@ -419,7 +437,7 @@ let
   # crash visible. Decide that on its own, and not inside a refactor.
   kindArgs = {
     ubsan = uncapturedArgs;
-    asan = uncapturedArgs ++ [ "--ignore=pynix/tests" ];
+    asan = uncapturedArgs ++ [ "--ignore-glob=pynix/tests/*" ];
     nogc = baseArgs;
   };
 

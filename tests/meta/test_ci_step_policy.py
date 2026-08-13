@@ -110,3 +110,53 @@ def test_a_run_body_holds_no_workflow_expression(workflow: str, job: str, label:
         f"job, and read it as a shell variable.\n"
         f"The body was:\n{run}"
     )
+
+
+# `--ignore=<path>` in ci/steps.nix, with the path it names.
+_IGNORE_FLAG = re.compile(r'"--ignore=([^"]+)"')
+
+_STEPS_NIX = _REPO_ROOT / "ci" / "steps.nix"
+_PYTEST_INI = _REPO_ROOT / "pytest.ini"
+
+
+def _declared_testpaths() -> list[str]:
+    """The `testpaths` of the repository's own `pytest.ini`, as written."""
+    import configparser  # noqa: PLC0415 -- one caller, and the module costs 4 ms at import
+
+    parser = configparser.ConfigParser()
+    parser.read(_PYTEST_INI)
+    return parser.get("pytest", "testpaths", fallback="").split()
+
+
+def test_the_scanner_reads_a_pytest_ini_that_declares_suites() -> None:
+    """The gate below compares against this list, so an empty one proves nothing."""
+    assert _declared_testpaths(), f"{_PYTEST_INI} declares no testpaths"
+    assert _STEPS_NIX.is_file()
+
+
+def test_no_ignore_flag_names_a_testpaths_entry() -> None:
+    """``--ignore`` cannot remove a suite that ``testpaths`` names.
+
+    pytest applies ``--ignore`` while it *recurses* into a directory, and every
+    entry of ``testpaths`` reaches it as an argument instead. So the flag reads
+    as a live exclusion and excludes nothing, and the run gets larger with no
+    word about it.
+
+    **This is what issue #130 broke, and the shape is what makes it worth a
+    gate.** ``--ignore=tests/pynix`` worked while ``testpaths`` was ``tests``,
+    because that suite was a subdirectory. The move made ``pynix/tests`` a
+    ``testpaths`` entry, the flag went quiet, and the ASAN jobs ran 475 more
+    tests. Eleven of them failed, on CI run 31712183826.
+
+    ``--ignore-glob`` is the flag that works: it matches each collected path,
+    whatever reached the collector.
+    """
+    declared = {entry.rstrip("/") for entry in _declared_testpaths()}
+    offenders = [
+        path for path in _IGNORE_FLAG.findall(_STEPS_NIX.read_text(encoding="utf-8")) if path.rstrip("/") in declared
+    ]
+    assert not offenders, (
+        f"ci/steps.nix passes `--ignore` for {offenders}, and pytest.ini names each one in "
+        "`testpaths`. pytest applies `--ignore` to a directory it recurses into, never to a "
+        "path it is given, so the flag excludes nothing. Use `--ignore-glob=<path>/*`."
+    )
