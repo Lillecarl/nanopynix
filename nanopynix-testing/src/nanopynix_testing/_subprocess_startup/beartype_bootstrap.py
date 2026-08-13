@@ -1,17 +1,18 @@
 """The one definition of nanopynix's beartype instrumentation.
 
-Two places install it, and neither can import the other: `tests/support/
-beartype_hook.py` (a pytest plugin, covering the pytest process) and the
+Two places install it, and neither can import the other:
+`nanopynix_testing.beartype_hook` (covering the pytest process) and the
 `sitecustomize.py` beside this file (covering freshly exec'd subprocesses).
 They must agree on the package list and the config -- an instrumented parent
 with an uninstrumented worker child is exactly the asymmetry this module
 exists to prevent -- so the definition lives here rather than in either one.
 
-This directory is put on `PYTHONPATH` rather than being a package under
-`tests`, because `sitecustomize` has to be importable by the `site` module at
-interpreter startup, long before anything has arranged `sys.path` for this
-repository. That is also why the import beside it is a bare
-`import beartype_bootstrap` rather than a dotted one.
+This directory is put on `PYTHONPATH` rather than being a package, because
+`sitecustomize` has to be importable by the `site` module at interpreter
+startup, long before anything has arranged `sys.path`. That is also why the
+import beside it is a bare `import beartype_bootstrap` rather than a dotted
+one, and why this directory holds no `__init__.py` although it ships inside
+an installed package.
 """
 
 from __future__ import annotations

@@ -18,8 +18,7 @@ here and to read the results. This file only says where a file belongs.
 | `tests/nanopynix/` | the library, by subsystem | one behaviour of nanopynix |
 | `tests/pynix/` | the CLI and the LSP server | one command or one editor request |
 | `tests/nanopynix_helpers/` | the helpers package | one helper |
-| `tests/support/` | fixtures, drivers and scanners. **No tests.** | — |
-| `tests/_subprocess_startup/` | `sitecustomize.py` for a spawned interpreter | — |
+| `tests/support/` | scanners and the LSP drivers. **No tests.** | — |
 
 The helpers are outside `tests/`, and issue #130 put them there:
 
@@ -28,6 +27,7 @@ The helpers are outside `tests/`, and issue #130 put them there:
 | `test-support/src/test_support/` | helpers that name no Nix concept | — |
 | `test-support/tests/` | the tests of those helpers | one helper behaviour |
 | `nanopynix-testing/src/nanopynix_testing/` | fixtures and markers that name Nix | — |
+| `nanopynix-testing/.../_subprocess_startup/` | `sitecustomize.py` for a spawned interpreter | — |
 
 **A helper leaves `tests/support/` when a second project needs it.**
 `tests/support/` imports as `tests.support.<name>`, which only the repository
@@ -42,7 +42,13 @@ a helper that names one goes to `nanopynix-testing`. Everything else goes to
 project's `__init__.py` carries the measurement behind its own contents.
 
 What stays in `tests/support/` is what only this repository's own suite reads:
-the scanners of the meta tests, the beartype hook, and the LSP drivers.
+the scanners of the meta tests, and the LSP drivers.
+
+**The beartype hook went with the fixtures, and it had to.** A suite that
+reaches its own rootdir and cannot install the hook loses runtime type
+checking and still passes every test, so the loss is silent. It names
+`nanopynix`, `nanopynix_helpers` and `pynix` in its package list, which is why
+it is in `nanopynix-testing` and not in `test-support`.
 
 `tests/nanopynix/` is the large one, and it groups by the layer under test:
 `bindings/` for the compiled Nix bindings, `core/` for the direct runtime

@@ -8,7 +8,7 @@ running.
 
 Modules that use `if TYPE_CHECKING or BEARTYPING:` instead ask for that same
 name to *also* become a real runtime import when this flag is set, which
-`tests/support/beartype_hook.py` does (via the `NANOPYNIX_BEARTYPING`
+`nanopynix_testing.beartype_hook` does (via the `NANOPYNIX_BEARTYPING`
 environment variable, read below) before anything else is imported --
 because beartype's runtime checks need a real, importable object to check
 against, not a string. Flipping `typing.TYPE_CHECKING` itself for this would

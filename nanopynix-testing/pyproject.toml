@@ -20,7 +20,13 @@ requires-python = ">=3.13"
 # projects split by whether a module names a Nix concept, and a dependency in
 # this direction is what that split expects: the Nix-aware half may use the
 # generic half, and never the reverse.
-dependencies = ["nanopynix", "test-support", "pytest", "anyio"]
+#
+# `beartype` and `coverage` for `beartype_hook` and the `sitecustomize.py`
+# beside it. Both are real imports of this project now: issue #130 moved the
+# instrumentation here, so that a suite in its own rootdir keeps it. A suite
+# that silently loses the hook still passes, which is why the dependency is
+# declared and not left to whatever the runner happens to install.
+dependencies = ["nanopynix", "test-support", "pytest", "anyio", "beartype", "coverage"]
 
 # The same PEP 639 fields as `nanopynix/pyproject.toml`, and the same reason.
 license = "LGPL-2.1-or-later"
