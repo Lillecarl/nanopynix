@@ -56,12 +56,16 @@ let
       ../nanopynix-proto
       ../greeter-proto
       ../grpclib-transports
-      # Only this subproject of `pynixd/`, and not the whole tree of it. The
-      # gate below reads this suite, and nothing here reads the rest: an
-      # allowlist of `../pynixd` would put 3.5 MiB in the source of every gate
-      # in this file and rebuild all of them on an edit to any part of pynixd.
-      # Issue #131 widens this when the other suites of pynixd get a gate.
-      ../pynixd/nix-daemon-protocol
+      # The whole tree, and not the one subproject that `checks.nix-daemon-protocol`
+      # reads. `ruff.toml` stopped excluding `pynixd`, so `check-lint` and
+      # `check-format` report on it, and a gate that reads less than a
+      # developer's own `ruff check .` gives two answers to one question.
+      #
+      # It costs 3.5 MiB in the source of every gate here, and an edit to any
+      # part of pynixd rebuilds all of them. Issue #131 takes most of that
+      # back: `todo/`, `research/`, `ai/` and the rest of the agent-workflow
+      # trees leave the repository, and they are the bulk of it.
+      ../pynixd
       ../pynix
       ../pytest-agent
       ../test-support
