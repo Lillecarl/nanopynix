@@ -295,6 +295,48 @@ def test_real_path_info_round_trips_through_a_python_store(store: Any, store_see
     assert info["sigs"] == original["sigs"]
 
 
+class TestTheTypedQueriesReachAPythonStore:
+    """The bound types must answer from a Python store, and not only from C++.
+
+    ``CoreStore`` calls ``query_path_info_typed`` and its two neighbours, so
+    both engines take this route for every store a caller opens -- including
+    one that a Python class implements. The dictionary that
+    :class:`nanopynix.StoreImpl` returns is what Nix fills the C++ struct from,
+    so the two forms have to agree. Nothing proved that they do.
+
+    ``test_query_path_info_reports_what_the_python_store_returned`` above asks
+    the same question of the dictionary form.
+    """
+
+    def test_a_python_store_answers_the_typed_query(self) -> None:
+        served = open_python_store(lambda _path: dict(FULL_INFO))
+        info = served.query_path_info_typed(nanopynix_store.StorePath(BOGUS))
+
+        assert info.nar_hash == FULL_INFO["nar_hash"]
+        assert info.nar_size == FULL_INFO["nar_size"]
+        assert info.references == FULL_INFO["references"]
+        assert info.deriver == FULL_INFO["deriver"]
+        assert info.ultimate == FULL_INFO["ultimate"]
+        assert info.sigs == FULL_INFO["sigs"]
+        assert info.registration_time == FULL_INFO["registration_time"]
+        assert info.ca is None
+
+    def test_the_two_forms_agree_field_for_field(self) -> None:
+        """A field the dictionary carries and the bound type drops, or the reverse.
+
+        Both forms read the same ``nix::ValidPathInfo``, so a difference here
+        is a defect in one of the two readers and not in the Python store.
+        """
+        served = open_python_store(lambda _path: dict(FULL_INFO))
+        path = nanopynix_store.StorePath(BOGUS)
+
+        as_dict = served.query_path_info(path)
+        as_type = served.query_path_info_typed(path)
+
+        for name, value in as_dict.items():
+            assert getattr(as_type, name) == value, f"{name} differs between the dictionary and the bound type"
+
+
 class TestUnderlyingStoreFallthrough:
     """A Python store may delegate to a real one by exposing ``underlying_store``.
 
