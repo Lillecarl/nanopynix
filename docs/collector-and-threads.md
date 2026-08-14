@@ -239,6 +239,30 @@ not this issue. So #70 has not reproduced once since the collector gained an
 owner thread, and no arm of any size can now measure whether the registration
 helped. **Reopening #70 needs a reproduction first, not another soak.**
 
+**The streak ended, and the soak is the new reproduction.** Run 31820106000
+is a full matrix on `ci-develop` at `0349648a`. Its `test-local-nix_2_35` job
+died with SIGSEGV in the **soak**, 0.6 seconds in, with three evaluator
+threads live and the same frame as before:
+
+```
+Thread 0x00007f9d3c3fe6c0 [nix-eval_0]:  _objects.py:534 in eval_string
+Current thread 0x00007f9d3ffff6c0 [nix-eval_0]:  _objects.py:543 in repl_eval_string
+Thread 0x00007f9d387fd6c0 [nix-eval_0]:  _objects.py:534 in eval_string
+
+libnixexpr.so.2.35.1, at nix::ExprVar::eval(nix::EvalState&, nix::Env&, nix::Value&)+0x120
+```
+
+Four lanes were in flight, and one of them
+(`test_a_cancelled_interruptible_operation_frees_the_evaluator`) closes an
+evaluator, which is the condition this issue is named for. The same job on
+the same commit then passed three times out of three, so the rate is about 1
+in 4 on this job.
+
+**This matters because the soak is 0.6 seconds where the whole suite was 8
+minutes.** An arm that forces collection was not affordable against the old
+reproduction. Against this one it is. Issue #70 carries the lane composition
+and the run links.
+
 The registration (`99f74d82`) landed after that measurement, and the streak
 continues on code that carries it. Run 31050794050 is a full matrix on
 `develop` at `7ec0114a`, and each of its four UBSAN jobs passed:
