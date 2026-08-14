@@ -39,6 +39,7 @@ from nanopynix_proto.nix.common import (
     NullValue as NullValue,
     PathInfo as PathInfo,
     PrimOpSpec as PrimOpSpec,
+    RealisedOutput as RealisedOutput,
     RemoteCallArg as RemoteCallArg,
     ResultType as ResultType,
     ScalarValue as ScalarValue,
