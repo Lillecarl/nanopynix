@@ -115,6 +115,62 @@ patch in place:
 | default | 30 | 1 |
 | `GC_FREE_SPACE_DIVISOR=64` | 15 | 5 |
 
+**Measured again, on today's code, at 2.34.8 and on one machine.** The arm
+below is the soak alone, and the amplified setting is a pair:
+
+| Boehm setting | runs | failures |
+|---|---|---|
+| default | 12 | 0 |
+| `GC_INITIAL_HEAP_SIZE=8388608` and `GC_FREE_SPACE_DIVISOR=64` | 12 | 3 |
+
+Two of the three are SIGSEGV. The third is #70's own symptom, and it is the
+first sighting of that symptom since the collector gained an owner thread:
+
+```
+… while evaluating list element at index 265468
+error: cannot convert a function to JSON
+at «string»:1:19:
+     1| builtins.genList (x: x) 12000000
+```
+
+`genList (x: x)` gives a list of integers, and Nix read element 265468 as a
+function. That is a live object which the collector reclaimed and handed out
+again, which is what this issue says.
+
+**Amplification needs both settings.** `GC_FREE_SPACE_DIVISOR` alone changes
+nothing while the heap has slack, and `eval-gc.cc:88` gives it 384 MiB of
+slack unless `GC_INITIAL_HEAP_SIZE` is set. Measured with `_gc_stats` on an
+evaluator thread, over the same workload:
+
+| setting | collections |
+|---|---|
+| default | 6 |
+| `GC_FREE_SPACE_DIVISOR=64` | 6 |
+| `GC_INITIAL_HEAP_SIZE=8388608` | 63 |
+| both | 129 |
+
+The soak is heavier than that workload and exhausts the 384 MiB heap, so the
+divisor does act there; the table above is why the pair is the arm to use.
+Note that `ci/steps.nix` raises `GC_INITIAL_HEAP_SIZE` to 2 GiB for the TSan
+soak, which moves the other way on purpose, and says so.
+
+### The narrow reproduction
+
+The inproc soak alone, under the amplified pair, fails **4 runs in 8**, at
+about 10 seconds for each run:
+
+    GC_INITIAL_HEAP_SIZE=8388608 GC_FREE_SPACE_DIVISOR=64 \
+        pytest -m soak -k inproc --soak-seed=0 --nix-test-backends local
+
+That replaces "the whole suite, about 1 failure in 5 runs of 8 minutes" as the
+reproduction of #70. Every arm that was too expensive against the old one is
+affordable against this one.
+
+**Select the soak with `-m soak`, and name no path.** A path argument moves
+pytest's rootdir, and `discover_roster` reads `nanopynix/tests` under the root
+it is given. The roster then comes back empty. That state used to skip, and it
+now fails.
+
 ### Two evaluators are enough for #70
 
 The full suite died once in `nanopynix/tests/rpc/test_log_backpressure.py`,
@@ -235,9 +291,14 @@ lacks the thread registration, the whole suite ran 30 times in CI:
 | 30969557667 | `develop` | 15 | 0 |
 
 The one failure in run 30966905346 was the unknown-thread abort above, and
-not this issue. So #70 has not reproduced once since the collector gained an
-owner thread, and no arm of any size can now measure whether the registration
-helped. **Reopening #70 needs a reproduction first, not another soak.**
+not this issue. So #70 did not reproduce once between the collector-owner
+change and 2026-08-14, and no arm of any size could measure whether the
+registration helped.
+
+**That paragraph asked for a reproduction before another soak, and the
+amplified soak above is it.** The arm to run is the pair of Boehm settings,
+and not the divisor alone. Read "The collector is in the causal path of #70"
+for the rates and for the command.
 
 **The streak ended, and the soak is the new reproduction.** Run 31820106000
 is a full matrix on `ci-develop` at `0349648a`. Its `test-local-nix_2_35` job
@@ -321,13 +382,22 @@ The selection of #53, before the fix, crashed 6 times in 6, in 48 seconds:
     pytest nanopynix/tests/test_logging.py nanopynix/tests/test_verbosity.py \
         nanopynix/tests/inproc nanopynix/tests/bindings
 
-#70 needs the whole suite:
+#70 fails 4 runs in 8, at about 10 seconds for each run:
 
-    pytest
+    GC_INITIAL_HEAP_SIZE=8388608 GC_FREE_SPACE_DIVISOR=64 \
+        pytest -m soak -k inproc --soak-seed=0 --nix-test-backends local
 
-Raise `GC_FREE_SPACE_DIVISOR` to make the collector run more often. Set
-`GC_DONT_GC=1` to take the collector out of the picture, which is the control
-arm for every collector hypothesis.
+The whole suite reproduced #70 before this, at about 1 failure in 5 runs of 8
+minutes. Use the command above instead.
+
+**Both settings are necessary.** `GC_FREE_SPACE_DIVISOR` raises the collection
+rate only when the heap has no slack, and `GC_INITIAL_HEAP_SIZE` is what takes
+the slack away. The measurement is in "The collector is in the causal path of
+#70". Set `GC_DONT_GC=1` to take the collector out of the picture, which is
+the control arm for every collector hypothesis.
+
+**Select the soak with `-m soak`, and name no path.** A path argument moves
+pytest's rootdir, and the roster is read relative to it.
 
 `NANOPYNIX_GC_THREAD_DEBUG=1` logs every registration, and
 `NANOPYNIX_GC_THREAD_DEBUG_FILE` sends the log to a path. Use the file:
