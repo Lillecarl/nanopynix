@@ -66,6 +66,23 @@ namespace nb = nanobind;
  * `CanonPath(drvPath.to_string())`, and 2.35 asks a per-object accessor for
  * `CanonPath::root`. Two accessor contracts with different path rooting is two
  * protocols, not one, in the same way `narFromPath`'s `Sink &` is.
+ *
+ * **This list is the inbound protocol, and a dictionary is its shape.** Three
+ * of the names below -- `query_path_info`, `query_missing` and
+ * `read_derivation` -- also name a method of `nanopynix_bindings.store.Store`,
+ * and each of those has a `_typed` neighbour that returns a bound C++ type.
+ * The two are not an old form and a new one. They are two directions:
+ *
+ * - Outbound, Nix to Python. `query_path_info_typed` projects a struct that
+ *   Nix already filled, and reads each field only when a caller asks for it.
+ * - Inbound, Python to Nix. A `nanopynix.StoreImpl` builds an answer from
+ *   nothing, so it needs a shape it can construct. Every bound store type but
+ *   `StorePath` takes no constructor, because a projection has no reason to
+ *   take one. A dictionary is therefore the only shape available here, and it
+ *   is also the natural one.
+ *
+ * `py_store_impl.cpp` reads each answer with `nb::cast<nb::dict>`, and that is
+ * why. Issue #141 records the decision and the two alternatives it rejected.
  */
 #define NANOPYNIX_STORE_DISPATCH_METHODS(X)                                                        \
     X(is_valid_path_uncached)                                                                      \
