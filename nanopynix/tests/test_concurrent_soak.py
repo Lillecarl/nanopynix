@@ -37,11 +37,17 @@ def _report(result: SoakResult, engine: str) -> str:
     The overlap set is the point. A test that passes alone and fails here
     failed *against something*, and the driver already knows what was in
     flight, so it says so rather than leaving that to be reconstructed.
+
+    **The replay command selects with `-m soak`, and names no path.** A path
+    argument moves pytest's rootdir to `nanopynix/`, and `discover_roster`
+    reads `nanopynix/tests` under that root. The roster then comes back empty
+    and the test skips itself, so the command this report exists to give would
+    reproduce nothing and say it passed.
     """
     lines = [
         f"{len(result.failures)} of {len(result.events)} soaked tests failed under concurrency.",
         "Replay this exact composition with:",
-        f"  pytest nanopynix/tests/test_concurrent_soak.py -k {engine} --soak-seed={result.seed} --capture=no",
+        f"  pytest -m soak -k {engine} --soak-seed={result.seed} --capture=no",
         "",
     ]
     for event in result.failures:
@@ -85,7 +91,21 @@ async def _soak(
     root = Path(config.rootpath)
     roster: list[SoakCandidate] = discover_roster(root=root, engine=engine)
     if not roster:
-        pytest.skip(f"no {engine} test is eligible for the soak")
+        # A failure, and not a skip. An empty roster is always a
+        # misconfiguration: `tests/meta/test_soak_roster.py` asserts that the
+        # roster is large at the repository root, so an empty one here means
+        # `root` is not that root. The cause is a path argument on the command
+        # line, which moves pytest's rootdir to `nanopynix/` and makes
+        # `discover_roster` read `nanopynix/nanopynix/tests`.
+        #
+        # This read as a skip until #70 needed the soak, and a skip is
+        # invisible: 11 runs of a hand-written arm reported success and ran no
+        # test at all.
+        raise AssertionError(
+            f"no {engine} test is eligible for the soak, so the roster under {root} is empty. "
+            f"Select the soak with `-m soak` and name no path: a path argument moves the "
+            f"rootdir, and the roster is read relative to it."
+        )
 
     seed = _int_option(config, "--soak-seed")
     manifest_path = config.getoption("--soak-manifest")
