@@ -414,6 +414,104 @@ class TestMissingPathsType:
         assert t.unknown == [f"{store.get_store_dir()}/{bogus.to_string()}"]
 
 
+# A derivation that depends on another derivation, so `input_drvs` is not
+# empty. The L1 suite has no derivation fixture, and `read_derivation` needs
+# one. Evaluating `drvPath` writes the `.drv` into this session's isolated
+# store as a side effect, which is what makes the path valid to read back.
+DERIVATION_WITH_AN_INPUT = """
+let
+  inner = derivation {
+    name = "nanopynix-l1-inner";
+    system = builtins.currentSystem;
+    builder = "/bin/sh";
+    args = [ "-c" "echo inner > $out" ];
+  };
+in (derivation {
+  name = "nanopynix-l1-outer";
+  system = builtins.currentSystem;
+  builder = "/bin/sh";
+  args = [ "-c" "echo ${inner} > $out" ];
+}).drvPath
+"""
+
+
+@pytest.fixture(scope="module")
+def seeded_drv_path(store: Any, eval_state: Any) -> Any:
+    """The store path of a `.drv` written into this session's isolated store."""
+    return store.parse_store_path(eval_state.eval_string(DERIVATION_WITH_AN_INPUT).as_string())
+
+
+class TestDerivationType:
+    """``read_derivation_typed`` — the largest helper of #141, as three types.
+
+    Two of the three defects that
+    ``nanopynix/tests/test_store_metadata_fidelity.py`` records came from
+    ``read_derivation``. The one that matters here is ``input_drvs``:
+    ``DerivedPathMap`` is a tree, a dictionary has no natural shape for a
+    tree, and the invented shape kept the first output of each child and never
+    recursed.
+
+    ``DerivationOutputs`` binds Nix's own node, so there is no projection to
+    get wrong. These tests check that the bound types report what the
+    dictionary reports, and that the tree is a tree.
+    """
+
+    def test_the_scalar_fields_agree_with_the_dict(self, store: Any, seeded_drv_path: Any) -> None:
+        d = store.read_derivation(seeded_drv_path)
+        t = store.read_derivation_typed(seeded_drv_path)
+
+        assert t.name == d["name"]
+        assert t.system == d["system"]
+        assert t.builder == d["builder"]
+        assert list(t.args) == list(d["args"])
+        assert dict(t.env) == dict(d["env"])
+        assert sorted(t.input_srcs) == sorted(d["input_srcs"])
+        assert t.structured_attrs == d["structured_attrs"]
+
+    def test_the_outputs_agree_with_the_dict(self, store: Any, seeded_drv_path: Any) -> None:
+        """``nix::DerivationOutput`` is a variant, so ``type`` names the branch."""
+        d = store.read_derivation(seeded_drv_path)
+        t = store.read_derivation_typed(seeded_drv_path)
+
+        assert set(t.outputs) == set(d["outputs"])
+        for name, output in t.outputs.items():
+            expected = d["outputs"][name]
+            assert output.type == expected["type"]
+            # The dictionary carries a key only for the branch it took. The
+            # bound type reports `None` for a field that branch does not have,
+            # which is the same information without the absent key.
+            for field in ("path", "ca", "method", "hash_algo"):
+                assert getattr(output, field) == expected.get(field)
+
+    def test_the_input_drvs_agree_with_the_dict(self, store: Any, seeded_drv_path: Any) -> None:
+        d = store.read_derivation(seeded_drv_path)
+        t = store.read_derivation_typed(seeded_drv_path)
+
+        assert set(t.input_drvs) == set(d["input_drvs"])
+        for path, node in t.input_drvs.items():
+            assert sorted(node.outputs) == sorted(d["input_drvs"][path]["outputs"])
+
+    def test_the_fixture_really_has_an_input(self, store: Any, seeded_drv_path: Any) -> None:
+        """Without this the two tests above would pass against an empty map."""
+        t = store.read_derivation_typed(seeded_drv_path)
+        assert t.input_drvs, "the fixture derivation depends on nothing, so input_drvs proves nothing"
+
+    def test_the_tree_recurses(self, store: Any, seeded_drv_path: Any) -> None:
+        """``dynamic_outputs`` is a map of the same node type, not a leaf.
+
+        The old flattening could not represent this, and the type must. A
+        plain derivation has no dynamic output, so this checks the shape and
+        not a non-empty value.
+        """
+        t = store.read_derivation_typed(seeded_drv_path)
+        node = next(iter(t.input_drvs.values()))
+        children: dict[str, Any] = node.dynamic_outputs
+        assert isinstance(children, dict)
+        for child in children.values():
+            assert hasattr(child, "outputs")
+            assert hasattr(child, "dynamic_outputs")
+
+
 class TestOpenStore:
     @pytest.mark.skipif(os.environ.get("GITHUB_ACTIONS") == "true", reason="cannot access daemon in GHA")
     def test_open_store_daemon(self):

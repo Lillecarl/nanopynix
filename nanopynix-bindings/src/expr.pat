@@ -1,4 +1,4 @@
-nanopynix_bindings.expr.__prefix__:
+nanopynix_bindings.expr.__prefix__$:
     type ValueType = int | float | bool | str | None | list[ValueType] | dict[str, ValueType]
     class EditLocation(TypedDict):
         path: str
@@ -7,7 +7,7 @@ nanopynix_bindings.expr.__prefix__:
     \from typing import TypedDict, overload
     \from nanopynix_bindings.store import Store
 
-nanopynix_bindings.expr.register_primop:
+nanopynix_bindings.expr.register_primop$:
     def register_primop(
         name: str,
         arity: int,
@@ -20,28 +20,28 @@ nanopynix_bindings.expr.register_primop:
 # pattern names it, which is why `_enter_evaluator_thread` is absent from the
 # stub and its call sites carry a blanket `type: ignore`. These two are named
 # so that pyright checks the calls instead.
-nanopynix_bindings.expr._gc_collect:
+nanopynix_bindings.expr._gc_collect$:
     def _gc_collect() -> None: ...
 
-nanopynix_bindings.expr._gc_stats:
+nanopynix_bindings.expr._gc_stats$:
     def _gc_stats() -> dict[str, int]: ...
 
-nanopynix_bindings.expr.Value.edit_location:
+nanopynix_bindings.expr.Value.edit_location$:
     def edit_location(self) -> EditLocation: ...
 
-nanopynix_bindings.expr.Value.to_python:
+nanopynix_bindings.expr.Value.to_python$:
     def to_python(self) -> ValueType: ...
 
-nanopynix_bindings.expr.Value._release:
+nanopynix_bindings.expr.Value._release$:
     def _release(self) -> None: ...
 
-nanopynix_bindings.expr.Value.to_json:
+nanopynix_bindings.expr.Value.to_json$:
     def to_json(self, *, copy_to_store: bool = False) -> ValueType: ...
 
-nanopynix_bindings.expr.Value.build:
+nanopynix_bindings.expr.Value.build$:
     def build(self, build_store: Store | None = None, build_mode: int = 0, eval_store: Store | None = None) -> dict[str, object]: ...
 
-nanopynix_bindings.expr.EvalState.__init__:
+nanopynix_bindings.expr.EvalState.__init__$:
     @overload
     def __init__(
         self,
@@ -61,7 +61,7 @@ nanopynix_bindings.expr.EvalState.__init__:
     ) -> None: ...
     def __init__(self, *args: object, **kwargs: object) -> None: ...
 
-nanopynix_bindings.expr.EvalState.set_eval_setting:
+nanopynix_bindings.expr.EvalState.set_eval_setting$:
     def set_eval_setting(self, name: str, value: str) -> None: ...
-nanopynix_bindings.expr.EvalState.set_fetch_setting:
+nanopynix_bindings.expr.EvalState.set_fetch_setting$:
     def set_fetch_setting(self, name: str, value: str) -> None: ...

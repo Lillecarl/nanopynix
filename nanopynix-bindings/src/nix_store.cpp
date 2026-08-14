@@ -425,11 +425,11 @@ struct PyMissingPaths {
 };
 
 static void bind_missing_paths(nb::module_ &m) {
-    // The Python name is not `MissingPaths`: `store.pat` already gives that name
-    // to the `TypedDict` that `query_missing` returns, and one module cannot
-    // carry two meanings for one name. The pair reads like `PathInfo` beside
-    // `ValidPathInfo`, where the dictionary keeps the short name.
-    nb::class_<PyMissingPaths>(m, "MissingPathsInfo")
+    // This type keeps the name that Nix gives the struct. The `TypedDict` of
+    // `query_missing` is `MissingPathsDict` in `store.pat`, and that file
+    // states the rule: a bound C++ type takes the name of the struct, and the
+    // shape of a dictionary takes the `Dict` suffix.
+    nb::class_<PyMissingPaths>(m, "MissingPaths")
         .def_ro("store_dir", &PyMissingPaths::store_dir)
         .def_prop_ro("will_build", [](const PyMissingPaths &p) { return p.render(p.missing.willBuild); })
         .def_prop_ro("will_substitute",
@@ -694,6 +694,198 @@ static nb::dict derived_path_node_to_dict(const Node &node) {
         dynamic_outputs[outputName.c_str()] = derived_path_node_to_dict(child);
     entry["dynamic_outputs"] = dynamic_outputs;
     return entry;
+}
+
+// =========================================================================
+// Derivation — the same data as read_derivation, as three types
+// =========================================================================
+//
+// The strongest case of issue #141. `read_derivation` below is 79 lines, and
+// two of the three defects that
+// `nanopynix/tests/test_store_metadata_fidelity.py` records came from it.
+//
+// `input_drvs` is the one to read first. `DerivedPathMap` is a tree, and a
+// dictionary has no natural shape for a tree, so a person had to invent one.
+// The invented one kept the first output of each child and never recursed.
+// `DerivationOutputs` below binds Nix's own node, so no projection exists to
+// get wrong, and the recursion is the tree itself.
+//
+// `structured_attrs` is the other. Nix's parser moves the `__json` attribute
+// out of `env` into `Derivation::structuredAttrs`, and reading `env` alone
+// reported nothing for a derivation that used it.
+
+// One node of `Derivation::inputDrvs`. Bound by reference: each child lives
+// inside the parent's map, and `rv_policy::reference_internal` keeps the
+// parent alive for as long as Python holds the child.
+//
+// **The type is derived from the field, and not written out again.** Nix
+// declares `DerivedPathMap<std::set<OutputName, std::less<>>> inputDrvs`, and
+// that transparent comparator makes it a different type from
+// `DerivedPathMap<StringSet>::ChildNode`. Spelling the type here compiled and
+// then raised `std::bad_cast` at the first read, because nanobind had
+// registered a type that no value has. The element type also differs across
+// the supported Nix versions, which is why `derived_path_node_to_dict` below
+// is a template.
+using DrvInputMap = std::decay_t<decltype(std::declval<const nix::Derivation &>().inputDrvs.map)>;
+using DrvInputNode = DrvInputMap::mapped_type;
+
+static void bind_derivation_outputs(nb::module_ &m) {
+    nb::class_<DrvInputNode>(m, "DerivationOutputs")
+        .def_prop_ro("outputs",
+                     [](const DrvInputNode &n) {
+                         nb::list out;
+                         // `value` is a set of output names, and its element
+                         // type differs across the supported Nix versions, so
+                         // this reads it as a range.
+                         for (auto &name : n.value)
+                             out.append(name);
+                         return out;
+                     })
+        // Each child is a copy, and not a reference into the parent.
+        // `rv_policy::reference_internal` needs a parent object to tie the
+        // lifetime to, and `nb::cast` inside this lambda has none: it raises
+        // `std::bad_cast` at the first read. A copy of the node is a copy of
+        // a C++ value and not a projection of it, so the tree stays a tree.
+        .def_prop_ro("dynamic_outputs", [](const DrvInputNode &n) {
+            nb::dict children;
+            for (auto &[name, child] : n.childMap)
+                children[name.c_str()] = nb::cast(child);
+            return children;
+        });
+}
+
+// One output of a derivation. `nix::DerivationOutput` is a `std::variant`, so
+// `type` names the branch and the other fields report what that branch
+// carries. A branch that carries no path leaves `path` as `None`, and so on.
+//
+// The wrapper holds the store directory, because a `DerivationOutput` carries
+// none and `InputAddressed` holds a `StorePath` that has to be rendered.
+struct PyDerivationOutput {
+    nix::DerivationOutput output;
+    std::string store_dir;
+};
+
+// Each branch of the variant, read once. `read_derivation` writes this same
+// `std::visit` inline, and the bound type reads it per property, so the visit
+// lives here and each property picks one field out of the result.
+struct DerivationOutputFields {
+    std::string type;
+    std::optional<std::string> path;
+    std::optional<std::string> ca;
+    std::optional<std::string> method;
+    std::optional<std::string> hash_algo;
+};
+
+static DerivationOutputFields derivation_output_fields(const PyDerivationOutput &o) {
+    DerivationOutputFields f;
+    std::visit(
+        nix::overloaded{
+            [&](const nix::DerivationOutput::InputAddressed &ia) {
+                f.type = "InputAddressed";
+                f.path = (o.store_dir + "/").append(ia.path.to_string());
+            },
+            [&](const nix::DerivationOutput::CAFixed &caf) {
+                f.type = "CAFixed";
+                f.ca = nix::renderContentAddress(nix::ContentAddress{caf.ca});
+            },
+            [&](const nix::DerivationOutput::CAFloating &caf) {
+                f.type = "CAFloating";
+                f.method = std::string(caf.method.render());
+                f.hash_algo = std::string(nix::printHashAlgo(caf.hashAlgo));
+            },
+            [&](const nix::DerivationOutput::Deferred &) { f.type = "Deferred"; },
+            [&](const nix::DerivationOutput::Impure &imp) {
+                f.type = "Impure";
+                f.method = std::string(imp.method.render());
+                f.hash_algo = std::string(nix::printHashAlgo(imp.hashAlgo));
+            },
+        },
+        o.output.raw);
+    return f;
+}
+
+static void bind_derivation_output(nb::module_ &m) {
+    nb::class_<PyDerivationOutput>(m, "DerivationOutput")
+        .def_ro("store_dir", &PyDerivationOutput::store_dir)
+        .def_prop_ro("type", [](const PyDerivationOutput &o) { return derivation_output_fields(o).type; })
+        .def_prop_ro("path", [](const PyDerivationOutput &o) { return derivation_output_fields(o).path; })
+        .def_prop_ro("ca", [](const PyDerivationOutput &o) { return derivation_output_fields(o).ca; })
+        .def_prop_ro("method", [](const PyDerivationOutput &o) { return derivation_output_fields(o).method; })
+        .def_prop_ro("hash_algo",
+                     [](const PyDerivationOutput &o) { return derivation_output_fields(o).hash_algo; });
+}
+
+// The derivation itself. `nix::Derivation` carries no store directory, so the
+// wrapper holds the one of the store that read it. That is the rule this
+// issue settled on, and `PyMissingPaths` above is the other user of it.
+struct PyDerivation {
+    nix::Derivation drv;
+    std::string store_dir;
+
+    std::string render(const nix::StorePath &p) const {
+        return (store_dir + "/").append(p.to_string());
+    }
+};
+
+static void bind_derivation(nb::module_ &m) {
+    nb::class_<PyDerivation>(m, "Derivation")
+        .def_ro("store_dir", &PyDerivation::store_dir)
+        .def_prop_ro("name", [](const PyDerivation &d) { return d.drv.name; })
+        .def_prop_ro("system", [](const PyDerivation &d) { return d.drv.platform; })
+        .def_prop_ro("builder", [](const PyDerivation &d) { return d.drv.builder; })
+        .def_prop_ro("args",
+                     [](const PyDerivation &d) {
+                         nb::list args;
+                         for (auto &a : d.drv.args)
+                             args.append(a);
+                         return args;
+                     })
+        .def_prop_ro("env",
+                     [](const PyDerivation &d) {
+                         nb::dict env;
+                         for (auto &[k, v] : d.drv.env)
+                             env[k.c_str()] = v;
+                         return env;
+                     })
+        .def_prop_ro("input_srcs",
+                     [](const PyDerivation &d) {
+                         nb::list srcs;
+                         for (auto &p : d.drv.inputSrcs)
+                             srcs.append(d.render(p));
+                         return srcs;
+                     })
+        .def_prop_ro("input_drvs",
+                     [](const PyDerivation &d) {
+                         nb::dict drvs;
+                         for (auto &[path, node] : d.drv.inputDrvs.map)
+                             drvs[d.render(path).c_str()] = nb::cast(node);
+                         return drvs;
+                     })
+        .def_prop_ro("outputs",
+                     [](const PyDerivation &d) {
+                         nb::dict outputs;
+                         for (auto &[name, output] : d.drv.outputs)
+                             outputs[name.c_str()] = PyDerivationOutput{output, d.store_dir};
+                         return outputs;
+                     })
+        // `unparse()` is Nix's own serialiser for the field, and it returns
+        // the `{"__json", payload}` pair. This hands back the bytes Nix read.
+        .def_prop_ro("structured_attrs",
+                     [](const PyDerivation &d) -> std::optional<std::string> {
+                         if (!d.drv.structuredAttrs)
+                             return std::nullopt;
+                         return d.drv.structuredAttrs->unparse().second;
+                     })
+        .def("__repr__", [](const PyDerivation &d) { return "Derivation('" + d.drv.name + "')"; });
+}
+
+static PyDerivation read_derivation_typed(nix::Store &s, const nix::StorePath &drvPath) {
+    nix::Derivation drv;
+    {
+        nb::gil_scoped_release release;
+        drv = s.readDerivation(drvPath);
+    }
+    return PyDerivation{std::move(drv), s.storeDir};
 }
 
 static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
@@ -993,6 +1185,7 @@ static void bind_store(nb::module_ &m) {
             "build_mode"_a = nix::bmNormal,
             "eval_store"_a = nullptr)
         .def("read_derivation", &read_derivation, "drv_path"_a)
+        .def("read_derivation_typed", &read_derivation_typed, "drv_path"_a)
         .def("write_dev_shell_derivation", &write_dev_shell_derivation, "drv_path"_a, "get_env_script"_a)
         // Path info
         .def("query_path_info", &query_path_info, "path"_a)
@@ -1125,6 +1318,9 @@ void nanopynix_bind_store(nb::module_ &m) {
     bind_store_path(m);
     bind_valid_path_info(m);
     bind_missing_paths(m);
+    bind_derivation_outputs(m);
+    bind_derivation_output(m);
+    bind_derivation(m);
     bind_store(m);
 
     // ── Pure utility functions (no init required) ───────────────
