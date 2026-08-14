@@ -118,12 +118,20 @@ patch in place:
 **Measured again, on today's code, at 2.34.8 and on one machine.** The arm
 below is the soak alone, and the amplified setting is a pair:
 
-| Boehm setting | runs | failures |
-|---|---|---|
-| default | 12 | 0 |
-| `GC_INITIAL_HEAP_SIZE=8388608` and `GC_FREE_SPACE_DIVISOR=64` | 12 | 3 |
+| arm | heap settings | collector | runs | failures |
+|---|---|---|---|---|
+| default | default | on | 12 | 0 |
+| amplified | 8 MiB, divisor 64 | on | 12 | 3 |
+| amplified, inproc alone | 8 MiB, divisor 64 | on | 8 | 4 |
+| control | 8 MiB, divisor 64 | **off** | 8 | 0 |
 
-Two of the three are SIGSEGV. The third is #70's own symptom, and it is the
+**The control is the row that decides it.** It holds each heap setting of the
+amplified arm and adds `GC_DONT_GC=1`, so the process takes the same memory
+pressure and the same heap layout, and collects nothing. Every failure goes
+away. Memory pressure is therefore not the cause, and the heap layout is not
+the cause. Collection is.
+
+Two of the three failures of the amplified arm are SIGSEGV. The third is #70's own symptom, and it is the
 first sighting of that symptom since the collector gained an owner thread:
 
 ```
@@ -393,8 +401,9 @@ minutes. Use the command above instead.
 **Both settings are necessary.** `GC_FREE_SPACE_DIVISOR` raises the collection
 rate only when the heap has no slack, and `GC_INITIAL_HEAP_SIZE` is what takes
 the slack away. The measurement is in "The collector is in the causal path of
-#70". Set `GC_DONT_GC=1` to take the collector out of the picture, which is
-the control arm for every collector hypothesis.
+#70". Add `GC_DONT_GC=1` to the same command to take the collector out of the
+picture, and keep each heap setting: that is the control arm, and it fails 0
+runs in 8 where the arm above fails 4.
 
 **Select the soak with `-m soak`, and name no path.** A path argument moves
 pytest's rootdir, and the roster is read relative to it.
