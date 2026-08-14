@@ -240,3 +240,80 @@ def test_the_input_drvs_builder_recurses_and_keeps_every_output() -> None:
     first = node.dynamic_outputs["first"]
     assert first.outputs == ["a", "b"], "a child with two outputs lost one"
     assert first.dynamic_outputs["deeper"].outputs == ["c"], "the second level was not built"
+
+
+# --- built_outputs --------------------------------------------------------
+#
+# `BuildResult::Success::builtOutputs` names the store path of each output a
+# build produced. `nix build` answers its own output paths from this field and
+# from nothing else (`installables.cc`), and nanopynix reported none of it, so
+# a caller had to query the store again to find its own build.
+#
+# The derivation below is deliberately **input-addressed**. An earlier reading
+# of Nix said this field is filled only for a content-addressed derivation.
+# That is wrong: `checkPathValidity` emplaces every output whose known path is
+# valid, and `DerivationGoal` adds the wanted output back when it is missing.
+# A content-addressed subject would have hidden that.
+#
+# Issue #142 records why the neighbouring timing fields stay unexposed: Nix
+# loses them in the goal system on 2.34 and 2.35.
+
+BUILT_OUTPUTS_DRV = """
+derivation {
+  name = "nanopynix-built-outputs-fidelity";
+  system = builtins.currentSystem;
+  builder = "/bin/sh";
+  args = [ "-c" "echo built > $out" ];
+}
+"""
+
+
+def _check_built_outputs(results: Any, store_dir: str) -> None:
+    """One result, one output, and a real store path for it."""
+    assert len(results) == 1, f"expected one result, got {results!r}"
+    built = results[0].built_outputs
+    assert built, "a successful build reported no built outputs"
+    assert sorted(built) == ["out"], f"unexpected output names: {sorted(built)}"
+
+    out_path = built["out"].out_path
+    assert out_path.startswith(f"{store_dir}/"), f"{out_path} is not in {store_dir}"
+    assert out_path.endswith("-nanopynix-built-outputs-fidelity"), out_path
+
+    # Empty, and present. Nix signs a realisation when it registers one under
+    # `ca-derivations`; a plain local build registers none. The assertion is
+    # that the field exists and is a list, which is what a signed output would
+    # fill in.
+    assert built["out"].signatures == [], built["out"].signatures
+
+
+async def test_inproc_build_reports_the_path_it_produced(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as session, session.store() as store:
+        drv = await _drv_path(session, store, BUILT_OUTPUTS_DRV)
+        results = await store.build_paths_with_results([f"{drv}^*"])
+        _check_built_outputs(results, (await store.store_dirs()).store_dir)
+
+
+async def test_rpc_build_reports_the_path_it_produced(rpc_session: RpcSessionFactory) -> None:
+    async with rpc_session() as session, session.store() as store:
+        drv = await _drv_path(session, store, BUILT_OUTPUTS_DRV)
+        results = await store.build_paths_with_results([f"{drv}^*"])
+        _check_built_outputs(results, (await store.store_dirs()).store_dir)
+
+
+async def test_an_opaque_request_builds_nothing_and_says_so(inproc_session: InprocSessionFactory) -> None:
+    """A plain store path is a fetch, not a build, so it produces no output.
+
+    `outputs` is already empty for this case, and `built_outputs` has to agree.
+    Without this the empty map would read as "the field is never filled",
+    which is what the two tests above would then be proving.
+    """
+    async with inproc_session() as session, session.store() as store:
+        drv = await _drv_path(session, store, BUILT_OUTPUTS_DRV)
+        built = await store.build_paths_with_results([f"{drv}^*"])
+        fetched = built[0].built_outputs["out"].out_path
+
+        results = await store.build_paths_with_results([fetched])
+
+        assert len(results) == 1
+        assert results[0].outputs == [], "an opaque request selects no outputs"
+        assert results[0].built_outputs == {}, "an opaque request produced no outputs"

@@ -80,6 +80,31 @@ message BuildResult {
   // sorted order. Empty and ["*"] are different requests, which is why this is
   // a field rather than something a caller re-derives from drv_path.
   repeated string outputs = 5;
+  // What the build produced, keyed by output name. Nix answers `nix build`'s
+  // output paths from this and from nothing else, so without it a caller has
+  // to query the store again to learn where its own build went.
+  //
+  // Empty for a DerivedPath::Opaque request ("fetch this path", no build),
+  // which `outputs` above reports as empty as well. Populated for every other
+  // request, an input-addressed derivation included.
+  map<string, RealisedOutput> built_outputs = 6;
+}
+
+// One output of a build, as `nix::UnkeyedRealisation` carries it.
+//
+// `nix::Realisation` on Nix 2.34 also carries a `DrvOutput id`, and 2.35
+// dropped it from this map. That field names the derivation, which a caller
+// already has, and its own shape changed in the same release, so nothing here
+// reports it.
+message RealisedOutput {
+  string out_path = 1;
+  // Signatures over the realisation, as Nix renders them, in the same
+  // spelling as `PathInfo.sigs`. Empty for an output that this machine built:
+  // Nix signs a realisation when it registers one under `ca-derivations`, and
+  // a plain local build registers none. A signed one arrives from a
+  // substituter. Empty is what Nix reports, and there is no separate state
+  // for "not applicable" to carry.
+  repeated string signatures = 2;
 }
 
 message BuildResultList {

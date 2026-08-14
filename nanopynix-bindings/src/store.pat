@@ -44,6 +44,13 @@ nanopynix_bindings.store.__prefix__$:
         download_size: int
         nar_size: int
 
+    class RealisedOutputDict(TypedDict):
+        # One output that the build produced. `signatures` is empty for an
+        # output this machine built; only a realisation from a substituter
+        # under `ca-derivations` carries one.
+        out_path: str
+        signatures: list[str]
+
     class BuildResultDict(TypedDict):
         # `drv_path` is a store path; `outputs` says what was asked of it --
         # [] for an opaque fetch, ["*"] for every output, else named outputs.
@@ -52,6 +59,10 @@ nanopynix_bindings.store.__prefix__$:
         success: bool
         status: str
         error_msg: str
+        # What the build produced, keyed by output name. Empty for a failure,
+        # and for an opaque fetch. See build_result_util.hh, which also gives
+        # the reason the timing fields of `BuildResult` are absent.
+        built_outputs: dict[str, RealisedOutputDict]
 
     class DerivationOutputDict(TypedDict):
         # A tagged union rendered flat: `type` names the variant and decides

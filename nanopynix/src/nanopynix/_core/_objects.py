@@ -46,6 +46,7 @@ from nanopynix.models import (
     LockedNode,
     MissingInfo,
     PathInfo,
+    RealisedOutput,
     StorePath,
 )
 from nanopynix.settings import (
@@ -242,7 +243,20 @@ class CoreStore:
             build_mode,
             None if eval_store is None else eval_store.require_raw(),
         )
-        return [BuildResult(**result) for result in results]
+        return [
+            BuildResult(
+                drv_path=result["drv_path"],
+                outputs=result["outputs"],
+                success=result["success"],
+                status=result["status"],
+                error_msg=result["error_msg"],
+                built_outputs={
+                    name: RealisedOutput(out_path=output["out_path"], signatures=output["signatures"])
+                    for name, output in result["built_outputs"].items()
+                },
+            )
+            for result in results
+        ]
 
     def copy_closure(
         self,

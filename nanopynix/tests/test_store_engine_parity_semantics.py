@@ -99,8 +99,13 @@ async def _query_missing(store: Any, suffix: str) -> dict[str, list[str]]:
     }
 
 
-async def _build_paths_with_results(store: Any, suffix: str) -> list[tuple[str, list[str], str]]:
-    """Project to the echoed drv_path, outputs and status, dropping error_msg.
+async def _build_paths_with_results(store: Any, suffix: str) -> list[tuple[str, list[str], str, dict[str, str]]]:
+    """Project to the echoed drv_path, outputs, status and built outputs.
+
+    ``error_msg`` is dropped, and the signatures of a built output with it: a
+    locally built output carries none, so comparing them would compare two
+    empty lists. The store path of each output is the part that differs if one
+    engine stops reporting it.
 
     The echoed derived path is the load-bearing part: Nix hands back the
     *canonical* DerivedPath, so a bare ``.drv`` comes back selecting every
@@ -112,8 +117,26 @@ async def _build_paths_with_results(store: Any, suffix: str) -> list[tuple[str, 
     what the field carried. It now carries a store path and ``outputs`` carries
     the selector, so the same evidence is read from the field that means it.
     """
-    results = await store.build_paths_with_results([await _drv_argument(store, suffix)])
-    return [(str(r.drv_path), [str(o) for o in r.outputs], str(r.status)) for r in results]
+    return _project(await store.build_paths_with_results([await _drv_argument(store, suffix)]))
+
+
+def _project(results: Any) -> list[tuple[str, list[str], str, dict[str, str]]]:
+    """The projection itself, so that two call sites cannot disagree on it.
+
+    ``test_a_bare_drv_round_trips_through_its_own_reply`` compares a second
+    reply against the first, and it used to spell this out again inline. The
+    two spellings then drifted the moment the projection gained a field, and
+    the test failed on the shape rather than on the property it is about.
+    """
+    return [
+        (
+            str(r.drv_path),
+            [str(o) for o in r.outputs],
+            str(r.status),
+            {name: str(output.out_path) for name, output in r.built_outputs.items()},
+        )
+        for r in results
+    ]
 
 
 def _hash_part(seeded: StorePath) -> str:
@@ -513,10 +536,7 @@ async def test_a_bare_drv_round_trips_through_its_own_reply(
     """
     async with inproc_session() as session, session.store() as store:
         first = await _build_paths_with_results(store, "")
-        second = [
-            (str(r.drv_path), [str(o) for o in r.outputs], str(r.status))
-            for r in await store.build_paths_with_results([first[0][0]])
-        ]
+        second = _project(await store.build_paths_with_results([first[0][0]]))
 
     assert first[0][1] == ["*"]
     assert second == first
