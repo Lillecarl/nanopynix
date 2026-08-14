@@ -28,6 +28,7 @@ setup -- a signing key, a dynamic derivation -- the setup is the point.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -196,6 +197,21 @@ async def test_rpc_read_derivation_keeps_nested_input_drvs(rpc_session: RpcSessi
         _check_nested_input_drvs(await store.read_derivation(drv))
 
 
+@dataclass(frozen=True)
+class _StandInNode:
+    """One node of a ``DerivedPathMap``, which a test can build.
+
+    ``nanopynix_bindings.store.DerivationOutputs`` is the real one, and
+    nanobind binds it for reading only, so it has no constructor.
+    ``_derivation_outputs`` takes the ``_DerivedPathNode`` protocol rather
+    than that class, and this is the class that protocol exists for. The two
+    fields are the whole of it.
+    """
+
+    outputs: list[str]
+    dynamic_outputs: dict[str, _StandInNode]
+
+
 def test_the_input_drvs_builder_recurses_and_keeps_every_output() -> None:
     """The Python half of the recursion, including the case Nix will not produce on demand.
 
@@ -209,15 +225,15 @@ def test_the_input_drvs_builder_recurses_and_keeps_every_output() -> None:
     from nanopynix._core._objects import _derivation_outputs  # noqa: PLC0415 -- private, exercised only here
 
     node = _derivation_outputs(
-        {
-            "outputs": ["out"],
-            "dynamic_outputs": {
-                "first": {
-                    "outputs": ["a", "b"],
-                    "dynamic_outputs": {"deeper": {"outputs": ["c"], "dynamic_outputs": {}}},
-                },
+        _StandInNode(
+            outputs=["out"],
+            dynamic_outputs={
+                "first": _StandInNode(
+                    outputs=["a", "b"],
+                    dynamic_outputs={"deeper": _StandInNode(outputs=["c"], dynamic_outputs={})},
+                ),
             },
-        }
+        )
     )
 
     assert node.outputs == ["out"]

@@ -29,6 +29,7 @@ from nanopynix_proto.nix.common import (
     CallArgAttrs,
     CallArgList,
     DeepValue,
+    DerivationOutputs,
     MissingInfo,
     NullValue,
     PathInfo,
@@ -42,9 +43,6 @@ from nanopynix._core._codec import (  # type: ignore[reportPrivateUsage] -- the 
     python_to_deep_value,
     python_to_scalar,
     scalar_to_python,
-)
-from nanopynix._core._objects import (  # type: ignore[reportPrivateUsage] -- see above
-    _derivation_outputs,
 )
 from nanopynix.rpc.worker._worker_eval import (  # type: ignore[reportPrivateUsage] -- test imports private module
     EvalServiceHandler,
@@ -241,15 +239,18 @@ def test_an_empty_call_arg_is_refused() -> None:
 def test_the_recursive_derivation_output_tree_survives_the_wire() -> None:
     """``DerivationOutputs`` nests once per level of dynamic derivation.
 
-    ``_derivation_outputs`` recurses by hand rather than handing the raw dict
-    to pydantic, so a level that stopped being rebuilt would leave a plain
-    dict where a model belongs -- and pydantic would not complain.
-    """
-    node: dict[str, object] = {"outputs": ["out"], "dynamic_outputs": {}}
-    for level in range(3):
-        node = {"outputs": [f"out{level}"], "dynamic_outputs": {f"dyn{level}": node}}
+    The subject here is the wire, and not the builder that fills the tree in.
+    A message that carries itself as a field is the shape that a flat encoder
+    truncates, so this builds three levels and reads the innermost one back
+    through real bytes.
 
-    tree = _derivation_outputs(node)
+    ``test_the_input_drvs_builder_recurses_and_keeps_every_output`` in
+    ``test_store_metadata_fidelity.py`` is the test of the builder.
+    """
+    tree = DerivationOutputs(outputs=["out"], dynamic_outputs={})
+    for level in range(3):
+        tree = DerivationOutputs(outputs=[f"out{level}"], dynamic_outputs={f"dyn{level}": tree})
+
     received = type(tree)().parse(bytes(tree))
 
     assert received == tree

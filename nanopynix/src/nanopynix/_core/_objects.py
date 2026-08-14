@@ -21,7 +21,7 @@ build on, below the process boundary that distinguishes ``inproc`` from
 from __future__ import annotations
 
 import weakref
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 from nanopynix_bindings import (
     errors as nanopynix_errors,
@@ -67,18 +67,44 @@ if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Mapping, Sequence
 
 
-def _derivation_outputs(node: Mapping[str, Any]) -> DerivationOutputs:
+@runtime_checkable
+class _DerivedPathNode(Protocol):
+    """The two fields that ``_derivation_outputs`` reads off one node.
+
+    ``nanopynix_bindings.store.DerivationOutputs`` is the real one, and it
+    satisfies this by structure. A protocol, and not that class directly,
+    because nanobind binds the class for reading only and it has no
+    constructor. A test cannot build the tree that Nix will not produce on
+    demand -- a child with several outputs, or a second level -- and
+    ``test_the_input_drvs_builder_recurses_and_keeps_every_output`` covers
+    exactly those two shapes from a stand-in node.
+    """
+
+    # A protocol with no `__slots__` gives every class that inherits it a
+    # `__dict__`, and the cost is invisible.
+    __slots__ = ()
+
+    @property
+    def outputs(self) -> list[str]: ...
+
+    @property
+    def dynamic_outputs(self) -> Mapping[str, _DerivedPathNode]: ...
+
+
+def _derivation_outputs(node: _DerivedPathNode) -> DerivationOutputs:
     """Rebuild one node of Nix's ``DerivedPathMap`` tree, children included.
 
     ``dynamic_outputs`` nests once per level of dynamic derivation, so this
-    recurses rather than passing the raw dict to ``DerivationOutputs(**node)``.
-    Written out for the same reason ``read_derivation`` builds its other two
-    maps by hand: pydantic would coerce the nested dicts happily, and invisibly
-    to the type checker, against any shape at all.
+    recurses rather than handing the node straight to ``DerivationOutputs``.
+
+    *node* carries fields, and it is not a dictionary. That is what makes
+    each name below a checked one: pyright reads the field of the node and the
+    field of the model, and it fails when the two stop agreeing. A ``**dict``
+    spread type-checks against any shape at all, including a wrong one.
     """
     return DerivationOutputs(
-        outputs=list(node["outputs"]),
-        dynamic_outputs={name: _derivation_outputs(child) for name, child in node["dynamic_outputs"].items()},
+        outputs=node.outputs,
+        dynamic_outputs={name: _derivation_outputs(child) for name, child in node.dynamic_outputs.items()},
     )
 
 
@@ -190,8 +216,14 @@ class CoreStore:
         :meth:`~nanopynix.models.DerivedPath.for_build`. This layer maps Nix
         and does not, so a caller here gets what ``nix build`` would give.
         """
-        result = self.require_raw().query_missing([str(path) for path in derived_paths])
-        return MissingInfo(**result)
+        missing = self.require_raw().query_missing_typed([str(path) for path in derived_paths])
+        return MissingInfo(
+            will_build=missing.will_build,
+            will_substitute=missing.will_substitute,
+            unknown=missing.unknown,
+            download_size=missing.download_size,
+            nar_size=missing.nar_size,
+        )
 
     def build_paths_with_results(
         self,
@@ -254,7 +286,18 @@ class CoreStore:
     # --- Queries ----------------------------------------------------------
 
     def query_path_info(self, path: str | nanopynix_store.StorePath) -> PathInfo:
-        return PathInfo(**self.require_raw().query_path_info(self._store_path(path)))
+        info = self.require_raw().query_path_info_typed(self._store_path(path))
+        return PathInfo(
+            path=info.path,
+            references=info.references,
+            nar_hash=info.nar_hash,
+            nar_size=info.nar_size,
+            registration_time=info.registration_time,
+            deriver=info.deriver,
+            ca=info.ca,
+            ultimate=info.ultimate,
+            sigs=info.sigs,
+        )
 
     def dump_db(
         self,
@@ -307,21 +350,31 @@ class CoreStore:
         return self.require_raw().get_build_log(self._store_path(path))
 
     def read_derivation(self, drv_path: str | nanopynix_store.StorePath) -> Derivation:
-        result = self.require_raw().read_derivation(self._store_path(drv_path))
-        # The two nested maps are built explicitly rather than left to pydantic's
-        # dict->model coercion: the coercion works, but it is invisible to the
-        # type checker, so `Derivation(**result)` would typecheck against any
-        # nested shape at all -- including a wrong one.
+        drv = self.require_raw().read_derivation_typed(self._store_path(drv_path))
+        # Every name below is a checked one. The bound type carries a real
+        # annotation for each field, so pyright reads the binding and the model
+        # together and fails when the two stop agreeing. The dictionary this
+        # replaced could only be spread, and a `**dict` spread type-checks
+        # against any shape at all -- including a wrong one.
         return Derivation(
-            name=result["name"],
-            system=result["system"],
-            builder=result["builder"],
-            args=result["args"],
-            env=result["env"],
-            input_srcs=result["input_srcs"],
-            input_drvs={path: _derivation_outputs(node) for path, node in result["input_drvs"].items()},
-            outputs={name: DerivationOutput(**output) for name, output in result["outputs"].items()},
-            structured_attrs=result["structured_attrs"],
+            name=drv.name,
+            system=drv.system,
+            builder=drv.builder,
+            args=drv.args,
+            env=drv.env,
+            input_srcs=drv.input_srcs,
+            input_drvs={path: _derivation_outputs(node) for path, node in drv.input_drvs.items()},
+            outputs={
+                name: DerivationOutput(
+                    type=output.type,
+                    path=output.path,
+                    ca=output.ca,
+                    method=output.method,
+                    hash_algo=output.hash_algo,
+                )
+                for name, output in drv.outputs.items()
+            },
+            structured_attrs=drv.structured_attrs,
         )
 
     # --- Mutation ---------------------------------------------------------
