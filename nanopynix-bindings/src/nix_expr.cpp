@@ -1760,6 +1760,18 @@ void nanopynix_start_gc_owner_thread() {
             // instead. If #70 goes away here, an unregistered displacement is
             // the cause. If #70 survives, that whole class is excluded.
             //
+            // **It survived, so that class is excluded.** Measured on the
+            // 10-second reproduction that `docs/collector-and-threads.md`
+            // gives, at 2.34.8:
+            //
+            //   arm                                    runs  failures
+            //   amplified                                12         3
+            //   amplified, every offset valid            12         4
+            //
+            // The differential kept its value, so it stays until #70 closes:
+            // a later change to how Nix packs a `Value` pointer would put this
+            // class back on the table, and the arm answers it in two minutes.
+            //
             // The direction is always more conservative:
             // `GC_initialize_offsets` marks every offset valid, so the
             // collector retains more and frees less. It runs after

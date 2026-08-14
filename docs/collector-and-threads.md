@@ -252,6 +252,26 @@ Each of these has evidence, and needs new evidence to reopen.
   asked whether the collector knows that one thread.
 - **A data race that ThreadSanitizer can see.** Every TSan job passes with the
   soak in it.
+- **A live pointer at a displacement that Boehm does not accept.**
+  `GC_push_contents_hdr` black-lists a reference at an unregistered offset
+  rather than marking the object it names, and Nix packs a 3-bit discriminator
+  into each `Value` pointer. `NANOPYNIX_GC_ALL_INTERIOR_POINTERS=1` marks every
+  offset valid, and the failure rate does not move:
+
+  | arm | runs | failures |
+  |---|---|---|
+  | amplified | 12 | 3 |
+  | amplified, every offset valid | 12 | 4 |
+
+  The differential is in `nix_expr.cpp`, and it states this criterion itself.
+  It stays until #70 closes, because a later change to how Nix packs that
+  pointer puts the class back on the table.
+- **A thread that the collector does not know.** Registration is balanced in a
+  run that fails: 57 registrations and 57 unregistrations, which is what a
+  clean run gives. `NANOPYNIX_GC_THREAD_DEBUG=1` on the short reproduction.
+  **This excludes the accounting, and not the scan.** A thread that Boehm
+  knows and does not stop is a different failure, and #72 is the precedent for
+  one.
 - **Multiple evaluators plus frequent collections, on their own.** The two
   multi-evaluator modules with `GC_FREE_SPACE_DIVISOR=64`: 0 failures in 10
   runs. Something else in the suite is a necessary ingredient.
