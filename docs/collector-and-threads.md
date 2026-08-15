@@ -455,15 +455,41 @@ in two ways that none of the four measurements covers:
    saved at suspend. A wrong `hi` leaves the top of the stack unscanned, and
    nothing reports it.
 
+**The `FINISHED` flag is measured, and it is excluded.**
 `GC_PRINT_VERBOSE_STATS=1` prints `Pushed %d thread stacks` for each
-collection, which measures the first of the two. **That arm cannot run against
-this reproduction as it stands.** Four processes initialise the collector, they
-all write to the one path that `GC_LOG_FILE` names, and no line carries a pid.
-The sequence of counts is therefore interleaved and no count belongs to a known
-process. `NANOPYNIX_GC_THREAD_DEBUG=1` does carry a pid now, and it says that
-**one** of those four processes registers an evaluator thread. Give the
-collector log the same attribution, or reduce the reproduction to one process,
-and the arm becomes readable.
+collection. Reading it took two instruments, because a count on its own belongs
+to no process and to no collection:
+
+- `boehmgc-log-file-pid.patch` expands the first `%d` of `GC_LOG_FILE` to the
+  process id, so each process gets its own log.
+- `gc_collection_start_probe` in `nix_expr.cpp` writes the count of threads
+  **we** registered, keyed by `GC_get_gc_no()`, at the start of each
+  collection. A reader pairs the two files by that number, and adds one,
+  because bdwgc prints `GC_gc_no + 1` on the marking line.
+
+Twelve runs, one of which died with SIGSEGV. In the process that owns every
+evaluator thread, the pairing covers all but the first collection of the run,
+which happens before the probe is installed:
+
+| run | collections paired | of, in that process | deficits | pushed minus registered |
+|---|---|---|---|---|
+| SIGSEGV | 14 | 15 | **0** | always 1 |
+| clean | 55 | 56 | **0** | always 1 |
+| clean | 57 | 58 | **0** | always 1 |
+
+The offset of one is the thread that owns the collector. It takes its entry
+from `GC_INIT`, and not from the registration that the counter follows.
+
+**No collection ever pushed fewer stacks than were registered.** So no entry
+carried `FINISHED` while its thread was still registered, and the first
+miss-path is closed. The second, the recorded `stack_end` bound, has no
+instrument yet.
+
+**Read the log of the right process.** The `nix` command on the `PATH` of the
+dev shell links a different, unpatched collector, so a `nix` subprocess
+inherits `GC_LOG_FILE` and writes the name with the `%d` still in it. Three of
+them do that in each run. Those logs are not this process, and the pid in the
+name is what tells them apart.
 
 **The other family is a root that is not a thread stack.** A `Value` reachable
 only through memory the collector does not trace is invisible to a correct scan

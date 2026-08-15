@@ -88,6 +88,8 @@ void setCallingThreadName(const char *name) {
 
 #if NIX_USE_BOEHMGC
 #  include <gc/gc.h>
+// `GC_set_start_callback` lives here, and not in <gc/gc.h>.
+#  include <gc/gc_mark.h>
 #endif
 
 #include <nix/expr/eval.hh>
@@ -1496,6 +1498,14 @@ static void gc_thread_debug_log(const char *event);
 // `GC_suspend_all` then signals a thread that is gone -- issue #72 when glibc
 // answers `EINVAL`, and issue #53 when it faults instead.
 namespace {
+// How many threads of this process hold a registration through the object
+// below. DIAGNOSTIC, for issue #70: `GC_push_all_stacks` prints
+// `Pushed %d thread stacks` under `GC_PRINT_VERBOSE_STATS=1`, and the question
+// that issue asks is whether that count ever falls below the count of threads
+// that are really registered. Reading the two numbers needs them keyed to the
+// same collection, and `gc_collection_start_probe` below does that.
+std::atomic<int> gc_registered_threads{0};
+
 struct GcThreadRegistration {
     // True when this thread holds the registration and therefore owes the
     // matching release. A `-Dgc=disabled` build still tracks it, because the
@@ -1518,6 +1528,7 @@ struct GcThreadRegistration {
             throw std::runtime_error("could not register this thread with Boehm GC");
 #endif
         owned = true;
+        gc_registered_threads.fetch_add(1, std::memory_order_relaxed);
         gc_thread_debug_log("gc_thread_registration:acquired");
     }
 
@@ -1525,6 +1536,7 @@ struct GcThreadRegistration {
         if (!owned)
             return;
         owned = false;
+        gc_registered_threads.fetch_sub(1, std::memory_order_relaxed);
 #if NIX_USE_BOEHMGC
         // **The main thread keeps its registration.** Its stack stays a root
         // until the process ends, so there is no stale entry to leave: the
@@ -1617,6 +1629,44 @@ static void gc_thread_debug_log(const char *event) {
     ssize_t written = write(gc_thread_debug_fd(), line, remaining);
     (void) written;
 }
+
+#if NIX_USE_BOEHMGC
+// DIAGNOSTIC (temporary), for issue #70: say how many threads this process has
+// registered, at the start of each collection.
+//
+// **The two numbers have to name the same collection.** bdwgc prints
+// `Pushed %d thread stacks` for every collection under
+// `GC_PRINT_VERBOSE_STATS=1`, and `--> Marking for collection #N` just above
+// it. This probe writes `GC_get_gc_no()` with our own count, so a reader pairs
+// the lines by that number rather than by their order in two files. The
+// question is whether the pushed count ever falls below what is registered.
+//
+// **The two numbers differ by one, and the pairing has to add it.** bdwgc
+// prints `GC_gc_no + 1` on the marking line, and it increments `GC_gc_no`
+// later in the same collection. This probe runs before that, so the collection
+// that the log calls #N is the one this probe reports as `gc_no=N-1`.
+//
+// bdwgc calls this with the allocation lock held, and before it stops the
+// world. `write` is a system call and allocates nothing, and `GC_get_gc_no`
+// reads one word, so neither can re-enter the collector.
+static void gc_collection_start_probe() {
+    if (!gc_thread_debug_enabled())
+        return;
+    char line[256];
+    int length = std::snprintf(line, sizeof(line),
+                               "[nanopynix-gc-thread-debug] pid=%ld tid=%ld event=collection "
+                               "gc_no=%lu registered=%d\n",
+                               static_cast<long>(getpid()), osThreadId(),
+                               static_cast<unsigned long>(GC_get_gc_no()),
+                               gc_registered_threads.load(std::memory_order_relaxed));
+    if (length <= 0)
+        return;
+    size_t remaining = static_cast<size_t>(length) < sizeof(line) ? static_cast<size_t>(length)
+                                                                  : sizeof(line) - 1;
+    ssize_t written = write(gc_thread_debug_fd(), line, remaining);
+    (void) written;
+}
+#endif
 
 // libstdc++'s classic std::ctype<char> facet caches narrow()/widen()
 // results lazily, unguarded by any lock (it's a plain anonymous-namespace
@@ -1786,6 +1836,14 @@ void nanopynix_start_gc_owner_thread() {
             if (const char *all_interior = std::getenv("NANOPYNIX_GC_ALL_INTERIOR_POINTERS");
                 all_interior != nullptr && *all_interior == '1')
                 GC_set_all_interior_pointers(1);
+
+            // TEMPORARY, for issue #70. Remove it with the issue.
+            //
+            // Only under NANOPYNIX_GC_THREAD_DEBUG, so a normal run installs
+            // no callback at all. bdwgc keeps one start callback, and this
+            // takes it, so anything else that wanted it must chain instead.
+            if (gc_thread_debug_enabled())
+                GC_set_start_callback(gc_collection_start_probe);
 #endif
             ready.set_value();
             // Park, and never leave. The entry that `GC_thr_init` just made
