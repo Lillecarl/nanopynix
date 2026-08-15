@@ -33,10 +33,24 @@ issue upstream; treating EINVAL the same as ESRCH here is the same
 tolerance both switches already apply, just widened to the errno this
 environment actually produces.
 
+The tolerated branch also logs, under `GC_PRINT_STATS=1`. Tolerating the
+race removes an abort that killed the process, and it leaves behind a
+thread that this collection did not suspend and whose stack it did not
+push. When the thread really is gone that is correct. When it is not, the
+collection frees whatever only that stack refers to, and the next read of
+one of those objects gives a value of the wrong type. That is the shape of
+issue #70, and the branch reported nothing at all until now: bdwgc's own
+`Resent %d signals after timeout` and `Lost some threads while stopping or
+starting world?!` cover the retry path and not this one.
+
+`GC_COND_LOG_PRINTF` writes only when `GC_print_stats` is set, which is what
+`GC_PRINT_STATS=1` sets, so a normal run prints nothing. The same file
+already logs from this machinery at the retry site.
+
 diff -ruN a/pthread_stop_world.c b/pthread_stop_world.c
---- a/pthread_stop_world.c
-+++ b/pthread_stop_world.c
-@@ -983,7 +983,17 @@
+--- a/pthread_stop_world.c	2026-08-15 19:24:37.312809840 +0200
++++ b/pthread_stop_world.c	2026-08-15 19:24:57.337516440 +0200
+@@ -983,7 +983,25 @@
                result = raise_signal(p, GC_sig_suspend);
                switch(result) {
                  case ESRCH:
@@ -51,10 +65,18 @@ diff -ruN a/pthread_stop_world.c b/pthread_stop_world.c
 +                       lifetime, so EINVAL here cannot mean "bad signal
 +                       number" -- treat it the same as "thread already
 +                       gone". */
++                    /* Say so. This branch leaves the thread unsuspended
++                       and leaves its entry in GC_threads, so the stack of
++                       that thread is not pushed for this collection. When
++                       the thread really is gone that is correct. When it
++                       is not, the collection frees whatever only that
++                       stack refers to, and nothing else reports it. */
++                    GC_COND_LOG_PRINTF("Skipped a thread at suspend:"
++                                       " errcode= %d\n", result);
                      n_live_threads--;
                      break;
                  case 0:
-@@ -1327,7 +1337,17 @@
+@@ -1327,7 +1345,19 @@
              result = raise_signal(p, GC_sig_thr_restart);
              switch(result) {
              case ESRCH:
@@ -69,6 +91,8 @@ diff -ruN a/pthread_stop_world.c b/pthread_stop_world.c
 +                 lifetime, so EINVAL here cannot mean "bad signal
 +                 number" -- treat it the same as "thread already
 +                 gone". */
++              GC_COND_LOG_PRINTF("Skipped a thread at resume:"
++                                 " errcode= %d\n", result);
                n_live_threads--;
                break;
              case 0:
