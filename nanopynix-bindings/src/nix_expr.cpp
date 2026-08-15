@@ -1940,45 +1940,14 @@ void nanopynix_start_gc_owner_thread() {
             gc_owner_thread_id.store(osThreadId(), std::memory_order_release);
             nix::initGC();
 #if NIX_USE_BOEHMGC
-            // TEMPORARY, for issue #70. Remove it with the issue.
-            //
-            // The differential for "a live pointer sits at a displacement that
-            // Boehm does not accept". `GC_push_contents_hdr` consults
-            // `GC_valid_offsets`, and it black-lists a reference at an
-            // unregistered displacement rather than marking the object. Nix
-            // registers 1 to 7, for the 3-bit discriminator that `value.hh`
-            // packs into the pointer.
-            //
-            // With every displacement valid, such a reference marks its object
-            // instead. If #70 goes away here, an unregistered displacement is
-            // the cause. If #70 survives, that whole class is excluded.
-            //
-            // **It survived, so that class is excluded.** Measured on the
-            // 10-second reproduction that `docs/collector-and-threads.md`
-            // gives, at 2.34.8:
-            //
-            //   arm                                    runs  failures
-            //   amplified                                12         3
-            //   amplified, every offset valid            12         4
-            //
-            // The differential kept its value, so it stays until #70 closes:
-            // a later change to how Nix packs a `Value` pointer would put this
-            // class back on the table, and the arm answers it in two minutes.
-            //
-            // The direction is always more conservative:
-            // `GC_initialize_offsets` marks every offset valid, so the
-            // collector retains more and frees less. It runs after
-            // `nix::initGC`, and on this thread, so no allocation has happened
-            // yet.
-            if (const char *all_interior = std::getenv("NANOPYNIX_GC_ALL_INTERIOR_POINTERS");
-                all_interior != nullptr && *all_interior == '1')
-                GC_set_all_interior_pointers(1);
-
-            // TEMPORARY, for issue #70. Remove it with the issue.
-            //
             // Only under NANOPYNIX_GC_THREAD_DEBUG, so a normal run installs
             // no callback at all. bdwgc keeps one start callback, and this
             // takes it, so anything else that wanted it must chain instead.
+            //
+            // `docs/collector-and-threads.md` pairs what this writes with
+            // bdwgc's own `Pushed %d thread stacks` line, which is how the
+            // `FINISHED` flag was excluded. Keep it: the pairing needs both
+            // halves, and this half costs nothing when the flag is unset.
             if (gc_thread_debug_enabled())
                 GC_set_start_callback(gc_collection_start_probe);
 #endif
