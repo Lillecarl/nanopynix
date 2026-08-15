@@ -1471,6 +1471,9 @@ static thread_local bool evaluator_thread_registered = false;
 
 // Defined below, beside the rest of the diagnostic.
 static void gc_thread_debug_log(const char *event);
+#if NIX_USE_BOEHMGC
+static void gc_stack_bounds_probe(void *recorded_base);
+#endif
 
 // The one owner of this thread's Boehm registration.
 //
@@ -1526,6 +1529,7 @@ struct GcThreadRegistration {
         // is correct whoever made it.
         if (result != GC_SUCCESS && result != GC_DUPLICATE)
             throw std::runtime_error("could not register this thread with Boehm GC");
+        gc_stack_bounds_probe(stack_base.mem_base);
 #endif
         owned = true;
         gc_registered_threads.fetch_add(1, std::memory_order_relaxed);
@@ -1631,6 +1635,62 @@ static void gc_thread_debug_log(const char *event) {
 }
 
 #if NIX_USE_BOEHMGC
+// DIAGNOSTIC (temporary), for issue #70: say what upper bound the collector
+// recorded for this thread's stack, and what the real one is.
+//
+// **A wrong upper bound truncates the scan silently.**
+// `GC_push_all_stacks` takes `hi = p -> stack_end` for a thread that is not
+// the main one, and `lo` from the stack pointer saved at suspend. It then
+// pushes `[lo, hi)`. The stack grows down here, so `hi` is the **oldest** end:
+// the frames that live longest, and the ones most likely to hold the only
+// reference to a value. A `hi` below the real top leaves those frames
+// unscanned, and no counter moves.
+//
+// `GC_get_stack_base` gives what the registration recorded.
+// `pthread_getattr_np` gives what the thread really has, as the lowest address
+// and a size, so the top is the sum of the two. The two agree when the
+// registration is right.
+//
+// The probe writes the difference as well, so a reader greps for a line with a
+// non-zero one rather than comparing two hexadecimal numbers by eye.
+static void gc_stack_bounds_probe(void *recorded_base) {
+    if (!gc_thread_debug_enabled())
+        return;
+
+    // A failure to read the attributes is a fact about this platform, and not
+    // about the collector, so it reports rather than raises: the caller is a
+    // registration that must not fail for a diagnostic.
+    pthread_attr_t attr;
+    if (pthread_getattr_np(pthread_self(), &attr) != 0) {
+        gc_thread_debug_log("gc_stack_bounds:unavailable");
+        return;
+    }
+    void *low = nullptr;
+    size_t size = 0;
+    int failed = pthread_attr_getstack(&attr, &low, &size);
+    pthread_attr_destroy(&attr);
+    if (failed != 0) {
+        gc_thread_debug_log("gc_stack_bounds:unavailable");
+        return;
+    }
+
+    char *real_top = static_cast<char *>(low) + size;
+    long long shortfall = static_cast<long long>(real_top - static_cast<char *>(recorded_base));
+
+    char line[256];
+    int length = std::snprintf(line, sizeof(line),
+                               "[nanopynix-gc-thread-debug] pid=%ld tid=%ld event=stack_bounds "
+                               "recorded_top=%p real_top=%p size=%zu shortfall=%lld\n",
+                               static_cast<long>(getpid()), osThreadId(), recorded_base,
+                               static_cast<void *>(real_top), size, shortfall);
+    if (length <= 0)
+        return;
+    size_t remaining = static_cast<size_t>(length) < sizeof(line) ? static_cast<size_t>(length)
+                                                                  : sizeof(line) - 1;
+    ssize_t written = write(gc_thread_debug_fd(), line, remaining);
+    (void) written;
+}
+
 // DIAGNOSTIC (temporary), for issue #70: say how many threads this process has
 // registered, at the start of each collection.
 //
