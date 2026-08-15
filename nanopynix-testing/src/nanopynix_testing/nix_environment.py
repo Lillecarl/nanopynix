@@ -134,7 +134,7 @@ def with_nixpkgs(source: str, nixpkgs_path: str) -> str:
     return source.replace("<nixpkgs>", nixpkgs_path)
 
 
-async def _force_rmtree(path: Path) -> None:
+async def force_rmtree(path: Path) -> None:
     """Remove a closed test root even if Nix made entries read-only."""
 
     def onexc(function: Callable[..., object], raw_path: str, _exc: BaseException) -> None:
@@ -300,7 +300,7 @@ async def shared_nix_environment(
     finally:
         if daemon is not None:
             await daemon.close()
-        await _force_rmtree(root)
+        await force_rmtree(root)
 
 
 @pytest.fixture(scope="session")
@@ -325,7 +325,7 @@ def l1_nix_environment(
         finally:
             if daemon is not None:
                 runner.run(daemon.close())
-            runner.run(_force_rmtree(root))
+            runner.run(force_rmtree(root))
 
 
 @pytest.fixture
@@ -345,7 +345,7 @@ async def isolated_nix_environment(
     finally:
         if daemon is not None:
             await daemon.close()
-        await _force_rmtree(root)
+        await force_rmtree(root)
 
 
 @pytest.fixture

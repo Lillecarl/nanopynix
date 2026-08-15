@@ -79,6 +79,59 @@ this repo passes an explicit `root=` for exactly that reason (see
 `nanopynix_testing.nix_environment`), and a store path is not executable at the
 path it reports when the store is relocated.
 
+## "One process can hold as many `LocalStore` objects as it likes"
+
+**Truth: Nix assumes one for each process, and says so in a comment.**
+`LocalStore` names its temp-roots lock file `<stateDir>/temproots/<getpid()>`,
+and `LocalStore::createTempRootsFile` (`src/libstore/gc.cc`) removes a file
+that is already there:
+
+```c++
+    if (pathExists(fnTempRoots))
+        /* It *must* be stale, since there can be no two
+           processes with the same pid. */
+        tryUnlink(fnTempRoots);
+```
+
+The process id is the identity of the store. A second `LocalStore` in one
+process breaks that in two ways, and which one a run gets is a race between
+`pathExists` and `openLockFile`:
+
+- Both open the same inode. The first one takes a waiting exclusive `flock`
+  and holds it for the life of the store, so the second one waits for ever.
+  `lockFile` looks for an interrupt only after `flock` returns, so nothing
+  cancels the wait.
+- They do not share the inode. The second one then removes the file of the
+  first one, and the temporary roots of the first store are invisible to the
+  garbage collector.
+
+The first failure is a deadlock, and the second is a path that disappears
+while a store is using it.
+
+`nix::openStore` keeps **no cache**, so every call makes a new store. That is
+right for the `nix` command, which opens one store and exits. It is not right
+for a library.
+
+**Nix removed the assumption after 2.35.** On `master` the name comes from
+`makeTempPath(tempRootsDir, "temproots")`, so each store gets its own file and
+neither failure above can happen:
+
+```c++
+// 2.34 and 2.35, src/libstore/local-store.cc
+, fnTempRoots(tempRootsDir / std::to_string(getpid()))
+// master
+, fnTempRoots(makeTempPath(tempRootsDir, "temproots"))
+```
+
+The supported floor is 2.34, so the two released versions still carry it. Do
+not read a test that passes on `git` as proof that the code is safe: the
+failure is version-specific, and `git` is the version that cannot show it.
+
+**Why it matters here:** `nanopynix-bindings` keeps one `LocalStore` for each
+state directory, in `nix_store.cpp`. Do not remove that cache, and do not key
+it on the store URI: a URI names a location, and pytest gives one location to
+two different directories in one session. Issue #99.
+
 ## Adding to this file
 
 Only add things that are *true* and *surprising* -- a rule someone competent

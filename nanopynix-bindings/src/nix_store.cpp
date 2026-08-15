@@ -9,8 +9,14 @@
 #include <nanobind/stl/set.h>
 #include <nanobind/typing.h>
 
+#include <fcntl.h>
+#include <sys/stat.h>
+
 #include <filesystem>
 #include <limits>
+#include <map>
+#include <memory>
+#include <mutex>
 
 #include <nix/store/store-api.hh>
 #include <nix/store/store-open.hh>
@@ -30,6 +36,7 @@
 #include <nix/store/content-address.hh>
 #include <nix/store/store-reference.hh>
 #include <nix/store/store-registration.hh>
+#include <nix/store/globals.hh>
 #include <nlohmann/json.hpp>
 #include <nix/util/experimental-features.hh>
 // `experimentalFeatureSettings` itself, which write_dev_shell_derivation
@@ -235,13 +242,126 @@ static void bind_valid_path_info(nb::module_ &m) {
 // Store — bound directly via shared_ptr<Store>
 // =========================================================================
 
+// -------------------------------------------------------------------------
+// One LocalStore for each state directory
+// -------------------------------------------------------------------------
+//
+// `nix::openStore` keeps no cache, so it builds a new store on every call.
+// That is right for the `nix` command, which opens one store and then exits.
+// It is wrong here. `LocalStore` names its temp-roots lock file
+// `<stateDir>/temproots/<getpid()>`, and it takes a waiting exclusive `flock`
+// on that file for the whole life of the store. Nix gives the assumption in
+// its own comment: "It *must* be stale, since there can be no two processes
+// with the same pid." A second `LocalStore` in this process is that
+// impossible thing, and the two stores deadlock in `flock`. `lockFile` calls
+// `checkInterrupt` only after `flock` returns, so nothing cancels the wait.
+// That is issue #99.
+//
+// So this process keeps one `LocalStore` for each state directory. The
+// pointer is weak, so the store goes away when the last `Store` of the caller
+// goes away. That is the behaviour of the process without a cache.
+//
+// The key is the state directory that Nix resolved, and not the store URI. A
+// URI names a location, and a location is not an identity. pytest removes a
+// temporary store root and then gives the same name to the next test, so one
+// URI names two different directories in one session. A cache on the URI
+// returned the store of the first test, which held a directory that no longer
+// exists, and four tests of `test_l3_inproc.py` failed on "opening file ...
+// No such file or directory".
+//
+// A path is not an identity either, for the same reason. Each entry also
+// holds an open descriptor on the state directory, and the `st_dev` and
+// `st_ino` of that directory. A lookup accepts the entry only when two checks
+// agree:
+//
+//   - `fstat` of the held descriptor reports `st_nlink == 0` after something
+//     removes the directory. The descriptor keeps the old inode, and the
+//     kernel does not put that inode back. This check therefore sees a
+//     removal even when the file system gives the same inode number to the
+//     directory that replaces it.
+//   - `stat` of the path sees a replacement that took a different inode,
+//     which a rename leaves behind and which the first check does not report.
+//
+// The mutex covers the construction of the store as well as the lookup. That
+// is deliberate: the race of #99 is two threads that build a store for one
+// state directory at the same moment, and a lock that the construction does
+// not cover leaves that race open. Only a local store takes the mutex, so an
+// SSH store or a daemon store never waits behind local disk work.
+
+namespace {
+
+struct CachedLocalStore {
+    std::weak_ptr<nix::Store> store;
+    nix::AutoCloseFD state_dir;
+    dev_t dev;
+    ino_t ino;
+};
+
+std::mutex local_store_cache_mutex;
+std::map<std::filesystem::path, CachedLocalStore> local_store_cache;
+
+// True when the entry still describes the directory that `path` names now.
+bool cached_store_is_current(const CachedLocalStore &entry, const std::filesystem::path &path) {
+    struct stat held{};
+    if (fstat(entry.state_dir.get(), &held) != 0 || held.st_nlink == 0)
+        return false;
+    struct stat now{};
+    if (stat(path.c_str(), &now) != 0)
+        return false;
+    return now.st_dev == entry.dev && now.st_ino == entry.ino;
+}
+
+std::shared_ptr<nix::Store> open_store_shared(nix::StoreReference &&reference) {
+    auto config = nix::resolveStoreConfig(std::move(reference));
+
+    auto *local = dynamic_cast<nix::LocalFSStoreConfig *>(&*config);
+    if (local == nullptr) {
+        auto store = config->openStore();
+        store->init();
+        return store.get_ptr();
+    }
+
+    // `weakly_canonical`, so two names for one directory give one key. The
+    // directory does not exist yet on the first open, and that function
+    // accepts a path that is not there.
+    std::filesystem::path state_dir =
+        std::filesystem::weakly_canonical(std::filesystem::path(local->stateDir.get()));
+
+    const std::lock_guard<std::mutex> guard(local_store_cache_mutex);
+
+    if (auto it = local_store_cache.find(state_dir); it != local_store_cache.end()) {
+        auto shared = it->second.store.lock();
+        if (shared && cached_store_is_current(it->second, state_dir))
+            return shared;
+        local_store_cache.erase(it);
+    }
+
+    auto store = config->openStore();
+    store->init();
+
+    // `init` makes the state directory, so the descriptor opens after it and
+    // not before. A store that is not a `LocalStore` takes no temp-roots
+    // lock, and it stays out of the cache.
+    if (dynamic_cast<nix::LocalStore *>(&*store) != nullptr) {
+        nix::AutoCloseFD state_fd{open(state_dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC)};
+        struct stat identity{};
+        if (state_fd && fstat(state_fd.get(), &identity) == 0)
+            local_store_cache.insert_or_assign(
+                state_dir, CachedLocalStore{store.get_ptr(), std::move(state_fd), identity.st_dev, identity.st_ino});
+    }
+
+    return store.get_ptr();
+}
+
+} // namespace
+
 static std::shared_ptr<nix::Store> open_store_uri(const std::string &uri) {
     nb::gil_scoped_release release;
-    return nix::openStore(uri).get_ptr();
+    return open_store_shared(nix::StoreReference::parse(uri));
 }
 static std::shared_ptr<nix::Store> open_store_default() {
     nb::gil_scoped_release release;
-    return nix::openStore().get_ptr();
+    return open_store_shared(nix::StoreReference{nix::settings.storeUri.get()});
 }
 
 static void close_store(nix::Store &store) {
