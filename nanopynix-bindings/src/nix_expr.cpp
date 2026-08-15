@@ -1600,8 +1600,14 @@ static void gc_thread_debug_log(const char *event) {
     if (!gc_thread_debug_enabled())
         return;
     char line[256];
-    int length = std::snprintf(line, sizeof(line), "[nanopynix-gc-thread-debug] tid=%ld event=%s\n",
-                               osThreadId(), event);
+    // **The pid is not decoration.** The forkserver worker writes to the same
+    // file, and the reproduction of #70 runs four processes that all
+    // initialise the collector. A count of registrations taken over the whole
+    // file is therefore a sum, and it balances even when one process does not.
+    // Only a per-process count says whether a thread stayed registered.
+    int length = std::snprintf(line, sizeof(line),
+                               "[nanopynix-gc-thread-debug] pid=%ld tid=%ld event=%s\n",
+                               static_cast<long>(getpid()), osThreadId(), event);
     if (length <= 0)
         return;
     size_t remaining = static_cast<size_t>(length) < sizeof(line) ? static_cast<size_t>(length)
