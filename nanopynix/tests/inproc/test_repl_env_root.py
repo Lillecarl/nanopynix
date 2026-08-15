@@ -35,6 +35,16 @@ from nanopynix_bindings import expr as nanopynix_expr
 if TYPE_CHECKING:
     from nanopynix_testing.nix_environment import InprocSessionFactory
 
+pytestmark = pytest.mark.nix_capability("boehm_gc")
+"""Every test here needs the collector, and the whole module is about it.
+
+``_gc_collect``, ``_gc_finalizer_self_test`` and ``_gc_repl_env_finalized``
+live inside ``#if NIX_USE_BOEHMGC``, so a build without the collector raises
+from the first of them. The question the module asks does not apply to such a
+build either: ``traceable_allocator`` is a plain ``std::allocator`` there, and
+nothing collects the environment.
+"""
+
 CHURN = "builtins.length (builtins.genList (i: { a = i; b = toString i; }) 200000)"
 """Enough allocation that a freed block is handed to something else."""
 
