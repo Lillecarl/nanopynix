@@ -272,6 +272,36 @@ Each of these has evidence, and needs new evidence to reopen.
   **This excludes the accounting, and not the scan.** A thread that Boehm
   knows and does not stop is a different failure, and #72 is the precedent for
   one.
+- **A thread that stops too slowly for stop-the-world.** `GC_stop_world`
+  resends its signal to a thread that does not acknowledge in time, and it
+  logs `Resent %d signals after timeout`. It warns `Lost some threads while
+  stopping or starting world?!` when the count still does not balance. Both
+  strings are in this build of the library. `GC_PRINT_STATS=1` with
+  `GC_LOG_FILE` on eight runs of the short reproduction, of which runs 2 and 5
+  failed: **zero occurrences of either line, in all eight**. Only the banner
+  `Will retry suspend and restart signals if necessary` appears.
+
+- **The tolerated branch of our own patch.**
+  `nix/patches/boehmgc-tolerate-suspend-thread-exit-race.patch` widens
+  `GC_suspend_all` and `GC_start_world` to accept `EINVAL` beside `ESRCH`. That
+  branch runs `n_live_threads--; break;`, so it leaves a thread unsuspended and
+  leaves its entry in `GC_threads`, and the count then balances by
+  construction. It fitted every measurement this issue had.
+
+  The patch now logs from both branches, through `GC_COND_LOG_PRINTF`, so
+  `GC_PRINT_STATS=1` reports the skip. Twelve runs of the short reproduction,
+  three of which failed: **zero skips at suspend and zero at resume, in all
+  twelve**. The control is exact, because the banner `Will retry suspend and
+  restart signals if necessary` comes from the same macro in the same file, and
+  it appears in every log.
+
+  **So the branch is never taken here, and #70 is not #72 under another name.**
+  Keep the log lines. They cost nothing in a normal run, and they turn the one
+  silent branch in this file into an observable one.
+- **Parallel marking.** The stats log says `Started 3 mark helper threads`, so
+  the mark phase runs on four threads. `GC_MARKERS=1` removes the helpers, and
+  the log then carries no such line. Twelve runs with one marker: **6
+  failures**, against 3 in twelve with the helpers. The rate does not fall.
 - **Multiple evaluators plus frequent collections, on their own.** The two
   multi-evaluator modules with `GC_FREE_SPACE_DIVISOR=64`: 0 failures in 10
   runs. Something else in the suite is a necessary ingredient.
@@ -379,6 +409,34 @@ One failure in 20 is about 5 percent, and 15 runs of a 5 percent event expect
 whether the registration helped. **Do not report a clean amplified arm as
 evidence for a fix.** Find an amplifier that reproduces, or use the one-line
 differential above, which decides in two runs.
+
+### The lost root is not a thread stack
+
+Four measurements now say the same thing, and together they close that family.
+All are on the short reproduction, and each covers a run that failed:
+
+| question | instrument | answer |
+|---|---|---|
+| does Boehm have an entry for every thread? | `NANOPYNIX_GC_THREAD_DEBUG=1` | yes, 57 and 57 |
+| does any thread fail to acknowledge in time? | `Resent %d signals after timeout` | never, 0 of 12 |
+| does the count of live threads ever drop? | `Lost some threads...` | never, 0 of 12 |
+| does a thread get skipped at suspend or resume? | the log added to our patch | never, 0 of 12 |
+
+`GC_stop_world` waits until the acknowledgement count equals the count of live
+threads, and it logs only when that wait passes 100 ms. Zero `Resent` lines
+therefore mean that **every registered thread acknowledged the suspend signal,
+on every one of the 117 collections of a failing run.** Add the balanced
+registration, and every live thread was stopped and its stack was pushed.
+
+Parallel marking is excluded separately, above. So the mark phase started from
+a complete set of thread stacks and ran correctly over it.
+
+**That points the search at a root that is not a thread stack.** A `Value` that
+is reachable only through memory the collector does not trace is invisible to a
+correct scan of every stack. Python's own allocator is such memory, and so is
+any C++ container that does not use `traceable_allocator`. The next question is
+which of our own structures hold a `nix::Value *` across a point where a
+collection can happen, and whether each one is a root.
 
 ## The instruments, and what each one cannot see
 
