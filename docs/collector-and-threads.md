@@ -267,8 +267,12 @@ Each of these has evidence, and needs new evidence to reopen.
   It stays until #70 closes, because a later change to how Nix packs that
   pointer puts the class back on the table.
 - **A thread that the collector does not know.** Registration is balanced in a
-  run that fails: 57 registrations and 57 unregistrations, which is what a
-  clean run gives. `NANOPYNIX_GC_THREAD_DEBUG=1` on the short reproduction.
+  run that fails with the wrong-type read: 57 registrations and 57
+  unregistrations, which is what a clean run gives.
+  `NANOPYNIX_GC_THREAD_DEBUG=1` on the short reproduction. The count is now per
+  process, and one process of the four registers every evaluator thread. A run
+  that ends in SIGSEGV instead gives an unbalanced count, because the process
+  dies with its threads live, and that says nothing.
   **This excludes the accounting, and not the scan.** A thread that Boehm
   knows and does not stop is a different failure, and #72 is the precedent for
   one.
@@ -410,10 +414,10 @@ whether the registration helped. **Do not report a clean amplified arm as
 evidence for a fix.** Find an amplifier that reproduces, or use the one-line
 differential above, which decides in two runs.
 
-### The lost root is not a thread stack
+### Stop-the-world reaches every thread
 
-Four measurements now say the same thing, and together they close that family.
-All are on the short reproduction, and each covers a run that failed:
+Four measurements say the same thing. All are on the short reproduction, and
+each covers a run that failed:
 
 | question | instrument | answer |
 |---|---|---|
@@ -425,18 +429,40 @@ All are on the short reproduction, and each covers a run that failed:
 `GC_stop_world` waits until the acknowledgement count equals the count of live
 threads, and it logs only when that wait passes 100 ms. Zero `Resent` lines
 therefore mean that **every registered thread acknowledged the suspend signal,
-on every one of the 117 collections of a failing run.** Add the balanced
-registration, and every live thread was stopped and its stack was pushed.
+on every one of the 117 collections of a failing run.** Parallel marking is
+excluded separately, above.
 
-Parallel marking is excluded separately, above. So the mark phase started from
-a complete set of thread stacks and ran correctly over it.
+**This closes the reaching of a thread, and not the scan of its stack.**
+`GC_push_all_stacks` runs after the world stops, and it can still miss a stack
+in two ways that none of the four measurements covers:
 
-**That points the search at a root that is not a thread stack.** A `Value` that
-is reachable only through memory the collector does not trace is invisible to a
-correct scan of every stack. Python's own allocator is such memory, and so is
-any C++ container that does not use `traceable_allocator`. The next question is
-which of our own structures hold a `nix::Value *` across a point where a
-collection can happen, and whether each one is a root.
+1. **The `FINISHED` flag.** The loop runs `if (p -> flags & FINISHED)
+   continue;`, and it does not count such an entry. `GC_unregister_my_thread`
+   sets that flag for a joinable thread. A thread that unregisters and keeps
+   running therefore keeps its stack out of every later collection.
+2. **The recorded bounds.** For a thread that is not the main one, the loop
+   takes `hi = p -> stack_end`, which `GC_register_my_thread` recorded from
+   `GC_get_stack_base` at registration. It takes `lo` from the stack pointer
+   saved at suspend. A wrong `hi` leaves the top of the stack unscanned, and
+   nothing reports it.
+
+`GC_PRINT_VERBOSE_STATS=1` prints `Pushed %d thread stacks` for each
+collection, which measures the first of the two. **That arm cannot run against
+this reproduction as it stands.** Four processes initialise the collector, they
+all write to the one path that `GC_LOG_FILE` names, and no line carries a pid.
+The sequence of counts is therefore interleaved and no count belongs to a known
+process. `NANOPYNIX_GC_THREAD_DEBUG=1` does carry a pid now, and it says that
+**one** of those four processes registers an evaluator thread. Give the
+collector log the same attribution, or reduce the reproduction to one process,
+and the arm becomes readable.
+
+**The other family is a root that is not a thread stack.** A `Value` reachable
+only through memory the collector does not trace is invisible to a correct scan
+of every stack. One candidate is already excluded: `PyValue` holds a
+`nix::RootValue`, which `nix::allocRootValue` builds with
+`traceable_allocator`, and bdwgc's `traceable_allocator::allocate` calls
+`GC_MALLOC_UNCOLLECTABLE`. That block is traced and never collected, so a
+`PyValue` in Python's own heap still keeps its `Value` alive.
 
 ## The instruments, and what each one cannot see
 
