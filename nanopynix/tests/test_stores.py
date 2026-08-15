@@ -15,8 +15,10 @@ rather than implied.
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING, Any
 
+import anyio
 import pytest
 from nanopynix_bindings import store as nanopynix_store
 from pydantic import ValidationError
@@ -25,6 +27,7 @@ import nanopynix
 from nanopynix import stores
 from nanopynix.namespace import OverlayNamespace
 from nanopynix.settings import NIX_2_34, NixStoreDefaults, field_is_supported, running_nix_version
+from nanopynix_testing.nix_environment import force_rmtree
 from test_support.notes import note
 
 if TYPE_CHECKING:
@@ -426,3 +429,155 @@ async def test_both_engines_open_auto_the_way_resolve_auto_uri_asks(
             assert "max-connections" not in full, f"{label} added a limit the rule did not ask for"
         else:
             assert stores.parse(full) == stores.parse(expected), f"{label} did not apply the rule"
+
+
+# ── One LocalStore for each state directory ──────────────────────────
+
+
+async def _write_store_root(tmp_path: Path, name: str = "store") -> tuple[str, anyio.Path, anyio.Path]:
+    """Make an empty store root and a small file to add to it."""
+    root = anyio.Path(tmp_path) / name
+    await root.mkdir()
+    source = anyio.Path(tmp_path) / "payload.txt"
+    if not await source.exists():
+        await source.write_text("one local store for each state directory\n")
+    return stores.Local(root=str(root)).uri(), root, source
+
+
+async def _temp_roots_descriptors(state_dir: anyio.Path) -> list[str]:
+    """Every descriptor of this process on a file in the temp-roots directory.
+
+    One `LocalStore` makes one such file and holds it open for its whole life,
+    so the length of this list is the number of `LocalStore` objects that this
+    process has for the state directory. That is true of every supported Nix,
+    and the **name** of the file is not:
+
+    - 2.34 and 2.35 call it `<stateDir>/temproots/<getpid()>`, so two stores
+      in one process compete for one name.
+    - Nix git calls `makeTempPath`, which gives each store its own name.
+      Upstream removed the assumption there, and the count still reports what
+      this asks.
+
+    A deleted file keeps its descriptor, and Linux writes " (deleted)" after
+    the name, so a stale one is in the list and is easy to tell apart.
+    """
+    # Resolved, because a link in `/proc/self/fd` names the real path and Nix
+    # git calls `canonPath(root, true)` on this directory as well. A workspace
+    # under a symlink makes the two spellings differ otherwise.
+    wanted = str(await (state_dir / "temproots").resolve())
+    held: list[str] = []
+    async for entry in anyio.Path("/proc/self/fd").iterdir():
+        try:
+            target = str(await entry.readlink())
+        except OSError:
+            continue
+        if target.startswith(wanted + "/"):
+            held.append(target)
+    return held
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the descriptor list comes from /proc")
+async def test_two_handles_on_one_local_store_share_the_temp_roots_file(
+    inproc_session: InprocSessionFactory,
+    tmp_path: Path,
+) -> None:
+    """Two `Store` objects on one URI hold one temp-roots file between them.
+
+    One descriptor means one `LocalStore`, which is what the cache in
+    `nix_store.cpp` gives. Two means two, and on 2.34 and 2.35 two is a
+    defect: those versions name the file `<stateDir>/temproots/<getpid()>`,
+    and Nix gives the assumption in its own comment. The file "*must* be
+    stale, since there can be no two processes with the same pid". A second
+    `LocalStore` in one process breaks that in two ways:
+
+    - The two race between `pathExists` and `openLockFile`. When both open the
+      same inode, the second one waits in `flock` for ever, because the first
+      one never gives the lock up. `lockFile` looks for an interrupt only
+      after `flock` returns, so nothing cancels that wait. Issue #99.
+    - When the two do not race, the second one calls `tryUnlink` and removes
+      the file of the first one. The temporary roots of the first store are
+      then invisible to the garbage collector, which may delete a path that
+      the store is using.
+
+    The second failure is the one this test drives, because it is
+    deterministic: the two stores take their roots one after the other, so
+    the second store always reaches `tryUnlink`. Two descriptors, one of them
+    on a deleted file, is the broken answer there.
+
+    Nix git gives each store its own name, so neither failure can happen on
+    it. The count is still one, because the cache still gives one store, and
+    that is what this asserts on every version.
+    """
+    uri, root, source = await _write_store_root(tmp_path)
+    state_dir = root / "nix" / "var" / "nix"
+
+    async with inproc_session() as nix, nix.store(uri) as first, nix.store(uri) as second:
+        # `add_to_store` takes a temporary root, which is what makes the
+        # file. The order is deliberate, and it is not a race.
+        await first.add_to_store(str(source), name="first")
+        await second.add_to_store(str(source), name="second")
+
+        held = await _temp_roots_descriptors(state_dir)
+        note(temp_roots_descriptors=held)
+        assert held, "no descriptor holds the temp-roots file, so this test proves nothing"
+        assert len(held) == 1, f"{len(held)} LocalStore objects, each with its own temp-roots file: {held}"
+
+
+async def test_a_store_root_that_came_back_is_not_the_old_store(
+    inproc_session: InprocSessionFactory,
+    tmp_path: Path,
+) -> None:
+    """A path is not an identity, so the cache does not key on one.
+
+    pytest's `tmp_path_factory` numbers a directory from the highest one that
+    exists, and the store fixture of this suite removes its root. The next
+    test therefore gets the same name, and one URI names two different
+    directories in one session. A cache on the path returned the store of the
+    first test, which held a directory that no longer exists, and four tests
+    of `tests/rpc/test_l3_inproc.py` failed on "No such file or directory".
+
+    This removes the root while the first store is still alive, which is what
+    makes the entry stale rather than absent. The second store must be a new
+    one, and it must work.
+    """
+    uri, root, source = await _write_store_root(tmp_path)
+
+    async with inproc_session() as nix:
+        async with nix.store(uri) as first:
+            await first.add_to_store(str(source), name="before")
+
+            await force_rmtree(tmp_path / "store")
+            await root.mkdir()
+
+            async with nix.store(uri) as second:
+                # This raised `SysError: opening file ... No such file or
+                # directory` when the cache keyed on the URI alone.
+                path = await second.add_to_store(str(source), name="after")
+        note(after_recreation=path)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the descriptor list comes from /proc")
+async def test_two_store_roots_get_a_local_store_each(
+    inproc_session: InprocSessionFactory,
+    tmp_path: Path,
+) -> None:
+    """The cache shares one store, and it does not join two of them.
+
+    Each state directory holds its own temp-roots file, so two roots give two
+    files and each file has one descriptor. A cache that returned one store
+    for both roots would leave the second directory with no file at all, and
+    the second store would write its temporary roots into the first store.
+    """
+    first_uri, first_root, source = await _write_store_root(tmp_path, "one")
+    second_uri, second_root, _ = await _write_store_root(tmp_path, "two")
+
+    async with inproc_session() as nix, nix.store(first_uri) as first, nix.store(second_uri) as second:
+        await first.add_to_store(str(source), name="in-one")
+        await second.add_to_store(str(source), name="in-two")
+
+        held_first = await _temp_roots_descriptors(first_root / "nix" / "var" / "nix")
+        held_second = await _temp_roots_descriptors(second_root / "nix" / "var" / "nix")
+        note(temp_roots_one=held_first, temp_roots_two=held_second)
+        assert len(held_first) == 1, f"the first root has {len(held_first)} temp-roots descriptors: {held_first}"
+        assert len(held_second) == 1, f"the second root has {len(held_second)} temp-roots descriptors: {held_second}"
+        assert held_first != held_second, "both roots reported the same file, so the two stores were joined"
