@@ -23,11 +23,20 @@
 # whose whole subject is a pool of Nix threads that start and exit.
 #
 # So the collector that ships was the one collector with the defect in it.
+#
+# **The second patch makes the log of the collector readable.**
+# `./patches/boehmgc-log-file-pid.patch` expands the first `%d` of
+# `GC_LOG_FILE` to the process id. bdwgc writes no process id on any line, so
+# the four processes of the short reproduction of #70 append to one file and
+# every count in it is a sum. A name with no `%d` behaves exactly as before.
 { }:
 {
   patchBoehmGC =
     boehmgc:
     boehmgc.overrideAttrs (old: {
-      patches = (old.patches or [ ]) ++ [ ./patches/boehmgc-tolerate-suspend-thread-exit-race.patch ];
+      patches = (old.patches or [ ]) ++ [
+        ./patches/boehmgc-tolerate-suspend-thread-exit-race.patch
+        ./patches/boehmgc-log-file-pid.patch
+      ];
     });
 }

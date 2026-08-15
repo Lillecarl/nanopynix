@@ -1,0 +1,58 @@
+Expand the first "%d" of GC_LOG_FILE to the process id.
+
+bdwgc reads GC_LOG_FILE once, at GC_init, and opens that name with O_APPEND.
+No line that it then writes carries a process id. A program that forks
+therefore gives every process the same name, all of them append to the one
+file, and the result cannot be read: no line says which process wrote it.
+
+That is not a theoretical problem here. The short reproduction of issue #70
+runs four processes that each initialise the collector, because the
+forkserver of nanopynix starts a Nix worker. Every count in such a log is a
+sum over the four. "Pushed %d thread stacks" is the line that issue needs,
+and it asks whether one collection missed the stack of one thread. A sum
+cannot answer that.
+
+The patch takes the name from the environment, and it replaces the first
+"%d" of that name with the process id. A name with no "%d" behaves exactly
+as before, so every other user of the variable sees no change.
+
+The expansion happens before the open, and it uses a static buffer, because
+GC_init runs once for each process and nothing here is re-entrant. A name
+that does not fit the buffer keeps its original form rather than losing a
+part, so the failure of the expansion is a shared log and not a wrong path.
+
+diff -ruN a/misc.c b/misc.c
+--- a/misc.c	2026-08-15 20:09:04.524289030 +0200
++++ b/misc.c	2026-08-15 20:09:12.850220150 +0200
+@@ -1056,6 +1056,31 @@
+         || defined(CYGWIN32) || defined(SYMBIAN)) && !defined(SMALL_CONFIG)
+         {
+           char * file_name = TRUSTED_STRING(GETENV("GC_LOG_FILE"));
++#         if defined(UNIX_LIKE) && !defined(GC_ANDROID_LOG)
++            /* Expand the first "%d" of the name to the process id.  A     */
++            /* program that forks gives every process the same name, so    */
++            /* all of them append to one file and no line says which       */
++            /* process wrote it.  The counts in that file are then a sum.  */
++            /* A name with no "%d" behaves exactly as before.              */
++            static char GC_log_name_buf[1024];
++            if (file_name != NULL) {
++              char * percent_d = strstr(file_name, "%d");
++
++              if (percent_d != NULL) {
++                size_t head_len = (size_t)(percent_d - file_name);
++
++                if (head_len < sizeof(GC_log_name_buf) / 2) {
++                  BCOPY(file_name, GC_log_name_buf, head_len);
++                  if ((size_t)snprintf(GC_log_name_buf + head_len,
++                                       sizeof(GC_log_name_buf) - head_len,
++                                       "%ld%s", (long)getpid(), percent_d + 2)
++                      < sizeof(GC_log_name_buf) - head_len) {
++                    file_name = GC_log_name_buf;
++                  }
++                }
++              }
++            }
++#         endif
+ #         ifdef GC_LOG_TO_FILE_ALWAYS
+             if (NULL == file_name)
+               file_name = GC_LOG_STD_NAME;
