@@ -294,8 +294,8 @@ Each of these has evidence, and needs new evidence to reopen.
 
   The patch now logs from both branches, through `GC_COND_LOG_PRINTF`, so
   `GC_PRINT_STATS=1` reports the skip. Twelve runs of the short reproduction,
-  three of which failed: **zero skips at suspend and zero at resume, in all
-  twelve**. The control is exact, because the banner `Will retry suspend and
+  three of which died with SIGSEGV: **zero skips at suspend and zero at resume,
+  in all twelve**. The control is exact, because the banner `Will retry suspend and
   restart signals if necessary` comes from the same macro in the same file, and
   it appears in every log.
 
@@ -304,8 +304,17 @@ Each of these has evidence, and needs new evidence to reopen.
   silent branch in this file into an observable one.
 - **Parallel marking.** The stats log says `Started 3 mark helper threads`, so
   the mark phase runs on four threads. `GC_MARKERS=1` removes the helpers, and
-  the log then carries no such line. Twelve runs with one marker: **6
-  failures**, against 3 in twelve with the helpers. The rate does not fall.
+  the log then carries no such line.
+
+  | arm | runs | SIGSEGV | other |
+  |---|---|---|---|
+  | amplified | 12 | 3 | 0 |
+  | amplified, one marker | 12 | **4** | 2 |
+
+  The rate does not fall. **Count the SIGSEGV column, and not the runs that
+  merely failed.** The soak also fails with a `TimeoutError` from its own
+  deadline, which is a slow machine and not this issue, and one arm of this
+  investigation reported 6 against 3 by adding the two together.
 - **Multiple evaluators plus frequent collections, on their own.** The two
   multi-evaluator modules with `GC_FREE_SPACE_DIVISOR=64`: 0 failures in 10
   runs. Something else in the suite is a necessary ingredient.
