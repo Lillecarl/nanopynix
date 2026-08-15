@@ -12,7 +12,7 @@
 #
 # Run one the way CI runs it:
 #
-#   MATRIX_JSON='{"arm":"interior"}' nix run --file . experiments.gc-soak
+#   MATRIX_JSON='{"arm":"amplified"}' nix run --file . experiments.gc-soak
 {
   pkgs,
   tests,
@@ -43,23 +43,20 @@ let
   runner = tests."nanopynix-tests-nix_2_34";
 in
 {
-  # TEMPORARY, for issue #70. Delete this attribute with the issue.
-  #
-  # #70 reproduces only in the whole suite, at about 1 failure in 5 runs. That
-  # rate needs repetition. The failure count of each arm is the measurement.
+  # A collector defect of this kind reproduces only in the whole suite, and
+  # only some of the time. That rate needs repetition, and the failure count of
+  # each arm is the measurement.
   #
   # - control   -- the shipped configuration, and the rate to compare against.
-  # - interior  -- every displacement valid. `GC_push_contents_hdr` consults
-  #                `GC_valid_offsets` in the mark path, and it black-lists a
-  #                reference at a displacement that Boehm does not know rather
-  #                than marking the object of that reference. Nix registers 1
-  #                to 7, and the bit-packed `Value` uses 3 bits. A clean arm
-  #                says an unregistered displacement is the cause, and a dirty
-  #                arm excludes that whole class.
   # - amplified -- `GC_FREE_SPACE_DIVISOR=64`, so the collector runs far more
-  #                often. The rate of #70 already follows the collection rate:
-  #                0 in 20 with `GC_DONT_GC=1`, 1 in 30 by default, and 5 in
-  #                15 with this divisor, measured on the soak driver.
+  #                often. The rate of #70 followed the collection rate: 0 in 20
+  #                with `GC_DONT_GC=1`, 1 in 30 by default, and 5 in 15 with
+  #                this divisor, measured on the soak driver.
+  #
+  # The `interior` arm went with #70. It set
+  # `NANOPYNIX_GC_ALL_INTERIOR_POINTERS=1`, which no longer exists, and its own
+  # criterion was met: the arm excluded the whole displacement class, and the
+  # cause turned out to be an environment that nothing rooted.
   #
   # `docs/collector-and-threads.md` records what each arm settles.
   gc-soak = pkgs.writeShellApplication {
@@ -70,7 +67,6 @@ in
       echo "arm: $arm"
       case "$arm" in
         control)   armEnv=(NANOPYNIX_GC_SOAK_ARM=control) ;;
-        interior)  armEnv=(NANOPYNIX_GC_ALL_INTERIOR_POINTERS=1) ;;
         amplified) armEnv=(GC_FREE_SPACE_DIVISOR=64) ;;
         *) echo "unknown arm: $arm" >&2; exit 2 ;;
       esac

@@ -318,17 +318,20 @@ Each of these has evidence, and needs new evidence to reopen.
 - **A live pointer at a displacement that Boehm does not accept.**
   `GC_push_contents_hdr` black-lists a reference at an unregistered offset
   rather than marking the object it names, and Nix packs a 3-bit discriminator
-  into each `Value` pointer. `NANOPYNIX_GC_ALL_INTERIOR_POINTERS=1` marks every
-  offset valid, and the failure rate does not move:
+  into each `Value` pointer. `NANOPYNIX_GC_ALL_INTERIOR_POINTERS=1` marked
+  every offset valid, and the failure rate did not move:
 
   | arm | runs | failures |
   |---|---|---|
   | amplified | 12 | 3 |
   | amplified, every offset valid | 12 | 4 |
 
-  The differential is in `nix_expr.cpp`, and it states this criterion itself.
-  It stays until #70 closes, because a later change to how Nix packs that
-  pointer puts the class back on the table.
+  The differential was `NANOPYNIX_GC_ALL_INTERIOR_POINTERS` in `nix_expr.cpp`,
+  and the `interior` arm of `ci/experiments.nix` drove it. Both went with #70:
+  the arm stated the criterion above, the criterion was met, and the cause was
+  an environment that nothing rooted. To put the class back on the table, add
+  `GC_set_all_interior_pointers(1)` after `nix::initGC` on the owner thread
+  again. It is three lines, and the table above says what a clean arm means.
 - **A thread that the collector does not know.** Registration is balanced in a
   run that fails with the wrong-type read: 57 registrations and 57
   unregistrations, which is what a clean run gives.
