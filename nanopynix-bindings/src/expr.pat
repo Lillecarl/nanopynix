@@ -18,8 +18,11 @@ nanopynix_bindings.expr.register_primop$:
 
 # stubgen drops a module function whose name starts with an underscore unless a
 # pattern names it, which is why `_enter_evaluator_thread` is absent from the
-# stub and its call sites carry a blanket `type: ignore`. These two are named
+# stub and its call sites carry a blanket `type: ignore`. These three are named
 # so that pyright checks the calls instead.
+nanopynix_bindings.expr._check_value_alignment$:
+    def _check_value_alignment(address: int) -> None: ...
+
 nanopynix_bindings.expr._gc_collect$:
     def _gc_collect() -> None: ...
 
