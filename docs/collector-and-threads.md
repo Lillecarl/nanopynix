@@ -441,9 +441,10 @@ therefore mean that **every registered thread acknowledged the suspend signal,
 on every one of the 117 collections of a failing run.** Parallel marking is
 excluded separately, above.
 
-**This closes the reaching of a thread, and not the scan of its stack.**
-`GC_push_all_stacks` runs after the world stops, and it can still miss a stack
-in two ways that none of the four measurements covers:
+**Reaching a thread is not the same as scanning its stack.**
+`GC_push_all_stacks` runs after the world stops, and it can miss a stack in two
+ways that none of the four measurements above covers. Both are measured below,
+and both are excluded:
 
 1. **The `FINISHED` flag.** The loop runs `if (p -> flags & FINISHED)
    continue;`, and it does not count such an entry. `GC_unregister_my_thread`
@@ -482,8 +483,28 @@ from `GC_INIT`, and not from the registration that the counter follows.
 
 **No collection ever pushed fewer stacks than were registered.** So no entry
 carried `FINISHED` while its thread was still registered, and the first
-miss-path is closed. The second, the recorded `stack_end` bound, has no
-instrument yet.
+miss-path is closed.
+
+**The recorded bound is measured too, and it is exact.**
+`gc_stack_bounds_probe` runs at each registration. It takes what the collector
+recorded, through `GC_get_stack_base`, and what the thread really has, through
+`pthread_getattr_np` and `pthread_attr_getstack`, and writes the difference.
+Ten runs, two of which died with SIGSEGV, 57 registrations in a run that
+completes:
+
+```
+recorded_top=0x7a8f38000000 real_top=0x7a8f38000000 size=62914560 shortfall=0
+```
+
+**Every registration in every run gives `shortfall=0`.** The two agree to the
+byte, on a 60 MiB stack, and the recorded top differs for each thread, so the
+probe reads a real value rather than a constant.
+
+One limit of this instrument: it compares the bound at the moment of
+registration. A stack that moved afterwards would not show here. These are
+pthread stacks of a fixed size, so none moves, and the main thread does not use
+this path at all -- `GC_push_all_stacks` takes `GC_stackbottom` for the entry
+that carries `MAIN_THREAD`.
 
 **Read the log of the right process.** The `nix` command on the `PATH` of the
 dev shell links a different, unpatched collector, so a `nix` subprocess
@@ -491,13 +512,34 @@ inherits `GC_LOG_FILE` and writes the name with the `%d` still in it. Three of
 them do that in each run. Those logs are not this process, and the pid in the
 name is what tells them apart.
 
-**The other family is a root that is not a thread stack.** A `Value` reachable
-only through memory the collector does not trace is invisible to a correct scan
-of every stack. One candidate is already excluded: `PyValue` holds a
-`nix::RootValue`, which `nix::allocRootValue` builds with
+### The lost root is not a thread stack
+
+Six measurements now cover every step from "Boehm knows the thread" to "Boehm
+pushed the whole of its stack", and each one covers a run that crashed:
+
+| question | instrument | answer |
+|---|---|---|
+| does Boehm have an entry for every thread? | `NANOPYNIX_GC_THREAD_DEBUG=1` | yes |
+| does a thread fail to acknowledge the suspend? | `Resent %d signals after timeout` | never |
+| does the live-thread count ever drop? | `Lost some threads...` | never |
+| is a thread skipped at suspend or resume? | the log in our patch | never |
+| does a collection skip a registered thread's stack? | `Pushed %d thread stacks`, paired | never |
+| is the recorded stack bound short? | `gc_stack_bounds_probe` | never, 0 bytes |
+
+Parallel marking is excluded separately. **So the collection marked from the
+whole of every stack of every live thread, and it still freed a live value.**
+
+**The remaining family is a root that is not a thread stack.** A `Value`
+reachable only through memory the collector does not trace is invisible to a
+correct scan of every stack. One candidate is already excluded: `PyValue` holds
+a `nix::RootValue`, which `nix::allocRootValue` builds with
 `traceable_allocator`, and bdwgc's `traceable_allocator::allocate` calls
 `GC_MALLOC_UNCOLLECTABLE`. That block is traced and never collected, so a
 `PyValue` in Python's own heap still keeps its `Value` alive.
+
+The question to answer next is which other structure holds a `nix::Value *`, or
+a `nix::Env *`, across a point where a collection can happen, and whether the
+memory that holds it is traced.
 
 ## The instruments, and what each one cannot see
 
