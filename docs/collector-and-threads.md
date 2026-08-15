@@ -541,6 +541,78 @@ The question to answer next is which other structure holds a `nix::Value *`, or
 a `nix::Env *`, across a point where a collection can happen, and whether the
 memory that holds it is traced.
 
+### What the core dump says the crash is
+
+A core dump of the SIGSEGV. The crashing thread is `nix::ExprVar::eval`, which
+is the frame that every report of this issue names.
+
+**Pin the closure before you make the crash.** `systemd-coredump` keeps the
+core, and the core names the store paths of every library it loaded. A store
+collection removes the dev environment of a previous `direnv` build as soon as
+nothing refers to it, and then gdb resolves no symbol in `libnixexpr` and none
+in the bindings. Three cores of this investigation were lost that way. Take a
+root first, and the crash after:
+
+```
+nix-store --add-root ./keep --indirect -r "$(direnv exec . python -c \
+  'import nanopynix_bindings,pathlib;print(pathlib.Path(nanopynix_bindings.__file__).parent)' \
+  | grep -o '^/nix/store/[^/]*')"
+```
+
+**The fault is an alignment fault, and not an access to memory that is not
+there.** The instruction is `movdqa (%r12),%xmm0`, and `%r12` is
+`0x713dd60fb012`. `movdqa` needs an address that is a multiple of 16, and that
+address is a multiple of 2. The proof that the page is present is 60
+instructions earlier in the same function: `mov (%r12),%rax` reads the same
+address and does not fault.
+
+**The pointer carries a discriminator.** `class ValueStorage` is `alignas(16)`
+and packs 3 bits into the low bits of `payload[0]`, so a real `Value *` always
+ends in 0. Take those bits off `0x713dd60fb012` and the result is
+`0x713dd60fb010`, which is a multiple of 16.
+
+**The memory it names is the collected heap, and it holds well-formed values.**
+`GC_least_plausible_heap_addr` is `0x713d6e7f01bb` and
+`GC_greatest_plausible_heap_addr` is `0x713de04ef5e6`, so the address is inside
+the heap of the collector. The bytes there repeat every 32:
+
+```
+0x713dd60fb000:  0x0000713dd66d1695   0x0000713dd60fb012
+0x713dd60fb010:  0x0000000000000009   0x0000000000041032
+0x713dd60fb020:  0x0000713dd66d1695   0x0000713dd60fb032
+0x713dd60fb030:  0x0000000000000009   0x0000000000041031
+```
+
+Read as `Value`, each pair is coherent. The one at `...000` has
+`payload[0] & 7 == 5`, which is `pdPairOfPointers`, and its `payload[1]` is the
+address of the next `Value` with 2 in the low bits. The one at `...010` has
+`payload[0] & 7 == 1`, which is `pdSingleDWord`, an internal type of 1, and a
+payload that counts down by one for each pair. **This is live data, and not
+rubbish.**
+
+`%rax` at the fault is `0x1032000000000000`, which is exactly the eight bytes
+that start at `...012`. So the dispatch read its discriminator from an address
+two bytes into a `Value`, got 0 in the low bits, took that for
+`pdUninitialized`, and fell through to the 16-byte copy.
+
+**The shape that fits is an `Env` whose memory now holds an array of values.**
+`Env` is `{ Env * up; Value * values[0]; }`, so `values[0]` sits 8 bytes in.
+Eight bytes into this block is `0x713dd60fb012`, which is `payload[1]` of the
+first `Value` of the array. A read of `env->values[0]` therefore returns the
+tagged second word of a `Value`, and that is precisely the pointer that faults.
+
+State this one carefully: `%r8` holds the address that was read, and it is a
+register the unwinder cannot recover, so it reads 0 in the dump. The
+identification of `0x713dd60fb000` as the env is **inferred from the layout,
+and not read out of the core.**
+
+**So the failure is a use of collected memory after that memory was given to
+something else**, which is the shape this issue always had. What is new is that
+the reused block is now identified, and the fingerprint is cheap to recognise
+again: a `Value *` whose low three bits are not 0.
+
+### The remaining family
+
 **`std::make_shared<nix::EvalState>` is not that structure. Do not change it.**
 `py_eval.hh` builds the evaluator with the default allocator, and
 `libcmd/command.cc:169` builds one with
