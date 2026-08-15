@@ -24,21 +24,13 @@
 
 struct PyValue;
 
-/// Boehm's allocator that gives memory the collector scans but never frees.
-///
-/// The name lives in two namespaces, and neither file chooses. With the
-/// collector it is `::traceable_allocator`, from `<gc/gc_allocator.h>`;
-/// without it `nix/expr/eval-gc.hh` defines `nix::traceable_allocator` as an
-/// alias of `std::allocator`. Nix's own code is inside `namespace nix`, so an
-/// unqualified name reaches whichever exists. This file is not, so it needs
-/// the alias.
-#if NIX_USE_BOEHMGC
-template<typename T>
-using nanopynix_traceable_allocator = ::traceable_allocator<T>;
-#else
-template<typename T>
-using nanopynix_traceable_allocator = nix::traceable_allocator<T>;
-#endif
+// `traceable_allocator` is at global scope in both builds, and needs no
+// `#if` here. With the collector it comes from `<gc/gc_allocator.h>`, which
+// `nix/expr/eval-gc.hh` includes; without it, that same header defines a shim
+// of `std::allocator` under the same name and also at global scope. Writing
+// `nix::traceable_allocator` compiles with the collector, because the name is
+// then found in the enclosing global scope, and fails without it. Only the
+// `-nogc` variant catches that, and it did.
 
 struct PyEvalState {
     using SettingsMap = std::map<std::string, std::string>;
