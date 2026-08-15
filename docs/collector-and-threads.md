@@ -611,6 +611,19 @@ something else**, which is the shape this issue always had. What is new is that
 the reused block is now identified, and the fingerprint is cheap to recognise
 again: a `Value *` whose low three bits are not 0.
 
+**The bad pointer does not cross the boundary of the bindings.**
+`nanopynix_check_value_alignment` refuses such a pointer where a value enters a
+wrapper and where an accessor reads one, and
+`nanopynix/tests/bindings/test_value_alignment_check.py` proves that it refuses
+one. Fourteen runs of the short reproduction, two of which died with SIGSEGV:
+**the check fired in neither.**
+
+That is a result and not a disappointment. No `PyValue` holds the bad pointer.
+`ExprVar::eval` reads it out of an `Env` and faults on it, entirely inside
+libnixexpr. So the block that the collector reused is reached through Nix's own
+environment chain, and the search belongs there rather than in anything this
+repository hands across.
+
 ### The remaining family
 
 **`std::make_shared<nix::EvalState>` is not that structure. Do not change it.**

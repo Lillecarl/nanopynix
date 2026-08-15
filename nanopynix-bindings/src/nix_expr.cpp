@@ -824,6 +824,11 @@ nix::Value *PyValue::checkedValue() const {
     (void) evalState();
     if (!root || !*root)
         throw std::runtime_error("Nix value has been released");
+    // The wrapper checked this pointer when it took it. It checks again here
+    // because the two moments are far apart: a collection runs between them,
+    // and issue #70 is a block that the collection gave away. This is the read
+    // that every accessor makes, so it is the first place that can see it.
+    nanopynix_check_value_alignment(*root, "an accessor on a value");
     return *root;
 }
 
@@ -2031,6 +2036,21 @@ void nanopynix_bind_expr(nb::module_ &m) {
           "Internal: register the current dedicated evaluator thread with Boehm GC.");
     m.def("_exit_evaluator_thread", &exit_evaluator_thread,
           "Internal: unregister the current dedicated evaluator thread from Boehm GC.");
+    m.def("_check_value_alignment",
+          [](uintptr_t address) {
+              nanopynix_check_value_alignment(reinterpret_cast<const nix::Value *>(address),
+                                              "a caller of _check_value_alignment");
+          },
+          nb::arg("address"),
+          "Internal: run the value alignment check against a raw address.\n\n"
+          "The check refuses a Nix value pointer that keeps the discriminator bits "
+          "that `nix::ValueStorage` packs into the low bits of a value. Issue #70 "
+          "gives the analysis, and `docs/collector-and-threads.md` gives the core "
+          "dump.\n\n"
+          "It exists so a test can prove that the check rejects such a pointer and "
+          "accepts an aligned one. No ordinary caller can make a misaligned value, "
+          "which is the whole point, so the check is untestable without it. Remove "
+          "this together with issue #70.");
     m.def("_gc_collect", &gc_collect, nb::call_guard<nb::gil_scoped_release>(),
           "Internal: run one full Boehm collection now, on an evaluator thread.\n\n"
           "Python's gc.collect() does not reach the Nix heap. A test that drops a "
