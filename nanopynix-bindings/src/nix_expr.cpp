@@ -591,6 +591,67 @@ static nix::SourcePath lookup_file_arg(nix::EvalState &state, std::string_view s
 // PyEvalState out-of-line methods
 // =========================================================================
 
+#if NIX_USE_BOEHMGC
+// Did the REPL environment become unreachable to the collector?
+//
+// **This is the only way to test the invariant that `repl_env_root` holds.**
+// A freed block keeps its old contents until something else takes it, so
+// reading a REPL binding back answers "yes" whether or not the environment is
+// still alive. A finalizer answers the real question, and it does not depend
+// on the block being handed away afterwards: Boehm queues one when it finds
+// the object unreachable, so any count above zero is the proof.
+//
+// `begin_repl` allocates one `nix::Env` with `GC_MALLOC`. It used to keep the
+// only pointer to it in `PyEvalState::repl_env`, and a `PyEvalState` lives in
+// the Python heap, which Boehm scans no part of. That was issue #70.
+// `py_eval.hh` gives the root that answers it, and the measurement.
+//
+// Only under NANOPYNIX_GC_REPL_ENV_PROBE, so an ordinary run registers
+// nothing. Registering a finalizer does not root an object, but it does move
+// when the block is freed, and a caller who has not asked for the probe
+// should not pay that.
+namespace {
+
+std::atomic<int64_t> repl_env_finalized{0};
+
+void repl_env_finalizer(void *, void *) {
+    repl_env_finalized.fetch_add(1, std::memory_order_relaxed);
+}
+
+bool repl_env_probe_enabled() {
+    const char *value = std::getenv("NANOPYNIX_GC_REPL_ENV_PROBE");
+    return value != nullptr && *value == '1';
+}
+
+std::atomic<int64_t> finalizer_self_test_count{0};
+
+void finalizer_self_test_callback(void *, void *) {
+    finalizer_self_test_count.fetch_add(1, std::memory_order_relaxed);
+}
+
+// Allocate a block of `size` bytes, give it a finalizer, and drop it.
+//
+// Out of line and never inlined, so the frame that held the pointer is gone
+// and the next call reuses those stack slots. A conservative collector keeps
+// a block that any stale slot still names, which is the one way this control
+// can report a false negative.
+//
+// `no_order` and not `ignore_self`. Boehm refuses to finalize an object it
+// finds in a cycle of finalizable objects, and it says so with
+// "Finalization cycle involving ...". A count that stops there reads as
+// "nothing died", which is the wrong answer in the direction that hides a
+// defect. This probe asks only whether a block became unreachable, and it
+// needs no ordering between one block and the next.
+[[gnu::noinline]] void allocate_and_drop_finalizable(size_t size) {
+    void *block = GC_MALLOC(size);
+    if (block != nullptr)
+        GC_register_finalizer_no_order(block, finalizer_self_test_callback, nullptr, nullptr,
+                                          nullptr);
+}
+
+}  // namespace
+#endif
+
 PyValue PyEvalState::eval_string(const std::string &expr, const std::string &path) {
     checkThread();
     nix::Value *v;
@@ -612,8 +673,19 @@ void PyEvalState::begin_repl() {
 
     constexpr size_t repl_env_size = 32768;
     repl_static_env = std::make_shared<nix::StaticEnv>(nullptr, state->staticBaseEnv);
-    repl_env = &state->mem.allocEnv(repl_env_size);
+    // Allocate straight into the root. `repl_env_root` is the only thing that
+    // keeps this environment alive -- see its comment in `py_eval.hh`, and
+    // issue #70.
+    repl_env_root = std::allocate_shared<nix::Env *>(nanopynix_traceable_allocator<nix::Env *>(),
+                                                     &state->mem.allocEnv(repl_env_size));
+    repl_env = *repl_env_root;
     repl_env->up = &state->baseEnv;
+#if NIX_USE_BOEHMGC
+    // Only for the test that holds issue #70. The comment above
+    // `repl_env_finalizer` gives the question it answers.
+    if (repl_env_probe_enabled())
+        GC_register_finalizer_no_order(repl_env, repl_env_finalizer, nullptr, nullptr, nullptr);
+#endif
     repl_displ = 0;
     // The one place the size is named. Every bounds check reads it back from
     // here rather than repeating the literal -- see `repl_env_capacity`.
@@ -2085,6 +2157,53 @@ void nanopynix_bind_expr(nb::module_ &m) {
           "neither the caller nor `FINISHED`.\n\n"
           "Call it only on a thread that then enters and exits the evaluator "
           "hook. A build with no collector raises.");
+    m.def("_gc_finalizer_self_test",
+          [](int64_t count, int64_t size) -> int64_t {
+#if !NIX_USE_BOEHMGC
+              (void) count;
+              (void) size;
+              throw no_collector_in_this_build("cannot run the finalizer self test");
+#else
+              if (count < 1 || size < 1)
+                  throw std::runtime_error("count and size must both be positive");
+              finalizer_self_test_count.store(0, std::memory_order_relaxed);
+              for (int64_t i = 0; i < count; ++i)
+                  allocate_and_drop_finalizable(static_cast<size_t>(size));
+              GC_gcollect();
+              GC_gcollect();
+              GC_invoke_finalizers();
+              return finalizer_self_test_count.load(std::memory_order_relaxed);
+#endif
+          },
+          nb::arg("count"), nb::arg("size"),
+          "Internal, for tests: does a finalizer fire at all in this process?\n\n"
+          "Allocates `count` blocks of `size` bytes, gives each one a finalizer, "
+          "drops every reference, collects, and answers how many finalizers ran. "
+          "It is the control for `_gc_repl_env_finalized`: that count means "
+          "nothing until this one shows the machinery works at the same size.\n\n"
+          "A few blocks survive a correct run, because conservative scanning "
+          "keeps one that a stale stack slot still names. Read the number, and "
+          "not an exact equality.");
+    m.def("_gc_repl_env_finalized",
+          []() -> int64_t {
+#if !NIX_USE_BOEHMGC
+              throw no_collector_in_this_build("cannot count REPL environment finalizers");
+#else
+              // The finalizers Boehm queued run when something allocates, or
+              // on demand. Ask for them, so the count is current.
+              GC_invoke_finalizers();
+              return repl_env_finalized.load(std::memory_order_relaxed);
+#endif
+          },
+          "Internal, for tests: how many REPL environments the collector freed.\n\n"
+          "`begin_repl` allocates one `nix::Env` with the collector and keeps the "
+          "only pointer to it in a `PyEvalState`, which lives in the Python heap. "
+          "Boehm scans no part of that heap. This counts the environments the "
+          "collector found unreachable, so any number above zero says the block "
+          "was live to Nix and garbage to Boehm.\n\n"
+          "It counts nothing unless NANOPYNIX_GC_REPL_ENV_PROBE is 1, because "
+          "registering a finalizer changes when a block is freed, and a caller "
+          "who has not asked for the probe should not pay that.");
     m.def("_gc_stats", &gc_stats,
           "Internal: the Boehm counters, for a test that must measure the Nix heap.\n\n"
           "`non_gc_bytes` is the interesting one. Every `nix::allocRootValue` is one "

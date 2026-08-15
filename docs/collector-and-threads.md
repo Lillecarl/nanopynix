@@ -234,6 +234,69 @@ call out, rebuild, and build an evaluator on the main thread:
 Two runs decide it. Prefer this over a rate: the soak below could not
 reproduce the failure often enough to measure either side.
 
+### #70: the REPL environment had no root
+
+**`PyEvalState::begin_repl` allocated one `nix::Env` with `GC_MALLOC` and kept
+the only pointer to it in a plain member.** A `PyEvalState` lives in the Python
+heap. Boehm scans its own heap, the stacks of the threads it knows, and the
+memory it hands out as uncollectable. It scans no part of the Python heap, so
+that member rooted nothing, and the collector freed the environment while the
+REPL scope was open.
+
+Every observation of the crash follows from that one fact.
+
+| observation | what it follows from |
+|---|---|
+| frame #4 is in `_ext.so`, directly under `ExprVar::eval` | `EvalState::eval` is in libnixexpr and cannot inline into our module, so the caller is one of the three `parsedExpr->eval(*state, *repl_env, *v)` calls, and all three are REPL functions |
+| the faulting pointer is 2 past a 16-byte boundary | `pdListN` is 2, so the word is a `Value` payload and not a `Value *` |
+| the memory holds a repeating array of values | the environment's block was handed to a list |
+| `mov (%r12),%rax` reads the same address and does not fault | the page is mapped, and only the alignment is wrong |
+| the alignment check at the boundary never fires | the pointer is made and used inside libnixexpr, and no `PyValue` holds it |
+
+**The measurement.** A finalizer on the environment answers the question
+directly, and it does not need the freed block to be handed away afterwards.
+
+The control comes first, because a probe that never fires proves nothing. The
+machinery finalizes 200 of 200 blocks of 64 bytes, and 20 of 20 at the
+environment's own size. Use `GC_register_finalizer_no_order`: Boehm refuses to
+finalize an object it finds in a cycle of finalizable objects, and a count that
+stops there reads as "nothing died".
+
+Then, with exactly one environment in flight -- a plain evaluator drives every
+collection, so a count can only mean the scope under test:
+
+| state of the REPL scope | unrooted | rooted |
+|---|---|---|
+| open, nothing evaluated | **1 collected** | 0 |
+| open, one deep evaluation | **1 collected** | 0 |
+| after close | 1 | 1 |
+
+The last row still fires, so the environment is released when the scope closes
+rather than leaked.
+
+**The correction.** `PyEvalState::repl_env_root` holds it now:
+`std::allocate_shared<nix::Env *>` with `traceable_allocator`, which allocates
+with `GC_MALLOC_UNCOLLECTABLE`. That is the mechanism Nix uses for the same
+problem: `baseEnvP` in `src/libexpr/eval.cc` is the identical call, and
+`nix::allocRootValue` is the same idea for a value. Upstream's REPL takes the
+other route and derives `NixRepl` from `gc`, which puts the whole object into
+the collector's heap. Either roots it. A raw member of a Python object does
+not.
+
+**`repl_env` was the only one.** Every other Nix pointer in these bindings is a
+local variable, which the collector reaches through the stack of a registered
+thread, or a `nix::RootValue`, which is already a root.
+
+`nanopynix/tests/inproc/test_repl_env_root.py` holds this. It is a
+deterministic gate and not a rate: against the unrooted bindings it fails with
+"the collector freed the REPL environment while the scope was open".
+
+**The crash arm could not have settled this, and says why the mechanism had
+to.** The amplified reproduction gave 0 SIGSEGV in 14 runs rooted, against 1 in
+8 unrooted, on one machine on one day. The documented rate for that arm is 4 in
+8, so the arm was far less sensitive than usual, and 0 against 1 decides
+nothing on its own.
+
 ## Excluded
 
 Each of these has evidence, and needs new evidence to reopen.
@@ -345,8 +408,14 @@ Each of these has evidence, and needs new evidence to reopen.
 
 ## Not yet explained
 
-**#70.** A `Value` reads as the wrong type during evaluation. The shape fits a
-live object that the collector reclaims and then hands out again.
+**#70 is explained, and "#70: the REPL environment had no root" holds it.**
+What follows is the history of the hunt, which is kept because it says what
+each instrument could and could not see, and because the reproduction it
+built is the one to use for the next defect of this shape.
+
+Read the stack of run 31820106000 below with the answer in hand: the dying
+thread is in `repl_eval_string`, and the other two are in `eval_string`. That
+trace named the REPL path before anything else did.
 
 The reproduction used to be the **whole** test suite, at about 1 failure in 5
 runs of 8 minutes, measured locally. A narrower selection does not reproduce,
@@ -623,6 +692,9 @@ That is a result and not a disappointment. No `PyValue` holds the bad pointer.
 libnixexpr. So the block that the collector reused is reached through Nix's own
 environment chain, and the search belongs there rather than in anything this
 repository hands across.
+
+**That narrowing found it.** The `Env` was the REPL environment, and nothing
+rooted it. "#70: the REPL environment had no root", above, gives the analysis.
 
 ### The remaining family
 

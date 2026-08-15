@@ -24,6 +24,22 @@
 
 struct PyValue;
 
+/// Boehm's allocator that gives memory the collector scans but never frees.
+///
+/// The name lives in two namespaces, and neither file chooses. With the
+/// collector it is `::traceable_allocator`, from `<gc/gc_allocator.h>`;
+/// without it `nix/expr/eval-gc.hh` defines `nix::traceable_allocator` as an
+/// alias of `std::allocator`. Nix's own code is inside `namespace nix`, so an
+/// unqualified name reaches whichever exists. This file is not, so it needs
+/// the alias.
+#if NIX_USE_BOEHMGC
+template<typename T>
+using nanopynix_traceable_allocator = ::traceable_allocator<T>;
+#else
+template<typename T>
+using nanopynix_traceable_allocator = nix::traceable_allocator<T>;
+#endif
+
 struct PyEvalState {
     using SettingsMap = std::map<std::string, std::string>;
 
@@ -40,6 +56,35 @@ struct PyEvalState {
     /// body calls `init`.
     const std::thread::id owner = std::this_thread::get_id();
     std::shared_ptr<nix::StaticEnv> repl_static_env;
+
+    /// The root that keeps the REPL environment alive, and the only one.
+    ///
+    /// `begin_repl` allocates one `nix::Env` with `GC_MALLOC`, and `repl_env`
+    /// below is a plain pointer inside this object. A `PyEvalState` lives in
+    /// the Python heap, and Boehm scans no part of that heap, so a plain
+    /// pointer roots nothing: the collector frees the environment while the
+    /// REPL scope is open, and the block comes back as something else.
+    ///
+    /// `traceable_allocator` allocates with `GC_MALLOC_UNCOLLECTABLE`, which
+    /// Boehm treats as a root and scans. This is how `nix::EvalState` roots
+    /// its own base environment -- `baseEnvP` in `src/libexpr/eval.cc` is the
+    /// same `std::allocate_shared<Env *>` -- and how `nix::allocRootValue`
+    /// roots a value. Upstream's REPL takes the other route and derives
+    /// `NixRepl` from `gc`, which puts the whole object in the collector's
+    /// heap. Either roots it; a raw member of a Python object does not.
+    ///
+    /// Measured, on the reproduction that `docs/collector-and-threads.md`
+    /// gives. A finalizer on the environment, and one collection with the
+    /// scope open:
+    ///
+    ///     state of the scope             environments collected
+    ///     open, nothing evaluated                             1
+    ///     open, one deep evaluation                           1
+    ///
+    /// Issue #70.
+    std::shared_ptr<nix::Env *> repl_env_root;
+
+    /// The REPL environment. `repl_env_root` above is what keeps it alive.
     nix::Env *repl_env = nullptr;
     size_t repl_displ = 0;
     /// How many bindings `repl_env` has room for, remembered from the
