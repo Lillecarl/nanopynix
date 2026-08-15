@@ -676,7 +676,7 @@ void PyEvalState::begin_repl() {
     // Allocate straight into the root. `repl_env_root` is the only thing that
     // keeps this environment alive -- see its comment in `py_eval.hh`, and
     // issue #70.
-    repl_env_root = std::allocate_shared<nix::Env *>(nanopynix_traceable_allocator<nix::Env *>(),
+    repl_env_root = std::allocate_shared<nix::Env *>(traceable_allocator<nix::Env *>(),
                                                      &state->mem.allocEnv(repl_env_size));
     repl_env = *repl_env_root;
     repl_env->up = &state->baseEnv;
