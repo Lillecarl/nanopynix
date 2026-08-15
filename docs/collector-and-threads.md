@@ -541,6 +541,32 @@ The question to answer next is which other structure holds a `nix::Value *`, or
 a `nix::Env *`, across a point where a collection can happen, and whether the
 memory that holds it is traced.
 
+**`std::make_shared<nix::EvalState>` is not that structure. Do not change it.**
+`py_eval.hh` builds the evaluator with the default allocator, and
+`libcmd/command.cc:169` builds one with
+`std::allocate_shared<EvalState>(traceable_allocator<EvalState>(), ...)`. That
+difference reads like a defect and is not one. Nix itself uses plain
+`std::make_shared<EvalState>` in `nix/main.cc`, `prefetch.cc`,
+`nix-build/nix-build.cc`, `upgrade-nix.cc` and
+`nix-instantiate/nix-instantiate.cc`. The one call in `libcmd` is the exception.
+
+The design is what makes both correct: every member of `EvalState` that refers
+to collected memory carries its own root.
+
+| member | what roots it |
+|---|---|
+| `baseEnvP` | `std::allocate_shared<Env *>(traceable_allocator<Env *>(), ...)` |
+| `fileEvalCache` | `traceable_allocator` on its nodes |
+| `internalPrimOps` | `traceable_allocator` on its nodes |
+| `vImportedDrvToDerivation` | a `RootValue`, so `allocRootValue` |
+| `Value::vTrue`, `Value::vFalse` | static storage, which Boehm scans |
+
+`mem.exprs` is the one that looks wrong and is not. It is a
+`std::pmr::monotonic_buffer_resource` over the ordinary heap, and `ExprString`
+and `ExprPath` each hold a `Value` inside it. Those values point into that same
+arena and not into collected memory, which is what the comment above
+`ExprString::v` states. The arena belongs to the evaluator and outlives them.
+
 ## The instruments, and what each one cannot see
 
 **Do not read a green sanitizer job as evidence against a collector bug.**
