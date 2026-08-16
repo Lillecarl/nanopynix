@@ -991,9 +991,12 @@ async def test_inproc_value_build_and_release(
             }
         """)
         outputs = await drv.build()
-        # Nix reports the logical StorePath. The fixture's local store maps it
-        # beneath its private root rather than the host's /nix/store mount.
-        out_path = AnyioPath(shared_nix_environment.root / "nix" / "store" / Path(outputs["out"]).name)
+        # Nix reports the logical StorePath. `physical_path` maps it to the
+        # path on disk, which is beneath the private root of a chroot store and
+        # is the logical path itself for the store of the machine. Spelling the
+        # chroot mapping out here instead made this fail under
+        # `NANOPYNIX_TEST_SYSTEM_STORE`, where there is no root to map through.
+        out_path = AnyioPath(shared_nix_environment.physical_path(outputs["out"]))
         assert await out_path.read_text() == "built-via-inproc\n"
 
         await drv.release()
