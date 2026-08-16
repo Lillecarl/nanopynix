@@ -12,7 +12,7 @@
   cachix,
   statix,
   tofuCoreSchemaTool,
-  storeExecTool,
+  storeExecTools,
   gdb,
 }:
 let
@@ -56,6 +56,6 @@ mkShell {
     # here so the editable dev shell resolves it exactly like the real,
     # non-editable build's makeWrapperArgs does (pynix/package.nix).
     tofuCoreSchemaTool
-    storeExecTool
-  ];
+  ]
+  ++ storeExecTools;
 }
