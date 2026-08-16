@@ -38,9 +38,9 @@ import urllib.parse
 from typing import TYPE_CHECKING, Any
 
 import anyio
-import pynix._util as pynix_util
 
 import nanopynix
+import pynix._util as pynix_util
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Sequence

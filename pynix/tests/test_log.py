@@ -8,10 +8,10 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
-import pynix._util as util_module
 import pytest
 from nanopynix_proto.nix.store import GetBuildLogRequest
 
+import pynix._util as util_module
 from pynix import Pynix
 
 if TYPE_CHECKING:

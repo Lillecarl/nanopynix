@@ -23,6 +23,13 @@ from nanopynix_proto.nix.common import LogLevel
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import ANSI
+
+from nanopynix.exceptions import EvaluatorAbandonedError, NixError
+from nanopynix.models import NixType
+from nanopynix.rpc import ReplSession, Store, ValueProxy
+from nanopynix.settings import NixFlakeSettings
+from nanopynix.verbosity import LogLevelInput, normalize_log_level
+from pynix import Pynix
 from pynix.repl import (  # type: ignore[reportPrivateUsage] -- tests intentionally access private symbols
     _HELP,
     Repl,
@@ -45,13 +52,6 @@ from pynix.repl import (  # type: ignore[reportPrivateUsage] -- tests intentiona
     _shell,
 )
 from pynix.target import EvaluationTarget
-
-from nanopynix.exceptions import EvaluatorAbandonedError, NixError
-from nanopynix.models import NixType
-from nanopynix.rpc import ReplSession, Store, ValueProxy
-from nanopynix.settings import NixFlakeSettings
-from nanopynix.verbosity import LogLevelInput, normalize_log_level
-from pynix import Pynix
 
 if TYPE_CHECKING:
     from nanopynix_testing.nix_environment import NixTestEnvironment

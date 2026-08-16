@@ -7,7 +7,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     # A test fixture, and nothing else. `pynix`'s LSP ships an
-    # `EasykubenixDialect` (pynix/src/pynix/_lsp/_easykubenix.py), and the
+    # `EasykubenixDialect` (pynix-lsp/src/pynix_lsp/_easykubenix.py), and the
     # scenarios in pynix/tests/test_lsp/easykubenix/ drive it against a real
     # easykubenix module tree rather than a hand-rolled `lib.evalModules`
     # stand-in -- which is the only way to test a dialect that exists to

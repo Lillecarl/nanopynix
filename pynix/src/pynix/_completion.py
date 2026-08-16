@@ -203,7 +203,7 @@ def _tree_prefix_at(source: str, byte_offset: int) -> tuple[str | None, str] | _
         # "c"), silently losing "a.b." -- this needs its own reconstruction,
         # walking the attrpath's siblings up to that point, mirroring
         # ``identifier_path_at``'s own binding-attrpath handling in
-        # ``pynix/_lsp/_syntax.py``.
+        # ``pynix-lsp/src/pynix_lsp/_syntax.py``.
         attrpath_prefix = _attrpath_binding_prefix_before_dot(nodes, byte_offset, encoded)
         if attrpath_prefix is not None:
             return attrpath_prefix

@@ -13,10 +13,9 @@ invocation reads one project and not the whole repository. Everything the root
 suite: these tests drive a real CLI against a real store, so they need the
 store, the evaluator and ``repo_root``.
 
-``support.lsp_environment`` is this suite's own. It supplies ``lsp_server``
-and ``lsp_wire``, and ``support/`` is a package inside the suite because
-nothing outside the suite reads it. This file imports those two fixtures
-rather than registering the module as a plugin; the import below says why.
+``support/`` is a package inside the suite because nothing outside the suite
+reads it. The language-server fixtures that used to be re-exported here moved
+to ``pynix-lsp/tests/conftest.py`` with the server itself, in issue #107.
 
 Every other plugin, beartype's import hook included, is named with ``-p`` in
 ``pynix/pytest.ini``. That file gives the reason.
@@ -32,7 +31,6 @@ import json
 import os
 import shutil
 import signal
-import subprocess
 import tempfile
 import uuid
 from contextlib import redirect_stderr, redirect_stdout
@@ -41,12 +39,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
-import pynix._util as pynix_util
 import pytest
 import structlog
 from structlog.exceptions import DropEvent
 
 import pynix
+import pynix._util as pynix_util
 from _shared_sessions import FAITHFUL_SESSIONS_ENV_VAR, SharedSessions
 
 # Session scope, and anyio's own `anyio_backend` is module scope. Both are
@@ -57,14 +55,6 @@ from _shared_sessions import FAITHFUL_SESSIONS_ENV_VAR, SharedSessions
 # the full account.
 from nanopynix_testing.nix_environment import anyio_backend as anyio_backend
 from pynix import Pynix
-
-# The two LSP fixtures, re-exported so that this conftest supplies them to
-# every test below it. An import and not a `pytest_plugins` entry, and not a
-# `-p` name either: `pytest_plugins` is legal only in a top-level conftest, and
-# `-p` is processed before `sys.path` reaches this suite, so `support` is not
-# importable that early. `pytest.ini` explains both. A fixture that a conftest
-# imports is a fixture that conftest defines, which is all this needs to be.
-from support.lsp_environment import lsp_server as lsp_server, lsp_wire as lsp_wire
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Generator, Iterator
@@ -386,38 +376,6 @@ class PynixStoreScenario:
 
     def _append_log_record(self, record: dict[str, object]) -> None:
         self.live_log.append(record)
-
-
-@pytest.fixture(scope="session")
-def easykubenix_openapi_schema() -> str:
-    """Realise the pinned Kubernetes OpenAPI schema the easykubenix scenarios read.
-
-    The entry point is found relative to this file rather than to ``repo_root``.
-    Issue #130 moved the suite, and a path spelled out from the repository root
-    is a second place that has to be edited when it moves again.
-
-    ``test_lsp/easykubenix/default.nix`` beside this file interpolates a ``fetchurl``
-    derivation into ``openApiSchemaPath``, and nothing on the path from there to
-    the assertion ever *builds* it -- the LSP evaluates that file and then reads
-    the resulting path straight off disk. So on any machine where the fetch has
-    not happened to occur, all nine easykubenix scenarios fail with
-    ``FileNotFoundError`` on a store path that is perfectly valid and simply
-    absent, which reads as a bug in the LSP rather than a missing fixture.
-
-    Sync on purpose: a blocking call is fine here (this is not an async
-    function), and a session-scoped async fixture would need the whole suite's
-    event loop to outlive it for no benefit.
-    """
-    entry = Path(__file__).parent / "test_lsp" / "easykubenix" / "default.nix"
-    result = subprocess.run(  # noqa: S603 -- fixed argv, no shell, paths from the repo itself
-        ["nix-build", "--no-out-link", str(entry), "-A", "openApiSchema"],  # noqa: S607 -- nix-build resolved from PATH, as everywhere else in this suite
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        pytest.skip(f"could not realise the easykubenix OpenAPI schema (offline?):\n{result.stderr}")
-    return result.stdout.strip()
 
 
 @pytest.fixture(scope="session")

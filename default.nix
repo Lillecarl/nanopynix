@@ -115,7 +115,7 @@ let
   # Exports OpenTofu's built-in ("core") HCL block schema
   # (resource/data/count/for_each/lifecycle/...) as JSON for a given OpenTofu
   # version, on demand -- see tools/tofu-core-schema/package.nix and
-  # pynix/src/pynix/_lsp/_tofu_core_schema.py, which invokes this at LSP-
+  # pynix-lsp/src/pynix_lsp/_tofu_core_schema.py, which invokes this at LSP-
   # server runtime rather than baking a static snapshot. Independent of any
   # nanopynix/Nix version, so it lives here rather than inside
   # nanopynixForNixVersions.
@@ -539,14 +539,32 @@ let
               pynix = mkApp {
                 name = "pynix";
                 inherit (final) pythonSet;
-                # pynix._lsp._tofu_core_schema shells out to this at LSP
-                # runtime rather than baking a static snapshot, so it has to
-                # be on the program's PATH.
+                # `pynix develop` calls `nanopynix.store_exec_prefix`, which
+                # resolves this off PATH. The prefix runs a program out of a
+                # store that is relocated, which is every store that pynix
+                # opens away from the root one.
                 #
-                # storeExecTool likewise: nanopynix.store_exec_prefix resolves
-                # it off PATH, and the terranix dialect execs `tofu` straight
-                # out of whatever store the LSP is evaluating against -- which
-                # is relocated whenever pynix is pointed at a non-root store.
+                # `tofuCoreSchemaTool` was here as well until issue #107. It
+                # belongs to the language server, so it is on the PATH of the
+                # `pynix-lsp` application below.
+                pathInputs = storeExecTools;
+              };
+              # The language server, as a release application of its own.
+              # Issue #107 split it out of `pynix`, so that `pygls`,
+              # `lsprotocol` and `jsonschema` are not in the closure of
+              # `pynix build`. `pynix` is still a dependency of it, so this
+              # application carries both programs' code and `pynix lsp` also
+              # works inside its venv.
+              #
+              # `tofuCoreSchemaTool` is here because
+              # `pynix_lsp._tofu_core_schema` runs it at request time, rather
+              # than reading a snapshot that this repository stores.
+              # `storeExecTools` is here for the same reason it is on `pynix`:
+              # the terranix dialect runs `tofu` out of the store that the
+              # server evaluates against.
+              pynix-lsp = mkApp {
+                name = "pynix-lsp";
+                inherit (final) pythonSet;
                 pathInputs = [
                   tofuCoreSchemaTool
                 ]
@@ -942,6 +960,11 @@ lib.throwIf (unlistedVariants != [ ])
       # this repo's project overlay into the consumer's set.
       pytest-agent
       pynix
+      # The language server of `pynix-lsp/`, which issue #107 split out of
+      # `pynix`. It is a second application, and not a variant of the first
+      # one: an editor names one command, and `pynix-lsp` is the name that
+      # every other Nix language server uses.
+      pynix-lsp
       # The daemon proxy of `pynixd/`. `nixosModules.pynixd` in `flake.nix`
       # defaults `services.pynixd.package` to this one.
       pynixd

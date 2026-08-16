@@ -7,17 +7,17 @@ import pytest
 from anyio import Path as AnyioPath
 from nanopynix_helpers import build as nanopynix_helpers_build
 from nanopynix_helpers.fod import replace_fod_hash as _real_replace_fod_hash
-from pynix.build import (
-    BuildTargetError,
-    _build_target,  # pyright: ignore[reportPrivateUsage] -- test drives the private build step directly to exercise FOD-update/dry-run paths
-)
-from pynix.target import EvaluationTarget
 
 import nanopynix
 from nanopynix._ansi import strip_ansi
 from nanopynix.exceptions import StoreError
 from nanopynix_testing.nix_environment import with_nixpkgs
 from pynix import Pynix
+from pynix.build import (
+    BuildTargetError,
+    _build_target,  # pyright: ignore[reportPrivateUsage] -- test drives the private build step directly to exercise FOD-update/dry-run paths
+)
+from pynix.target import EvaluationTarget
 from test_support.git_fixtures import init_flake_repo
 
 if TYPE_CHECKING:

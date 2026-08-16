@@ -71,6 +71,10 @@ let
       # `pynixd/docs/notes/`.
       ../pynixd
       ../pynix
+      # The language server, which issue #107 moved out of `../pynix`. Without
+      # it `check-lint`, `check-format` and `check-types` read a smaller tree
+      # than `ruff check .` in the dev shell reads.
+      ../pynix-lsp
       ../completion-spike
       ../pytest-agent
       ../test-support
@@ -119,6 +123,10 @@ let
       "test"
       "docs"
     ];
+    # The language server, which issue #107 moved out of `pynix`. pyright
+    # reads `pynix-lsp/src` and `pynix-lsp/tests`, so the env has to carry
+    # `pygls`, `lsprotocol`, `jsonschema` and `pytest-lsp`.
+    pynix-lsp = [ "test" ];
     pytest-agent = [ ];
     # The `test` extra, because pyright reads grpclib-transports' own tests
     # and benchmarks and they import `greeter`, `asyncssh` and `rich`.
@@ -187,6 +195,13 @@ let
   # it would report the sandbox rather than the code.
   pynixdEnv = pythonSet.mkVirtualEnv "pynixd-test-env" {
     pynixd = [ "test" ];
+  };
+
+  # And an eighth. `pynix` and nothing else, which is what the `pynix-isolated`
+  # gate below asks a question of. The dev shell carries the language server
+  # on purpose, so no environment that a person works in can answer it.
+  pynixOnlyEnv = pythonSet.mkVirtualEnv "pynix-only-env" {
+    pynix = [ ];
   };
 
   # A minimum NixOS configuration, so that the module of pynixd is evaluated.
@@ -290,6 +305,61 @@ in
   pynixd = mkCheck "pynixd" [
     pynixdEnv
   ] "cd pynixd && python -m pytest -p no:cacheprovider tests/unit";
+
+  # **`pynix` alone, and the language server must not arrive with it.** Issue
+  # #107 split `pynix-lsp` out to take `pygls`, `lsprotocol` and `jsonschema`
+  # off the start-up of `pynix build`: 349 of the 966 modules that `import
+  # pynix` loaded came from those three, and the split removed 62 of the 966.
+  #
+  # A test in either suite cannot state this. The dev shell installs both
+  # projects, on purpose, because `pynix lsp` is what a developer here calls.
+  # So the question "is the server absent" only has an answer inside a venv
+  # built for the question, which is what `pynixOnlyEnv` is.
+  #
+  # **The gate asks two questions, and `jsonschema` is why there are two.**
+  # `pygls`, `lsprotocol` and `pynix_lsp` must not be installed at all: no
+  # other project here needs them. `jsonschema` is a dependency of
+  # `nanopynix`, which ships `jsonschema_primops()`, so it is installed and
+  # correct -- what must not happen is `import pynix` loading it. The second
+  # question is therefore about `sys.modules` after the import, which is also
+  # the cost that issue #107 measured. Issue #123 tracks that cost.
+  #
+  # The third question is the other half of the optional import.
+  # `pynix/__init__.py` mounts `Lsp` when this project is installed, and an
+  # optional import that silently never succeeds is the failure that half
+  # reports: `lsp` has to be absent here and present in the dev shell, and
+  # `tests/meta/test_subcommands.py` states the second case.
+  #
+  # `runCommand` and not `mkCheck`: this gate reads no file of the source
+  # tree, and `cd`-ing into one would put a `pynix/` directory on `sys.path`
+  # as a namespace portion for no reason.
+  pynix-isolated =
+    runCommand "nanopynix-check-pynix-isolated" { nativeBuildInputs = [ pynixOnlyEnv ]; }
+      ''
+        python - <<'EOF'
+        import importlib.util
+        import sys
+
+        NOT_INSTALLED = ("pygls", "lsprotocol", "pynix_lsp")
+        NOT_IMPORTED = (*NOT_INSTALLED, "jsonschema")
+
+        present = [n for n in NOT_INSTALLED if importlib.util.find_spec(n)]
+        if present:
+            raise SystemExit(f"the venv of pynix must not hold the language server, but it holds: {present}")
+
+        import pynix
+
+        loaded = sorted({m.split(".")[0] for m in sys.modules} & set(NOT_IMPORTED))
+        if loaded:
+            raise SystemExit(f"`import pynix` must not load these, and it loaded: {loaded}")
+
+        names = set(pynix.Pynix.subcommands())
+        if "lsp" in names:
+            raise SystemExit("pynix mounted the `lsp` subcommand without pynix-lsp installed")
+        print(f"pynix alone: {len(sys.modules)} modules, {len(names)} subcommands, no language server")
+        EOF
+        touch "$out"
+      '';
 
   # The NixOS module of pynixd, evaluated. It is the only module this
   # repository ships, and `flake.nix` exposes it as `nixosModules.pynixd`.

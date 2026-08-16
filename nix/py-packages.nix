@@ -178,6 +178,18 @@ let
         };
       };
 
+    # `nixLinked`, for the same reason as `pynix`: this project imports pynix
+    # and nanopynix, so it reaches the bindings, and a build against one Nix
+    # version does not fit another.
+    pynix-lsp =
+      _pySelf: rendered:
+      nixLinked rendered
+      // {
+        meta = rendered.meta // {
+          platforms = lib.platforms.unix;
+        };
+      };
+
     pytest-agent = _pySelf: rendered: {
       meta = rendered.meta // {
         platforms = lib.platforms.unix;
@@ -248,6 +260,15 @@ let
     nanopynix = { };
     nanopynix-helpers = { };
     pynix = { };
+    # The language server, and every dialect it understands. Separate from
+    # `pynix` so that `pygls`, `lsprotocol` and `jsonschema` are not
+    # dependencies of `pynix build`. Measured before the split: `import pynix`
+    # took 0.440 s over 966 modules, and 0.309 s over 904 after it. Issue #107.
+    #
+    # `pynix` mounts it through an optional import, so this is a dependency of
+    # nothing here -- an environment that leaves it out still has a working
+    # `pynix`, without the `lsp` subcommand.
+    pynix-lsp = { };
     # The helpers that every suite here shares. Editable like the rest, so a
     # change to a helper is live in the dev shell without a rebuild.
     test-support = { };

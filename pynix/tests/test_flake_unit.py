@@ -16,14 +16,14 @@ a real flake to expose them.
 from __future__ import annotations
 
 from nanopynix_proto.nix.common import NixType
+from rich.tree import Tree
+
+from nanopynix.rpc import ValueProxy
 from pynix.flake import (
     _build_tree,  # pyright: ignore[reportPrivateUsage] -- test unit-tests pynix.flake's private rendering helpers directly, see module docstring
     _format_attr,  # pyright: ignore[reportPrivateUsage] -- test unit-tests pynix.flake's private rendering helpers directly, see module docstring
     _TreeBudget,  # pyright: ignore[reportPrivateUsage] -- test unit-tests pynix.flake's private rendering helpers directly, see module docstring
 )
-from rich.tree import Tree
-
-from nanopynix.rpc import ValueProxy
 
 
 class _FakeFlakeValue(ValueProxy):

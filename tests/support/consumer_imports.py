@@ -60,6 +60,10 @@ if TYPE_CHECKING:
 # root. `tests/` is absent on purpose -- see the module docstring.
 CONSUMER_ROOTS = (
     "pynix/src",
+    # The language server, which issue #107 moved out of `pynix/src`. It is a
+    # first-party consumer of `nanopynix` exactly as `pynix` is, and without
+    # this entry the move took 14 modules out from under the ledger.
+    "pynix-lsp/src",
     "nanopynix-helpers/src",
     "docs",
 )

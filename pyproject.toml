@@ -19,6 +19,8 @@ extraPaths = [
   "tests",
   "nanopynix/tests",
   "pynix/tests",
+  "pynix-lsp/src",
+  "pynix-lsp/tests",
   # Reached by a bare `import beartype_bootstrap` from both the sitecustomize
   # shim beside it and `nanopynix_testing.beartype_hook`, because the
   # directory goes on PYTHONPATH rather than being a package -- see that
@@ -50,7 +52,7 @@ root = "tests"
 reportPrivateUsage = "none"
 
 # A suite reads the private surface of the thing it tests, and the LSP drivers
-# call `pynix._lsp._handlers._hover` and its peers directly. This entry says
+# call `pynix_lsp._handlers._hover` and its peers directly. This entry says
 # for `pynix/tests/` what the one above says for `tests/`: issue #130 moved the
 # suite out from under that root, and 18 reports appeared with no code change.
 # Each suite that moves needs its own entry.
@@ -62,13 +64,25 @@ reportPrivateUsage = "none"
 root = "pynix/tests"
 reportPrivateUsage = "none"
 
+# The drivers call `pynix_lsp._handlers._hover` and its peers directly. Issue
+# #107 moved this suite out of `pynix/tests/`, and the entry moved with it.
+#
+# No `extraPaths` here, unlike the entry below it. `extraPaths` in an execution
+# environment replaces the global list rather than adding to it, so an entry
+# that named `pynix-lsp/tests` alone lost `pynix-lsp/src` and pyright reported
+# 18 `reportMissingTypeStubs` for `pynix_lsp._handlers` and its peers. The
+# global list already carries both directories.
+[[tool.pyright.executionEnvironments]]
+root = "pynix-lsp/tests"
+reportPrivateUsage = "none"
+
 [[tool.pyright.executionEnvironments]]
 root = "pytest-agent/tests"
 extraPaths = ["pytest-agent/tests"]
 reportPrivateUsage = "none"
 
 [tool.coverage.run]
-source_pkgs = ["nanopynix", "nanopynix_helpers", "pynix"]
+source_pkgs = ["nanopynix", "nanopynix_helpers", "pynix", "pynix_lsp"]
 branch = true
 # The Nix worker runs in a process forked from a `multiprocessing` forkserver
 # helper, not a plain subprocess. `concurrency = multiprocessing` plus
@@ -89,6 +103,7 @@ nanopynix_helpers = [
   "*/site-packages/nanopynix_helpers",
 ]
 pynix = ["pynix/src/pynix", "*/site-packages/pynix"]
+pynix_lsp = ["pynix-lsp/src/pynix_lsp", "*/site-packages/pynix_lsp"]
 
 [tool.coverage.report]
 show_missing = true

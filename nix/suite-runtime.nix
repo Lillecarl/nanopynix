@@ -76,7 +76,7 @@
   # none of them: the only subcommand its fetcher names is `symbolic-ref`.
   gitMinimal
 
-  # `pynix._lsp._tofu_core_schema` resolves `nanopynix-tofu-core-schema` off
+  # `pynix_lsp._tofu_core_schema` resolves `nanopynix-tofu-core-schema` off
   # PATH, so every core (non-provider) meta-argument hover and completion needs
   # it present. The released `pynix` app supplies it through its wrapper; these
   # two supply it here.

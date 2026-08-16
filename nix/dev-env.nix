@@ -32,6 +32,11 @@ editablePythonSet.mkVirtualEnv "nanopynix-dev-env" (
     nanopynix = [ "test" ];
     nanopynix-helpers = [ "test" ];
     pynix = [ "test" ];
+    # The language server, which `pynix` mounts through an optional import.
+    # Named here so the dev shell has the `lsp` subcommand and can run its
+    # suite; a release `pynix` that leaves it out still works, without that
+    # subcommand. Issue #107.
+    pynix-lsp = [ "test" ];
     pytest-agent = [ ];
     # Already in the venv as a dependency of `nanopynix`; named here for its
     # `test` extra, which is what puts `greeter-proto`, `asyncssh` and `rich`

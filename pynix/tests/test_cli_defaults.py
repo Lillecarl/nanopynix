@@ -16,6 +16,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+
+from nanopynix.settings import field_key
+from pynix import Pynix
 from pynix._settings import (
     DEFAULT_STORE,
     UNSET,
@@ -25,9 +28,6 @@ from pynix._settings import (
     nix_settings,
 )
 from pynix.build import Build
-
-from nanopynix.settings import field_key
-from pynix import Pynix
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -112,10 +112,10 @@ _CONSTRUCTS = (
 CONSUMER_ENGINE_ANNOTATIONS: dict[tuple[str, str], str] = {
     ("pynix/src/pynix/_util.py", "Session"): _CONSTRUCTS,
     ("pynix/src/pynix/_util.py", "Store"): _OWN_STORE,
-    ("pynix/src/pynix/_lsp/_context.py", "Session"): _CONSTRUCTS,
-    ("pynix/src/pynix/_lsp/_context.py", "Store"): _OWN_STORE,
-    ("pynix/src/pynix/_lsp/_handlers.py", "Session"): _CONSTRUCTS,
-    ("pynix/src/pynix/_lsp/_handlers.py", "Store"): _OWN_STORE,
+    ("pynix-lsp/src/pynix_lsp/_context.py", "Session"): _CONSTRUCTS,
+    ("pynix-lsp/src/pynix_lsp/_context.py", "Store"): _OWN_STORE,
+    ("pynix-lsp/src/pynix_lsp/_handlers.py", "Session"): _CONSTRUCTS,
+    ("pynix-lsp/src/pynix_lsp/_handlers.py", "Store"): _OWN_STORE,
     ("nanopynix-helpers/src/nanopynix_helpers/build.py", "Session"): _CONSTRUCTS,
     ("nanopynix-helpers/src/nanopynix_helpers/build.py", "Store"): _OWN_STORE,
     ("nanopynix-helpers/src/nanopynix_helpers/build.py", "EvalSession"): (

@@ -29,6 +29,9 @@ SUITE_ROOTS = (
     REPO_ROOT / "test-support" / "tests",
     REPO_ROOT / "nanopynix-helpers" / "tests",
     REPO_ROOT / "pynix" / "tests",
+    # The language server suite, which issue #107 moved out of `pynix/tests`
+    # with the project it tests.
+    REPO_ROOT / "pynix-lsp" / "tests",
 )
 
 # The installed packages that a suite runs on top of. They hold no test, and
