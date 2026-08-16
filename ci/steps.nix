@@ -165,10 +165,26 @@ let
         # threads and forkserver workers, and that combine intermittently
         # failed with "database is locked" -- exit 3 on a job whose tests had
         # all passed. See nanopynix/tests.nix.
+        # **The job may raise this, and the macOS one does.** A GitHub runner
+        # for Linux is a VM among many; a runner for macOS is a real Apple
+        # machine from a much smaller pool, and it is short of both compute and
+        # I/O. Measured across two runs of the same commit, 31958491707 and
+        # 31960925314: the median test over one second took 1.27 times longer
+        # in the second, and the increase was spread evenly over flake, repl,
+        # example and store tests rather than concentrated anywhere.
+        #
+        # `test_osearch_builds_index_and_finds_a_match` then crossed the
+        # deadline at 30.9 s. It had measured 20.4 s against the same 30 s in
+        # the faster run, so the headroom was already one and a half.
+        #
+        # The default stays 30 for every Linux job, which measures 8 to 13
+        # minutes for the whole suite and needs nothing more. `kindEnv` below
+        # already raises it for the sanitized kinds, for the same reason: a
+        # slower run, not a different contract.
         env NANOPYNIX_CORE_DEBUG=1 \
             NANOPYNIX_GC_THREAD_DEBUG=1 \
             NANOPYNIX_GC_THREAD_DEBUG_FILE="$gc_thread_log" \
-            NANOPYNIX_RPC_TIMEOUT=30 \
+            NANOPYNIX_RPC_TIMEOUT="''${NANOPYNIX_RPC_TIMEOUT:-30}" \
             PYTHONDONTWRITEBYTECODE=1 \
             COVERAGE_FILE="$GITHUB_WORKSPACE/.coverage" \
             NANOPYNIX_COVERAGE=1 \

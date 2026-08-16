@@ -475,8 +475,9 @@ jobs:
     env:
       BACKEND: daemon
       CI_STEP: ciSteps.nix_2_34
+      NANOPYNIX_RPC_TIMEOUT: '90'
       NANOPYNIX_TEST_SYSTEM_STORE: '1'
-    timeout-minutes: 175
+    timeout-minutes: 190
     steps:
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -499,7 +500,7 @@ jobs:
       timeout-minutes: 15
     - name: Test nanopynix against Nix nix_2_34 (full suite, daemon backend)
       run: ./result/bin/nanopynix-ci suite
-      timeout-minutes: 45
+      timeout-minutes: 60
     - name: Upload test output
       uses: actions/upload-artifact@main
       if: ${{ !cancelled() }}
