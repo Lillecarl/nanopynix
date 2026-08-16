@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -1375,6 +1376,63 @@ static void py_primop_bridge(
     // context to every string in the result.
     python_to_value(state, result, ret, &name, context);
 }
+
+// =========================================================================
+// builtins.sleep
+// =========================================================================
+
+// **`builtins.sleep` holds the evaluator thread, and it never polls
+// `checkInterrupt()`.** That is the whole point of it. Nix can stop an
+// evaluation only where it polls, so a caller that cancels this one cannot be
+// answered, and nanopynix abandons the evaluator instead. The tests of that
+// path need such an operation, and they need it to last a *known* time.
+//
+// **A fold was what they used, and a fold measures the machine.** The
+// expression was 12 million additions, which took 0.72 s on an M-series Mac
+// and longer than the cancel window on the runner of the macOS job. So the
+// same test passed on one macOS host and failed on another, and the failure
+// said only that the evaluator was not abandoned. Every year of faster
+// hardware moves that boundary again.
+//
+// A sleep says how long it takes. Nothing has to be tuned, and no machine
+// changes the answer.
+//
+// **Registered as `__sleep`, so it is `builtins.sleep` and nothing else.**
+// `EvalState::addPrimOp` puts the unstripped name into `staticBaseEnv`, so a
+// primop called `sleep` would also be a global identifier and would shadow a
+// `let sleep = ...;` of the caller. Upstream draws the same line: `__head` is
+// `builtins.head` alone, while `map` is deliberately both.
+//
+// **This is a builtin that upstream Nix does not have.** An expression that
+// calls it evaluates here and fails under `nix eval`. That divergence is
+// deliberate and it is the reason the name is not something vaguer.
+static void sleep_primop(nix::EvalState &state, const nix::PosIdx pos, nix::Value **args, nix::Value &ret)
+{
+    const auto seconds = state.forceFloat(*args[0], pos, "while evaluating the argument of builtins.sleep");
+    if (seconds < 0) {
+        state.error<nix::EvalError>("builtins.sleep takes a number of seconds that is not negative, got %f", seconds)
+            .atPos(pos)
+            .debugThrow();
+    }
+    // No `checkInterrupt()`, and no loop that could poll one. See above.
+    std::this_thread::sleep_for(std::chrono::duration<double>(seconds));
+    ret.mkBool(true);
+}
+
+static nix::RegisterPrimOp primop_sleep({
+    .name = "__sleep",
+    .args = {"seconds"},
+    .arity = 1,
+    .doc = R"(
+      Hold the evaluator for *seconds*, then return `true`.
+
+      **This builtin is not part of Nix.** It exists so that a test can make an
+      evaluation last a known time, and it does not poll for an interrupt while
+      it waits, so it also serves as the operation that a cancellation cannot
+      stop.
+    )",
+    .impl = sleep_primop,
+});
 
 static void register_primop(
     const std::string &name,
