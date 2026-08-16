@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from typing import TYPE_CHECKING, Any, Never, cast
@@ -30,6 +29,7 @@ from nanopynix.models import LockedNode
 from nanopynix.protocols import AsyncLockedFlake
 from nanopynix_testing.nix_environment import with_nixpkgs
 from pynix import Pynix
+from support.nix_oracle import require_matching_nix_cli
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -154,8 +154,7 @@ def _normalise(value: object) -> object:
 
 async def _nix_print_dev_env(nix_file: Path, store_uri: str) -> dict[str, Any]:
     """The oracle: what ``nix print-dev-env --json`` says about the same file."""
-    if shutil.which("nix") is None:
-        pytest.skip("the nix CLI is the oracle for this test, and it is not on PATH")
+    await require_matching_nix_cli()
     result = await run_process(
         [
             "nix",

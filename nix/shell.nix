@@ -14,6 +14,9 @@
   tofuCoreSchemaTool,
   storeExecTools,
   gdb,
+  # The `nix` of this scope, which is the Nix that the bindings of this shell
+  # link. `packages` below puts it first on PATH. See the note there.
+  nix-cli,
 }:
 let
   # Reuses dev-env.nix's editable venv rather than assembling a second one.
@@ -36,6 +39,25 @@ mkShell {
   '';
 
   packages = [
+    # **The `nix` on PATH here is the Nix that these bindings link.**
+    #
+    # Two tests compare pynix against the `nix` command: `test_flake_metadata`
+    # runs `nix flake metadata`, and `test_develop` runs `nix print-dev-env`.
+    # Both read the binary from PATH, so a machine whose own Nix is newer than
+    # this checkout links makes them compare two Nix releases rather than
+    # pynix. Measured: a 2.35.1 installation against the 2.34.8 of these
+    # bindings reports a different flake `fingerprint`, and the test says only
+    # that two hashes differ.
+    #
+    # `ci/steps.nix` leaves `nix` out of every `runtimeInputs` for the opposite
+    # reason, and both are right. A runner installs one Nix and that
+    # installation owns the store the tests write to, so a second copy there
+    # would be redundant. A developer machine owns a Nix that nothing here
+    # chose, which is the case this fixes.
+    #
+    # `support/nix_oracle.py` still checks, because a shell is not the only way
+    # to run the suite.
+    nix-cli
     pythonEnv
     pyright
     ruff

@@ -21,12 +21,12 @@ express.
 from __future__ import annotations
 
 import json
-import shutil
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from pynix import Pynix
+from support.nix_oracle import require_matching_nix_cli
 from test_support.git_fixtures import init_linked_flakes
 from test_support.subprocess_output import run_process
 
@@ -38,8 +38,7 @@ if TYPE_CHECKING:
 
 async def _nix_flake_metadata(flake: Path, store_uri: str) -> dict[str, Any]:
     """The oracle: what ``nix flake metadata --json`` says about the same flake."""
-    if shutil.which("nix") is None:
-        pytest.skip("the nix CLI is the oracle for this test, and it is not on PATH")
+    await require_matching_nix_cli()
     result = await run_process(
         [
             "nix",
