@@ -67,4 +67,11 @@ known-first-party = [
   # The support package of `pynix-lsp/tests/`, importable by bare name for
   # the reason that `support` above gives.
   "lsp_support",
+  # The two distributions of `pynixd/`. ruff reads the nearest configuration
+  # to each file, so `pynixd/ruff.toml` governs that tree and this list does
+  # not reach it. The names are here so that the two answers agree: a module
+  # outside `pynixd/` that imports either one must not sort it as a
+  # third-party package, and `pynix` above is here for that same reason.
+  "nix_daemon_protocol",
+  "pynixd",
 ]
