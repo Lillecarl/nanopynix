@@ -28,6 +28,7 @@ import anyio
 import pytest
 
 import nanopynix
+from nanopynix_testing.nix_markers import LINUX_STORE_EXEC
 from test_support.subprocess_output import run_process
 
 if TYPE_CHECKING:
@@ -79,6 +80,7 @@ async def _check_runs_from_a_relocated_store(store: Any, tmp_path: Path) -> None
     assert "store-exec-ok" in result.stdout, result.describe()
 
 
+@LINUX_STORE_EXEC
 async def test_inproc_a_program_in_a_relocated_store_runs_through_the_exec_prefix(
     inproc_session: InprocSessionFactory, tmp_path: Path
 ) -> None:
@@ -86,6 +88,7 @@ async def test_inproc_a_program_in_a_relocated_store_runs_through_the_exec_prefi
         await _check_runs_from_a_relocated_store(store, tmp_path)
 
 
+@LINUX_STORE_EXEC
 async def test_rpc_a_program_in_a_relocated_store_runs_through_the_exec_prefix(
     rpc_session: RpcSessionFactory, tmp_path: Path
 ) -> None:

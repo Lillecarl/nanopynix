@@ -36,3 +36,17 @@ LINUX_NAMESPACES = pytest.mark.nix_platform("linux")
 already refuses the whole feature on another operating system, and reports
 the reason, so there is nothing for the test to assert there. Issue #143.
 """
+
+LINUX_STORE_EXEC = pytest.mark.nix_platform("linux")
+"""The test runs a program that lives in a relocated store.
+
+`nanopynix-store-exec` puts the real store at its logical path, and it does
+that with an unprivileged user namespace and a bind mount. Neither one exists
+on macOS, so `default.nix` builds the helper on Linux alone and
+`store_exec_prefix` raises there instead of returning a prefix.
+
+**The test cannot skip itself on the empty prefix.** Every store in this suite
+is relocated, so the prefix is never empty and the call raises before the skip.
+That loudness is deliberate -- a silent empty prefix reproduces the defect the
+helper exists to correct. Issue #143.
+"""
