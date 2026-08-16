@@ -27,6 +27,7 @@ import pytest
 
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix.settings import normalize_nix_path, normalize_nix_settings
+from nanopynix_testing.nix_markers import LINUX_FORK_THEN_INIT
 from test_support.subprocess_output import run_process
 
 # An `int` is wrong for both functions probed below -- `normalize_nix_path`
@@ -84,6 +85,7 @@ def test_subprocesses_inherit_the_startup_shim() -> None:
     assert any(entry.endswith("_subprocess_startup") for entry in entries), entries
 
 
+@LINUX_FORK_THEN_INIT
 @pytest.mark.skipif(
     "forkserver" not in multiprocessing.get_all_start_methods(),
     reason="the Nix worker is forked from a forkserver helper; nothing to check without one",
@@ -98,6 +100,19 @@ def test_a_forkserver_child_is_instrumented_not_merely_flagged() -> None:
     Both halves are asserted because the failure mode was *disagreement*: the
     flag alone was true, which is what made the gap invisible. A child with
     neither would be a different (and louder) bug.
+
+    **Linux only, and the library draws the same line.** A forkserver child is
+    a process that forked and never exec'd, and `resolve_worker_start` answers
+    `spawn` on Darwin for exactly that reason: libdispatch and CoreFoundation
+    do not survive it. So this builds, on purpose, the one thing nanopynix
+    refuses to build on macOS, and it asserts a property of a path that no
+    macOS caller ever takes.
+
+    Ungated, it did more than fail. On the runner of the macOS job it killed
+    the pytest process at 72 percent of run 31955684530: no summary, no
+    `junit.xml`, and the seven real failures of that run unreadable. It passes
+    on an M-series Mac, three runs out of three, so the host decides and this
+    machine cannot reproduce it. Issue #151.
     """
     ctx = multiprocessing.get_context("forkserver")
     ctx.set_forkserver_preload(["nanopynix.rpc.worker._worker"])
