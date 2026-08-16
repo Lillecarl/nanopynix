@@ -498,8 +498,7 @@ let
                     # and the type gate can see the tree. Reading the
                     # pyproject.toml is all `nixpkgsRootsFor` does, so this
                     # adds no second package.
-                    projectRoots =
-                      final.pyPackages.projectRoots ++ [ ./completion-spike ] ++ projectRoots;
+                    projectRoots = final.pyPackages.projectRoots ++ [ ./completion-spike ] ++ projectRoots;
                     # A nixpkgs Python package, but this scope's own -- lifted
                     # in as a root above rather than looked up by name.
                     exclude = [ "nanopynix-bindings" ];
@@ -530,10 +529,10 @@ let
                   inherit (inputs) nixpkgs;
                   inherit sanitizer sanitizerRuntime;
                   inherit (final) pythonSet;
-                  # The same tools the `pynix` app above puts on its PATH, for
-                  # the same reason -- the LSP tests drive the real handlers,
-                  # so they need them exactly as the released program does.
-                  inherit tofuCoreSchemaTool storeExecTools;
+                  # The one list that the dev shell also takes, so a tool the
+                  # suite needs cannot reach only one of them. See
+                  # nix/suite-runtime.nix.
+                  inherit (final) suiteRuntime;
                 };
               };
 
@@ -563,7 +562,13 @@ let
                 name = "pynixd";
                 inherit (final) pythonSet;
               };
-              shell = final.callPackage ./nix/shell.nix { inherit tofuCoreSchemaTool storeExecTools; };
+              # What the suite needs on PATH, shared by the packaged runner
+              # and the dev shell so the two cannot drift again. The file
+              # says which drifts it already cost.
+              suiteRuntime = final.callPackage ./nix/suite-runtime.nix {
+                inherit tofuCoreSchemaTool storeExecTools;
+              };
+              shell = final.callPackage ./nix/shell.nix { };
               # A live, editable-install `pynix`/`ekn` env (no devtools --
               # see nix/shell.nix for the full interactive nanopynix shell),
               # exported so other repos can drop a hot-reloading `pynix`

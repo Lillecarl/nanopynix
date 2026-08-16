@@ -2,14 +2,8 @@
   lib,
   writeShellApplication,
   pythonSet,
-  nix-cli,
   nixpkgs,
-  bashInteractive,
-  coreutils,
-  gdb,
-  gitMinimal,
-  tofuCoreSchemaTool,
-  storeExecTools,
+  suiteRuntime,
   version,
   sanitizer ? null,
   sanitizerRuntime ? null,
@@ -52,73 +46,11 @@ let
 in
 (writeShellApplication {
   name = "nanopynix-tests";
-  runtimeInputs = [
-    pythonEnv
-    nix-cli
-    # mktemp/wc/head/rm, for bounding the post-mortem backtrace below.
-    # writeShellApplication only *prepends* runtimeInputs to the ambient
-    # PATH, so without this the crash path would silently depend on the host
-    # having coreutils -- true on a GitHub runner, not something this runner
-    # should rely on.
-    coreutils
-    gdb
-    # Nix runs `git` off PATH to fetch a `git+file:` or a dirty `path:` flake
-    # input, so `nanopynix/tests/bindings/test_flake.py` needs one. The host
-    # git worked until the ASAN job, which sets LD_PRELOAD to the sanitizer
-    # runtime. That runtime links against the glibc of this closure, and the
-    # loader then gives the host git a mix of two glibcs:
-    #
-    #   git: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_ABI_DT_X86_64_PLT'
-    #   not found (required by /nix/store/...-glibc-2.42-67/lib/libdl.so.2)
-    #
-    # so `test_eval_flake_writes_lock_file` failed. One git from this closure
-    # answers that, and it removes a dependency on the host that the coreutils
-    # entry above already rejects for the same reason.
-    #
-    # **Minimal, because the other half of git is perl.** `pkgs.git` carries a
-    # 384.2 MiB closure over 87 store paths, and 40 of those paths are perl.
-    # `pkgs.gitMinimal` carries 159.3 MiB over 34 paths, and none of them is
-    # perl. What the minimal build drops is `git svn`, `git send-email`,
-    # `git cvs*`, gitweb and the gui, and Nix calls none of them: the only
-    # subcommand its fetcher names is `symbolic-ref`, and every core command
-    # is present either way.
-    gitMinimal
-    # `pynix._lsp._tofu_core_schema` resolves `nanopynix-tofu-core-schema`
-    # off PATH, so every core (non-provider) meta-argument hover/completion
-    # needs it present. The dev shell and the released `pynix` app both
-    # already supply it; this runner did not, which is why those scenarios
-    # passed interactively and failed in CI -- `get_core_schema` catches the
-    # OSError and returns None, so the LSP answered "no schema" rather than
-    # erroring, and the tests read as a schema bug.
-    tofuCoreSchemaTool
-    # **The bash of this closure, because the host's may not read what the
-    # suite writes.** `pynix develop` restores the environment of a
-    # derivation, and that environment carries bash functions of stdenv. One
-    # of them uses `;&`, the fallthrough form of a `case` arm, which bash
-    # added in 4.0.
-    #
-    # macOS ships 3.2.57, because every release after it is GPLv3. So the
-    # three `test_develop` tests that run the restored environment failed on
-    # the macOS job with a syntax error at line 1865 of a generated file, and
-    # passed in the dev shell, which carries 5.3.
-    #
-    # This is the same shape as `tofuCoreSchemaTool` above: the dev shell
-    # supplied it, the runner did not, and the difference read as a defect in
-    # the code under test. The runner carries what the suite needs.
-    #
-    # It does not repair `pynix develop` for a user whose own bash is 3.2.
-    # Issue #152 holds that, and this changes nothing about the fallback it
-    # describes.
-    bashInteractive
-  ]
-  # nanopynix.store_exec_prefix resolves this off PATH. Every Nix session in
-  # this suite runs against a *relocated* store, so without it the terranix
-  # LSP scenarios cannot exec `tofu` at all -- this is the runner's most
-  # load-bearing case for it, not an edge case.
-  #
-  # Empty off Linux, where the tool does not exist. `default.nix` says why,
-  # and the tests that need it carry a marker.
-  ++ storeExecTools;
+  # `pythonEnv` is the one input that differs between the two consumers of
+  # `suiteRuntime`: this runner takes the non-editable environment, and the
+  # dev shell takes the editable one. Everything else is the shared list, so a
+  # tool the suite needs cannot reach only one of them.
+  runtimeInputs = [ pythonEnv ] ++ suiteRuntime;
   text = ''
     cd ${source}
     export PYTHONNOUSERSITE=1
