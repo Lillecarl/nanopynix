@@ -323,6 +323,33 @@ def _marks_of(module: Any, func: Any) -> set[str]:
     return {mark.name for mark in _all_marks(module, func)}
 
 
+def _another_platform_only(module: Any, func: Any) -> bool:
+    """Whether ``nix_platform`` names an operating system that is not this one.
+
+    **The soak reads marks, and pytest is what turns this one into a skip.**
+    ``nix_runtime.pytest_collection_modifyitems`` adds a real ``skip`` mark to
+    an item whose ``nix_platform`` does not match ``sys.platform``, and that
+    happens at collection time. ``_DISQUALIFYING_MARKS`` therefore never sees
+    it: this scanner reads the source marks, where the name is still
+    ``nix_platform``.
+
+    Nothing reported this while the suite ran on Linux alone, because every
+    use of the mark names Linux. On macOS the soak ran three ``/proc`` probes
+    that the ordinary run skips, and all three failed -- which reads as a
+    concurrency defect and is a missing platform gate.
+
+    ``nix_version``, ``nix_capability``, ``nix_sanitizer`` and
+    ``nix_known_issue`` decide an outcome the same way. They are not here
+    because each one asks the linked Nix rather than the interpreter, and this
+    scanner runs before a runtime exists. A test that they exclude still
+    joins a lane. Issue #143 holds the macOS work that found this one.
+    """
+    for mark in _all_marks(module, func):
+        if mark.name == "nix_platform" and len(mark.args) == 1 and mark.args[0] != sys.platform:
+            return True
+    return False
+
+
 def _wants_an_unsupplied_fixture(module: Any, func: Any) -> bool:
     """Whether ``usefixtures`` asks for a fixture the driver does not supply.
 
@@ -469,6 +496,8 @@ def discover_roster(*, root: Path, engine: str | None = None) -> list[SoakCandid
             if func is None or not inspect.iscoroutinefunction(func):
                 continue
             if _marks_of(module, func) & _DISQUALIFYING_MARKS:
+                continue
+            if _another_platform_only(module, func):
                 continue
             if _wants_an_unsupplied_fixture(module, func):
                 continue
