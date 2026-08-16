@@ -40,6 +40,16 @@ _SUBPROCESS_CLOSE_TIMEOUT = 5.0
 # parent signals it. `_close_worker_process` gives the measurement and the
 # reason; `multiprocessing._stop_process` carries the same number.
 _PROCESS_EXIT_GRACE = 2.0
+# **`F_SETPIPE_SZ` is Linux only, and the lookup is the failure.** Python
+# defines the constant on Linux alone, so `fcntl.F_SETPIPE_SZ` raises
+# `AttributeError` on macOS, and the `OSError` suppression in
+# `bump_subprocess_pipe_buffers` does not catch that. A stdio worker therefore
+# died at start on macOS, before it read a byte.
+#
+# There is no equivalent call to reach for. A macOS pipe grows its buffer on
+# demand, up to a system limit that a process may not set, so the right
+# behaviour off Linux is to leave the pipe alone.
+_F_SETPIPE_SZ: int | None = getattr(fcntl, "F_SETPIPE_SZ", None)
 
 
 class StdioTransport(BaseCustomTransport):
@@ -239,6 +249,8 @@ def bump_subprocess_pipe_buffers(
     *,
     tuning: TransportTuning = DEFAULT_TUNING,
 ) -> None:
+    if _F_SETPIPE_SZ is None:
+        return
     popen = getattr(getattr(proc, "_transport", None), "_proc", None)
     if popen is None:
         return
@@ -246,7 +258,7 @@ def bump_subprocess_pipe_buffers(
         f = getattr(popen, attr, None)
         if f is not None:
             with contextlib.suppress(OSError):
-                fcntl.fcntl(f.fileno(), fcntl.F_SETPIPE_SZ, tuning.buffer_size)
+                fcntl.fcntl(f.fileno(), _F_SETPIPE_SZ, tuning.buffer_size)
 
 
 async def _close_worker_process(proc: asyncio.subprocess.Process) -> None:
