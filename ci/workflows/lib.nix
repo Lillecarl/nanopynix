@@ -450,7 +450,27 @@ let
       // {
         runs-on = "macos-latest";
         continue-on-error = true;
-        env = testJobEnv { inherit version backend; };
+        # **The macOS job tests the store of the machine, and it must.**
+        # Every store this suite makes is a chroot store, and
+        # `derivation-builder.cc` refuses to build in one off Linux: Linux
+        # answers a diverted store with a mount namespace and a bind mount,
+        # and macOS has neither. So every test that builds a derivation fails
+        # there, for a reason no test owns.
+        # `NANOPYNIX_TEST_SYSTEM_STORE` makes the fixtures open the store of
+        # the machine instead, which is not diverted, so a build is a plain
+        # build. `nix_environment.py` carries the rest of the reasoning, and
+        # the destructive tests keep a store of their own whatever this says.
+        #
+        # **The backend is `daemon`, and that is not a preference.** The
+        # runner takes the multi-user installer, so `/nix/var/nix/db` belongs
+        # to root and a direct `local://` store cannot take the big lock:
+        # every write fails with `Permission denied`. Measured on macOS
+        # 26.5.1, and the installer log of this job says the same. A
+        # multi-user installation is also what a macOS user gets by default,
+        # so the daemon backend is the one that matches that host.
+        env = testJobEnv { inherit version backend; } // {
+          NANOPYNIX_TEST_SYSTEM_STORE = "1";
+        };
         steps = mkTestSetup { inherit ref lockArtifact; } ++ [
           (mkBuildStep {
             name = "Build the CI step package for Nix ${version}";
