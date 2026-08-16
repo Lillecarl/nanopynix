@@ -4,6 +4,7 @@
   pythonSet,
   nix-cli,
   nixpkgs,
+  bashInteractive,
   coreutils,
   gdb,
   gitMinimal,
@@ -90,6 +91,25 @@ in
     # OSError and returns None, so the LSP answered "no schema" rather than
     # erroring, and the tests read as a schema bug.
     tofuCoreSchemaTool
+    # **The bash of this closure, because the host's may not read what the
+    # suite writes.** `pynix develop` restores the environment of a
+    # derivation, and that environment carries bash functions of stdenv. One
+    # of them uses `;&`, the fallthrough form of a `case` arm, which bash
+    # added in 4.0.
+    #
+    # macOS ships 3.2.57, because every release after it is GPLv3. So the
+    # three `test_develop` tests that run the restored environment failed on
+    # the macOS job with a syntax error at line 1865 of a generated file, and
+    # passed in the dev shell, which carries 5.3.
+    #
+    # This is the same shape as `tofuCoreSchemaTool` above: the dev shell
+    # supplied it, the runner did not, and the difference read as a defect in
+    # the code under test. The runner carries what the suite needs.
+    #
+    # It does not repair `pynix develop` for a user whose own bash is 3.2.
+    # Issue #152 holds that, and this changes nothing about the fallback it
+    # describes.
+    bashInteractive
   ]
   # nanopynix.store_exec_prefix resolves this off PATH. Every Nix session in
   # this suite runs against a *relocated* store, so without it the terranix
