@@ -20,6 +20,7 @@ from nanopynix.rpc import Session, WorkerDiedError, WorkerSignaledError
 from nanopynix.rpc.client import _pool as pool_module, session as session_module
 from nanopynix.rpc.worker._worker import worker_child_teardown
 from nanopynix_testing.worker_death import expect_the_worker_to_die
+from test_support.subprocess_output import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -382,6 +383,38 @@ def _worker_process(nix: Session) -> Any:
     return proc
 
 
+#: How long a signalled child gets to be collected.
+#:
+#: It was 10 s, and that was not enough on the runner of the macOS job: both
+#: tests that abort a worker failed there while passing on an M-series Mac,
+#: and the two runs of run 31958491707 took 23.6 s and 22.9 s, so each one
+#: waited the whole 10 s and the child was still alive. Nothing here proves
+#: what holds it, which is what `_why_it_is_still_alive` is for.
+_REAP_TIMEOUT_SECONDS = 30.0
+
+
+async def _why_it_is_still_alive(proc: Any) -> str:
+    """What the operating system says about a child that will not be reaped.
+
+    **The assertion used to be `assert not proc.is_alive()` and nothing else.**
+    That says a child is alive and not one thing about why, so a failure on a
+    machine nobody can reproduce on gives a reader nothing to act on. This asks
+    the operating system and puts the answer in the message.
+
+    `Z` in the state column is a zombie, which means the child is dead and
+    nobody has collected it -- a defect in this code. Anything else means the
+    child is still running, which points at whatever is holding it: on macOS a
+    crash reporter attaches to a process that took a fatal signal, and it
+    inspects the whole address space before it lets go.
+    """
+    pid = proc.pid
+    details = [f"pid={pid}", f"exit_status={proc.exit_status}", f"waited={_REAP_TIMEOUT_SECONDS}s"]
+    if pid is not None:
+        result = await run_process(["ps", "-o", "pid,ppid,stat,comm", "-p", str(pid)])
+        details.append(f"ps:\n{result.stdout.strip() or '(no such process, so it was reaped after the join)'}")
+    return "the signalled child was not collected. " + " ".join(details)
+
+
 async def _reaped(proc: Any) -> None:
     """Wait for a signalled child to be collected, and assert that it was.
 
@@ -392,8 +425,8 @@ async def _reaped(proc: Any) -> None:
     # the pool holds a `WorkerProcess` adapter now, whose `join` is a
     # coroutine. Handing that to `run_sync` builds a coroutine object, returns
     # it unawaited, and waits for nothing at all.
-    await proc.join(10.0)
-    assert not proc.is_alive()
+    await proc.join(_REAP_TIMEOUT_SECONDS)
+    assert not proc.is_alive(), await _why_it_is_still_alive(proc)
     assert proc.exit_status is not None
 
 
