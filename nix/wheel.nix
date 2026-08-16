@@ -83,6 +83,15 @@ runCommand "nanopynix-bindings-wheel-${platform}"
     meta = {
       description = "nanopynix-bindings as a ${platform} wheel";
       inherit (bindings.meta) license;
+      # **A `manylinux` wheel is a Linux artefact, and this says so.** The
+      # repair below rewrites the extension against the C++ runtime of
+      # `nix/cxx-runtime.nix`, which is Linux only, so a build off Linux stops
+      # there with a refusal that names that runtime and not this wheel.
+      #
+      # `flake.nix` filters `packages` by `lib.meta.availableOn`, so declaring
+      # the platforms here is what keeps the wheel out of the macOS package
+      # set. Issue #148.
+      platforms = lib.platforms.linux;
     };
   }
   ''

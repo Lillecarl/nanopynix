@@ -294,6 +294,16 @@ in
 runCommand "nanopynix-wheel-licenses"
   {
     passthru = { inherit manifest texts; };
+    # **This describes the closure of a `manylinux` wheel, so it is Linux
+    # only.** The soname loop below reads `lib/*.so*` of each rebuilt package,
+    # and those packages include Linux-only libraries such as `acl`. Off Linux
+    # the build stops on one of them, with a refusal that names that library
+    # rather than this derivation.
+    #
+    # `flake.nix` filters `packages` by `lib.meta.availableOn`, so declaring
+    # the platforms here is what keeps this out of the macOS package set.
+    # Issue #148.
+    meta.platforms = lib.platforms.linux;
   }
   ''
     mkdir -p "$out/texts"
