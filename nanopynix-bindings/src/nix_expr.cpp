@@ -1712,6 +1712,36 @@ static void gc_thread_debug_log(const char *event) {
 }
 
 #if NIX_USE_BOEHMGC
+// The highest address of the calling thread's stack, and its size.
+//
+// The stack grows down on both platforms, so the top is the oldest end. Linux
+// reports the lowest address and the size, and Darwin reports the top address
+// and the size, so one of the two adds and the other does not.
+//
+// Returns false when the platform refuses to answer. That is a fact about the
+// platform and not about the collector, so the caller reports it rather than
+// raises: the caller is a registration that must not fail for a diagnostic.
+static bool callingThreadStackTop(char **top, size_t *size) {
+#ifdef __APPLE__
+    // Darwin has no `pthread_getattr_np`. These two are its equivalent, and
+    // neither one can fail: both read a field of the thread structure.
+    *top = static_cast<char *>(pthread_get_stackaddr_np(pthread_self()));
+    *size = pthread_get_stacksize_np(pthread_self());
+    return true;
+#else
+    pthread_attr_t attr;
+    if (pthread_getattr_np(pthread_self(), &attr) != 0)
+        return false;
+    void *low = nullptr;
+    int failed = pthread_attr_getstack(&attr, &low, size);
+    pthread_attr_destroy(&attr);
+    if (failed != 0)
+        return false;
+    *top = static_cast<char *>(low) + *size;
+    return true;
+#endif
+}
+
 // DIAGNOSTIC (temporary), for issue #70: say what upper bound the collector
 // recorded for this thread's stack, and what the real one is.
 //
@@ -1724,9 +1754,8 @@ static void gc_thread_debug_log(const char *event) {
 // unscanned, and no counter moves.
 //
 // `GC_get_stack_base` gives what the registration recorded.
-// `pthread_getattr_np` gives what the thread really has, as the lowest address
-// and a size, so the top is the sum of the two. The two agree when the
-// registration is right.
+// `callingThreadStackTop` gives what the thread really has. The two agree when
+// the registration is right.
 //
 // The probe writes the difference as well, so a reader greps for a line with a
 // non-zero one rather than comparing two hexadecimal numbers by eye.
@@ -1734,24 +1763,13 @@ static void gc_stack_bounds_probe(void *recorded_base) {
     if (!gc_thread_debug_enabled())
         return;
 
-    // A failure to read the attributes is a fact about this platform, and not
-    // about the collector, so it reports rather than raises: the caller is a
-    // registration that must not fail for a diagnostic.
-    pthread_attr_t attr;
-    if (pthread_getattr_np(pthread_self(), &attr) != 0) {
-        gc_thread_debug_log("gc_stack_bounds:unavailable");
-        return;
-    }
-    void *low = nullptr;
+    char *real_top = nullptr;
     size_t size = 0;
-    int failed = pthread_attr_getstack(&attr, &low, &size);
-    pthread_attr_destroy(&attr);
-    if (failed != 0) {
+    if (!callingThreadStackTop(&real_top, &size)) {
         gc_thread_debug_log("gc_stack_bounds:unavailable");
         return;
     }
 
-    char *real_top = static_cast<char *>(low) + size;
     long long shortfall = static_cast<long long>(real_top - static_cast<char *>(recorded_base));
 
     char line[256];
