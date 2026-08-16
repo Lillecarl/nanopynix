@@ -17,6 +17,11 @@ from typing import TYPE_CHECKING, Any, Never, cast
 
 import pytest
 from anyio import Path as AnyioPath, run_process
+
+from nanopynix.models import LockedNode
+from nanopynix.protocols import AsyncLockedFlake
+from nanopynix_testing.nix_environment import with_nixpkgs
+from pynix import Pynix
 from pynix._dev_env import BuildEnvironment, make_rc_script, quote
 from pynix.develop import (
     InteractiveShell,
@@ -24,11 +29,6 @@ from pynix.develop import (
     compose_shell_script,
     take_unparsed,
 )
-
-from nanopynix.models import LockedNode
-from nanopynix.protocols import AsyncLockedFlake
-from nanopynix_testing.nix_environment import with_nixpkgs
-from pynix import Pynix
 from support.nix_oracle import require_matching_nix_cli
 
 if TYPE_CHECKING:

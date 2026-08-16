@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pynix-lsp"
+version = "0.1.0"
+description = "The Nix language server of pynix, and the dialects it understands"
+authors = [{ name = "nanopynix contributors" }]
+requires-python = ">=3.10"
+# PEP 639. The repository is Apache-2.0. The file is a copy of the one at the
+# root, because the source root of this project is this directory and a path
+# above it is not in the sdist.
+license = "Apache-2.0"
+license-files = [ "LICENSE" ]
+# **`pygls` and `jsonschema` are here so that they are not in `pynix`.**
+# Measured before the split: `import pynix` took 0.440 s and loaded 966
+# modules, and 349 of those came from these two alone -- 195 for `pygls` with
+# `lsprotocol`, and 154 for `jsonschema`. A caller running `pynix build` paid
+# all of it. Issue #107, and issue #123 for the startup cost it feeds.
+#
+# `pynix` is a dependency, and the arrow points that way on purpose. This
+# project imports `pynix._nix_syntax` and `pynix._completion`, which the REPL
+# shares, and `pynix` mounts this one through an optional import. Both modules
+# are leaves -- neither reads a name from `pynix/__init__.py` -- so the
+# optional import does not close a cycle.
+dependencies = [
+  "pynix",
+  "nanopynix",
+  "clypi",
+  "jsonschema",
+  "pydantic",
+  "pygls",
+  "rapidfuzz",
+  "structlog",
+]
+
+[project.scripts]
+pynix-lsp = "pynix_lsp.cli:main"
+
+[project.optional-dependencies]
+# `pytest-lsp` drives the server over real JSON-RPC. `pynix[test]` carries the
+# rest of the harness, and this suite needs the pynix fixtures either way.
+test = ["pynix[test]", "pytest-lsp"]
+
+[project.urls]
+Homepage = "https://github.com/lillecarl/nanopynix"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pynix_lsp"]

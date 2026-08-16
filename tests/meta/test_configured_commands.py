@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import pytest
 from clypi import Command
-from pynix._settings import UNSET, ConfiguredCommand, _configured_fields
 
 from pynix import Pynix
+from pynix._settings import UNSET, ConfiguredCommand, _configured_fields
 
 
 def _command_tree(cmd: type[Command]) -> list[type[Command]]:

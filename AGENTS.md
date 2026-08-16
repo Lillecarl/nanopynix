@@ -40,7 +40,7 @@ reach, in the `static-checks` job. Each one is a derivation in
 `nix/checks.nix`, and each is a package. Build them to run a gate the way CI
 runs it, in a sandbox and not in the dev shell:
 
-- nix build --file . --no-link --keep-going checks.lint checks.lint-strict checks.format checks.types checks.shell checks.grpclib-transports checks.pytest-agent checks.test-support checks.nanopynix-helpers checks.nix-daemon-protocol checks.pynixd checks.nixos-module
+- nix build --file . --no-link --keep-going checks.lint checks.lint-strict checks.format checks.types checks.shell checks.grpclib-transports checks.pytest-agent checks.test-support checks.nanopynix-helpers checks.nix-daemon-protocol checks.pynixd checks.nixos-module checks.pynix-isolated
 
 Do not use `nix flake check` for this. That command evaluates every package,
 and `packages.shell` cannot evaluate in a pure flake evaluation.
@@ -263,6 +263,33 @@ the one this repository tests. `checks.nixos-module` evaluates it.
 **Lix is not supported.** The project supported it, through `LIX_BIN` and the
 `--client-bin`, `--local-bin` and `--builder-bin` options. Every one of those
 is gone. Do not add a branch for a second implementation of Nix.
+
+# pynix-lsp
+
+`pynix-lsp/` holds the Nix language server, and issue #107 moved it out of
+`pynix/`. It carries `pygls`, `lsprotocol` and `jsonschema`, so `pynix build`
+does not. Measured before the split: `import pynix` loaded 966 modules and
+took 0.440 s; 349 of those modules came from those three packages.
+
+**The arrow points from `pynix-lsp` to `pynix`, and never back.** The server
+imports `pynix._nix_syntax` and `pynix._completion`, which the REPL shares.
+`pynix` mounts the `Lsp` subcommand through an optional import, in
+`pynix/src/pynix/__init__.py`. That import closes no cycle, because both
+modules it needs are leaves.
+
+**The subcommand union is written twice, and both halves must agree.** clypi
+evaluates the annotation of `Pynix.subcommand` while the class body runs, so
+an optional member cannot be added afterwards; pyright cannot read a computed
+value as a type. `tests/meta/test_subcommands.py` compares the two halves.
+
+The server has two names. `pynix-lsp` is the program, which is what an editor
+calls. `pynix lsp` is the subcommand, which works wherever both projects are
+installed, such as the dev shell. The release build of `pynix` carries neither
+the server nor its dependencies, and `checks.pynix-isolated` states that.
+
+Run the tests:
+
+- direnv exec . timeout 300 pytest pynix-lsp/tests
 
 # Issues, and how a commit closes one
 

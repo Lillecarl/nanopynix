@@ -11,9 +11,9 @@ if TYPE_CHECKING:
 
     from nanopynix_testing.nix_environment import NixTestEnvironment
 
-import pynix._util as util_module
 import pytest
 
+import pynix._util as util_module
 from nanopynix_testing.nix_environment import with_nixpkgs
 from pynix import Pynix
 

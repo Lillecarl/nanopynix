@@ -479,7 +479,7 @@ lint-rule rollout (a refactor risks behavior changes; a lint sweep shouldn't
 bundle them). Worth tackling opportunistically when next touching one of
 these functions: `pynix/tests/support/lsp_scenario.py`'s `_apply` (38 branches/87 statements),
 `nanopynix_testing.nix_runtime`'s `pytest_collection_modifyitems` (21
-branches/56 statements), `pynix/_lsp/_syntax.py`'s `_resolve_declaration`
+branches/56 statements), `pynix-lsp/src/pynix_lsp/_syntax.py`'s `_resolve_declaration`
 (18 branches) and `_identifier_path_at_node` (17 branches/11 returns), and a
 long tail of smaller too-many-arguments constructors/factories (`ekn/apply.py`,
 `nanopynix_helpers/build.py`, `nanopynix/inproc/_impl.py`,

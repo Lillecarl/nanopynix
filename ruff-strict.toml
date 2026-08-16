@@ -556,13 +556,23 @@ known-first-party = [
   "nanopynix_store",
   "nanopynix_util",
   "support",
-  # Named here, unlike `nanopynix` and `pynix`, which ruff finds by itself:
-  # with no `src` setting it looks for a directory of the same name beside
-  # this file, and these two are at `test-support/src/test_support` and
-  # `nanopynix-testing/src/nanopynix_testing`. Add a project the same way when
-  # its directory name and its module name differ.
+  # Named here, unlike `nanopynix`, which ruff finds by itself: with no `src`
+  # setting it looks for a directory of the same name beside this file, and
+  # these are at `test-support/src/test_support`,
+  # `nanopynix-testing/src/nanopynix_testing` and `pynix-lsp/src/pynix_lsp`.
+  # Add a project the same way when its directory name and its module name
+  # differ.
   "test_support",
   "nanopynix_testing",
+  "pynix_lsp",
+  # `pynix` as well, although a directory of that name is beside this file.
+  # ruff found it by itself only for a file under `pynix/`; a module of
+  # `pynix-lsp/` that imports `pynix` had it sorted as a third-party package,
+  # and one project cannot be in two groups.
+  "pynix",
+  # The support package of `pynix-lsp/tests/`, importable by bare name for
+  # the reason that `support` above gives.
+  "lsp_support",
 ]
 
 [format]

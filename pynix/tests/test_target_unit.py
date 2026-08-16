@@ -21,6 +21,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+import nanopynix
+from nanopynix.exceptions import ThrownError
+from nanopynix.rpc import EvalSession, ValueProxy
+from nanopynix.settings import NixFlakeSettings
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
@@ -35,11 +40,6 @@ from pynix.target import (
     resolve_file_reference,
     select_attr,
 )
-
-import nanopynix
-from nanopynix.exceptions import ThrownError
-from nanopynix.rpc import EvalSession, ValueProxy
-from nanopynix.settings import NixFlakeSettings
 
 
 # These doubles subclass the real classes rather than duck-typing them, so

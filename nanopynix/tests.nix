@@ -36,6 +36,10 @@ let
     nanopynix = [ "test" ];
     nanopynix-helpers = [ ];
     pynix = [ "test" ];
+    # `testpaths` in the repository `pytest.ini` names `pynix-lsp/tests`, so
+    # the runner collects that suite and needs the server and `pytest-lsp`.
+    # Issue #107 moved the suite out of `pynix/tests/`.
+    pynix-lsp = [ "test" ];
   };
 
   # Interpolating this path literal copies it into the store and substitutes

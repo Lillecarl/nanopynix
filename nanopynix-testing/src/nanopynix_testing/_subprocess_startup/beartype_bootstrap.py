@@ -24,7 +24,11 @@ import os
 # beartype's import hook to instrument. nanopynix_proto is absent too -- it is
 # betterproto2-generated code, not hand-written, so checking it would flag
 # generator quirks rather than our own bugs.
-PACKAGES = ("nanopynix", "nanopynix_helpers", "pynix")
+#
+# `pynix_lsp` is here because issue #107 moved 14 modules out of `pynix`, and
+# a package that this tuple does not name is not instrumented at all. The
+# split would otherwise have taken the checks off those modules in silence.
+PACKAGES = ("nanopynix", "nanopynix_helpers", "pynix", "pynix_lsp")
 
 ENV_VAR = "NANOPYNIX_BEARTYPING"
 

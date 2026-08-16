@@ -21,15 +21,20 @@ from typing import TYPE_CHECKING, Any
 _DOCS_DIR = Path(__file__).resolve().parent
 _OUTPUT = _DOCS_DIR / "pynix" / "reference.md"
 _PYNIX_SRC = _DOCS_DIR.parent / "pynix" / "src"
+# The language server, which issue #107 made an optional subcommand: `pynix`
+# mounts `lsp` when `pynix-lsp` imports and leaves it out when it does not.
+# Naming the source directory here makes this generator read the whole CLI
+# whichever environment runs it, so the reference does not gain and lose a
+# command with the venv that builds it.
+_PYNIX_LSP_SRC = _DOCS_DIR.parent / "pynix-lsp" / "src"
 _PYTHON_SRC = _DOCS_DIR.parent / "python" / "src"
 
-for _path in (_PYNIX_SRC, _PYTHON_SRC):
+for _path in (_PYNIX_SRC, _PYNIX_LSP_SRC, _PYTHON_SRC):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-from pynix._settings import UNSET, PynixDefaults  # noqa: E402 -- see above
-
 from pynix import Pynix  # noqa: E402 -- sys.path must be extended before pynix is importable
+from pynix._settings import UNSET, PynixDefaults  # noqa: E402 -- see above
 
 if TYPE_CHECKING:
     from clypi import Command

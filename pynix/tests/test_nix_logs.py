@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pynix._util import _forward_nix_logs, _LogActivity
-
 from nanopynix import LogEvent
+from pynix._util import _forward_nix_logs, _LogActivity
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
