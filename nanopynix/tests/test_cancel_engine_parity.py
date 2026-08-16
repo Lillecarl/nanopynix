@@ -35,10 +35,18 @@ INTERRUPTIBLE = "builtins.genList (x: x) 12000000"
 # which records the CI failure that chose the value.
 CANCEL_AFTER = 0.2
 
-# A fold polls nothing. Sized to outlast the default 2s grace plus the deadline
-# below on both engines, because the worker's grace cannot be reached from this
-# process and both engines must therefore reach the same state by the clock.
-UNINTERRUPTIBLE = "builtins.foldl' (a: b: a + b) 0 (builtins.genList (x: x) 40000000)"
+# `builtins.sleep` polls nothing while it waits. It has to outlast the default
+# 2s grace plus the deadline below on both engines, because the grace of the
+# worker cannot be reached from this process, so both engines reach the same
+# state by the clock and not by an event.
+#
+# **It was a fold over 40 million elements, and that measured the machine.**
+# The same shape in `inproc/test_inproc_cancel.py` ran in 0.72 s on an M-series
+# Mac at 12 million, so the margin over the grace was a property of the
+# hardware rather than of the expression. A sleep states the duration.
+# `nanopynix-bindings/src/nix_expr.cpp` implements it.
+UNINTERRUPTIBLE_SECONDS = 8.0
+UNINTERRUPTIBLE = f"builtins.sleep {UNINTERRUPTIBLE_SECONDS}"
 
 DEADLINE = 0.5
 
