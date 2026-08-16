@@ -124,9 +124,17 @@ let
     # macOS job is slower than the Linux one. Measured on an M-series Mac, in
     # the configuration this job runs: 22 minutes. The runner is slower still.
     #
-    # 45 leaves about half again over that measurement. Raise it against a run
-    # that timed out, and not against a guess.
-    darwinSuite = 45;
+    # **Two complete runs then measured the spread of the runner itself**, and
+    # 45 was not enough headroom for it. Run 31958491707 took 24.6 minutes and
+    # run 31960925314 took 32.7 minutes, on the same commit: the median test
+    # over one second was 1.27 times slower in the second. Another 1.27 on the
+    # slower of those two is 41.5 minutes, which 45 does not clear.
+    #
+    # 60 clears it. The cap is a ceiling and not a cost: a job that finishes in
+    # 25 minutes pays nothing for it, and what it buys is that a slow runner
+    # reports its failures instead of being killed with nothing to read. That
+    # is what 30 cost once already.
+    darwinSuite = 60;
     # `nanopynix/tests` under ASAN. Three runs measured the way here:
     #
     #   30860160011  686 tests, stopped at a 60-minute cap
@@ -511,6 +519,22 @@ let
         # so the daemon backend is the one that matches that host.
         env = testJobEnv { inherit version backend; } // {
           NANOPYNIX_TEST_SYSTEM_STORE = "1";
+          # **This runner is short of compute and of I/O, and the deadline has
+          # to allow for it.** A GitHub runner for Linux is a VM among many; a
+          # runner for macOS is a real Apple machine from a much smaller pool.
+          #
+          # Two runs of the same commit measured the spread: 31958491707 took
+          # 1478 s and 31960925314 took 1960 s, and the median test over one
+          # second was 1.27 times slower in the second. The increase was even
+          # across flake, repl, example and store tests, so it is the machine
+          # and not one subsystem.
+          #
+          # `test_osearch_builds_index_and_finds_a_match` crossed the 30 s
+          # deadline at 30.9 s in the slower run, having taken 20.4 s in the
+          # faster one. 90 s restores the headroom that 30 s gives a Linux job.
+          #
+          # `ci/steps.nix` keeps 30 as the default, so no Linux job moves.
+          NANOPYNIX_RPC_TIMEOUT = "90";
         };
         steps =
           mkTestSetup {
