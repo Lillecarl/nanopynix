@@ -39,15 +39,26 @@ rec {
           // lib.optionalAttrs (fetchDepth != null) { fetch-depth = fetchDepth; };
       };
 
+    # `experimentalFeatures` names what the *installed* Nix has to allow.
+    #
+    # A job that makes its own daemon does not need this: `_start_daemon` in
+    # `nanopynix_testing.nix_environment` pins the features on the command
+    # line, on purpose, so that daemon does not read the host at all. A job
+    # that runs against the daemon of the machine has no such seam, and the
+    # installer writes `nix-command flakes` and nothing else.
     installNix =
       {
         timeoutMinutes ? 15,
+        experimentalFeatures ? [
+          "nix-command"
+          "flakes"
+        ],
       }:
       {
         uses = "cachix/install-nix-action@master";
         timeout-minutes = timeoutMinutes;
         "with" = {
-          extra_nix_config = "experimental-features = nix-command flakes\n";
+          extra_nix_config = "experimental-features = ${lib.concatStringsSep " " experimentalFeatures}\n";
         };
       };
 
