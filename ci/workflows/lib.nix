@@ -397,6 +397,85 @@ let
       }
     );
 
+  # **One test job on macOS, and the whole suite inside it.** Issue #143.
+  #
+  # The subset is the *job*, and not the tests. The suite has never run off
+  # Linux, so the first run does not report a macOS defect: it reports which
+  # tests assume Linux. A hand-picked list of tests would hide exactly that.
+  # `nix_platform` carries the five that cannot answer there, and each one
+  # names what it excludes.
+  #
+  # **The reason this job earns a slot is #140.** Darwin is the one host in
+  # this matrix that is clang with libc++, measured:
+  #
+  #   nanopynixVersions.nix_2_34.nanopynix-bindings.stdenv.cc.name
+  #     -> clang-wrapper-21.1.8
+  #   ...stdenv.cc.libcxx.name  -> libcxx-21.1.6+apple-sdk-26.5
+  #
+  # That is the library which compares `type_info` by address, which is the
+  # claim `nanopynix-bindings/package.nix` records and that nothing can
+  # confirm today. Its two failures are a lost exception translation and a
+  # null `dynamic_cast`, and the second is a *wrong answer* rather than an
+  # error.
+  #
+  # Three steps of a Linux test job are absent, and each for a reason:
+  #
+  # - the sandbox step unshares a user namespace, which is Linux;
+  # - the soak, which is the ThreadSanitizer workload, and this job runs no
+  #   sanitizer;
+  # - the coverage upload and the collector-thread log, which answer questions
+  #   about a job that is already understood.
+  #
+  # **The test log and the JUnit report are artifacts, and they are not
+  # optional here.** Run 31940698516 lost the whole suite: the runner's own
+  # worker process died with `System.IO.IOException: Illegal byte sequence`
+  # while it wrote its diagnostic log, so the step got no conclusion and
+  # GitHub archived nothing to read. The suite writes both files itself, so an
+  # upload costs one step and answers the run that the live log cannot.
+  #
+  # **`continue-on-error`, to start.** A job that fails for a week and that
+  # nobody reads is worse than no job, and this one is expected to fail until
+  # the Linux assumptions are gone. Remove the flag when it passes, and that
+  # removal is the moment it becomes a gate.
+  mkDarwinTestJob =
+    {
+      version,
+      backend,
+      ref ? null,
+      lockArtifact ? null,
+      needs ? [ ],
+    }:
+    mkJob (
+      lib.optionalAttrs (needs != [ ]) { inherit needs; }
+      // {
+        runs-on = "macos-latest";
+        continue-on-error = true;
+        env = testJobEnv { inherit version backend; };
+        steps = mkTestSetup { inherit ref lockArtifact; } ++ [
+          (mkBuildStep {
+            name = "Build the CI step package for Nix ${version}";
+            cap = caps.build;
+          })
+          (steps.verifyClosure { name = "Verify test runner closure after build"; })
+          (mkRunStep {
+            name = "Test nanopynix against Nix ${version} (full suite, ${backend} backend)";
+            subcommand = "suite";
+            cap = caps.suite;
+          })
+          (steps.uploadArtifact {
+            name = "Upload test output";
+            artifactName = "test-output-darwin-${backend}-${version}";
+            path = "\${{ github.workspace }}/test-gdb-output.log";
+          })
+          (steps.uploadArtifact {
+            name = "Upload the JUnit report";
+            artifactName = "junit-darwin-${backend}-${version}";
+            path = "\${{ github.workspace }}/junit.xml";
+          })
+        ];
+      }
+    );
+
   # The concurrency soak and the concurrency tests, under ThreadSanitizer.
   # `ci/steps.nix` carries the collector reasoning, the seed loop and the
   # forensics that issue #69 asks for.
@@ -822,6 +901,7 @@ in
     regularBackends
     versionMatrixOutputs
     mkRegularTestJob
+    mkDarwinTestJob
     mkTsanTestJob
     mkUbsanTestJob
     mkAsanTestJob

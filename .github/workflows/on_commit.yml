@@ -468,6 +468,52 @@ jobs:
     - name: Verify test runner closure after tests
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
       timeout-minutes: 15
+  test-darwin-nix_2_34:
+    runs-on: macos-latest
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-darwin-nix_2_34,')
+    env:
+      BACKEND: local
+      CI_STEP: ciSteps.nix_2_34
+    timeout-minutes: 160
+    steps:
+    - uses: actions/checkout@main
+      timeout-minutes: 10
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+      timeout-minutes: 15
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+      timeout-minutes: 15
+    - name: Build the CI step package for Nix nix_2_34
+      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
+      timeout-minutes: 30
+    - name: Verify test runner closure after build
+      run: nix store verify --recursive --no-trust "$(readlink -f result)"
+      timeout-minutes: 15
+    - name: Test nanopynix against Nix nix_2_34 (full suite, local backend)
+      run: ./result/bin/nanopynix-ci suite
+      timeout-minutes: 30
+    - name: Upload test output
+      uses: actions/upload-artifact@main
+      if: ${{ !cancelled() }}
+      with:
+        name: test-output-darwin-local-nix_2_34
+        path: ${{ github.workspace }}/test-gdb-output.log
+      timeout-minutes: 15
+    - name: Upload the JUnit report
+      uses: actions/upload-artifact@main
+      if: ${{ !cancelled() }}
+      with:
+        name: junit-darwin-local-nix_2_34
+        path: ${{ github.workspace }}/junit.xml
+      timeout-minutes: 15
+    continue-on-error: true
   test-local-git:
     runs-on: ubuntu-24.04
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',

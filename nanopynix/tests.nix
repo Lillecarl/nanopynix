@@ -8,7 +8,7 @@
   gdb,
   gitMinimal,
   tofuCoreSchemaTool,
-  storeExecTool,
+  storeExecTools,
   version,
   sanitizer ? null,
   sanitizerRuntime ? null,
@@ -90,12 +90,15 @@ in
     # OSError and returns None, so the LSP answered "no schema" rather than
     # erroring, and the tests read as a schema bug.
     tofuCoreSchemaTool
-    # nanopynix.store_exec_prefix resolves this off PATH. Every Nix session in
-    # this suite runs against a *relocated* store, so without it the terranix
-    # LSP scenarios cannot exec `tofu` at all -- this is the runner's most
-    # load-bearing case for it, not an edge case.
-    storeExecTool
-  ];
+  ]
+  # nanopynix.store_exec_prefix resolves this off PATH. Every Nix session in
+  # this suite runs against a *relocated* store, so without it the terranix
+  # LSP scenarios cannot exec `tofu` at all -- this is the runner's most
+  # load-bearing case for it, not an edge case.
+  #
+  # Empty off Linux, where the tool does not exist. `default.nix` says why,
+  # and the tests that need it carry a marker.
+  ++ storeExecTools;
   text = ''
     cd ${source}
     export PYTHONNOUSERSITE=1

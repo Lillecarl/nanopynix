@@ -129,6 +129,20 @@ let
   # library, so it lives out here rather than in nanopynixForNixVersions.
   storeExecTool = pkgs.callPackage ./tools/store-exec/package.nix { };
 
+  # **The same tool, as a list that is empty off Linux.** `store-exec.c`
+  # rearranges the mount table and the package links `glibc.static`, so
+  # `meta.platforms` is `lib.platforms.linux` and that is right. Forcing the
+  # derivation on Darwin therefore throws from `check-meta.nix`, and it took
+  # the whole test runner with it: the macOS job of #143 refused to evaluate
+  # before it built anything.
+  #
+  # Nix is lazy, so binding `storeExecTool` above costs nothing on Darwin.
+  # Only a list position forces it, and every consumer uses one, so the
+  # `lib.optional` here is the single place that decides. `storeExecTool`
+  # stays exported unchanged, for a consumer outside this repository that
+  # already names it.
+  storeExecTools = lib.optional pkgs.stdenv.hostPlatform.isLinux storeExecTool;
+
   # The completion spike: a tiny cyclopts program, the shell code that gives a
   # cyclopts script a dynamic completion, and a pty driver that proves it in
   # fish, bash and zsh. Version-independent, like the two tools above, so it
@@ -519,7 +533,7 @@ let
                   # The same tools the `pynix` app above puts on its PATH, for
                   # the same reason -- the LSP tests drive the real handlers,
                   # so they need them exactly as the released program does.
-                  inherit tofuCoreSchemaTool storeExecTool;
+                  inherit tofuCoreSchemaTool storeExecTools;
                 };
               };
 
@@ -536,8 +550,8 @@ let
                 # is relocated whenever pynix is pointed at a non-root store.
                 pathInputs = [
                   tofuCoreSchemaTool
-                  storeExecTool
-                ];
+                ]
+                ++ storeExecTools;
               };
               # The daemon proxy, as a release application. It needs no
               # `pathInputs`: it speaks the daemon protocol itself and shells
@@ -549,7 +563,7 @@ let
                 name = "pynixd";
                 inherit (final) pythonSet;
               };
-              shell = final.callPackage ./nix/shell.nix { inherit tofuCoreSchemaTool storeExecTool; };
+              shell = final.callPackage ./nix/shell.nix { inherit tofuCoreSchemaTool storeExecTools; };
               # A live, editable-install `pynix`/`ekn` env (no devtools --
               # see nix/shell.nix for the full interactive nanopynix shell),
               # exported so other repos can drop a hot-reloading `pynix`
@@ -961,6 +975,7 @@ lib.throwIf (unlistedVariants != [ ])
       ciVersionMatrix
       tofuCoreSchemaTool
       storeExecTool
+      storeExecTools
       # The seam onto pyproject.nix's builders, exported for the same reason
       # `pythonSet` above is. `ps.mkProject` renders a project from its own
       # pyproject.toml; `mkApp` turns one of those into a release application.
