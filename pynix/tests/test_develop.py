@@ -52,6 +52,39 @@ _STORE_PATH = re.compile(r"/nix/store/[a-z0-9]{32}-")
 #:   from the output path, and the output path follows the derivation.
 _EXPECTED_DIFFERENCES = frozenset({"LINENO", "NIX_CFLAGS_COMPILE"})
 
+#: The variables that name the temporary directory of one build.
+#:
+#: **A Linux build makes them agree, and it is the chroot that does it.** The
+#: builder there runs in a mount namespace where the build directory is
+#: ``/build``, whatever directory Nix made outside it. pynix and nix therefore
+#: read the same string from two different builds.
+#:
+#: Nothing maps the directory on another operating system. Nix makes
+#: ``/nix/var/nix/builds/nix-<pid>-<random>`` for each build, so two builds
+#: never agree, and the value says nothing about the code under test.
+#:
+#: ``NIX_ATTRS_JSON_FILE`` and ``NIX_ATTRS_SH_FILE`` are files inside that
+#: directory, so a structured-attributes derivation adds them to the set.
+_BUILD_DIRECTORY_VARIABLES = frozenset(
+    {
+        "NIX_ATTRS_JSON_FILE",
+        "NIX_ATTRS_SH_FILE",
+        "NIX_BUILD_TOP",
+        "TEMP",
+        "TEMPDIR",
+        "TMP",
+        "TMPDIR",
+    }
+)
+
+
+def _acceptable_differences() -> frozenset[str]:
+    """Which variables may differ between pynix and the oracle, on this host."""
+    if sys.platform == "linux":
+        return _EXPECTED_DIFFERENCES
+    return _EXPECTED_DIFFERENCES | _BUILD_DIRECTORY_VARIABLES
+
+
 _PLAIN_DERIVATION = """
 let
   pkgs = import <nixpkgs> {};
@@ -154,8 +187,9 @@ def _compare(mine: dict[str, Any], theirs: dict[str, Any]) -> None:
     their_variables: dict[str, Any] = theirs["variables"]
     assert sorted(my_variables) == sorted(their_variables)
     differing = {name for name in my_variables if _normalise(my_variables[name]) != _normalise(their_variables[name])}
-    assert differing <= _EXPECTED_DIFFERENCES, {
-        name: (my_variables[name], their_variables[name]) for name in sorted(differing - _EXPECTED_DIFFERENCES)
+    acceptable = _acceptable_differences()
+    assert differing <= acceptable, {
+        name: (my_variables[name], their_variables[name]) for name in sorted(differing - acceptable)
     }
 
 
