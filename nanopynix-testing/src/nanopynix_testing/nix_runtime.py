@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
+from nanopynix_bindings import util as nanopynix_util
 
 import nanopynix
 
@@ -183,6 +184,37 @@ def pytest_configure(config: pytest.Config) -> None:
         "l3_inproc: real in-process L3 worker tests with worker-side lifecycle inspection",
     ):
         config.addinivalue_line("markers", marker)
+    _initialise_libstore_before_any_fork()
+
+
+# **On Darwin the parent must initialise libstore, and it must do so here.**
+# `nix::initLibStore` calls `curl_global_init`, and on macOS alone curl calls
+# `SCDynamicStoreCopyProxies` there. That is SystemConfiguration, which is
+# CoreFoundation, which a process may not use between `fork` and `exec`. A
+# forked child that reaches it dies on SIGSEGV.
+#
+# The `_init` fixture of `fixtures.py` cannot answer this. That fixture is
+# session-scoped, a session fixture built in a child dies with the child, and
+# `pytest_collection_modifyitems` puts every forked test at the front of the
+# run. So the first fork of a run happens before the parent ever initialises
+# libstore, and the child does the whole initialisation itself.
+#
+# `curl_global_init` counts its callers (`lib/easy.c`, `if(initialized++)`) and
+# a fork child inherits the counter, so a parent that got there first leaves
+# the child returning early. Measured on macOS 26.5.1 arm64: a child of an
+# uninitialised parent dies on signal 11, and a child of an initialised parent
+# returns in 0.000s. Issue #147 holds the library question, which is what a
+# consumer that forks should be told; this hook only makes the harness obey the
+# rule that already exists.
+#
+# `load_config=False` and the two settings match `_init`, so the parent and
+# every child agree about the store configuration.
+def _initialise_libstore_before_any_fork() -> None:
+    if sys.platform != "darwin":
+        return
+    nanopynix_util.set_setting("build-users-group", "")
+    nanopynix_util.set_setting("require-drop-supplementary-groups", "false")
+    nanopynix.init_libstore(load_config=False)
 
 
 def configured_backends(config: pytest.Config) -> tuple[str, ...]:
