@@ -10,6 +10,7 @@ import os
 import shutil
 import signal
 import stat
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -205,7 +206,10 @@ async def force_rmtree(path: Path) -> None:
 _PR_SET_PDEATHSIG = 1
 
 
-def _die_with_parent() -> None:
+# pyright reads `sys.platform` statically, so off Linux the branch below that
+# names this function is dead code and `reportUnusedFunction` fires. The
+# function is used, on the platform that has the call it makes.
+def _die_with_parent() -> None:  # pyright: ignore[reportUnusedFunction] -- see the note above, and `_PDEATHSIG_PREEXEC` below
     """Ask the kernel to SIGKILL this process the instant pytest's process dies.
 
     ``_Daemon.close`` only runs when pytest's own fixture teardown chain gets
@@ -217,6 +221,27 @@ def _die_with_parent() -> None:
     gap unconditionally, regardless of how the parent goes away.
     """
     ctypes.CDLL("libc.so.6", use_errno=True).prctl(_PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)
+
+
+# **`PR_SET_PDEATHSIG` is Linux, and macOS has nothing to put in its place.**
+# The call above names `libc.so.6`, which does not exist on macOS, and `prctl`,
+# which is a Linux system call. `subprocess` runs this in the child between
+# `fork` and `exec`, so the failure arrived as
+# `SubprocessError: Exception occurred in preexec_fn`, and every test on the
+# daemon backend failed at fixture setup. It was 21 of the 44 failures of the
+# first full macOS run.
+#
+# The alternatives do not reach. `kqueue` with `EVFILT_PROC` and `NOTE_EXIT`
+# watches a parent, but it needs a loop in the child, and the child here is
+# `nix daemon`, which runs its own code. A pipe that closes on parent exit
+# needs the child to read it, which that daemon does not do either.
+#
+# **So the safety net is absent on macOS, and this says what that costs.**
+# `_Daemon.close` still ends the daemon on every ordinary teardown. What is
+# gone is the guarantee for a pytest that dies without teardown, such as a
+# `SIGKILL`. That leaves one `nix daemon` per abandoned run, holding a socket
+# under a temporary directory of pytest.
+_PDEATHSIG_PREEXEC = _die_with_parent if sys.platform == "linux" else None
 
 
 async def _start_daemon(root: Path) -> _Daemon:
@@ -263,7 +288,7 @@ async def _start_daemon(root: Path) -> _Daemon:
             " ".join(DEFAULT_EXPERIMENTAL_FEATURES),
             env=daemon_environment,
             start_new_session=True,
-            preexec_fn=_die_with_parent,
+            preexec_fn=_PDEATHSIG_PREEXEC,
             stdout=daemon_log,
             stderr=asyncio.subprocess.STDOUT,
         )

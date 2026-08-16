@@ -183,6 +183,7 @@ def _nix_version_at_least(version: str, minimum: str) -> bool:
 #: exclusive -- a setting Nix dropped rather than one it never had.
 NIX_VERSION_MIN_KEY = "nix_version_min"
 NIX_VERSION_REMOVED_KEY = "nix_version_removed"
+NIX_PLATFORM_KEY = "nix_platform"
 
 NIX_2_34 = "2.34"
 NIX_2_35 = "2.35"
@@ -196,6 +197,22 @@ def since(version: str) -> Any:
 def until(version: str) -> Any:
     """A field Nix removed in ``version``."""
     return Field(default=None, json_schema_extra={NIX_VERSION_REMOVED_KEY: version})
+
+
+def only_on(platform: str) -> Any:
+    """A field that Nix registers on one ``sys.platform`` only.
+
+    **Nix registers a different set of settings on each operating system, and
+    the model has to say so.** The sandbox of Linux is a mount namespace, a
+    seccomp filter and a cgroup, and the settings that steer it exist there
+    alone. macOS sandboxes with `sandbox-exec`, and it registers
+    `darwin-log-sandbox-violations`, which Linux does not have.
+
+    Without this, :func:`check_settings_model_drift` reports every one of them
+    on the other operating system: six settings of the model that macOS does
+    not register, and one setting of macOS that the model did not declare.
+    """
+    return Field(default=None, json_schema_extra={NIX_PLATFORM_KEY: platform})
 
 
 def running_nix_version() -> str:
@@ -219,8 +236,17 @@ def _field_version_problem(field: Any) -> str | None:
     return None
 
 
+def _field_platform_problem(field: Any) -> str | None:
+    """Why this operating system does not register the field, or ``None``."""
+    extras: dict[str, Any] = field.json_schema_extra or {}
+    platform: Any = extras.get(NIX_PLATFORM_KEY)
+    if platform is None or platform == sys.platform:
+        return None
+    return f"Nix registers this on {platform} only (running {sys.platform})"
+
+
 def field_is_supported(field: Any) -> bool:
-    return _field_version_problem(field) is None
+    return _field_version_problem(field) is None and _field_platform_problem(field) is None
 
 
 class NixSettingMetadata(BaseModel):
@@ -460,7 +486,7 @@ class NixGlobalSettings(NixConfigModel):
     see :mod:`nanopynix.stores`, where it is spelled ``store_dir``.
     """
 
-    allow_new_privileges: bool | None = None
+    allow_new_privileges: bool | None = only_on("linux")
     allow_symlinked_store: bool | None = None
     allowed_impure_host_deps: list[str] | None = None
     always_allow_substitutes: bool | None = None
@@ -475,6 +501,7 @@ class NixGlobalSettings(NixConfigModel):
     compress_build_log: bool | None = None
     connect_timeout: int | None = None
     cores: int | None = None
+    darwin_log_sandbox_violations: bool | None = only_on("darwin")
     diff_hook: str | None = None
     download_attempts: int | None = None
     download_buffer_size: int | None = None
@@ -488,7 +515,7 @@ class NixGlobalSettings(NixConfigModel):
     filetransfer_retry_delay_rate_limited: int | None = since(NIX_2_35)
     filetransfer_retry_jitter: bool | None = since(NIX_2_35)
     filetransfer_retry_max_delay: int | None = since(NIX_2_35)
-    filter_syscalls: bool | None = None
+    filter_syscalls: bool | None = only_on("linux")
     fsync_metadata: bool | None = None
     fsync_store_paths: bool | None = None
     gc_reserved_space: int | None = None
@@ -497,7 +524,7 @@ class NixGlobalSettings(NixConfigModel):
     http3: bool | None = since(NIX_2_35)
     http_connections: int | None = None
     id_count: int | None = None
-    ignored_acls: list[str] | None = None
+    ignored_acls: list[str] | None = only_on("linux")
     impersonate_linux_26: bool | None = None
     impure_env: list[str] | None = None
     json_log_path: str | None = None
@@ -541,8 +568,8 @@ class NixGlobalSettings(NixConfigModel):
     require_sigs: bool | None = None
     run_diff_hook: bool | None = None
     sandbox: str | None = None
-    sandbox_build_dir: str | None = None
-    sandbox_dev_shm_size: str | None = None
+    sandbox_build_dir: str | None = only_on("linux")
+    sandbox_dev_shm_size: str | None = only_on("linux")
     sandbox_fallback: bool | None = None
     sandbox_paths: list[str] | None = None
     secret_key_files: list[str] | None = None
@@ -560,7 +587,7 @@ class NixGlobalSettings(NixConfigModel):
     trusted_public_keys: list[str] | None = None
     trusted_substituters: list[str] | None = None
     use_case_hack: bool | None = None
-    use_cgroups: bool | None = None
+    use_cgroups: bool | None = only_on("linux")
     use_sqlite_wal: bool | None = None
     use_xdg_base_directories: bool | None = None
     user_agent_suffix: str | None = None
