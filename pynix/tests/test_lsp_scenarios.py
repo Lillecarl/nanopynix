@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+import nanopynix
 from support.lsp_drivers import InProcessDriver, WireDriver
 from support.lsp_environment import asset
 from support.lsp_scenario import (
@@ -43,6 +44,16 @@ from support.lsp_scenario import (
     Select,
     Type,
 )
+
+#: What `pkgs.stdenv.hostPlatform.system` renders to on the host that runs
+#: these tests.
+#:
+#: **The value is the proof, and not the subject.** Each hover below reads
+#: `_module.args.pkgs` through the module system, and the system string is what
+#: comes back when that resolution works. The tests named it `x86_64-linux`,
+#: which is one host and not every host, so each of them failed on macOS with
+#: `aarch64-darwin` in the hover. Ask Nix, as the other pynix tests do.
+_HOST_SYSTEM = nanopynix.current_system()
 
 if TYPE_CHECKING:
     import pytest_lsp
@@ -357,7 +368,7 @@ async def test_hover_on_a_module_arg_resolves_via_terranixs_own_module_system(
         _NULL_NIX.read_text(),
         [
             GoTo("9"),
-            ExpectHover(contains="x86_64-linux"),
+            ExpectHover(contains=_HOST_SYSTEM),
         ],
     )
     await scenario.run(terranix_driver)
@@ -425,7 +436,7 @@ async def test_hover_on_a_module_arg_resolves_for_easykubenix_files(easykubenix_
         _EASYKUBENIX_DEMO_NIX.read_text(),
         [
             GoTo("1"),
-            ExpectHover(contains="x86_64-linux"),
+            ExpectHover(contains=_HOST_SYSTEM),
         ],
     )
     await scenario.run(easykubenix_driver)
@@ -473,7 +484,7 @@ async def test_hover_on_a_module_arg_still_works_inside_an_explicit_config_wrapp
         _EASYKUBENIX_CONFIG_NIX.read_text(),
         [
             GoTo("1"),
-            ExpectHover(contains="x86_64-linux"),
+            ExpectHover(contains=_HOST_SYSTEM),
         ],
     )
     await scenario.run(easykubenix_driver)

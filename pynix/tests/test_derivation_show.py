@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+import nanopynix
 from nanopynix._ansi import strip_ansi
 from nanopynix_testing.nix_environment import with_nixpkgs
 from pynix import Pynix
@@ -50,7 +51,11 @@ async def test_show_file(
     drv_path = next(iter(result))
     drv = result[drv_path]
     assert drv["name"] == "test-drv-1"
-    assert drv["system"] == "x86_64-linux"
+    # `stdenvNoCC` builds for the host, so the system of this derivation is the
+    # system of the machine. Naming one host made this fail on macOS with
+    # `aarch64-darwin`, and the subject is that `derivation show` reports the
+    # field, not what the field holds.
+    assert drv["system"] == nanopynix.current_system()
     assert "out" in drv["outputs"]
 
 
