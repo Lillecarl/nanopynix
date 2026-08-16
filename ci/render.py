@@ -24,12 +24,17 @@ and the write is not possible.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import os
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix import to_yaml
 from nanopynix.rpc import EvalSession, Session
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS_DIR = REPO_ROOT / "ci" / "workflows"
@@ -137,11 +142,53 @@ def output_path(nix_file: Path) -> Path:
     return OUTPUT_DIR / f"{nix_file.stem}.yml"
 
 
+#: What nixpkgs reads to stop refusing a package that this platform cannot
+#: build. nixpkgs reads it with ``builtins.getEnv``, so it belongs to the
+#: environment of the worker and not to the settings of Nix.
+_UNSUPPORTED_SYSTEM_ENV = "NIXPKGS_ALLOW_UNSUPPORTED_SYSTEM"
+
+
+@contextlib.contextmanager
+def _allow_unsupported_system() -> Generator[None]:
+    """Let the render name a package that this platform cannot build.
+
+    **The render reads names, and it builds nothing.** ``checkAttrs`` in
+    ``ci/workflows/lib.nix`` asks ``isDerivation`` of each check, which forces
+    each one, and ``checks.nixos-module`` evaluates a NixOS module. That module
+    reaches ``nixos-enter``, whose ``meta.platforms`` is Linux, so nixpkgs
+    refuses on macOS and the whole render fails.
+
+    **The output does not change, and it must not.** The step of
+    ``static-checks`` names every gate, so a render that dropped one would
+    quietly drop it from CI. This makes macOS evaluate the same names that
+    Linux evaluates, rather than fewer.
+
+    Set around the session, because the worker takes the environment when it
+    starts. Restored after, because
+    ``nanopynix/tests/test_ci_workflows.py`` calls this from the pytest
+    process, which other tests share.
+    """
+    previous = os.environ.get(_UNSUPPORTED_SYSTEM_ENV)
+    os.environ[_UNSUPPORTED_SYSTEM_ENV] = "1"
+    try:
+        yield
+    finally:
+        if previous is None:
+            del os.environ[_UNSUPPORTED_SYSTEM_ENV]
+        else:
+            os.environ[_UNSUPPORTED_SYSTEM_ENV] = previous
+
+
 async def render_workflows() -> dict[Path, str]:
     """Render every workflow, and return the whole text of each output file.
 
     Writes nothing. The keys are the paths that :func:`main` writes to.
     """
+    with _allow_unsupported_system():
+        return await _render_workflows()
+
+
+async def _render_workflows() -> dict[Path, str]:
     async with (
         # No `primops=`. This used to register `yaml_primops()` and call
         # `builtins.toYAML`, and issue #121 moved the render to `builtins.toJSON`
