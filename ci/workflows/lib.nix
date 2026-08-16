@@ -111,6 +111,22 @@ let
     # the same cap, and it measured 12 minutes locally: a fork for each
     # in-process test costs about half again as much as one process.
     suite = 30;
+    # The same suite on macOS, which is slower for two reasons and gets its
+    # own number for that.
+    #
+    # **Run 31949782513 was killed by the 30-minute cap at 94 percent.** Four
+    # LSP tests were burning a 120-second deadline each there, which issue #149
+    # holds and which the move to `test_lsp_protocol.py` took out of this job.
+    # That is about eight minutes back, so the same run reaches the end.
+    #
+    # What stays is the machine. The local backend is not available here, so
+    # every store operation crosses the daemon socket, and the runner of the
+    # macOS job is slower than the Linux one. Measured on an M-series Mac, in
+    # the configuration this job runs: 22 minutes. The runner is slower still.
+    #
+    # 45 leaves about half again over that measurement. Raise it against a run
+    # that timed out, and not against a guess.
+    darwinSuite = 45;
     # `nanopynix/tests` under ASAN. Three runs measured the way here:
     #
     #   30860160011  686 tests, stopped at a 60-minute cap
@@ -480,7 +496,7 @@ let
           (mkRunStep {
             name = "Test nanopynix against Nix ${version} (full suite, ${backend} backend)";
             subcommand = "suite";
-            cap = caps.suite;
+            cap = caps.darwinSuite;
           })
           (steps.uploadArtifact {
             name = "Upload test output";
