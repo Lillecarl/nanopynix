@@ -14,7 +14,7 @@ serialization -- over an in-memory duplex channel, with both halves in one
 process. Only the transport differs, and the transport is what made a failure
 unreadable here: a request that did not answer left a 120-second timeout and no
 way to ask the server anything. The same five assertions take 3.4 s there and
-took 10 minutes of deadlines here. Issue #149.
+took 10 minutes of deadlines here. Issue #44.
 
 So this module stays small on purpose. Add a test here only when a real process
 is what the test is about.
@@ -68,7 +68,7 @@ def _report_server_stderr(lsp_client: LanguageClient) -> None:
     **A failure here used to arrive with nothing to read.** The client waits
     for a message, the deadline fires, and the traceback names the wait. What
     the server was doing went to its stderr, which nothing collected, so
-    issue #149 took six experiments by hand to state.
+    issue #44 took six experiments by hand to state.
 
     `pytest_lsp` keeps the lines in `LanguageClient.stderr`, under one name or
     another depending on the version, so this asks for each and reports the

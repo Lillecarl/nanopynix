@@ -115,7 +115,7 @@ let
     # own number for that.
     #
     # **Run 31949782513 was killed by the 30-minute cap at 94 percent.** Four
-    # LSP tests were burning a 120-second deadline each there, which issue #149
+    # LSP tests were burning a 120-second deadline each there, which issue #44
     # holds and which the move to `test_lsp_protocol.py` took out of this job.
     # That is about eight minutes back, so the same run reaches the end.
     #

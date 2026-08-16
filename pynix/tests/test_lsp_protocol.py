@@ -1,7 +1,7 @@
 """LSP requests over real JSON-RPC framing, with the server in this process.
 
 These ran against a spawned ``pynix lsp`` in ``test_lsp_e2e.py`` until issue
-#149. The transport was the only thing that differed, and it was the thing that
+#44. The transport was the only thing that differed, and it was the thing that
 cost the most: a request that did not answer left a bare 120-second timeout and
 no way to ask the server what it was doing.
 
@@ -17,9 +17,9 @@ that the packaged ``pynix lsp`` entry point starts and negotiates
 ``initialize``. Nothing here duplicates that.
 
 **A document round trip against a spawned server is not tested anywhere, and
-issue #149 owns that gap.** It is the defect itself: the round trip is what
+issue #44 owns that gap.** It is the defect itself: the round trip is what
 takes more than 120 s there, so a test of it today asserts the defect rather
-than the behaviour. #149 asks for the test back, ungated, with the cause found.
+than the behaviour. #44 asks for the test back, ungated, with the cause found.
 """
 
 from __future__ import annotations
