@@ -274,8 +274,21 @@ async def test_ensure_path(
         await store.rpc.ensure_path(EnsurePathRequest(path=str(seeded_store_path)))
 
 
-async def test_optimise_and_verify_store(shared_nix_environment: NixTestEnvironment) -> None:
-    async with shared_nix_environment.rpc_session() as session, session.store() as store:
+async def test_optimise_and_verify_store(isolated_nix_environment: NixTestEnvironment) -> None:
+    """Both calls act on every path of the store, so this needs a store of its own.
+
+    **`optimise_store` rewrites what it is given.** It deduplicates the whole
+    store by hard-linking, and `verify_store` reads every path. On the shared
+    environment under `NANOPYNIX_TEST_SYSTEM_STORE` that is the store of the
+    machine: 42 thousand paths on the laptop this was measured on, which took
+    longer than the deadline of the test and would have relinked a store that
+    this suite does not own.
+
+    `isolated_nix_environment` is the fixture its own docstring names for
+    exactly this, alongside `collect_garbage`, and it stays a chroot store
+    whatever that variable says.
+    """
+    async with isolated_nix_environment.rpc_session() as session, session.store() as store:
         await store.rpc.optimise_store(OptimiseStoreRequest())
         response = await store.rpc.verify_store(VerifyStoreRequest(check_contents=False, repair=False))
         assert response.errors is False
