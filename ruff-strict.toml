@@ -573,6 +573,15 @@ known-first-party = [
   # The support package of `pynix-lsp/tests/`, importable by bare name for
   # the reason that `support` above gives.
   "lsp_support",
+  # The two distributions of `pynixd/`. `exclude` above keeps this
+  # configuration off that tree today, so neither name changes a run yet.
+  # They are here for the day issue #131 removes the exclusion: `--config
+  # ruff-strict.toml` forces *this* file over every path, so `pynixd/ruff.toml`
+  # and its own isort section stop being read at that moment. Without these
+  # two names, the 69 imports that section just corrected would all regress in
+  # the same commit that turned the gate on.
+  "nix_daemon_protocol",
+  "pynixd",
 ]
 
 [format]
