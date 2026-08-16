@@ -38,6 +38,33 @@ if TYPE_CHECKING:
     from grpclib.const import Handler
     from grpclib.encoding.base import StatusDetailsCodecBase
 
+# **`SO_PEERCRED` is Linux only, and reading it through the module is what
+# breaks.** Python defines the constant on Linux alone. `_unix_socket_identity`
+# already asks `hasattr` before it reads the name, so the runtime is correct,
+# but pyright does not narrow a module attribute through `hasattr` and reports
+# three errors on macOS: an unknown member, an unknown argument, and the access
+# itself.
+#
+# Reading it once here answers all three, and it is the shape `stdio.py` uses
+# for `F_SETPIPE_SZ`.
+#
+# **macOS has a partial alternative, and this does not take it.** Python
+# exposes `socket.LOCAL_PEERCRED` there, which `getsockopt` answers with a
+# `struct xucred`: an effective uid and a group list, and no pid. The pid needs
+# `LOCAL_PEERPID`, which Python does not expose on macOS at all. So a macOS
+# branch would fill two of the four fields of `PeerIdentity` and leave `pid`
+# empty, and it would have to unpack a second, differently shaped structure to
+# do it.
+#
+# Nothing asks for that yet. `PeerIdentity` has no reader outside this library
+# -- `pipes.py` and this module are the only two files that name it -- and
+# `AGENTS.md` says to change this library when nanopynix needs a different
+# behaviour, not before. **Write the macOS branch when a caller reads the
+# identity of a unix peer, and record then whether a uid with no pid is
+# enough.** Until then this returns None off Linux, which
+# `peer_identity_from_transport` already turns into `transport="unknown"`.
+_SO_PEERCRED: int | None = getattr(socket, "SO_PEERCRED", None)
+
 _SIZE_UNITS = {
     "": 1,
     "b": 1,
@@ -283,12 +310,12 @@ def local_process_identity(*, transport: str) -> PeerIdentity:
 
 
 def _unix_socket_identity(sock: socket.socket) -> PeerIdentity | None:
-    if not hasattr(socket, "SO_PEERCRED"):
+    if _SO_PEERCRED is None:
         return None
     try:
         raw = sock.getsockopt(
             socket.SOL_SOCKET,
-            socket.SO_PEERCRED,
+            _SO_PEERCRED,
             struct.calcsize("3i"),
         )
     except OSError:
