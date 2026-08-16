@@ -33,6 +33,7 @@ import pytest
 
 import nanopynix
 from nanopynix.namespace import EXPERIMENTAL_FEATURE, STORE_DIR, enter_overlay_namespace
+from nanopynix_testing.nix_markers import LINUX_NAMESPACES, LINUX_PROC_FS
 
 # ── the pure half ───────────────────────────────────────────────────
 
@@ -78,6 +79,9 @@ class TestOverlayNamespaceSpec:
 class TestEnterRefusesWhenItCannotWork:
     """Both guards fail *before* unsharing, so calling them here is safe."""
 
+    # The platform guard runs before the thread guard, so off Linux this test
+    # gets "needs Linux" and never reaches the message it asks for.
+    @LINUX_NAMESPACES
     def test_a_second_thread_is_refused(self, tmp_path: Path) -> None:
         spec = nanopynix.OverlayNamespace.under(tmp_path)
         stop = threading.Event()
@@ -92,6 +96,8 @@ class TestEnterRefusesWhenItCannotWork:
 
 
 class TestSupportProbe:
+    # `_mounts` is the measurement, and only Linux has the file it reads.
+    @LINUX_PROC_FS
     def test_the_probe_answers_without_changing_this_process(self, tmp_path: Path) -> None:
         """Whatever the answer, the caller's own store must not move."""
         before = (STORE_DIR + " ") in _mounts()
