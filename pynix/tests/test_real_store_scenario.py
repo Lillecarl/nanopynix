@@ -43,7 +43,12 @@ async def test_scenario_verifies_temporary_store_dirs(
     dirs = await scenario.assert_temp_store_dirs(test_name=request.node.nodeid)
 
     assert dirs["storeDir"] == "/nix/store"
-    assert dirs["rootDir"] == str(scenario.store_root)
+    if scenario.environment.relocated:
+        assert dirs["rootDir"] == str(scenario.store_root)
+    else:
+        # The store of the machine, which `assert_temp_store_dirs` already
+        # checked is undiverted. It has no root directory to compare.
+        assert dirs["rootDir"] is None
 
 
 @pytest.mark.dependency(name="scenario:add-file", depends=["scenario:store-dirs"])

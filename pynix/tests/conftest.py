@@ -174,6 +174,21 @@ class PynixStoreScenario:
 
     async def assert_temp_store_dirs(self, *, test_name: str = "unknown") -> dict[str, object]:
         dirs = await self.get_store_dirs(test_name=test_name)
+        if not self.environment.relocated:
+            # `NANOPYNIX_TEST_SYSTEM_STORE` opened the store of the machine, so
+            # there is no temporary layout to name. What stays worth asserting
+            # is the property that mode exists for: the store is not diverted,
+            # so `storeDir` is the directory on disk and a build there needs no
+            # chroot. The layout of that store belongs to the machine, and this
+            # suite must not assert what it is.
+            if dirs.get("rootDir") is not None:
+                raise AssertionError(f"the store of the machine has no root directory; got {dirs.get('rootDir')!r}")
+            if dirs.get("realStoreDir") != dirs.get("storeDir"):
+                raise AssertionError(
+                    f"expected an undiverted store, got storeDir={dirs.get('storeDir')!r} "
+                    f"realStoreDir={dirs.get('realStoreDir')!r}"
+                )
+            return dirs
         expected = {
             "storeDir": "/nix/store",
             "rootDir": str(self.store_root),

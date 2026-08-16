@@ -34,6 +34,38 @@ if TYPE_CHECKING:
 # than any release measured.
 _RMTREE_ATTEMPTS = 20
 
+# **The switch that puts the suite on the store of the machine.**
+#
+# Every store this suite makes is a chroot store: `root=` moves the physical
+# store under a temporary directory and leaves the logical store dir at
+# `/nix/store`. Nix builds in such a store on Linux alone. It answers the
+# difference with a mount namespace and a bind mount, and
+# `derivation-builder.cc` throws "building using a diverted store is not
+# supported on this platform" where there is no namespace to use. So every
+# test that builds a derivation fails on macOS, for a reason no test owns.
+#
+# This variable makes the fixtures open the store of the machine instead. That
+# store is not relocated, so a build there is a plain build and it works on
+# every platform.
+#
+# **It is off by default, and the default is the one a developer wants.** A
+# hermetic store leaves the machine alone; the store of the machine is shared,
+# and a test that writes it leaves a path behind. `NANOPYNIX_TEST_DELETE_PATHS_FILE`
+# and `StorePathRecorder` record each such path, and the CI step deletes them
+# after the run.
+#
+# **A multi-user installation answers this only through the daemon.**
+# `/nix/var/nix/db` belongs to root there, so a direct `local://` store cannot
+# take the big lock and every write fails with `Permission denied`. Measured on
+# macOS 26.5.1, and the runner of the macOS job takes the multi-user installer
+# as well. Use `--nix-test-backends daemon` with this variable on such a host.
+SYSTEM_STORE_ENV = "NANOPYNIX_TEST_SYSTEM_STORE"
+
+
+def use_system_store() -> bool:
+    """Whether the fixtures open the store of the machine, not a chroot store."""
+    return os.environ.get(SYSTEM_STORE_ENV, "") not in ("", "0")
+
 
 @dataclass
 class _Daemon:
@@ -61,6 +93,11 @@ class NixTestEnvironment:
     backend: str
     root: Path
     store_uri: str
+    # Whether `store_uri` names a chroot store under `root`. False means the
+    # store of the machine, which this suite does not own. `root` stays a
+    # directory of pytest either way, so the teardown that removes it is safe
+    # in both modes and no caller has to ask which mode it is in.
+    relocated: bool = True
 
     @property
     def settings(self) -> nanopynix.NixSettings:
@@ -107,7 +144,12 @@ class NixTestEnvironment:
         (Nix reports ``storeDir`` as the logical ``/nix/store`` regardless, see
         ``realStoreDir``), so reading a realized path directly -- bypassing the
         daemon protocol -- needs this translation instead of the raw string.
+
+        The store of the machine is not relocated, so the logical path is
+        already the path on disk and the translation must not happen.
         """
+        if not self.relocated:
+            return Path(store_path)
         return self.root / store_path.removeprefix("/")
 
     def store_uri_matches(self, uri: str) -> bool:
@@ -266,7 +308,24 @@ async def _start_daemon(root: Path) -> _Daemon:
     return _Daemon(process, socket_path)
 
 
-async def _environment(backend: str, root: Path) -> tuple[NixTestEnvironment, _Daemon | None]:
+async def _environment(
+    backend: str,
+    root: Path,
+    *,
+    allow_system_store: bool = True,
+) -> tuple[NixTestEnvironment, _Daemon | None]:
+    """Build one store endpoint.
+
+    ``allow_system_store`` is False for the fixture that owns a store of its
+    own. ``isolated_nix_environment`` is that fixture, and its docstring gives
+    the rule: a test that mutates the whole store takes it. Such a test calls
+    ``collect_garbage(DELETE_DEAD)``, ``optimise_store`` or ``verify_store``,
+    and each of those acts on every path of the store it is given. Pointing one
+    at the store of the machine would delete the paths of that machine, so the
+    switch must not reach this fixture.
+    """
+    if allow_system_store and use_system_store():
+        return _system_store_environment(backend, root), None
     if backend == "local":
         # "local://" (not "local") -- Nix always adds the "//" authority
         # separator when it reports an open store's URI back, so starting
@@ -279,6 +338,26 @@ async def _environment(backend: str, root: Path) -> tuple[NixTestEnvironment, _D
             daemon,
         )
     raise ValueError(f"unknown Nix test backend: {backend!r}")
+
+
+def _system_store_environment(backend: str, root: Path) -> NixTestEnvironment:
+    """The store of the machine, for a host that cannot build in a chroot store.
+
+    ``root`` stays the scratch directory of pytest. It no longer holds the
+    store, and the fixtures still own it and still remove it.
+
+    **The daemon backend names the daemon of the machine, and starts none.**
+    ``_start_daemon`` exists to give a chroot store its own daemon. Here the
+    daemon that owns the store is already running, so a second one would open
+    the same database from a second process for no gain.
+    """
+    if backend == "local":
+        store_uri = "local://"
+    elif backend == "daemon":
+        store_uri = "daemon"
+    else:
+        raise ValueError(f"unknown Nix test backend: {backend!r}")
+    return NixTestEnvironment(backend=backend, root=root, store_uri=store_uri, relocated=False)
 
 
 @pytest.fixture(scope="session")
@@ -339,7 +418,10 @@ async def isolated_nix_environment(
     # as an unsupported source file type. ``tmp_path_factory`` still gives
     # pytest ownership of this distinct per-test root.
     root = tmp_path_factory.mktemp(f"nix-{nix_backend}")
-    environment, daemon = await _environment(nix_backend, root)
+    # Always a chroot store, even with `NANOPYNIX_TEST_SYSTEM_STORE` set. See
+    # `_environment` for the reason: this is the fixture of the tests that
+    # collect garbage.
+    environment, daemon = await _environment(nix_backend, root, allow_system_store=False)
     try:
         yield environment
     finally:
