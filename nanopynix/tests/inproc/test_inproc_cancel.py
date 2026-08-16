@@ -57,21 +57,28 @@ INTERRUPTIBLE = "builtins.genList (x: x) 12000000"
 # `scope.cancelled_caught`, which says that a cancellation really happened.
 CANCEL_AFTER = 0.2
 
-# A fold has no checkInterrupt() anywhere in its path. This is the case Nix
-# cannot stop, and the one that abandons the evaluator.
+# `builtins.sleep` polls no checkInterrupt() while it waits. This is the case
+# Nix cannot stop, and the one that abandons the evaluator.
 #
-# Sized to run for a few seconds, not for minutes. The size decides how much
-# Boehm heap the abandoned thread holds while it runs, and a 4-core machine
-# with three of these at once swaps hard enough to break the collector's
-# stop-the-world budget. Only the ratio to GRACE matters to what is under test.
-UNINTERRUPTIBLE = "builtins.foldl' (a: b: a + b) 0 (builtins.genList (x: x) 12000000)"
+# **A fold stood here, and a fold measures the machine.** It was 12 million
+# additions, which run in 0.72 s on an M-series Mac and take longer than
+# `CANCEL_AFTER` on the runner of the macOS job. So the cancel below landed
+# after the work had already finished on the faster host: nothing was
+# interrupted, nothing was poisoned, and three tests here failed on one macOS
+# machine while passing on another. Every year of faster hardware moves that
+# boundary again.
+#
+# The sleep says how long it takes, so nothing here is tuned to a machine.
+# `nanopynix-bindings/src/nix_expr.cpp` implements it, and says why it is a
+# builtin that upstream Nix does not have.
+UNINTERRUPTIBLE_SECONDS = 5.0
+UNINTERRUPTIBLE = f"builtins.sleep {UNINTERRUPTIBLE_SECONDS}"
 
-# Short enough that poisoning happens well inside the fold above, so the test
-# does not depend on how fast the machine is.
+# Short enough that poisoning happens well inside the sleep above.
 GRACE = 0.3
 
-# How long a cancelled fold may take to run itself out. Generous: the point is
-# to fail with a clear message rather than to measure the machine.
+# How long the abandoned work may take to run itself out. It is the sleep
+# above, and the margin is for a loaded machine rather than for a slow one.
 ABANDONED_WORK_TIMEOUT = 60.0
 
 
@@ -138,7 +145,7 @@ async def test_a_cancelled_evaluation_abandons_the_evaluator(
     ``close()``. Failing at once, with a class that says why, is the correction.
     """
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as evaluator:
-        with anyio.move_on_after(0.4):
+        with anyio.move_on_after(CANCEL_AFTER):
             await evaluator.string(UNINTERRUPTIBLE)
 
         assert evaluator._executor.poisoned is not None  # type: ignore[reportPrivateUsage] -- the state under test
@@ -172,7 +179,7 @@ async def test_closing_an_abandoned_evaluator_does_not_hang_or_raise(
     async with inproc_session() as nix, nix.store() as store:
         evaluator = nix.eval(store)
         await evaluator.open()
-        with anyio.move_on_after(0.4):
+        with anyio.move_on_after(CANCEL_AFTER):
             await evaluator.string(UNINTERRUPTIBLE)
         assert evaluator._executor.poisoned is not None  # type: ignore[reportPrivateUsage] -- the state under test
 
@@ -206,7 +213,7 @@ async def test_an_abandoned_evaluator_does_not_stop_its_siblings(
         nix.eval(store) as doomed,
         nix.eval(store) as healthy,
     ):
-        with anyio.move_on_after(0.4):
+        with anyio.move_on_after(CANCEL_AFTER):
             await doomed.string(UNINTERRUPTIBLE)
         assert doomed._executor.poisoned is not None  # type: ignore[reportPrivateUsage] -- the state under test
 
