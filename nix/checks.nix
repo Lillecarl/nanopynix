@@ -230,6 +230,18 @@ let
   enabled = evalModule { services.pynixd.enable = true; };
   disabled = evalModule { };
 
+  # The module with one setting overridden, so the gate can see that the
+  # defaults are defaults. `settingsDefaults` in `pynixd/nix/common.nix` is
+  # wrapped in `mkDefault`; without that wrapper these are values, and a user
+  # who sets `unix_path` gets an evaluation conflict rather than an override.
+  # The wrapper is one `lib.mapAttrsRecursive` and is the easiest thing to
+  # lose when that block moves between files, which is why it is checked here
+  # and not only read.
+  overridden = evalModule {
+    services.pynixd.enable = true;
+    services.pynixd.settings.unix_path = "/run/pynixd/custom.sock";
+  };
+
   mkCheck =
     name: nativeBuildInputs: command:
     runCommand "nanopynix-check-${name}" { inherit nativeBuildInputs; } ''
@@ -381,8 +393,13 @@ in
     assert enabled.environment.etc."pynixd/pynixd.json".source != null;
     assert installedWhenEnabled;
     assert !installedWhenDisabled;
+    # The defaults are defaults: an override wins, and the settings it did not
+    # name survive. See `overridden` above for why this is worth a gate.
+    assert enabled.services.pynixd.settings.unix_path == "/run/pynixd/pynixd.sock";
+    assert overridden.services.pynixd.settings.unix_path == "/run/pynixd/custom.sock";
+    assert overridden.services.pynixd.settings.ssh_port == null;
     runCommand "nanopynix-check-nixos-module" { } ''
-      echo "services.pynixd evaluates, and installs nothing while disabled" > "$out"
+      echo "services.pynixd evaluates, overrides cleanly, and installs nothing while disabled" > "$out"
     '';
 
   # The plugin every other suite in this repository reports through, gated for
