@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
+#include <pthread.h>
 #include <functional>
 #include <map>
 #include <memory>
@@ -32,6 +34,21 @@ struct PyValue;
 // then found in the enclosing global scope, and fails without it. Only the
 // `-nogc` variant catches that, and it did.
 
+/// The number `threading.get_ident()` reports for the calling thread.
+///
+/// CPython's `PyThread_get_thread_ident` returns `pthread_self()` widened to
+/// an integer, so this reads the same handle the same way. `memcpy` rather
+/// than a cast, because a `pthread_t` is an integer on glibc and a pointer on
+/// macOS, and no single cast is well formed for both.
+inline std::uintptr_t current_thread_ident()
+{
+    const pthread_t self = pthread_self();
+    static_assert(sizeof(self) <= sizeof(std::uintptr_t), "a pthread_t must fit in a uintptr_t to be reported");
+    std::uintptr_t ident = 0;
+    std::memcpy(&ident, &self, sizeof(self));
+    return ident;
+}
+
 struct PyEvalState {
     using SettingsMap = std::map<std::string, std::string>;
 
@@ -47,6 +64,21 @@ struct PyEvalState {
     /// it. A default member initializer, so it is set before the constructor
     /// body calls `init`.
     const std::thread::id owner = std::this_thread::get_id();
+
+    /// The same thread, as the number `threading.get_ident()` reports.
+    ///
+    /// **`std::thread::id` compares portably and prints however it likes.**
+    /// libstdc++ streams the underlying `pthread_t`, which on glibc is an
+    /// integer and is exactly what CPython returns from
+    /// `threading.get_ident()`. libc++ streams the same member, but on macOS a
+    /// `pthread_t` is a pointer, so the refusal below read
+    /// `thread 0x16b8f7000` and the reader had nothing to compare against
+    /// Python. `test_a_foreign_thread_cannot_read_a_value` matched
+    /// `thread (\d+)` and got `0` out of the `0x`.
+    ///
+    /// So the comparison keeps `std::thread::id`, which is the portable part,
+    /// and the message uses this, which is the part that has to be a number.
+    const std::uintptr_t owner_ident = current_thread_ident();
     std::shared_ptr<nix::StaticEnv> repl_static_env;
 
     /// The root that keeps the REPL environment alive, and the only one.
@@ -141,8 +173,8 @@ struct PyEvalState {
         if (here == owner)
             return;
         std::ostringstream message;
-        message << "this evaluator belongs to thread " << owner
-                << ", so thread " << here << " cannot use it. Nix confines an "
+        message << "this evaluator belongs to thread " << owner_ident
+                << ", so thread " << current_thread_ident() << " cannot use it. Nix confines an "
                 << "EvalState, and every value of that EvalState, to the "
                 << "thread that built it.";
         throw std::runtime_error(message.str());
