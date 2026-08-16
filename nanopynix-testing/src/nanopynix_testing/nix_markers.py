@@ -37,6 +37,20 @@ already refuses the whole feature on another operating system, and reports
 the reason, so there is nothing for the test to assert there. Issue #143.
 """
 
+LINUX_FORK_THEN_INIT = pytest.mark.nix_platform("linux")
+"""The test initialises Nix in a forked child, or asserts what `auto` picks.
+
+`nix::initLibStore` calls `curl_global_init`, and curl calls
+`SCDynamicStoreCopyProxies` there on macOS alone. SystemConfiguration is
+CoreFoundation, which a process may not use between `fork` and `exec`, so the
+child stops rather than fails. **A test that drives it hangs for the whole
+step cap**, which is why the marker is worth more here than a skip usually is.
+
+`resolve_worker_start` answers `spawn` on Darwin for the same reason, so the
+rpc engine never reaches this. The inproc engine has no equivalent, because
+the caller owns the fork. Issue #147.
+"""
+
 LINUX_STORE_EXEC = pytest.mark.nix_platform("linux")
 """The test runs a program that lives in a relocated store.
 
