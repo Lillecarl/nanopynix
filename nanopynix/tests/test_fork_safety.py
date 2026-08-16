@@ -50,6 +50,7 @@ from nanopynix._wire import HandleKind
 from nanopynix.exceptions import ForkedSessionError
 from nanopynix.rpc.client._session import _DeferredReleases
 from nanopynix.settings import NanopynixSettings, resolve_worker_start
+from nanopynix_testing.nix_markers import LINUX_FORK_THEN_INIT
 from test_support.subprocess_output import run_process
 
 if TYPE_CHECKING:
@@ -394,6 +395,7 @@ async def test_a_fork_after_a_closed_inproc_session_is_still_refused(
     assert "initialized Nix in this address space" in message
 
 
+@LINUX_FORK_THEN_INIT
 async def test_fork_first_then_open_still_works_for_inproc(shared_nix_environment: NixTestEnvironment) -> None:
     """The one supported inproc pattern, and the test that stops the guard eating it.
 
@@ -471,6 +473,9 @@ async def test_an_rpc_session_starts_a_spawn_worker_with_no_fork(rpc_session: Rp
         assert await nix.get_verbosity() is not None
 
 
+# Darwin answers `spawn` whatever the fork state is, so the first row below is
+# the Linux answer and only the Linux answer. Issue #147 gives the reason.
+@LINUX_FORK_THEN_INIT
 @pytest.mark.parametrize(
     ("forked", "expected"),
     [(False, "forkserver"), (True, "spawn")],
