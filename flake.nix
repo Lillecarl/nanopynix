@@ -75,7 +75,28 @@
       # `FLAKE_COMPATISH_DISABLE_OVERRIDES=1` makes that evaluation agree with
       # a flake evaluation, so CI names `ciSteps.nix_2_34-tsan` and
       # `checks.lint` as they are written. The mangling had no other consumer.
-      packages = forAllSystems (system: lib.filterAttrs (_: lib.isDerivation) eachDefNix.${system});
+      # **`meta.platforms` decides what each system exports, and no list here
+      # does.** `nanopynix-store-exec` rearranges the mount table and links
+      # `glibc.static`, so `tools/store-exec/package.nix` declares
+      # `lib.platforms.linux`, which is right. Exporting it on macOS anyway
+      # left an attribute that names a package and throws when anything forces
+      # it, so `nix flake show` and `nix flake check` failed there on a tool
+      # that could never have run.
+      #
+      # `availableOn` reads that declaration, so a package states its own
+      # platforms once and this filter answers for every system. Add nothing
+      # here for the next Linux-only tool; give the package the `meta` it
+      # deserves. Issue #148.
+      #
+      # Reading `meta` of a package that this platform refuses is safe: the
+      # refusal replaces `outPath` and `drvPath`, and leaves `meta` alone.
+      packages = forAllSystems (
+        system:
+        lib.filterAttrs (
+          _: value:
+          lib.isDerivation value && lib.meta.availableOn eachDefNix.${system}.pkgs.stdenv.hostPlatform value
+        ) eachDefNix.${system}
+      );
       # The standard place for the four static gates, although `nix flake
       # check` cannot run them today: that command evaluates every package,
       # and `packages.shell` fails a pure evaluation with "Editable root was
