@@ -5,7 +5,11 @@ from __future__ import annotations
 import secrets
 import sys
 
-from setproctitle import setproctitle as _setproctitle
+# The mirror of the note on ``_discard_process_title`` below. pyright reads
+# ``sys.platform`` statically, so on macOS the branch that names this import is
+# the dead one and ``reportUnusedImport`` fires. The import is used, on every
+# platform that is not macOS.
+from setproctitle import setproctitle as _setproctitle  # pyright: ignore[reportUnusedImport] -- see the note below
 
 
 # pyright evaluates ``sys.platform`` statically, so it reads the selection
