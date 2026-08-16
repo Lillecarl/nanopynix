@@ -483,7 +483,7 @@ jobs:
     - uses: cachix/install-nix-action@master
       with:
         extra_nix_config: |
-          experimental-features = nix-command flakes
+          experimental-features = flakes nix-command ca-derivations dynamic-derivations recursive-nix
       timeout-minutes: 15
     - uses: cachix/cachix-action@master
       with:

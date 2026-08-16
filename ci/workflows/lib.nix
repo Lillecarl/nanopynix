@@ -256,15 +256,40 @@ let
   # Nix install mode no longer affects what gets exercised. The remaining
   # local/daemon axis lives in `--nix-test-backends`, not in how Nix itself
   # was installed.
+  # **What the suite needs of the Nix that owns the store it writes to.**
+  # `nanopynix.settings.DEFAULT_EXPERIMENTAL_FEATURES`, spelled here because a
+  # workflow cannot import Python.
+  #
+  # A job that makes its own daemon does not read this: `_start_daemon` pins
+  # the same list on the command line so that daemon ignores the host. The
+  # macOS job has no private daemon -- `NANOPYNIX_TEST_SYSTEM_STORE` puts it on
+  # the store of the machine -- so the installed Nix is the one that has to
+  # allow them.
+  #
+  # Measured: without it, `test_inproc_read_derivation_keeps_nested_input_drvs`
+  # and its rpc twin fail on `builtins.outputOf` with "experimental Nix feature
+  # 'ca-derivations' is disabled". The comment on `_start_daemon` named those
+  # two tests years before this job existed.
+  suiteExperimentalFeatures = [
+    "flakes"
+    "nix-command"
+    "ca-derivations"
+    "dynamic-derivations"
+    "recursive-nix"
+  ];
+
   mkTestSetup =
     {
       ref ? null,
       lockArtifact ? null,
+      experimentalFeatures ? null,
     }:
     [ (steps.checkout { inherit ref; }) ]
     ++ lib.optional (lockArtifact != null) (steps.downloadArtifact { artifactName = lockArtifact; })
     ++ [
-      (steps.installNix { })
+      (steps.installNix (
+        lib.optionalAttrs (experimentalFeatures != null) { inherit experimentalFeatures; }
+      ))
       (steps.cachix { })
     ];
 
@@ -487,28 +512,33 @@ let
         env = testJobEnv { inherit version backend; } // {
           NANOPYNIX_TEST_SYSTEM_STORE = "1";
         };
-        steps = mkTestSetup { inherit ref lockArtifact; } ++ [
-          (mkBuildStep {
-            name = "Build the CI step package for Nix ${version}";
-            cap = caps.build;
-          })
-          (steps.verifyClosure { name = "Verify test runner closure after build"; })
-          (mkRunStep {
-            name = "Test nanopynix against Nix ${version} (full suite, ${backend} backend)";
-            subcommand = "suite";
-            cap = caps.darwinSuite;
-          })
-          (steps.uploadArtifact {
-            name = "Upload test output";
-            artifactName = "test-output-darwin-${backend}-${version}";
-            path = "\${{ github.workspace }}/test-gdb-output.log";
-          })
-          (steps.uploadArtifact {
-            name = "Upload the JUnit report";
-            artifactName = "junit-darwin-${backend}-${version}";
-            path = "\${{ github.workspace }}/junit.xml";
-          })
-        ];
+        steps =
+          mkTestSetup {
+            inherit ref lockArtifact;
+            experimentalFeatures = suiteExperimentalFeatures;
+          }
+          ++ [
+            (mkBuildStep {
+              name = "Build the CI step package for Nix ${version}";
+              cap = caps.build;
+            })
+            (steps.verifyClosure { name = "Verify test runner closure after build"; })
+            (mkRunStep {
+              name = "Test nanopynix against Nix ${version} (full suite, ${backend} backend)";
+              subcommand = "suite";
+              cap = caps.darwinSuite;
+            })
+            (steps.uploadArtifact {
+              name = "Upload test output";
+              artifactName = "test-output-darwin-${backend}-${version}";
+              path = "\${{ github.workspace }}/test-gdb-output.log";
+            })
+            (steps.uploadArtifact {
+              name = "Upload the JUnit report";
+              artifactName = "junit-darwin-${backend}-${version}";
+              path = "\${{ github.workspace }}/junit.xml";
+            })
+          ];
       }
     );
 
