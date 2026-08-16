@@ -15,7 +15,6 @@ rather than implied.
 
 from __future__ import annotations
 
-import sys
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -28,6 +27,7 @@ from nanopynix import stores
 from nanopynix.namespace import OverlayNamespace
 from nanopynix.settings import NIX_2_34, NixStoreDefaults, field_is_supported, running_nix_version
 from nanopynix_testing.nix_environment import force_rmtree
+from nanopynix_testing.nix_markers import LINUX_PROC_FS
 from test_support.notes import note
 
 if TYPE_CHECKING:
@@ -476,7 +476,7 @@ async def _temp_roots_descriptors(state_dir: anyio.Path) -> list[str]:
     return held
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="the descriptor list comes from /proc")
+@LINUX_PROC_FS
 async def test_two_handles_on_one_local_store_share_the_temp_roots_file(
     inproc_session: InprocSessionFactory,
     tmp_path: Path,
@@ -556,7 +556,7 @@ async def test_a_store_root_that_came_back_is_not_the_old_store(
         note(after_recreation=path)
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="the descriptor list comes from /proc")
+@LINUX_PROC_FS
 async def test_two_store_roots_get_a_local_store_each(
     inproc_session: InprocSessionFactory,
     tmp_path: Path,

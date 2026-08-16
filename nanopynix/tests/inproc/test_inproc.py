@@ -21,7 +21,7 @@ import nanopynix
 from nanopynix import Derivation, GcResult, MissingInfo, NixType, StorePath, inproc, yaml_primops
 from nanopynix._ansi import strip_ansi
 from nanopynix.settings import NixEvalSettings, normalize_nix_path
-from nanopynix_testing.nix_markers import NIX_GC_ROOTS_BUG
+from nanopynix_testing.nix_markers import LINUX_PROC_FS, NIX_GC_ROOTS_BUG
 from test_support.git_fixtures import init_flake_repo
 from test_support.notes import note
 
@@ -269,6 +269,7 @@ async def test_a_collected_value_releases_its_nix_root(inproc_session: InprocSes
 
 @requires_boehm_gc
 @pytest.mark.anyio
+@LINUX_PROC_FS
 async def test_the_collector_owner_thread_outlives_the_session(
     inproc_session: InprocSessionFactory,
 ) -> None:

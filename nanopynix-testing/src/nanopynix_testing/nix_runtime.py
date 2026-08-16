@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -169,6 +170,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "nix_version(minimum=None, maximum=None, exclude=()): require a linked Nix version range",
         "nix_capability(name): require a compiled nanopynix/Nix capability",
         "nix_sanitizer(name): run only under the named sanitizer",
+        "nix_platform(name): run only on the named `sys.platform`",
         (
             "nix_known_issue(exclude=(), sanitizer=None, reason=''): skip an explicitly bounded "
             "upstream defect. Give `exclude`, or `sanitizer`, or both"
@@ -311,6 +313,14 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
                 raise pytest.UsageError("nix_capability requires one capability name")
             if not runtime.supports(capability.args[0]):
                 item.add_marker(pytest.mark.skip(reason=f"linked Nix lacks {capability.args[0]}"))
+
+        platform_marker = item.get_closest_marker("nix_platform")
+        if platform_marker is not None:
+            if platform_marker.kwargs or len(platform_marker.args) != 1 or not isinstance(platform_marker.args[0], str):
+                raise pytest.UsageError("nix_platform requires one platform name")
+            wanted = platform_marker.args[0]
+            if sys.platform != wanted:
+                item.add_marker(pytest.mark.skip(reason=f"needs {wanted}, and this host is {sys.platform}"))
 
         sanitizer_marker = item.get_closest_marker("nix_sanitizer")
         if sanitizer_marker is not None:

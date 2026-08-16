@@ -34,6 +34,7 @@ from nanopynix.rpc import WorkerDiedError, WorkerSignaledError
 from nanopynix.rpc._status_details import NIX_STATUS_DETAILS_CODEC
 from nanopynix.rpc._worker_argv import worker_argv
 from nanopynix.settings import NanopynixSettings
+from nanopynix_testing.nix_markers import LINUX_PROC_FS
 from nanopynix_testing.worker_death import expect_the_worker_to_die
 
 if TYPE_CHECKING:
@@ -136,6 +137,7 @@ async def test_the_worker_ends_itself_and_reports_status_zero(rpc_session: RpcSe
     assert proc.exit_status == 0, f"the stdio worker was signalled rather than left to end itself: {proc.exit_status}"
 
 
+@LINUX_PROC_FS
 async def test_worker_oom_score_adj_reaches_the_exec_d_process(rpc_session: RpcSessionFactory) -> None:
     """``on_process_start`` is the only route to the pid, and this uses it.
 

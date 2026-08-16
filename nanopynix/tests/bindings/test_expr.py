@@ -12,6 +12,7 @@ import pytest
 from nanopynix_bindings import expr as nanopynix_expr
 
 import nanopynix
+from nanopynix_testing.nix_markers import LINUX_PROC_FS
 from test_support.notes import note
 
 if TYPE_CHECKING:
@@ -580,6 +581,7 @@ class TestEvaluatorThreadRegistration:
         )
 
     @requires_boehm_gc
+    @LINUX_PROC_FS
     def test_the_collector_has_an_owner_thread(self, eval_state: nanopynix.EvalState) -> None:
         """One thread starts the collector, and that thread is still running.
 
