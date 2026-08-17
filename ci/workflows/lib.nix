@@ -397,13 +397,29 @@ let
       }
     );
 
-  # **One test job on macOS, and the whole suite inside it.** Issue #143.
+  # **One test job on macOS, and the bindings inside it.** Issue #143.
   #
-  # The subset is the *job*, and not the tests. The suite has never run off
-  # Linux, so the first run does not report a macOS defect: it reports which
-  # tests assume Linux. A hand-picked list of tests would hide exactly that.
-  # `nix_platform` carries the five that cannot answer there, and each one
-  # names what it excludes.
+  # This started as the whole suite, on the argument that the subset should be
+  # the *job* and not the tests: a hand-picked list would hide which tests
+  # assume Linux, and that list was the first thing the job had to report.
+  # That argument was right about what to learn and wrong about what the
+  # runner can carry. Three runs measured it:
+  #
+  #   31940698516  the runner's worker died writing its own diagnostic log
+  #   31942405488  cancelled by hand after 24 minutes inside one test
+  #   31944603019  82 minutes, "the hosted runner lost communication"
+  #
+  # A `macos-latest` runner has 3 cores and about 7 GB. Darwin resolves every
+  # worker start to `spawn` (issue #147), so each worker execs a fresh
+  # interpreter and loads the Nix libraries again instead of sharing one copy
+  # through a fork. The 30-minute step cap never fired on the third run,
+  # because the process that enforces the cap was the one that died.
+  #
+  # So the job takes `nanopynix/tests/bindings`, which is the part that earns
+  # a macOS runner at all -- see #140 below. The five `nix_platform` markers
+  # stay, because they record what was learned and the wider job needs them
+  # back. The two resource-report steps are how the next widening gets a
+  # number rather than a guess.
   #
   # **The reason this job earns a slot is #140.** Darwin is the one host in
   # this matrix that is clang with libc++, measured:
@@ -457,11 +473,21 @@ let
             cap = caps.build;
           })
           (steps.verifyClosure { name = "Verify test runner closure after build"; })
+          (withTimeout 5 {
+            name = "Report free space and memory before the tests";
+            run = "df -h && vm_stat";
+          })
           (mkRunStep {
-            name = "Test nanopynix against Nix ${version} (full suite, ${backend} backend)";
-            subcommand = "suite";
+            name = "Test nanopynix against Nix ${version} (bindings, ${backend} backend)";
+            subcommand = "suite-bindings";
             cap = caps.suite;
           })
+          (withCond "\${{ !cancelled() }}" (
+            withTimeout 5 {
+              name = "Report free space and memory after the tests";
+              run = "df -h && vm_stat";
+            }
+          ))
           (steps.uploadArtifact {
             name = "Upload test output";
             artifactName = "test-output-darwin-${backend}-${version}";
