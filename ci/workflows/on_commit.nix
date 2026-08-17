@@ -51,10 +51,22 @@ workflow.evalWorkflow {
   name = "On commit";
   env = workflow.workflowEnv;
   on = {
-    # Keep ci-develop available as a pushed ref for focused workflow_dispatch
-    # runs without starting the full push matrix.
+    # **Any `ci-` branch is a scratch branch, and a push to one starts
+    # nothing.** Such a branch exists so a `workflow_dispatch` can name a ref
+    # that carries work in progress, and a focused `-f jobs=...` run is the
+    # whole point of it. The full push matrix is 245 runner-minutes, and none
+    # of them answer the question the dispatch asked.
+    #
+    # A pattern rather than the single name `ci-develop`, because one name is
+    # one lane. Two sessions that both force-push `ci-develop` overwrite each
+    # other, and neither can tell from the branch whose work is on it. That
+    # already happened, and it cost the whole #143 stack its remote. A prefix
+    # gives each worker a lane of its own for the cost of one character.
+    #
+    # GitHub reads this trigger from the ref that is pushed, so a new `ci-`
+    # branch is exempt from its own first push.
     push = {
-      branches-ignore = [ "ci-develop" ];
+      branches-ignore = [ "ci-*" ];
     };
     workflow_dispatch = {
       inputs = {
