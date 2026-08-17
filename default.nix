@@ -311,6 +311,26 @@ let
   # `AGENTS.md` gives that rule, and this floor is what makes it affordable.
   supportedNixFloor = "2.34";
 
+  # The plain Nix package of each supported version, with no patch of this
+  # repository on it. `nixFunctionalTests` below runs Nix's own test suite
+  # against each one, and that comparison needs the Nix that upstream ships:
+  # a patch here would change what the control run measures.
+  #
+  # `nixVersions` also holds the component scopes, the aliases and the
+  # override functions. `isDerivation` drops all three kinds, and the names
+  # below are the aliases, which point at a version this set already holds.
+  supportedNixPackages = lib.filterAttrs (
+    name: value:
+    !(builtins.elem name [
+      "stable"
+      "latest"
+      "unstable"
+      "minimum"
+    ])
+    && (builtins.tryEval (lib.isDerivation value && value ? version)).value
+    && lib.versionAtLeast (lib.versions.majorMinor value.version) supportedNixFloor
+  ) pkgs.nixVersions;
+
   # Builds one full nanopynix scope per modular Nix component set nixpkgs
   # exposes, optionally with ThreadSanitizer instrumentation applied to nix
   # itself and to nanopynix's own C++ bindings. Rather than hand-enumerating
@@ -580,6 +600,25 @@ let
                 name = "pynixd";
                 inherit (final) pythonSet;
               };
+              # Nix's own functional test suite, run against a daemon. One
+              # program for each supported Nix version, and each program
+              # carries its Nix, the test scripts of that Nix, and pynixd. So
+              # a person runs two commands and gets a comparison:
+              #
+              #     nix build --file . nixFunctionalTests.nix_2_34 --out-link result
+              #     ./result/bin/nanopynix-nixft-nix_2_34 all
+              #
+              # The tests build derivations, so they need Linux. Read
+              # `pynixd/nix/functional-tests/README.md` for the test mode, and
+              # issue #172 for the work.
+              nixFunctionalTests = lib.mapAttrs (
+                versionName: nixPackage:
+                final.callPackage ./pynixd/nix/functional-tests/package.nix {
+                  nix = nixPackage;
+                  version = versionName;
+                  inherit (final) pynixd;
+                }
+              ) supportedNixPackages;
               # What the suite needs on PATH, shared by the packaged runner
               # and the dev shell so the two cannot drift again. The file
               # says which drifts it already cost.
@@ -968,6 +1007,10 @@ lib.throwIf (unlistedVariants != [ ])
       # The daemon proxy of `pynixd/`. `nixosModules.pynixd` in `flake.nix`
       # defaults `services.pynixd.package` to this one.
       pynixd
+      # One runner of Nix's functional test suite for each supported Nix
+      # version. An attrset of packages, so a person names the version:
+      # `nix build --file . nixFunctionalTests.nix_2_34`.
+      nixFunctionalTests
       pynixDevEnv
       shell
       nanopynix-docs
