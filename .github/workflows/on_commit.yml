@@ -475,7 +475,7 @@ jobs:
     env:
       BACKEND: local
       CI_STEP: ciSteps.nix_2_34
-    timeout-minutes: 160
+    timeout-minutes: 170
     steps:
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -496,9 +496,16 @@ jobs:
     - name: Verify test runner closure after build
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
       timeout-minutes: 15
-    - name: Test nanopynix against Nix nix_2_34 (full suite, local backend)
-      run: ./result/bin/nanopynix-ci suite
+    - name: Report free space and memory before the tests
+      run: df -h && vm_stat
+      timeout-minutes: 5
+    - name: Test nanopynix against Nix nix_2_34 (bindings, local backend)
+      run: ./result/bin/nanopynix-ci suite-bindings
       timeout-minutes: 30
+    - name: Report free space and memory after the tests
+      run: df -h && vm_stat
+      if: ${{ !cancelled() }}
+      timeout-minutes: 5
     - name: Upload test output
       uses: actions/upload-artifact@main
       if: ${{ !cancelled() }}

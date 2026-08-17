@@ -197,6 +197,43 @@ let
       }
     '';
 
+  # **The bindings alone, for a host that cannot carry the whole suite.**
+  #
+  # Issue #143 asks for a limited subset on macOS, and three runs measured why
+  # the whole suite is not it. A `macos-latest` runner has 3 cores and about
+  # 7 GB of memory, and Darwin resolves every worker start to `spawn`, so each
+  # worker execs a fresh interpreter and loads the Nix libraries again rather
+  # than sharing one copy through a fork. Run 31944603019 ran 82 minutes and
+  # ended with "the hosted runner lost communication with the server", and the
+  # 30-minute step cap never fired, because the process that enforces the cap
+  # was the one that died.
+  #
+  # **The bindings are the part that earns the runner.** #140 asks whether a
+  # `type_info` comparison and a `dynamic_cast` cross the boundary to
+  # libnixexpr under libc++, and `nanopynix/tests/bindings` is where both are
+  # measured. The rpc and pynix suites answer questions about Python, and
+  # Linux answers those already.
+  #
+  # No coverage, and no store deletion: neither is a question this job asks,
+  # and each one costs the memory that ran out. Same log file as the full
+  # suite, so the artifact step needs no branch.
+  bindingsSuite =
+    { runner }:
+    ''
+      suite_bindings() {
+        local status=0
+        env NANOPYNIX_RPC_TIMEOUT=30 \
+            PYTHONDONTWRITEBYTECODE=1 \
+          ${runner} ${quote baseArgs} \
+          --nix-test-backends "$BACKEND" \
+          -m "not soak" \
+          --junitxml="$GITHUB_WORKSPACE/junit.xml" \
+          nanopynix/tests/bindings \
+          2>&1 | tee "$GITHUB_WORKSPACE/test-gdb-output.log" || status=$?
+        return "$status"
+      }
+    '';
+
   # The five-seed TSAN soak.
   #
   # **There is no retry, and no abort budget.** Both existed while issue #69
@@ -465,12 +502,15 @@ let
         arms = {
           suite = "suite";
           soak = "soak";
-        };
+        }
+        # Only the plain build carries it. A sanitized runner has its own
+        # argument list and its own report scan, and neither reaches macOS.
+        // lib.optionalAttrs (kind == "regular") { "suite-bindings" = "suite_bindings"; };
         body =
           scanBody
           + (
             if kind == "regular" then
-              regularSuite { inherit runner; }
+              regularSuite { inherit runner; } + bindingsSuite { inherit runner; }
             else
               scannedSuite {
                 inherit runner bare kind;
