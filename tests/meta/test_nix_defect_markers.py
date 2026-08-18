@@ -1,19 +1,21 @@
-"""Each `NIX-DEFECT` marker has the shape that issue #191 asks for.
+"""Each marker of a divergence has the shape that section 5b asks for.
 
-pynixd matches the bytes of `nix-daemon` on the wire, so it copies decisions
-of Nix that are wrong. Nix is not perfect: C++ limits what its authors can do
-easily, and Python does not carry the same limits. A comment that reads as if
-Nix is the specification hides the difference between "pynixd does this
-because it is right" and "pynixd does this because the parity run compares the
-bytes".
+Matching the bytes of `nix-daemon` is a measure, and it is not the goal. A
+difference between the two recordings of the parity run is how a divergence
+becomes visible, and every divergence then gets a verdict. A comment that
+reads as if Nix is the specification hides the difference between "pynixd does
+this because it is right" and "pynixd does this because the parity run
+compares the bytes".
 
-The convention is a literal tag, `NIX-DEFECT (#191):`, in front of the
-paragraph that gives four parts:
+Two tags carry the two verdicts, and each one names its own tracking issue:
 
-1. the mechanism in Nix, with the file and the line;
-2. what the mechanism gets wrong;
-3. what pynixd could do instead;
-4. why pynixd still copies it, or how pynixd already deviates.
+- `NIX-DEFECT (#191):` marks a place where Nix is wrong. pynixd copies the
+  defect, or pynixd answers correctly, and part 4 says which.
+- `NIX-DEVIATION (#206):` marks a place where Nix is right, or where neither
+  answer is wrong, and pynixd answers differently on purpose.
+
+Do not write `NIX-DEFECT` for a place where Nix is right. The tag then states
+a defect that nobody found.
 
 Two things decay, and neither fails a build:
 
@@ -34,12 +36,20 @@ import pytest
 
 from tests.support.suite_roots import REPO_ROOT
 
-TRACKING_ISSUE = 191
+TRACKING_ISSUE: dict[str, int] = {
+    "NIX-DEFECT": 191,
+    "NIX-DEVIATION": 206,
+}
+"""The tracking issue of each tag. A tag with the wrong number fails."""
 
-MARKER = re.compile(r"NIX-DEFECT(?P<issue>[^:]*):")
-"""Every spelling of the tag, so a wrong one fails rather than hides."""
+MARKER = re.compile(rf"(?P<tag>{'|'.join(TRACKING_ISSUE)})(?P<issue>[^:]*):")
+"""Every spelling of every tag, so a wrong one fails rather than hides."""
 
-CORRECT = f"NIX-DEFECT (#{TRACKING_ISSUE}):"
+
+def _correct(tag: str) -> str:
+    """The one spelling that the convention accepts, for this tag."""
+    return f"{tag} (#{TRACKING_ISSUE[tag]}):"
+
 
 NIX_SOURCE = re.compile(r"`[\w./-]+\.(?:cc|hh)(?::\d+(?:-\d+)?)?`")
 """A file of Nix, and the line if the marker gives one, in back quotes."""
@@ -55,16 +65,17 @@ def _sources() -> list[Path]:
     return sorted(p for p in SEARCH_ROOT.rglob("*.py") if "/tests/" not in p.as_posix())
 
 
-def _markers() -> list[tuple[Path, int, str]]:
-    """Each marker, as the file, the 1-based line, and the paragraph after it."""
-    found: list[tuple[Path, int, str]] = []
+def _markers() -> list[tuple[Path, int, str, str]]:
+    """Each marker, as the file, the 1-based line, the tag, and the paragraph."""
+    found: list[tuple[Path, int, str, str]] = []
     for path in _sources():
         lines = path.read_text(encoding="utf-8").splitlines()
         for index, line in enumerate(lines):
-            if not MARKER.search(line):
+            match = MARKER.search(line)
+            if match is None:
                 continue
             paragraph = _paragraph(lines, index)
-            found.append((path, index + 1, paragraph))
+            found.append((path, index + 1, match.group("tag"), paragraph))
     return found
 
 
@@ -81,19 +92,22 @@ def _paragraph(lines: list[str], start: int) -> str:
 
 def test_the_repository_holds_at_least_one_marker() -> None:
     """A test that finds nothing proves nothing, so say when the sweep is empty."""
-    assert _markers(), f"no NIX-DEFECT marker under {SEARCH_ROOT}; the regex or the root is wrong"
+    assert _markers(), f"no divergence marker under {SEARCH_ROOT}; the regex or the root is wrong"
 
 
-@pytest.mark.parametrize(("path", "line", "paragraph"), _markers(), ids=lambda v: str(v)[-40:])
-def test_the_marker_names_the_tracking_issue(path: Path, line: int, paragraph: str) -> None:
+@pytest.mark.parametrize(("path", "line", "tag", "paragraph"), _markers(), ids=lambda v: str(v)[-40:])
+def test_the_marker_names_the_tracking_issue(path: Path, line: int, tag: str, paragraph: str) -> None:
+    """Each tag has one tracking issue, and the other tag's number is a fault."""
     where = f"{path.relative_to(REPO_ROOT)}:{line}"
-    assert CORRECT in paragraph, f"{where}: write the tag as `{CORRECT}`, and not as it reads now"
+    correct = _correct(tag)
+    assert correct in paragraph, f"{where}: write the tag as `{correct}`, and not as it reads now"
 
 
-@pytest.mark.parametrize(("path", "line", "paragraph"), _markers(), ids=lambda v: str(v)[-40:])
-def test_the_marker_names_a_place_in_the_source_of_nix(path: Path, line: int, paragraph: str) -> None:
+@pytest.mark.parametrize(("path", "line", "tag", "paragraph"), _markers(), ids=lambda v: str(v)[-40:])
+def test_the_marker_names_a_place_in_the_source_of_nix(path: Path, line: int, tag: str, paragraph: str) -> None:
     """A reader has to be able to check the claim against Nix."""
     where = f"{path.relative_to(REPO_ROOT)}:{line}"
     assert NIX_SOURCE.search(paragraph), (
-        f"{where}: name the file of Nix that holds the mechanism, in back quotes, for example `goal.cc:214`"
+        f"{where}: a `{tag}` marker names the file of Nix that holds the mechanism, "
+        "in back quotes, for example `goal.cc:214`"
     )
