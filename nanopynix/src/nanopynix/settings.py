@@ -20,6 +20,7 @@ from nanopynix_bindings import (
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, EnvSettingsSource, PydanticBaseSettingsSource, SettingsConfigDict
 
+from nanopynix._features import DEFAULT_EXPERIMENTAL_FEATURES as DEFAULT_EXPERIMENTAL_FEATURES
 from nanopynix._fork import process_is_forked
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix.exceptions import SettingNotLiveError, SettingOutOfScopeError
@@ -30,13 +31,6 @@ if TYPE_CHECKING or BEARTYPING:
     from pydantic.fields import FieldInfo
 
 
-DEFAULT_EXPERIMENTAL_FEATURES = (
-    "flakes",
-    "nix-command",
-    "ca-derivations",
-    "dynamic-derivations",
-    "recursive-nix",
-)
 DEFAULT_LINE_EDITORS = ("emacs", "nano", "vim", "kak", "hx")
 type SettingsSurface = Literal["global", "eval", "fetch", "flake"]
 

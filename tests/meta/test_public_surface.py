@@ -22,7 +22,9 @@ these tests ask is only whether the list matches what the module binds.
 
 from __future__ import annotations
 
+import ast
 import inspect
+from pathlib import Path
 from types import ModuleType
 
 import nanopynix
@@ -41,18 +43,49 @@ guard, not a target -- see the guard test."""
 
 
 def _bound_public_names(module: ModuleType) -> set[str]:
-    """Public names a module binds, less its submodules and the future flag.
+    """Public names a module offers, less its submodules and the future flag.
 
     A submodule is bound as a side effect of ``from nanopynix.x import y``, so
     it is not evidence of intent either way. A submodule the package does mean
     to export is listed in ``__all__`` like any other name, and the other
     direction of this test covers it.
+
+    ``vars()`` is no longer the whole answer for the package. Issue #123 made
+    every public name lazy, so ``nanopynix/__init__.py`` binds almost nothing
+    until something reads a name. ``_NAME_TO_MODULE`` is where the intent
+    lives now, and a private table is what a meta test is allowed to read.
     """
-    return {
+    lazy: set[str] = set(getattr(module, "_NAME_TO_MODULE", {}))
+    bound = {
         name
         for name, value in vars(module).items()
         if not name.startswith("_") and name != _FUTURE_FLAG and not isinstance(value, ModuleType)
     }
+    return lazy | bound
+
+
+def _type_checking_imports(module: ModuleType) -> dict[str, str]:
+    """Name to origin, read from the ``if TYPE_CHECKING:`` blocks of a module.
+
+    The lazy surface is written twice, and this reads the half that runs
+    nowhere. pyright cannot follow ``_NAME_TO_MODULE``, so the block is what
+    gives a caller of ``from nanopynix import NixError`` a type; the table is
+    what gives the caller a value. A name in one and not the other fails in a
+    way that no run of the suite reports.
+    """
+    source = Path(str(module.__file__)).read_text(encoding="utf-8")
+    found: dict[str, str] = {}
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.If):
+            continue
+        test = ast.unparse(node.test)
+        if test not in {"TYPE_CHECKING", "typing.TYPE_CHECKING"}:
+            continue
+        for statement in ast.walk(node):
+            if isinstance(statement, ast.ImportFrom) and statement.module:
+                for alias in statement.names:
+                    found[alias.asname or alias.name] = statement.module
+    return found
 
 
 def _exception_classes(module: ModuleType) -> set[str]:
@@ -143,4 +176,41 @@ def test_every_protocol_reaches_the_top_level() -> None:
     assert not missing, (
         f"{len(missing)} protocol(s) are public in nanopynix.protocols but not exported by the "
         f"nanopynix package, so engine-neutral code cannot name them: {missing}"
+    )
+
+
+def test_the_lazy_table_and_the_type_checking_block_agree() -> None:
+    """The two halves of the lazy surface name the same things, from the same modules.
+
+    ``__getattr__`` reads ``_NAME_TO_MODULE`` and pyright reads the
+    ``if TYPE_CHECKING:`` block above it. A name added to one alone still
+    imports at run time and still type-checks -- one of the two halves simply
+    stops covering it, silently. This is the check that the mechanism itself
+    needs, and it is new with the mechanism.
+
+    Submodules are excluded on both sides. ``inproc``, ``rpc`` and ``stores``
+    are in the block and in ``_LAZY_SUBMODULES``, and not in the table.
+    """
+    table: dict[str, str] = dict(nanopynix._NAME_TO_MODULE)
+    submodules: frozenset[str] = nanopynix._LAZY_SUBMODULES
+    declared = {name: origin for name, origin in _type_checking_imports(nanopynix).items() if name not in submodules}
+
+    assert declared, "no TYPE_CHECKING imports found in nanopynix/__init__.py; the parser is wrong"
+
+    missing = sorted(set(table) - set(declared))
+    assert not missing, (
+        f"{len(missing)} name(s) resolve through _NAME_TO_MODULE but no TYPE_CHECKING import "
+        f"declares them, so pyright cannot type them: {missing}"
+    )
+
+    extra = sorted(set(declared) - set(table))
+    assert not extra, (
+        f"{len(extra)} name(s) are imported for the type checker but absent from "
+        f"_NAME_TO_MODULE, so reading them at run time raises AttributeError: {extra}"
+    )
+
+    disagree = sorted(name for name, origin in declared.items() if table[name] != origin)
+    assert not disagree, (
+        f"{len(disagree)} name(s) come from a different module in the two halves, so the type "
+        f"and the value can be different things: {disagree}"
     )

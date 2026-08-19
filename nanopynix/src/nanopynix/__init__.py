@@ -1,255 +1,423 @@
 # pyright: reportUnusedImport=false
-# Justifies both pragmas above. This module is nanopynix's public surface:
-# every import in it is a deliberate re-export, so 'unused' is exactly
-# what a correct entry in it looks like. The reason sits here rather than
-# after the codes because pyright rejects trailing text on its pragma --
-# it reports a directive error and silently stops suppressing.
+# Justifies the pragma above. The block below the table is the type checker's
+# copy of this module's public surface: every import in it is a deliberate
+# re-export that no runtime line reads, so 'unused' is exactly what a correct
+# entry looks like. The reason sits here rather than after the code because
+# pyright rejects trailing text on its pragma -- it reports a directive error
+# and silently stops suppressing.
 """nanopynix — nanobind-based Python bindings for Nix."""
 
 from __future__ import annotations
 
 import importlib
-import types
 import typing
 
-from nanopynix_bindings.expr import (
-    EvalState,
-    PrimopError,
-    Value,
-    eval_counters_enabled,
-    eval_file,
-    init_libexpr,
-    is_pseudo_url,
-    register_primop,
-    set_eval_counters_enabled,
-)
-from nanopynix_bindings.fetchers import input_from_attrs, input_from_url
-from nanopynix_bindings.flake import get_flake, lock_flake, parse_flake_ref
-from nanopynix_bindings.store import (
-    BuildMode as BuildMode,
-    open_store as open_store,
-    process_connection as process_connection,
-    register_store_implementation as register_store_implementation,
-)
-from nanopynix_bindings.util import (
-    build_info,  # type: ignore[reportUnknownVariableType] -- C++ extension without type stubs
-    current_system,
-    enable_experimental_feature,
-    get_verbosity,
-    init_libstore as _init_libstore_raw,
-    install_logger,
-    list_settings,
-    remove_logger,
-    set_verbosity,
-)
-from nanopynix_proto.nix.common import LogLevel
-from nanopynix_proto.nix.store import GcAction as GcAction
-
-from nanopynix import stores as stores
-from nanopynix._ansi import strip_ansi as strip_ansi
-from nanopynix._process_title import set_manager_title as set_manager_title
-from nanopynix.exceptions import (
-    BadStorePathError,
-    BuildError,
-    BuildHashMismatchError,
-    BuildTimedOutError,
-    CachedBuildFailureError,
-    DependencyFailedError,
-    EngineError,
-    EvalError,
-    EvalHashMismatchError,
-    EvalSessionClosedError,
-    EvaluatorAbandonedError,
-    ForeignValueError,
-    ForkedSessionError,
-    HashMismatchError,
-    InfiniteRecursionError,
-    InputRejectedError,
-    InvalidPathError,
-    ListIndexError,
-    LockedFlakeReleasedError,
-    LogLimitExceededError,
-    MiscBuildError,
-    MissingArgumentError,
-    MissingAttributeError,
-    NixAssertionError,
-    NixError,
-    NixSysError,
-    NixTypeError,
-    NoSubstitutersError,
-    NotDeterministicError,
-    ObjectLifetimeError,
-    ObjectMisuseError,
-    OutputRejectedError,
-    ParseError,
-    PermanentBuildError,
-    RestrictedPathError,
-    SessionClosedError,
-    SettingNotLiveError,
-    SettingOutOfScopeError,
-    StoreClosedError,
-    StoreError,
-    ThrownError,
-    TransientBuildError,
-    UndefinedVarError,
-    UnimplementedError,
-    UnresolvedValueError,
-    UnsupportedError,
-    UsageError,
-    ValueReleasedError,
-    WorkerDiedError,
-    WorkerSignaledError,
-    WrongNixTypeError,
-)
-from nanopynix.logging import LogCapture, LogCollector
-from nanopynix.models import (
-    BuildResult,
-    Derivation,
-    DerivationOutput,
-    DerivationOutputs,
-    DerivedPath,
-    FlakeRef,
-    GcResult,
-    GcRoot,
-    Input,
-    LockedFlake,
-    LockedNode,
-    LogEvent,
-    MissingInfo,
-    NixType,
-    PathInfo,
-    PrimOpSpec,
-    ResultType,
-    StorePath,
-)
-from nanopynix.namespace import (
-    NamespaceSupport as NamespaceSupport,
-    OverlayNamespace as OverlayNamespace,
-    enter_overlay_namespace as enter_overlay_namespace,
-    probe_namespace_support as probe_namespace_support,
-)
-from nanopynix.primops import from_yaml, from_yaml11, from_yaml11_stream, from_yaml_stream, to_yaml, yaml_primops
-from nanopynix.protocols import (
-    AsyncEvalSession,
-    AsyncLockedFlake,
-    AsyncReplSession,
-    AsyncSession,
-    AsyncStore,
-    AsyncValue,
-    AsyncVerbosityController,
-)
-from nanopynix.settings import (
-    DEFAULT_EXPERIMENTAL_FEATURES,
-    NanopynixSettings,
-    NixEvalSettings,
-    NixEvaluatorSettings,
-    NixFetchSettings,
-    NixFlakeSettings,
-    NixGlobalSettings,
-    NixSettingMetadata,
-    NixSettings,
-    NixSettingsEnv,
-    NixStoreDefaults,
-    PrefixedEnvSettingsSource,
-    SettingsDrift,
-    SettingsProvenance,
-    check_all_settings_model_drift,
-    check_settings_model_drift,
-    list_eval_settings_metadata,
-    list_fetch_settings_metadata,
-    list_flake_settings_metadata,
-    list_settings_metadata,
-)
-from nanopynix.store_exec import STORE_EXEC_TOOL as STORE_EXEC_TOOL, store_exec_prefix as store_exec_prefix
-from nanopynix.store_impl import DISPATCHABLE_METHODS as DISPATCHABLE_METHODS, StoreImpl as StoreImpl
-from nanopynix.verbosity import LogLevelInput, normalize_log_level
-
-# `import types` and `import typing`, rather than `from ... import` of the two
-# names this module needs from them. Two rules of this repository meet here:
+# `import typing`, rather than `from typing import ...`. Two rules of this
+# repository meet here:
 #
 # - `tests/meta/test_public_surface.py` fails on a public name that the package
 #   binds and `__all__` does not carry. It exempts a *module*, because
-#   `from nanopynix.x import y` binds one as a side effect, so `types` and
-#   `typing` pass where `ModuleType` and `TYPE_CHECKING` did not.
+#   `from nanopynix.x import y` binds one as a side effect, so `typing` passes
+#   where `TYPE_CHECKING` did not.
 # - beartype wraps `__getattr__` and resolves its return annotation when the
-#   function runs. A `TYPE_CHECKING`-only `ModuleType` therefore makes every
-#   `from nanopynix import rpc` raise `BeartypeCallHintForwardRefException:
-#   Forward reference "ModuleType" unimportable`, which is a collection error
-#   and not a type error.
+#   function runs. A `TYPE_CHECKING`-only name in that annotation therefore
+#   makes every `from nanopynix import rpc` raise
+#   `BeartypeCallHintForwardRefException`, which is a collection error and not
+#   a type error.
 #
-# Neither import costs anything: `types` and `typing` are both in
-# `sys.modules` before this module loads.
-if typing.TYPE_CHECKING:
-    # The two engines, for the type checker only. `__getattr__` below imports
-    # each one at first use, and a type checker cannot read that.
-    from nanopynix import inproc as inproc, rpc as rpc
+# Neither import costs anything: both are in `sys.modules` before this module
+# loads.
 
-#: The submodules that :func:`__getattr__` imports at first use.
+# **Every public name of this package resolves on first use, and none of them
+# resolves at import.**
+#
+# This block is for the type checker, which cannot read the table below.
+# pyright reports each entry as unused, and an unused import is what a correct
+# entry looks like here, so the file turns that rule off at the top.
+if typing.TYPE_CHECKING:
+    from nanopynix_bindings.expr import (
+        EvalState,
+        PrimopError,
+        Value,
+        eval_counters_enabled,
+        eval_file,
+        init_libexpr,
+        is_pseudo_url,
+        register_primop,
+        set_eval_counters_enabled,
+    )
+    from nanopynix_bindings.fetchers import input_from_attrs, input_from_url
+    from nanopynix_bindings.flake import get_flake, lock_flake, parse_flake_ref
+    from nanopynix_bindings.store import (
+        BuildMode as BuildMode,
+        open_store as open_store,
+        process_connection as process_connection,
+        register_store_implementation as register_store_implementation,
+    )
+    from nanopynix_bindings.util import (
+        build_info,  # type: ignore[reportUnknownVariableType] -- C++ extension without type stubs
+        current_system,
+        enable_experimental_feature,
+        get_verbosity,
+        install_logger,
+        list_settings,
+        remove_logger,
+        set_verbosity,
+    )
+    from nanopynix_proto.nix.common import LogLevel
+    from nanopynix_proto.nix.store import GcAction as GcAction
+
+    from nanopynix import (
+        inproc as inproc,
+        rpc as rpc,
+        stores as stores,
+    )
+    from nanopynix._ansi import strip_ansi as strip_ansi
+    from nanopynix._process_title import set_manager_title as set_manager_title
+    from nanopynix.exceptions import (
+        BadStorePathError,
+        BuildError,
+        BuildHashMismatchError,
+        BuildTimedOutError,
+        CachedBuildFailureError,
+        DependencyFailedError,
+        EngineError,
+        EvalError,
+        EvalHashMismatchError,
+        EvalSessionClosedError,
+        EvaluatorAbandonedError,
+        ForeignValueError,
+        ForkedSessionError,
+        HashMismatchError,
+        InfiniteRecursionError,
+        InputRejectedError,
+        InvalidPathError,
+        ListIndexError,
+        LockedFlakeReleasedError,
+        LogLimitExceededError,
+        MiscBuildError,
+        MissingArgumentError,
+        MissingAttributeError,
+        NixAssertionError,
+        NixError,
+        NixSysError,
+        NixTypeError,
+        NoSubstitutersError,
+        NotDeterministicError,
+        ObjectLifetimeError,
+        ObjectMisuseError,
+        OutputRejectedError,
+        ParseError,
+        PermanentBuildError,
+        RestrictedPathError,
+        SessionClosedError,
+        SettingNotLiveError,
+        SettingOutOfScopeError,
+        StoreClosedError,
+        StoreError,
+        ThrownError,
+        TransientBuildError,
+        UndefinedVarError,
+        UnimplementedError,
+        UnresolvedValueError,
+        UnsupportedError,
+        UsageError,
+        ValueReleasedError,
+        WorkerDiedError,
+        WorkerSignaledError,
+        WrongNixTypeError,
+    )
+    from nanopynix.libstore import init_libstore as init_libstore
+    from nanopynix.logging import LogCapture, LogCollector
+    from nanopynix.models import (
+        BuildResult,
+        Derivation,
+        DerivationOutput,
+        DerivationOutputs,
+        DerivedPath,
+        FlakeRef,
+        GcResult,
+        GcRoot,
+        Input,
+        LockedFlake,
+        LockedNode,
+        LogEvent,
+        MissingInfo,
+        NixType,
+        PathInfo,
+        PrimOpSpec,
+        ResultType,
+        StorePath,
+    )
+    from nanopynix.namespace import (
+        NamespaceSupport as NamespaceSupport,
+        OverlayNamespace as OverlayNamespace,
+        enter_overlay_namespace as enter_overlay_namespace,
+        probe_namespace_support as probe_namespace_support,
+    )
+    from nanopynix.primops import from_yaml, from_yaml11, from_yaml11_stream, from_yaml_stream, to_yaml, yaml_primops
+    from nanopynix.protocols import (
+        AsyncEvalSession,
+        AsyncLockedFlake,
+        AsyncReplSession,
+        AsyncSession,
+        AsyncStore,
+        AsyncValue,
+        AsyncVerbosityController,
+    )
+    from nanopynix.settings import (
+        DEFAULT_EXPERIMENTAL_FEATURES,
+        NanopynixSettings,
+        NixEvalSettings,
+        NixEvaluatorSettings,
+        NixFetchSettings,
+        NixFlakeSettings,
+        NixGlobalSettings,
+        NixSettingMetadata,
+        NixSettings,
+        NixSettingsEnv,
+        NixStoreDefaults,
+        PrefixedEnvSettingsSource,
+        SettingsDrift,
+        SettingsProvenance,
+        check_all_settings_model_drift,
+        check_settings_model_drift,
+        list_eval_settings_metadata,
+        list_fetch_settings_metadata,
+        list_flake_settings_metadata,
+        list_settings_metadata,
+    )
+    from nanopynix.store_exec import STORE_EXEC_TOOL as STORE_EXEC_TOOL, store_exec_prefix as store_exec_prefix
+    from nanopynix.store_impl import DISPATCHABLE_METHODS as DISPATCHABLE_METHODS, StoreImpl as StoreImpl
+    from nanopynix.verbosity import LogLevelInput, normalize_log_level
+
+
+#: The module that defines each public name, for :func:`__getattr__`.
 #:
-#: **A program uses one engine, and used to pay for both.** This module read
-#: ``from nanopynix import inproc, rpc``, so an inproc program loaded the whole
-#: rpc client and an rpc program loaded inproc. Neither could be avoided,
-#: because an ``import nanopynix.inproc`` runs the ``__init__`` of the package
-#: first. Issue #123 measured it: 786.4 ms and 566 modules before, 673.2 ms and
-#: 526 modules after.
+#: **The package used to import all of this at load time, and a program pays
+#: for what it reads.** Issue #123 measured it: ``import nanopynix`` was
+#: 598 ms against 16 ms for a bare interpreter, and the four heaviest modules
+#: under it -- the generated protocol, the settings models, the store registry
+#: and the namespace helper -- are read by no consumer at once. The issue names
+#: a real case: a planner of ``ddrn/examples/venv-graph`` spent 97% of its run
+#: on this import, and the one name it read was ``init_libstore``.
 #:
 #: A module ``__getattr__`` (PEP 562) is the shape this repository permits.
 #: It is a package-level construct and not an import inside a function, so the
-#: ban in ``CLAUDE.md`` does not reach it, and ``from nanopynix import rpc``
+#: ban in ``CLAUDE.md`` does not reach it, and ``from nanopynix import X``
 #: keeps working: ``IMPORT_FROM`` falls back to ``getattr`` on the module.
-_LAZY_SUBMODULES = frozenset({"inproc", "rpc"})
+#:
+#: ``tests/meta/test_public_surface.py`` checks this table against ``__all__``
+#: in both directions, so a name cannot be dropped from one and kept in the
+#: other.
+_NAME_TO_MODULE: typing.Final[dict[str, str]] = {
+    "AsyncEvalSession": "nanopynix.protocols",
+    "AsyncLockedFlake": "nanopynix.protocols",
+    "AsyncReplSession": "nanopynix.protocols",
+    "AsyncSession": "nanopynix.protocols",
+    "AsyncStore": "nanopynix.protocols",
+    "AsyncValue": "nanopynix.protocols",
+    "AsyncVerbosityController": "nanopynix.protocols",
+    "BadStorePathError": "nanopynix.exceptions",
+    "BuildError": "nanopynix.exceptions",
+    "BuildHashMismatchError": "nanopynix.exceptions",
+    "BuildMode": "nanopynix_bindings.store",
+    "BuildResult": "nanopynix.models",
+    "BuildTimedOutError": "nanopynix.exceptions",
+    "CachedBuildFailureError": "nanopynix.exceptions",
+    "DEFAULT_EXPERIMENTAL_FEATURES": "nanopynix.settings",
+    "DISPATCHABLE_METHODS": "nanopynix.store_impl",
+    "DependencyFailedError": "nanopynix.exceptions",
+    "Derivation": "nanopynix.models",
+    "DerivationOutput": "nanopynix.models",
+    "DerivationOutputs": "nanopynix.models",
+    "DerivedPath": "nanopynix.models",
+    "EngineError": "nanopynix.exceptions",
+    "EvalError": "nanopynix.exceptions",
+    "EvalHashMismatchError": "nanopynix.exceptions",
+    "EvalSessionClosedError": "nanopynix.exceptions",
+    "EvalState": "nanopynix_bindings.expr",
+    "EvaluatorAbandonedError": "nanopynix.exceptions",
+    "FlakeRef": "nanopynix.models",
+    "ForeignValueError": "nanopynix.exceptions",
+    "ForkedSessionError": "nanopynix.exceptions",
+    "GcAction": "nanopynix_proto.nix.store",
+    "GcResult": "nanopynix.models",
+    "GcRoot": "nanopynix.models",
+    "HashMismatchError": "nanopynix.exceptions",
+    "InfiniteRecursionError": "nanopynix.exceptions",
+    "Input": "nanopynix.models",
+    "InputRejectedError": "nanopynix.exceptions",
+    "InvalidPathError": "nanopynix.exceptions",
+    "ListIndexError": "nanopynix.exceptions",
+    "LockedFlake": "nanopynix.models",
+    "LockedFlakeReleasedError": "nanopynix.exceptions",
+    "LockedNode": "nanopynix.models",
+    "LogCapture": "nanopynix.logging",
+    "LogCollector": "nanopynix.logging",
+    "LogEvent": "nanopynix.models",
+    "LogLevel": "nanopynix_proto.nix.common",
+    "LogLevelInput": "nanopynix.verbosity",
+    "LogLimitExceededError": "nanopynix.exceptions",
+    "MiscBuildError": "nanopynix.exceptions",
+    "MissingArgumentError": "nanopynix.exceptions",
+    "MissingAttributeError": "nanopynix.exceptions",
+    "MissingInfo": "nanopynix.models",
+    "NamespaceSupport": "nanopynix.namespace",
+    "NanopynixSettings": "nanopynix.settings",
+    "NixAssertionError": "nanopynix.exceptions",
+    "NixError": "nanopynix.exceptions",
+    "NixEvalSettings": "nanopynix.settings",
+    "NixEvaluatorSettings": "nanopynix.settings",
+    "NixFetchSettings": "nanopynix.settings",
+    "NixFlakeSettings": "nanopynix.settings",
+    "NixGlobalSettings": "nanopynix.settings",
+    "NixSettingMetadata": "nanopynix.settings",
+    "NixSettings": "nanopynix.settings",
+    "NixSettingsEnv": "nanopynix.settings",
+    "NixStoreDefaults": "nanopynix.settings",
+    "NixSysError": "nanopynix.exceptions",
+    "NixType": "nanopynix.models",
+    "NixTypeError": "nanopynix.exceptions",
+    "NoSubstitutersError": "nanopynix.exceptions",
+    "NotDeterministicError": "nanopynix.exceptions",
+    "ObjectLifetimeError": "nanopynix.exceptions",
+    "ObjectMisuseError": "nanopynix.exceptions",
+    "OutputRejectedError": "nanopynix.exceptions",
+    "OverlayNamespace": "nanopynix.namespace",
+    "ParseError": "nanopynix.exceptions",
+    "PathInfo": "nanopynix.models",
+    "PermanentBuildError": "nanopynix.exceptions",
+    "PrefixedEnvSettingsSource": "nanopynix.settings",
+    "PrimOpSpec": "nanopynix.models",
+    "PrimopError": "nanopynix_bindings.expr",
+    "RestrictedPathError": "nanopynix.exceptions",
+    "ResultType": "nanopynix.models",
+    "STORE_EXEC_TOOL": "nanopynix.store_exec",
+    "SessionClosedError": "nanopynix.exceptions",
+    "SettingNotLiveError": "nanopynix.exceptions",
+    "SettingOutOfScopeError": "nanopynix.exceptions",
+    "SettingsDrift": "nanopynix.settings",
+    "SettingsProvenance": "nanopynix.settings",
+    "StoreClosedError": "nanopynix.exceptions",
+    "StoreError": "nanopynix.exceptions",
+    "StoreImpl": "nanopynix.store_impl",
+    "StorePath": "nanopynix.models",
+    "ThrownError": "nanopynix.exceptions",
+    "TransientBuildError": "nanopynix.exceptions",
+    "UndefinedVarError": "nanopynix.exceptions",
+    "UnimplementedError": "nanopynix.exceptions",
+    "UnresolvedValueError": "nanopynix.exceptions",
+    "UnsupportedError": "nanopynix.exceptions",
+    "UsageError": "nanopynix.exceptions",
+    "Value": "nanopynix_bindings.expr",
+    "ValueReleasedError": "nanopynix.exceptions",
+    "WorkerDiedError": "nanopynix.exceptions",
+    "WorkerSignaledError": "nanopynix.exceptions",
+    "WrongNixTypeError": "nanopynix.exceptions",
+    "build_info": "nanopynix_bindings.util",
+    "check_all_settings_model_drift": "nanopynix.settings",
+    "check_settings_model_drift": "nanopynix.settings",
+    "current_system": "nanopynix_bindings.util",
+    "enable_experimental_feature": "nanopynix_bindings.util",
+    "enter_overlay_namespace": "nanopynix.namespace",
+    "eval_counters_enabled": "nanopynix_bindings.expr",
+    "eval_file": "nanopynix_bindings.expr",
+    "from_yaml": "nanopynix.primops",
+    "from_yaml11": "nanopynix.primops",
+    "from_yaml11_stream": "nanopynix.primops",
+    "from_yaml_stream": "nanopynix.primops",
+    "get_flake": "nanopynix_bindings.flake",
+    "get_verbosity": "nanopynix_bindings.util",
+    "init_libexpr": "nanopynix_bindings.expr",
+    "init_libstore": "nanopynix.libstore",
+    "input_from_attrs": "nanopynix_bindings.fetchers",
+    "input_from_url": "nanopynix_bindings.fetchers",
+    "install_logger": "nanopynix_bindings.util",
+    "is_pseudo_url": "nanopynix_bindings.expr",
+    "list_eval_settings_metadata": "nanopynix.settings",
+    "list_fetch_settings_metadata": "nanopynix.settings",
+    "list_flake_settings_metadata": "nanopynix.settings",
+    "list_settings": "nanopynix_bindings.util",
+    "list_settings_metadata": "nanopynix.settings",
+    "lock_flake": "nanopynix_bindings.flake",
+    "normalize_log_level": "nanopynix.verbosity",
+    "open_store": "nanopynix_bindings.store",
+    "parse_flake_ref": "nanopynix_bindings.flake",
+    "probe_namespace_support": "nanopynix.namespace",
+    "process_connection": "nanopynix_bindings.store",
+    "register_primop": "nanopynix_bindings.expr",
+    "register_store_implementation": "nanopynix_bindings.store",
+    "remove_logger": "nanopynix_bindings.util",
+    "set_eval_counters_enabled": "nanopynix_bindings.expr",
+    "set_manager_title": "nanopynix._process_title",
+    "set_verbosity": "nanopynix_bindings.util",
+    "store_exec_prefix": "nanopynix.store_exec",
+    "strip_ansi": "nanopynix._ansi",
+    "to_yaml": "nanopynix.primops",
+    "yaml_primops": "nanopynix.primops",
+}
+
+#: The submodules that :func:`__getattr__` imports on attribute access.
+#:
+#: ``from nanopynix.exceptions import NixError`` binds ``exceptions`` on the
+#: package as a side effect, so code that reads ``nanopynix.exceptions`` used
+#: to work by luck. Nothing imports the package eagerly any more, so the luck
+#: is gone and the table replaces it.
+_LAZY_SUBMODULES: typing.Final[frozenset[str]] = frozenset(
+    {
+        "_ansi",
+        "_core",
+        "_env",
+        "_features",
+        "_fork",
+        "_process_title",
+        "_typechecking",
+        "_wire",
+        "exceptions",
+        "inproc",
+        "libstore",
+        "logging",
+        "models",
+        "namespace",
+        "primops",
+        "protocols",
+        "rpc",
+        "settings",
+        "store_exec",
+        "store_impl",
+        "stores",
+        "verbosity",
+    }
+)
 
 
-def __getattr__(name: str) -> types.ModuleType:
-    """Import an engine at first use, and cache it in the module namespace.
+def __getattr__(name: str) -> typing.Any:
+    """Resolve a public name, and cache it in the module namespace.
 
-    Writing the result into ``globals()`` means this runs once for each
-    engine. Python calls a module ``__getattr__`` only when the ordinary
-    attribute lookup fails, so the second access reads the global directly.
+    Writing the result into ``globals()`` means this runs one time for each
+    name. Python calls a module ``__getattr__`` only when the ordinary
+    attribute lookup fails, so the second read takes the global directly.
     """
-    if name in _LAZY_SUBMODULES:
-        module = importlib.import_module(f"nanopynix.{name}")
-        globals()[name] = module
-        return module
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    origin = _NAME_TO_MODULE.get(name)
+    if origin is not None:
+        value = getattr(importlib.import_module(origin), name)
+    elif name in _LAZY_SUBMODULES:
+        value = importlib.import_module(f"nanopynix.{name}")
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    globals()[name] = value
+    return value
 
 
-def init_libstore(load_config: bool = True) -> None:
-    """Initialize libstore, then enable nanopynix's default experimental features.
+def __dir__() -> list[str]:
+    """Report the public surface, which ``vars()`` no longer holds.
 
-    The one Nix initialisation entry point nanopynix offers. There used to be a
-    second, ``init_nix``, wrapping ``nix::initNix``; it is gone because
-    everything ``initNix`` adds over ``initLibStore`` is a process-wide side
-    effect a library has no business imposing on its host -- a signal-handler
-    thread, ``SIGCHLD`` reset to ``SIG_DFL``, a ``SIGSEGV`` handler, an
-    ``NIX_SIG_MULTI_INT`` handler, ``umask(0022)``, a ``RLIMIT_NOFILE`` bump
-    and a static buffer installed on ``std::cerr``. Python has its own signal
-    machinery, and nothing in nanopynix ever called it.
-
-    Enabling the features here, rather than leaving it to whoever opens a
-    store, is load-bearing: Nix latches some of them at store *construction*
-    but re-checks them at *query* time. ``LocalStore`` prepares its realisation
-    SQL statements only when ``ca-derivations`` is on at construction
-    (``local-store.cc:356``), while ``queryRealisationUncached`` re-tests the
-    flag and dereferences those statements (``:1563``). A store built before
-    the feature was enabled, then queried after it was turned on, therefore
-    trips ``assert(stmt.stmt)`` and aborts the process -- SIGABRT, not an
-    exception, so there is nothing a caller could have caught.
-
-    Since libstore has to be initialised before any libstore call anyway, doing
-    it here means every store nanopynix can open is constructed with the
-    defaults already in force. ``Session`` enables the same features again
-    through ``runtime.initialize``, which calls
-    :func:`enable_experimental_feature` at the same point of its own sequence;
-    that is additive and harmless.
+    ``dir()`` on a module reads ``__dict__`` when a module defines no
+    ``__dir__``, and this one starts nearly empty. Tab completion in a REPL
+    and ``inspect.getmembers`` both go through here.
     """
-    _init_libstore_raw(load_config=load_config)
-    _enable_default_experimental_features()
-
-
-def _enable_default_experimental_features() -> None:
-    for feature in DEFAULT_EXPERIMENTAL_FEATURES:
-        enable_experimental_feature(feature)
+    return sorted(set(__all__) | set(_LAZY_SUBMODULES) | set(globals()))
 
 
 __all__ = [
