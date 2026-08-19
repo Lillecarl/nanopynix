@@ -435,6 +435,24 @@ let
   # `tests/meta/test_ci_step_policy.py` now fails on an `--ignore` that names
   # a `testpaths` entry, so this cannot go quiet again.
   #
+  # **`pynix-lsp/tests` is out for the same reason, and issue #107 is why it
+  # needed a second entry.** That issue moved the language server out of
+  # `pynix/` and into `pynix-lsp/`, so `pynix-lsp/tests` became a `testpaths`
+  # entry of its own and the glob above stopped reaching it. The suite that
+  # the paragraph above cut then came back under a new path, and run
+  # 32237291501 measured the result: `test-asan-nix_2_34` reached its 60
+  # minute cap, and 13 tests of `pynix-lsp/tests/test_lsp.py` took three
+  # minutes each before a timeout. Each one of the 13 evaluates something
+  # real, nixpkgs or a full module system, and the tests beside them that
+  # evaluate nothing pass in under a second. `test_lsp.py` is the same file
+  # that the run above was killed inside.
+  #
+  # The argument of the paragraph above carries over whole: only instrumented
+  # code reports, and the language server reaches the bindings along paths
+  # that `nanopynix/tests` already covers. ASAN looks for a memory fault in
+  # the bindings, and an instrumented evaluation of nixpkgs is not where one
+  # lives. Issue #209.
+  #
   # **The no-collector suite keeps pytest's capture, and the sanitized ones do
   # not.** A sanitizer writes its report to stderr from inside the process, so
   # capture would hold that report in the buffer of whichever test was running
@@ -453,7 +471,10 @@ let
   # crash visible. Decide that on its own, and not inside a refactor.
   kindArgs = {
     ubsan = uncapturedArgs;
-    asan = uncapturedArgs ++ [ "--ignore-glob=pynix/tests/*" ];
+    asan = uncapturedArgs ++ [
+      "--ignore-glob=pynix/tests/*"
+      "--ignore-glob=pynix-lsp/tests/*"
+    ];
     nogc = baseArgs;
   };
 
