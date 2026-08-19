@@ -11,8 +11,7 @@ the URI, the layout, and the two guards that stop the namespace being entered
 at a moment when it cannot work. The second half needs a host that allows
 unprivileged user namespaces and an OverlayFS over the filesystem holding the
 layers, so it asks :func:`nanopynix.probe_namespace_support` first and skips
-when the answer is no. That half reaches the host store through
-``HOST_LOWER_STORE``, and the docstring of that constant gives the reason.
+when the answer is no.
 
 The pickling test is not filler. The spec reaches the worker as a pickled
 argument through the forkserver, which is the only channel that works -- the
@@ -35,60 +34,6 @@ import pytest
 import nanopynix
 from nanopynix.namespace import EXPERIMENTAL_FEATURE, STORE_DIR, enter_overlay_namespace
 from nanopynix_testing.nix_markers import LINUX_NAMESPACES, LINUX_PROC_FS
-
-HOST_LOWER_STORE = "local?read-only=true"
-"""The host store as the lower layer, reached without the daemon of the machine.
-
-**A test must not open the daemon of the machine.** No part of the matrix
-picks the version of that daemon, so a job named `nix_2_34` measured 2.34
-against whatever Nix the runner installed. A GitHub runner installs 2.35.2, a
-developer machine here runs 2.34.8, and the pair disagreed on the
-`realisation-with-path-not-hash` protocol feature. The test failed on the
-runner and passed on the machine, which reads as a defect of whatever change
-is under the reader's hands. Issue #208.
-
-**The message of that failure names the wrong end, so do not grep for it.**
-`WorkerProto::Serialise<DrvOutput>` of Nix 2.35 writes `the daemon is
-missing the 'realisation-with-path-not-hash' protocol feature`, at
-`src/libstore/worker-protocol.cc:491` and `:508`. The serialiser runs on
-both ends, and the feature set is the intersection of the two, so the daemon
-raises the sentence when the client is the end that misses the feature. The
-string is in no file of 2.34, which is the version that missed it. The fork
-carries the report, at `Lillecarl/nix#315`.
-
-`local` and not `daemon`, so the store speaks no protocol and no second Nix
-version enters the test. `read-only=true` is what lets a plain user open it:
-the store of a multi-user installation belongs to root, and a writable
-`local` store dies on `opening lock file "/nix/var/nix/db/big-lock":
-Permission denied`.
-
-**Read-only is the honest setting as well, and not only the one that works.**
-The lower layer of an overlay is read-only by construction, and the assertion
-of `test_a_build_lands_in_the_upper_layer_and_not_on_the_host` is that the
-host store gains nothing. A store that cannot write cannot break that
-assertion by accident.
-
-The lower store must stay the host store. The builder of the derivation is a
-real host store path through `builtins.storePath`, which the lower layer
-supplies as bytes with nothing copied in, and that is the subject of these
-tests.
-"""
-
-
-def _namespace_settings(**overrides: object) -> nanopynix.NixSettings:
-    """Settings for a worker whose lower store is `HOST_LOWER_STORE`.
-
-    Nix names the read-only local store experimental and refuses the URI
-    without the feature. `rpc/client/session.py` adds `local-overlay-store`
-    for the store that the session itself makes; the lower store is the
-    choice of the caller, so the caller names the feature that one needs.
-    Issue #208.
-    """
-    return nanopynix.NixSettings(
-        experimental_features=[*nanopynix.DEFAULT_EXPERIMENTAL_FEATURES, "read-only-local-store"],
-        **overrides,  # type: ignore[arg-type] -- pydantic validates each override against its own field
-    )
-
 
 # ── the pure half ───────────────────────────────────────────────────
 
@@ -192,11 +137,8 @@ class TestNamespacedWorker:
         A relocated store would need ``nanopynix.store_exec_prefix`` to run
         anything out of it, which is the cost this design exists to avoid.
         """
-        spec = nanopynix.OverlayNamespace.under(tmp_path, lower_store=HOST_LOWER_STORE)
-        async with (
-            nanopynix.rpc.Session(namespace=spec, settings=_namespace_settings()) as session,
-            session.store() as store,
-        ):
+        spec = nanopynix.OverlayNamespace.under(tmp_path)
+        async with nanopynix.rpc.Session(namespace=spec) as session, session.store() as store:
             dirs = await store.store_dirs()
             assert dirs.store_dir == STORE_DIR
             assert dirs.real_store_dir == STORE_DIR
@@ -206,8 +148,8 @@ class TestNamespacedWorker:
         self, namespace_support: nanopynix.NamespaceSupport, tmp_path: Path
     ) -> None:
         """Nix refuses the store URI without it, so the session must add it."""
-        spec = nanopynix.OverlayNamespace.under(tmp_path, lower_store=HOST_LOWER_STORE)
-        async with nanopynix.rpc.Session(namespace=spec, settings=_namespace_settings()) as session:
+        spec = nanopynix.OverlayNamespace.under(tmp_path)
+        async with nanopynix.rpc.Session(namespace=spec) as session:
             assert session.namespace is spec
             # Opening the store at all proves the feature reached the worker.
             async with session.store() as store:
@@ -224,11 +166,10 @@ class TestNamespacedWorker:
         changes: a worker that never entered the namespace would answer with
         the host's own state directory.
         """
-        spec = nanopynix.OverlayNamespace.under(tmp_path, lower_store=HOST_LOWER_STORE)
+        spec = nanopynix.OverlayNamespace.under(tmp_path)
         async with (
             nanopynix.rpc.Session(
                 namespace=spec,
-                settings=_namespace_settings(),
                 runtime_settings=nanopynix.NanopynixSettings(worker_start="stdio"),
             ) as session,
             session.store() as store,
@@ -256,20 +197,18 @@ class TestNamespacedWorker:
         the *second* run found it already valid through the lower layer, built
         nothing, and failed on an empty upper layer.
 
-        The copy goes to a scratch store rather than to the host store.
-        Copying out of the overlay is what is under test, and the destination
-        is not; a test that writes to the developer's own store on every run
-        would leave a path behind each time, which is what caused the failure
-        above. `HOST_LOWER_STORE` is read-only, so `host` here can answer
-        `is_valid_path` and can receive nothing.
+        The copy goes to a scratch store rather than to the daemon. Copying out
+        of the overlay is what is under test, and the destination is not; a
+        test that writes to the developer's own store on every run would leave
+        a path behind each time, which is what caused the failure above.
         """
-        spec = nanopynix.OverlayNamespace.under(tmp_path, lower_store=HOST_LOWER_STORE)
+        spec = nanopynix.OverlayNamespace.under(tmp_path)
         name = f"nanopynix-ns-build-{uuid.uuid4().hex[:12]}"
         destination = tmp_path / "destination"
         async with (
-            nanopynix.rpc.Session(namespace=spec, settings=_namespace_settings(sandbox="false")) as session,
+            nanopynix.rpc.Session(namespace=spec, settings=nanopynix.NixSettings(sandbox="false")) as session,
             session.store() as store,
-            session.store(HOST_LOWER_STORE) as host,
+            session.store("daemon") as host,
             session.store(f"local://?root={destination}") as scratch,
         ):
             nix_file = namespaced_derivation(tmp_path, name)
