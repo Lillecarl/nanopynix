@@ -473,10 +473,9 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-darwin-nix_2_34,')
     env:
-      BACKEND: daemon
+      BACKEND: local
       CI_STEP: ciSteps.nix_2_34
       NANOPYNIX_RPC_TIMEOUT: '90'
-      NANOPYNIX_TEST_SYSTEM_STORE: '1'
     timeout-minutes: 190
     steps:
     - uses: actions/checkout@main
@@ -498,21 +497,21 @@ jobs:
     - name: Verify test runner closure after build
       run: nix store verify --recursive --no-trust "$(readlink -f result)"
       timeout-minutes: 15
-    - name: Test nanopynix against Nix nix_2_34 (full suite, daemon backend)
+    - name: Test nanopynix against Nix nix_2_34 (full suite, local backend)
       run: ./result/bin/nanopynix-ci suite
       timeout-minutes: 60
     - name: Upload test output
       uses: actions/upload-artifact@main
       if: ${{ !cancelled() }}
       with:
-        name: test-output-darwin-daemon-nix_2_34
+        name: test-output-darwin-local-nix_2_34
         path: ${{ github.workspace }}/test-gdb-output.log
       timeout-minutes: 15
     - name: Upload the JUnit report
       uses: actions/upload-artifact@main
       if: ${{ !cancelled() }}
       with:
-        name: junit-darwin-daemon-nix_2_34
+        name: junit-darwin-local-nix_2_34
         path: ${{ github.workspace }}/junit.xml
       timeout-minutes: 15
     continue-on-error: true
