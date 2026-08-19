@@ -47,6 +47,15 @@ developer machine here runs 2.34.8, and the pair disagreed on the
 runner and passed on the machine, which reads as a defect of whatever change
 is under the reader's hands. Issue #208.
 
+**The message of that failure names the wrong end, so do not grep for it.**
+`WorkerProto::Serialise<DrvOutput>` of Nix 2.35 writes `the daemon is
+missing the 'realisation-with-path-not-hash' protocol feature`, at
+`src/libstore/worker-protocol.cc:491` and `:508`. The serialiser runs on
+both ends, and the feature set is the intersection of the two, so the daemon
+raises the sentence when the client is the end that misses the feature. The
+string is in no file of 2.34, which is the version that missed it. The fork
+carries the report, at `Lillecarl/nix#315`.
+
 `local` and not `daemon`, so the store speaks no protocol and no second Nix
 version enters the test. `read-only=true` is what lets a plain user open it:
 the store of a multi-user installation belongs to root, and a writable
