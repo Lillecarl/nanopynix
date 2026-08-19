@@ -17,6 +17,12 @@ It answers the two questions a hang raises:
   dedicated thread, and a subprocess reader runs on another, so "alive but
   parked in a read" and "gone" look completely different here and identical
   from a ``TimeoutError``.
+* **What is a thread waiting on, below Python?** :func:`kernel_state` reads
+  the state and the wait channel of every thread from ``/proc``. A thread that
+  stops inside a native call shows its last Python frame and nothing more, and
+  a stack of Nix frames needs a debugger and a permission that CI does not
+  give. The wait channel needs neither, and it separates a file lock from a
+  mutex and from a socket. Issue #211 is why it exists.
 
 **The other tasks are the useful half, and they survive the unwind.** By the
 time the wrapper catches ``TimeoutError``, ``fail_after`` has already cancelled
@@ -36,6 +42,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import threading
+from pathlib import Path
 
 # A parked task is usually two or three frames deep. Ten is enough to cross a
 # few `async with` layers and short enough that twenty tasks stay readable.
@@ -148,6 +155,63 @@ def _frames_of(frame: object) -> list[object]:
     return list(reversed(chain))
 
 
+def kernel_state() -> str:
+    """The state and the wait channel of every thread, from ``/proc``.
+
+    ``stat`` gives one letter for the state of a thread: ``R`` runs, ``S``
+    sleeps and takes a signal, ``D`` sleeps and takes none. ``wchan`` names the
+    kernel function that a sleeping thread waits in. The pair separates the
+    three things that a stopped build can be waiting for, and each one asks for
+    a different correction:
+
+    * ``flock_lock_file_wait`` -- a lock of the store, which another holder
+      owns;
+    * ``futex_wait`` -- a mutex or a condition variable inside the process;
+    * ``sk_wait_data`` or a poll -- a socket, which is a substituter or a
+      daemon.
+
+    **This needs no privilege.** A native backtrace needs ptrace, and
+    ``/proc/sys/kernel/yama/ptrace_scope`` is 1 on an ordinary machine, so a
+    debugger reaches a descendant alone. A process always reads its own
+    ``/proc/self/task``.
+
+    The directory is Linux alone. macOS gets one line that says so, because a
+    report that raises would replace the hang with itself.
+    """
+    tasks = Path("/proc/self/task")
+    if not tasks.is_dir():
+        return "no /proc/self/task on this platform, so no wait channels"
+
+    lines = ["thread wait channels:"]
+    try:
+        entries = sorted(tasks.iterdir(), key=lambda entry: int(entry.name))
+    except Exception as exc:
+        return f"no wait channels: {exc}"
+
+    for entry in entries:
+        name = _read_proc(entry / "comm") or "?"
+        wchan = _read_proc(entry / "wchan") or "?"
+        # The state is the field after the command, and the command itself may
+        # hold a space inside its parentheses, so read from the last `)`.
+        stat = _read_proc(entry / "stat") or ""
+        _, _, tail = stat.rpartition(") ")
+        state = tail.split(" ")[0] if tail else "?"
+        lines.append(f"  - {entry.name} {name}: state={state} wchan={wchan}")
+    return "\n".join(lines)
+
+
+def _read_proc(path: Path) -> str:
+    """One line of ``/proc``, or an empty string when it cannot be read.
+
+    A thread can end between the listing of the directory and this read, and a
+    diagnostic must not fail for that.
+    """
+    try:
+        return path.read_text(encoding="utf-8", errors="replace").strip()
+    except Exception:
+        return ""
+
+
 def hang_report(seconds: float) -> str:
     """The whole report, for :meth:`BaseException.add_note`."""
     return "\n".join(
@@ -158,5 +222,6 @@ def hang_report(seconds: float) -> str:
             f"--- state at the {seconds:g}s deadline (tests/support/hang_report.py, #44) ---",
             pending_tasks(),
             live_threads(),
+            kernel_state(),
         )
     )

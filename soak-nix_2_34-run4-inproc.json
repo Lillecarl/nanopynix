@@ -1,0 +1,717 @@
+{
+  "seed": 4,
+  "roster_hash": "sha256:f79eb9dbfc68391d",
+  "lanes": [
+    [
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_to_python",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_attr_names",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_store_query_missing",
+      "nanopynix/tests/test_repl_scope_capacity.py::test_inproc_fills_the_repl_scope_exactly_to_the_end",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_scalar_conversions",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_repl_supports_shared_protocol_operations",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_file",
+      "nanopynix/tests/test_stores.py::test_a_store_root_that_came_back_is_not_the_old_store",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_store_cannot_close_while_its_eval_state_is_open",
+      "nanopynix/tests/test_scalar_accessor_semantics.py::test_apply_accepts_an_already_evaluated_function"
+    ],
+    [
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_selection_on_a_released_value_raises_at_selection",
+      "nanopynix/tests/test_store_dump_db.py::test_the_records_follow_the_order_of_the_argument",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_rejects_store_from_different_session",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_rejects_use_from_different_eval_session",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_edit_location",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_repl_load_file_and_add_attrs",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_open_and_close_are_idempotent",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_value_navigation",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_copy_closure_copies_between_two_stores_in_one_session",
+      "nanopynix/tests/inproc/test_inproc_cancel.py::test_a_cancelled_interruptible_operation_frees_the_evaluator"
+    ],
+    [
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_optimise_and_verify_a_private_store",
+      "nanopynix/tests/test_flake_lock_graph.py::test_find_input_resolves_a_follows_edge",
+      "nanopynix/tests/primops/test_sleep_primop.py::test_sleep_waits_for_the_time_it_is_given",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_store_uri_and_store_dir",
+      "nanopynix/tests/test_store_metadata_fidelity.py::test_inproc_read_derivation_keeps_structured_attrs",
+      "nanopynix/tests/test_stores.py::test_two_handles_on_one_local_store_share_the_temp_roots_file",
+      "nanopynix/tests/test_scalar_accessor_semantics.py::test_deep_conversion_of_a_derivation_terminates",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_concurrent_eval_sessions_have_independent_pure_eval",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_auto_call",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_open_requires_open_store"
+    ],
+    [
+      "nanopynix/tests/test_store_engine_parity_semantics.py::test_the_selector_actually_reaches_nix",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_store_open_is_idempotent",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_session_subscribe_receives_a_request_finalized_event",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_repl_open_is_idempotent",
+      "nanopynix/tests/test_stores.py::test_two_store_roots_get_a_local_store_each",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_allows_concurrent_eval_states_on_one_store",
+      "nanopynix/tests/test_flake_lock_graph.py::test_find_input_returns_none_for_a_name_that_is_not_an_input",
+      "nanopynix/tests/primops/test_sleep_primop.py::test_sleep_is_a_builtin_and_not_a_global",
+      "nanopynix/tests/inproc/test_inproc_cancel.py::test_an_operation_that_runs_a_nix_thread_pool_still_completes",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_autocall_and_realise_argv"
+    ],
+    [
+      "nanopynix/tests/inproc/test_inproc.py::test_a_value_the_caller_still_holds_survives_a_collection",
+      "nanopynix/tests/test_store_metadata_fidelity.py::test_inproc_read_derivation_keeps_nested_input_drvs",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_build_raises_on_build_failure",
+      "nanopynix/tests/test_scalar_accessor_semantics.py::test_deep_conversion_of_a_true_cycle_raises_instead_of_crashing",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_context_manager_releases_rooted_value",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_repl_requires_open_repl",
+      "nanopynix/tests/test_store_engine_parity_semantics.py::test_a_bare_drv_round_trips_through_its_own_reply",
+      "nanopynix/tests/test_store_metadata_fidelity.py::test_an_opaque_request_builds_nothing_and_says_so",
+      "nanopynix/tests/bindings/test_value_accessor_types.py::test_an_int_read_as_a_string_names_both_types",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_store_not_open_raises"
+    ],
+    [
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_rejects_use_after_eval_close",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_store_read_derivation",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_session_subscribe_receives_log_events",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_close_releases_values_left_open",
+      "nanopynix/tests/test_repl_scope_capacity.py::test_inproc_refuses_one_binding_past_the_end",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_build_rejects_store_from_different_session",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_call_accepts_value_argument",
+      "nanopynix/tests/inproc/test_inproc.py::test_the_collector_owner_thread_outlives_the_session",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_close_releases_leftover_locked_flakes"
+    ],
+    [
+      "nanopynix/tests/test_store_exec.py::test_inproc_a_program_in_a_relocated_store_runs_through_the_exec_prefix",
+      "nanopynix/tests/inproc/test_inproc.py::test_collect_garbage_rejects_an_unsupported_action",
+      "nanopynix/tests/test_flake_lock_graph.py::test_find_input_returns_a_locked_ref_with_a_rev",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_store_collect_garbage_return_dead",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_state_can_be_closed_and_reopened",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_locked_flake_facade",
+      "nanopynix/tests/primops/test_sleep_primop.py::test_sleep_refuses_a_negative_duration",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_lock_flake_update_inputs_variants",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_flake"
+    ],
+    [
+      "nanopynix/tests/test_scalar_accessor_semantics.py::test_inproc_reads_a_string_carrying_store_path_context",
+      "nanopynix/tests/test_scalar_accessor_semantics.py::test_max_call_depth_is_a_nix_error_with_error_info",
+      "nanopynix/tests/test_flake_lock_graph.py::test_metadata_json_carries_the_whole_graph",
+      "nanopynix/tests/bindings/test_store_empty_path.py::test_the_guard_lives_in_cpp_not_in_the_python_wrapper",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_store_query_derivation_outputs_and_valid_derivers",
+      "nanopynix/tests/test_store_metadata_fidelity.py::test_inproc_build_reports_the_path_it_produced",
+      "nanopynix/tests/bindings/test_value_accessor_types.py::test_accessors_force_a_thunk_first",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_release_is_idempotent",
+      "nanopynix/tests/inproc/test_inproc.py::test_inproc_locked_flake_release_is_idempotent"
+    ]
+  ],
+  "events": [
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_rejects_use_after_eval_close",
+      "lane": 5,
+      "start_ms": 0.003,
+      "end_ms": 0.047,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_selection_on_a_released_value_raises_at_selection",
+      "lane": 1,
+      "start_ms": 0.001,
+      "end_ms": 0.225,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_a_value_the_caller_still_holds_survives_a_collection",
+      "lane": 4,
+      "start_ms": 0.002,
+      "end_ms": 0.241,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_scalar_accessor_semantics.py::test_inproc_reads_a_string_carrying_store_path_context",
+      "lane": 7,
+      "start_ms": 0.003,
+      "end_ms": 0.257,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_to_python",
+      "lane": 0,
+      "start_ms": 0.0,
+      "end_ms": 0.259,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_store_engine_parity_semantics.py::test_the_selector_actually_reaches_nix",
+      "lane": 3,
+      "start_ms": 0.001,
+      "end_ms": 0.302,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_optimise_and_verify_a_private_store",
+      "lane": 2,
+      "start_ms": 0.028,
+      "end_ms": 0.304,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_store_open_is_idempotent",
+      "lane": 3,
+      "start_ms": 0.302,
+      "end_ms": 0.31,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_store_read_derivation",
+      "lane": 5,
+      "start_ms": 0.047,
+      "end_ms": 0.311,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_session_subscribe_receives_a_request_finalized_event",
+      "lane": 3,
+      "start_ms": 0.311,
+      "end_ms": 0.33,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_scalar_accessor_semantics.py::test_max_call_depth_is_a_nix_error_with_error_info",
+      "lane": 7,
+      "start_ms": 0.257,
+      "end_ms": 0.33,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_attr_names",
+      "lane": 0,
+      "start_ms": 0.259,
+      "end_ms": 0.331,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_store_dump_db.py::test_the_records_follow_the_order_of_the_argument",
+      "lane": 1,
+      "start_ms": 0.236,
+      "end_ms": 0.371,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_session_subscribe_receives_log_events",
+      "lane": 5,
+      "start_ms": 0.311,
+      "end_ms": 0.372,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_rejects_store_from_different_session",
+      "lane": 1,
+      "start_ms": 0.371,
+      "end_ms": 0.399,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_close_releases_values_left_open",
+      "lane": 5,
+      "start_ms": 0.372,
+      "end_ms": 0.435,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_repl_open_is_idempotent",
+      "lane": 3,
+      "start_ms": 0.33,
+      "end_ms": 0.452,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_store_metadata_fidelity.py::test_inproc_read_derivation_keeps_nested_input_drvs",
+      "lane": 4,
+      "start_ms": 0.241,
+      "end_ms": 0.452,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_store_query_missing",
+      "lane": 0,
+      "start_ms": 0.335,
+      "end_ms": 0.457,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_rejects_use_from_different_eval_session",
+      "lane": 1,
+      "start_ms": 0.399,
+      "end_ms": 0.457,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_flake_lock_graph.py::test_find_input_resolves_a_follows_edge",
+      "lane": 2,
+      "start_ms": 0.311,
+      "end_ms": 0.523,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_edit_location",
+      "lane": 1,
+      "start_ms": 0.472,
+      "end_ms": 0.525,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_flake_lock_graph.py::test_metadata_json_carries_the_whole_graph",
+      "lane": 7,
+      "start_ms": 0.34,
+      "end_ms": 0.535,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/bindings/test_store_empty_path.py::test_the_guard_lives_in_cpp_not_in_the_python_wrapper",
+      "lane": 7,
+      "start_ms": 0.535,
+      "end_ms": 0.61,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_repl_load_file_and_add_attrs",
+      "lane": 1,
+      "start_ms": 0.528,
+      "end_ms": 0.654,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_open_and_close_are_idempotent",
+      "lane": 1,
+      "start_ms": 0.654,
+      "end_ms": 0.747,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_store_query_derivation_outputs_and_valid_derivers",
+      "lane": 7,
+      "start_ms": 0.61,
+      "end_ms": 0.806,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_value_navigation",
+      "lane": 1,
+      "start_ms": 0.747,
+      "end_ms": 0.831,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_build_raises_on_build_failure",
+      "lane": 4,
+      "start_ms": 0.452,
+      "end_ms": 0.982,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/primops/test_sleep_primop.py::test_sleep_waits_for_the_time_it_is_given",
+      "lane": 2,
+      "start_ms": 0.523,
+      "end_ms": 1.036,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_copy_closure_copies_between_two_stores_in_one_session",
+      "lane": 1,
+      "start_ms": 0.833,
+      "end_ms": 1.053,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_store_uri_and_store_dir",
+      "lane": 2,
+      "start_ms": 1.036,
+      "end_ms": 1.074,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_store_metadata_fidelity.py::test_inproc_read_derivation_keeps_structured_attrs",
+      "lane": 2,
+      "start_ms": 1.074,
+      "end_ms": 1.187,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_stores.py::test_two_store_roots_get_a_local_store_each",
+      "lane": 3,
+      "start_ms": 0.462,
+      "end_ms": 1.356,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_allows_concurrent_eval_states_on_one_store",
+      "lane": 3,
+      "start_ms": 1.356,
+      "end_ms": 1.432,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_repl_scope_capacity.py::test_inproc_refuses_one_binding_past_the_end",
+      "lane": 5,
+      "start_ms": 0.435,
+      "end_ms": 1.497,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_store_metadata_fidelity.py::test_inproc_build_reports_the_path_it_produced",
+      "lane": 7,
+      "start_ms": 0.806,
+      "end_ms": 1.553,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_repl_scope_capacity.py::test_inproc_fills_the_repl_scope_exactly_to_the_end",
+      "lane": 0,
+      "start_ms": 0.457,
+      "end_ms": 1.576,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_build_rejects_store_from_different_session",
+      "lane": 5,
+      "start_ms": 1.497,
+      "end_ms": 1.592,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/bindings/test_value_accessor_types.py::test_accessors_force_a_thunk_first",
+      "lane": 7,
+      "start_ms": 1.553,
+      "end_ms": 1.593,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_release_is_idempotent",
+      "lane": 7,
+      "start_ms": 1.593,
+      "end_ms": 1.632,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_call_accepts_value_argument",
+      "lane": 5,
+      "start_ms": 1.592,
+      "end_ms": 1.634,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_scalar_conversions",
+      "lane": 0,
+      "start_ms": 1.576,
+      "end_ms": 1.65,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_flake_lock_graph.py::test_find_input_returns_none_for_a_name_that_is_not_an_input",
+      "lane": 3,
+      "start_ms": 1.433,
+      "end_ms": 1.663,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_the_collector_owner_thread_outlives_the_session",
+      "lane": 5,
+      "start_ms": 1.634,
+      "end_ms": 1.673,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/primops/test_sleep_primop.py::test_sleep_is_a_builtin_and_not_a_global",
+      "lane": 3,
+      "start_ms": 1.666,
+      "end_ms": 1.714,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_repl_supports_shared_protocol_operations",
+      "lane": 0,
+      "start_ms": 1.662,
+      "end_ms": 1.731,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_file",
+      "lane": 0,
+      "start_ms": 1.731,
+      "end_ms": 1.77,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_locked_flake_release_is_idempotent",
+      "lane": 7,
+      "start_ms": 1.635,
+      "end_ms": 1.77,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_close_releases_leftover_locked_flakes",
+      "lane": 5,
+      "start_ms": 1.688,
+      "end_ms": 1.796,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_stores.py::test_two_handles_on_one_local_store_share_the_temp_roots_file",
+      "lane": 2,
+      "start_ms": 1.195,
+      "end_ms": 1.82,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_scalar_accessor_semantics.py::test_deep_conversion_of_a_derivation_terminates",
+      "lane": 2,
+      "start_ms": 1.82,
+      "end_ms": 1.963,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_stores.py::test_a_store_root_that_came_back_is_not_the_old_store",
+      "lane": 0,
+      "start_ms": 1.771,
+      "end_ms": 1.978,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_store_cannot_close_while_its_eval_state_is_open",
+      "lane": 0,
+      "start_ms": 1.978,
+      "end_ms": 2.046,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_concurrent_eval_sessions_have_independent_pure_eval",
+      "lane": 2,
+      "start_ms": 1.963,
+      "end_ms": 2.064,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_scalar_accessor_semantics.py::test_apply_accepts_an_already_evaluated_function",
+      "lane": 0,
+      "start_ms": 2.049,
+      "end_ms": 2.086,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_auto_call",
+      "lane": 2,
+      "start_ms": 2.064,
+      "end_ms": 2.09,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_open_requires_open_store",
+      "lane": 2,
+      "start_ms": 2.09,
+      "end_ms": 2.09,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_store_exec.py::test_inproc_a_program_in_a_relocated_store_runs_through_the_exec_prefix",
+      "lane": 6,
+      "start_ms": 0.034,
+      "end_ms": 2.15,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_collect_garbage_rejects_an_unsupported_action",
+      "lane": 6,
+      "start_ms": 2.15,
+      "end_ms": 2.156,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_flake_lock_graph.py::test_find_input_returns_a_locked_ref_with_a_rev",
+      "lane": 6,
+      "start_ms": 2.157,
+      "end_ms": 2.301,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_store_collect_garbage_return_dead",
+      "lane": 6,
+      "start_ms": 2.301,
+      "end_ms": 2.913,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_state_can_be_closed_and_reopened",
+      "lane": 6,
+      "start_ms": 2.913,
+      "end_ms": 2.978,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_locked_flake_facade",
+      "lane": 6,
+      "start_ms": 2.98,
+      "end_ms": 3.862,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/primops/test_sleep_primop.py::test_sleep_refuses_a_negative_duration",
+      "lane": 6,
+      "start_ms": 3.862,
+      "end_ms": 3.891,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_lock_flake_update_inputs_variants",
+      "lane": 6,
+      "start_ms": 3.893,
+      "end_ms": 3.993,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_eval_flake",
+      "lane": 6,
+      "start_ms": 3.995,
+      "end_ms": 4.095,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_scalar_accessor_semantics.py::test_deep_conversion_of_a_true_cycle_raises_instead_of_crashing",
+      "lane": 4,
+      "start_ms": 0.982,
+      "end_ms": 5.076,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_context_manager_releases_rooted_value",
+      "lane": 4,
+      "start_ms": 5.076,
+      "end_ms": 5.088,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_repl_requires_open_repl",
+      "lane": 4,
+      "start_ms": 5.088,
+      "end_ms": 5.09,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_store_engine_parity_semantics.py::test_a_bare_drv_round_trips_through_its_own_reply",
+      "lane": 4,
+      "start_ms": 5.09,
+      "end_ms": 5.128,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_store_metadata_fidelity.py::test_an_opaque_request_builds_nothing_and_says_so",
+      "lane": 4,
+      "start_ms": 5.128,
+      "end_ms": 5.174,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/bindings/test_value_accessor_types.py::test_an_int_read_as_a_string_names_both_types",
+      "lane": 4,
+      "start_ms": 5.174,
+      "end_ms": 5.196,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_store_not_open_raises",
+      "lane": 4,
+      "start_ms": 5.196,
+      "end_ms": 5.196,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc_cancel.py::test_a_cancelled_interruptible_operation_frees_the_evaluator",
+      "lane": 1,
+      "start_ms": 1.053,
+      "end_ms": 10.939,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc_cancel.py::test_an_operation_that_runs_a_nix_thread_pool_still_completes",
+      "lane": 3,
+      "start_ms": 1.714,
+      "end_ms": 11.704,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/inproc/test_inproc.py::test_inproc_value_autocall_and_realise_argv",
+      "lane": 3,
+      "start_ms": 11.706,
+      "end_ms": 12.004,
+      "outcome": "ok",
+      "detail": ""
+    }
+  ]
+}
