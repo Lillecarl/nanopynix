@@ -15,6 +15,7 @@ import pytest
 
 import pynix._util as util_module
 from nanopynix_testing.nix_environment import with_nixpkgs
+from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
 from pynix import Pynix
 
 
@@ -22,6 +23,7 @@ def _store_path_basename(path: str) -> str:
     return path.split("/nix/store/", 1)[1]
 
 
+@LINUX_CHROOT_BUILD
 async def test_print_roots(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     cmd = Pynix.parse(["store", "gc", "print-roots", "--store", populated_store["store_url"]])
     await cmd.astart()
@@ -35,6 +37,7 @@ async def test_print_roots(populated_store: dict[str, str], capsys: pytest.Captu
         assert root["path"].startswith("/nix/store/")
 
 
+@LINUX_CHROOT_BUILD
 async def test_print_alive(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     cmd = Pynix.parse(["store", "gc", "print-alive", "--store", populated_store["store_url"]])
     await cmd.astart()
@@ -46,6 +49,7 @@ async def test_print_alive(populated_store: dict[str, str], capsys: pytest.Captu
         assert path.startswith("/nix/store/")
 
 
+@LINUX_CHROOT_BUILD
 async def test_print_dead_dry_run(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     cmd = Pynix.parse(["store", "gc", "print-dead", "--store", populated_store["store_url"]])
     await cmd.astart()
@@ -66,6 +70,7 @@ def test_print_dead_help(capsys: pytest.CaptureFixture[str]):
     assert "--rip" in captured.out
 
 
+@LINUX_CHROOT_BUILD
 async def test_path_from_hash_part(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     store_path = _store_path_basename(populated_store["hello_path"])
     hash_part = store_path.split("-", 1)[0]
@@ -76,6 +81,7 @@ async def test_path_from_hash_part(populated_store: dict[str, str], capsys: pyte
     assert data["path"] == f"/nix/store/{store_path}"
 
 
+@LINUX_CHROOT_BUILD
 async def test_store_info(
     populated_store: dict[str, str],
     nix_backend: str,
@@ -95,6 +101,7 @@ async def test_store_info(
     assert data["storeDir"] == "/nix/store"
 
 
+@LINUX_CHROOT_BUILD
 async def test_is_valid_path(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     store_path = populated_store["hello_path"]
     cmd = Pynix.parse(["store", "is-valid-path", store_path, "--store", populated_store["store_url"]])
@@ -104,6 +111,7 @@ async def test_is_valid_path(populated_store: dict[str, str], capsys: pytest.Cap
     assert data == {"path": store_path, "valid": True}
 
 
+@LINUX_CHROOT_BUILD
 async def test_follow_links_to_store_path(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     cmd = Pynix.parse(
         ["store", "follow-links-to-store-path", populated_store["hello_path"], "--store", populated_store["store_url"]],
@@ -114,6 +122,7 @@ async def test_follow_links_to_store_path(populated_store: dict[str, str], capsy
     assert data == {"path": populated_store["hello_path"]}
 
 
+@LINUX_CHROOT_BUILD
 async def test_compute_fs_closure(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     store_path = populated_store["hello_path"]
     cmd = Pynix.parse(["store", "compute-fs-closure", store_path, "--store", populated_store["store_url"]])
@@ -123,6 +132,7 @@ async def test_compute_fs_closure(populated_store: dict[str, str], capsys: pytes
     assert store_path in data["paths"]
 
 
+@LINUX_CHROOT_BUILD
 async def test_query_missing(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     cmd = Pynix.parse(
         ["store", "query-missing", populated_store["hello_path"], "--store", populated_store["store_url"]],
@@ -177,6 +187,7 @@ async def test_query_derivation_outputs(
     assert data["paths"][0].startswith("/nix/store/")
 
 
+@LINUX_CHROOT_BUILD
 async def test_query_valid_derivers(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     store_path = populated_store["hello_path"]
     cmd = Pynix.parse(["store", "query-valid-derivers", store_path, "--store", populated_store["store_url"]])
@@ -186,6 +197,7 @@ async def test_query_valid_derivers(populated_store: dict[str, str], capsys: pyt
     assert isinstance(data["paths"], list)
 
 
+@LINUX_CHROOT_BUILD
 async def test_list_valid_paths(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     cmd = Pynix.parse(["store", "list-valid-paths", "--store", populated_store["store_url"]])
     await cmd.astart()
@@ -194,6 +206,7 @@ async def test_list_valid_paths(populated_store: dict[str, str], capsys: pytest.
     assert populated_store["hello_path"] in data["paths"]
 
 
+@LINUX_CHROOT_BUILD
 async def test_query_referrers(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     store_path = populated_store["hello_path"]
     cmd = Pynix.parse(["store", "query-referrers", store_path, "--store", populated_store["store_url"]])
@@ -203,6 +216,7 @@ async def test_query_referrers(populated_store: dict[str, str], capsys: pytest.C
     assert isinstance(data["paths"], list)
 
 
+@LINUX_CHROOT_BUILD
 async def test_query_substitutable_paths(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     cmd = Pynix.parse(
         ["store", "query-substitutable-paths", populated_store["hello_path"], "--store", populated_store["store_url"]],
@@ -213,6 +227,7 @@ async def test_query_substitutable_paths(populated_store: dict[str, str], capsys
     assert isinstance(data["paths"], list)
 
 
+@LINUX_CHROOT_BUILD
 async def test_add_temp_root(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     cmd = Pynix.parse(
         ["store", "add-temp-root", populated_store["hello_path"], "--store", populated_store["store_url"]],
@@ -223,6 +238,7 @@ async def test_add_temp_root(populated_store: dict[str, str], capsys: pytest.Cap
     assert data == {"path": populated_store["hello_path"], "added": True}
 
 
+@LINUX_CHROOT_BUILD
 async def test_add_perm_root_and_indirect_root(
     populated_store: dict[str, str], tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ):
@@ -250,6 +266,7 @@ async def test_add_perm_root_and_indirect_root(
     assert data == {"path": str(root_path), "added": True}
 
 
+@LINUX_CHROOT_BUILD
 async def test_ensure_path(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     store_path = populated_store["hello_path"]
     cmd = Pynix.parse(["store", "ensure-path", store_path, "--store", populated_store["store_url"]])
@@ -259,6 +276,7 @@ async def test_ensure_path(populated_store: dict[str, str], capsys: pytest.Captu
     assert data == {"path": store_path, "valid": True}
 
 
+@LINUX_CHROOT_BUILD
 async def test_store_cat_reads_file_from_populated_store(
     populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]
 ):
@@ -268,6 +286,7 @@ async def test_store_cat_reads_file_from_populated_store(
     assert captured.out == "temporary-store-message\n"
 
 
+@LINUX_CHROOT_BUILD
 async def test_store_ls_lists_populated_store_path(populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]):
     cmd = Pynix.parse(["store", "ls", populated_store["hello_path"], "--store", populated_store["store_url"]])
     await cmd.astart()

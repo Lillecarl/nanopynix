@@ -44,6 +44,7 @@ from lsp_support.lsp_scenario import (
     Select,
     Type,
 )
+from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
 
 #: What `pkgs.stdenv.hostPlatform.system` renders to on the host that runs
 #: these tests.
@@ -129,6 +130,7 @@ def easykubenix_driver(
     return _driver_for(request)
 
 
+@LINUX_CHROOT_BUILD
 async def test_hover_inside_a_tfref_string_resolves_the_cross_resource_reference(
     terranix_driver: LspDriver,
 ) -> None:
@@ -144,6 +146,7 @@ async def test_hover_inside_a_tfref_string_resolves_the_cross_resource_reference
     await scenario.run(terranix_driver)
 
 
+@LINUX_CHROOT_BUILD
 async def test_hover_on_the_resource_type_segment_of_a_tfref_string_summarizes_the_type(
     terranix_driver: LspDriver,
 ) -> None:
@@ -165,6 +168,7 @@ async def test_hover_on_the_resource_type_segment_of_a_tfref_string_summarizes_t
     await scenario.run(terranix_driver)
 
 
+@LINUX_CHROOT_BUILD
 async def test_hover_on_a_resource_type_name_summarizes_its_attributes(
     terranix_driver: LspDriver,
 ) -> None:
@@ -187,6 +191,7 @@ async def test_hover_on_a_resource_type_name_summarizes_its_attributes(
     await scenario.run(terranix_driver)
 
 
+@LINUX_CHROOT_BUILD
 async def test_select_delete_and_retype_inside_a_tfref_string_updates_completion(
     terranix_driver: LspDriver,
 ) -> None:
@@ -210,6 +215,7 @@ async def test_select_delete_and_retype_inside_a_tfref_string_updates_completion
     await scenario.run(terranix_driver)
 
 
+@LINUX_CHROOT_BUILD
 async def test_clearing_and_retyping_a_whole_line_still_completes(
     terranix_driver: LspDriver,
 ) -> None:
@@ -262,6 +268,7 @@ async def test_bare_top_level_prefix_completes_block_type_keywords(
     await scenario.run(terranix_driver)
 
 
+@LINUX_CHROOT_BUILD
 async def test_resource_type_completion_lists_the_full_provider_catalog(
     terranix_driver: LspDriver,
 ) -> None:
@@ -290,6 +297,7 @@ async def test_resource_type_completion_lists_the_full_provider_catalog(
     await scenario.run(terranix_driver)
 
 
+@LINUX_CHROOT_BUILD
 async def test_hover_on_a_core_meta_argument_resolves_via_the_tofu_core_schema(
     terranix_driver: LspDriver,
 ) -> None:
@@ -313,6 +321,7 @@ async def test_hover_on_a_core_meta_argument_resolves_via_the_tofu_core_schema(
     await scenario.run(terranix_driver)
 
 
+@LINUX_CHROOT_BUILD
 async def test_completion_after_a_partial_core_meta_argument_name(
     terranix_driver: LspDriver,
 ) -> None:
@@ -328,6 +337,7 @@ async def test_completion_after_a_partial_core_meta_argument_name(
     await scenario.run(terranix_driver)
 
 
+@LINUX_CHROOT_BUILD
 async def test_hover_on_a_resource_instance_name_also_summarizes_its_type(
     terranix_driver: LspDriver,
 ) -> None:
@@ -374,6 +384,7 @@ async def test_hover_on_a_module_arg_resolves_via_terranixs_own_module_system(
     await scenario.run(terranix_driver)
 
 
+@LINUX_CHROOT_BUILD
 async def test_unknown_attribute_reports_tf001_unless_suppressed_on_its_own_line(terranix_driver: LspDriver) -> None:
     """Neither `content2` nor `content5` (`local_file.greeting`) are real attributes.
 
@@ -394,6 +405,7 @@ async def test_unknown_attribute_reports_tf001_unless_suppressed_on_its_own_line
     await scenario.run(terranix_driver)
 
 
+@LINUX_CHROOT_BUILD
 async def test_resource_type_completion_still_works_inside_an_explicit_config_wrapper(
     terranix_driver: LspDriver,
 ) -> None:

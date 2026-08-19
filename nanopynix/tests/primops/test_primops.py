@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix_bindings import store as nanopynix_store
 
+from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
+
 if TYPE_CHECKING:
     import nanopynix
     from nanopynix_testing.nix_environment import NixTestEnvironment
@@ -89,6 +91,7 @@ class TestRegisterPrimop:
         v = eval_state.eval_string("test_add4 10 10 10 12")
         assert v.as_int() == 42
 
+    @LINUX_CHROOT_BUILD
     def test_string_arg_with_context_is_realised(
         self,
         eval_state: nanopynix.EvalState,
@@ -112,6 +115,7 @@ class TestRegisterPrimop:
         assert result.endswith("primop-string-context-test")
         assert l1_nix_environment.physical_path(result).exists()
 
+    @LINUX_CHROOT_BUILD
     def test_string_return_value_carries_context_from_arg(
         self,
         eval_state: nanopynix.EvalState,

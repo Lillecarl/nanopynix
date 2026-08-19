@@ -7,6 +7,7 @@ from lsprotocol import types
 
 from lsp_support.lsp_cursor import cursor_after
 from lsp_support.lsp_environment import asset
+from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
 from pynix_lsp._context import parse_directives
 from pynix_lsp._handlers import _completion, _document_symbols, _hover, _sync_document
 from pynix_lsp._syntax import (
@@ -546,6 +547,7 @@ async def test_hover_falls_back_to_the_last_error_free_parse(lsp_server: PynixLa
 # ── TerranixDialect (real tofu providers schema -json, via the fixture's own wrapper) ──
 
 
+@LINUX_CHROOT_BUILD
 async def test_hover_shows_provider_schema_description_for_a_resource_attribute(
     lsp_server: PynixLanguageServer,
 ) -> None:
@@ -563,6 +565,7 @@ async def test_hover_shows_provider_schema_description_for_a_resource_attribute(
     assert "4" in hover.contents.value
 
 
+@LINUX_CHROOT_BUILD
 async def test_completion_lists_real_schema_attribute_names_for_a_resource_type(
     lsp_server: PynixLanguageServer,
 ) -> None:
@@ -579,6 +582,7 @@ async def test_completion_lists_real_schema_attribute_names_for_a_resource_type(
     assert {"byte_length", "prefix", "keepers", "hex", "b64_url", "b64_std", "dec", "id"} <= labels
 
 
+@LINUX_CHROOT_BUILD
 async def test_hover_resolves_a_cross_resource_reference_inside_a_tfref_string(
     lsp_server: PynixLanguageServer,
 ) -> None:
@@ -595,6 +599,7 @@ async def test_hover_resolves_a_cross_resource_reference_inside_a_tfref_string(
     assert "padded hexadecimal digits" in hover.contents.value
 
 
+@LINUX_CHROOT_BUILD
 async def test_completion_inside_a_tfref_string_lists_matching_schema_attribute_names(
     lsp_server: PynixLanguageServer,
 ) -> None:

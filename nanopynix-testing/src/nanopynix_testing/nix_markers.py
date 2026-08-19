@@ -64,3 +64,24 @@ is relocated, so the prefix is never empty and the call raises before the skip.
 That loudness is deliberate -- a silent empty prefix reproduces the defect the
 helper exists to correct. Issue #143.
 """
+
+LINUX_CHROOT_BUILD = pytest.mark.nix_platform("linux")
+"""The test builds a derivation, and every store this suite makes is a chroot store.
+
+`derivation-builder.cc:2111` throws `building using a diverted store is not
+supported on this platform` when `storeDir != realStoreDir` and the platform
+is not Linux. Linux answers a diverted store with a mount namespace and a
+bind mount, and macOS has neither.
+
+**The throw is in the builder alone.** A chroot store still evaluates,
+queries, copies a closure and reads a NAR on macOS, and those tests run there.
+So this marker names a build and not a store: a test that only reads from a
+chroot store must not carry it.
+
+The macOS job set `NANOPYNIX_TEST_SYSTEM_STORE=1` until issue #210, which
+pointed every fixture at `/nix/store`. That is not diverted, so a build was a
+plain build. It was a way around the limit rather than a measurement of it,
+and it wrote to the store of the runner on every run. Run `32264745390`
+measured what the limit really costs: 41 failures and 20 errors, and every one
+of them reached this throw.
+"""

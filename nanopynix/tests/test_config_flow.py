@@ -44,6 +44,7 @@ from nanopynix.settings import (
     reject_construction_time_keys,
     render_for_scope,
 )
+from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
 from test_support.git_fixtures import init_flake_repo
 from test_support.notes import note
 
@@ -418,6 +419,7 @@ async def test_the_core_layer_is_what_refuses(
 # ── Store construction is its own moment ─────────────────────────────
 
 
+@LINUX_CHROOT_BUILD
 async def test_a_store_setting_in_the_uri_beats_the_global(
     shared_nix_environment: NixTestEnvironment,
     tmp_path: Path,

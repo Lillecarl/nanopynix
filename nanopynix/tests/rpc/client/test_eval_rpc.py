@@ -23,6 +23,7 @@ from nanopynix import (
     yaml_primops,
 )
 from nanopynix._ansi import strip_ansi
+from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
 from test_support.git_fixtures import init_flake_repo
 
 if TYPE_CHECKING:
@@ -520,6 +521,7 @@ async def test_to_python_refuses_a_tree_containing_a_function(rpc_session: RpcSe
         assert await f_result.as_int() == 42
 
 
+@LINUX_CHROOT_BUILD
 async def test_evaluated_derivation_can_build_while_eval_session_is_active(
     rpc_session: RpcSessionFactory,
     shared_nix_environment: NixTestEnvironment,
@@ -554,6 +556,7 @@ async def test_evaluated_derivation_can_build_while_eval_session_is_active(
         assert await AnyioPath(shared_nix_environment.physical_path(outputs["out"])).read_text() == "hello\n"
 
 
+@LINUX_CHROOT_BUILD
 async def test_evaluated_derivation_can_build_with_explicit_build_store(
     rpc_session: RpcSessionFactory,
     shared_nix_environment: NixTestEnvironment,
