@@ -18,10 +18,10 @@ import anyio.to_thread
 import structlog
 from anyio import Path as AnyioPath
 from clypi import arg
-from nanopynix_helpers.build import FodBuildError, build_with_fod_update
 
 import nanopynix
 from nanopynix._typechecking import BEARTYPING
+from pynix import _impl
 from pynix._settings import (
     ConfiguredCommand,
     eval_store_option,
@@ -319,7 +319,7 @@ async def _build_target(  # noqa: PLR0913 -- tracked complexity/arg-count debt, 
     source_file = reference.local_path if reference is not None else None
 
     try:
-        return await build_with_fod_update(
+        return await _impl.build.build_with_fod_update(
             _evaluate,
             nix=nix,
             eval_session=session,
@@ -330,7 +330,7 @@ async def _build_target(  # noqa: PLR0913 -- tracked complexity/arg-count debt, 
             dry_run=dry_run,
             on_hash_update=_print_diff,
         )
-    except FodBuildError as exc:
+    except _impl.build.FodBuildError as exc:
         raise BuildTargetError(str(exc)) from exc
 
 
