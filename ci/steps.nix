@@ -696,34 +696,6 @@ let
       '';
     };
 
-    # macOS attaches a crash reporter to a process that takes a fatal signal,
-    # and that reporter reads the whole address space before it lets the
-    # process go. `test_workerpool.py` aborts a worker on purpose and then
-    # waits for the child to be collected, so the reporter is what the wait is
-    # spent on: run `32274388607` reported `ReportCrash` and `spindump` both
-    # running, and `SIGKILL` collecting the same child at once. Issue #212.
-    #
-    # A crash report of a worker that a test aborted on purpose tells nobody
-    # anything, so this stops the reporter rather than waiting for it. The
-    # deadline of `_REAP_TIMEOUT_SECONDS` went from 10 s to 30 s once already,
-    # on a measurement of how long the wait took rather than of its cause.
-    #
-    # `|| true` on each: a runner image that has already unloaded one of these
-    # answers `Could not find specified service`, and that is not a failure of
-    # this step. The step reports what it did either way.
-    disable-crash-reporter = mkStep {
-      name = "ci-disable-crash-reporter";
-      runtimeInputs = [ ];
-      text = ''
-        for plist in com.apple.ReportCrash com.apple.ReportCrash.Root com.apple.spindump; do
-          sudo launchctl unload -w "/System/Library/LaunchDaemons/$plist.plist" 2>&1 || true
-          launchctl unload -w "/System/Library/LaunchAgents/$plist.plist" 2>&1 || true
-        done
-        echo "crash reporters still running:"
-        pgrep -l "ReportCrash|spindump" || echo "  (none)"
-      '';
-    };
-
     # The documentation build writes a store path, and `actions/upload-pages-
     # artifact` needs a writable directory.
     prepare-pages = mkStep {

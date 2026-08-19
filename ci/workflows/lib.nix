@@ -327,18 +327,6 @@ let
       cap = caps.sandbox;
     };
 
-  # macOS holds a process that took a fatal signal while its crash reporter
-  # reads the address space, and `test_workerpool.py` aborts a worker and then
-  # waits for it. Issue #212 measured the wait and named the cause, and
-  # `ci/steps.nix` carries the reasoning.
-  mkCrashReporterStep =
-    { }:
-    mkNixRunStep {
-      name = "Stop the macOS crash reporter";
-      attr = "disable-crash-reporter";
-      cap = caps.sandbox;
-    };
-
   # Build the CI step package of one version, and leave it at `result`.
   #
   # `$CI_STEP` is a job-level environment variable, so the version reaches this
@@ -558,7 +546,6 @@ let
             experimentalFeatures = suiteExperimentalFeatures;
           }
           ++ [
-            (mkCrashReporterStep { })
             (mkBuildStep {
               name = "Build the CI step package for Nix ${version}";
               cap = caps.build;
