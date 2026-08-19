@@ -8,7 +8,7 @@ runs share the same ``Scenario``/``Action`` list -- that's the point: one
 scenario, two fidelity levels, instead of hand-duplicating each test.
 
 The expectations below are deliberately ones that hold on *both* backends.
-Real e2e (a genuine `pynix lsp` subprocess, a real client like Helix)
+Real e2e (a genuine `pynix-lsp` subprocess, a real client like Helix)
 additionally drives client-side behaviour this repo's server never sees at
 all -- automatic completion popups on trigger characters, client-side fuzzy
 filtering/sorting of completion items, debouncing -- so an e2e-only scenario

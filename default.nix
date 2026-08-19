@@ -560,9 +560,8 @@ let
               # The language server, as a release application of its own.
               # Issue #107 split it out of `pynix`, so that `pygls`,
               # `lsprotocol` and `jsonschema` are not in the closure of
-              # `pynix build`. `pynix` is still a dependency of it, so this
-              # application carries both programs' code and `pynix lsp` also
-              # works inside its venv.
+              # `pynix build`. `pynix` is still a dependency of it, because the
+              # server imports `pynix._nix_syntax` and `pynix._completion`.
               #
               # `tofuCoreSchemaTool` is here because
               # `pynix_lsp._tofu_core_schema` runs it at request time, rather

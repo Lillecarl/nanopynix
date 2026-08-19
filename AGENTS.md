@@ -273,19 +273,18 @@ took 0.440 s; 349 of those modules came from those three packages.
 
 **The arrow points from `pynix-lsp` to `pynix`, and never back.** The server
 imports `pynix._nix_syntax` and `pynix._completion`, which the REPL shares.
-`pynix` mounts the `Lsp` subcommand through an optional import, in
-`pynix/src/pynix/__init__.py`. That import closes no cycle, because both
-modules it needs are leaves.
+`pynix` knows nothing about the server.
 
-**The subcommand union is written twice, and both halves must agree.** clypi
-evaluates the annotation of `Pynix.subcommand` while the class body runs, so
-an optional member cannot be added afterwards; pyright cannot read a computed
-value as a type. `tests/meta/test_subcommands.py` compares the two halves.
+**The server has one name: `pynix-lsp`, the program an editor calls.** `pynix`
+mounted it as an `lsp` subcommand as well until issue #123, through an optional
+import. That alias cost a subcommand union written twice, a meta test to keep
+the two halves in step, a third question in `checks.pynix-isolated`, and a dev
+shell that loaded 647 modules for `import pynix` where a release build loads
+202. Do not add it back. `pynix-lsp` sits beside `pynix` on the PATH of the dev
+shell.
 
-The server has two names. `pynix-lsp` is the program, which is what an editor
-calls. `pynix lsp` is the subcommand, which works wherever both projects are
-installed, such as the dev shell. The release build of `pynix` carries neither
-the server nor its dependencies, and `checks.pynix-isolated` states that.
+The release build of `pynix` carries neither the server nor its dependencies,
+and `checks.pynix-isolated` states that.
 
 Run the tests:
 

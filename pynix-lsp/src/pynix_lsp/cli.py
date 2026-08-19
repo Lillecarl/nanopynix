@@ -12,7 +12,7 @@ from pynix._util import configure_logging
 from pynix_lsp._handlers import create_server
 
 
-class Lsp(PynixCommand):
+class PynixLsp(PynixCommand):
     """Run pynix as a Nix language server (stdio transport).
 
     Files opt in to real hover/completion by naming a bound identifier and a
@@ -29,28 +29,20 @@ class Lsp(PynixCommand):
         await create_server().start_io_async()
 
 
-# The same command, under the name that the standalone program uses. clypi
-# reads the name of a command from the name of its class (`Command.prog`), so
-# `Lsp` is `lsp` and this subclass is `pynix-lsp`. Two classes, because both
-# names are correct and neither one can take the other position: `pynix
-# pynix-lsp` and a program called `lsp` are each wrong.
-#
-# `__doc__` is taken from `Lsp` rather than written again, because clypi turns
-# it into the help text and one description of one command must not drift.
-class PynixLsp(Lsp):
-    __doc__ = Lsp.__doc__
-
-
 def main() -> None:
     """Run the server as the `pynix-lsp` program.
 
-    **The server has two names, and each one has a reason.** An editor
-    configures one command, so this project installs `pynix-lsp`, which is the
-    name that every other Nix language server uses. `pynix` also mounts `Lsp`
-    as its `lsp` subcommand when this project is installed beside it, which is
-    what a developer in the shell of this repository calls. The release build
-    of `pynix` does not carry this project, so `pynix lsp` is not a subcommand
-    there. Issue #107 gives the measurement that made the split.
+    **One name.** An editor configures one command, and `pynix-lsp` is the name
+    that every other Nix language server uses. clypi reads the name of a
+    command from the name of its class (`Command.prog`), so this class is
+    spelled `PynixLsp`.
+
+    `pynix` used to mount this command as its `lsp` subcommand as well, through
+    an optional import. That alias is gone: it cost a subcommand union written
+    twice, a meta test to keep the two halves in step, a third question in
+    `checks.pynix-isolated`, and a dev shell that loaded 647 modules for
+    `import pynix` where a release build loads 202. Issue #107 made the split
+    and issue #123 removed the alias.
     """
     rich.traceback.install(show_locals=True)
     set_manager_title("pynix-lsp")
