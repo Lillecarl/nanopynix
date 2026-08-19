@@ -69,6 +69,25 @@ TERM = "xterm"
 #: long against the work and short against the timeout below.
 SETTLE = 0.4
 
+#: Seconds to wait for the *first* thing a shell draws after Tab, when a caller
+#: gives no other number.
+#:
+#: **A program that starts slowly needs more than `SETTLE`, and a read that is
+#: too short reports an empty answer rather than a slow one.** Measured against
+#: `pynix`: fish starts the program twice for one completion, once for the
+#: condition of `complete -n` and once for its candidates, and each start takes
+#: about 0.15 s. With 0.4 s the driver returned no candidates and an unchanged
+#: command line for `pynix build --<TAB>`, and the case table of
+#: `pynix/completions/tests/` passed. With 2.0 s the same line came back as
+#: `pynix build print-dev-env`, which is the defect issue #213 is about.
+#:
+#: The wait applies to the first chunk alone. `settle` below ends the read
+#: after that, and it has to grow with this one: measured against `pynix`,
+#: fish drew its first bytes at once and then went quiet for longer than 0.4 s
+#: before it put `print-dev-env` on the command line, so a long `answer` with
+#: the default `settle` still read a truncated answer.
+ANSWER = SETTLE
+
 #: Seconds before a shell that never answers fails the test.
 TIMEOUT = 20.0
 
@@ -186,11 +205,20 @@ class ShellSession:
             offered = shell.complete("prog build --attr ")
     """
 
-    def __init__(self, shell: Shell | str, env: Mapping[str, str], cwd: str | None = None) -> None:
+    def __init__(
+        self,
+        shell: Shell | str,
+        env: Mapping[str, str],
+        cwd: str | None = None,
+        settle: float = SETTLE,
+        answer: float = ANSWER,
+    ) -> None:
         spec = SHELLS.get(shell)
         if spec is None:
             raise ValueError(f"unknown shell {shell!r}; expected one of {', '.join(SHELLS)}")
         self.spec = spec
+        self._settle = settle
+        self._answer = answer
         columns, rows = WINDOW
         self._child = pexpect.spawn(
             spec.argv[0],
@@ -247,12 +275,17 @@ class ShellSession:
         self._child.send(line + "\n")
         self._child.expect_exact(PROMPT, timeout=TIMEOUT)
 
-    def _read_until_quiet(self) -> str:
-        """Everything the shell writes, until it writes nothing for `SETTLE`."""
+    def _read_until_quiet(self, first: float | None = None) -> str:
+        """Everything the shell writes, until it goes quiet for `settle`.
+
+        *first* is how long to wait for the first chunk, for a caller that
+        knows the shell has slow work to do before it draws anything.
+        """
         chunks: list[str] = []
         while True:
+            wait = first if first is not None and not chunks else self._settle
             try:
-                chunks.append(self._child.read_nonblocking(size=4096, timeout=SETTLE))
+                chunks.append(self._child.read_nonblocking(size=4096, timeout=wait))
             except pexpect.TIMEOUT:
                 return "".join(chunks)
             except pexpect.EOF:
@@ -269,8 +302,14 @@ class ShellSession:
         # landed in the front of the next answer.
         self._read_until_quiet()
         self._child.send(line)
+        # **The echo is read before Tab, and it is put back afterwards.** The
+        # echo of the typed line arrives at once, so it would be the first
+        # chunk of the read below and the long wait would never apply. The two
+        # halves are joined again because `candidates` and `completed_line`
+        # read one text, and the echo is part of what they read.
+        echo = self._read_until_quiet()
         self._child.send(_TAB)
-        drawn = self._read_until_quiet()
+        drawn = echo + self._read_until_quiet(first=self._answer)
         # Ctrl-U clears the line, Ctrl-C leaves any pager or menu, and the
         # empty line brings the prompt back so the next call starts clean.
         self._child.send("\x15\x03")
