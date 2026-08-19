@@ -2,16 +2,15 @@ from __future__ import annotations
 
 from typing import override
 
-from clypi import arg
-
 from pynix import _impl
+from pynix._cli import opt
 from pynix._settings import ConfiguredCommand, attr_option, file_option, flake_option, store_option
 
 
 class Eval(ConfiguredCommand):
     """Evaluate a Nix expression and print the result as JSON"""
 
-    expr: str | None = arg(None, help="Nix expression to evaluate. Reads from stdin if not provided.")
+    expr: str | None = opt(None, help="Nix expression to evaluate. Reads from stdin if not provided.")
 
     file: str | None = file_option()
 

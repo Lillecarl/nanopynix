@@ -53,7 +53,7 @@ from _shared_sessions import FAITHFUL_SESSIONS_ENV_VAR, SharedSessions
 # here settles it. `nanopynix/tests/conftest.py` carries the same import and
 # the full account.
 from nanopynix_testing.nix_environment import anyio_backend as anyio_backend
-from pynix import Pynix
+from pynix import parse
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Generator, Iterator
@@ -131,12 +131,12 @@ class PynixStoreScenario:
             redirect_stdout(stdout),
             redirect_stderr(stderr),
         ):
-            cmd = Pynix.parse(args)
+            cmd = parse(args)
             # Parsing may configure structlog through Pynix's public re-export.
             # Reinstall the test collector before the command starts forwarding
             # Nix logs, so JSON command output remains machine-readable.
             structlog.configure(processors=[self.live_log.capture])
-            await cmd.astart()
+            await cmd.run()
         self.last_stdout = stdout.getvalue()
         self.last_stderr = stderr.getvalue()
         self.last_logs = [dict(entry) for entry in self.live_log.entries_for(test_name)[before:]]
@@ -556,7 +556,7 @@ def _patched_environ(values: dict[str, str]) -> Generator[None]:
 @contextlib.contextmanager
 def _pynix_configure_logging_noop() -> Generator[None]:
     # One name, not two. `pynix/__init__.py` used to import `configure_logging`
-    # so that `main` could call it before `Pynix.parse()`; it now calls
+    # so that `main` could call it before `parse()`; it now calls
     # `pynix._impl.main.prepare()` after the parse instead, and the package no
     # longer binds the name. Issue #123.
     old_configure_logging = pynix_util.configure_logging

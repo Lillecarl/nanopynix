@@ -2,16 +2,15 @@ from __future__ import annotations
 
 from typing import override
 
-from clypi import arg
-
 from pynix import _impl
+from pynix._cli import opt
 from pynix._settings import PynixCommand
 
 
 class Show(PynixCommand):
     """Show Nix configuration settings"""
 
-    setting: str | None = arg(None, help="Show only one setting.")
+    setting: str | None = opt(None, help="Show only one setting.")
 
     @override
     async def run(self) -> None:
@@ -37,4 +36,4 @@ class CurrentSystem(PynixCommand):
 class Config(PynixCommand):
     """Inspect Nix configuration"""
 
-    subcommand: Show | Check | CurrentSystem
+    subcommands = (Show, Check, CurrentSystem)

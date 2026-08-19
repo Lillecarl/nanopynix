@@ -30,4 +30,4 @@ class Show(ConfiguredCommand):
 class Derivation(PynixCommand):
     """Inspect and manipulate Nix derivations"""
 
-    subcommand: Show
+    subcommands = (Show,)

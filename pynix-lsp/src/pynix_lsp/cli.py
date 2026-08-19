@@ -7,6 +7,8 @@ from typing import override
 import rich.traceback
 
 from nanopynix import set_manager_title
+from pynix._cli import build_parser, complete, dispatch
+from pynix._impl.main import run
 from pynix._settings import PynixCommand
 from pynix._util import configure_logging
 from pynix_lsp._handlers import create_server
@@ -33,9 +35,9 @@ def main() -> None:
     """Run the server as the `pynix-lsp` program.
 
     **One name.** An editor configures one command, and `pynix-lsp` is the name
-    that every other Nix language server uses. clypi reads the name of a
-    command from the name of its class (`Command.prog`), so this class is
-    spelled `PynixLsp`.
+    that every other Nix language server uses. `pynix._cli` reads the name of a
+    command from the name of its class, so this class is spelled `PynixLsp` and
+    the program is `pynix-lsp`.
 
     `pynix` used to mount this command as its `lsp` subcommand as well, through
     an optional import. That alias is gone: it cost a subcommand union written
@@ -44,7 +46,10 @@ def main() -> None:
     `import pynix` where a release build loads 202. Issue #107 made the split
     and issue #123 removed the alias.
     """
+    parser = build_parser(PynixLsp)
+    complete(parser)
+    command = dispatch(parser, parser.parse_args())
     rich.traceback.install(show_locals=True)
     set_manager_title("pynix-lsp")
     configure_logging()
-    PynixLsp.parse().start()
+    run(command.run)

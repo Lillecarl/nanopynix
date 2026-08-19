@@ -21,14 +21,14 @@ from anyio import Path as AnyioPath, run_process
 from nanopynix.models import LockedNode
 from nanopynix.protocols import AsyncLockedFlake
 from nanopynix_testing.nix_environment import with_nixpkgs
-from pynix import Pynix
+from pynix import parse
 from pynix._dev_env import BuildEnvironment, make_rc_script, quote
 from pynix._impl.develop import (  # pyright: ignore[reportPrivateUsage] -- the ref-selection decision is unit-tested directly; the end-to-end path builds bashInteractive
     InteractiveShell,
     _nixpkgs_flake_ref,
     compose_shell_script,
-    take_unparsed,
 )
+from pynix.develop import Develop
 from support.nix_oracle import require_matching_nix_cli
 
 if TYPE_CHECKING:
@@ -196,28 +196,38 @@ def _compare(mine: dict[str, Any], theirs: dict[str, Any]) -> None:
 
 
 def test_a_command_after_the_double_dash_reaches_the_command_untouched() -> None:
-    """clypi stops parsing at ``--``, so no option after it is interpreted.
+    """argparse stops parsing options at ``--``, so nothing after it is one.
 
     This is what lets ``develop`` take its command the way the shell would,
     rather than through a ``--command`` option as ``nix develop`` does. Every
     other test here assumes it.
+
+    Measured across the move of issue #214: clypi and argparse hand back the
+    same list, ``-- literal`` as one word included.
     """
-    cmd = Pynix.parse(["develop", "--file", "x.nix", "--", "make", "-j4", "--jobs=2", "-- literal"])
-    assert take_unparsed(type(cmd.subcommand)) == ["make", "-j4", "--jobs=2", "-- literal"]
+    cmd = parse(["develop", "--file", "x.nix", "--", "make", "-j4", "--jobs=2", "-- literal"])
+    assert isinstance(cmd, Develop)
+    assert cmd.command == ["make", "-j4", "--jobs=2", "-- literal"]
 
 
 def test_a_second_parse_does_not_inherit_the_first_command() -> None:
-    """clypi keeps the tail on the class and never clears it.
+    """A second parse in one process sees only its own tail.
 
-    ``take_unparsed`` is what clears it. Without that, a ``develop`` with no
-    ``--`` of its own runs whatever the previous parse asked for -- which a
-    one-parse-per-process command line would never reveal.
+    clypi kept the tail on the *class* and never cleared it, so
+    ``pynix._impl.develop.take_unparsed`` had to reach into
+    ``clypi._cli.main.CLYPI_UNPARSED`` and reset it. A command line parses once
+    and would never have shown that; a test, or any program that embeds the
+    parser, saw it every time. argparse keeps nothing on the class, and issue
+    #214 deleted the workaround. This test stays, because the property is what
+    matters and not the mechanism.
     """
-    first = Pynix.parse(["develop", "--file", "x.nix", "--", "make"])
-    assert take_unparsed(type(first.subcommand)) == ["make"]
+    first = parse(["develop", "--file", "x.nix", "--", "make"])
+    assert isinstance(first, Develop)
+    assert first.command == ["make"]
 
-    second = Pynix.parse(["develop", "--file", "x.nix"])
-    assert take_unparsed(type(second.subcommand)) == []
+    second = parse(["develop", "--file", "x.nix"])
+    assert isinstance(second, Develop)
+    assert second.command == []
 
 
 # --- which nixpkgs the interactive shell comes from ------------------------
@@ -306,10 +316,10 @@ async def test_print_dev_env_json_matches_nix(
     nix_file = _write(tmp_path, "plain.nix", _PLAIN_DERIVATION, nixpkgs_path)
     theirs = await _nix_print_dev_env(nix_file, shared_nix_environment.store_uri)
 
-    cmd = Pynix.parse(
+    cmd = parse(
         ["print-dev-env", "--file", str(nix_file), "--json", *shared_nix_environment.pynix_store_args()],
     )
-    await cmd.astart()
+    await cmd.run()
     mine = json.loads(capsys.readouterr().out)
 
     _compare(mine, theirs)
@@ -325,10 +335,10 @@ async def test_print_dev_env_json_matches_nix_for_structured_attrs(
     nix_file = _write(tmp_path, "structured.nix", _STRUCTURED_DERIVATION, nixpkgs_path)
     theirs = await _nix_print_dev_env(nix_file, shared_nix_environment.store_uri)
 
-    cmd = Pynix.parse(
+    cmd = parse(
         ["print-dev-env", "--file", str(nix_file), "--json", *shared_nix_environment.pynix_store_args()],
     )
-    await cmd.astart()
+    await cmd.run()
     mine = json.loads(capsys.readouterr().out)
 
     assert "structuredAttrs" in mine, "a __structuredAttrs derivation must report them"
@@ -346,8 +356,8 @@ async def test_print_dev_env_prints_bash_that_restores_the_environment(
 ) -> None:
     """Run the printed script under bash, and read the variables back out."""
     nix_file = _write(tmp_path, "plain.nix", _PLAIN_DERIVATION, nixpkgs_path)
-    cmd = Pynix.parse(["print-dev-env", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["print-dev-env", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
+    await cmd.run()
     script = capsys.readouterr().out
 
     # A bash array, and a bash function, both restored. Nix flattens a Nix list
@@ -377,13 +387,13 @@ async def test_the_original_derivation_is_untouched(
     nix_file = _write(tmp_path, "plain.nix", _PLAIN_DERIVATION, nixpkgs_path)
     store_args = shared_nix_environment.pynix_store_args()
 
-    await Pynix.parse(["derivation", "show", "--file", str(nix_file), *store_args]).astart()
+    await parse(["derivation", "show", "--file", str(nix_file), *store_args]).run()
     before = json.loads(capsys.readouterr().out)
 
-    await Pynix.parse(["print-dev-env", "--file", str(nix_file), "--json", *store_args]).astart()
+    await parse(["print-dev-env", "--file", str(nix_file), "--json", *store_args]).run()
     capsys.readouterr()
 
-    await Pynix.parse(["derivation", "show", "--file", str(nix_file), *store_args]).astart()
+    await parse(["derivation", "show", "--file", str(nix_file), *store_args]).run()
     after = json.loads(capsys.readouterr().out)
 
     assert before == after
@@ -399,11 +409,11 @@ async def test_a_derivation_whose_builder_is_not_bash_is_refused(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     nix_file = _write(tmp_path, "non-bash.nix", _NON_BASH_DERIVATION, nixpkgs_path)
-    cmd = Pynix.parse(
+    cmd = parse(
         ["print-dev-env", "--file", str(nix_file), "--json", *shared_nix_environment.pynix_store_args()],
     )
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
     assert "only works on derivations that use 'bash' as their builder" in capsys.readouterr().err
 
 

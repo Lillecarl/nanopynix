@@ -1,6 +1,6 @@
 # CLI reference
 
-Generated from pynix's live `clypi` command tree — see `docs/_generate_pynix_reference.py`. Every command also accepts `--help` for the same information at the terminal.
+Generated from pynix's live command tree — see `docs/_generate_pynix_reference.py`. Every command also accepts `--help` for the same information at the terminal.
 
 ## `pynix`
 
@@ -26,7 +26,7 @@ Build a Nix derivation value
 | `--namespaced` | `bool` | Build in a private user namespace, against an overlay store whose lower layer is the host store. Nothing is copied in, the host store does not change, and this process owns the sandbox settings that the daemon otherwise controls. Linux only. (default: `False`) |
 | `--overlay-dir` | `Path or None` | Keep the overlay's upper layer here, instead of in a temporary directory that is deleted on exit. Reuse the same directory to keep what earlier --namespaced builds produced. Implies --namespaced. (default: `None`) |
 | `--copy-back` | `bool` | Copy the outputs of a --namespaced build into the host store when the build succeeds. Without it the outputs are gone when the worker exits. (default: `True`) |
-| `--sandbox-path` | `list[str]` | Extra path to mount into the build sandbox, as /inside=/outside or /path. Repeatable. Requires --namespaced, because the daemon does not let a client change its sandbox. (default: `[]`) |
+| `--sandbox-path` | `list[str]` | Extra path to mount into the build sandbox, as /inside=/outside or /path. Repeatable. Requires --namespaced, because the daemon does not let a client change its sandbox. (default: `None`) |
 
 ### `pynix config`
 
@@ -101,6 +101,7 @@ Examples:
 | `--eval-store` | `str or None` | Store URI to evaluate with. Defaults to --store. (default: `None`) |
 | `--verbosity` | `str or None` | Nix log verbosity: error, warn, notice, info, talkative, chatty, debug, vomit, or 0-7. (default: `None`) |
 | `--print-build-logs` | `bool` | Print build log lines to stderr. (default: `False`) |
+| `command` | `list[str]` | Command to run in the environment, after --. Omit for an interactive bash. *(required)* |
 
 ### `pynix flake`
 
@@ -112,7 +113,7 @@ Show the outputs provided by a flake
 
 | Argument | Type | Help |
 | --- | --- | --- |
-| `flake-ref` | `str` | Flake reference (e.g. '.#' or 'nixpkgs#'). *(required)* |
+| `flake_ref` | `str` | Flake reference (e.g. '.#' or 'nixpkgs#'). *(required)* |
 | `--attrpath` | `str or None` | Dot-separated attribute path within the flake outputs to start from. (default: `None`) |
 | `--store` | `str` | Store URI to evaluate with. (default: `'auto'`) |
 
@@ -122,7 +123,7 @@ Show locked flake metadata
 
 | Argument | Type | Help |
 | --- | --- | --- |
-| `flake-ref` | `str` | Flake reference (e.g. '.' or 'nixpkgs'). *(required)* |
+| `flake_ref` | `str` | Flake reference (e.g. '.' or 'nixpkgs'). *(required)* |
 | `--store` | `str` | Store URI to evaluate with. (default: `'auto'`) |
 
 #### `pynix flake info`
@@ -131,7 +132,7 @@ Alias for flake metadata
 
 | Argument | Type | Help |
 | --- | --- | --- |
-| `flake-ref` | `str` | Flake reference (e.g. '.' or 'nixpkgs'). *(required)* |
+| `flake_ref` | `str` | Flake reference (e.g. '.' or 'nixpkgs'). *(required)* |
 | `--store` | `str` | Store URI to evaluate with. (default: `'auto'`) |
 
 ### `pynix log`
@@ -348,7 +349,7 @@ Add a permanent GC root symlink
 | Argument | Type | Help |
 | --- | --- | --- |
 | `path` | `str` | Store path to root. *(required)* |
-| `gc-root` | `str` | GC root symlink to create. *(required)* |
+| `gc_root` | `str` | GC root symlink to create. *(required)* |
 | `--store` | `str` | Store URI to use. (default: `'auto'`) |
 
 #### `pynix store add-indirect-root`
@@ -366,7 +367,7 @@ Resolve a store path from its hash prefix
 
 | Argument | Type | Help |
 | --- | --- | --- |
-| `hash-part` | `str` | Store path hash prefix to resolve. *(required)* |
+| `hash_part` | `str` | Store path hash prefix to resolve. *(required)* |
 | `--store` | `str` | Store URI to query. (default: `'auto'`) |
 
 #### `pynix store ensure-path`

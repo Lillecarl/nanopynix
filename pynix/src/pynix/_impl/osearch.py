@@ -3,7 +3,7 @@
 Search NixOS module options, using a cached, offline index.
 
 ``pynix.osearch`` holds the command class and its options, and this module holds
-what ``run`` needs. ``pynix._impl`` says why: clypi loads every subcommand module
+what ``run`` needs. ``pynix._impl`` says why: the parser loads every subcommand module
 on every start, and none of these imports is needed to list an option.
 """
 

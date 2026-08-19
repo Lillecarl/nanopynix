@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from nanopynix._ansi import strip_ansi
-from pynix import Pynix
+from pynix import parse
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -27,8 +27,8 @@ async def test_eval_expr(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    cmd = Pynix.parse(["eval", "--expr", "1 + 1", *shared_nix_environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["eval", "--expr", "1 + 1", *shared_nix_environment.pynix_store_args()])
+    await cmd.run()
     captured = capsys.readouterr()
     assert _parse_json_output(captured.out) == 2
 
@@ -37,8 +37,8 @@ async def test_eval_string(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    cmd = Pynix.parse(["eval", "--expr", '"hello"', *shared_nix_environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["eval", "--expr", '"hello"', *shared_nix_environment.pynix_store_args()])
+    await cmd.run()
     captured = capsys.readouterr()
     assert _parse_json_output(captured.out) == "hello"
 
@@ -50,8 +50,8 @@ async def test_eval_file(
 ) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ a = 1; b = true; c = [ 1 2 3 ]; }")
-    cmd = Pynix.parse(["eval", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["eval", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
+    await cmd.run()
     captured = capsys.readouterr()
     assert _parse_json_output(captured.out) == {"a": 1, "b": True, "c": [1, 2, 3]}
 
@@ -63,11 +63,11 @@ async def test_eval_file_attr(
 ) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ nested = { answer = 42; }; }")
-    cmd = Pynix.parse(
+    cmd = parse(
         ["eval", "--file", str(nix_file), "--attr", "nested", *shared_nix_environment.pynix_store_args()],
     )
 
-    await cmd.astart()
+    await cmd.run()
 
     captured = capsys.readouterr()
     assert _parse_json_output(captured.out) == {"answer": 42}
@@ -77,17 +77,17 @@ async def test_eval_json_sorted_keys(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    cmd = Pynix.parse(["eval", "--expr", "{ z = 1; a = 2; }", *shared_nix_environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["eval", "--expr", "{ z = 1; a = 2; }", *shared_nix_environment.pynix_store_args()])
+    await cmd.run()
     captured = capsys.readouterr()
     result = _parse_json_output(captured.out)
     assert json.dumps(result, sort_keys=True, indent=2) + "\n" in captured.out
 
 
 async def test_eval_attr_without_file_or_flake_errors(capsys: pytest.CaptureFixture[str]) -> None:
-    cmd = Pynix.parse(["eval", "--expr", "1", "--attr", "x"])
+    cmd = parse(["eval", "--expr", "1", "--attr", "x"])
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
     captured = capsys.readouterr()
     assert "--attr requires --file or --flake" in captured.err
 
@@ -95,9 +95,9 @@ async def test_eval_attr_without_file_or_flake_errors(capsys: pytest.CaptureFixt
 async def test_eval_expr_combined_with_file_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("1")
-    cmd = Pynix.parse(["eval", "--expr", "1", "--file", str(nix_file)])
+    cmd = parse(["eval", "--expr", "1", "--file", str(nix_file)])
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
     captured = capsys.readouterr()
     assert "expression argument cannot be combined with --file or --flake" in captured.err
 
@@ -108,8 +108,8 @@ async def test_eval_reads_expression_from_stdin(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr("sys.stdin", io.StringIO("21 + 21"))
-    cmd = Pynix.parse(["eval", *shared_nix_environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["eval", *shared_nix_environment.pynix_store_args()])
+    await cmd.run()
     captured = capsys.readouterr()
     assert _parse_json_output(captured.out) == 42
 
@@ -121,10 +121,10 @@ async def test_eval_file_missing_attr_errors(
 ) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ present = 1; }")
-    cmd = Pynix.parse(
+    cmd = parse(
         ["eval", "--file", str(nix_file), "--attr", "missing", *shared_nix_environment.pynix_store_args()],
     )
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
     captured = capsys.readouterr()
     assert "attribute 'missing' not found" in strip_ansi(captured.err)

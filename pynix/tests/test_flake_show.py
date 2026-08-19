@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from pynix import Pynix
+from pynix import parse
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -16,8 +16,8 @@ if TYPE_CHECKING:
 async def test_flake_show_root(
     shared_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
 ) -> None:
-    cmd = Pynix.parse(["flake", "show", str(git_flake), *shared_nix_environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["flake", "show", str(git_flake), *shared_nix_environment.pynix_store_args()])
+    await cmd.run()
     captured = capsys.readouterr()
     assert "hello" in captured.out
     assert "greeting" in captured.out
@@ -28,8 +28,8 @@ async def test_flake_show_with_hash_attrpath(
     capsys: pytest.CaptureFixture[str],
     git_flake: Path,
 ) -> None:
-    cmd = Pynix.parse(["flake", "show", f"{git_flake}#hello", *shared_nix_environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["flake", "show", f"{git_flake}#hello", *shared_nix_environment.pynix_store_args()])
+    await cmd.run()
     captured = capsys.readouterr()
     assert "hello" in captured.out
     assert "greeting" not in captured.out
@@ -43,10 +43,10 @@ async def test_flake_show_with_a_separate_attrpath_flag_navigates_further(
     """--attrpath narrows further than the flake_ref's own '#' fragment,
     a distinct code path from resolving the fragment alone (see the other
     test above)."""
-    cmd = Pynix.parse(
+    cmd = parse(
         ["flake", "show", f"{git_flake}#hello", "--attrpath", "pname", *shared_nix_environment.pynix_store_args()]
     )
-    await cmd.astart()
+    await cmd.run()
     captured = capsys.readouterr()
     assert "greeting" not in captured.out
     assert "drvPath" not in captured.out
@@ -58,8 +58,8 @@ async def test_flake_metadata_json_does_not_write_lock_file(
     lock_file = git_flake / "flake.lock"
     assert not lock_file.exists()
 
-    cmd = Pynix.parse(["flake", "metadata", str(git_flake), *shared_nix_environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["flake", "metadata", str(git_flake), *shared_nix_environment.pynix_store_args()])
+    await cmd.run()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
     # `resolvedUrl` and `locks` are Nix's own key names. This object used to be
@@ -77,8 +77,8 @@ async def test_flake_metadata_json_does_not_write_lock_file(
 async def test_flake_info_aliases_metadata(
     shared_nix_environment: NixTestEnvironment, capsys: pytest.CaptureFixture[str], git_flake: Path
 ) -> None:
-    cmd = Pynix.parse(["flake", "info", str(git_flake), *shared_nix_environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["flake", "info", str(git_flake), *shared_nix_environment.pynix_store_args()])
+    await cmd.run()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
     assert str(git_flake) in data["resolvedUrl"]

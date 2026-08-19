@@ -3,15 +3,15 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from pynix import Pynix
+from pynix import parse
 
 if TYPE_CHECKING:
     import pytest
 
 
 async def test_config_show(capsys: pytest.CaptureFixture[str]) -> None:
-    cmd = Pynix.parse(["config", "show"])
-    await cmd.astart()
+    cmd = parse(["config", "show"])
+    await cmd.run()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
     assert isinstance(data, dict)
@@ -19,8 +19,8 @@ async def test_config_show(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 async def test_config_show_one_setting(capsys: pytest.CaptureFixture[str]) -> None:
-    cmd = Pynix.parse(["config", "show", "--setting", "store"])
-    await cmd.astart()
+    cmd = parse(["config", "show", "--setting", "store"])
+    await cmd.run()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
     assert set(data) == {"store"}
@@ -28,15 +28,15 @@ async def test_config_show_one_setting(capsys: pytest.CaptureFixture[str]) -> No
 
 
 async def test_config_check(capsys: pytest.CaptureFixture[str]) -> None:
-    cmd = Pynix.parse(["config", "check"])
-    await cmd.astart()
+    cmd = parse(["config", "check"])
+    await cmd.run()
     captured = capsys.readouterr()
     assert json.loads(captured.out) == {"ok": True}
 
 
 async def test_config_current_system(capsys: pytest.CaptureFixture[str]) -> None:
-    cmd = Pynix.parse(["config", "current-system"])
-    await cmd.astart()
+    cmd = parse(["config", "current-system"])
+    await cmd.run()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
     assert set(data) == {"currentSystem"}

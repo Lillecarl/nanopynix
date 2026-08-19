@@ -123,7 +123,7 @@ class PynixLanguageServer(LanguageServer):
 
         pygls' own ``start_io()`` is synchronous and always wraps its message
         loop in a fresh ``asyncio.run(...)``, which cannot nest inside the
-        loop clypi already runs this command under. The loop itself
+        loop ``pynix._impl.main.run`` already runs this command under. The loop itself
         (``pygls.io_.run_async``) is a plain coroutine with no such
         requirement -- it dispatches its own blocking stdin reads via
         ``loop.run_in_executor`` -- so driving it directly here avoids a

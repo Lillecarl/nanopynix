@@ -229,15 +229,24 @@ FORBIDDEN_IN_PYNIX = (
     "rich",
     "structlog",
     "yaml",
+    # The completion machinery. `pynix._cli.complete` imports it behind the
+    # `_ARGCOMPLETE` variable that the generated script sets, so a command a
+    # person typed loads none of it. Issue #214.
+    "argcomplete",
 )
 
 #: The most modules ``import pynix`` may load.
 #:
-#: Measured at 202 on the release build when issue #123 finished, down from
-#: 866. The dev shell reads the same tree now, because ``pynix`` no longer
-#: mounts the language server. See ``MODULE_BUDGET`` for why a count carries
-#: headroom and a name does not.
-PYNIX_MODULE_BUDGET = 240
+#: Measured at **105**, down from 202 when issue #123 finished and 866 before
+#: it. Issue #214 is the second half: clypi was 153 modules of the 202, and
+#: argparse is the standard library. argcomplete is 39 more and is not here at
+#: all, because ``pynix._cli.complete`` imports it only when ``_ARGCOMPLETE``
+#: is set -- so a real command never pays for the completion machinery.
+#:
+#: The dev shell reads the same tree as the release build, because ``pynix`` no
+#: longer mounts the language server. See ``MODULE_BUDGET`` for why a count
+#: carries headroom and a name does not.
+PYNIX_MODULE_BUDGET = 130
 
 #: What the ``pynix`` probe prints, as one JSON line.
 _PYNIX_PROBE = f"""
@@ -246,7 +255,7 @@ import pynix
 print(json.dumps({{
     "count": len(sys.modules),
     "forbidden": sorted(name for name in {FORBIDDEN_IN_PYNIX!r} if name in sys.modules),
-    "help_works": bool(pynix.Pynix.subcommands()),
+    "help_works": bool(pynix.Pynix.subcommands),
 }}))
 """
 

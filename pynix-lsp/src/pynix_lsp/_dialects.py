@@ -8,7 +8,7 @@ entry here -- nothing else in this package references a dialect by name.
 Deliberately a plain, explicit Python list rather than plugin/entry-point
 discovery: this matches the rest of the codebase's existing extensibility
 style (e.g. ``pynix/__init__.py``'s ``Pynix.subcommand`` union of explicitly
-imported ``clypi.Command`` subclasses), and keeps "which dialects are active"
+imported ``pynix._cli.Command`` subclasses), and keeps "which dialects are active"
 fully static and greppable.
 """
 

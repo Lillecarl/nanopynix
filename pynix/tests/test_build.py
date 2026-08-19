@@ -13,7 +13,7 @@ from nanopynix._ansi import strip_ansi
 from nanopynix.exceptions import StoreError
 from nanopynix_testing.nix_environment import with_nixpkgs
 from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
-from pynix import Pynix
+from pynix import parse
 from pynix._impl.build import (  # pyright: ignore[reportPrivateUsage] -- test drives the private build step directly to exercise FOD-update/dry-run paths
     BuildTargetError,
     _build_target,
@@ -101,9 +101,9 @@ async def test_build_file_derivation(
             nixpkgs_path,
         )
     )
-    cmd = Pynix.parse(["build", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
+    cmd = parse(["build", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
 
-    await cmd.astart()
+    await cmd.run()
 
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -139,7 +139,7 @@ async def test_build_file_derivation_attr(
             nixpkgs_path,
         )
     )
-    cmd = Pynix.parse(
+    cmd = parse(
         [
             "build",
             "--file",
@@ -151,7 +151,7 @@ async def test_build_file_derivation_attr(
         ],
     )
 
-    await cmd.astart()
+    await cmd.run()
 
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -185,11 +185,11 @@ async def test_build_file_auto_calls_defaulted_lambda_before_attr(
             nixpkgs_path,
         )
     )
-    cmd = Pynix.parse(
+    cmd = parse(
         ["build", "--file", str(nix_file), "--attr", "package", *shared_nix_environment.pynix_store_args()],
     )
 
-    await cmd.astart()
+    await cmd.run()
 
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -225,12 +225,12 @@ async def test_build_missing_attr_errors_before_build(
             nixpkgs_path,
         )
     )
-    cmd = Pynix.parse(
+    cmd = parse(
         ["build", "--file", str(nix_file), "--attr", "missing", *shared_nix_environment.pynix_store_args()],
     )
 
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
 
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -242,9 +242,9 @@ async def test_build_flake_derivation(
     capsys: pytest.CaptureFixture[str],
     git_flake: Path,
 ) -> None:
-    cmd = Pynix.parse(["build", "--flake", f"{git_flake}#hello", *shared_nix_environment.pynix_store_args()])
+    cmd = parse(["build", "--flake", f"{git_flake}#hello", *shared_nix_environment.pynix_store_args()])
 
-    await cmd.astart()
+    await cmd.run()
 
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -254,10 +254,10 @@ async def test_build_flake_derivation(
 
 
 async def test_build_missing_input_errors(capsys: pytest.CaptureFixture[str]) -> None:
-    cmd = Pynix.parse(["build"])
+    cmd = parse(["build"])
 
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
 
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -269,12 +269,12 @@ async def test_build_update_fod_without_file_errors(
     capsys: pytest.CaptureFixture[str],
     git_flake: Path,
 ) -> None:
-    cmd = Pynix.parse(
+    cmd = parse(
         ["build", "--flake", f"{git_flake}#hello", "--update-fod", *shared_nix_environment.pynix_store_args()],
     )
 
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
 
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -291,12 +291,12 @@ async def test_build_update_fod_with_a_fetched_file_errors(
     read-only. The guard refuses it before any evaluation starts, so this test
     needs no network and no lookup path that exists.
     """
-    cmd = Pynix.parse(
+    cmd = parse(
         ["build", "--file", "<nixpkgs>", "--update-fod", *shared_nix_environment.pynix_store_args()],
     )
 
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
 
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -310,10 +310,10 @@ async def test_build_dry_run_without_update_fod_errors(
 ) -> None:
     nix_file = tmp_path / "build-test.nix"
     nix_file.write_text("1\n")
-    cmd = Pynix.parse(["build", "--file", str(nix_file), "--dry-run", *shared_nix_environment.pynix_store_args()])
+    cmd = parse(["build", "--file", str(nix_file), "--dry-run", *shared_nix_environment.pynix_store_args()])
 
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
 
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -346,10 +346,10 @@ async def test_build_propagates_a_non_fod_build_failure(
             nixpkgs_path,
         )
     )
-    cmd = Pynix.parse(["build", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
+    cmd = parse(["build", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
 
     with pytest.raises(StoreError):
-        await cmd.astart()
+        await cmd.run()
 
     assert capsys.readouterr().out == ""
 
@@ -379,7 +379,7 @@ async def test_build_with_separate_eval_store(
             nixpkgs_path,
         )
     )
-    cmd = Pynix.parse(
+    cmd = parse(
         [
             "build",
             "--file",
@@ -390,7 +390,7 @@ async def test_build_with_separate_eval_store(
         ],
     )
 
-    await cmd.astart()
+    await cmd.run()
 
     captured = capsys.readouterr()
     data = json.loads(captured.out)
@@ -409,11 +409,11 @@ async def test_build_update_fod_dry_run_reports_local_fetchurl_diff(
     nix_file = tmp_path / "source.nix"
     source = f'builtins.fetchurl {{ url = "file://{payload}"; sha256 = ""; }}\n'
     nix_file.write_text(source)
-    cmd = Pynix.parse(
+    cmd = parse(
         ["build", "--file", str(nix_file), "--update-fod", "--dry-run", *shared_nix_environment.pynix_store_args()],
     )
 
-    await cmd.astart()
+    await cmd.run()
 
     captured = capsys.readouterr()
     assert json.loads(captured.out) == {"dryRun": True, "outputs": {}, "updatedFods": 1}
@@ -442,9 +442,9 @@ runCommand "payload" {
             nixpkgs_path,
         ),
     )
-    cmd = Pynix.parse(["build", "--file", str(nix_file), "--update-fod", *shared_nix_environment.pynix_store_args()])
+    cmd = parse(["build", "--file", str(nix_file), "--update-fod", *shared_nix_environment.pynix_store_args()])
 
-    await cmd.astart()
+    await cmd.run()
 
     data = json.loads(capsys.readouterr().out)
     assert data["updatedFods"] == 1
@@ -479,9 +479,9 @@ in runCommand "combined" {} "cat ${first} ${second} > $out"
             nixpkgs_path,
         ),
     )
-    cmd = Pynix.parse(["build", "--file", str(nix_file), "--update-fod", *shared_nix_environment.pynix_store_args()])
+    cmd = parse(["build", "--file", str(nix_file), "--update-fod", *shared_nix_environment.pynix_store_args()])
 
-    await cmd.astart()
+    await cmd.run()
 
     data = json.loads(capsys.readouterr().out)
     assert data["updatedFods"] == 2
@@ -547,12 +547,12 @@ async def test_build_update_fod_reports_an_ambiguous_hash_literal(
         f'{{ a = builtins.fetchurl {{ url = "file://{payload_a}"; sha256 = ""; }};'
         f' b = builtins.fetchurl {{ url = "file://{payload_b}"; sha256 = ""; }}; }}\n',
     )
-    cmd = Pynix.parse(
+    cmd = parse(
         ["build", "--file", str(nix_file), "--attr", "a", "--update-fod", *shared_nix_environment.pynix_store_args()],
     )
 
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
 
     captured = capsys.readouterr()
     assert captured.out == ""

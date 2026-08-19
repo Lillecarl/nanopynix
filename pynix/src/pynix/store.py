@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from typing import override
 
-from clypi import Positional, arg
-
 from pynix import _impl
+from pynix._cli import opt, pos
 from pynix._settings import ConfiguredCommand, PynixCommand, store_option
 
 
@@ -22,7 +21,7 @@ class PrintDead(ConfiguredCommand):
     """List paths that would be removed by a garbage collection.
     Use --rip to actually delete them."""
 
-    rip: bool = arg(
+    rip: bool = opt(
         False,
         help="Actually delete the dead store paths instead of just listing them.",
     )
@@ -47,7 +46,7 @@ class PrintAlive(ConfiguredCommand):
 class Gc(PynixCommand):
     """Manage Nix store garbage collection"""
 
-    subcommand: PrintRoots | PrintDead | PrintAlive
+    subcommands = (PrintRoots, PrintDead, PrintAlive)
 
 
 class Info(ConfiguredCommand):
@@ -73,7 +72,7 @@ class Dirs(ConfiguredCommand):
 class IsValidPath(ConfiguredCommand):
     """Check whether a store path is valid"""
 
-    path: Positional[str] = arg(help="Store path to check.")
+    path: str = pos(help="Store path to check.")
 
     store: str = store_option("Store URI to query.")
 
@@ -85,7 +84,7 @@ class IsValidPath(ConfiguredCommand):
 class FollowLinksToStorePath(ConfiguredCommand):
     """Resolve symlinks to a store path"""
 
-    path: Positional[str] = arg(help="Filesystem path to resolve.")
+    path: str = pos(help="Filesystem path to resolve.")
 
     store: str = store_option("Store URI to query.")
 
@@ -97,13 +96,13 @@ class FollowLinksToStorePath(ConfiguredCommand):
 class ComputeFsClosure(ConfiguredCommand):
     """Compute the filesystem closure of a store path"""
 
-    path: Positional[str] = arg(help="Store path to query.")
+    path: str = pos(help="Store path to query.")
 
-    flip_direction: bool = arg(False, help="Compute the inverse closure.")
+    flip_direction: bool = opt(False, help="Compute the inverse closure.")
 
-    include_outputs: bool = arg(False, help="Include derivation outputs.")
+    include_outputs: bool = opt(False, help="Include derivation outputs.")
 
-    include_derivers: bool = arg(False, help="Include derivers.")
+    include_derivers: bool = opt(False, help="Include derivers.")
 
     store: str = store_option("Store URI to query.")
 
@@ -115,7 +114,7 @@ class ComputeFsClosure(ConfiguredCommand):
 class QueryMissing(ConfiguredCommand):
     """Show which paths would need building, substituting, or are unknown"""
 
-    paths: Positional[list[str]] = arg(help="Store paths to query.")
+    paths: list[str] = pos(help="Store paths to query.")
 
     store: str = store_option("Store URI to query.")
 
@@ -127,7 +126,7 @@ class QueryMissing(ConfiguredCommand):
 class QueryDerivationOutputs(ConfiguredCommand):
     """Show the outputs of a derivation path"""
 
-    path: Positional[str] = arg(help="Derivation path to query.")
+    path: str = pos(help="Derivation path to query.")
 
     store: str = store_option("Store URI to query.")
 
@@ -139,7 +138,7 @@ class QueryDerivationOutputs(ConfiguredCommand):
 class QueryValidDerivers(ConfiguredCommand):
     """Show valid derivers for a store path"""
 
-    path: Positional[str] = arg(help="Store path to query.")
+    path: str = pos(help="Store path to query.")
 
     store: str = store_option("Store URI to query.")
 
@@ -161,7 +160,7 @@ class ListValidPaths(ConfiguredCommand):
 class QueryReferrers(ConfiguredCommand):
     """Show referrers of a store path"""
 
-    path: Positional[str] = arg(help="Store path to query.")
+    path: str = pos(help="Store path to query.")
 
     store: str = store_option("Store URI to query.")
 
@@ -173,7 +172,7 @@ class QueryReferrers(ConfiguredCommand):
 class QuerySubstitutablePaths(ConfiguredCommand):
     """Show which paths are substitutable"""
 
-    paths: Positional[list[str]] = arg(help="Store paths to query.")
+    paths: list[str] = pos(help="Store paths to query.")
 
     store: str = store_option("Store URI to query.")
 
@@ -185,7 +184,7 @@ class QuerySubstitutablePaths(ConfiguredCommand):
 class AddTempRoot(ConfiguredCommand):
     """Add a temporary GC root for this command's store session"""
 
-    path: Positional[str] = arg(help="Store path to root temporarily.")
+    path: str = pos(help="Store path to root temporarily.")
 
     store: str = store_option("Store URI to use.")
 
@@ -197,9 +196,9 @@ class AddTempRoot(ConfiguredCommand):
 class AddPermRoot(ConfiguredCommand):
     """Add a permanent GC root symlink"""
 
-    path: Positional[str] = arg(help="Store path to root.")
+    path: str = pos(help="Store path to root.")
 
-    gc_root: Positional[str] = arg(help="GC root symlink to create.")
+    gc_root: str = pos(help="GC root symlink to create.")
 
     store: str = store_option("Store URI to use.")
 
@@ -211,7 +210,7 @@ class AddPermRoot(ConfiguredCommand):
 class AddIndirectRoot(ConfiguredCommand):
     """Register an indirect GC root"""
 
-    path: Positional[str] = arg(help="GC root path to register.")
+    path: str = pos(help="GC root path to register.")
 
     store: str = store_option("Store URI to use.")
 
@@ -223,7 +222,7 @@ class AddIndirectRoot(ConfiguredCommand):
 class PathFromHashPart(ConfiguredCommand):
     """Resolve a store path from its hash prefix"""
 
-    hash_part: Positional[str] = arg(help="Store path hash prefix to resolve.")
+    hash_part: str = pos(help="Store path hash prefix to resolve.")
 
     store: str = store_option("Store URI to query.")
 
@@ -235,7 +234,7 @@ class PathFromHashPart(ConfiguredCommand):
 class EnsurePath(ConfiguredCommand):
     """Ensure a store path is valid, substituting it if available"""
 
-    path: Positional[str] = arg(help="Store path to ensure.")
+    path: str = pos(help="Store path to ensure.")
 
     store: str = store_option("Store URI to use.")
 
@@ -247,7 +246,7 @@ class EnsurePath(ConfiguredCommand):
 class Cat(ConfiguredCommand):
     """Print a file inside a local Nix store path"""
 
-    path: Positional[str] = arg(help="File path to print.")
+    path: str = pos(help="File path to print.")
 
     store: str = store_option("Store URI to use.")
 
@@ -259,9 +258,9 @@ class Cat(ConfiguredCommand):
 class Ls(ConfiguredCommand):
     """List files inside a local Nix store path"""
 
-    path: Positional[str] = arg(help="File or directory path to list.")
+    path: str = pos(help="File or directory path to list.")
 
-    json: bool = arg(False, help="Print machine-readable JSON.")
+    json: bool = opt(False, help="Print machine-readable JSON.")
 
     store: str = store_option("Store URI to use.")
 
@@ -273,15 +272,15 @@ class Ls(ConfiguredCommand):
 class Add(ConfiguredCommand):
     """Add a file or directory to a Nix store"""
 
-    path: Positional[str] = arg(help="Filesystem path to add.")
+    path: str = pos(help="Filesystem path to add.")
 
-    name: str | None = arg(None, short="n", help="Override the store path name component.")
+    name: str | None = opt(None, short="n", help="Override the store path name component.")
 
-    mode: str = arg("nar", help="Content-addressing method: nar, flat, or git.")
+    mode: str = opt("nar", help="Content-addressing method: nar, flat, or git.")
 
-    hash_algo: str = arg("sha256", help="Hash algorithm to use.")
+    hash_algo: str = opt("sha256", help="Hash algorithm to use.")
 
-    dry_run: bool = arg(False, help="Compute the store path without adding the content.")
+    dry_run: bool = opt(False, help="Compute the store path without adding the content.")
 
     store: str = store_option("Store URI to use.")
 
@@ -293,13 +292,13 @@ class Add(ConfiguredCommand):
 class AddFile(ConfiguredCommand):
     """Add a single file to a Nix store"""
 
-    path: Positional[str] = arg(help="Filesystem path to add.")
+    path: str = pos(help="Filesystem path to add.")
 
-    name: str | None = arg(None, short="n", help="Override the store path name component.")
+    name: str | None = opt(None, short="n", help="Override the store path name component.")
 
-    hash_algo: str = arg("sha256", help="Hash algorithm to use.")
+    hash_algo: str = opt("sha256", help="Hash algorithm to use.")
 
-    dry_run: bool = arg(False, help="Compute the store path without adding the content.")
+    dry_run: bool = opt(False, help="Compute the store path without adding the content.")
 
     store: str = store_option("Store URI to use.")
 
@@ -311,13 +310,13 @@ class AddFile(ConfiguredCommand):
 class AddPath(ConfiguredCommand):
     """Add a path to a Nix store using NAR ingestion"""
 
-    path: Positional[str] = arg(help="Filesystem path to add.")
+    path: str = pos(help="Filesystem path to add.")
 
-    name: str | None = arg(None, short="n", help="Override the store path name component.")
+    name: str | None = opt(None, short="n", help="Override the store path name component.")
 
-    hash_algo: str = arg("sha256", help="Hash algorithm to use.")
+    hash_algo: str = opt("sha256", help="Hash algorithm to use.")
 
-    dry_run: bool = arg(False, help="Compute the store path without adding the content.")
+    dry_run: bool = opt(False, help="Compute the store path without adding the content.")
 
     store: str = store_option("Store URI to use.")
 
@@ -329,9 +328,9 @@ class AddPath(ConfiguredCommand):
 class DiffClosures(ConfiguredCommand):
     """Compare two filesystem closures"""
 
-    before: Positional[str] = arg(help="Original store path.")
+    before: str = pos(help="Original store path.")
 
-    after: Positional[str] = arg(help="New store path.")
+    after: str = pos(help="New store path.")
 
     store: str = store_option("Store URI to query.")
 
@@ -353,9 +352,9 @@ class Optimise(ConfiguredCommand):
 class Verify(ConfiguredCommand):
     """Verify store integrity"""
 
-    check_contents: bool = arg(False, help="Check path contents, not only metadata.")
+    check_contents: bool = opt(False, help="Check path contents, not only metadata.")
 
-    repair: bool = arg(False, help="Attempt repair while verifying.")
+    repair: bool = opt(False, help="Attempt repair while verifying.")
 
     store: str = store_option("Store URI to verify.")
 
@@ -367,30 +366,30 @@ class Verify(ConfiguredCommand):
 class Store(PynixCommand):
     """Manage the Nix store"""
 
-    subcommand: (
-        Gc
-        | Info
-        | Dirs
-        | IsValidPath
-        | FollowLinksToStorePath
-        | ComputeFsClosure
-        | QueryMissing
-        | QueryDerivationOutputs
-        | QueryValidDerivers
-        | ListValidPaths
-        | QueryReferrers
-        | QuerySubstitutablePaths
-        | AddTempRoot
-        | AddPermRoot
-        | AddIndirectRoot
-        | PathFromHashPart
-        | EnsurePath
-        | Cat
-        | Ls
-        | Add
-        | AddFile
-        | AddPath
-        | DiffClosures
-        | Optimise
-        | Verify
+    subcommands = (
+        Gc,
+        Info,
+        Dirs,
+        IsValidPath,
+        FollowLinksToStorePath,
+        ComputeFsClosure,
+        QueryMissing,
+        QueryDerivationOutputs,
+        QueryValidDerivers,
+        ListValidPaths,
+        QueryReferrers,
+        QuerySubstitutablePaths,
+        AddTempRoot,
+        AddPermRoot,
+        AddIndirectRoot,
+        PathFromHashPart,
+        EnsurePath,
+        Cat,
+        Ls,
+        Add,
+        AddFile,
+        AddPath,
+        DiffClosures,
+        Optimise,
+        Verify,
     )

@@ -8,7 +8,7 @@ import pytest
 import nanopynix
 from nanopynix._ansi import strip_ansi
 from nanopynix_testing.nix_environment import with_nixpkgs
-from pynix import Pynix
+from pynix import parse
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -41,10 +41,10 @@ async def test_show_file(
             nixpkgs_path,
         )
     )
-    cmd = Pynix.parse(
+    cmd = parse(
         ["derivation", "show", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()],
     )
-    await cmd.astart()
+    await cmd.run()
     captured = capsys.readouterr()
     result = json.loads(captured.out)
 
@@ -86,10 +86,10 @@ async def test_show_file_with_attr(
             nixpkgs_path,
         )
     )
-    cmd = Pynix.parse(
+    cmd = parse(
         ["derivation", "show", "--file", str(nix_file), "--attr", "hello", *shared_nix_environment.pynix_store_args()],
     )
-    await cmd.astart()
+    await cmd.run()
     captured = capsys.readouterr()
     result = json.loads(captured.out)
     drv_path = next(iter(result))
@@ -101,10 +101,8 @@ async def test_show_flake(
     capsys: pytest.CaptureFixture[str],
     git_flake: Path,
 ) -> None:
-    cmd = Pynix.parse(
-        ["derivation", "show", "--flake", f"{git_flake}#hello", *shared_nix_environment.pynix_store_args()]
-    )
-    await cmd.astart()
+    cmd = parse(["derivation", "show", "--flake", f"{git_flake}#hello", *shared_nix_environment.pynix_store_args()])
+    await cmd.run()
     captured = capsys.readouterr()
     result = json.loads(captured.out)
     drv_path = next(iter(result))
@@ -118,19 +116,19 @@ async def test_show_flake_greeting_is_not_derivation(
     capsys: pytest.CaptureFixture[str],
     git_flake: Path,
 ) -> None:
-    cmd = Pynix.parse(
+    cmd = parse(
         ["derivation", "show", "--flake", f"{git_flake}#greeting", *shared_nix_environment.pynix_store_args()],
     )
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
     captured = capsys.readouterr()
     assert "value is not a derivation" in captured.err
 
 
 async def test_show_missing_both_errors(capsys: pytest.CaptureFixture[str]) -> None:
-    cmd = Pynix.parse(["derivation", "show"])
+    cmd = parse(["derivation", "show"])
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
     captured = capsys.readouterr()
     assert "either --file or --flake is required" in captured.err
 
@@ -138,9 +136,9 @@ async def test_show_missing_both_errors(capsys: pytest.CaptureFixture[str]) -> N
 async def test_show_both_file_and_flake_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{}")
-    cmd = Pynix.parse(["derivation", "show", "--file", str(nix_file), "--flake", ".#hello"])
+    cmd = parse(["derivation", "show", "--file", str(nix_file), "--flake", ".#hello"])
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
     captured = capsys.readouterr()
     assert "--file and --flake are mutually exclusive" in captured.err
 
@@ -152,7 +150,7 @@ async def test_show_file_missing_attr_errors(
 ) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ present = 1; }")
-    cmd = Pynix.parse(
+    cmd = parse(
         [
             "derivation",
             "show",
@@ -164,7 +162,7 @@ async def test_show_file_missing_attr_errors(
         ],
     )
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
     captured = capsys.readouterr()
     assert "attribute 'missing' not found" in strip_ansi(captured.err)
 
@@ -176,9 +174,9 @@ async def test_show_file_wrong_type_attr_errors(
 ) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text('{ type = "not-a-derivation"; }')
-    cmd = Pynix.parse(["derivation", "show", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
+    cmd = parse(["derivation", "show", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
     captured = capsys.readouterr()
     assert "value at attribute path is not a derivation" in captured.err
 
@@ -190,8 +188,8 @@ async def test_show_file_non_string_drv_path_errors(
 ) -> None:
     nix_file = tmp_path / "test.nix"
     nix_file.write_text('{ type = "derivation"; drvPath = 123; }')
-    cmd = Pynix.parse(["derivation", "show", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
+    cmd = parse(["derivation", "show", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
     captured = capsys.readouterr()
     assert "failed to get derivation path" in captured.err

@@ -1,7 +1,7 @@
 """The heavy half of a subcommand, imported when that subcommand runs.
 
-**clypi needs every command class before it can parse one argument.**
-``pynix/__init__.py`` builds a union of the subcommands, and clypi evaluates
+**The parser needs every command class before it can parse one argument.**
+``pynix/__init__.py`` lists every subcommand, and ``pynix._cli`` reads
 that annotation while the class body of ``Pynix`` runs. So every subcommand
 module loads on every start, including ``pynix --help`` and every keypress of
 a shell completion.
@@ -9,7 +9,7 @@ a shell completion.
 A subcommand module therefore holds the command class and its options, and
 nothing else. What ``run`` needs lives here, and the module ``__getattr__``
 below (PEP 562) imports it at the first attribute read -- which happens inside
-``run``, after clypi decided that this is the subcommand to run.
+``run``, after the parser decided that this is the subcommand to run.
 
 Issue #123 measured what this saves, on the release build:
 

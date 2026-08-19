@@ -13,7 +13,7 @@ from nanopynix_proto.nix.store import GetBuildLogRequest
 
 import pynix._util as util_module
 from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
-from pynix import Pynix
+from pynix import parse
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
@@ -37,8 +37,8 @@ async def test_nanopynix_store_get_build_log_from_populated_store(
 async def test_pynix_log_prints_build_log_from_populated_store(
     populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    cmd = Pynix.parse(["log", populated_store["log_path"], "--store", populated_store["store_url"]])
-    await cmd.astart()
+    cmd = parse(["log", populated_store["log_path"], "--store", populated_store["store_url"]])
+    await cmd.run()
     captured = capsys.readouterr()
     assert "pynix-log-line" in captured.out
 
@@ -51,9 +51,9 @@ async def test_pynix_log_errors_when_build_log_unavailable(
     monkeypatch.setattr(util_module, "forward_nix_logs", _noop_forward_nix_logs)
     monkeypatch.setattr(util_module, "nanopynix", SimpleNamespace(rpc=SimpleNamespace(Session=_FakeSession)))
 
-    cmd = Pynix.parse(["log", path, *shared_nix_environment.pynix_store_args()])
+    cmd = parse(["log", path, *shared_nix_environment.pynix_store_args()])
     with pytest.raises(SystemExit, match=r"build log of .* is not available"):
-        await cmd.astart()
+        await cmd.run()
 
 
 @asynccontextmanager

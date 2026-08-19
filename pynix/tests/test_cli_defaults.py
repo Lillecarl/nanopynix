@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from nanopynix.settings import field_key
-from pynix import Pynix
+from pynix import parse
 from pynix._impl.build import (
     _resolve_namespaced,  # pyright: ignore[reportPrivateUsage] -- the refusal under test is inside this function
 )
@@ -27,9 +27,9 @@ from pynix._impl.settings import (
     ConfigFileError,
     PynixDefaults,
     PynixNixSettings,
+    configured_fields,
     nix_settings,
 )
-from pynix._settings import UNSET
 from pynix.build import Build
 
 if TYPE_CHECKING:
@@ -48,8 +48,15 @@ def no_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PYNIX_CONFIG", str(tmp_path / "absent.toml"))
 
 
-def build_command(*arguments: str) -> object:
-    return Pynix.parse(["build", *arguments]).subcommand
+def build_command(*arguments: str) -> Build:
+    """The `Build` that *arguments* names, resolved the way `main` resolves it.
+
+    Narrowed to `Build`, because `parse` answers with whatever command the
+    caller named and every test here names this one.
+    """
+    command = parse(["build", *arguments])
+    assert isinstance(command, Build)
+    return command
 
 
 # ── one test for each boundary of the precedence order ───────────────
@@ -104,7 +111,7 @@ def test_the_flag_beats_the_environment(tmp_path: Path, monkeypatch: pytest.Monk
 
     command = build_command("--store", "daemon")
 
-    assert command.store == "daemon"  # type: ignore[attr-defined] -- Pynix.subcommand is a union of every command
+    assert command.store == "daemon"
     assert nix_settings(substituters="https://flag.example/").substituters == ["https://flag.example/"]
 
 
@@ -117,7 +124,7 @@ def test_a_configured_store_becomes_the_default_of_a_command(
 ) -> None:
     write_config(tmp_path, monkeypatch, '[defaults]\nstore = "daemon"\n')
 
-    command = Pynix.parse(["path-info", "/nix/store/x"]).subcommand
+    command = parse(["path-info", "/nix/store/x"])
 
     assert command.store == "daemon"  # type: ignore[attr-defined] -- see test_the_flag_beats_the_environment
 
@@ -159,23 +166,31 @@ def test_a_configured_store_does_not_refuse_a_namespaced_build(
         _resolve_namespaced(named)  # type: ignore[arg-type] -- see above
 
 
-# ── the sentinel, and what the command line named ────────────────────
+# ── what the command line named ──────────────────────────────────────
 
 
-def test_no_option_keeps_the_sentinel_after_the_command_is_built(
+def test_every_configured_option_holds_a_value_after_the_command_is_built(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``UNSET`` marks an option that the caller did not name, and
-    ``ConfiguredCommand.__init__`` is what turns it back into a value. A
-    command that reached ``run()`` with the sentinel would pass ``<unset>`` to
-    the library."""
+    """``ConfiguredCommand.__init__`` is what fills in a configured option.
+
+    A command that reached ``run()`` without it would pass ``None`` to the
+    library. clypi needed an ``UNSET`` sentinel to tell "absent" from
+    "explicitly false"; argparse says it with ``SUPPRESS``, so the sentinel is
+    gone and this asks the question the other way round. Issue #214.
+    """
     no_config(tmp_path, monkeypatch)
 
     command = build_command()
 
-    unset = [name for name in Build.field_names() if getattr(command, name, None) is UNSET]
-    assert unset == []
+    # Compared against the models, and not against ``None``: ``--eval-store``
+    # and ``--verbosity`` resolve to ``None`` on purpose, so "is not None" would
+    # be false for two options that are perfectly resolved.
+    for model, fields in configured_fields(Build).items():
+        resolved = model()
+        for field in fields:
+            assert getattr(command, field) == getattr(resolved, field), field
 
 
 def test_explicit_holds_the_flags_and_nothing_else(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -183,8 +198,8 @@ def test_explicit_holds_the_flags_and_nothing_else(tmp_path: Path, monkeypatch: 
     write_config(tmp_path, monkeypatch, '[defaults]\nverbosity = "notice"\n')
     monkeypatch.setenv("PYNIX_STORE", "local")
 
-    assert build_command().explicit_options == frozenset()  # type: ignore[attr-defined] -- see above
-    assert build_command("--store", "daemon").explicit_options == frozenset({"store"})  # type: ignore[attr-defined] -- see above
+    assert build_command().explicit_options == frozenset()
+    assert build_command("--store", "daemon").explicit_options == frozenset({"store"})
 
 
 def test_the_two_models_that_share_a_name_do_not_fight_over_it(

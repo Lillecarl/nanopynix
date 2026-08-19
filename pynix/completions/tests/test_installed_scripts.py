@@ -1,11 +1,11 @@
 """What each installed file is, before anything asks a shell to run it.
 
 **Issue #105 measured the failure this catches**: three files holding an
-ANSI-coloured help screen, each written to a path that a shell loads.
-`installShellCompletion` knows click's protocol -- run
-`env _PROG_COMPLETE=source_bash prog` and read stdout -- and clypi reads no
-such variable, so a program asked that way prints its help screen and exits 0.
-Nothing about that is an error, and the files are installed.
+ANSI-coloured help screen, each written to a path that a shell loads. That
+happened because `installShellCompletion` knows click's protocol -- run
+`env _PROG_COMPLETE=source_bash prog` and read stdout -- and the program of the
+day read no such variable, so asked that way it printed its help screen and
+exited 0. Nothing about that is an error, and the files are installed.
 
 The case table in `test_completion_cases.py` would fail too, but it would fail
 by way of a shell that offered nothing, and a reader would start at the wrong
@@ -28,11 +28,14 @@ if TYPE_CHECKING:
 ESCAPE = "\x1b"
 
 #: The line each shell's script must carry, so that the file is the script of
-#: that shell and not of another. Each one is clypi's own template.
+#: that shell and not of another. Each one is argcomplete's own template.
+#:
+#: bash and zsh get the same file, which branches on `ZSH_VERSION`. fish gets
+#: its own.
 STRUCTURE = {
-    "bash": ("_complete_pynix()", "complete -o default -F _complete_pynix pynix"),
-    "fish": ("complete -c pynix --no-files",),
-    "zsh": ("#compdef pynix", "compdef _complete_pynix pynix"),
+    "bash": ("_python_argcomplete()", "complete -o nospace -o default -o bashdefault -F _python_argcomplete pynix"),
+    "fish": ("function __fish_pynix_complete", "complete --command pynix -f -a '(__fish_pynix_complete)'"),
+    "zsh": ("#compdef pynix", "compdef _python_argcomplete pynix"),
 }
 
 SHELL_NAMES = tuple(STRUCTURE)
@@ -59,15 +62,31 @@ def test_the_file_carries_the_structure_of_its_own_shell(shell: str, scripts: di
 
 
 @pytest.mark.parametrize("shell", SHELL_NAMES)
-def test_the_callback_names_the_shell_that_is_asking(shell: str, scripts: dict[str, Path]) -> None:
-    """**clypi resolves a completion through the user's login shell.**
+def test_the_answer_comes_back_on_its_own_file_descriptor(shell: str, scripts: dict[str, Path]) -> None:
+    """**The program's own stdout cannot corrupt a completion.**
 
-    `get_installer` does `Path(os.environ["SHELL"]).name` and raises: a
-    `KeyError` where `SHELL` is unset, and a `ValueError` where the name is one
-    it does not know. Either one puts a Python traceback in the terminal
-    instead of candidates. `nix/render-completions.py` puts the right name into
-    each callback, which is also the more correct answer -- the shell that is
-    completing is the one running the script.
+    argcomplete runs the program with `8>&1 9>&2 1>/dev/null`, so the
+    candidates come back on file descriptor 8 and everything the program writes
+    to stdout or stderr is discarded. clypi and click both read stdout, where a
+    stray `print` -- in a logger, in a library at import time -- silently breaks
+    every completion. Issue #214 chose argcomplete partly for this.
     """
     text = scripts[shell].read_text(encoding="utf-8")
-    assert f"env SHELL={shell} _CLYPI_CURRENT_ARGS=" in text, text
+    assert "8>&1" in text, text
+    assert "_ARGCOMPLETE" in text, text
+
+
+@pytest.mark.parametrize("shell", SHELL_NAMES)
+def test_the_script_sends_the_line_and_the_cursor(shell: str, scripts: dict[str, Path]) -> None:
+    """**The shell sends the raw line, and not a list of words.**
+
+    `COMP_LINE` and `COMP_POINT` are what let argcomplete lex the line itself,
+    so a value holding a space or a quote survives. bash also sends
+    `COMP_WORDBREAKS`, which is what makes `--store ssh://<TAB>` and
+    `--attr=hel<TAB>` work there; issue #214 measured both failing under click.
+    """
+    text = scripts[shell].read_text(encoding="utf-8")
+    assert "COMP_LINE" in text, text
+    assert "COMP_POINT" in text, text
+    if shell == "bash":
+        assert "_ARGCOMPLETE_COMP_WORDBREAKS" in text, text

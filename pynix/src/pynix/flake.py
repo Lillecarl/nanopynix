@@ -4,18 +4,17 @@ from __future__ import annotations
 # nanopynix / nanopynix_proto are C++ nanobind extensions without type stubs.
 from typing import override
 
-from clypi import Positional, arg
-
 from pynix import _impl
+from pynix._cli import opt, pos
 from pynix._settings import ConfiguredCommand, PynixCommand, store_option
 
 
 class Show(ConfiguredCommand):
     """Show the outputs provided by a flake"""
 
-    flake_ref: Positional[str] = arg(help="Flake reference (e.g. '.#' or 'nixpkgs#').")
+    flake_ref: str = pos(help="Flake reference (e.g. '.#' or 'nixpkgs#').")
 
-    attrpath: str | None = arg(
+    attrpath: str | None = opt(
         None,
         short="A",
         help="Dot-separated attribute path within the flake outputs to start from.",
@@ -31,7 +30,7 @@ class Show(ConfiguredCommand):
 class Metadata(ConfiguredCommand):
     """Show locked flake metadata"""
 
-    flake_ref: Positional[str] = arg(help="Flake reference (e.g. '.' or 'nixpkgs').")
+    flake_ref: str = pos(help="Flake reference (e.g. '.' or 'nixpkgs').")
 
     store: str = store_option("Store URI to evaluate with.")
 
@@ -43,7 +42,7 @@ class Metadata(ConfiguredCommand):
 class Info(ConfiguredCommand):
     """Alias for flake metadata"""
 
-    flake_ref: Positional[str] = arg(help="Flake reference (e.g. '.' or 'nixpkgs').")
+    flake_ref: str = pos(help="Flake reference (e.g. '.' or 'nixpkgs').")
 
     store: str = store_option("Store URI to evaluate with.")
 
@@ -55,4 +54,4 @@ class Info(ConfiguredCommand):
 class Flake(PynixCommand):
     """Inspect and manage Nix flakes"""
 
-    subcommand: Show | Metadata | Info
+    subcommands = (Show, Metadata, Info)

@@ -2,7 +2,7 @@
 
 This module holds the command class and its options, and no more.
 ``pynix._impl.repl`` holds the prompt, the commands and the session, and
-``pynix._impl`` says why the two are apart: clypi loads every subcommand
+``pynix._impl`` says why the two are apart: the parser loads every subcommand
 module on every start, and the REPL's own dependencies were 91.8 ms of that.
 """
 

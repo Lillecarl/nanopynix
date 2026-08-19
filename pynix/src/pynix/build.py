@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-# A real import, not a TYPE_CHECKING one: clypi resolves the annotations on
-# the command below at runtime to build its argument parser, so `Path` has to
-# exist as an object and not just as a lazy PEP 563 string.
+# A real import, not a TYPE_CHECKING one: `pynix._cli` resolves the annotations
+# of a command to build its parser, so `Path` has to exist as an object and not
+# just as a lazy PEP 563 string.
 from pathlib import Path
 from typing import override
 
-from clypi import arg
-
 from pynix import _impl
+from pynix._cli import opt
 from pynix._settings import (
     ConfiguredCommand,
     attr_option,
@@ -19,12 +18,6 @@ from pynix._settings import (
     store_option,
     verbosity_option,
 )
-
-
-def _no_sandbox_paths() -> list[str]:
-    """Default for ``--sandbox-path``. A named function rather than ``list``,
-    which would give the field an unparameterised ``list[Unknown]``."""
-    return []
 
 
 class Build(ConfiguredCommand):
@@ -42,12 +35,12 @@ class Build(ConfiguredCommand):
 
     # None, not a literal list: an absent flag leaves the value to `[nix]`, to
     # `PYNIX_NIX_*`, and then to the built-in defaults, in that order. These
-    # used to be clypi defaults passed straight into the settings model as
+    # used to be parser defaults passed straight into the settings model as
     # keyword arguments, and pydantic-settings ranks the init source above the
     # environment -- so `PYNIX_NIX_SUBSTITUTERS` never once took effect.
-    substituters: str | None = arg(None, help="Space-separated substituter URLs.")
+    substituters: str | None = opt(None, help="Space-separated substituter URLs.")
 
-    trusted_public_keys: str | None = arg(None, help="Space-separated substituter public keys.")
+    trusted_public_keys: str | None = opt(None, help="Space-separated substituter public keys.")
 
     # None, not a literal level: nanopynix leaves Nix's own compiled-in default
     # (info) alone when no verbosity is named, and pynix has no reason to
@@ -57,11 +50,11 @@ class Build(ConfiguredCommand):
 
     print_build_logs: bool = print_build_logs_option()
 
-    update_fod: bool = arg(False, help="Update plain fixed-output hash literals after a hash mismatch.")
+    update_fod: bool = opt(False, help="Update plain fixed-output hash literals after a hash mismatch.")
 
-    dry_run: bool = arg(False, help="Show --update-fod changes without writing or rebuilding.")
+    dry_run: bool = opt(False, help="Show --update-fod changes without writing or rebuilding.")
 
-    namespaced: bool = arg(
+    namespaced: bool = opt(
         False,
         help=(
             "Build in a private user namespace, against an overlay store whose lower layer is the host "
@@ -70,7 +63,7 @@ class Build(ConfiguredCommand):
         ),
     )
 
-    overlay_dir: Path | None = arg(
+    overlay_dir: Path | None = opt(
         None,
         help=(
             "Keep the overlay's upper layer here, instead of in a temporary directory that is deleted "
@@ -79,19 +72,21 @@ class Build(ConfiguredCommand):
         ),
     )
 
-    copy_back: bool = arg(
+    copy_back: bool = opt(
         True,
-        # Snake case, not the dashed spelling: clypi normalises the parsed
-        # option to snake case before it compares against this.
-        negative="no_copy_back",
+        # `argparse.BooleanOptionalAction` writes `--copy-back` and
+        # `--no-copy-back` from this one declaration.
+        negatable=True,
         help=(
             "Copy the outputs of a --namespaced build into the host store when the build succeeds. "
             "Without it the outputs are gone when the worker exits."
         ),
     )
 
-    sandbox_path: list[str] = arg(
-        default_factory=_no_sandbox_paths,
+    # No default is written: `pynix._cli` gives a repeated option a new empty
+    # list for each command, because one shared literal would keep whatever a
+    # previous parse appended to it.
+    sandbox_path: list[str] = opt(
         help=(
             "Extra path to mount into the build sandbox, as /inside=/outside or /path. Repeatable. "
             "Requires --namespaced, because the daemon does not let a client change its sandbox."

@@ -1,33 +1,34 @@
 """Gate: a command that declares a configuration-backed option resolves it.
 
-``pynix._settings.option`` gives an option the sentinel ``UNSET`` as its
-default, and ``ConfiguredCommand.__init__`` is the only thing that turns the
-sentinel back into a value. A command that declares such an option and inherits
-plain ``clypi.Command`` therefore carries ``<unset>`` into its ``run()``, and
-passes it to the library.
+``pynix._settings.option`` marks an option as configuration-backed, and
+``ConfiguredCommand.__init__`` is the only thing that fills one in. A command
+that declares such an option and inherits plain ``pynix._cli.Command``
+therefore carries ``None`` into its ``run()``, and passes it to the library.
 
-Nothing else catches that. clypi parses the command, the type checker sees the
-declared return type of ``store_option`` and not the sentinel, and the failure
-appears at the store that the option names. This test walks the live command
-tree and states the rule instead.
+Nothing else catches that. The parser is happy, the type checker sees the
+declared return type of ``store_option``, and the failure appears at the store
+that the option names. This test walks the live command tree and states the
+rule instead.
 """
 
 from __future__ import annotations
 
+import contextlib
+import io
+
 import pytest
-from clypi import Command
 
 from pynix import Pynix
+from pynix._cli import Command, build_parser
 from pynix._impl.settings import configured_fields
-from pynix._settings import UNSET, ConfiguredCommand
+from pynix._settings import ConfiguredCommand
 
 
 def _command_tree(cmd: type[Command]) -> list[type[Command]]:
     """Every command reachable from *cmd*, including *cmd* itself."""
     found = [cmd]
-    for sub in cmd.subcommands().values():
-        if sub is not None:
-            found += _command_tree(sub)
+    for sub in cmd.subcommands:
+        found += _command_tree(sub)
     return found
 
 
@@ -35,14 +36,9 @@ def _configuration_backed_options(cmd: type[Command]) -> list[str]:
     """The options of *cmd* that ``option()`` declared.
 
     Read from the declaration, and not from a built instance: the point of the
-    test is the command that never resolves its sentinel.
+    test is the command that never fills one in.
     """
-    named: list[str] = []
-    for field, conf in cmd.options().items():
-        factory = conf.default_factory
-        if callable(factory) and factory() is UNSET:
-            named.append(field)
-    return named
+    return [field for field, spec in cmd.specs.items() if spec.configured]
 
 
 def test_every_command_with_a_configured_option_resolves_it() -> None:
@@ -75,24 +71,38 @@ def test_the_command_tree_is_not_empty() -> None:
     assert any(_configuration_backed_options(cmd) for cmd in tree)
 
 
-def test_every_command_writes_a_usage_failure_to_stderr() -> None:
-    """The whole command tree obeys the stream rule, and not a part of it.
+def test_the_parser_writes_a_usage_failure_to_stderr() -> None:
+    """The stream rule, which argparse keeps and clypi did not.
 
-    ``clypi.Command.print_help`` writes to stdout whether the caller asked for
-    help or mistyped the command line, and ``ClypiConfig`` names no stream, so
-    a pynix command overrides the second case. A command that keeps clypi's
-    own method puts its usage table in the stdout of whatever reads the
-    command, and nothing reports that.
+    stdout carries the answer of a command, so a caller can write ``pynix
+    derivation show ... | jq``. A usage message is not an answer.
+
+    ``clypi.Command.print_help`` wrote to stdout whether the caller asked for
+    help or mistyped the command line, so every pynix command overrode the
+    second case and this test walked the tree to prove none had been missed.
+    ``ArgumentParser.error`` writes to stderr and exits 2, so there is one
+    behaviour to check rather than fifty. Issue #214.
 
     Measured before the override existed: ``pynix derivation show <path>`` put
     2165 bytes on stdout and left stderr empty.
-
-    **The subject is the method, and not a shared base class.** The rule is
-    about behaviour, not inheritance: a command satisfies it by not keeping
-    clypi's own ``print_help``, however it gets there.
     """
-    offenders = sorted(
-        cmd.__name__ for cmd in _command_tree(Pynix) if cmd.print_help.__func__ is Command.print_help.__func__
-    )
+    parser = build_parser(Pynix)
+    out, err = io.StringIO(), io.StringIO()
 
-    assert offenders == [], "these commands keep clypi's print_help, so a usage failure goes to stdout"
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), pytest.raises(SystemExit) as exit_info:
+        parser.parse_args(["build", "--no-such-option"])
+
+    assert exit_info.value.code == 2
+    assert out.getvalue() == "", "a usage failure reached stdout"
+    assert "--no-such-option" in err.getvalue()
+
+
+def test_asking_for_help_still_reaches_stdout() -> None:
+    """The caller asked for it, so it is the answer of the command."""
+    out = io.StringIO()
+
+    with contextlib.redirect_stdout(out), pytest.raises(SystemExit) as exit_info:
+        build_parser(Pynix).parse_args(["build", "--help"])
+
+    assert exit_info.value.code == 0
+    assert "--attr" in out.getvalue()

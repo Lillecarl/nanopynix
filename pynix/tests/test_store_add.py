@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from nanopynix_proto.nix.store import AddToStoreRequest, ComputeStorePathRequest
 
-from pynix import Pynix
+from pynix import parse
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -41,8 +41,8 @@ async def test_pynix_store_add_file_imports_and_can_be_read(
     source = tmp_path / "message.txt"
     source.write_text("pynix-add-file\n")
 
-    cmd = Pynix.parse(["store", "add-file", str(source), *shared_nix_environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["store", "add-file", str(source), *shared_nix_environment.pynix_store_args()])
+    await cmd.run()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
 
@@ -59,10 +59,10 @@ async def test_pynix_store_add_path_imports_directory(
     (source / "share").mkdir(parents=True)
     (source / "share" / "message").write_text("pynix-add-path\n")
 
-    cmd = Pynix.parse(
+    cmd = parse(
         ["store", "add-path", str(source), "--name", "custom-dir", *shared_nix_environment.pynix_store_args()],
     )
-    await cmd.astart()
+    await cmd.run()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
 
@@ -78,7 +78,7 @@ async def test_pynix_store_add_dry_run_does_not_import(
     source = tmp_path / "message.txt"
     source.write_text("dry-run\n")
 
-    cmd = Pynix.parse(
+    cmd = parse(
         [
             "store",
             "add",
@@ -89,7 +89,7 @@ async def test_pynix_store_add_dry_run_does_not_import(
             *shared_nix_environment.pynix_store_args(),
         ],
     )
-    await cmd.astart()
+    await cmd.run()
     captured = capsys.readouterr()
     data = json.loads(captured.out)
 
