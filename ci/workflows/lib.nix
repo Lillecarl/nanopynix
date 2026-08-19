@@ -499,26 +499,30 @@ let
       // {
         runs-on = "macos-latest";
         continue-on-error = true;
-        # **The macOS job tests the store of the machine, and it must.**
-        # Every store this suite makes is a chroot store, and
-        # `derivation-builder.cc` refuses to build in one off Linux: Linux
-        # answers a diverted store with a mount namespace and a bind mount,
-        # and macOS has neither. So every test that builds a derivation fails
-        # there, for a reason no test owns.
-        # `NANOPYNIX_TEST_SYSTEM_STORE` makes the fixtures open the store of
-        # the machine instead, which is not diverted, so a build is a plain
-        # build. `nix_environment.py` carries the rest of the reasoning, and
-        # the destructive tests keep a store of their own whatever this says.
+        # **This job runs what macOS can run, and skips the rest.** macOS is
+        # the less capable platform and this repository cannot change that,
+        # so a test that fails there for a reason it does not own is a test
+        # that must not run there. A marker of `nanopynix_testing.nix_markers`
+        # names each such capability, and the marker is what excludes the
+        # test. Issue #210.
         #
-        # **The backend is `daemon`, and that is not a preference.** The
-        # runner takes the multi-user installer, so `/nix/var/nix/db` belongs
-        # to root and a direct `local://` store cannot take the big lock:
-        # every write fails with `Permission denied`. Measured on macOS
-        # 26.5.1, and the installer log of this job says the same. A
-        # multi-user installation is also what a macOS user gets by default,
-        # so the daemon backend is the one that matches that host.
+        # **It took the store of the machine until then, and that was a way
+        # around the limit rather than a measurement of it.**
+        # `NANOPYNIX_TEST_SYSTEM_STORE` pointed every fixture at
+        # `/nix/store`, which is not diverted, so a build was a plain build.
+        # It also made the job write to the store of the runner, and it hid
+        # which tests really need a capability that macOS lacks. The variable
+        # is gone from this job, and `derivation-builder.cc:2111` is the limit
+        # it was hiding: a build refuses when
+        # `storeDir != realStoreDir` and the platform is not Linux.
+        #
+        # **The backend is `local`, because the stores are our own again.**
+        # `daemon` was the pair of the system store: the runner takes the
+        # multi-user installer, so `/nix/var/nix/db` belongs to root and only
+        # the daemon may write it. A store under the temporary directory of
+        # the suite belongs to the user who runs the job, so a direct
+        # `local://` store opens and writes without a daemon in the middle.
         env = testJobEnv { inherit version backend; } // {
-          NANOPYNIX_TEST_SYSTEM_STORE = "1";
           # **This runner is short of compute and of I/O, and the deadline has
           # to allow for it.** A GitHub runner for Linux is a VM among many; a
           # runner for macOS is a real Apple machine from a much smaller pool.
