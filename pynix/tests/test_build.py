@@ -14,9 +14,9 @@ from nanopynix.exceptions import StoreError
 from nanopynix_testing.nix_environment import with_nixpkgs
 from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
 from pynix import Pynix
-from pynix.build import (
+from pynix._impl.build import (  # pyright: ignore[reportPrivateUsage] -- test drives the private build step directly to exercise FOD-update/dry-run paths
     BuildTargetError,
-    _build_target,  # pyright: ignore[reportPrivateUsage] -- test drives the private build step directly to exercise FOD-update/dry-run paths
+    _build_target,
 )
 from pynix.target import EvaluationTarget
 from test_support.git_fixtures import init_flake_repo

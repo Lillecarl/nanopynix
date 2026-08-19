@@ -11,8 +11,7 @@ from __future__ import annotations
 from typing import override
 
 from pynix import _impl
-from pynix._settings import ConfiguredCommand, store_option
-from pynix.target import EvaluationTarget, attr_option, file_option, flake_option
+from pynix._settings import ConfiguredCommand, attr_option, file_option, flake_option, store_option
 
 
 class Repl(ConfiguredCommand):
@@ -25,4 +24,4 @@ class Repl(ConfiguredCommand):
 
     @override
     async def run(self) -> None:
-        await _impl.repl.run_repl(store_uri=self.store, target=EvaluationTarget.from_command(self))
+        await _impl.repl.run_repl(self)

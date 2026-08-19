@@ -39,6 +39,7 @@ from pynix._completion import completion_prefix_at
 from pynix._nix_syntax import NIX_GRAMMAR_PATH, NIX_LANGUAGE, parse_nix
 from pynix._util import forward_nix_logs
 from pynix._value_render import format_json
+from pynix.repl import Repl
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
@@ -660,13 +661,14 @@ def _derivation_name_part(name: str) -> str:
     return name
 
 
-async def run_repl(*, store_uri: str, target: EvaluationTarget) -> None:
+async def run_repl(command: Repl) -> None:
     """Open the session, and drive the prompt until the user leaves it.
 
     The body of ``Repl.run``. It lives here, and not beside the command class,
     because ``prompt_toolkit`` and the Nix grammar are 91.8 ms that every
     ``pynix`` start paid. See the docstring of ``pynix._impl``.
     """
+    target = EvaluationTarget.from_command(command)
     try:
         target.validate()
     except EvaluationTargetError as exc:
@@ -677,7 +679,7 @@ async def run_repl(*, store_uri: str, target: EvaluationTarget) -> None:
         with patch_stdout():
             async with (
                 forward_nix_logs(nix, log_file=sys.stdout),
-                nix.store(store_uri) as store,
+                nix.store(command.store) as store,
                 nix.repl(store) as repl,
             ):
                 prompt: PromptSession[str] = PromptSession(

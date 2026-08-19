@@ -19,10 +19,10 @@ from nanopynix_proto.nix.common import NixType
 from rich.tree import Tree
 
 from nanopynix.rpc import ValueProxy
-from pynix.flake import (
-    _build_tree,  # pyright: ignore[reportPrivateUsage] -- test unit-tests pynix.flake's private rendering helpers directly, see module docstring
-    _format_attr,  # pyright: ignore[reportPrivateUsage] -- test unit-tests pynix.flake's private rendering helpers directly, see module docstring
-    _TreeBudget,  # pyright: ignore[reportPrivateUsage] -- test unit-tests pynix.flake's private rendering helpers directly, see module docstring
+from pynix._impl.flake import (  # pyright: ignore[reportPrivateUsage] -- test unit-tests the private rendering helpers directly, see module docstring
+    _build_tree,
+    _format_attr,
+    _TreeBudget,
 )
 
 

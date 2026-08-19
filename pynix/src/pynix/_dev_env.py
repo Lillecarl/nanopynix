@@ -21,6 +21,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast
 
+#: The vendored copy of Nix's own environment dumper. Its header gives the
+#: provenance and the licence.
+#:
+#: It names this module's directory, and this module is the one whose subject
+#: is that script. The constant used to sit in ``pynix.develop``; that code
+#: moved to ``pynix._impl.develop`` and took a ``Path(__file__).parent`` with
+#: it, which then named a directory with no script in it.
+GET_ENV_SH = Path(__file__).parent / "get-env.sh"
+
 #: Variables that the shell must keep from the caller rather than take from the
 #: build. ``develop.cc:315``, unchanged: `HOME` and `TERM` make a shell usable,
 #: and `NIX_BUILD_TOP` and the temp variables are set again further down.

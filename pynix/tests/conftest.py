@@ -43,7 +43,6 @@ import pytest
 import structlog
 from structlog.exceptions import DropEvent
 
-import pynix
 import pynix._util as pynix_util
 from _shared_sessions import FAITHFUL_SESSIONS_ENV_VAR, SharedSessions
 
@@ -556,15 +555,16 @@ def _patched_environ(values: dict[str, str]) -> Generator[None]:
 
 @contextlib.contextmanager
 def _pynix_configure_logging_noop() -> Generator[None]:
+    # One name, not two. `pynix/__init__.py` used to import `configure_logging`
+    # so that `main` could call it before `Pynix.parse()`; it now calls
+    # `pynix._impl.main.prepare()` after the parse instead, and the package no
+    # longer binds the name. Issue #123.
     old_configure_logging = pynix_util.configure_logging
-    old_public_configure_logging = pynix.configure_logging
     pynix_util.configure_logging = lambda *, file=None: None  # noqa: ARG005 -- matching configure_logging's real signature so callers like forward_nix_logs(log_file=...) don't break
-    pynix.configure_logging = lambda *, file=None: None  # noqa: ARG005 -- matching configure_logging's real signature so callers like forward_nix_logs(log_file=...) don't break
     try:
         yield
     finally:
         pynix_util.configure_logging = old_configure_logging
-        pynix.configure_logging = old_public_configure_logging
 
 
 @contextlib.contextmanager

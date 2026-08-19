@@ -4,11 +4,8 @@ import functools
 import operator
 from typing import TYPE_CHECKING
 
-import rich.traceback
-
-from nanopynix import set_manager_title
+from pynix import _impl
 from pynix._settings import PynixCommand
-from pynix._util import configure_logging
 from pynix.build import Build
 from pynix.config import Config
 from pynix.derivation import Derivation
@@ -92,10 +89,12 @@ class Pynix(PynixCommand):
 
 
 def main() -> None:
-    rich.traceback.install(show_locals=True)
-    set_manager_title("pynix")
-    configure_logging()
+    # `parse` first, and the set-up after it. clypi answers a shell completion
+    # and `--help` inside `parse` and exits there, and neither needs a logger,
+    # a process title or a traceback handler. `pynix._impl.main` holds the
+    # measurement.
     cmd = Pynix.parse()
+    _impl.main.prepare()
     cmd.start()
 
 
