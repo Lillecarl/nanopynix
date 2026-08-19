@@ -170,6 +170,8 @@ let
     # out of our hands.
     docsUpload = 15;
     docsDeploy = 20;
+    # One `echo` of a value that `env` already holds. Issue #132.
+    docsGateReport = 2;
     # `actions/deploy-pages` polls the Pages API, and it gives up on its own
     # after `timeout` milliseconds. That limit defaults to ten minutes, which
     # is below `docsDeploy` above, so the action decided the deadline and the
@@ -914,14 +916,21 @@ let
       }
     );
 
+  # **The build waits for nothing, and the deploy carries the argument.**
+  # `docs-build` used to name every gating test job, so one red job in the
+  # matrix skipped it. A sanitizer job reads the memory of the C++ libraries
+  # and `commit-subjects` reads commit messages, and neither says whether the
+  # documentation builds. The build either succeeds or it does not, and that
+  # is the whole of what it proves. Issue #132.
   mkDocsBuildJob =
     {
-      needs,
+      needs ? [ ],
       ref ? null,
       lockArtifact ? null,
     }:
-    mkJob {
-      inherit needs;
+    mkJob (
+      lib.optionalAttrs (needs != [ ]) { inherit needs; }
+      // {
       steps = [
         (steps.checkout { inherit ref; })
       ]
@@ -948,12 +957,18 @@ let
           };
         }
       ];
-    };
+      }
+    );
 
+  # **The deploy carries the gate, and it says when it does not run.**
+  # `gates` names the jobs that answer whether the code works. A skipped job
+  # reports nothing, so this job runs whatever they did and decides in a step:
+  # the run then holds the reason a deploy did not happen, rather than only
+  # the dependency graph. Issue #132.
   mkDocsDeployJob =
-    { needs }:
+    { needs, gates ? [ ] }:
     mkJob {
-      inherit needs;
+      needs = if gates == [ ] then needs else lib.toList needs ++ gates;
       permissions = {
         pages = "write";
         id-token = "write";
@@ -967,7 +982,28 @@ let
         cancel-in-progress = false;
       };
       steps = [
-        {
+        # The results of the jobs this one waits for, as one line of the run.
+        # A deploy that does not happen is otherwise a grey square, and a
+        # reader has to open the dependency graph to learn which job stopped
+        # it. `env` carries the expression, because a `run:` body holds none.
+        (withCond "\${{ always() }}" {
+          name = "Report what the gating jobs did";
+          timeout-minutes = caps.docsGateReport;
+          env = {
+            GATE_RESULTS = "\${{ join(needs.*.result, ' ') }}";
+          };
+          run = "echo \"the jobs this deploy waits for finished as: $GATE_RESULTS\"";
+        })
+        # **The gate is here, and not on the job.** An `if` on the job that
+        # does not name `success()` replaces the rule that every dependency
+        # must have succeeded, so the job runs whatever the matrix did. That
+        # is what lets the step above report; it is also what makes this
+        # condition necessary, or a red matrix would publish.
+        #
+        # `skipped` counts as a failure to pass. A dispatch that selects a
+        # few jobs leaves the rest skipped, and a deploy then rests on jobs
+        # that never ran.
+        (withCond "\${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}" {
           name = "Deploy to GitHub Pages";
           id = "deployment";
           timeout-minutes = caps.docsDeploy;
@@ -975,7 +1011,7 @@ let
           "with" = {
             timeout = caps.docsDeployPollMs;
           };
-        }
+        })
       ];
     };
 in

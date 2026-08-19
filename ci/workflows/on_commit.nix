@@ -69,14 +69,17 @@ workflow.evalWorkflow {
     };
   };
   jobs = selectedTestJobs // {
-    docs-build = withCond "github.ref == 'refs/heads/develop'" (
-      workflow.mkDocsBuildJob {
-        needs = builtins.attrNames gatingTestJobs;
-      }
-    );
-    docs-deploy = withCond "github.ref == 'refs/heads/develop'" (
+    # **The build waits for no test, and the deploy waits for all of them.**
+    # One red job of the matrix used to skip the build as well, and a
+    # sanitizer job or a commit-message gate says nothing about whether the
+    # documentation builds. The deploy keeps the argument, and it reports the
+    # result of each gating job so that a run says why it did not publish.
+    # Issue #132.
+    docs-build = withCond "github.ref == 'refs/heads/develop'" (workflow.mkDocsBuildJob { });
+    docs-deploy = withCond "github.ref == 'refs/heads/develop' && !cancelled()" (
       workflow.mkDocsDeployJob {
         needs = "docs-build";
+        gates = builtins.attrNames gatingTestJobs;
       }
     );
   };

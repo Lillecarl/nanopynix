@@ -36,27 +36,6 @@ jobs:
       timeout-minutes: 15
   docs-build:
     runs-on: ubuntu-24.04
-    needs:
-    - commit-subjects
-    - static-checks
-    - test-asan-git
-    - test-asan-nix_2_34
-    - test-asan-nix_2_35
-    - test-daemon-git
-    - test-daemon-nix_2_34
-    - test-daemon-nix_2_35
-    - test-local-git
-    - test-local-nix_2_34
-    - test-local-nix_2_35
-    - test-nogc-git
-    - test-nogc-nix_2_34
-    - test-nogc-nix_2_35
-    - test-tsan-git
-    - test-tsan-nix_2_34
-    - test-tsan-nix_2_35
-    - test-ubsan-git
-    - test-ubsan-nix_2_34
-    - test-ubsan-nix_2_35
     if: github.ref == 'refs/heads/develop'
     timeout-minutes: 125
     steps:
@@ -89,19 +68,48 @@ jobs:
       timeout-minutes: 15
   docs-deploy:
     runs-on: ubuntu-24.04
-    needs: docs-build
-    if: github.ref == 'refs/heads/develop'
+    needs:
+    - docs-build
+    - commit-subjects
+    - static-checks
+    - test-asan-git
+    - test-asan-nix_2_34
+    - test-asan-nix_2_35
+    - test-daemon-git
+    - test-daemon-nix_2_34
+    - test-daemon-nix_2_35
+    - test-local-git
+    - test-local-nix_2_34
+    - test-local-nix_2_35
+    - test-nogc-git
+    - test-nogc-nix_2_34
+    - test-nogc-nix_2_35
+    - test-tsan-git
+    - test-tsan-nix_2_34
+    - test-tsan-nix_2_35
+    - test-ubsan-git
+    - test-ubsan-nix_2_34
+    - test-ubsan-nix_2_35
+    if: github.ref == 'refs/heads/develop' && !cancelled()
     permissions:
       id-token: write
       pages: write
     concurrency:
       cancel-in-progress: false
       group: pages
-    timeout-minutes: 35
+    timeout-minutes: 37
     steps:
+    - name: Report what the gating jobs did
+      run: 'echo "the jobs this deploy waits for finished as: $GATE_RESULTS"'
+      if: ${{ always() }}
+      env:
+        GATE_RESULTS: ${{ join(needs.*.result, ' ') }}
+      timeout-minutes: 2
     - name: Deploy to GitHub Pages
       id: deployment
       uses: actions/deploy-pages@main
+      if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+        && !contains(needs.*.result, 'skipped') }}
       with:
         timeout: 900000
       timeout-minutes: 20
