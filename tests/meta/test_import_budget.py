@@ -1,11 +1,14 @@
-"""``import nanopynix`` must not load an engine, and must stay under a budget.
+"""``import nanopynix`` must load no submodule of its own, and stay under a budget.
 
 Issue #123 measured the cost of importing this package: 786.4 ms, against
 16.7 ms for a bare interpreter and 43.0 ms for the C extension alone. The
-largest single cause that ``nanopynix`` owns was
-``from nanopynix import inproc, rpc`` at the top of ``__init__.py``, so a
-program that used one engine loaded both. A module ``__getattr__`` (PEP 562)
-now imports each one at first use.
+package imported its whole tree at load time, so every program paid for the
+generated protocol, the settings models, the store registry and both engines,
+and no program reads all four.
+
+``__init__.py`` now maps each public name to the module that defines it, and a
+module ``__getattr__`` (PEP 562) resolves the name on first read. Measured
+after the change: 28 ms and 54 modules, against 22 ms for a bare interpreter.
 
 **Without this file the next eager import puts the cost back in silence.**
 Nothing else fails: an eager import makes every test pass slightly slower, and
@@ -20,8 +23,8 @@ of those is noise on the next. A module count is the same number everywhere,
 and it moves for exactly the reason this file cares about.
 
 The name check is the sharper half. A count has to carry headroom, so a budget
-that fits one new dependency also hides one re-eager engine. Asserting that
-``nanopynix.rpc`` is absent from ``sys.modules`` has no headroom at all.
+that fits one new dependency also hides one re-eager import. Asserting that
+``sys.modules`` holds no submodule of the package has no headroom at all.
 
 ## Why this is a meta test and not a gate
 
@@ -39,6 +42,7 @@ import json
 import os
 import subprocess
 import sys
+from typing import cast
 
 import pytest
 
@@ -46,18 +50,20 @@ from test_support.notes import note
 
 #: The most modules ``import nanopynix`` may load.
 #:
-#: Measured at 526 when issue #123 made the engines lazy, down from 566. The
-#: headroom is deliberate and small: a legitimate new dependency raises this
-#: number in the same commit that adds it, and the reviewer sees the cost.
+#: Measured at 66 in the dev shell when issue #123 made every public name lazy,
+#: down from 514.
+#: The headroom is deliberate and small: a legitimate new dependency raises
+#: this number in the same commit that adds it, and the reviewer sees the cost.
 #: Raise it with a measurement in the commit message, and never to make a
 #: failing run green.
-MODULE_BUDGET = 560
+MODULE_BUDGET = 75
 
-#: Modules that ``import nanopynix`` must not load.
+#: The names that ``import nanopynix`` may leave in ``sys.modules``.
 #:
-#: Each is an engine, and a program uses one of them. ``__getattr__`` in
-#: ``nanopynix/__init__.py`` imports either one at first attribute access.
-FORBIDDEN_EAGER_MODULES = ("nanopynix.inproc", "nanopynix.rpc")
+#: The package itself, and nothing under it. ``__init__.py`` imports
+#: ``importlib`` and ``typing``, both of which a bare interpreter already
+#: holds, so a submodule in this list would be a new eager import.
+PERMITTED_EAGER_MODULES = ("nanopynix",)
 
 #: What the probe below prints, as one JSON line.
 _PROBE = """
@@ -72,6 +78,7 @@ print(json.dumps({
     "loaded": before,
     "rpc_resolves": "nanopynix.rpc" in sys.modules,
     "inproc_resolves": "nanopynix.inproc" in sys.modules,
+    "name_resolves": nanopynix.NixError.__name__,
 }))
 """
 
@@ -98,20 +105,26 @@ def _probe() -> dict[str, object]:
     return json.loads(completed.stdout)
 
 
-def test_importing_the_package_loads_neither_engine() -> None:
+def test_importing_the_package_loads_no_submodule() -> None:
     """The invariant with no headroom, and the reason this file exists."""
     result = _probe()
     loaded = result["loaded"]
     assert isinstance(loaded, list)
-    note(loaded_nanopynix_modules=json.dumps(loaded))
+    names: list[str] = [str(entry) for entry in cast("list[object]", loaded)]
+    note(loaded_nanopynix_modules=json.dumps(names))
 
-    eager = [name for name in FORBIDDEN_EAGER_MODULES if name in loaded]
+    eager = [name for name in names if name not in PERMITTED_EAGER_MODULES]
 
     assert not eager, (
-        f"import nanopynix loaded {eager}, so every program pays for an engine it may not use. "
-        "Reach the engine through nanopynix.__getattr__ instead of importing it at the top of "
-        "__init__.py -- see the _LAZY_SUBMODULES comment there."
+        f"import nanopynix loaded {eager}, so every program pays for a module it may not read. "
+        "Add the name to _NAME_TO_MODULE in nanopynix/__init__.py and let __getattr__ resolve "
+        "it, instead of importing the module at the top of the file."
     )
+
+
+def test_a_public_name_still_resolves() -> None:
+    """Laziness must not become absence, for a name as well as for a module."""
+    assert _probe()["name_resolves"] == "NixError"
 
 
 def test_each_engine_still_resolves_on_first_use() -> None:
@@ -151,7 +164,7 @@ def test_the_budget_is_not_slack() -> None:
     count = _probe()["count"]
     assert isinstance(count, int)
 
-    assert count > MODULE_BUDGET - 100, (
+    assert count > MODULE_BUDGET - 25, (
         f"import nanopynix loads {count} modules against a budget of {MODULE_BUDGET}, "
         "so the budget no longer measures anything. Lower MODULE_BUDGET to just above the "
         "count, and record the new figure on issue #123."
