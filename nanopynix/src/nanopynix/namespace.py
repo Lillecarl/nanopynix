@@ -135,12 +135,31 @@ class OverlayNamespace:
     state_dir: str
     log_dir: str
     #: Store URI for the lower store. It supplies the *metadata* of the paths
-    #: the lower layer supplies as bytes, so it must be the host store: the
-    #: mount check below compares its store directory against ``lowerdir``.
+    #: that ``lower_dir`` supplies as bytes, so the two must name one store.
     lower_store: str = "daemon"
+    #: Directory that OverlayFS reads the lower layer from. It defaults to the
+    #: host store, which is what ``lower_store`` defaults to as well.
+    #:
+    #: **Nix compares the two, so they move together.**
+    #: ``local-overlay-store.cc:66`` reads ``/proc/self/mounts``, finds the
+    #: overlay at the store directory, and checks that the ``lowerdir`` of
+    #: that mount equals the ``realStoreDir`` of ``lower_store``. A pair that
+    #: disagrees gives ``overlay filesystem /nix/store mounted incorrectly``.
+    #:
+    #: A caller that wants a lower layer of its own gives both: a store URI
+    #: such as ``local://?root=<root>``, whose ``realStoreDir`` is
+    #: ``<root>/nix/store``, and that same directory here. Issue #208 is why
+    #: the field exists, and it names what a lower layer of the host costs.
+    lower_dir: str = STORE_DIR
 
     @classmethod
-    def under(cls, root: str | os.PathLike[str], *, lower_store: str = "daemon") -> OverlayNamespace:
+    def under(
+        cls,
+        root: str | os.PathLike[str],
+        *,
+        lower_store: str = "daemon",
+        lower_dir: str = STORE_DIR,
+    ) -> OverlayNamespace:
         """Lay the four directories out under one *root*."""
         base = Path(root)
         return cls(
@@ -149,6 +168,7 @@ class OverlayNamespace:
             state_dir=str(base / "state"),
             log_dir=str(base / "log"),
             lower_store=lower_store,
+            lower_dir=lower_dir,
         )
 
     def store_config(self) -> LocalOverlay:
@@ -333,10 +353,10 @@ def enter_overlay_namespace(spec: OverlayNamespace, *, mount_at: str = STORE_DIR
     # write the `trusted.overlay.*` attributes that OverlayFS uses by default,
     # so deleting a lower-layer path would fail when it writes the whiteout.
     #
-    # `lowerdir` is the same directory this mounts over. OverlayFS resolves the
-    # lower layer before the new mount hides it, so the host store stays
-    # readable underneath.
-    options = f"lowerdir={STORE_DIR},upperdir={spec.upper_dir},workdir={spec.work_dir},userxattr"
+    # `lowerdir` is `spec.lower_dir`, and it defaults to the directory this
+    # mounts over. OverlayFS resolves the lower layer before the new mount
+    # hides it, so the host store stays readable underneath in that default.
+    options = f"lowerdir={spec.lower_dir},upperdir={spec.upper_dir},workdir={spec.work_dir},userxattr"
     try:
         _mount("overlay", mount_at, "overlay", 0, options)
     except OSError as exc:
