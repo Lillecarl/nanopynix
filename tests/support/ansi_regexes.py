@@ -65,15 +65,14 @@ ESCAPE_SPELLINGS = ("\x1b", "\\x1b", "\\x1B", "\\033", "\\u001b", "\\u001B", "\\
 # `tests/meta/test_consumer_surface.py`, and for the same reason: an exemption
 # that a machine records is an exemption a reader can find.
 EXEMPT: dict[str, str] = {
-    "completion-spike/src/completion_spike/_pty.py": (
+    "test-support/src/test_support/shell_pty.py": (
         "Not Nix output. This reads what a *shell* draws on a pty -- cursor "
         "movement, an OSC title, and a private-parameter sequence that fish "
         "writes -- so `nix::filterANSIEscapes` is not the authority on it. It "
         "also applies a backspace rather than removing it, which no filter of "
-        "Nix log text does. And `completion-spike` is a nixpkgs "
-        "`buildPythonApplication` that depends on `cyclopts` alone: importing "
-        "`nanopynix` would put the whole library in the runtime closure of a "
-        "package whose subject is shell plumbing."
+        "Nix log text does. And `test-support` is the project that names no "
+        "Nix concept at all, so importing `nanopynix` there would reverse the "
+        "one rule that project exists to keep."
     ),
 }
 

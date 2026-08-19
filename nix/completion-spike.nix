@@ -13,6 +13,7 @@
 # `pynix` depended on could not take this shape.
 {
   lib,
+  callPackage,
   buildPythonApplication,
   hatchling,
   cyclopts,
@@ -23,6 +24,10 @@
   zsh,
   ncurses,
 }:
+
+let
+  testSupport = callPackage ./test-support.nix { };
+in
 
 buildPythonApplication {
   pname = "completion-spike";
@@ -49,8 +54,15 @@ buildPythonApplication {
   # `ncurses` carries the terminfo database: the driver asks for a `xterm`
   # terminal, because fish draws no candidate list at all on a terminal it
   # believes cannot address the cursor.
+  #
+  # `testSupport` carries `test_support.shell_pty`, which drives a shell on a
+  # pty. That module used to be `completion_spike._pty`; issue #213 moved it,
+  # because `pynix/completions/tests/` drives the same three shells against the
+  # installed `pynix`. nix/test-support.nix says why that one project is built
+  # the nixpkgs way as well.
   nativeCheckInputs = [
     pytestCheckHook
+    testSupport
     pexpect
     bashInteractive
     fish

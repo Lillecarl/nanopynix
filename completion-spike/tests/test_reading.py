@@ -7,7 +7,7 @@ Every one of them was a defect first.
 
 from __future__ import annotations
 
-from completion_spike._pty import candidates, completed_line, strip_escapes
+from test_support.shell_pty import candidates, completed_line, strip_escapes
 
 
 def test_a_backspace_erases_rather_than_disappearing() -> None:

@@ -4,6 +4,9 @@
   ruff,
   nixfmt,
   clang-tools,
+  fish,
+  zsh,
+  ncurses,
   taplo,
   treefmt,
   actionlint,
@@ -31,6 +34,11 @@ in
 mkShell {
   shellHook = ''
     unset PYTHONPATH
+    # The terminfo database of this closure, for the pty driver. A shell that
+    # cannot find the `xterm` entry draws no candidate list, and fish draws
+    # none at all. Appended, so a terminal emulator that already named a
+    # directory keeps it.
+    export TERMINFO_DIRS="''${TERMINFO_DIRS:+$TERMINFO_DIRS:}${ncurses}/share/terminfo"
   '';
 
   # `suiteRuntime` is the list that `nanopynix/tests.nix` also takes, so a tool
@@ -57,5 +65,19 @@ mkShell {
     shellcheck
     cachix
     statix
+
+    # **The three shells that two suites drive on a pty.**
+    # `completion-spike` and `pynix/completions/tests/` press Tab in fish, bash
+    # and zsh and read back what each one offered. bash comes from
+    # `suiteRuntime` above. Without these, both suites skip in the dev shell
+    # and run in the Nix gates alone, so a developer would first learn of a
+    # broken completion from CI.
+    #
+    # `ncurses` carries the terminfo database. The driver asks for an `xterm`
+    # terminal, because fish draws no candidate list at all on a terminal it
+    # believes cannot address the cursor.
+    fish
+    zsh
+    ncurses
   ];
 }

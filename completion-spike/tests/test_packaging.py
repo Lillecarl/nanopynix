@@ -1,10 +1,10 @@
 """What the installed program is allowed to import.
 
-`pexpect` drives the shells in `_pty`, and it is a test dependency: the Nix
-build lists it as a `nativeCheckInput`, so it is **not** in the runtime closure
-of the installed application. Re-exporting `ShellSession` from
-`completion_spike/__init__.py` therefore made `demo` fail to start outside the
-check phase, and no test in this suite could see it -- pytest had `pexpect`
+`pexpect` drives the shells in `test_support.shell_pty`, and it is a test
+dependency: the Nix build lists it as a `nativeCheckInput`, so it is **not** in
+the runtime closure of the installed application. Re-exporting `ShellSession`
+from `completion_spike/__init__.py` therefore made `demo` fail to start outside
+the check phase, and no test in this suite could see it -- pytest had `pexpect`
 imported already.
 """
 

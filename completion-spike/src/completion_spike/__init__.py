@@ -7,14 +7,19 @@ program. Upstream issue #641 asks for such a hook, and no work on it started.
 
 This package answers the question that decides the shape of the `pynix` work:
 can a dynamic candidate be added to a cyclopts-generated script **without
-editing that script**? `_layer` holds the answer, one shape for each shell.
-`_pty` drives a real shell to prove it.
+editing that script**? `_layer` holds the answer, one shape for each shell, and
+``test_support.shell_pty`` drives a real shell to prove it.
 
-**`_pty` is deliberately absent from this file.** It imports `pexpect`, which
-is a test dependency and not a runtime one, so re-exporting it from here made
-the installed `demo` fail to start: `pexpect` is a `nativeCheckInput` of the
+**The pty driver is not in this package, and it used to be.** It was
+``completion_spike._pty`` until issue #213, which needs the same driver for
+``pynix/completions/tests/``. ``tests/AGENTS.md`` picks the home: the module
+names no Nix concept, and a second project needs it.
+
+**Nothing of ``pexpect`` is re-exported from this file.** ``pexpect`` is a test
+dependency and not a runtime one, so re-exporting the driver from here made the
+installed ``demo`` fail to start: ``pexpect`` is a ``nativeCheckInput`` of the
 Nix build and is not in the runtime closure. A test imports
-`completion_spike._pty` by its own name.
+``test_support.shell_pty`` by its own name.
 """
 
 from __future__ import annotations

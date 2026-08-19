@@ -19,7 +19,7 @@ from completion_spike.demo import CANDIDATES, DEFAULT_ENGINE
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from completion_spike._pty import ShellSession
+    from test_support.shell_pty import ShellSession
 
 #: Every option of `demo build`, in both spellings of the flag that has two.
 #: `--no-print-build-logs` is the one that a hand-written fish renderer lost,

@@ -1,5 +1,12 @@
 """Drive a real fish, bash or zsh on a pty, and read back what Tab offered.
 
+**Two suites drive a shell, so the driver is here and not in either of them.**
+`completion-spike` asks whether a dynamic candidate can sit on a
+cyclopts-generated script, and `pynix/completions/tests/` asks what the
+installed `pynix` really offers for each line a user can type. The rule in
+`tests/AGENTS.md` picks this project: the module names no Nix concept, and a
+second project needs it.
+
 **A pty is not optional.** zsh loads its completion system only in an
 interactive shell, and bash binds Tab only when readline is attached to a
 terminal. A pipe gets neither, so a test that used one would exercise no
@@ -29,14 +36,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from types import TracebackType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pexpect
 
-from completion_spike._layer import Shell
-
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
+
+#: The shells this module drives. Named here rather than imported, because the
+#: driver must stay useful to a suite that has no completion library at all.
+type Shell = Literal["fish", "bash", "zsh"]
 
 #: What each shell is told to use as its prompt. Chosen to appear nowhere else
 #: in the output of these tests, so a wait for it cannot end early.
@@ -174,7 +183,7 @@ class ShellSession:
 
         with ShellSession("bash", env) as shell:
             shell.load(script_path)
-            offered = shell.complete("demo build --attr ")
+            offered = shell.complete("prog build --attr ")
     """
 
     def __init__(self, shell: Shell | str, env: Mapping[str, str], cwd: str | None = None) -> None:
