@@ -418,6 +418,13 @@ async def _why_it_is_still_alive(proc: Any) -> str:
     # `spawn` and Linux takes `forkserver`, so this separates "the signal was
     # ignored" from "the signal was delivered and something held the process".
     details.append(f"parent_sigabrt={signal.getsignal(signal.SIGABRT)!r}")
+    # The mask, and not only the disposition. A blocked signal is held
+    # pending and the process goes on running, which is what `ps` reports
+    # here, and `SIGKILL` is the one signal that no mask holds. The mask is
+    # inherited across `exec` in the same way `SIG_IGN` is, so a spawn worker
+    # takes the mask of the thread that spawned it. Issue #212.
+    blocked = signal.pthread_sigmask(signal.SIG_BLOCK, [])
+    details.append(f"parent_blocks_sigabrt={signal.SIGABRT in blocked} parent_mask={sorted(blocked)}")
     if pid is not None:
         result = await run_process(["ps", "-o", "pid,ppid,stat,comm", "-p", str(pid)])
         details.append(f"ps:\n{result.stdout.strip() or '(no such process, so it was reaped after the join)'}")
