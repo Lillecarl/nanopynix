@@ -1,4 +1,4 @@
-"""What only a real `pynix lsp` process can answer.
+"""What only a real `pynix-lsp` process can answer.
 
 These spawn the packaged entry point and speak genuine LSP JSON-RPC to it, so
 they catch what neither in-process tier can: that the installed program starts
@@ -42,7 +42,7 @@ _MODULE_SYSTEM = (Path(__file__).parent / "test_lsp" / "module_system").resolve(
 
 @pytest_lsp.fixture(  # type: ignore[reportUnknownMemberType] -- pytest_lsp.fixture's decorator-factory return type isn't fully resolvable by pyright
     scope="module",
-    config=ClientServerConfig(server_command=["pynix", "lsp"]),
+    config=ClientServerConfig(server_command=["pynix-lsp"]),
 )
 async def client(lsp_client: LanguageClient) -> AsyncIterator[None]:
     response = await lsp_client.initialize_session(
@@ -86,7 +86,7 @@ def _report_server_stderr(lsp_client: LanguageClient) -> None:
             else str(captured)
         )
         if text.strip():
-            print(f"--- stderr of the `pynix lsp` server ({attribute}) ---\n{text}")  # noqa: T201 -- the report is the point
+            print(f"--- stderr of the `pynix-lsp` server ({attribute}) ---\n{text}")  # noqa: T201 -- the report is the point
         return
 
 

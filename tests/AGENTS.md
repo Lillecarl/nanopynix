@@ -239,8 +239,8 @@ What lives there now:
 | `test_suppression_grammar.py` | every lint or type suppression says why it exists |
 | `test_agent_note_imports.py` | no test module imports `pytest_agent` directly |
 | `test_consumer_surface.py` | consumers use nanopynix's public API, and its protocols rather than one engine's classes; a ledger records each exception |
-| `test_public_surface.py` | `__all__` lists every public name the package binds, protocols included |
-| `test_subcommands.py` | pynix's two subcommand declarations describe the same set |
+| `test_public_surface.py` | `__all__` lists every public name the package binds, protocols included; the lazy tables match the modules they name |
+| `test_import_budget.py` | `import nanopynix` and `import pynix` load no module a caller may not read |
 | `test_docs_reference.py` | the checked-in CLI reference matches the live command tree |
 | `test_docs_coverage.py` | every `__all__` name has an autodoc directive, with a ledger for the rest |
 | `test_doc_snippets.py` | every published Python block mirrors a region of an example that runs |

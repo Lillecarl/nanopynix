@@ -235,7 +235,7 @@ def test_the_impl_table_names_every_module_that_is_there() -> None:
 
     assert on_disk, "no implementation modules found; the glob is wrong"
 
-    declared: frozenset[str] = package._SUBMODULES  # noqa: SLF001 -- a meta test reads the mechanism it guards
+    declared: frozenset[str] = package._SUBMODULES
     assert declared == on_disk, (
         "pynix/_impl/_SUBMODULES and the files in that directory disagree. "
         f"only on disk: {sorted(on_disk - declared)}; only in the table: {sorted(declared - on_disk)}"

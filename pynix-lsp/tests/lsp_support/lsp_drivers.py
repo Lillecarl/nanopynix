@@ -137,7 +137,7 @@ class WireDriver:
     """Drives a real ``pytest_lsp.LanguageClient`` over genuine JSON-RPC.
 
     Backend-agnostic: works whether *client* is wired to an in-memory server
-    (``lsp_wire`` fixture) or a real ``pynix lsp`` subprocess (like
+    (``lsp_wire`` fixture) or a real ``pynix-lsp`` subprocess (like
     ``test_lsp_e2e.py``) -- the client API is identical either way.
     """
 

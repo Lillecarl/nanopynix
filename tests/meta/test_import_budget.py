@@ -231,41 +231,17 @@ FORBIDDEN_IN_PYNIX = (
     "yaml",
 )
 
-#: The most modules ``import pynix`` may load, with the language server blocked.
+#: The most modules ``import pynix`` may load.
 #:
 #: Measured at 202 on the release build when issue #123 finished, down from
-#: 866. Read the probe below for why the server is blocked, and
-#: ``MODULE_BUDGET`` for why a count carries headroom and a name does not.
+#: 866. The dev shell reads the same tree now, because ``pynix`` no longer
+#: mounts the language server. See ``MODULE_BUDGET`` for why a count carries
+#: headroom and a name does not.
 PYNIX_MODULE_BUDGET = 240
 
 #: What the ``pynix`` probe prints, as one JSON line.
 _PYNIX_PROBE = f"""
 import json, sys
-
-class _NoLanguageServer:
-    \"\"\"Refuse ``pynix_lsp``, so this probe reads the shape a user installs.
-
-    The dev environment installs the server, and ``pynix/__init__.py`` mounts
-    the ``Lsp`` subcommand through an optional import when it is there. That
-    one subcommand pulls ``structlog``, ``anyio`` and ``rich``, so the names
-    below could not be forbidden at all from the dev shell -- and they are the
-    names that matter. A release build carries neither the server nor its
-    dependencies, and ``checks.pynix-isolated`` states that.
-
-    Blocking the module makes the ``except ImportError`` in
-    ``pynix/__init__.py`` take its other branch, which is exactly the release
-    build's shape.
-    \"\"\"
-
-    def find_module(self, fullname, path=None):
-        return None
-
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname == "pynix_lsp" or fullname.startswith("pynix_lsp."):
-            raise ImportError(fullname)
-        return None
-
-sys.meta_path.insert(0, _NoLanguageServer())
 import pynix
 print(json.dumps({{
     "count": len(sys.modules),
@@ -278,16 +254,16 @@ print(json.dumps({{
 def test_importing_pynix_loads_no_subcommand_dependency() -> None:
     """The CLI pays for the subcommand the caller named, and no other.
 
-    **This is a name check and not a count, and the reason is the dev shell.**
-    That environment installs ``pynix-lsp``, so ``pynix/__init__.py`` mounts
-    the ``Lsp`` subcommand and the process loads ``pynix_lsp.cli``. A release
-    build carries neither, and ``checks.pynix-isolated`` states that. A module
-    count would therefore be two different numbers for the same tree, and the
-    budget would have to hold the larger one -- which is the number that
-    measures nothing.
+    A name check, and a count in the test below it. The names are the sharper
+    half: a budget has to carry headroom, and a name has none.
 
-    Each name below is absent in both environments, so this test reads the
-    same either way.
+    This probe reads the same in the dev shell and in a release build, and it
+    did not always. ``pynix`` mounted the ``Lsp`` subcommand through an
+    optional import until issue #123, so the dev shell -- which installs the
+    server -- loaded ``structlog``, ``anyio`` and ``rich`` through that one
+    subcommand, and those three could not be forbidden here at all. Deleting
+    the mount removed the difference. ``pynix-lsp`` is the program an editor
+    calls, and it sits beside ``pynix`` on the PATH of this shell.
     """
     result = _probe_pynix()
     forbidden = result["forbidden"]

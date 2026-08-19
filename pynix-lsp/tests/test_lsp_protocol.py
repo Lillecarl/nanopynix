@@ -1,6 +1,6 @@
 """LSP requests over real JSON-RPC framing, with the server in this process.
 
-These ran against a spawned ``pynix lsp`` in ``test_lsp_e2e.py`` until issue
+These ran against a spawned ``pynix-lsp`` in ``test_lsp_e2e.py`` until issue
 #44. The transport was the only thing that differed, and it was the thing that
 cost the most: a request that did not answer left a bare 120-second timeout and
 no way to ask the server what it was doing.
@@ -13,7 +13,7 @@ rather than guess. The bodies below are unchanged from the versions that ran
 over stdio.
 
 **What stayed in ``test_lsp_e2e.py``** is what only a real process can answer:
-that the packaged ``pynix lsp`` entry point starts and negotiates
+that the packaged ``pynix-lsp`` entry point starts and negotiates
 ``initialize``. Nothing here duplicates that.
 
 **A document round trip against a spawned server is not tested anywhere, and

@@ -324,9 +324,9 @@ in
   # pynix` loaded came from those three, and the split removed 62 of the 966.
   #
   # A test in either suite cannot state this. The dev shell installs both
-  # projects, on purpose, because `pynix lsp` is what a developer here calls.
-  # So the question "is the server absent" only has an answer inside a venv
-  # built for the question, which is what `pynixOnlyEnv` is.
+  # projects, because a developer here runs the server as well as the CLI. So
+  # the question "is the server absent" only has an answer inside a venv built
+  # for the question, which is what `pynixOnlyEnv` is.
   #
   # **The gate asks two questions, and `jsonschema` is why there are two.**
   # `pygls`, `lsprotocol` and `pynix_lsp` must not be installed at all: no
@@ -336,11 +336,11 @@ in
   # question is therefore about `sys.modules` after the import, which is also
   # the cost that issue #107 measured. Issue #123 tracks that cost.
   #
-  # The third question is the other half of the optional import.
-  # `pynix/__init__.py` mounts `Lsp` when this project is installed, and an
-  # optional import that silently never succeeds is the failure that half
-  # reports: `lsp` has to be absent here and present in the dev shell, and
-  # `tests/meta/test_subcommands.py` states the second case.
+  # There is no third question about a subcommand any more. `pynix` mounted
+  # `Lsp` through an optional import until issue #123, so this gate also had to
+  # state that the mount did not happen here. `pynix-lsp` is the program an
+  # editor calls, and it sits beside `pynix` on the PATH of the dev shell, so
+  # the alias is gone and the two questions above are the whole gate.
   #
   # `runCommand` and not `mkCheck`: this gate reads no file of the source
   # tree, and `cd`-ing into one would put a `pynix/` directory on `sys.path`
@@ -366,8 +366,6 @@ in
             raise SystemExit(f"`import pynix` must not load these, and it loaded: {loaded}")
 
         names = set(pynix.Pynix.subcommands())
-        if "lsp" in names:
-            raise SystemExit("pynix mounted the `lsp` subcommand without pynix-lsp installed")
         print(f"pynix alone: {len(sys.modules)} modules, {len(names)} subcommands, no language server")
         EOF
         touch "$out"
