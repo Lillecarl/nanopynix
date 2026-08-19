@@ -48,7 +48,7 @@ MAX_STUCK_DUMPS = 5
 # notes.jsonl. Notes are deliberate output -- somebody asked for them, so the
 # budget is generous -- but a probe inside a loop over 300 tests must not bury
 # the failure list above it.
-MAX_NOTE_LINES = 60
+DEFAULT_MAX_NOTE_LINES = 60
 
 # Tests named individually when their detail could not be written. A run
 # where every test hits this (a read-only agent dir) must not print one line
@@ -74,6 +74,17 @@ STATUS_FILE_NAME = "status.json"
 # How often that file is rewritten. `pytest-agent watch` polls at two seconds,
 # so a finer interval buys a reader nothing and costs the run one more write.
 DEFAULT_STATUS_INTERVAL = 2.0
+
+#: The base interval of the heartbeat, and how it widens. Issue #46.
+#:
+#: `HEARTBEAT_HOLD` is 70 s because a 74 s run printed seven lines and seven
+#: is the right number for it; holding the base that long keeps every run of
+#: that length exactly as it was. After it the interval doubles to a minute,
+#: so a 474 s run prints about fifteen lines where it printed 46.
+DEFAULT_HEARTBEAT_INTERVAL = 10.0
+HEARTBEAT_HOLD = 70.0
+HEARTBEAT_GROWTH = 2.0
+HEARTBEAT_CAP = 60.0
 
 # The outcomes counted for a run, as a fixed tuple rather than only as the
 # keys of the dict built from it. The watcher thread snapshots the counts
@@ -154,8 +165,10 @@ class AgentRuntime:
         run_number: int,
         keep_runs: int,
         heartbeat_interval: float,
+        heartbeat_backoff: bool = False,
         stuck_after: float,
         status_interval: float = DEFAULT_STATUS_INTERVAL,
+        max_note_lines: int = DEFAULT_MAX_NOTE_LINES,
         max_summary_lines: int = DEFAULT_MAX_TERMINAL_SUMMARY_LINES,
         terminal: RealTerminal | None,
         terminal_log: TextIO | None = None,
@@ -171,8 +184,10 @@ class AgentRuntime:
         self.label = label
         self.keep_runs = keep_runs
         self.heartbeat_interval = heartbeat_interval
+        self.heartbeat_backoff = heartbeat_backoff
         self.stuck_after = stuck_after
         self.status_interval = status_interval
+        self.max_note_lines = max_note_lines
         self.max_summary_lines = max_summary_lines
         self.terminal = terminal
         self.terminal_log = terminal_log
@@ -500,18 +515,42 @@ class AgentRuntime:
             return
         since_heartbeat = 0.0
         since_status = 0.0
+        elapsed = 0.0
+        every = self.heartbeat_interval
         while not self._stop_event.wait(tick):
             since_heartbeat += tick
             since_status += tick
-            if self.heartbeat_interval > 0 and since_heartbeat >= self.heartbeat_interval:
+            elapsed += tick
+            if every > 0 and since_heartbeat >= every:
                 since_heartbeat = 0.0
                 self._print(self._progress_line())
+                every = self._next_heartbeat(every, elapsed)
             if self.status_interval > 0 and since_status >= self.status_interval:
                 since_status = 0.0
                 self._write_status()
             self._check_stuck()
 
     def _tick_interval(self) -> float | None:
+        """How often the watcher wakes, or None when it has nothing to do.
+
+        A non-positive interval means "off" for all three options, matching
+        what --agent-stuck-after already documented. Before this,
+        --agent-heartbeat 0 was an unguarded Event.wait(0): a spin loop that
+        pegged a core and printed hundreds of thousands of progress lines
+        through a short run.
+
+        --agent-status-interval joins the other two here rather than being a
+        constant, so that turning every interval off still stops the thread
+        entirely. A constant would keep a thread alive, writing a file every
+        two seconds, in a run that asked for no thread at all.
+        """
+        intervals = [value for value in (self.heartbeat_interval, self.stuck_after, self.status_interval) if value > 0]
+        return min(intervals) if intervals else None
+
+    def _next_heartbeat(self, every: float, elapsed: float) -> float:
+        """The next heartbeat interval of this run. `next_heartbeat` holds the rule."""
+        return next_heartbeat(every, elapsed, backoff=self.heartbeat_backoff)
+
         """How often the watcher wakes, or None when it has nothing to do.
 
         A non-positive interval means "off" for all three options, matching
@@ -730,10 +769,16 @@ class AgentRuntime:
         if not lines:
             return
         self._print("notes:")
-        for line in lines[:MAX_NOTE_LINES]:
+        limit = self.max_note_lines
+        if limit <= 0:
+            # 0 leaves the block to `notes.jsonl` entirely, which is what a
+            # run with a probe inside a loop over 300 tests wants.
+            self._print(f"  {len(lines)} lines: {display_path(self.recorder.notes_path)}")
+            return
+        for line in lines[:limit]:
             self._print(line)
-        if len(lines) > MAX_NOTE_LINES:
-            dropped = len(lines) - MAX_NOTE_LINES
+        if len(lines) > limit:
+            dropped = len(lines) - limit
             self._print(f"  +{dropped} more lines: {display_path(self.recorder.notes_path)}")
 
     def _note_lines(self) -> list[str]:
@@ -759,3 +804,27 @@ class AgentRuntime:
             f"{self.counts['error']} error, {self.counts['skipped']} skipped, "
             f"{self.counts['collect_error']} collection errors"
         )
+
+
+def next_heartbeat(every: float, elapsed: float, *, backoff: bool) -> float:
+    """How long until the next progress line, given how long this run is.
+
+    **A tick carries three facts, and all three arrive on the first one:**
+    the run is alive, it is making progress, and this is the test it is
+    on. Every later tick restates them, and a fixed interval makes the
+    count a function of the wall clock: a 474 s run printed 46 lines,
+    which is the useful seven, six more times. Issue #46.
+
+    The interval holds at its base for `HEARTBEAT_HOLD` seconds and
+    doubles after that, up to `HEARTBEAT_CAP`. The hold is what keeps a
+    short run as informative as it was -- a 70 s run prints what it
+    printed before -- and the doubling is what stops a long one repeating
+    itself. A 474 s run prints about fifteen lines rather than 46.
+
+    **A stuck run is not what this watches.** `--agent-stuck-after` owns
+    that, and it dumps every thread's stack rather than printing one more
+    line that says the same as the last.
+    """
+    if not backoff or elapsed < HEARTBEAT_HOLD:
+        return every
+    return min(HEARTBEAT_CAP, every * HEARTBEAT_GROWTH)

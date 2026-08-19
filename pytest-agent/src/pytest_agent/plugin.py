@@ -16,6 +16,8 @@ from pytest_agent._notes import agent_notes as agent_notes, pop_runtime, push_ru
 from pytest_agent._pipe_guard import find_banned_pipe_reader, zero_detail_mode
 from pytest_agent._profile import profile as profile
 from pytest_agent._runtime import (
+    DEFAULT_HEARTBEAT_INTERVAL,
+    DEFAULT_MAX_NOTE_LINES,
     DEFAULT_MAX_TERMINAL_SUMMARY_LINES,
     DEFAULT_STATUS_INTERVAL,
     RUNTIME_PLUGIN_NAME,
@@ -110,8 +112,28 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption(
         "--agent-heartbeat",
         type=float,
-        default=float(os.environ.get("PYTEST_AGENT_HEARTBEAT", "10")),
-        help=("Seconds between progress lines while tests run; 0 prints none (default: %(default)s)."),
+        # `None` when nobody named a value, which is what selects the backoff.
+        # A number here -- from the flag or from the environment -- is a fixed
+        # interval, because somebody asked for that interval. Issue #46.
+        default=(float(os.environ["PYTEST_AGENT_HEARTBEAT"]) if "PYTEST_AGENT_HEARTBEAT" in os.environ else None),
+        help=(
+            "Seconds between progress lines while tests run; 0 prints none. "
+            "Unset, the interval starts at 10s, holds for 70s and then doubles "
+            "to a cap of 60s, so a long run does not repeat itself. A value "
+            "here, or in PYTEST_AGENT_HEARTBEAT, is that interval and does not "
+            "widen."
+        ),
+    )
+    group.addoption(
+        "--agent-max-note-lines",
+        type=int,
+        default=int(os.environ.get("PYTEST_AGENT_MAX_NOTE_LINES", str(DEFAULT_MAX_NOTE_LINES))),
+        help=(
+            "Terminal lines the notes block may take before the rest is left to "
+            "notes.jsonl; 0 prints the path alone. A note is deliberate output, so "
+            "the budget is generous, but a probe inside a loop over 300 tests must "
+            "not bury the failure list above it (default: %(default)s)."
+        ),
     )
     group.addoption(
         "--agent-stuck-after",
@@ -269,7 +291,11 @@ def pytest_configure(config: pytest.Config) -> None:
     explicit_agent_flag = "--agent" in config.invocation_params.args
     autodetected_via = None if explicit_agent_flag else _autodetected_via
 
-    heartbeat_interval = cast("float", config.getoption("agent_heartbeat"))
+    # `None` means nobody named an interval, so the heartbeat starts at the
+    # default and widens as the run goes on. Issue #46.
+    named_heartbeat = cast("float | None", config.getoption("agent_heartbeat"))
+    heartbeat_backoff = named_heartbeat is None
+    heartbeat_interval = DEFAULT_HEARTBEAT_INTERVAL if named_heartbeat is None else named_heartbeat
     keep_runs = cast("int", config.getoption("agent_keep_runs"))
     stuck_after = cast("float", config.getoption("agent_stuck_after"))
     # A stuck dump is faulthandler dumping *this* process's threads. On an
@@ -282,6 +308,7 @@ def pytest_configure(config: pytest.Config) -> None:
     if distributed:
         stuck_after = 0.0
     status_interval = cast("float", config.getoption("agent_status_interval"))
+    max_note_lines = cast("int", config.getoption("agent_max_note_lines"))
     max_summary_lines = cast("int", config.getoption("agent_max_summary_lines"))
     runtime = AgentRuntime(
         config,
@@ -290,6 +317,8 @@ def pytest_configure(config: pytest.Config) -> None:
         run_number=run_number,
         keep_runs=keep_runs,
         heartbeat_interval=heartbeat_interval,
+        heartbeat_backoff=heartbeat_backoff,
+        max_note_lines=max_note_lines,
         stuck_after=stuck_after,
         status_interval=status_interval,
         max_summary_lines=max_summary_lines,

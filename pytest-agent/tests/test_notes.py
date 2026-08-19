@@ -369,3 +369,46 @@ def test_with_agent_mode_off_a_note_prints_instead_of_vanishing(pytester: pytest
 
     assert result.ret == pytest.ExitCode.TESTS_FAILED
     result.stdout.fnmatch_lines(["*[[]pytest-agent[]] note backend=daemon*"])
+
+
+def test_the_notes_block_honours_a_cap_from_the_command_line(pytester: pytest.Pytester) -> None:
+    """`--agent-max-note-lines` reaches the inline cap.
+
+    The block already knew it had a limit and already wrote the whole thing
+    to `notes.jsonl`; the constant behind it was reachable from nowhere.
+    `--agent-max-summary-lines` governs exactly this trade for the end-of-run
+    report of another plugin, and this one made it with a number nobody could
+    name. Issue #46.
+    """
+    pytester.makepyfile(
+        test_many_notes="""
+        from pytest_agent import note
+
+        def test_one():
+            for index in range(12):
+                note(**{f"key_{index}": index})
+        """
+    )
+    result = _run(pytester, "--agent-max-note-lines=3")
+    # Three lines of the block, and the nodeid that heads it is one of them,
+    # so two values follow it. The cap counts what the terminal takes rather
+    # than how many notes there were.
+    printed = [line for line in result.outlines if "key_" in line]
+    assert len(printed) == 2, printed
+    assert any("more lines" in line for line in result.outlines)
+
+
+def test_a_cap_of_zero_leaves_the_notes_to_their_file(pytester: pytest.Pytester) -> None:
+    """A probe inside a loop over 300 tests must not bury the failure list."""
+    pytester.makepyfile(
+        test_many_notes="""
+        from pytest_agent import note
+
+        def test_one():
+            for index in range(12):
+                note(**{f"key_{index}": index})
+        """
+    )
+    result = _run(pytester, "--agent-max-note-lines=0")
+    assert not [line for line in result.outlines if "key_" in line]
+    assert any("notes.jsonl" in line for line in result.outlines)
