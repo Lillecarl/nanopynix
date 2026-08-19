@@ -21,7 +21,7 @@ import nanopynix
 from nanopynix import Derivation, GcResult, MissingInfo, NixType, StorePath, inproc, yaml_primops
 from nanopynix._ansi import strip_ansi
 from nanopynix.settings import NixEvalSettings, normalize_nix_path
-from nanopynix_testing.nix_markers import LINUX_PROC_FS, NIX_GC_ROOTS_BUG
+from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD, LINUX_PROC_FS, NIX_GC_ROOTS_BUG
 from test_support.git_fixtures import init_flake_repo
 from test_support.notes import note
 
@@ -977,6 +977,7 @@ async def test_inproc_value_auto_call(inproc_session: InprocSessionFactory) -> N
 
 
 @pytest.mark.anyio
+@LINUX_CHROOT_BUILD
 async def test_inproc_value_build_and_release(
     inproc_session: InprocSessionFactory,
     shared_nix_environment: NixTestEnvironment,

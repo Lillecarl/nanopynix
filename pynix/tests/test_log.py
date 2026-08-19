@@ -12,6 +12,7 @@ import pytest
 from nanopynix_proto.nix.store import GetBuildLogRequest
 
 import pynix._util as util_module
+from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
 from pynix import Pynix
 
 if TYPE_CHECKING:
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
     from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
+@LINUX_CHROOT_BUILD
 async def test_nanopynix_store_get_build_log_from_populated_store(
     populated_store: dict[str, str],
     shared_nix_environment: NixTestEnvironment,
@@ -31,6 +33,7 @@ async def test_nanopynix_store_get_build_log_from_populated_store(
     assert "pynix-log-line" in response.log
 
 
+@LINUX_CHROOT_BUILD
 async def test_pynix_log_prints_build_log_from_populated_store(
     populated_store: dict[str, str], capsys: pytest.CaptureFixture[str]
 ) -> None:

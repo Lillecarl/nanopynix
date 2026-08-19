@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
+
 if TYPE_CHECKING:
     from conftest import PynixStoreScenario
 
@@ -74,6 +76,7 @@ async def test_scenario_adds_local_package_with_pynix(
 
 
 @pytest.mark.dependency(name="scenario:build-local-log", depends=["scenario:build-hello"])
+@LINUX_CHROOT_BUILD
 async def test_scenario_builds_local_derivation_and_forwards_logs(
     pynix_store_scenario: PynixStoreScenario,
     request: pytest.FixtureRequest,

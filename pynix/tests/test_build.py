@@ -12,6 +12,7 @@ import nanopynix
 from nanopynix._ansi import strip_ansi
 from nanopynix.exceptions import StoreError
 from nanopynix_testing.nix_environment import with_nixpkgs
+from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
 from pynix import Pynix
 from pynix.build import (
     BuildTargetError,
@@ -319,6 +320,7 @@ async def test_build_dry_run_without_update_fod_errors(
     assert "--dry-run requires --update-fod" in captured.err
 
 
+@LINUX_CHROOT_BUILD
 async def test_build_propagates_a_non_fod_build_failure(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,
@@ -420,6 +422,7 @@ async def test_build_update_fod_dry_run_reports_local_fetchurl_diff(
     assert nix_file.read_text() == source
 
 
+@LINUX_CHROOT_BUILD
 async def test_build_update_fod_rewrites_and_rebuilds(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,
@@ -449,6 +452,7 @@ runCommand "payload" {
     assert 'outputHash = "sha256-' in nix_file.read_text()
 
 
+@LINUX_CHROOT_BUILD
 async def test_build_update_fod_rewrites_each_named_run_command_dependency(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,
@@ -555,6 +559,7 @@ async def test_build_update_fod_reports_an_ambiguous_hash_literal(
     assert "cannot update fixed-output hash" in strip_ansi(captured.err)
 
 
+@LINUX_CHROOT_BUILD
 async def test_build_target_raises_when_mismatch_is_not_in_the_target_closure(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,
@@ -609,6 +614,7 @@ async def test_build_target_requires_a_file_target_to_update_a_fod(
             await _build_target(target, session, nix=nix, evaluation_store=store, update_fod=True, dry_run=False)
 
 
+@LINUX_CHROOT_BUILD
 async def test_build_target_stops_after_ten_fixed_output_hash_updates(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,

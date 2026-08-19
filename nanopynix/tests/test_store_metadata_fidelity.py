@@ -35,6 +35,7 @@ import anyio
 import pytest
 
 from nanopynix.models import DerivationOutputs
+from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
 from test_support.subprocess_output import run_process
 
 if TYPE_CHECKING:
@@ -286,6 +287,7 @@ def _check_built_outputs(results: Any, store_dir: str) -> None:
     assert built["out"].signatures == [], built["out"].signatures
 
 
+@LINUX_CHROOT_BUILD
 async def test_inproc_build_reports_the_path_it_produced(inproc_session: InprocSessionFactory) -> None:
     async with inproc_session() as session, session.store() as store:
         drv = await _drv_path(session, store, BUILT_OUTPUTS_DRV)
@@ -293,6 +295,7 @@ async def test_inproc_build_reports_the_path_it_produced(inproc_session: InprocS
         _check_built_outputs(results, (await store.store_dirs()).store_dir)
 
 
+@LINUX_CHROOT_BUILD
 async def test_rpc_build_reports_the_path_it_produced(rpc_session: RpcSessionFactory) -> None:
     async with rpc_session() as session, session.store() as store:
         drv = await _drv_path(session, store, BUILT_OUTPUTS_DRV)
@@ -300,6 +303,7 @@ async def test_rpc_build_reports_the_path_it_produced(rpc_session: RpcSessionFac
         _check_built_outputs(results, (await store.store_dirs()).store_dir)
 
 
+@LINUX_CHROOT_BUILD
 async def test_an_opaque_request_builds_nothing_and_says_so(inproc_session: InprocSessionFactory) -> None:
     """A plain store path is a fetch, not a build, so it produces no output.
 
