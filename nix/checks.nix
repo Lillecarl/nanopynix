@@ -31,7 +31,11 @@
   shellcheck,
   pythonSet,
   nixos,
+  pynix,
   pynixd,
+  bash,
+  fish,
+  zsh,
   completionSpike,
 }:
 let
@@ -447,6 +451,98 @@ in
   # An alias, and not a `mkCheck`. The suite is the check phase of the package
   # itself, so building the package *is* running the gate. See
   # nix/completion-spike.nix for why that shape was chosen.
+  # **The shell completions `pynix` installs are completion scripts, and not
+  # its help screen.**
+  #
+  # That distinction is the whole gate. `installShellCompletion` knows click's
+  # protocol, which clypi does not speak, so asking the program for a script
+  # the click way makes it print help and exit 0 -- and a file holding an
+  # ANSI-coloured help screen sits at a path the shell loads and reports
+  # nothing. Issue #105 measured exactly that on a sibling program. A check
+  # that only asserts the file exists is silent about it, so this one runs the
+  # shells.
+  #
+  # bash and fish are driven for real: the file is sourced and the shell is
+  # asked what it would offer for `pynix bu`. zsh has no headless way to run
+  # its completion system -- that needs a pty, which `completion-spike/_pty.py`
+  # holds -- so zsh gets its structure checked and its callback run, which is
+  # what tells a script apart from a help screen.
+  #
+  # `SHELL` is deliberately absent from this sandbox. `nix/render-completions.py`
+  # gives the reason: clypi resolves a completion through the user's login
+  # shell and raises when it does not know it, and each script now names its
+  # own shell instead. A regression there fails here.
+  completions =
+    runCommand "nanopynix-check-completions"
+      {
+        nativeBuildInputs = [
+          pynix
+          bash
+          fish
+          zsh
+        ];
+      }
+      ''
+        set -euo pipefail
+        # `SHELL` unset on purpose, and a writable `HOME` because fish refuses
+        # to start without one.
+        unset SHELL
+        export HOME="$PWD/home"
+        mkdir -p "$HOME"
+
+        fish_script="${pynix}/share/fish/vendor_completions.d/pynix.fish"
+        bash_script="${pynix}/share/bash-completion/completions/pynix.bash"
+        zsh_script="${pynix}/share/zsh/site-functions/_pynix"
+
+        for f in "$fish_script" "$bash_script" "$zsh_script"; do
+          test -f "$f" || { echo "missing completion file: $f" >&2; exit 1; }
+          if grep -q $'\033' "$f"; then
+            echo "$f holds an ANSI escape, so it is a help screen and not a script" >&2
+            exit 1
+          fi
+          if grep -qi '^Usage:' "$f"; then
+            echo "$f holds a usage line, so it is a help screen and not a script" >&2
+            exit 1
+          fi
+        done
+
+        # Each probe is a file rather than a `-c` string: the bodies hold the
+        # quoting of two shells, and nesting that inside a Nix string as well
+        # is how a passing gate becomes an empty answer.
+        cat > probe.fish <<'FISH'
+        source FISH_SCRIPT
+        complete -C 'pynix bu'
+        FISH
+        sed -i "s|FISH_SCRIPT|$fish_script|" probe.fish
+
+        cat > probe.bash <<'BASH'
+        source BASH_SCRIPT
+        COMP_WORDS=(pynix bu)
+        COMP_CWORD=1
+        _complete_pynix pynix bu pynix
+        printf '%s\n' "''${COMPREPLY[@]}"
+        BASH
+        sed -i "s|BASH_SCRIPT|$bash_script|" probe.bash
+
+        echo "--- fish ---"
+        got=$(fish probe.fish 2>/dev/null)
+        test "$got" = "build" || { echo "fish offered '$got', wanted 'build'" >&2; exit 1; }
+
+        echo "--- bash ---"
+        got=$(bash probe.bash)
+        test "$got" = "build" || { echo "bash offered '$got', wanted 'build'" >&2; exit 1; }
+
+        echo "--- zsh ---"
+        grep -q '^#compdef pynix$' "$zsh_script" || { echo "no #compdef line in $zsh_script" >&2; exit 1; }
+        grep -q '^compdef _complete_pynix pynix$' "$zsh_script" || { echo "no compdef call in $zsh_script" >&2; exit 1; }
+        grep -q 'env SHELL=zsh _CLYPI_CURRENT_ARGS=' "$zsh_script" || { echo "no callback in $zsh_script" >&2; exit 1; }
+        got=$(env SHELL=zsh _CLYPI_CURRENT_ARGS="pynix bu" pynix | head -1)
+        test "$got" = "build" || { echo "the zsh callback offered '$got', wanted 'build'" >&2; exit 1; }
+
+        echo "every shell answered 'pynix bu' with 'build'"
+        touch "$out"
+      '';
+
   completion-spike = completionSpike;
 
   # **No gate for the pynix suite, and that is not an oversight.** Issue #130

@@ -30,8 +30,9 @@
   # `mkApplication` needs the venv for content and the package for shape.
   pythonSet,
   package ? pythonSet.${name},
-  # `{ var = "_EKN_COMPLETE"; }` for a click/clypi-style completion protocol,
-  # or null for a program that has none.
+  # `{ module = "pynix"; command = "Pynix"; }` names the clypi command class to
+  # render completion scripts from, or null for a program that gets none.
+  # `nix/render-completions.py` says why a class and not a protocol on stdout.
   completions ? null,
   # Put on the program's PATH via a wrapper. For tools the program shells out
   # to at runtime rather than imports.
@@ -48,12 +49,13 @@ let
 
   app = pyprojectUtil.mkApplication { inherit venv package; };
 
-  # `wrapped`, and not `app`: this derivation is itself a Nix build sandbox
-  # running the program, so it is the same case as the easykubenix
-  # derivations that shell out to `ekn`. It used to export `SSL_CERT_FILE`
-  # here to survive that. It does not any more, and that is deliberate --
-  # a `caBundle` wrapper that stops working fails this build, so the fix
-  # for #62 verifies itself on every build of the application.
+  # **Rendered from the command tree, not read off the program's stdout.**
+  # `installShellCompletion` knows click's protocol, and clypi does not speak
+  # it -- see `nix/render-completions.py`, which holds the whole reason and the
+  # one private import it needs.
+  #
+  # The venv's own interpreter runs it. The application's `bin/${name}` is an
+  # entry point and not a Python, and this needs to import the command class.
   generatedCompletions =
     runCommand "${name}-completions"
       {
@@ -61,18 +63,14 @@ let
           installShellFiles
         ];
       }
-      (
-        lib.concatMapStrings
-          (shell: ''
-            installShellCompletion --cmd ${name} \
-              --${shell} <(env ${completions.var}=source_${shell} ${wrapped}/bin/${name})
-          '')
-          [
-            "bash"
-            "zsh"
-            "fish"
-          ]
-      );
+      ''
+        ${venv}/bin/python ${./render-completions.py} \
+          ${completions.module} ${completions.command} "$PWD/rendered"
+        installShellCompletion --cmd ${name} \
+          --bash rendered/bash \
+          --zsh rendered/zsh \
+          --fish rendered/fish
+      '';
 
   # **`--set-default SSL_CERT_FILE` does not work here, and the reason is the
   # whole difficulty.** A Nix build sandbox does not leave the variable unset.
@@ -105,18 +103,31 @@ let
       (lib.makeBinPath pathInputs)
     ];
 
-  # `$out/bin/${name}` alone loses nothing. `mkApplication` mirrors the
-  # package's own `$out` minus `nix-support` and `site-packages`
-  # (`build/util/mk-application.py`), and an installed wheel of a program has
-  # nothing outside `bin/`.
+  # **The wrapper shadows one file of the application, and carries the rest.**
+  # It used to be a `runCommand` that created `$out/bin/${name}` and nothing
+  # else, which was true to what the application held at the time -- an
+  # installed wheel of a program has nothing outside `bin/`. It also silently
+  # decided that it never would: a completion script under
+  # `share/bash-completion/`, a manual page, an icon, anything a shell or a
+  # desktop reads by convention when the package is in `environment.systemPackages`
+  # or `home.packages`, would have been dropped here with no error.
+  #
+  # `symlinkJoin` over the application, with `makeWrapper` replacing the one
+  # entry point, keeps every other path. `rm` first, because the join already
+  # linked the unwrapped program to that name.
   wrapped =
     if wrapperArgs == [ ] then
       app
     else
-      runCommand "${name}-wrapped" { nativeBuildInputs = [ makeWrapper ]; } ''
-        mkdir -p "$out/bin"
-        makeWrapper "${app}/bin/${name}" "$out/bin/${name}" ${lib.escapeShellArgs wrapperArgs}
-      '';
+      symlinkJoin {
+        name = "${name}-wrapped";
+        paths = [ app ];
+        nativeBuildInputs = [ makeWrapper ];
+        postBuild = ''
+          rm "$out/bin/${name}"
+          makeWrapper "${app}/bin/${name}" "$out/bin/${name}" ${lib.escapeShellArgs wrapperArgs}
+        '';
+      };
 in
 symlinkJoin {
   inherit name;
