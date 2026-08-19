@@ -32,7 +32,8 @@ import anyio
 import rich.traceback
 
 from nanopynix import set_manager_title
-from pynix._util import configure_logging
+from nanopynix.exceptions import NixError
+from pynix._util import configure_logging, error_exit
 
 
 def prepare() -> None:
@@ -43,10 +44,28 @@ def prepare() -> None:
 
 
 def run(body: Callable[[], Coroutine[object, object, None]]) -> None:
-    """Run the body of a command.
+    """Run the body of a command, and report a failure of Nix as one line.
 
     One call, so that the choice of an async backend is written down once.
     clypi owned this call and started asyncio; anyio is what the rest of this
     repository uses, and `AGENTS.md` says why.
+
+    **The `except` is new, and clypi never had it.** clypi wrapped every
+    `run()` in `except get_config().nice_errors`, and that setting defaults to
+    `(ClypiException, ClypiExceptionGroup)` -- so a failure of Nix was
+    re-raised, reached the handler that `prepare` installs, and
+    `rich.traceback(show_locals=True)` printed a panel of internal objects with
+    the escape sequences of Nix inside them. Measured on `pynix build --file
+    <dir>#<attr>` against an attribute that is not a derivation: 20 lines of
+    `EvalError(...)` repr where one line of "selected value is not a
+    derivation" belongs. `error_exit` is what the rest of this CLI already uses
+    for exactly that, and its docstring holds the measurement about the escape
+    sequences.
+
+    `NixError` and nothing wider. A `TypeError` in this repository is a defect,
+    and a defect deserves the traceback.
     """
-    anyio.run(body)
+    try:
+        anyio.run(body)
+    except NixError as exc:
+        error_exit(str(exc), cause=exc)
