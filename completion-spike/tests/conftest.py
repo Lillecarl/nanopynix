@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING, cast
 import completion_spike
 import pytest
 from completion_spike._layer import Shell, render_script
-from completion_spike._pty import SHELLS, ShellSession
 from completion_spike.demo import CALL_LOG_VARIABLE, DYNAMIC_VALUES, app
+
+from test_support.shell_pty import SHELLS, ShellSession
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
