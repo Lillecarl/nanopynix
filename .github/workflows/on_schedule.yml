@@ -72,11 +72,19 @@ jobs:
     concurrency:
       cancel-in-progress: false
       group: pages
-    timeout-minutes: 35
+    timeout-minutes: 37
     steps:
+    - name: Report what the gating jobs did
+      run: 'echo "the jobs this deploy waits for finished as: $GATE_RESULTS"'
+      if: ${{ always() }}
+      env:
+        GATE_RESULTS: ${{ join(needs.*.result, ' ') }}
+      timeout-minutes: 2
     - name: Deploy to GitHub Pages
       id: deployment
       uses: actions/deploy-pages@main
+      if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+        && !contains(needs.*.result, 'skipped') }}
       with:
         timeout: 900000
       timeout-minutes: 20
