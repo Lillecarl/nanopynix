@@ -29,6 +29,7 @@ rootdir:
 | `nanopynix-helpers/tests/` | the pure helper package | one helper behaviour |
 | `pynix/tests/` | the CLI and the LSP server | one command or one editor request |
 | `pynix/tests/support/` | the LSP client, drivers, markers and scenarios. **No tests.** | — |
+| `pynix/completions/tests/` | the shell completions of the installed `pynix` | one line a user can type |
 | `test-support/tests/` | the tests of the generic helpers | one helper behaviour |
 
 `pynixd/` is the fourth project with a suite, and it keeps the conventions
@@ -46,6 +47,21 @@ rules of that project, and this file does not replace it. Two of its rules
 have no equivalent here: one pytest process at a time, because the functional
 tests share `/tmp/pynixd-stores` and a session server, and a store path under
 that prefix and no other.
+
+**`pynix/completions/tests/` is the one suite that the repository run does not
+reach, and that is deliberate.** It is not in `testpaths`, and it carries its
+own `pytest.ini`. Every test there spawns fish, bash and zsh on a pty and
+completes against an *installed* `pynix` -- a store path with `share/` in it.
+No job of the CI matrix has a shell to drive or an application to complete, so
+a run there would report the sandbox and not the code. `checks.completions`
+runs it, and the dev shell carries the three shells so a developer can run it
+too:
+
+    pytest pynix/completions/tests
+
+`test_support.shell_pty` drives the shell. `completion-spike` drives the same
+three, so the driver is in the project that names no Nix concept, by the rule
+below.
 
 **Two of those suites have a gate**: `checks.nix-daemon-protocol` and
 `checks.pynixd`. Neither needs a daemon, a Nix binary or SSH, so a build

@@ -32,6 +32,12 @@ SUITE_ROOTS = (
     # The language server suite, which issue #107 moved out of `pynix/tests`
     # with the project it tests.
     REPO_ROOT / "pynix-lsp" / "tests",
+    # The shell completions of the installed `pynix`, which issue #213 added.
+    # The one suite here that the repository's own `testpaths` does not name:
+    # every test in it drives fish, bash and zsh on a pty and completes against
+    # a store path. `checks.completions` runs it, and `tests/AGENTS.md` says
+    # why no job of the CI matrix can.
+    REPO_ROOT / "pynix" / "completions" / "tests",
 )
 
 # The installed packages that a suite runs on top of. They hold no test, and
