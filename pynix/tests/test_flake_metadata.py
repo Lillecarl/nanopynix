@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from pynix import Pynix
+from pynix import parse
 from support.nix_oracle import require_matching_nix_cli
 from test_support.git_fixtures import init_linked_flakes
 from test_support.subprocess_output import run_process
@@ -66,8 +66,8 @@ async def _pynix_flake_metadata(
     environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> dict[str, Any]:
-    cmd = Pynix.parse(["flake", "metadata", str(flake), *environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["flake", "metadata", str(flake), *environment.pynix_store_args()])
+    await cmd.run()
     return json.loads(capsys.readouterr().out)
 
 

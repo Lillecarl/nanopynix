@@ -27,7 +27,6 @@ license-files = [ "LICENSE" ]
 dependencies = [
   "pynix",
   "nanopynix",
-  "clypi",
   "jsonschema",
   "pydantic",
   "pygls",

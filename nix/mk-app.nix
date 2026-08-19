@@ -30,10 +30,10 @@
   # `mkApplication` needs the venv for content and the package for shape.
   pythonSet,
   package ? pythonSet.${name},
-  # `{ module = "pynix"; command = "Pynix"; }` names the clypi command class to
-  # render completion scripts from, or null for a program that gets none.
-  # `nix/render-completions.py` says why a class and not a protocol on stdout.
-  completions ? null,
+  # True for a program that answers a shell completion through argcomplete, and
+  # false for one that gets no completion scripts. `nix/render-completions.py`
+  # says where the script comes from.
+  completions ? false,
   # Put on the program's PATH via a wrapper. For tools the program shells out
   # to at runtime rather than imports.
   pathInputs ? [ ],
@@ -49,13 +49,12 @@ let
 
   app = pyprojectUtil.mkApplication { inherit venv package; };
 
-  # **Rendered from the command tree, not read off the program's stdout.**
-  # `installShellCompletion` knows click's protocol, and clypi does not speak
-  # it -- see `nix/render-completions.py`, which holds the whole reason and the
-  # one private import it needs.
+  # **Rendered by argcomplete, from the name of the program.** The script is
+  # the same for every argcomplete program: it exports the variables the
+  # protocol names and calls the program back on file descriptor 8. Nothing is
+  # read out of the command tree, so nothing here has to import the program.
   #
-  # The venv's own interpreter runs it. The application's `bin/${name}` is an
-  # entry point and not a Python, and this needs to import the command class.
+  # The venv's own interpreter runs it, because that is where argcomplete is.
   generatedCompletions =
     runCommand "${name}-completions"
       {
@@ -64,8 +63,7 @@ let
         ];
       }
       ''
-        ${venv}/bin/python ${./render-completions.py} \
-          ${completions.module} ${completions.command} "$PWD/rendered"
+        ${venv}/bin/python ${./render-completions.py} ${name} "$PWD/rendered"
         installShellCompletion --cmd ${name} \
           --bash rendered/bash \
           --zsh rendered/zsh \
@@ -131,7 +129,7 @@ let
 in
 symlinkJoin {
   inherit name;
-  paths = [ wrapped ] ++ lib.optional (completions != null) generatedCompletions;
+  paths = [ wrapped ] ++ lib.optional completions generatedCompletions;
   inherit (package) meta;
   passthru = package.passthru // {
     inherit venv package;

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from pynix import Pynix
+from pynix import parse
 
 if TYPE_CHECKING:
     from nanopynix_testing.nix_environment import NixTestEnvironment
@@ -49,7 +49,7 @@ async def test_osearch_builds_index_and_finds_a_match(
     cache_home: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    cmd = Pynix.parse(
+    cmd = parse(
         [
             "osearch",
             "--file",
@@ -59,7 +59,7 @@ async def test_osearch_builds_index_and_finds_a_match(
             *shared_nix_environment.pynix_store_args(),
         ],
     )
-    await cmd.astart()
+    await cmd.run()
     captured = capsys.readouterr()
     assert "indexed" in captured.err
     results = _results(captured.out)
@@ -80,7 +80,7 @@ async def test_osearch_survives_an_option_whose_default_cannot_be_evaluated(
     system is realized. Indexing must not evaluate `default`/`example` at
     all, so such an option (`brokenDefault` in the fixture module) doesn't
     abort the entire bulk fetch, and the rest of the options still index."""
-    cmd = Pynix.parse(
+    cmd = parse(
         [
             "osearch",
             "--file",
@@ -92,7 +92,7 @@ async def test_osearch_survives_an_option_whose_default_cannot_be_evaluated(
             *shared_nix_environment.pynix_store_args(),
         ],
     )
-    await cmd.astart()
+    await cmd.run()
     captured = capsys.readouterr()
     results = _results(captured.out)
     names = {str(result["name"]) for result in results}
@@ -105,7 +105,7 @@ async def test_osearch_filters_out_internal_options(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    cmd = Pynix.parse(
+    cmd = parse(
         [
             "osearch",
             "--file",
@@ -117,7 +117,7 @@ async def test_osearch_filters_out_internal_options(
             *shared_nix_environment.pynix_store_args(),
         ],
     )
-    await cmd.astart()
+    await cmd.run()
     captured = capsys.readouterr()
     results = _results(captured.out)
     assert all("secretInternal" not in str(result["name"]) for result in results)
@@ -127,12 +127,12 @@ async def test_osearch_second_run_hits_the_cache_without_a_working_store(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    build_cmd = Pynix.parse(["osearch", "--file", str(_SYSTEM_NIX), *shared_nix_environment.pynix_store_args()])
-    await build_cmd.astart()
+    build_cmd = parse(["osearch", "--file", str(_SYSTEM_NIX), *shared_nix_environment.pynix_store_args()])
+    await build_cmd.run()
     capsys.readouterr()
 
     # A bogus store URI would make evaluation fail if the cache were bypassed.
-    cached_cmd = Pynix.parse(
+    cached_cmd = parse(
         [
             "osearch",
             "--file",
@@ -143,7 +143,7 @@ async def test_osearch_second_run_hits_the_cache_without_a_working_store(
             "local://?root=/nonexistent-store-root",
         ],
     )
-    await cached_cmd.astart()
+    await cached_cmd.run()
     captured = capsys.readouterr()
     results = _results(captured.out)
     assert str(results[0]["name"]) == "services.example-daemon.enable"
@@ -153,14 +153,14 @@ async def test_osearch_update_index_rebuilds_the_cache(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    build_cmd = Pynix.parse(["osearch", "--file", str(_SYSTEM_NIX), *shared_nix_environment.pynix_store_args()])
-    await build_cmd.astart()
+    build_cmd = parse(["osearch", "--file", str(_SYSTEM_NIX), *shared_nix_environment.pynix_store_args()])
+    await build_cmd.run()
     capsys.readouterr()
 
-    rebuild_cmd = Pynix.parse(
+    rebuild_cmd = parse(
         ["osearch", "--file", str(_SYSTEM_NIX), "--update-index", *shared_nix_environment.pynix_store_args()],
     )
-    await rebuild_cmd.astart()
+    await rebuild_cmd.run()
     captured = capsys.readouterr()
     assert "indexed" in captured.err
 
@@ -169,7 +169,7 @@ async def test_osearch_limit_truncates_results(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    cmd = Pynix.parse(
+    cmd = parse(
         [
             "osearch",
             "--file",
@@ -181,7 +181,7 @@ async def test_osearch_limit_truncates_results(
             *shared_nix_environment.pynix_store_args(),
         ],
     )
-    await cmd.astart()
+    await cmd.run()
     captured = capsys.readouterr()
     results = _results(captured.out)
     assert len(results) == 1

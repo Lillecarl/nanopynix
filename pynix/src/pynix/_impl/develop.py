@@ -3,7 +3,7 @@
 ``pynix develop`` and ``pynix print-dev-env``, the counterparts of ``nix``'s.
 
 ``pynix.develop`` holds the command class and its options, and this module holds
-what ``run`` needs. ``pynix._impl`` says why: clypi loads every subcommand module
+what ``run`` needs. ``pynix._impl`` says why: the parser loads every subcommand module
 on every start, and none of these imports is needed to list an option.
 """
 
@@ -16,22 +16,15 @@ import tempfile
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 
-# A real import, not a TYPE_CHECKING one: clypi resolves the annotations on the
-# commands below at runtime to build their argument parsers, so `Path` has to
-# exist as an object and not just as a lazy PEP 563 string.
+# A real import, not a TYPE_CHECKING one: `pynix._cli` resolves the annotations
+# of a command to build its parser, so `Path` has to exist as an object and not
+# just as a lazy PEP 563 string.
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import anyio.to_thread
 import structlog
 from anyio import Path as AnyioPath
-from clypi import Command
-
-# A private name of clypi, and clypi offers no public way to clear it -- see
-# take_unparsed. Imported rather than spelled out as a string, so a rename in
-# clypi fails here at import time instead of leaving take_unparsed silently
-# clearing nothing.
-from clypi._cli.main import CLYPI_UNPARSED
 from rich.text import Text
 
 import nanopynix
@@ -86,20 +79,6 @@ class InteractiveShell:
     path: str
     from_nixpkgs: bool
     exec_prefix: list[str]
-
-
-def take_unparsed(command_type: type[Command]) -> list[str]:
-    """Return the words after ``--``, and clear them.
-
-    clypi keeps them on the *class* and never clears them
-    (``clypi/_cli/main.py:608``), so a second parse in the same process with no
-    ``--`` of its own still reports the first one's tail. A command-line run
-    parses once and would never see this. A test, or any program that embeds
-    the parser, parses more than once and sees it every time.
-    """
-    words = [str(word) for word in command_type.get_unparsed()]
-    setattr(command_type, CLYPI_UNPARSED, [])
-    return words
 
 
 def compose_shell_script(
@@ -399,7 +378,7 @@ async def run_print_dev_env(command: PrintDevEnv) -> None:
 
 async def run_develop(command: Develop) -> None:
     """The body of :meth:`pynix.develop.Develop.run`."""
-    words = take_unparsed(type(command))
+    words = command.command
     # Only an interactive shell needs one. develop.cc:688 appends its
     # `SHELL=` line after the `exec` of a command, where nothing runs it, so
     # resolving a shell for a command would cost a nixpkgs evaluation and

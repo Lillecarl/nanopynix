@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
@@ -16,10 +17,10 @@ def test_main_sets_up_after_it_parses(monkeypatch: pytest.MonkeyPatch) -> None:
     """The order is the point, and issue #123 is why.
 
     ``main`` used to install a traceback handler, name the process and
-    configure logging before ``Pynix.parse()``. clypi answers ``--help`` and a
-    shell completion inside ``parse`` and exits there, so a completion
-    callback paid for all three and used none of them. ``configure_logging``
-    alone pulled ``structlog``, which is 195 ms.
+    configure logging before it parsed anything. ``--help`` and a shell
+    completion both end inside the parse, so a completion callback paid for
+    all three and used none of them. ``configure_logging`` alone pulled
+    ``structlog``, which is 195 ms.
     """
     calls: list[tuple[str, str | None]] = []
     command = MagicMock()
@@ -30,9 +31,16 @@ def test_main_sets_up_after_it_parses(monkeypatch: pytest.MonkeyPatch) -> None:
         calls.append(("traceback", None))
 
     monkeypatch.setattr(impl_main.rich.traceback, "install", _record_traceback_install)
-    monkeypatch.setattr(pynix.Pynix, "parse", lambda: calls.append(("parse", None)) or command)  # type: ignore[reportUnknownLambdaType] -- lambda receives Any from setattr
+
+    def _record_dispatch(_parser: object, _namespace: object) -> object:
+        calls.append(("parse", None))
+        return command
+
+    monkeypatch.setattr(pynix, "dispatch", _record_dispatch)
+    monkeypatch.setattr(impl_main, "run", lambda _body: calls.append(("run", None)))  # type: ignore[reportUnknownLambdaType] -- lambda receives Any from setattr
+    monkeypatch.setattr(sys, "argv", ["pynix", "build"])
 
     pynix.main()
 
-    assert calls == [("parse", None), ("traceback", None), ("title", "pynix"), ("logging", None)]
-    command.start.assert_called_once_with()
+    # The parse comes first, the set-up after it, and the body last.
+    assert calls == [("parse", None), ("traceback", None), ("title", "pynix"), ("logging", None), ("run", None)]

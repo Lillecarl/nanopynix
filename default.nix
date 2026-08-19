@@ -25,8 +25,8 @@ let
   # and there would be nothing to notice it.
   #
   # `pySelf.callPackage`, not `python3Packages.callPackage`: these must be
-  # members of the set that resolves their dependencies, or `clypi` built
-  # against the plain set and `clypi` seen from this one would be two
+  # members of the set that resolves their dependencies, or `kr8s` built
+  # against the plain set and `kr8s` seen from this one would be two
   # derivations of one source.
   #
   # Additive, with one exception that says why it is here and when it goes.
@@ -77,8 +77,6 @@ let
       # that generation happens outside the package.
       betterproto2 = pySelf.callPackage ./nix/betterproto2.nix { };
       betterproto2-compiler = pySelf.callPackage ./nix/betterproto2-compiler.nix { };
-
-      clypi = pySelf.callPackage ./nix/clypi.nix { };
 
       kr8s = pySelf.callPackage ./nix/kr8s.nix { };
 
@@ -556,10 +554,7 @@ let
                 # belongs to the language server, so it is on the PATH of the
                 # `pynix-lsp` application below.
                 pathInputs = storeExecTools;
-                completions = {
-                  module = "pynix";
-                  command = "Pynix";
-                };
+                completions = true;
               };
               # The language server, as a release application of its own.
               # Issue #107 split it out of `pynix`, so that `pygls`,

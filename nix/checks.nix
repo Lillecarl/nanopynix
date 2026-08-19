@@ -379,7 +379,7 @@ in
         if loaded:
             raise SystemExit(f"`import pynix` must not load these, and it loaded: {loaded}")
 
-        names = set(pynix.Pynix.subcommands())
+        names = {sub.cli_name or sub.__name__ for sub in pynix.Pynix.subcommands}
         print(f"pynix alone: {len(sys.modules)} modules, {len(names)} subcommands, no language server")
         EOF
         touch "$out"
@@ -465,9 +465,8 @@ in
   # load them.**
   #
   # Two questions, and `pynix/completions/tests/` holds both. The first is what
-  # each installed file *is*: `installShellCompletion` knows click's protocol,
-  # which clypi does not speak, so asking the program for a script the click
-  # way makes it print help and exit 0 -- and a file holding an ANSI-coloured
+  # each installed file *is*: a program asked for a completion script the click
+  # way prints its help screen and exits 0, and a file holding an ANSI-coloured
   # help screen sits at a path the shell loads and reports nothing. Issue #105
   # measured exactly that on a sibling program.
   #
@@ -489,10 +488,12 @@ in
   # terminal, because fish draws no candidate list at all on a terminal it
   # believes cannot address the cursor.
   #
-  # `SHELL` is deliberately absent from this sandbox. `nix/render-completions.py`
-  # gives the reason: clypi resolves a completion through the user's login
-  # shell and raises when it does not know it, and each script now names its
-  # own shell instead. A regression there fails here.
+  # `SHELL` is deliberately absent from this sandbox. clypi resolved a
+  # completion through the user's login shell and raised when it did not know
+  # it, so each generated script had to name its own shell; argcomplete asks
+  # the shell that is running the script and reads no such variable. Issue
+  # #214. Keeping the variable unset here is what would catch a return to
+  # anything that needs it.
   completions = mkCheck "completions" [
     completionsEnv
     bashInteractive

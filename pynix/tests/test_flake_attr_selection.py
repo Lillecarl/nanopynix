@@ -20,7 +20,7 @@ import pytest
 
 import nanopynix
 from nanopynix._ansi import strip_ansi
-from pynix import Pynix
+from pynix import parse
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -72,8 +72,8 @@ async def _eval(
     capsys: pytest.CaptureFixture[str],
     reference: str,
 ) -> object:
-    cmd = Pynix.parse(["eval", "--flake", reference, *environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["eval", "--flake", reference, *environment.pynix_store_args()])
+    await cmd.run()
     return _json_output(capsys.readouterr().out)
 
 
@@ -139,10 +139,10 @@ async def test_a_missing_fragment_names_every_candidate(
 ) -> None:
     """The message of `InstallableFlake::getCursors`, and the names that exist."""
     system = nanopynix.current_system()
-    cmd = Pynix.parse(["eval", "--flake", f"{search_flake}#absent", *shared_nix_environment.pynix_store_args()])
+    cmd = parse(["eval", "--flake", f"{search_flake}#absent", *shared_nix_environment.pynix_store_args()])
 
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
 
     error = strip_ansi(capsys.readouterr().err)
     assert "does not provide attribute" in error
@@ -157,12 +157,12 @@ async def test_the_attr_flag_still_selects_exactly_what_it_says(
     search_flake: Path,
 ) -> None:
     """`--attr` is a plain path, applied after the search. No prefix reaches it."""
-    cmd = Pynix.parse(
+    cmd = parse(
         ["eval", "--flake", str(search_flake), "--attr", "nested", *shared_nix_environment.pynix_store_args()],
     )
 
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
 
     # The search resolved the empty fragment to `packages.<system>.default`,
     # which is a string, so `--attr nested` has no attribute set to look in.

@@ -1,8 +1,8 @@
 """The interactive Nix REPL: the prompt, the commands and the session.
 
-``pynix/repl.py`` holds the clypi command that starts this. The two are
+``pynix/repl.py`` holds the command that starts this. The two are
 separate modules because ``prompt_toolkit`` and the Nix grammar cost 91.8 ms,
-and clypi loads every subcommand module on every start. ``pynix._impl`` says
+and the parser loads every subcommand module on every start. ``pynix._impl`` says
 why, and how the two halves reach each other.
 """
 

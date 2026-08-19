@@ -29,7 +29,7 @@ from nanopynix.models import NixType
 from nanopynix.rpc import ReplSession, Store, ValueProxy
 from nanopynix.settings import NixFlakeSettings
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
-from pynix import Pynix
+from pynix import parse
 from pynix._impl.repl import (  # type: ignore[reportPrivateUsage] -- tests intentionally access private symbols
     _HELP,
     ReplRunError,
@@ -522,15 +522,15 @@ def test_repl_tree_sitter_lexer_skips_highlighting_for_non_expression_input() ->
 
 
 def test_repl_is_a_pynix_subcommand() -> None:
-    assert isinstance(Pynix.parse(["repl"]).subcommand, Repl)
+    assert isinstance(parse(["repl"]), Repl)
 
 
 def test_repl_accepts_file_and_attr_options() -> None:
-    command = Pynix.parse(["repl", "--file", "default.nix", "--attr", "pkgs"])
+    command = parse(["repl", "--file", "default.nix", "--attr", "pkgs"])
 
-    assert isinstance(command.subcommand, Repl)
-    assert command.subcommand.file == "default.nix"
-    assert command.subcommand.attr == "pkgs"
+    assert isinstance(command, Repl)
+    assert command.file == "default.nix"
+    assert command.attr == "pkgs"
 
 
 # ── _nix_input: dumb coverage tests ─────────────────────────────────────
@@ -947,8 +947,8 @@ async def test_repl_run_executes_a_full_interactive_session(
     monkeypatch.setattr("pynix._impl.repl.print_formatted_text", output.append)
     monkeypatch.setattr("pynix._impl.repl.PromptSession", _fake_prompt_session)
 
-    cmd = Pynix.parse(["repl", *shared_nix_environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["repl", *shared_nix_environment.pynix_store_args()])
+    await cmd.run()
 
     assert output[0] == _HELP
     assert "2" in output[1]
@@ -961,10 +961,10 @@ async def test_repl_run_rejects_mutually_exclusive_file_and_flake(tmp_path: Path
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{}")
 
-    cmd = Pynix.parse(["repl", "--file", str(nix_file), "--flake", ".#hello"])
+    cmd = parse(["repl", "--file", str(nix_file), "--flake", ".#hello"])
 
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
     assert output == ["error: --file and --flake are mutually exclusive"]
 
 
@@ -984,8 +984,8 @@ async def test_repl_run_loads_a_file_target_into_initial_scope(
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ answer = 42; }")
 
-    cmd = Pynix.parse(["repl", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["repl", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
+    await cmd.run()
 
     assert output == ["Added 1 variables: answer", _HELP]
 
@@ -1004,8 +1004,8 @@ async def test_repl_run_loads_a_flake_target_into_initial_scope(
     monkeypatch.setattr("pynix._impl.repl.print_formatted_text", output.append)
     monkeypatch.setattr("pynix._impl.repl.PromptSession", _fake_prompt_session)
 
-    cmd = Pynix.parse(["repl", "--flake", str(git_flake), *shared_nix_environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["repl", "--flake", str(git_flake), *shared_nix_environment.pynix_store_args()])
+    await cmd.run()
 
     assert output[0].startswith("Added ")
     assert "hello" in output[0].split()
@@ -1029,12 +1029,12 @@ async def test_repl_run_reports_missing_attr_in_initial_target(
     nix_file = tmp_path / "test.nix"
     nix_file.write_text("{ answer = 42; }")
 
-    cmd = Pynix.parse(
+    cmd = parse(
         ["repl", "--file", str(nix_file), "--attr", "missing", *shared_nix_environment.pynix_store_args()],
     )
 
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
     assert len(output) == 1
     assert output[0].startswith("error: attribute 'missing' not found")
 

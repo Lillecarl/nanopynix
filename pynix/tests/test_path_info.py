@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pynix import Pynix
+from pynix import parse
 
 if TYPE_CHECKING:
     from nanopynix.models import StorePath
@@ -19,8 +19,8 @@ async def test_path_info(
 ) -> None:
     path = str(seeded_store_path)
 
-    cmd = Pynix.parse(["path-info", path, *shared_nix_environment.pynix_store_args()])
-    await cmd.astart()
+    cmd = parse(["path-info", path, *shared_nix_environment.pynix_store_args()])
+    await cmd.run()
     captured = capsys.readouterr()
     result = json.loads(captured.out)
     assert result["path"] == path
@@ -41,11 +41,11 @@ async def test_path_info_nonexistent(
     the error moved, and the message it asserted was the one that reached
     ``jq`` instead of the JSON. ``_util.error_console`` carries the rule.
     """
-    cmd = Pynix.parse(
+    cmd = parse(
         ["path-info", "/nix/store/deadbeef-nonexistent", *shared_nix_environment.pynix_store_args()],
     )
     with pytest.raises(SystemExit):
-        await cmd.astart()
+        await cmd.run()
     captured = capsys.readouterr()
 
     assert "Error" in captured.err

@@ -7,13 +7,13 @@ Four layers, and the first one that names a value wins:
 3. ``$XDG_CONFIG_HOME/pynix/config.toml``
 4. the built-in default
 
-**pydantic-settings decides all four, and clypi decides none of them.** clypi
+**pydantic-settings decides all four, and the parser decides none of them.** argparse
 parses the command line and says which options the caller actually named;
 those go into the model as keyword arguments, which is the init source, and
 the environment and the file are the sources below it. One ordering, in one
 library, stated once in :meth:`_TableBackedSettings.settings_customise_sources`.
 
-An option the caller did not name holds ``pynix._settings.UNSET`` until
+An option the caller did not name is absent from the namespace until
 :class:`~pynix._settings.ConfiguredCommand` resolves it, which is how "absent"
 is told apart from "explicitly false".
 
@@ -40,13 +40,13 @@ is no loop to block, and ``anyio.Path`` would have nowhere to run.
 **Why this is under ``pynix._impl`` and not beside the command base.**
 :class:`PynixNixSettings` inherits the whole Nix settings model, so the class
 statement below imports ``pydantic_settings`` and builds a model of about 200
-fields. clypi loads every subcommand module on every start, ``pynix --help``
-and each keypress of a shell completion included, and none of those resolves a
-setting. Issue #123 measured ``pynix._settings`` at 334.3 ms, of which
-``pydantic_settings`` alone was 123.6 ms.
+fields. Building the parser loads every subcommand module on every start,
+``pynix --help`` and each keypress of a shell completion included, and none of
+those resolves a setting. Issue #123 measured ``pynix._settings`` at 334.3 ms,
+of which ``pydantic_settings`` alone was 123.6 ms.
 
 ``ConfiguredCommand`` reaches these names when it builds a command, which is
-after clypi decided that a command runs. ``pynix._impl`` says how.
+after the parser decided that a command runs. ``pynix._impl`` says how.
 """
 
 from __future__ import annotations
@@ -60,11 +60,11 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 
 from nanopynix import NixSettingsEnv, PrefixedEnvSettingsSource
 from nanopynix._typechecking import BEARTYPING
-from pynix._settings import UNSET
 
 if TYPE_CHECKING or BEARTYPING:
-    from clypi import Command
     from pydantic.fields import FieldInfo
+
+    from pynix._cli import Command
 
 
 #: What every ``--store`` used to default to, once per module.
@@ -280,8 +280,8 @@ def nix_settings(**overrides: Any) -> PynixNixSettings:
     A Nix setting that takes a list stays a plain flag of one string, and does
     not go through :func:`option`. The flag spells such a setting the way
     ``nix.conf`` does, in one space-separated string, and the model splits it.
-    :data:`UNSET` would make the resolved list reach the attribute, where the
-    command declares a string.
+    Going through :func:`option` would make the resolved list reach the
+    attribute, where the command declares a string.
     """
     named = {key: value for key, value in overrides.items() if value is not None}
     return PynixNixSettings(**named)
@@ -290,15 +290,14 @@ def nix_settings(**overrides: Any) -> PynixNixSettings:
 def configured_fields(command: type[Command]) -> dict[type[BaseSettings], list[str]]:
     """The options of *command* that :func:`option` declared, grouped by owner.
 
-    The declaration is the whole test: an option whose ``default_factory``
-    returns :data:`UNSET` is configuration-backed, and every other option is an
-    ordinary flag with an ordinary default. Reading the declaration keeps a name
-    that a model happens to share, such as ``substituters``, out of this.
+    The declaration is the whole test: an option that :func:`pynix._settings.option`
+    declared carries ``configured``, and every other option is an ordinary flag
+    with an ordinary default. Reading the declaration keeps a name that a model
+    happens to share, such as ``substituters``, out of this.
     """
     owned: dict[type[BaseSettings], list[str]] = {}
-    for field, conf in command.options().items():
-        factory = conf.default_factory
-        if not callable(factory) or factory() is not UNSET:
+    for field, spec in command.specs.items():
+        if not spec.configured:
             continue
         for model in _MODELS:
             if field in model.model_fields:

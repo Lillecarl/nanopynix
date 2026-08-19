@@ -1,7 +1,7 @@
 """The implementation of the ``pynix build`` command.
 
 ``pynix.build`` holds the command class and its options, and this module holds
-what ``run`` needs. ``pynix._impl`` says why: clypi loads every subcommand module
+what ``run`` needs. ``pynix._impl`` says why: the parser loads every subcommand module
 on every start, and none of these imports is needed to list an option.
 """
 
@@ -14,9 +14,9 @@ import shutil
 import tempfile
 from contextlib import AsyncExitStack, asynccontextmanager
 
-# A real import, not a TYPE_CHECKING one: clypi resolves the annotations on
-# the command below at runtime to build its argument parser, so `Path` has to
-# exist as an object and not just as a lazy PEP 563 string.
+# A real import, not a TYPE_CHECKING one: `pynix._cli` resolves the annotations
+# of a command to build its parser, so `Path` has to exist as an object and not
+# just as a lazy PEP 563 string.
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 

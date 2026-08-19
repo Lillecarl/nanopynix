@@ -12,26 +12,23 @@ three supported Nix versions disagree about how a derivation is written. The
 last two are here. :mod:`pynix._dev_env` turns the JSON back into bash.
 
 ``develop`` takes its command after ``--``, and not from a ``--command``
-option. clypi stops parsing at ``--`` and gives the tail back through
-``get_unparsed()``, so ``pynix develop -f . -- make -j4`` passes ``-j4``
-through untouched. A pipeline belongs inside the command, as ``-- bash -c
-'make | less'``, exactly as with ``nix develop --command``.
+option. argparse treats everything after the first ``--`` as a positional, so
+``pynix develop -f . -- make -j4`` passes ``-j4`` through untouched. A pipeline
+belongs inside the command, as ``-- bash -c 'make | less'``, exactly as with
+``nix develop --command``.
+
+**The tail is an ordinary positional now.** clypi kept it on the *class* and
+offered no public way to clear it, so `pynix._impl.develop.take_unparsed`
+reached into `clypi._cli.main.CLYPI_UNPARSED` to reset it between two parses in
+one process. Issue #214 deleted both.
 """
 
 from __future__ import annotations
 
-# A real import, not a TYPE_CHECKING one: clypi resolves the annotations on the
-# commands below at runtime to build their argument parsers, so `Path` has to
-# exist as an object and not just as a lazy PEP 563 string.
 from typing import override
 
-from clypi import arg
-
-# A private name of clypi, and clypi offers no public way to clear it -- see
-# take_unparsed. Imported rather than spelled out as a string, so a rename in
-# clypi fails here at import time instead of leaving take_unparsed silently
-# clearing nothing.
 from pynix import _impl
+from pynix._cli import opt, pos
 from pynix._settings import (
     ConfiguredCommand,
     attr_option,
@@ -65,7 +62,7 @@ class PrintDevEnv(ConfiguredCommand):
 
     print_build_logs: bool = print_build_logs_option()
 
-    json: bool = arg(False, help="Print the environment as JSON, instead of the bash that restores it.")
+    json: bool = opt(False, help="Print the environment as JSON, instead of the bash that restores it.")
 
     @override
     async def run(self) -> None:
@@ -96,6 +93,9 @@ class Develop(ConfiguredCommand):
     verbosity: str | None = verbosity_option()
 
     print_build_logs: bool = print_build_logs_option()
+
+    #: Everything after ``--``. Empty for an interactive shell.
+    command: list[str] = pos(help="Command to run in the environment, after --. Omit for an interactive bash.")
 
     @override
     async def run(self) -> None:
