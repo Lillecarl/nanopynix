@@ -556,6 +556,10 @@ let
                 # belongs to the language server, so it is on the PATH of the
                 # `pynix-lsp` application below.
                 pathInputs = storeExecTools;
+                completions = {
+                  module = "pynix";
+                  command = "Pynix";
+                };
               };
               # The language server, as a release application of its own.
               # Issue #107 split it out of `pynix`, so that `pygls`,
