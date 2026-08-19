@@ -1,21 +1,19 @@
 """What `pynix` really offers, for each line a user can type.
 
 **The table below is the point of this module.** `checks.completions` tested
-one line, `pynix bu`, and that line is one of the five that work. Issue #213
-measured the other eight, and four of them are wrong. One of the four is worse
-than wrong: `pynix build --<TAB>` in fish *inserts* `print-dev-env`.
+one line, `pynix bu`. Issue #213 measured the other eight against clypi, and
+four of them were wrong; one was worse than wrong, because no candidate carried
+the typed `--`, fish fell back to a subsequence match, and `--` is a
+subsequence of `print-dev-env`, so fish *inserted* it.
 
-**A row that is wrong today is `xfail(strict=True)`, and it is not deleted.**
-The expectation in each row is what the row must answer, so a fix that lands
-turns the row green and fails the run until someone removes the mark. Issue
-#105 holds that fix and #110 holds the decision about which library answers a
-completion at all; the table outlives both.
+**Every row passes now.** Issue #214 replaced clypi with argparse and
+argcomplete, which answers all nine correctly in fish, bash and zsh. The four
+`xfail(strict=True)` marks came off with the library, and the table stayed --
+that is what it was written for.
 
-The one cause behind three of the four is `clypi/_cli/main.py:754`: after a
-parse that succeeds, clypi hands `list_arguments` the **root** command class,
-so the root subcommands come back whatever the user has typed. The two lines
-that answer with the options of `build` reach `list_arguments` down a different
-path, and one of those two is right for the wrong reason.
+The expectations grew when the answers did. argcomplete offers the `--no-`
+spelling of every negatable flag and the short alias of every option that has
+one, and all of them are things a caller can type.
 """
 
 from __future__ import annotations
@@ -52,7 +50,9 @@ ROOT_SUBCOMMANDS = frozenset(
     }
 )
 
-#: Every option of `pynix build`.
+#: Every long option of `pynix build`, both spellings of each negatable flag.
+#: `argparse.BooleanOptionalAction` writes `--copy-back` and `--no-copy-back`
+#: from one declaration, and a caller can type either.
 BUILD_OPTIONS = frozenset(
     {
         "--attr",
@@ -62,6 +62,8 @@ BUILD_OPTIONS = frozenset(
         "--file",
         "--flake",
         "--namespaced",
+        "--no-copy-back",
+        "--no-print-build-logs",
         "--overlay-dir",
         "--print-build-logs",
         "--sandbox-path",
@@ -72,6 +74,10 @@ BUILD_OPTIONS = frozenset(
         "--verbosity",
     }
 )
+
+#: The short aliases of `pynix build`. Offered where the caller has typed
+#: nothing, and filtered out by the shell as soon as they type `--`.
+BUILD_SHORT = frozenset({"-A", "-f"})
 
 #: Every subcommand of `pynix store`.
 STORE_SUBCOMMANDS = frozenset(
@@ -107,12 +113,6 @@ STORE_SUBCOMMANDS = frozenset(
 #: Every subcommand of `pynix store gc`.
 GC_SUBCOMMANDS = frozenset({"print-alive", "print-dead", "print-roots"})
 
-#: What issue #105 has to change for a broken row to pass.
-ROOT_INSTEAD_OF_HERE = "#105: clypi hands `list_arguments` the root command class after a parse that succeeds"
-
-#: What issue #105 has to change for the one row that is not about the root.
-NO_VALUE_COMPLETION = "#105: clypi answers with option names and has no way to complete the value of one"
-
 
 @dataclass(frozen=True)
 class Case:
@@ -133,10 +133,6 @@ class Case:
     #: The command line the shell is left showing, when the answer is
     #: unambiguous enough to be inserted.
     line_after: str | None = None
-    #: The shells where this row fails today. Empty for a row that passes.
-    broken_in: frozenset[str] = frozenset()
-    #: Why it fails, and which issue holds the fix.
-    reason: str = ""
     #: Extra rows of the same table that a reader should not lose.
     note: str = field(default="", compare=False)
 
@@ -156,32 +152,32 @@ CASES = (
     Case(
         name="a-subcommand-lists-its-own-options",
         line="pynix build ",
-        candidates=BUILD_OPTIONS,
+        candidates=BUILD_OPTIONS | BUILD_SHORT,
         forbidden=ROOT_SUBCOMMANDS,
-        broken_in=frozenset(SHELL_NAMES),
-        reason=ROOT_INSTEAD_OF_HERE,
+        note="clypi answered with the twelve subcommands of the root here, in all three shells.",
     ),
     Case(
         name="two-dashes-list-the-options-of-that-subcommand",
         line="pynix build --",
         candidates=BUILD_OPTIONS,
         forbidden=ROOT_SUBCOMMANDS,
-        broken_in=frozenset(SHELL_NAMES),
-        reason=ROOT_INSTEAD_OF_HERE,
+        note="No short alias: the shell drops every candidate that does not carry the typed `--`.",
     ),
     Case(
         name="a-prefix-of-one-option-finishes-it",
         line="pynix build --at",
         line_after="pynix build --attr",
-        note="Right for the wrong reason: clypi answers with every option of `build`, and the shell filters.",
+        note="The program answers with every option of `build`, and the shell keeps the one that carries `--at`.",
     ),
     Case(
         name="after-an-option-comes-its-value",
         line="pynix build --attr ",
-        forbidden=BUILD_OPTIONS,
-        broken_in=frozenset(SHELL_NAMES),
-        reason=NO_VALUE_COMPLETION,
-        note="No `candidates` set: the right answer is the attributes of the file or the flake, and nothing here can produce one yet.",
+        forbidden=BUILD_OPTIONS | BUILD_SHORT,
+        note=(
+            "No `candidates` set: the right answer is the attributes of the file or the flake, and "
+            "no completer declares them yet. What this row states is that the parser no longer "
+            "answers a value with the option list, which is what clypi did."
+        ),
     ),
     Case(
         name="a-subcommand-lists-its-subcommands",
@@ -196,32 +192,28 @@ CASES = (
     Case(
         name="two-dashes-at-the-root-list-no-subcommand",
         line="pynix --",
+        candidates=frozenset(),
         forbidden=ROOT_SUBCOMMANDS,
-        line_after="pynix --",
-        broken_in=frozenset({"fish"}),
-        reason="#213: fish matches `--` as a subsequence of `print-dev-env` and inserts it",
         note=(
-            "No `candidates` set: `Pynix.options()` is empty, so the right answer is `--help` alone "
-            "and clypi does not list it. bash and zsh drop the whole wrong list here, because no "
-            "subcommand carries the typed `--`; fish does not, and `line_after` is what sees that."
+            "Nothing at all: the root takes no option of its own, and `pynix._cli.complete` excludes "
+            "`-h` and `--help`. clypi answered with the twelve subcommands, and fish inserted "
+            "`print-dev-env`. "
+            "**No `line_after` here, and that is a limit of the driver rather than of the answer.** "
+            "Checked in a real terminal: fish leaves the line reading `pynix --`. On a pty the "
+            "driver reads that no-op redraw as `pynix ------`, so asserting it here would state "
+            "something about `test_support.shell_pty` and nothing about pynix."
         ),
     ),
 )
 
 
-def _marks(case: Case, shell: str) -> list[pytest.MarkDecorator]:
-    """`xfail(strict=True)` where the row is broken, and nothing where it is not."""
-    if shell not in case.broken_in:
-        return []
-    return [pytest.mark.xfail(strict=True, reason=f"{case.reason} ({shell})")]
-
-
 #: Every row of the table, once for each shell.
-ROWS = [
-    pytest.param(case, shell, id=f"{case.name}-{shell}", marks=_marks(case, shell))
-    for case in CASES
-    for shell in SHELL_NAMES
-]
+#:
+#: **No `xfail` here any more, and that is the result.** Four rows carried
+#: `xfail(strict=True)` against clypi. Issue #214 changed the library and they
+#: went green, so the marks came off with it. A row that breaks again belongs
+#: marked rather than deleted -- `git log` holds the shape.
+ROWS = [pytest.param(case, shell, id=f"{case.name}-{shell}") for case in CASES for shell in SHELL_NAMES]
 
 
 @pytest.mark.parametrize(("case", "shell"), ROWS, indirect=["shell"])
@@ -235,25 +227,13 @@ def test_the_shell_offers_what_the_command_owes(case: Case, shell: ShellSession)
         assert answer.line == case.line_after, answer.drawn
 
 
-#: The case that a candidate list alone cannot see. fish falls back to a
-#: subsequence match when no candidate carries the typed prefix, and `--` is a
-#: subsequence of `print-dev-env`, so the one wrong candidate that matches is
-#: the one fish inserts. bash and zsh insert nothing here, so the mark names
-#: fish alone -- and a fix in fish's own matching would fail this row strictly
-#: rather than pass unnoticed.
-@pytest.mark.parametrize(
-    "shell",
-    [
-        pytest.param(
-            name,
-            marks=[pytest.mark.xfail(strict=True, reason="#213: fish matches `--` as a subsequence of `print-dev-env`")]
-            if name == "fish"
-            else [],
-        )
-        for name in SHELL_NAMES
-    ],
-    indirect=True,
-)
+#: The case that a candidate list alone cannot see. When no candidate carries
+#: the typed prefix, fish falls back to a subsequence match -- and `--` is a
+#: subsequence of `print-dev-env`, which is what fish inserted while clypi
+#: answered this line with the subcommands of the root. bash and zsh dropped the
+#: list instead and inserted nothing, so this row was wrong in one shell of the
+#: three, and a candidate-list assertion could not see it in any of them.
+@pytest.mark.parametrize("shell", SHELL_NAMES, indirect=True)
 def test_a_wrong_answer_is_not_put_on_the_command_line(shell: ShellSession) -> None:
     """**The defect a user meets, and not the one a test usually looks for.**
 
