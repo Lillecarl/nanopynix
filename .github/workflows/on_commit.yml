@@ -476,7 +476,7 @@ jobs:
       BACKEND: local
       CI_STEP: ciSteps.nix_2_34
       NANOPYNIX_RPC_TIMEOUT: '90'
-    timeout-minutes: 190
+    timeout-minutes: 200
     steps:
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -491,6 +491,9 @@ jobs:
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
       timeout-minutes: 15
+    - name: Stop the macOS crash reporter
+      run: nix run --file . ciSteps.disable-crash-reporter
+      timeout-minutes: 10
     - name: Build the CI step package for Nix nix_2_34
       run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
       timeout-minutes: 30
