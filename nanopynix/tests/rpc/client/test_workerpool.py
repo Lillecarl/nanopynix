@@ -392,6 +392,9 @@ def _worker_process(nix: Session) -> Any:
 #: what holds it, which is what `_why_it_is_still_alive` is for.
 _REAP_TIMEOUT_SECONDS = 30.0
 
+#: How long `_what_holds_it` waits after `SIGKILL`, which nothing can refuse.
+_SIGKILL_GRACE_SECONDS = 10.0
+
 
 async def _why_it_is_still_alive(proc: Any) -> str:
     """What the operating system says about a child that will not be reaped.
@@ -409,10 +412,46 @@ async def _why_it_is_still_alive(proc: Any) -> str:
     """
     pid = proc.pid
     details = [f"pid={pid}", f"exit_status={proc.exit_status}", f"waited={_REAP_TIMEOUT_SECONDS}s"]
+    # The disposition of this process, because `SIG_IGN` is the one setting a
+    # child keeps across `exec`. A spawn worker inherits it from here, and a
+    # forkserver worker inherits what the forkserver had instead. macOS takes
+    # `spawn` and Linux takes `forkserver`, so this separates "the signal was
+    # ignored" from "the signal was delivered and something held the process".
+    details.append(f"parent_sigabrt={signal.getsignal(signal.SIGABRT)!r}")
     if pid is not None:
         result = await run_process(["ps", "-o", "pid,ppid,stat,comm", "-p", str(pid)])
         details.append(f"ps:\n{result.stdout.strip() or '(no such process, so it was reaped after the join)'}")
+        details.append(await _what_holds_it(proc, pid))
     return "the signalled child was not collected. " + " ".join(details)
+
+
+async def _what_holds_it(proc: Any, pid: int) -> str:
+    """Whether `SIGKILL` collects the child that a fatal signal did not.
+
+    **This is the measurement that separates the two answers.** `SIGKILL`
+    cannot be caught, blocked or ignored, so a child that goes on it was
+    reachable all along and the first signal was refused rather than lost. A
+    child that survives this as well is held by something outside the process.
+
+    The docstring above names the candidate for the second answer: macOS
+    attaches a crash reporter to a process that takes a fatal signal, and that
+    reporter reads the whole address space before it lets go. This also names
+    any such reporter that is running, because that is the thing to look for.
+
+    It kills either way, so a run that meets this leaves no worker behind.
+    Issue #212.
+    """
+    reporters = await run_process(["ps", "-o", "pid,comm", "-A"])
+    named = [
+        line
+        for line in reporters.stdout.splitlines()
+        if any(tool in line for tool in ("ReportCrash", "spindump", "sysdiagnose"))
+    ]
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGKILL)
+    await proc.join(_SIGKILL_GRACE_SECONDS)
+    collected = "yes" if not proc.is_alive() else "no"
+    return f"sigkill_collected_it={collected} crash_reporters={named or '(none)'}"
 
 
 async def _reaped(proc: Any) -> None:
