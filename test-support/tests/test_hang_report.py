@@ -13,13 +13,17 @@ string would read as the second failure mode.
 
 from __future__ import annotations
 
+import fcntl
+import tempfile
 import threading
+import time
+from pathlib import Path
 
 import anyio
 import pytest
 
 from test_support import deadline
-from test_support.hang_report import hang_report, live_threads, pending_tasks
+from test_support.hang_report import hang_report, kernel_state, live_threads, pending_tasks
 
 _MARKER = "hang_report_parked_here"
 
@@ -148,3 +152,47 @@ async def test_the_deadline_wrapper_attaches_the_report(monkeypatch: pytest.Monk
     assert notes, "the TimeoutError carries no note, so CI would show the bare timeout again"
     assert "0.05s deadline" in notes[0], f"the wrapper did not pass its own deadline through:\n{notes[0]}"
     assert "thread(s):" in notes[0]
+
+
+@pytest.mark.skipif(not Path("/proc/self/task").is_dir(), reason="the wait channel of a thread is a Linux file")
+def test_the_report_names_the_kernel_wait_of_a_blocked_thread() -> None:
+    """A thread that waits for a file lock is what issue #211 has to tell apart.
+
+    `flock` is the deterministic way to park a thread in the kernel, and it is
+    also the wait that the store of Nix uses, so this asserts the case the
+    report exists for. The report must name the channel and not the address:
+    a running thread answers `0`, and a report of `0` for every thread would
+    be the false all-clear that this file already guards against.
+    """
+    with tempfile.NamedTemporaryFile() as holder:
+        fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
+        with Path(holder.name).open("r+", encoding="utf-8") as waiter:
+
+            def _wait_for_the_lock() -> None:
+                fcntl.flock(waiter.fileno(), fcntl.LOCK_EX)
+
+            blocked = threading.Thread(target=_wait_for_the_lock, daemon=True)
+            blocked.start()
+            try:
+                deadline = time.monotonic() + 5
+                report = ""
+                while time.monotonic() < deadline:
+                    report = kernel_state()
+                    if "lock" in report:
+                        break
+                    time.sleep(0.05)
+                assert "thread wait channels:" in report
+                assert "lock" in report, report
+            finally:
+                fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+                blocked.join(timeout=5)
+
+
+def test_the_report_says_so_where_proc_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """macOS has no `/proc`, and the report must say that rather than raise."""
+
+    def _never_a_directory(_self: Path) -> bool:
+        return False
+
+    monkeypatch.setattr(Path, "is_dir", _never_a_directory)
+    assert "no /proc/self/task" in kernel_state()

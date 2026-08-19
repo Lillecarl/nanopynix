@@ -1,0 +1,411 @@
+{
+  "seed": 3,
+  "roster_hash": "sha256:eef7d5aefd96e46b",
+  "lanes": [
+    [
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_has_attr",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_file_directory_loads_default_nix",
+      "nanopynix/tests/rpc/test_error_identity.py::test_an_unsupported_scalar_type_arrives_as_value_error",
+      "nanopynix/tests/rpc/test_error_identity.py::test_a_negative_index_past_the_start_arrives_as_index_error",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_list",
+      "nanopynix/tests/rpc/test_error_identity.py::test_an_absent_handle_arrives_as_key_error"
+    ],
+    [
+      "nanopynix/tests/rpc/test_error_identity.py::test_a_nix_error_still_refines_past_the_class_the_worker_named",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_file_simple",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_repl_session_edit_location_uses_function_source",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_to_python_refuses_a_tree_containing_a_function",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_reused_function_can_call_separately_evaluated_value",
+      "nanopynix/tests/test_repl_scope_capacity.py::test_rpc_refuses_one_binding_past_the_end"
+    ],
+    [
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_attr_names",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_string",
+      "nanopynix/tests/rpc/test_error_identity.py::test_a_setting_refusal_arrives_as_setting_not_live_error",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_repl_session_scope_names_include_bindings_and_base_scope",
+      "nanopynix/tests/test_store_metadata_fidelity.py::test_rpc_read_derivation_keeps_nested_input_drvs",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_nested_navigation"
+    ],
+    [
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_call_function_with_value_proxy_arg",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_strict_accessor_and_apply",
+      "nanopynix/tests/test_store_metadata_fidelity.py::test_rpc_build_reports_the_path_it_produced",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_repl_session_open_is_idempotent",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_copy_closure_between_stores"
+    ],
+    [
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_auto_call_function_with_default_attrset_args",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_concurrent_sessions",
+      "nanopynix/tests/test_scalar_accessor_semantics.py::test_rpc_reads_a_string_carrying_store_path_context",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_session_cleanup",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_call_function"
+    ],
+    [
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_call_function_with_nested_value_proxy_arg",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_repl_session_persists_bindings",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_call_non_function_raises",
+      "nanopynix/tests/test_store_metadata_fidelity.py::test_rpc_read_derivation_keeps_structured_attrs",
+      "nanopynix/tests/rpc/test_error_identity.py::test_a_handle_of_the_wrong_kind_arrives_as_type_error"
+    ],
+    [
+      "nanopynix/tests/test_store_exec.py::test_rpc_a_program_in_a_relocated_store_runs_through_the_exec_prefix",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_repl_session_load_file_autocalls_top_level_function",
+      "nanopynix/tests/test_repl_scope_capacity.py::test_rpc_fills_the_repl_scope_exactly_to_the_end",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_forced_attrs_borrow_the_parent_value_handle",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_repl_session_adds_attrs_to_scope"
+    ],
+    [
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_force_closing_store_closes_dependent_eval_state",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_attr_navigation",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_thunk",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_force_does_not_consume",
+      "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_callable_function_proxy"
+    ]
+  ],
+  "events": [
+    {
+      "nodeid": "nanopynix/tests/rpc/test_error_identity.py::test_a_nix_error_still_refines_past_the_class_the_worker_named",
+      "lane": 1,
+      "start_ms": 0.006,
+      "end_ms": 1.892,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_force_closing_store_closes_dependent_eval_state",
+      "lane": 7,
+      "start_ms": 0.094,
+      "end_ms": 1.893,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_attr_names",
+      "lane": 2,
+      "start_ms": 0.247,
+      "end_ms": 1.965,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_call_function_with_nested_value_proxy_arg",
+      "lane": 5,
+      "start_ms": 0.067,
+      "end_ms": 1.999,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_call_function_with_value_proxy_arg",
+      "lane": 3,
+      "start_ms": 0.021,
+      "end_ms": 2.0,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_has_attr",
+      "lane": 0,
+      "start_ms": 0.133,
+      "end_ms": 2.028,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_auto_call_function_with_default_attrset_args",
+      "lane": 4,
+      "start_ms": 0.039,
+      "end_ms": 2.073,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_store_exec.py::test_rpc_a_program_in_a_relocated_store_runs_through_the_exec_prefix",
+      "lane": 6,
+      "start_ms": 0.329,
+      "end_ms": 2.477,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_file_simple",
+      "lane": 1,
+      "start_ms": 1.893,
+      "end_ms": 3.363,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_attr_navigation",
+      "lane": 7,
+      "start_ms": 1.913,
+      "end_ms": 3.405,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_string",
+      "lane": 2,
+      "start_ms": 1.965,
+      "end_ms": 3.457,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_file_directory_loads_default_nix",
+      "lane": 0,
+      "start_ms": 2.044,
+      "end_ms": 3.473,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_repl_session_persists_bindings",
+      "lane": 5,
+      "start_ms": 2.073,
+      "end_ms": 3.54,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_concurrent_sessions",
+      "lane": 4,
+      "start_ms": 2.144,
+      "end_ms": 3.591,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_strict_accessor_and_apply",
+      "lane": 3,
+      "start_ms": 2.0,
+      "end_ms": 3.645,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_repl_session_load_file_autocalls_top_level_function",
+      "lane": 6,
+      "start_ms": 2.48,
+      "end_ms": 3.684,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_repl_session_edit_location_uses_function_source",
+      "lane": 1,
+      "start_ms": 3.363,
+      "end_ms": 4.832,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_thunk",
+      "lane": 7,
+      "start_ms": 3.405,
+      "end_ms": 4.855,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/test_error_identity.py::test_a_setting_refusal_arrives_as_setting_not_live_error",
+      "lane": 2,
+      "start_ms": 3.457,
+      "end_ms": 4.876,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/test_error_identity.py::test_an_unsupported_scalar_type_arrives_as_value_error",
+      "lane": 0,
+      "start_ms": 3.474,
+      "end_ms": 4.943,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_call_non_function_raises",
+      "lane": 5,
+      "start_ms": 3.54,
+      "end_ms": 4.974,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_scalar_accessor_semantics.py::test_rpc_reads_a_string_carrying_store_path_context",
+      "lane": 4,
+      "start_ms": 3.591,
+      "end_ms": 5.014,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_store_metadata_fidelity.py::test_rpc_build_reports_the_path_it_produced",
+      "lane": 3,
+      "start_ms": 3.645,
+      "end_ms": 5.062,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_repl_scope_capacity.py::test_rpc_fills_the_repl_scope_exactly_to_the_end",
+      "lane": 6,
+      "start_ms": 3.684,
+      "end_ms": 5.565,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_force_does_not_consume",
+      "lane": 7,
+      "start_ms": 4.855,
+      "end_ms": 6.311,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_repl_session_scope_names_include_bindings_and_base_scope",
+      "lane": 2,
+      "start_ms": 4.878,
+      "end_ms": 6.388,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/test_error_identity.py::test_a_negative_index_past_the_start_arrives_as_index_error",
+      "lane": 0,
+      "start_ms": 4.944,
+      "end_ms": 6.406,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_session_cleanup",
+      "lane": 4,
+      "start_ms": 5.021,
+      "end_ms": 6.45,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_to_python_refuses_a_tree_containing_a_function",
+      "lane": 1,
+      "start_ms": 4.832,
+      "end_ms": 6.469,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_store_metadata_fidelity.py::test_rpc_read_derivation_keeps_structured_attrs",
+      "lane": 5,
+      "start_ms": 4.974,
+      "end_ms": 6.492,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_repl_session_open_is_idempotent",
+      "lane": 3,
+      "start_ms": 5.062,
+      "end_ms": 6.521,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_forced_attrs_borrow_the_parent_value_handle",
+      "lane": 6,
+      "start_ms": 5.566,
+      "end_ms": 6.733,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_callable_function_proxy",
+      "lane": 7,
+      "start_ms": 6.311,
+      "end_ms": 7.699,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_call_function",
+      "lane": 4,
+      "start_ms": 6.45,
+      "end_ms": 7.864,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_store_metadata_fidelity.py::test_rpc_read_derivation_keeps_nested_input_drvs",
+      "lane": 2,
+      "start_ms": 6.389,
+      "end_ms": 7.903,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_list",
+      "lane": 0,
+      "start_ms": 6.415,
+      "end_ms": 7.926,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/test_error_identity.py::test_a_handle_of_the_wrong_kind_arrives_as_type_error",
+      "lane": 5,
+      "start_ms": 6.492,
+      "end_ms": 7.962,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_reused_function_can_call_separately_evaluated_value",
+      "lane": 1,
+      "start_ms": 6.469,
+      "end_ms": 7.964,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_copy_closure_between_stores",
+      "lane": 3,
+      "start_ms": 6.55,
+      "end_ms": 8.02,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_repl_session_adds_attrs_to_scope",
+      "lane": 6,
+      "start_ms": 6.733,
+      "end_ms": 8.034,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/test_error_identity.py::test_an_absent_handle_arrives_as_key_error",
+      "lane": 0,
+      "start_ms": 7.926,
+      "end_ms": 9.18,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/rpc/client/test_eval_rpc.py::test_eval_nested_navigation",
+      "lane": 2,
+      "start_ms": 7.904,
+      "end_ms": 9.189,
+      "outcome": "ok",
+      "detail": ""
+    },
+    {
+      "nodeid": "nanopynix/tests/test_repl_scope_capacity.py::test_rpc_refuses_one_binding_past_the_end",
+      "lane": 1,
+      "start_ms": 7.964,
+      "end_ms": 9.454,
+      "outcome": "ok",
+      "detail": ""
+    }
+  ]
+}
