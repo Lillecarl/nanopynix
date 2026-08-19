@@ -33,9 +33,10 @@
   nixos,
   pynix,
   pynixd,
-  bash,
+  bashInteractive,
   fish,
   zsh,
+  ncurses,
   completionSpike,
 }:
 let
@@ -206,6 +207,15 @@ let
   # on purpose, so no environment that a person works in can answer it.
   pynixOnlyEnv = pythonSet.mkVirtualEnv "pynix-only-env" {
     pynix = [ ];
+  };
+
+  # And a ninth, for the completion suite of `pynix`. `test-support` carries
+  # `shell_pty`, which drives a shell on a pty, and its `test` extra carries
+  # pytest. **`pynix` is deliberately not in it**: that suite completes against
+  # the *installed* application, which the gate names by its store path, and a
+  # second `pynix` on the search path would make the answer ambiguous.
+  completionsEnv = pythonSet.mkVirtualEnv "pynix-completions-test-env" {
+    test-support = [ "test" ];
   };
 
   # A minimum NixOS configuration, so that the module of pynixd is evaluated.
@@ -451,97 +461,52 @@ in
   # An alias, and not a `mkCheck`. The suite is the check phase of the package
   # itself, so building the package *is* running the gate. See
   # nix/completion-spike.nix for why that shape was chosen.
-  # **The shell completions `pynix` installs are completion scripts, and not
-  # its help screen.**
+  # **The shell completions `pynix` installs, driven in the three shells that
+  # load them.**
   #
-  # That distinction is the whole gate. `installShellCompletion` knows click's
-  # protocol, which clypi does not speak, so asking the program for a script
-  # the click way makes it print help and exit 0 -- and a file holding an
-  # ANSI-coloured help screen sits at a path the shell loads and reports
-  # nothing. Issue #105 measured exactly that on a sibling program. A check
-  # that only asserts the file exists is silent about it, so this one runs the
-  # shells.
+  # Two questions, and `pynix/completions/tests/` holds both. The first is what
+  # each installed file *is*: `installShellCompletion` knows click's protocol,
+  # which clypi does not speak, so asking the program for a script the click
+  # way makes it print help and exit 0 -- and a file holding an ANSI-coloured
+  # help screen sits at a path the shell loads and reports nothing. Issue #105
+  # measured exactly that on a sibling program.
   #
-  # bash and fish are driven for real: the file is sourced and the shell is
-  # asked what it would offer for `pynix bu`. zsh has no headless way to run
-  # its completion system -- that needs a pty, which `completion-spike/_pty.py`
-  # holds -- so zsh gets its structure checked and its callback run, which is
-  # what tells a script apart from a help screen.
+  # The second is what each shell then *offers*, for every line a user can
+  # type. This gate asked one line, `pynix bu`, and answered it in a shell
+  # probe written in this file. Issue #213 measured the other eight: four are
+  # wrong, and one of the four puts a command the user did not ask for on the
+  # command line. A case table replaces the probe, and each broken row is
+  # `xfail(strict=True)` against #105, so the fix turns the row green and the
+  # run red until someone removes the mark.
+  #
+  # `PYNIX_INSTALLED_PREFIX` names the built application, so the suite reads
+  # `share/` out of the thing a user installs. Without it the suite renders the
+  # same three scripts itself, which is what a run in the dev shell does.
+  #
+  # `bashInteractive` and not `bash`: the driver spawns an interactive shell
+  # and sends `bind`, which the non-interactive build has no readline for.
+  # `ncurses` carries the terminfo database, and the driver asks for an `xterm`
+  # terminal, because fish draws no candidate list at all on a terminal it
+  # believes cannot address the cursor.
   #
   # `SHELL` is deliberately absent from this sandbox. `nix/render-completions.py`
   # gives the reason: clypi resolves a completion through the user's login
   # shell and raises when it does not know it, and each script now names its
   # own shell instead. A regression there fails here.
-  completions =
-    runCommand "nanopynix-check-completions"
-      {
-        nativeBuildInputs = [
-          pynix
-          bash
-          fish
-          zsh
-        ];
-      }
-      ''
-        set -euo pipefail
-        # `SHELL` unset on purpose, and a writable `HOME` because fish refuses
-        # to start without one.
-        unset SHELL
-        export HOME="$PWD/home"
-        mkdir -p "$HOME"
-
-        fish_script="${pynix}/share/fish/vendor_completions.d/pynix.fish"
-        bash_script="${pynix}/share/bash-completion/completions/pynix.bash"
-        zsh_script="${pynix}/share/zsh/site-functions/_pynix"
-
-        for f in "$fish_script" "$bash_script" "$zsh_script"; do
-          test -f "$f" || { echo "missing completion file: $f" >&2; exit 1; }
-          if grep -q $'\033' "$f"; then
-            echo "$f holds an ANSI escape, so it is a help screen and not a script" >&2
-            exit 1
-          fi
-          if grep -qi '^Usage:' "$f"; then
-            echo "$f holds a usage line, so it is a help screen and not a script" >&2
-            exit 1
-          fi
-        done
-
-        # Each probe is a file rather than a `-c` string: the bodies hold the
-        # quoting of two shells, and nesting that inside a Nix string as well
-        # is how a passing gate becomes an empty answer.
-        cat > probe.fish <<'FISH'
-        source FISH_SCRIPT
-        complete -C 'pynix bu'
-        FISH
-        sed -i "s|FISH_SCRIPT|$fish_script|" probe.fish
-
-        cat > probe.bash <<'BASH'
-        source BASH_SCRIPT
-        COMP_WORDS=(pynix bu)
-        COMP_CWORD=1
-        _complete_pynix pynix bu pynix
-        printf '%s\n' "''${COMPREPLY[@]}"
-        BASH
-        sed -i "s|BASH_SCRIPT|$bash_script|" probe.bash
-
-        echo "--- fish ---"
-        got=$(fish probe.fish 2>/dev/null)
-        test "$got" = "build" || { echo "fish offered '$got', wanted 'build'" >&2; exit 1; }
-
-        echo "--- bash ---"
-        got=$(bash probe.bash)
-        test "$got" = "build" || { echo "bash offered '$got', wanted 'build'" >&2; exit 1; }
-
-        echo "--- zsh ---"
-        grep -q '^#compdef pynix$' "$zsh_script" || { echo "no #compdef line in $zsh_script" >&2; exit 1; }
-        grep -q '^compdef _complete_pynix pynix$' "$zsh_script" || { echo "no compdef call in $zsh_script" >&2; exit 1; }
-        grep -q 'env SHELL=zsh _CLYPI_CURRENT_ARGS=' "$zsh_script" || { echo "no callback in $zsh_script" >&2; exit 1; }
-        got=$(env SHELL=zsh _CLYPI_CURRENT_ARGS="pynix bu" pynix | head -1)
-        test "$got" = "build" || { echo "the zsh callback offered '$got', wanted 'build'" >&2; exit 1; }
-
-        echo "every shell answered 'pynix bu' with 'build'"
-        touch "$out"
-      '';
+  completions = mkCheck "completions" [
+    completionsEnv
+    bashInteractive
+    fish
+    zsh
+    ncurses
+  ] ''
+    unset SHELL
+    export PYNIX_INSTALLED_PREFIX="${pynix}"
+    export TERMINFO_DIRS="${ncurses}/share/terminfo"
+    # `-p no:cacheprovider`, because the source is a read-only store path.
+    cd pynix/completions
+    pytest . -p no:cacheprovider
+  '';
 
   completion-spike = completionSpike;
 
