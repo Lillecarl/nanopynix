@@ -23,9 +23,9 @@ from nanopynix.protocols import AsyncLockedFlake
 from nanopynix_testing.nix_environment import with_nixpkgs
 from pynix import Pynix
 from pynix._dev_env import BuildEnvironment, make_rc_script, quote
-from pynix.develop import (
+from pynix._impl.develop import (  # pyright: ignore[reportPrivateUsage] -- the ref-selection decision is unit-tested directly; the end-to-end path builds bashInteractive
     InteractiveShell,
-    _nixpkgs_flake_ref,  # pyright: ignore[reportPrivateUsage] -- the ref-selection decision is unit-tested directly; the end-to-end path builds bashInteractive
+    _nixpkgs_flake_ref,
     compose_shell_script,
     take_unparsed,
 )

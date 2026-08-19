@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 from anyio import Path as AsyncPath
-from clypi import arg
 from nanopynix_helpers import (
     AttrPathSearch as AttrPathSearch,
     EvaluationTargetError as EvaluationTargetError,
@@ -18,7 +17,7 @@ from nanopynix_helpers import (
 
 import nanopynix
 from nanopynix import NixType
-from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
+from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import ThrownError
 
 if TYPE_CHECKING or BEARTYPING:
@@ -29,35 +28,6 @@ if TYPE_CHECKING or BEARTYPING:
 logger = structlog.get_logger("pynix.target")
 
 _FLAKE_PREFIX = "flake:"
-
-
-@no_runtime_type_check  # clypi's arg() returns a PartialConfig placeholder at declaration time, not the annotated type -- clypi's own machinery replaces it later; beartype would otherwise flag every call as a type violation
-def file_option() -> str | None:
-    """Declare the common ``--file`` option.
-
-    The value is a string, and not a ``Path``. ``PurePath`` collapses a
-    repeated separator, so ``https://example.com/x.tar.gz`` reached the
-    evaluator as ``https:/example.com/x.tar.gz`` and failed. A reference is
-    also not a path: ``github:NixOS/nixpkgs`` and ``<nixpkgs>`` name a tree
-    that no local directory holds.
-    """
-    return arg(
-        None,
-        short="f",
-        help="Evaluate FILE as a Nix expression. FILE is a path, a lookup path, a URL, or a flake reference, and it may end with '#' and an attribute path.",
-    )
-
-
-@no_runtime_type_check  # see file_option
-def attr_option() -> str | None:
-    """Declare the common ``--attr`` option."""
-    return arg(None, short="A", help="Dot-separated attribute path within the evaluation result.")
-
-
-@no_runtime_type_check  # see file_option
-def flake_option() -> str | None:
-    """Declare the common ``--flake`` option."""
-    return arg(None, help="Evaluate FLAKE, optionally with a '#'-separated attribute path.")
 
 
 @dataclass(frozen=True)

@@ -34,7 +34,8 @@ for _path in (_PYNIX_SRC, _PYNIX_LSP_SRC, _PYTHON_SRC):
         sys.path.insert(0, str(_path))
 
 from pynix import Pynix  # noqa: E402 -- sys.path must be extended before pynix is importable
-from pynix._settings import UNSET, PynixDefaults  # noqa: E402 -- see above
+from pynix._impl.settings import PynixDefaults  # noqa: E402 -- see above
+from pynix._settings import UNSET  # noqa: E402 -- see above
 
 if TYPE_CHECKING:
     from clypi import Command

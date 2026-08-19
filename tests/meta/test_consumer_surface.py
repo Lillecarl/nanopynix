@@ -129,7 +129,7 @@ CONSUMER_ENGINE_ANNOTATIONS: dict[tuple[str, str], str] = {
         "make `AsyncValue` generic over the store type. Until then, the one "
         "function that pairs a value with a build store names the class."
     ),
-    ("pynix/src/pynix/build.py", "ValueProxy"): (
+    ("pynix/src/pynix/_impl/build.py", "ValueProxy"): (
         "Feeds `build_with_fod_update` above, so it inherits that constraint."
     ),
 }

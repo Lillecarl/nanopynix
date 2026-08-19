@@ -23,6 +23,7 @@ these tests ask is only whether the list matches what the module binds.
 from __future__ import annotations
 
 import ast
+import importlib
 import inspect
 from pathlib import Path
 from types import ModuleType
@@ -213,4 +214,36 @@ def test_the_lazy_table_and_the_type_checking_block_agree() -> None:
     assert not disagree, (
         f"{len(disagree)} name(s) come from a different module in the two halves, so the type "
         f"and the value can be different things: {disagree}"
+    )
+
+
+def test_the_impl_table_names_every_module_that_is_there() -> None:
+    """``pynix._impl`` is written three times, and two of them are lists.
+
+    The package holds ``_SUBMODULES``, an ``if TYPE_CHECKING:`` import block,
+    and the files themselves. A module missing from the frozenset raises
+    ``AttributeError`` the first time the command that needs it runs, and no
+    import-time check sees that: leaving ``main`` out cost every ``pynix-lsp``
+    end-to-end test a ``Server process exited with return code: 1``, and every
+    other suite stayed green.
+
+    The files on disk are the truth here, so this derives from them.
+    """
+    package = importlib.import_module("pynix._impl")
+    directory = Path(str(package.__file__)).parent
+    on_disk = {path.stem for path in directory.glob("*.py") if path.stem != "__init__"}
+
+    assert on_disk, "no implementation modules found; the glob is wrong"
+
+    declared: frozenset[str] = package._SUBMODULES  # noqa: SLF001 -- a meta test reads the mechanism it guards
+    assert declared == on_disk, (
+        "pynix/_impl/_SUBMODULES and the files in that directory disagree. "
+        f"only on disk: {sorted(on_disk - declared)}; only in the table: {sorted(declared - on_disk)}"
+    )
+
+    typed = set(_type_checking_imports(package))
+    assert typed == on_disk, (
+        "the TYPE_CHECKING block of pynix/_impl and the files in that directory disagree, so "
+        f"pyright cannot type one of them. only on disk: {sorted(on_disk - typed)}; "
+        f"only in the block: {sorted(typed - on_disk)}"
     )

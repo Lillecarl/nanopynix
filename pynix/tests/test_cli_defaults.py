@@ -19,14 +19,17 @@ import pytest
 
 from nanopynix.settings import field_key
 from pynix import Pynix
-from pynix._settings import (
+from pynix._impl.build import (
+    _resolve_namespaced,  # pyright: ignore[reportPrivateUsage] -- the refusal under test is inside this function
+)
+from pynix._impl.settings import (
     DEFAULT_STORE,
-    UNSET,
     ConfigFileError,
     PynixDefaults,
     PynixNixSettings,
     nix_settings,
 )
+from pynix._settings import UNSET
 from pynix.build import Build
 
 if TYPE_CHECKING:
@@ -141,7 +144,7 @@ def test_a_configured_store_does_not_refuse_a_namespaced_build(
     """``--namespaced`` owns its store, so naming one is a contradiction.
 
     A configured default is not a request about this build, and must not be
-    read as one. ``_resolve_namespaced`` asks ``_explicit``, which holds only
+    read as one. ``_resolve_namespaced`` asks ``explicit_options``, which holds only
     what the command line named.
     """
     write_config(tmp_path, monkeypatch, '[defaults]\nstore = "daemon"\n')
@@ -149,11 +152,11 @@ def test_a_configured_store_does_not_refuse_a_namespaced_build(
     command = build_command("--namespaced")
 
     assert command.store == "daemon"  # type: ignore[attr-defined] -- see above
-    assert command._resolve_namespaced() is True  # type: ignore[attr-defined] -- the refusal under test is inside this method
+    assert _resolve_namespaced(command) is True  # type: ignore[arg-type] -- build_command returns the parsed Build
 
     named = build_command("--namespaced", "--store", "daemon")
     with pytest.raises(SystemExit):
-        named._resolve_namespaced()  # type: ignore[attr-defined] -- see above
+        _resolve_namespaced(named)  # type: ignore[arg-type] -- see above
 
 
 # ── the sentinel, and what the command line named ────────────────────
@@ -176,12 +179,12 @@ def test_no_option_keeps_the_sentinel_after_the_command_is_built(
 
 
 def test_explicit_holds_the_flags_and_nothing_else(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Neither the environment nor the file puts a name in ``_explicit``."""
+    """Neither the environment nor the file puts a name in ``explicit_options``."""
     write_config(tmp_path, monkeypatch, '[defaults]\nverbosity = "notice"\n')
     monkeypatch.setenv("PYNIX_STORE", "local")
 
-    assert build_command()._explicit == frozenset()  # type: ignore[attr-defined] -- see above
-    assert build_command("--store", "daemon")._explicit == frozenset({"store"})  # type: ignore[attr-defined] -- see above
+    assert build_command().explicit_options == frozenset()  # type: ignore[attr-defined] -- see above
+    assert build_command("--store", "daemon").explicit_options == frozenset({"store"})  # type: ignore[attr-defined] -- see above
 
 
 def test_the_two_models_that_share_a_name_do_not_fight_over_it(

@@ -105,6 +105,33 @@ def _probe() -> dict[str, object]:
     return json.loads(completed.stdout)
 
 
+def _probe_pynix() -> dict[str, object]:
+    """Import ``pynix`` in a clean interpreter and report what it loaded.
+
+    **``NANOPYNIX_BEARTYPING`` has to go, and not only ``PYTHONPATH``.**
+    ``nanopynix._typechecking.BEARTYPING`` reads that variable, and this
+    repository writes ``if TYPE_CHECKING or BEARTYPING:`` wherever beartype
+    needs a type-only import to be a real object. So under the suite every one
+    of those blocks *is* an import, and a child that inherits the variable
+    loads 825 modules where a real ``pynix`` loads 647. Measured both ways.
+
+    That is correct for the suite and wrong for this probe, which asks what a
+    user's process loads.
+    """
+    stripped = ("PYTHONPATH", "NANOPYNIX_BEARTYPING")
+    env = {key: value for key, value in os.environ.items() if key not in stripped}
+    completed = subprocess.run(  # noqa: S603 -- sys.executable and a literal script, no shell
+        [sys.executable, "-c", _PYNIX_PROBE],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    if completed.returncode != 0:
+        pytest.fail(f"the pynix import probe exited {completed.returncode}:\n{completed.stderr}")
+    return json.loads(completed.stdout)
+
+
 def test_importing_the_package_loads_no_submodule() -> None:
     """The invariant with no headroom, and the reason this file exists."""
     result = _probe()
@@ -168,4 +195,132 @@ def test_the_budget_is_not_slack() -> None:
         f"import nanopynix loads {count} modules against a budget of {MODULE_BUDGET}, "
         "so the budget no longer measures anything. Lower MODULE_BUDGET to just above the "
         "count, and record the new figure on issue #123."
+    )
+
+
+#: Modules that ``import pynix`` must not load.
+#:
+#: Each one belongs to a subcommand that the caller may not have named, and
+#: each one was in this path until issue #123 measured it. The costs, on the
+#: release build:
+#:
+#: - ``pydantic_settings``, 123.6 ms. ``PynixNixSettings`` built a model of
+#:   about 200 fields in its class body, and ``pynix._impl.settings`` now
+#:   holds it.
+#: - ``prompt_toolkit``, 85 ms. The REPL, now in ``pynix._impl.repl``.
+#: - ``nanopynix_helpers.fod``, which imports ``tree_sitter_nix``, which
+#:   imports ``tree_sitter_config``, which imports ``email_validator`` for one
+#:   ``EmailStr`` field.
+#: - ``nanopynix.settings`` and ``nanopynix.stores``, which the lazy surface of
+#:   ``nanopynix`` keeps out.
+#: - either engine, which no command needs before it runs.
+FORBIDDEN_IN_PYNIX = (
+    "anyio",
+    "nanopynix.exceptions",
+    "nanopynix.inproc",
+    "nanopynix.rpc",
+    "nanopynix.settings",
+    "nanopynix.stores",
+    "nanopynix_helpers.fod",
+    "nanopynix_proto",
+    "prompt_toolkit",
+    "pydantic",
+    "pydantic_settings",
+    "rich",
+    "structlog",
+    "yaml",
+)
+
+#: The most modules ``import pynix`` may load, with the language server blocked.
+#:
+#: Measured at 202 on the release build when issue #123 finished, down from
+#: 866. Read the probe below for why the server is blocked, and
+#: ``MODULE_BUDGET`` for why a count carries headroom and a name does not.
+PYNIX_MODULE_BUDGET = 240
+
+#: What the ``pynix`` probe prints, as one JSON line.
+_PYNIX_PROBE = f"""
+import json, sys
+
+class _NoLanguageServer:
+    \"\"\"Refuse ``pynix_lsp``, so this probe reads the shape a user installs.
+
+    The dev environment installs the server, and ``pynix/__init__.py`` mounts
+    the ``Lsp`` subcommand through an optional import when it is there. That
+    one subcommand pulls ``structlog``, ``anyio`` and ``rich``, so the names
+    below could not be forbidden at all from the dev shell -- and they are the
+    names that matter. A release build carries neither the server nor its
+    dependencies, and ``checks.pynix-isolated`` states that.
+
+    Blocking the module makes the ``except ImportError`` in
+    ``pynix/__init__.py`` take its other branch, which is exactly the release
+    build's shape.
+    \"\"\"
+
+    def find_module(self, fullname, path=None):
+        return None
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "pynix_lsp" or fullname.startswith("pynix_lsp."):
+            raise ImportError(fullname)
+        return None
+
+sys.meta_path.insert(0, _NoLanguageServer())
+import pynix
+print(json.dumps({{
+    "count": len(sys.modules),
+    "forbidden": sorted(name for name in {FORBIDDEN_IN_PYNIX!r} if name in sys.modules),
+    "help_works": bool(pynix.Pynix.subcommands()),
+}}))
+"""
+
+
+def test_importing_pynix_loads_no_subcommand_dependency() -> None:
+    """The CLI pays for the subcommand the caller named, and no other.
+
+    **This is a name check and not a count, and the reason is the dev shell.**
+    That environment installs ``pynix-lsp``, so ``pynix/__init__.py`` mounts
+    the ``Lsp`` subcommand and the process loads ``pynix_lsp.cli``. A release
+    build carries neither, and ``checks.pynix-isolated`` states that. A module
+    count would therefore be two different numbers for the same tree, and the
+    budget would have to hold the larger one -- which is the number that
+    measures nothing.
+
+    Each name below is absent in both environments, so this test reads the
+    same either way.
+    """
+    result = _probe_pynix()
+    forbidden = result["forbidden"]
+    assert isinstance(forbidden, list)
+    note(forbidden_modules_in_pynix=json.dumps(forbidden), modules_after_import_pynix=result["count"])
+
+    assert not forbidden, (
+        f"import pynix loaded {forbidden}, so every start pays for a subcommand that may not run. "
+        "clypi needs each command class before it parses an argument, so the class and its options "
+        "stay in the subcommand module and what run() needs goes under pynix._impl -- see the "
+        "docstring there."
+    )
+
+
+def test_the_pynix_probe_reaches_the_command_tree() -> None:
+    """The guard: a probe that failed to build the CLI would forbid nothing."""
+    assert _probe_pynix()["help_works"] is True
+
+
+def test_pynix_stays_under_the_module_budget() -> None:
+    """The count, which catches a new dependency that the names above cannot."""
+    result = _probe_pynix()
+    count = result["count"]
+    assert isinstance(count, int)
+    note(modules_after_import_pynix=count, pynix_module_budget=PYNIX_MODULE_BUDGET)
+
+    assert count <= PYNIX_MODULE_BUDGET, (
+        f"import pynix loads {count} modules, over the budget of {PYNIX_MODULE_BUDGET}. "
+        "Issue #123 holds the measurements. Raise PYNIX_MODULE_BUDGET only with a measurement "
+        "in the commit message that says what the new modules buy."
+    )
+
+    assert count > PYNIX_MODULE_BUDGET - 60, (
+        f"import pynix loads {count} modules against a budget of {PYNIX_MODULE_BUDGET}, so the "
+        "budget no longer measures anything. Lower it to just above the count."
     )

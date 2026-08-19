@@ -18,7 +18,8 @@ import pytest
 from clypi import Command
 
 from pynix import Pynix
-from pynix._settings import UNSET, ConfiguredCommand, _configured_fields
+from pynix._impl.settings import configured_fields
+from pynix._settings import UNSET, ConfiguredCommand
 
 
 def _command_tree(cmd: type[Command]) -> list[type[Command]]:
@@ -57,11 +58,11 @@ def test_every_command_with_a_configured_option_resolves_it() -> None:
 
 def test_every_configured_option_names_a_settings_field() -> None:
     """``option()`` on a name that no settings model declares has no default to
-    resolve, so ``_configured_fields`` refuses it. Prove that no command does
+    resolve, so ``configured_fields`` refuses it. Prove that no command does
     this, rather than leaving the refusal to the first caller."""
     for cmd in _command_tree(Pynix):
         try:
-            _configured_fields(cmd)
+            configured_fields(cmd)
         except TypeError as exc:
             pytest.fail(str(exc))
 

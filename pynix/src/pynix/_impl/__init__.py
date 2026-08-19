@@ -29,10 +29,40 @@ import types
 import typing
 
 if typing.TYPE_CHECKING:
-    from pynix._impl import build as build, repl as repl
+    from pynix._impl import (
+        build as build,
+        config as config,
+        derivation as derivation,
+        develop as develop,
+        eval as eval,
+        flake as flake,
+        log as log,
+        main as main,
+        osearch as osearch,
+        path_info as path_info,
+        repl as repl,
+        settings as settings,
+        store as store,
+    )
 
 #: The implementation modules, one for each subcommand that has a heavy one.
-_SUBMODULES: typing.Final[frozenset[str]] = frozenset({"build", "repl"})
+_SUBMODULES: typing.Final[frozenset[str]] = frozenset(
+    {
+        "build",
+        "config",
+        "derivation",
+        "develop",
+        "eval",
+        "flake",
+        "log",
+        "main",
+        "osearch",
+        "path_info",
+        "repl",
+        "settings",
+        "store",
+    }
+)
 
 
 def __getattr__(name: str) -> types.ModuleType:
