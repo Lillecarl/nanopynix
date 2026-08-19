@@ -35,22 +35,17 @@ let
   # interpreter derivation itself untouched.
   pythonBase = pkgs.python3.override {
     packageOverrides = pySelf: pyPrev: {
-      # THE ONE OVERRIDE, for two unrelated reasons. The first goes away
-      # when nixpkgs PR #548078 reaches the nixpkgs this repo pins; the
-      # second does not go away at all. Keep them separable.
+      # THE ONE OVERRIDE, and one reason for it now.
       #
-      # ONE. datamodel-code-generator runs ruff over the code it generates and
-      # compares the result against a checked-in expectation. A newer ruff
-      # writes a blank line after `from __future__ import annotations`, so
-      # five of its tests fail, and nixpkgs ships the package with a failing
-      # test suite. It reaches this repo through tree-sitter-config, which
-      # nix/tree-sitter-nix.nix needs, so the failure took out the whole
-      # scheduled build: 18 of 19 jobs, three nights running.
+      # **The five disabled tests are gone, because nixpkgs disables them
+      # itself.** They were the ruff ones: the package runs ruff over the code
+      # it generates and compares the result against a checked-in
+      # expectation, and a newer ruff writes a blank line after
+      # `from __future__ import annotations`. nixpkgs PR #548078 merged on
+      # 2026-08-04 as `37fc74a8`, and the nixpkgs this repository pins,
+      # `8be7bd0c`, is 6695 commits after it and none behind. Issue #49.
       #
-      # The list is upstream's list, and not the two failures that were
-      # visible. nixpkgs passes --maxfail=2, so the run stopped at the second
-      # one and the other three were never reported.
-      # TWO. Six of its tests start a real HTTP server on loopback, and the
+      # Six of its tests start a real HTTP server on loopback, and the
       # Darwin build sandbox refuses the `bind`:
       #
       #   socketserver.py:478: PermissionError: [Errno 1] Operation not permitted
@@ -64,14 +59,7 @@ let
       # Found making `ekn` build on macOS at all: this package reaches the
       # tree through tree-sitter-config, so those six failures took out the
       # whole toolchain.
-      datamodel-code-generator = pyPrev.datamodel-code-generator.overridePythonAttrs (old: {
-        disabledTests = (old.disabledTests or [ ]) ++ [
-          "test_no_use_type_checking_imports"
-          "test_ruff_batch_formatting_directory"
-          "test_ruff_check_and_format_combined"
-          "test_ruff_check_only"
-          "test_type_checking_imports_default_to_runtime_imports_for_modular_pydantic_ruff"
-        ];
+      datamodel-code-generator = pyPrev.datamodel-code-generator.overridePythonAttrs (_old: {
         __darwinAllowLocalNetworking = true;
       });
 
