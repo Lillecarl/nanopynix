@@ -181,6 +181,27 @@ let
     };
 
     extraAttrs = {
+      # **The trim of ICU, reached through the attributes rather than the
+      # arguments.** `.override` cannot carry `enableIcu` to boost in this
+      # nixpkgs, and the comment above says why. The derivation still names
+      # the library and the flag, so this removes both.
+      #
+      # ICU is 39.1 MiB of the payload, and it costs two more things that the
+      # payload does not show. `libicuuc` is the one object of the closure that
+      # demands `GLIBC_ABI_GNU2_TLS`, which `nix/lower-glibc.py` says a rewrite
+      # cannot answer. The five ICU libraries are also the only objects that
+      # link `libstdc++.so.6`, which `nix/cxx-runtime.nix` says the wheel does
+      # not carry. Issue #220.
+      boost = old: {
+        buildInputs = builtins.filter (
+          input: !(lib.hasInfix "icu4c" (input.name or ""))
+        ) (old.buildInputs or [ ]);
+        configureFlags = (
+          builtins.filter (flag: !(lib.hasPrefix "--with-icu" flag)) (old.configureFlags or [ ])
+        )
+        ++ [ "--without-icu" ];
+      };
+
       # **The second of the two symbols that a rename cannot reach.**
       # `arc4random_buf` arrived in glibc 2.36, and libarchive is the only
       # library of this closure that calls it. `nix/arc4random-compat.c` answers
@@ -244,6 +265,16 @@ let
         };
       }
       // wheelLibs
+      // {
+        # **The wheel takes `curlMinimal`, and not the wrapper over it.**
+        # `pkgs.curl` is `curlMinimal` with the features turned back on, so
+        # `pslSupport = false` on `curlMinimal` reaches the wrapper as `true`
+        # again and `libpsl` returns to the wheel. `libpsl` is then the last
+        # object of the closure above `GLIBC_2.34`, and `libidn2` comes back
+        # the same way. Nix fetches over HTTP and HTTPS and needs none of what
+        # the wrapper adds. Issue #220.
+        curl = wheelLibs.curlMinimal;
+      }
     );
 in
 {
