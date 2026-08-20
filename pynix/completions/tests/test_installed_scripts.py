@@ -14,9 +14,13 @@ end. These tests name the fault directly.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
+
+from conftest import RENDERER
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -90,3 +94,30 @@ def test_the_script_sends_the_line_and_the_cursor(shell: str, scripts: dict[str,
     assert "COMP_POINT" in text, text
     if shell == "bash":
         assert "_ARGCOMPLETE_COMP_WORDBREAKS" in text, text
+
+
+def test_the_renderer_writes_where_it_is_told(tmp_path: Path) -> None:
+    """``render-completions.py`` takes a program and a directory, in that order.
+
+    **The guard for a stale argument.** clypi needed a display name between the
+    two, and issue #214 removed it with clypi. The fixture in `conftest.py`
+    kept passing it, so the renderer read that name as the directory and wrote
+    the three scripts beside the working directory of the run. `source` on a
+    missing file is quiet in all three shells, so every case of the suite
+    reported an empty answer and the cause was two files away.
+
+    A gate run never took that branch, because it sets
+    `PYNIX_INSTALLED_PREFIX` and reads the built package instead. So no CI job
+    could see it, and this states the contract that the fixture depends on.
+    """
+    out = tmp_path / "rendered"
+    subprocess.run(  # noqa: S603 -- this interpreter, and a path from `conftest`
+        [sys.executable, str(RENDERER), "pynix", str(out)],
+        check=True,
+        capture_output=True,
+    )
+
+    written = sorted(path.name for path in out.iterdir())
+    assert written == sorted(SHELL_NAMES), f"the renderer wrote {written} into {out}"
+    beside = sorted(path.name for path in tmp_path.iterdir())
+    assert beside == ["rendered"], f"the renderer wrote outside the directory it was given: {beside}"

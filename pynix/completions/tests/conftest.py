@@ -107,11 +107,28 @@ def scripts(installed_prefix: Path | None, tmp_path_factory: pytest.TempPathFact
         return found
     directory = tmp_path_factory.mktemp("rendered")
     # The renderer that nix/mk-app.nix runs, with the arguments it passes.
+    #
+    # **Two arguments, and not three.** clypi needed a display name between
+    # the program and the directory, and issue #214 removed it along with
+    # clypi. This call kept it, so `render-completions.py` read `"Pynix"` as
+    # the output directory and wrote the three scripts into a directory of
+    # that name, beside the working directory of the run. The fixture then
+    # handed each test a path that held no file, `source` on a missing file is
+    # quiet in all three shells, and every case reported an empty answer.
+    #
+    # No CI job saw it, because a gate run sets `PYNIX_INSTALLED_PREFIX` and
+    # takes the branch above. `test_the_renderer_writes_where_it_is_told`
+    # states the argument count now, so a third one fails a test rather than
+    # emptying a suite.
     subprocess.run(  # noqa: S603 -- this interpreter, and a path from this file
-        [sys.executable, str(RENDERER), "pynix", "Pynix", str(directory)],
+        [sys.executable, str(RENDERER), "pynix", str(directory)],
         check=True,
         capture_output=True,
     )
+    for shell in SHELLS:
+        rendered = directory / shell
+        if not rendered.is_file():
+            pytest.fail(f"the renderer wrote no {shell} script at {rendered}")
     return {shell: directory / shell for shell in SHELLS}
 
 
