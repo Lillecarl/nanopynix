@@ -75,6 +75,40 @@ if TYPE_CHECKING or BEARTYPING:
 #: :func:`_flake_search` resolves the name inside the completion.
 type FlakeSearch = Literal["base", "dev-shell", "repl", "exact"]
 
+#: The scheme that an indirect flake reference carries, and that a caller omits.
+_FLAKE_SCHEME = "flake:"
+
+#: The setting whose empty value means "no global registry layer" to Nix.
+_NO_GLOBAL_REGISTRY = "flake-registry"
+
+
+def _completion_settings() -> Any:
+    """Nix's own retry settings, cut down to what a keypress can afford.
+
+    **One attempt, and not five.** `download-attempts` defaults to 5, and Nix
+    backs off between them. Measured with no network at all: the flake
+    registry raised after 4.646 s at the default and after 0.002 s at one
+    attempt. The first figure is over the budget, so the completion was
+    cancelled where it should have fallen back to the local registry layers --
+    which is exactly what a build sandbox reported, three times, as an empty
+    answer with no cause.
+
+    **Three seconds to connect, and not fifteen.** One attempt against a host
+    that accepts and never answers still costs `connect-timeout`, and the
+    default outlasts the whole budget. A person holding a key down is not
+    waiting on a slow mirror.
+
+    Both are Nix's own settings, and neither reaches this program from a
+    `nix.conf` -- see issue #234 -- so a caller who wants the patient values
+    for a real command still gets them, because a real command does not come
+    through here.
+    """
+    # Imported here for the reason `_names` gives.
+    from nanopynix.settings import NixSettings  # noqa: PLC0415 -- see `_names`
+
+    return NixSettings(download_attempts=1, connect_timeout=3)
+
+
 #: Seconds a completion may take before it answers with nothing.
 #:
 #: **Long enough for a local file, short enough to feel like a keypress.**
@@ -136,7 +170,7 @@ async def _completion_session() -> AsyncGenerator[AsyncEvalSession]:
     # holding a key down, and no log forwarding: `_guarded` sends both streams
     # to a buffer that nothing reads.
     async with (
-        inproc.Session(verbosity="error") as nix,
+        inproc.Session(verbosity="error", settings=_completion_settings()) as nix,
         nix.store(DEFAULT_STORE) as store,
         nix.eval(store) as session,
     ):
@@ -277,24 +311,142 @@ async def _flake_names(reference: str, fragment: str, name: FlakeSearch) -> list
 
     search = _flake_search(name)
     async with _completion_session() as session:
-        # **A completion never writes a lock file.** Nix locks with the flags
-        # of the command it is completing, which may write one. A Tab is not a
-        # command, and a keypress that changes the tree of the caller is a
-        # surprise that no candidate is worth.
+        # **A completion never writes a lock file, and `nix` does.** Measured:
+        # a flake with one unlocked input and no `flake.lock`, completed with
+        # `NIX_GET_COMPLETIONS=2 nix build <flake>#top`, came back with its
+        # candidates and a `flake.lock` beside its `flake.nix`.
+        # `completeFlakeRefWithFragment` (`libcmd/installables.cc`) passes the
+        # flags of the command it is completing straight to `lockFlake`, and
+        # `writeLockFile` defaults to true.
+        #
+        # A Tab is not a command, and a keypress that changes the tree of the
+        # caller is a surprise that no candidate is worth. This is a place
+        # where `nix` is wrong and this program does not conform. Issue #231.
         locked = await session.lock_flake(reference, write_lock_file=False)
         return await complete_flake_fragment(await flake_outputs(await locked.eval()), search, fragment)
 
 
-def complete_flake(prefix: str, name: FlakeSearch) -> list[str]:
-    """Candidates for ``--flake``, once the caller has typed a ``#``.
+def _directories(prefix: str) -> list[str]:
+    """The directories that *prefix* could name, as ``Args::completeDir`` finds them.
 
-    Before the ``#`` this answers nothing, so the shell offers file names.
-    `nix` answers a flake reference there -- a registry entry, or a directory
-    -- and issue #229 holds that half.
+    That function (``libutil/args.cc``) globs ``expandTilde(prefix) + "*"`` and
+    keeps what ``stat`` calls a directory. This is the same two steps.
+
+    **A directory is a candidate of this program and not of the shell.** Before
+    this function ``--flake`` answered nothing before the ``#``, and the shell
+    fell back to file names on its own. A completer that answers cannot fall
+    back, so the half that the shell used to supply has to come from here.
     """
+    # Imported here for the reason `_names` gives. `glob` is cheap, and the
+    # rule is one rule.
+    import glob  # noqa: PLC0415 -- see `_names`
+
+    expanded = os.path.expanduser(prefix)  # noqa: PTH111 -- the tilde rule of `_completePath`, and no I/O
+    return [candidate for candidate in glob.glob(expanded + "*") if os.path.isdir(candidate)]  # noqa: PTH207, PTH112 -- `glob.glob` is what Nix calls, and `anyio.Path` is async
+
+
+async def _registry_references(prefix: str) -> list[str]:
+    """The registry entries that *prefix* could name, as ``completeFlakeRef`` finds them.
+
+    That function (``libcmd/installables.cc``) walks every layer that
+    ``fetchers::getRegistries`` returns and offers each ``from`` that starts
+    with the prefix. A caller who has not typed ``flake:`` gets the entry
+    without it, which is how ``nixp<TAB>`` reaches ``flake:nixpkgs``.
+
+    **This uses the ``flake-registry`` setting as it stands, so a cold cache
+    downloads.** `nix` does the same on the same keypress, and dropping the
+    global layer would answer fewer candidates than `nix` on every machine
+    that does not pin `nixpkgs` in a system registry.
+
+    Four cases, measured on this machine for the prefix ``nixp``:
+
+    ==================================  ========  =============================
+    case                                elapsed   answer
+    ==================================  ========  =============================
+    cache warm                          0.54 s    7 candidates
+    no network, cache within its TTL    0.54 s    7 candidates
+    no network, TTL expired             4.10 s    7, read back from the cache
+    a host that accepts and never       ~7 s      the directories alone
+    answers
+    ==================================  ========  =============================
+
+    The last row is the budget doing its work, plus the two seconds the
+    executor waits for the interrupt. `nix` in the same case takes 14.9 s and
+    answers nothing at all, so this is the one place where following `nix`
+    exactly would be worse than the budget.
+
+    **One unreachable layer must not take the others down, and in `nix` it
+    does.** `getRegistries` builds all four layers before it returns any of
+    them, so an exception from the global layer discards the flag, user and
+    system layers as well. Measured: on this machine, which pins `nixpkgs` in
+    its system registry, `nix build nixp<TAB>` with an unreachable
+    `flake-registry` offers nothing at all. A build sandbox reproduces it
+    without any setting, because it has no network.
+
+    Losing a local file because a remote one is unreachable is wrong, so this
+    does not conform. The second call names an empty `flake-registry`, which
+    is Nix's own value for "no global layer", and Nix answers from the layers
+    that did work. It costs nothing: a function-local static whose initialiser
+    threw is not initialised, so the retry runs it again -- measured at
+    0.002 s, against 0.002 s for the failure that precedes it.
+
+    **`nix` returns at once when the flakes feature is off, and this does
+    not.** nanopynix turns that feature on for every session it builds, so
+    the gate could never fire here.
+    """
+    # Imported here for the reason `_names` gives.
+    from nanopynix import inproc  # noqa: PLC0415 -- see `_names`
+    from pynix._impl.settings import DEFAULT_STORE  # noqa: PLC0415 -- see `_names`
+
+    async with (
+        inproc.Session(verbosity="error", settings=_completion_settings()) as nix,
+        nix.store(DEFAULT_STORE) as store,
+    ):
+        try:
+            entries = await store.registry_entries()
+        except Exception:
+            # Broad, because Nix reports every layer's failure the same way and
+            # the second call is harmless whatever the first one hit: a store
+            # that cannot answer at all fails again, and `_guarded` turns that
+            # into the same empty list.
+            entries = await store.registry_entries(fetch_settings={_NO_GLOBAL_REGISTRY: ""})
+
+    candidates: list[str] = []
+    for entry in entries:
+        source = entry.from_
+        if not prefix.startswith(_FLAKE_SCHEME) and source.startswith(_FLAKE_SCHEME):
+            without_scheme = source[len(_FLAKE_SCHEME) :]
+            if without_scheme.startswith(prefix):
+                candidates.append(without_scheme)
+        elif source.startswith(prefix):
+            candidates.append(source)
+    return candidates
+
+
+def _reference_candidates(prefix: str) -> list[str]:
+    """Candidates for a flake reference, which is the part before the ``#``.
+
+    The three sources are the three that ``completeFlakeRef`` reads, in the
+    order that function reads them: the bare ``.`` for an empty prefix, the
+    directories, and the registry. Nix collects them into a ``std::set``, so
+    the answer is sorted and holds no duplicate.
+
+    **The registry runs under the budget and the directories do not.** A glob
+    of one directory cannot hang, and a registry that is slow or unreachable
+    must not take the file names down with it.
+    """
+    candidates = set(_directories(prefix))
+    if not prefix:
+        candidates.add(".")
+    candidates.update(_guarded(functools.partial(_registry_references, prefix)))
+    return sorted(candidates)
+
+
+def complete_flake(prefix: str, name: FlakeSearch) -> list[str]:
+    """Candidates for ``--flake``: a reference before the ``#``, a fragment after it."""
     reference, separator, fragment = prefix.partition("#")
     if not separator:
-        return []
+        return _reference_candidates(prefix)
     return [
         f"{reference}#{candidate}" for candidate in _guarded(functools.partial(_flake_names, reference, fragment, name))
     ]

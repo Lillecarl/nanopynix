@@ -97,6 +97,36 @@ to look.
 below the layer that the budget cancels, so a flake with an unreachable input
 outlasts it. Issue #231 holds that.
 
+## What a Tab for `--flake` reads
+
+Before the `#`, `--flake` completes a flake reference, and it reads the same
+three sources `nix` reads: the bare `.`, the directories under what you have
+typed, and every layer of the flake registry.
+
+**The registry can download.** The global layer names a URL in the
+`flake-registry` setting, and Nix fetches it. That is what `nix` does on the
+same keypress, and the result is cached for `tarball-ttl` seconds, so only the
+first Tab of an hour pays for it. Measured: 0.54 s warm, 4.10 s with no
+network and an expired cache, and Nix answers from the stale copy in that case
+rather than failing.
+
+**A Tab still completes with no network, and under `nix` it does not.**
+`getRegistries` builds all four registry layers before it returns any of them,
+so `nix` throws away your `/etc/nix/registry.json` and your own
+`registry.json` whenever it cannot reach the global one. Measured on a machine
+that pins `nixpkgs` in its system registry: `nix build nixp<TAB>` with an
+unreachable registry offers nothing at all. `pynix` asks again without the
+global layer and offers what the local ones hold.
+
+**`flake-registry` in your `nix.conf` does not reach this program.** Nix
+registers its one global fetch-settings object with `globalConfig`, and
+`nix.conf` fills that object in. nanopynix builds a fetch-settings object of
+its own for each call and registers none of them, so every fetch setting comes
+from the caller and none from the file. Measured: `flake-registry` is absent
+from `nanopynix.list_settings()`, which is `globalConfig` itself. Issue #234
+holds that gap. The layer is on here because it is Nix's own default, and not
+because the file said so.
+
 ## What `pynix build` does not need
 
 `nix build` writes a `result` symlink, which is a GC root, and it prints
