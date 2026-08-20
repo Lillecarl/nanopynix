@@ -164,7 +164,10 @@ let
 
     # Network.
     openssl = [ "LICENSE.txt" ];
-    curl = [ "COPYING" ];
+    # `curlMinimal`, and not `curl`. The wheel takes the package that declares
+    # the arguments, because `pkgs.curl` is a wrapper that turns the trimmed
+    # features back on. nix/nix-closure.nix says why. Issue #220.
+    curlMinimal = [ "COPYING" ];
     libssh2 = [ "COPYING" ];
     nghttp2 = [ "COPYING" ];
     # sfparse is vendored and compiled in, and it carries its own copyright.
