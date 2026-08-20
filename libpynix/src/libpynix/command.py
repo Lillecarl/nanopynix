@@ -450,8 +450,17 @@ def _let_a_hash_stay_in_the_line() -> None:
     dependency of `datamodel-code-generator`, whose test closure is
     `httpx2`, `elasticsearch`, `ipython`, `prance` and more. Overriding
     `argcomplete` rebuilt every one of them, and `httpx2` fails its own suite
-    on macOS. The one-line change belongs upstream; until it lands, this is
-    the cheapest place that reaches only this program.
+    on macOS. This is the cheapest place that reaches only this program.
+
+    **TODO: report this upstream, and then delete these lines.** The fix
+    there is one line in `split_line` itself::
+
+        lexer.commenters = ""
+
+    No upstream issue tracks it. The nearest is kislyuk/argcomplete#362, which
+    is about the vendored copies in general and not about this. Until somebody
+    files it, every program that completes a flake reference has to install
+    this correction for itself, and each of them meets the defect first.
 
     `split_line` builds the lexer itself, so there is no argument to pass. It
     reads the class off the module at call time, which is what makes a
