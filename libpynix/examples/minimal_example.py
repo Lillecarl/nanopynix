@@ -1,8 +1,8 @@
 """The smallest program this library builds: one command, one option.
 
-`libpynix/tests/test_examples.py` runs this file, so a change to the library
-that breaks it fails the suite. That is the reason the documentation points at
-a script rather than repeating it as a snippet.
+`libpynix/tests/test_documented_examples.py` runs this file, so a change to
+the library that breaks it fails the suite. That is the reason the
+documentation points at a script rather than repeating it as a snippet.
 """
 
 from __future__ import annotations

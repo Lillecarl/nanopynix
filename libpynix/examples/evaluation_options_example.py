@@ -5,7 +5,7 @@ and `--attr`. They declare them and read none of them, so this file needs no
 evaluator: it prints what the caller named. A real program hands the three to
 whatever resolves a target -- `pynix.target` is the one in this repository.
 
-`libpynix/tests/test_examples.py` runs this file.
+`libpynix/tests/test_documented_examples.py` runs this file.
 """
 
 from __future__ import annotations

@@ -494,9 +494,10 @@ ignorelist = ["eval"]
   "TID251",
 ]
 # Runnable documentation, for the same reason. `docs/libpynix/index.md`
-# includes both of these files, and `libpynix/tests/test_examples.py` runs
-# them. `T20` because a command-line program prints, which is the whole
-# subject: an example that produced no output would show a reader nothing.
+# includes both of these files, and
+# `libpynix/tests/test_documented_examples.py` runs them. `T20` because a
+# command-line program prints, which is the whole subject: an example that
+# produced no output would show a reader nothing.
 "libpynix/examples/**" = ["T20"]
 # Fourteen transport constructors and `serve_*`/`connect_*` factories, spread
 # over six modules. Every argument past the second is keyword-only and is a
