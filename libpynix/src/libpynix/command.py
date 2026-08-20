@@ -79,6 +79,11 @@ class Spec:
     #: True where the default comes from the environment or the configuration
     #: file rather than from `default` above. `pynix._settings` resolves it.
     configured: bool = False
+    #: True for an option the caller must name. Options only, and never
+    #: together with `configured`: a configured option has a source below the
+    #: command line, so requiring one at the parser would refuse a value the
+    #: configuration file already gives.
+    required: bool = False
     #: What answers a Tab after this option. `None` leaves it to the shell,
     #: which offers file names.
     complete: Completer | None = None
@@ -97,6 +102,7 @@ def opt(  # noqa: PLR0913 -- one keyword for each thing a declaration can say; c
     short: str | None = None,
     negatable: bool = False,
     configured: bool = False,
+    required: bool = False,
     complete: Completer | None = None,
 ) -> Any:
     """Declare an option.
@@ -108,12 +114,15 @@ def opt(  # noqa: PLR0913 -- one keyword for each thing a declaration can say; c
     :func:`pynix._settings.option` passes the mark, and
     :class:`pynix._settings.ConfiguredCommand` reads it.
     """
+    if required and configured:
+        raise ValueError("an option cannot be both required and configured; see Spec.required")
     return Spec(
         default=default,
         help=help,
         short=short,
         negatable=negatable,
         configured=configured,
+        required=required,
         complete=complete,
     )
 
@@ -230,6 +239,24 @@ def _unwrapped(annotation: Any) -> Any:
     return annotation
 
 
+def _converted(annotation: Any) -> type | None:
+    """The `type=` argparse needs for *annotation*, or `None` to leave it alone.
+
+    **argparse hands back a string unless it is told otherwise.** Without this,
+    `--limit 20` reached `rapidfuzz` as `"20"` and it answered `TypeError: an
+    integer is required`, six frames away from the declaration that says `int`.
+
+    A `list[Path]` answers `Path`: argparse applies `type` to each value it
+    collects, so a repeated option and a repeated positional convert the same
+    way a single one does.
+    """
+    inner = _unwrapped(annotation)
+    if typing.get_origin(inner) is list:
+        args = typing.get_args(inner)
+        inner = _unwrapped(args[0]) if args else str
+    return inner if inner in _CONVERTED else None
+
+
 def _flags(field: str, spec: Spec) -> list[str]:
     """The flag spellings of *field*, longest first, as argparse wants them."""
     flags = ["--" + field.replace("_", "-")]
@@ -244,12 +271,20 @@ def _add(parser: argparse.ArgumentParser, field: str, spec: Spec, annotation: An
     repeated = typing.get_origin(inner) is list
     kwargs: dict[str, Any] = {"help": spec.help}
 
+    converted = _converted(annotation)
+
     if spec.positional:
         if repeated:
             kwargs["nargs"] = "*"
         elif spec.default is not MISSING:
             kwargs["nargs"] = "?"
             kwargs["default"] = argparse.SUPPRESS
+        # **A positional needs `type` exactly as an option does.** It did not
+        # get one until issue #222 made this layer a library: every `pos()` in
+        # `pynix` is a `str`, so the fault was latent there, and `easykubenix`
+        # has three `Path` positionals and hit it.
+        if converted is not None:
+            kwargs["type"] = converted
         action = parser.add_argument(field, **kwargs)
         action.completer = spec.complete  # type: ignore[attr-defined] -- argcomplete reads this attribute off the action it did not create
         return
@@ -265,12 +300,14 @@ def _add(parser: argparse.ArgumentParser, field: str, spec: Spec, annotation: An
         kwargs["action"] = "store_true"
     elif repeated:
         kwargs["action"] = "append"
-    elif inner in _CONVERTED:
-        # **argparse hands back a string unless it is told otherwise.** Without
-        # this, `--limit 20` reached `rapidfuzz` as `"20"` and it answered
-        # `TypeError: an integer is required`, six frames away from the
-        # declaration that says `int`.
-        kwargs["type"] = inner
+    # No guard for a flag here, and none is needed: `bool` is not in
+    # `_CONVERTED`, so `_converted` answers `None` for one. A `type` beside
+    # `store_true` or `BooleanOptionalAction` is an argparse error, and
+    # `test_a_flag_is_not_given_a_type` is what keeps that true.
+    if converted is not None:
+        kwargs["type"] = converted
+    if spec.required:
+        kwargs["required"] = True
     action = parser.add_argument(*_flags(field, spec), **kwargs)
     action.completer = spec.complete  # type: ignore[attr-defined] -- see above
 
