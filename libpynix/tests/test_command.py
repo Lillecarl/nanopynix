@@ -210,3 +210,65 @@ def test_a_declaration_is_a_spec_until_the_parser_reads_it() -> None:
 def test_the_parser_is_an_ordinary_argparse_parser() -> None:
     """Nothing here subclasses argparse, so a program keeps every escape."""
     assert type(build_parser(Leaf)) is argparse.ArgumentParser
+
+
+class Converted(Command):
+    """A command whose positionals and repeated options are not strings."""
+
+    where: Path = pos(help="A path the caller must give.")
+    counts: list[int] = pos(help="Numbers, however many.")
+    roots: list[Path] = opt(help="A repeated path.")
+
+
+def test_a_positional_arrives_as_its_annotated_type() -> None:
+    """A positional needs `type` exactly as an option does.
+
+    Latent in `pynix`, where every `pos()` is a `str` on purpose, and live in
+    `easykubenix`, which has three `Path` positionals. Issue #222.
+    """
+    command = parse(Converted, "/nix/store", "1", "2")
+    assert command.where == Path("/nix/store")  # type: ignore[attr-defined] -- see above
+    assert command.counts == [1, 2]  # type: ignore[attr-defined] -- see above
+
+
+def test_a_repeated_option_converts_each_value() -> None:
+    """argparse applies `type` to each value it collects."""
+    command = parse(Converted, "/a", "--roots", "/x", "--roots", "/y")
+    assert command.roots == [Path("/x"), Path("/y")]  # type: ignore[attr-defined] -- see above
+
+
+class Required(Command):
+    """A command with an option the caller must name."""
+
+    to: str = opt(help="Where to push.", required=True)
+    attr: str | None = opt(None, help="What to push.")
+
+
+def test_a_required_option_must_be_named() -> None:
+    parser = build_parser(Required)
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--attr", "hello"])
+
+
+def test_a_required_option_arrives_like_any_other() -> None:
+    assert parse(Required, "--to", "s3://cache").to == "s3://cache"  # type: ignore[attr-defined] -- see above
+
+
+def test_an_option_cannot_be_both_required_and_configured() -> None:
+    """A configured option has a source below the command line.
+
+    Requiring one at the parser would refuse a value that the environment or
+    the configuration file already gives.
+    """
+    with pytest.raises(ValueError, match="required and configured"):
+        opt(help="A contradiction.", required=True, configured=True)
+
+
+def test_a_flag_is_not_given_a_type() -> None:
+    """The guard for the conversion above: `bool` is in no `type=`.
+
+    `store_true` and `BooleanOptionalAction` set the value themselves, and a
+    `type` beside either one is an argparse error rather than a silent one.
+    """
+    assert parse(Leaf, "--loud").loud is True  # type: ignore[attr-defined] -- see above
+    assert parse(Leaf, "--no-colour").colour is False  # type: ignore[attr-defined] -- see above

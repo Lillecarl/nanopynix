@@ -31,6 +31,17 @@ Three things make that file work:
   group. `libpynix.group` declares one in a single expression, for a group
   that needs no class of its own.
 
+`pos()` declares a positional instead of an option, and it converts the same
+way: `where: Path = pos(help="...")` arrives as a `Path`. A positional with no
+`default` is one the caller must give, one with a `default` becomes optional,
+and a `list[str]` positional takes whatever is left.
+
+`opt(..., required=True)` is the option a caller must name. It is for an
+option with no sensible default, such as the destination of a push. Do not
+combine it with `configured=True`: a configured option has a source below the
+command line, so requiring one at the parser would refuse a value that the
+configuration file already gives, and `opt` raises rather than build that.
+
 `libpynix.command_name` gives the name a command has on the command line: the
 class name in kebab case, unless the class sets `cli_name`.
 
