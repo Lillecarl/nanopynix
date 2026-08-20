@@ -22,7 +22,7 @@ import nanopynix
 from nanopynix._typechecking import BEARTYPING
 from pynix._util import eval_session, print_json
 from pynix.flake import Info, Metadata, Show
-from pynix.target import select_attr
+from pynix.target import flake_outputs, select_attr
 
 if TYPE_CHECKING or BEARTYPING:
     from nanopynix import AsyncValue
@@ -139,7 +139,7 @@ async def run_show(command: Show) -> None:
     flake_attr = flake_attr or None
 
     async with eval_session(command.store) as (_nix, _store, session):
-        outputs = await session.eval_flake(base_ref)
+        outputs = await flake_outputs(await session.eval_flake(base_ref))
         # `select_attr`, and no candidate search. `nix flake show` starts
         # at the root of the outputs on purpose: it shows what the flake
         # provides, so a prefix that hid the other outputs would defeat

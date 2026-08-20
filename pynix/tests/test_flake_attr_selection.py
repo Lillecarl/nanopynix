@@ -167,3 +167,51 @@ async def test_the_attr_flag_still_selects_exactly_what_it_says(
     # The search resolved the empty fragment to `packages.<system>.default`,
     # which is a string, so `--attr nested` has no attribute set to look in.
     assert "expected a set" in strip_ansi(capsys.readouterr().err)
+
+
+async def test_the_metadata_of_the_flake_is_not_an_attribute_of_the_target(
+    shared_nix_environment: NixTestEnvironment,
+    capsys: pytest.CaptureFixture[str],
+    search_flake: Path,
+) -> None:
+    """`callFlake` merges the metadata in, and `nix` selects the outputs first.
+
+    The value that `callFlake` returns holds `_type`, `inputs`, `lastModified`,
+    `lastModifiedDate`, `narHash`, `outPath`, `outputs` and `sourceInfo` beside
+    the outputs of the flake. `openEvalCache` of `src/libflake/flake.cc` takes
+    `outputs` out of it before it resolves anything, so none of those eight is
+    a target of `nix`.
+
+    Measured before issue #228: `pynix eval --flake F#outPath` printed the
+    source path of the flake, and `nix eval F#outPath` reported that the flake
+    does not provide it. This asserts the message, because a failure for
+    another reason would satisfy a bare `raises`.
+    """
+    cmd = parse(["eval", "--flake", f"{search_flake}#outPath", *shared_nix_environment.pynix_store_args()])
+
+    with pytest.raises(SystemExit):
+        await cmd.run()
+
+    error = strip_ansi(capsys.readouterr().err)
+    assert "does not provide attribute" in error
+    assert "'outPath'" in error
+
+
+async def test_the_outputs_attribute_is_not_a_target_either(
+    shared_nix_environment: NixTestEnvironment,
+    capsys: pytest.CaptureFixture[str],
+    search_flake: Path,
+) -> None:
+    """The control for the test above.
+
+    `outputs` is the name that the selection resolves *through*, so a fix that
+    stopped one level short would still reach it and would still hide every
+    other name of the flake. It is not a target of `nix`, and reaching it would
+    mean the target was rooted at the value of `callFlake` after all.
+    """
+    cmd = parse(["eval", "--flake", f"{search_flake}#outputs", *shared_nix_environment.pynix_store_args()])
+
+    with pytest.raises(SystemExit):
+        await cmd.run()
+
+    assert "does not provide attribute" in strip_ansi(capsys.readouterr().err)
