@@ -35,7 +35,9 @@ from pynix.build import Build
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncGenerator
 
-    from nanopynix.rpc import ValueProxy
+    # The protocol, and not one engine's class, for the reason
+    # `nanopynix_helpers.build` gives. Issue #232.
+    from nanopynix.protocols import AsyncValue as ValueProxy
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
