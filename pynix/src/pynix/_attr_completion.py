@@ -94,11 +94,22 @@ def _completion_settings() -> Any:
     answer with no cause.
 
     **Three seconds to connect, and not fifteen.** One attempt against a host
-    that accepts and never answers still costs `connect-timeout`, and the
-    default outlasts the whole budget. A person holding a key down is not
-    waiting on a slow mirror.
+    that refuses still costs `connect-timeout`, and the default outlasts the
+    whole budget. A person holding a key down is not waiting on a slow mirror.
 
-    Both are Nix's own settings, and neither reaches this program from a
+    **Three seconds of silence, and not three hundred.** A host that *accepts*
+    the connection and then sends nothing is not covered by the two above:
+    the connect succeeded, and there is one attempt in flight. Measured
+    against a socket that accepts and never writes: at the default
+    `stalled-download-timeout` of 300 s the call outlasted 25 s and was killed,
+    and at 3 s it raised in 3.004 s. Issue #231 opened on that shape.
+
+    **It bounds what curl fetches, and not what `git` fetches.** A
+    `git+https:` input runs `git` as a separate process, which reads none of
+    these settings. Issue #231 keeps that half, and `GIT_HTTP_LOW_SPEED_TIME`
+    is the thing to measure for it.
+
+    All three are Nix's own settings, and none reaches this program from a
     `nix.conf` -- see issue #234 -- so a caller who wants the patient values
     for a real command still gets them, because a real command does not come
     through here.
@@ -106,7 +117,7 @@ def _completion_settings() -> Any:
     # Imported here for the reason `_names` gives.
     from nanopynix.settings import NixSettings  # noqa: PLC0415 -- see `_names`
 
-    return NixSettings(download_attempts=1, connect_timeout=3)
+    return NixSettings(download_attempts=1, connect_timeout=3, stalled_download_timeout=3)
 
 
 #: Seconds a completion may take before it answers with nothing.
