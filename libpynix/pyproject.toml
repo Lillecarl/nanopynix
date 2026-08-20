@@ -26,10 +26,15 @@ license-files = [ "LICENSE" ]
 #
 # **`nanopynix` is deliberately absent, although `--file`, `--flake` and
 # `--attr` name Nix concepts.** This project declares those three options and
-# reads none of them, so it needs no evaluator. Two things follow. A consumer
-# that has not loaded Nix can still build its parser, and this project is one
-# package for every Nix version rather than one for each -- see `nixLinked`
-# in `nix/py-packages.nix`.
+# reads none of them, so it needs no evaluator.
+#
+# The thing that entry would really add is `nanopynix-bindings`, a compiled
+# extension linked against one Nix version. Two things follow. A consumer that
+# has not built the bindings can still take this project and build its parser,
+# and this project is one package for every Nix version rather than one for
+# each -- measured: `nanopynixVersions.stable.libpynix` and
+# `nanopynixVersions.nix_2_35.libpynix` are the same store path. See
+# `nixLinked` in `nix/py-packages.nix`.
 dependencies = ["argcomplete"]
 
 [project.optional-dependencies]

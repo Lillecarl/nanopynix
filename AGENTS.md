@@ -264,6 +264,48 @@ the one this repository tests. `checks.nixos-module` evaluates it.
 `--client-bin`, `--local-bin` and `--builder-bin` options. Every one of those
 is gone. Do not add a branch for a second implementation of Nix.
 
+# libpynix
+
+`libpynix/` holds the command-line layer, and issue #222 moved it out of
+`pynix/src/pynix/_cli.py`. `easykubenix` had copied the same 359 lines to get
+a second Nix CLI, and the two diverged in six days.
+
+**It depends on `argcomplete` and on nothing else. Keep it that way.** A
+consumer takes the parser without taking the evaluator, which is the whole
+reason it is a project beside `pynix` rather than a module of
+`nanopynix-helpers`. Two things follow. `nix/py-packages.nix` gives it no
+`nixLinked` suffix, so it is one package for every Nix version -- measured:
+`nanopynixVersions.stable.libpynix` and `nanopynixVersions.nix_2_35.libpynix`
+are the same store path. And `libpynix/src/libpynix/_typecheck.py` carries its
+own `no_runtime_type_check` rather than importing `nanopynix._typechecking`.
+The cost avoided there is the dependency and not the import: that module is
+cheap to import, at 55 modules against 34 for a bare interpreter, but naming
+`nanopynix` in `pyproject.toml` drags in `nanopynix-bindings`, and a program
+that has not built the bindings could then not take this project at all.
+
+**`libpynix.command` is generic, and `libpynix.nix_options` names Nix.** The
+second declares `--file`, `--flake` and `--attr` and reads none of them. Keep
+that split: reading a target means an evaluator, and a command module imports
+whatever declares its options. Issue #123 measured what that costs a start
+which evaluates nothing -- 101 ms, because `pynix.target` pulls `structlog`
+and the exception tree of nanopynix.
+
+**`pynix._settings` keeps `configured=`.** `libpynix` records the mark and
+resolves nothing; a program puts its own base class between `Command` and its
+commands and fills the attribute in. `opt` refuses `required=True` together
+with `configured=True`, because a configured option has a source below the
+command line.
+
+`docs/libpynix/index.md` says how to build a program on it, and includes two
+scripts from `libpynix/examples/` that
+`libpynix/tests/test_documented_examples.py` runs. Issue #223 holds the one
+piece that is deliberately absent: a completer for the three options, which
+would evaluate Nix on a keypress and so needs a budget and a way to give up.
+
+Run the tests:
+
+- direnv exec . timeout 60 pytest libpynix
+
 # pynix-lsp
 
 `pynix-lsp/` holds the Nix language server, and issue #107 moved it out of
