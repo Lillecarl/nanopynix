@@ -193,15 +193,14 @@ CASES = (
         name="two-dashes-at-the-root-list-no-subcommand",
         line="pynix --",
         candidates=frozenset(),
+        line_after="pynix --",
         forbidden=ROOT_SUBCOMMANDS,
         note=(
             "Nothing at all: the root takes no option of its own, and `pynix._cli.complete` excludes "
             "`-h` and `--help`. clypi answered with the twelve subcommands, and fish inserted "
-            "`print-dev-env`. "
-            "**No `line_after` here, and that is a limit of the driver rather than of the answer.** "
-            "Checked in a real terminal: fish leaves the line reading `pynix --`. On a pty the "
-            "driver reads that no-op redraw as `pynix ------`, so asserting it here would state "
-            "something about `test_support.shell_pty` and nothing about pynix."
+            "`print-dev-env`. The line is unchanged, because there is nothing to insert: issue #216 "
+            "is what made that assertable, because the driver read fish's no-op redraw as "
+            "`pynix ------` until a terminal emulator replaced the approximation."
         ),
     ),
 )
