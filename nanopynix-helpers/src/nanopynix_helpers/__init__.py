@@ -10,6 +10,10 @@ import importlib
 import typing
 
 if typing.TYPE_CHECKING:
+    from nanopynix_helpers.attr_completion import (
+        complete_file_attr_path as complete_file_attr_path,
+        complete_flake_fragment as complete_flake_fragment,
+    )
     from nanopynix_helpers.build import (
         FodBuildError as FodBuildError,
         build_with_fod_update as build_with_fod_update,
@@ -60,6 +64,8 @@ _NAME_TO_MODULE: typing.Final[dict[str, str]] = {
     "FodHashMismatch": "nanopynix_helpers.fod",
     "FodSourceUpdateError": "nanopynix_helpers.fod",
     "build_with_fod_update": "nanopynix_helpers.build",
+    "complete_file_attr_path": "nanopynix_helpers.attr_completion",
+    "complete_flake_fragment": "nanopynix_helpers.attr_completion",
     "derivation_name_from_path": "nanopynix_helpers.fod",
     "evaluated_derivation_path": "nanopynix_helpers.fod",
     "extract_fod_hash_mismatch": "nanopynix_helpers.fod",
