@@ -35,7 +35,7 @@ let
   # interpreter derivation itself untouched.
   pythonBase = pkgs.python3.override {
     packageOverrides = pySelf: pyPrev: {
-      # THE ONE OVERRIDE, and one reason for it now.
+      # `datamodel-code-generator`, and one reason for it now.
       #
       # **The five disabled tests are gone, because nixpkgs disables them
       # itself.** They were the ruff ones: the package runs ruff over the code
@@ -61,6 +61,25 @@ let
       # whole toolchain.
       datamodel-code-generator = pyPrev.datamodel-code-generator.overridePythonAttrs (_old: {
         __darwinAllowLocalNetworking = true;
+      });
+
+      # **A command line is not a script, so no part of it is a comment.**
+      # `argcomplete.lexers.split_line` lexes the line with a vendored `shlex`
+      # whose `commenters` is `#`, and it never clears it. Everything from the
+      # first `#` is then dropped, so `pynix build --file .#hello --at<TAB>`
+      # completes an empty word and offers every option of `pynix build`
+      # rather than `--attr`.
+      #
+      # No shell agrees. bash reads `#` as a comment only at the start of a
+      # word, `fish -c 'echo a#b'` prints `a#b`, and `#` is in no
+      # `COMP_WORDBREAKS`. A flake reference is the shape a Nix program is
+      # typed with most, so this is not a corner. Issue #221 holds the
+      # measurement and the state upstream.
+      argcomplete = pyPrev.argcomplete.overridePythonAttrs (old: {
+        postPatch = (old.postPatch or "") + ''
+          substituteInPlace argcomplete/lexers.py \
+            --replace-fail 'lexer.whitespace_split = True' 'lexer.whitespace_split = True; lexer.commenters = ""'
+        '';
       });
 
       # The protobuf runtime, and the protoc plugin that writes the modules

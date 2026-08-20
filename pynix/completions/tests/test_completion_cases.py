@@ -190,6 +190,20 @@ CASES = (
         candidates=GC_SUBCOMMANDS,
     ),
     Case(
+        name="a-flake-reference-does-not-swallow-the-rest-of-the-line",
+        line="pynix build --file .#hello --at",
+        line_after="pynix build --file .#hello --attr",
+        note=(
+            "**A `#` earlier on the line used to drop everything after it.** "
+            "`argcomplete.lexers.split_line` lexes with a vendored `shlex` whose `commenters` is "
+            "`#`, and it never clears it, so the finder saw `pynix build --file .` and completed an "
+            "empty word. The shell then offered every option of `pynix build`. No shell reads `#` "
+            "that way: bash treats it as a comment only at the start of a word, and it is in no "
+            "`COMP_WORDBREAKS`. `default.nix` patches the lexer. Issue #221. "
+            "The unquoted spelling is the one to state here, because the quoted one always worked."
+        ),
+    ),
+    Case(
         name="two-dashes-at-the-root-list-no-subcommand",
         line="pynix --",
         candidates=frozenset(),
