@@ -1691,7 +1691,8 @@ class LockedFlake(AsyncLockedFlake):
             await self._eval_session._run_closing(local.close)  # type: ignore[reportPrivateUsage] -- flake teardown follows evaluator close ordering  # noqa: SLF001
 
 
-class Value(AsyncValue):
+# `AsyncValue[Store]`, for the reason `nanopynix.rpc.client._session` gives.
+class Value(AsyncValue["Store"]):
     """Async façade over a thread-confined :class:`CoreValue`.
 
     A value is in one of two states. A *resolved* value holds a rooted
