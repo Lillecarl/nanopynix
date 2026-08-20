@@ -30,6 +30,14 @@ joins the fragment and the option -- so the completion of each has to be the
 same set. That is why `complete_file` below completes the part after a ``#``
 itself rather than leaving it to the shell.
 
+**The walk is in `nanopynix_helpers.attr_completion`, and this module is the
+program around it.** That library holds the two rules Nix applies -- one for
+``--file`` and one for the fragment of a flake -- because they need an
+evaluator and nothing else, and a second Nix CLI that wants them already
+depends on it. What is here is what belongs to a program: the store, the
+session, the budget, the ``#`` spelling that is ours, and the argcomplete
+glue.
+
 **A completion runs while a person holds a key down, so it gives up.** Issue
 #223 is the question this answers, and a budget is the answer. Evaluating a
 Nix file has no upper bound: it can fetch a flake input, or walk nixpkgs. When
@@ -41,12 +49,30 @@ the shell writes a candidate onto the command line.
 from __future__ import annotations
 
 import contextlib
+import functools
 import io
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+from nanopynix._typechecking import BEARTYPING
+
+# `or BEARTYPING`, for the reason `nanopynix_helpers.attr_completion` gives:
+# beartype resolves an annotation at call time, and a name that only a type
+# checker imported is not there to resolve.
+if TYPE_CHECKING or BEARTYPING:
+    from collections.abc import Awaitable, Callable, Sequence
+
+    from nanopynix_helpers import AttrPathSearch
+
+    from libpynix.command import Completer
+
+#: Which attribute-path search a command applies to the fragment of ``--flake``.
+#:
+#: **A name, and not the search itself.** ``pynix.target`` builds each search,
+#: and importing it costs 101 ms that a command which only lists an option must
+#: not pay. So a command module names the one it wants and
+#: :func:`_flake_search` resolves the name inside the completion.
+type FlakeSearch = Literal["base", "dev-shell", "repl", "exact"]
 
 #: Seconds a completion may take before it answers with nothing.
 #:
@@ -70,46 +96,29 @@ BUDGET_VARIABLE = "PYNIX_COMPLETION_BUDGET"
 DEBUG_VARIABLE = "PYNIX_COMPLETION_DEBUG"
 
 
-def _split(attr_prefix: str) -> tuple[tuple[str, ...], str]:
-    """The complete components of *attr_prefix*, and the one being typed.
-
-    ``"a.b.c"`` is ``("a", "b")`` and ``"c"``: the caller has finished ``a``
-    and ``b``, and ``c`` is a prefix to match. ``"a."`` is ``("a",)`` and
-    ``""``, which matches every attribute of ``a``.
-    """
-    parts = attr_prefix.split(".")
-    return tuple(parts[:-1]), parts[-1]
-
-
 async def _names(source: str, attr_prefix: str) -> list[str]:
-    """The attribute paths of *source* that start with *attr_prefix*."""
+    """The attribute paths of the file *source* that *attr_prefix* could mean."""
     # Imported here and not at the top of the module. Issue #123 measured what
     # `pynix.target` costs a start that evaluates nothing -- 101 ms, because it
     # pulls structlog and the exception tree of nanopynix. A parser that only
     # lists an option must not pay that, and a completion is the one caller
     # that needs it.
-    from nanopynix_helpers import select_attr_path  # noqa: PLC0415 -- see above
+    from nanopynix_helpers import complete_file_attr_path  # noqa: PLC0415 -- see above
 
     from pynix._impl.settings import DEFAULT_STORE  # noqa: PLC0415 -- see above
     from pynix._util import eval_session  # noqa: PLC0415 -- see above
     from pynix.target import EvaluationTarget, base_attr_search, evaluate_target  # noqa: PLC0415 -- see above
 
-    stem, tail = _split(attr_prefix)
     target = EvaluationTarget(file=source, attr=None, flake=None)
     # `"auto"`, which is what `--store` defaults to, and `verbosity="error"`
     # so the evaluator says nothing while a person is holding a key down.
     async with eval_session(DEFAULT_STORE, verbosity="error") as (_nix, _store, session):
         root = await evaluate_target(target, session, auto_call_file=True, attr_search=base_attr_search())
-        value = await select_attr_path(root, stem) if stem else root
-        names = await value.attr_names()
-
-    prefix = ".".join(stem)
-    head = f"{prefix}." if prefix else ""
-    return [f"{head}{name}" for name in names if name.startswith(tail)]
+        return await complete_file_attr_path(root, attr_prefix)
 
 
-def _answer(source: str, attr_prefix: str) -> list[str]:
-    """Run :func:`_names` under the budget, and answer nothing when it fails.
+def _guarded(work: Callable[[], Awaitable[list[str]]]) -> list[str]:
+    """Run *work* under the budget, and answer nothing when it fails.
 
     **Every failure is the same answer, and that is on purpose.** A file that
     does not parse, an attribute path that leads nowhere, a value that is not
@@ -121,7 +130,7 @@ def _answer(source: str, attr_prefix: str) -> list[str]:
 
     async def bounded() -> list[str]:
         with anyio.fail_after(BUDGET_SECONDS):
-            return await _names(source, attr_prefix)
+            return await work()
 
     # **stderr goes nowhere while this runs.** The evaluator logs through
     # structlog, and a log line drawn into a command line is worse than a
@@ -135,6 +144,11 @@ def _answer(source: str, attr_prefix: str) -> list[str]:
         # cancellation is not caught, so Ctrl-C still ends the process.
         _record_the_failure()
         return []
+
+
+def _answer(source: str, attr_prefix: str) -> list[str]:
+    """The attribute paths of *source* under *attr_prefix*, or nothing."""
+    return _guarded(functools.partial(_names, source, attr_prefix))
 
 
 def _record_the_failure() -> None:
@@ -190,3 +204,75 @@ def complete_file(*, prefix: str, **_: Any) -> Sequence[str]:
     if not separator:
         return []
     return [f"{path}#{candidate}" for candidate in _answer(path, fragment)]
+
+
+def _flake_search(name: FlakeSearch) -> AttrPathSearch:
+    """The :class:`~nanopynix_helpers.AttrPathSearch` that *name* stands for.
+
+    ``"exact"`` is the empty search, which reads the fragment as one path and
+    applies no prefix. ``pynix osearch`` passes no search to
+    :func:`~pynix.target.evaluate_target`, and that is what no search means.
+    """
+    # Imported here for the reason `_names` gives.
+    from nanopynix_helpers import AttrPathSearch  # noqa: PLC0415 -- see `_names`
+
+    from pynix.target import base_attr_search, dev_shell_attr_search, repl_attr_search  # noqa: PLC0415 -- see `_names`
+
+    if name == "base":
+        return base_attr_search()
+    if name == "dev-shell":
+        return dev_shell_attr_search()
+    if name == "repl":
+        return repl_attr_search()
+    return AttrPathSearch()
+
+
+async def _flake_names(reference: str, fragment: str, name: FlakeSearch) -> list[str]:
+    """The fragments of the flake *reference* that *fragment* could mean."""
+    # Imported here for the reason `_names` gives.
+    from nanopynix_helpers import complete_flake_fragment, flake_outputs  # noqa: PLC0415 -- see `_names`
+
+    from pynix._impl.settings import DEFAULT_STORE  # noqa: PLC0415 -- see `_names`
+    from pynix._util import eval_session  # noqa: PLC0415 -- see `_names`
+
+    search = _flake_search(name)
+    async with eval_session(DEFAULT_STORE, verbosity="error") as (_nix, _store, session):
+        # **A completion never writes a lock file.** Nix locks with the flags
+        # of the command it is completing, which may write one. A Tab is not a
+        # command, and a keypress that changes the tree of the caller is a
+        # surprise that no candidate is worth.
+        locked = await session.lock_flake(reference, write_lock_file=False)
+        return await complete_flake_fragment(await flake_outputs(await locked.eval()), search, fragment)
+
+
+def complete_flake(prefix: str, name: FlakeSearch) -> list[str]:
+    """Candidates for ``--flake``, once the caller has typed a ``#``.
+
+    Before the ``#`` this answers nothing, so the shell offers file names.
+    `nix` answers a flake reference there -- a registry entry, or a directory
+    -- and issue #229 holds that half.
+    """
+    reference, separator, fragment = prefix.partition("#")
+    if not separator:
+        return []
+    return [
+        f"{reference}#{candidate}" for candidate in _guarded(functools.partial(_flake_names, reference, fragment, name))
+    ]
+
+
+def flake_completer(name: FlakeSearch) -> Completer:
+    """A completer for ``--flake`` that applies the search *name* names.
+
+    **Each command searches differently, so each command gets its own.**
+    ``nix develop F#<TAB>`` offers the names under ``devShells.<system>`` and
+    ``nix build F#<TAB>`` does not, because the two commands override
+    `getDefaultFlakeAttrPathPrefixes` differently. Seven commands of this
+    program declare the option, and a single completer carrying the base pair
+    would be wrong for four of them: both forms of ``develop``, ``repl``, and
+    ``osearch``, which applies no search at all.
+    """
+
+    def complete(*, prefix: str, **_: Any) -> Sequence[str]:
+        return complete_flake(prefix, name)
+
+    return complete
