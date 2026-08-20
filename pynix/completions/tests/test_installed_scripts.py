@@ -109,10 +109,21 @@ def test_the_renderer_writes_where_it_is_told(tmp_path: Path, renderer: Path) ->
     could see it, and this states the contract that the fixture depends on.
     """
     out = tmp_path / "rendered"
-    subprocess.run(  # noqa: S603 -- this interpreter, and a path from the `renderer` fixture
+    # `check=False`, and the report is built here. `check=True` raises a
+    # `CalledProcessError` whose message holds the exit status and not the
+    # stderr, so a renderer that is missing from the source of a gate reports
+    # "exit status 2" and nothing else. That cost a round trip to diagnose.
+    completed = subprocess.run(  # noqa: S603 -- this interpreter, and a path from the `renderer` fixture
         [sys.executable, str(renderer), "pynix", str(out)],
-        check=True,
+        check=False,
         capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, (
+        f"the renderer exited {completed.returncode}\n"
+        f"  script: {renderer} (exists: {renderer.is_file()})\n"
+        f"  stdout: {completed.stdout}\n"
+        f"  stderr: {completed.stderr}"
     )
 
     written = sorted(path.name for path in out.iterdir())

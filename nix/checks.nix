@@ -105,6 +105,17 @@ let
       # The gate step of the same build, and here for the same reason. A
       # fault in it is a gate that passes, which is worse than no gate.
       ../nix/wheel-gates.py
+      # The renderer of the completion scripts. `nix/mk-app.nix` runs it inside
+      # each application build, and `checks.completions` runs it as well: the
+      # dev-shell branch of its `scripts` fixture renders the three scripts
+      # rather than reading them out of a store path, and
+      # `test_the_renderer_writes_where_it_is_told` states the arguments it
+      # takes. Absent from this list the file is not in the source, and Python
+      # answers a missing script with exit status 2 and no message at all.
+      #
+      # It also brings the file into `check-lint` and `check-format`, which
+      # read three of the four `nix/*.py` files without it.
+      ../nix/render-completions.py
       # The rewrite that lowers the glibc floor of every object of the wheel
       # closure. It runs as a setup hook inside each build, so no test imports
       # it either, and a fault in it is a wheel that installs and then fails to
