@@ -58,6 +58,17 @@ BUDGET_SECONDS = float(os.environ.get("PYNIX_COMPLETION_BUDGET", "2.0"))
 #: The variable that overrides the budget, named here so a test can set it.
 BUDGET_VARIABLE = "PYNIX_COMPLETION_BUDGET"
 
+#: Set this to a file name to make a failed completion write its traceback there.
+#:
+#: **A completion that answers nothing looks the same whatever went wrong**, and
+#: that is deliberate: a shell shows no candidates, and the caller keeps typing.
+#: It also means a defect here is invisible. Measured: the gate ran this suite
+#: with no `pynix` on its search path, every row answered an empty set, and the
+#: failure read as a completer offering nothing rather than one that never ran.
+#: So there is a way to look, and it writes to a file rather than to stderr,
+#: because stderr during a completion lands in the command line.
+DEBUG_VARIABLE = "PYNIX_COMPLETION_DEBUG"
+
 
 def _split(attr_prefix: str) -> tuple[tuple[str, ...], str]:
     """The complete components of *attr_prefix*, and the one being typed.
@@ -122,7 +133,28 @@ def _answer(source: str, attr_prefix: str) -> list[str]:
     except Exception:
         # Every failure is one answer here; the docstring above says why. A
         # cancellation is not caught, so Ctrl-C still ends the process.
+        _record_the_failure()
         return []
+
+
+def _record_the_failure() -> None:
+    """Write the current traceback to the file :data:`DEBUG_VARIABLE` names.
+
+    Does nothing when the variable is unset, which is every ordinary run.
+    A failure to write is itself ignored: this exists to explain a completion
+    that answered nothing, and it must never become the reason one did.
+    """
+    destination = os.environ.get(DEBUG_VARIABLE)
+    if not destination:
+        return
+    # Imported here so an ordinary completion never loads it.
+    import traceback  # noqa: PLC0415 -- see above
+
+    try:
+        with open(destination, "a", encoding="utf-8") as record:  # noqa: PTH123 -- a plain file, and `anyio.Path` is async
+            record.write(traceback.format_exc())
+    except OSError:
+        return
 
 
 def complete_attr(*, prefix: str, parsed_args: Any = None, **_: Any) -> Sequence[str]:
