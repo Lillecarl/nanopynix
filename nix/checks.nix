@@ -231,8 +231,15 @@ let
   # pytest. **`pynix` is deliberately not in it**: that suite completes against
   # the *installed* application, which the gate names by its store path, and a
   # second `pynix` on the search path would make the answer ambiguous.
+  #
+  # `libpynix` is in it for `argcomplete` alone. `nix/render-completions.py`
+  # imports `argcomplete.shell_integration`, and
+  # `test_the_renderer_writes_where_it_is_told` runs that script with this
+  # interpreter. `libpynix` names `argcomplete` and names nothing else, and it
+  # is not a second `pynix`, so the ambiguity above stays avoided.
   completionsEnv = pythonSet.mkVirtualEnv "pynix-completions-test-env" {
     test-support = [ "test" ];
+    libpynix = [ ];
   };
 
   # A minimum NixOS configuration, so that the module of pynixd is evaluated.
