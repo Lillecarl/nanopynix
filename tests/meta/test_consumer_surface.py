@@ -116,23 +116,18 @@ CONSUMER_ENGINE_ANNOTATIONS: dict[tuple[str, str], str] = {
     ("pynix-lsp/src/pynix_lsp/_context.py", "Store"): _OWN_STORE,
     ("pynix-lsp/src/pynix_lsp/_handlers.py", "Session"): _CONSTRUCTS,
     ("pynix-lsp/src/pynix_lsp/_handlers.py", "Store"): _OWN_STORE,
-    ("nanopynix-helpers/src/nanopynix_helpers/build.py", "Session"): _CONSTRUCTS,
-    ("nanopynix-helpers/src/nanopynix_helpers/build.py", "Store"): _OWN_STORE,
-    ("nanopynix-helpers/src/nanopynix_helpers/build.py", "EvalSession"): (
-        "Travels with the `Session` and the `Store` above; this function holds "
-        "all three of one engine's objects together."
-    ),
-    ("nanopynix-helpers/src/nanopynix_helpers/build.py", "ValueProxy"): (
-        "Calls `root.build(store=build_store)`. `build`'s `store` parameter is "
-        "absent from `AsyncValue` for the reason in that method's docstring: "
-        "each engine accepts only its own `Store`, and expressing it would "
-        "make `AsyncValue` generic over the store type. Until then, the one "
-        "function that pairs a value with a build store names the class."
-    ),
-    ("pynix/src/pynix/_impl/build.py", "ValueProxy"): (
-        "Feeds `build_with_fod_update` above, so it inherits that constraint."
-    ),
 }
+
+# Five entries retired here, and the `ValueProxy` one named its own condition:
+# "expressing it would make `AsyncValue` generic over the store type. Until
+# then, the one function that pairs a value with a build store names the
+# class." Issue #232 made it generic, so `nanopynix_helpers.build` and
+# `pynix._impl.build` take the protocols and the four entries for the first
+# and the one for the second have no subject left.
+#
+# The entries that stay are the other constraint, and it did not move: a
+# consumer that *constructs* a session names the engine it chose, and a store
+# paired with such a session is that engine's own.
 
 
 def test_the_scanner_can_see_the_consumers() -> None:

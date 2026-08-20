@@ -22,7 +22,17 @@ if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Awaitable, Callable
     from pathlib import Path
 
-    from nanopynix.rpc import EvalSession, Session, Store, ValueProxy
+    # **The protocols, and not one engine's classes.** These named
+    # `nanopynix.rpc`, and beartype checks an annotation at call time, so this
+    # module accepted `rpc` and refused `inproc` although the two carry one
+    # API. Issue #232 widened `AsyncValue` so that `build(store=...)` types
+    # here as well.
+    from nanopynix.protocols import (
+        AsyncEvalSession as EvalSession,
+        AsyncSession as Session,
+        AsyncStore as Store,
+        AsyncValue as ValueProxy,
+    )
 
 
 class FodBuildError(RuntimeError):
