@@ -25,6 +25,7 @@
 #include <nanopynix/nix_compat_config.hh>
 
 #include "attrs_util.hh"
+#include "settings_util.hh"
 
 #include "py_value.hh"
 
@@ -136,12 +137,6 @@ struct PyLockedFlake {
 // =========================================================================
 // Free functions
 // =========================================================================
-
-static void apply_settings_overrides(nix::Config &config, const std::map<std::string, std::string> &overrides) {
-    for (auto &[name, value] : overrides)
-        if (!config.set(name, value))
-            throw std::runtime_error("unknown setting: " + name);
-}
 
 static PyFlakeRef parse_flake_ref(const std::string &url,
                                    const std::map<std::string, std::string> &fetch_settings = {}) {
