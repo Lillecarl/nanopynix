@@ -41,7 +41,7 @@ async def run_show(command: Show) -> None:
                 report_and_exit(exc)
 
             try:
-                drv_path = await derivation_path(root)
+                drv_path = await derivation_path(root, selected=target.selected_attr())
             except EvaluationTargetError as exc:
                 report_and_exit(exc)
 

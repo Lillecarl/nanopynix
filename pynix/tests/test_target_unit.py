@@ -27,11 +27,13 @@ from nanopynix.exceptions import ThrownError
 from nanopynix.rpc import EvalSession, ValueProxy
 from nanopynix.settings import NixFlakeSettings
 from pynix.target import (
+    CONFIGURATION_KINDS,
     EvaluationTarget,
     EvaluationTargetError,
     FileReference,
     app_attr_search,
     base_attr_search,
+    configuration_message,
     dev_shell_attr_search,
     evaluate_target,
     formatter_attr_search,
@@ -449,3 +451,26 @@ async def test_the_last_error_survives_when_no_candidate_answers() -> None:
         await open_file_reference(reference, opener)
 
     assert opener.asked == ["<nixpkgs>", "flake:nixpkgs"]
+
+
+def test_the_selected_attribute_joins_a_fragment_and_an_attr() -> None:
+    """The path can arrive in two places at once, and the hint names the whole of it."""
+    assert EvaluationTarget(file="dir#hetztop", attr=None, flake=None).selected_attr() == "hetztop"
+    assert EvaluationTarget(file=None, attr="hetztop", flake=None).selected_attr() == "hetztop"
+    assert EvaluationTarget(file="dir#hetztop", attr="config", flake=None).selected_attr() == "hetztop.config"
+    assert EvaluationTarget(file=None, attr=None, flake="ref#hello").selected_attr() == "hello"
+    assert EvaluationTarget(file="default.nix", attr=None, flake=None).selected_attr() is None
+    assert EvaluationTarget(file=None, attr=None, flake=None).selected_attr() is None
+
+
+def test_the_configuration_message_names_the_kind_and_the_path() -> None:
+    """Without a selected attribute it still names the path, because that is the answer."""
+    nixos = CONFIGURATION_KINDS["nixos"]
+    assert configuration_message(nixos, "hetztop") == (
+        "hetztop is a NixOS configuration, not a derivation.\nTry --attr hetztop.config.system.build.toplevel"
+    )
+    assert configuration_message(nixos, None) == (
+        "the selected value is a NixOS configuration, not a derivation.\nTry --attr config.system.build.toplevel"
+    )
+    home = CONFIGURATION_KINDS["homeManager"]
+    assert configuration_message(home, "me").endswith("Try --attr me.config.home.activationPackage")
