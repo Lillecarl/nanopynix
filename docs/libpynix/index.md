@@ -53,7 +53,7 @@ is the one in this repository that does it, from the environment and from
 **No completer is set on the three.** `Spec.complete` exists, and a Tab after
 any of them offers file names, which is what the shell does when nothing
 answers. An `--attr` completer would evaluate Nix on a keypress, so it needs a
-budget and a way to give up. Issue #222 holds that question.
+budget and a way to give up. Issue #223 holds that question.
 
 ## Answer a shell completion
 

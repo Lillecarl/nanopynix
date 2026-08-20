@@ -18,7 +18,7 @@ resolves them, and ``nanopynix_helpers.eval_target`` holds the search.
 **No completer is set.** ``Spec.complete`` exists, and a Tab after any of these
 three offers file names, which is what the shell does when nothing answers. An
 ``--attr`` completer would evaluate Nix on a keypress, so it needs a budget and
-a way to give up; issue #222 states that as its own question.
+a way to give up; issue #223 holds that question.
 """
 
 from __future__ import annotations
