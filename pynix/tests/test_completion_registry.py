@@ -52,6 +52,24 @@ from pynix._attr_completion import complete_flake
 print(json.dumps(complete_flake(sys.argv[1], "base")))
 """
 
+#: The registry layers Nix reads from a file, with the one that fetches off.
+_LAYERS_SCRIPT = """
+import json
+
+import anyio
+
+from nanopynix import inproc
+
+
+async def main() -> None:
+    async with inproc.Session(verbosity="error") as nix, nix.store("dummy://") as store:
+        entries = await store.registry_entries(fetch_settings={"flake-registry": ""})
+    print(json.dumps([[e.type, e.from_] for e in entries]))
+
+
+anyio.run(main)
+"""
+
 
 @pytest.fixture
 def user_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -88,10 +106,28 @@ async def _complete(prefix: str) -> list[str]:
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 
+async def _read_layers() -> list[list[str]]:
+    """The registry layers that need no network, as ``[type, from]`` pairs."""
+    result = await run_process([sys.executable, "-c", _LAYERS_SCRIPT])
+    assert result.returncode == 0, result.describe()
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
 @pytest.mark.usefixtures("user_registry")
-async def test_the_user_layer_answers_when_the_global_layer_is_reachable() -> None:
-    """The control. Without it the case below could pass on an empty answer."""
-    assert PROBE_ENTRY in await _complete("aprobe")
+async def test_the_fixture_puts_an_entry_where_nix_reads_it() -> None:
+    """The control. Without it the case below could pass on an empty answer.
+
+    **It names an empty ``flake-registry``, so it never reaches the network.**
+    The control used to complete for real and let the global layer stand,
+    which made it the one test here that could fail for a reason of its own.
+    It did: three jobs of one CI run reported an empty answer, on a machine
+    with a network, where the case below -- which cannot download at all --
+    passed. A control that is less reliable than the thing it controls is
+    worse than no control.
+    """
+    layers = await _read_layers()
+
+    assert ["user", f"flake:{PROBE_ENTRY}"] in layers
 
 
 @pytest.mark.usefixtures("user_registry")
@@ -106,5 +142,17 @@ async def test_the_user_layer_still_answers_when_the_global_layer_fails(
     blocked = tmp_path / "not-a-directory"
     blocked.write_text("", encoding="utf-8")
     monkeypatch.setenv("NIX_CACHE_HOME", str(blocked / "nix"))
+    record = tmp_path / "completion-failure.txt"
+    monkeypatch.setenv("PYNIX_COMPLETION_DEBUG", str(record))
 
-    assert PROBE_ENTRY in await _complete("aprobe")
+    offered = await _complete("aprobe")
+
+    # A completion that fails answers nothing and says nothing, so a bare
+    # membership assertion names no cause. `PYNIX_COMPLETION_DEBUG` is the
+    # documented way to look, and a failure in CI is where nobody can look by
+    # hand.
+    assert PROBE_ENTRY in offered, (
+        f"offered {offered}\n"
+        f"completion traceback:\n"
+        f"{record.read_text(encoding='utf-8') if record.is_file() else '(none recorded)'}"
+    )
