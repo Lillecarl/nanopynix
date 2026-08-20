@@ -15,20 +15,27 @@ declaration next to the code that reads it puts that cost on every command.
 The code that reads these three stays in the program: ``pynix.target``
 resolves them, and ``nanopynix_helpers.eval_target`` holds the search.
 
-**No completer is set.** ``Spec.complete`` exists, and a Tab after any of these
-three offers file names, which is what the shell does when nothing answers. An
-``--attr`` completer would evaluate Nix on a keypress, so it needs a budget and
-a way to give up; issue #223 holds that question.
+**A completer is a parameter, and this module supplies none.** Answering a
+Tab after ``--attr`` means evaluating Nix while a person holds a key down,
+which needs an evaluator, a budget and a way to give up. All three belong to
+the program: ``pynix._attr_completion`` has them, and ``pynix._nix_options``
+passes them in. A program that supplies nothing keeps what these three did
+before, which is to let the shell offer file names.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from libpynix._typecheck import no_runtime_type_check
 from libpynix.command import opt
 
+if TYPE_CHECKING:
+    from libpynix.command import Completer
+
 
 @no_runtime_type_check  # a declaration returns a Spec, not the annotated type; beartype would otherwise flag every call as a type violation
-def file_option() -> str | None:
+def file_option(*, complete: Completer | None = None) -> str | None:
     """Declare the common ``--file`` option.
 
     The value is a string, and not a ``Path``. ``PurePath`` collapses a
@@ -41,16 +48,26 @@ def file_option() -> str | None:
         None,
         short="f",
         help="Evaluate FILE as a Nix expression. FILE is a path, a lookup path, a URL, or a flake reference, and it may end with '#' and an attribute path.",
+        complete=complete,
     )
 
 
 @no_runtime_type_check  # see file_option
-def attr_option() -> str | None:
+def attr_option(*, complete: Completer | None = None) -> str | None:
     """Declare the common ``--attr`` option."""
-    return opt(None, short="A", help="Dot-separated attribute path within the evaluation result.")
+    return opt(
+        None,
+        short="A",
+        help="Dot-separated attribute path within the evaluation result.",
+        complete=complete,
+    )
 
 
 @no_runtime_type_check  # see file_option
-def flake_option() -> str | None:
+def flake_option(*, complete: Completer | None = None) -> str | None:
     """Declare the common ``--flake`` option."""
-    return opt(None, help="Evaluate FLAKE, optionally with a '#'-separated attribute path.")
+    return opt(
+        None,
+        help="Evaluate FLAKE, optionally with a '#'-separated attribute path.",
+        complete=complete,
+    )
