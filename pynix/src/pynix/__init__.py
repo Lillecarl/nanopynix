@@ -6,8 +6,8 @@ from __future__ import annotations
 # is already loaded by the interpreter, so this costs nothing.
 from collections.abc import Sequence
 
+from libpynix import Command, build_parser, complete, dispatch, group
 from pynix import _impl
-from pynix._cli import Command, build_parser, complete, dispatch, group
 from pynix.build import Build
 from pynix.config import Config
 from pynix.derivation import Derivation

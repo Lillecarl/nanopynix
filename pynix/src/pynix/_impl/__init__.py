@@ -1,7 +1,7 @@
 """The heavy half of a subcommand, imported when that subcommand runs.
 
 **The parser needs every command class before it can parse one argument.**
-``pynix/__init__.py`` lists every subcommand, and ``pynix._cli`` reads
+``pynix/__init__.py`` lists every subcommand, and ``libpynix`` reads
 that annotation while the class body of ``Pynix`` runs. So every subcommand
 module loads on every start, including ``pynix --help`` and every keypress of
 a shell completion.

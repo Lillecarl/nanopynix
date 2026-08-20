@@ -64,7 +64,7 @@ from nanopynix._typechecking import BEARTYPING
 if TYPE_CHECKING or BEARTYPING:
     from pydantic.fields import FieldInfo
 
-    from pynix._cli import Command
+    from libpynix import Command
 
 
 #: What every ``--store`` used to default to, once per module.

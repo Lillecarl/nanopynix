@@ -43,9 +43,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from libpynix import Command, opt
 from nanopynix._typechecking import no_runtime_type_check
 from pynix import _impl
-from pynix._cli import Command, opt
 
 
 @no_runtime_type_check  # a declaration returns a Spec, and the annotation names the value it will hold
@@ -121,40 +121,14 @@ class ConfiguredCommand(PynixCommand):
                 setattr(self, field, getattr(resolved, field))
 
 
-# The three options that name what to evaluate. They live here, and not in
-# `pynix.target` where the code that reads them lives, because a command module
-# imports whatever declares its options, and `pynix.target` pulls `structlog`
-# and the exception tree of nanopynix -- 101 ms that a start which evaluates
-# nothing was paying. Issue #123.
-@no_runtime_type_check  # a declaration returns a Spec, not the annotated type; beartype would otherwise flag every call as a type violation
-def file_option() -> str | None:
-    """Declare the common ``--file`` option.
-
-    The value is a string, and not a ``Path``. ``PurePath`` collapses a
-    repeated separator, so ``https://example.com/x.tar.gz`` reached the
-    evaluator as ``https:/example.com/x.tar.gz`` and failed. A reference is
-    also not a path: ``github:NixOS/nixpkgs`` and ``<nixpkgs>`` name a tree
-    that no local directory holds.
-    """
-    return opt(
-        None,
-        short="f",
-        help="Evaluate FILE as a Nix expression. FILE is a path, a lookup path, a URL, or a flake reference, and it may end with '#' and an attribute path.",
-    )
-
-
-@no_runtime_type_check  # see file_option
-def attr_option() -> str | None:
-    """Declare the common ``--attr`` option."""
-    return opt(None, short="A", help="Dot-separated attribute path within the evaluation result.")
-
-
-@no_runtime_type_check  # see file_option
-def flake_option() -> str | None:
-    """Declare the common ``--flake`` option."""
-    return opt(None, help="Evaluate FLAKE, optionally with a '#'-separated attribute path.")
-
-
+# `--file`, `--flake` and `--attr` are not here. They mean the same thing in
+# every program that evaluates Nix, and `libpynix.nix_options` declares them
+# for all of them since issue #222. That module also keeps the rule this file
+# used to state: a declaration lives away from `pynix.target`, which is where
+# the code that *reads* one lives, because a command module imports whatever
+# declares its options and `pynix.target` pulls `structlog` and the exception
+# tree of nanopynix -- 101 ms that a start which evaluates nothing was paying.
+# Issue #123.
 @no_runtime_type_check  # see option
 def store_option(help: str = "Store URI to use.") -> str:  # noqa: A002 -- see option
     return option(help)

@@ -210,7 +210,7 @@ CASES = (
         line_after="pynix --",
         forbidden=ROOT_SUBCOMMANDS,
         note=(
-            "Nothing at all: the root takes no option of its own, and `pynix._cli.complete` excludes "
+            "Nothing at all: the root takes no option of its own, and `libpynix.complete` excludes "
             "`-h` and `--help`. clypi answered with the twelve subcommands, and fish inserted "
             "`print-dev-env`. The line is unchanged, because there is nothing to insert: issue #216 "
             "is what made that assertable, because the driver read fish's no-op redraw as "

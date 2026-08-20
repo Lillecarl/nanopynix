@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import override
 
+from libpynix import attr_option, file_option, flake_option
 from pynix import _impl
-from pynix._settings import ConfiguredCommand, PynixCommand, attr_option, file_option, flake_option, store_option
+from pynix._settings import ConfiguredCommand, PynixCommand, store_option
 
 
 class Show(ConfiguredCommand):
