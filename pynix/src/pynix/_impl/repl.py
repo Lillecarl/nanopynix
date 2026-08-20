@@ -248,8 +248,23 @@ class _ReplCompleter(Completer):
         document: Document,
         complete_event: CompleteEvent,
     ) -> AsyncGenerator[Completion]:
-        del complete_event
         before_cursor = document.text_before_cursor
+        if not before_cursor:
+            # **Tab, and not typing.** The shell convention is that Tab on an
+            # empty word offers everything that can go there, and `nix repl`
+            # follows it. `complete_while_typing` is on, so a completer that
+            # answers an empty line unasked would open the menu as soon as the
+            # prompt appeared. `completion_requested` is true for a keypress
+            # and false for typing, which is exactly that difference.
+            #
+            # No cap on the number of names. The menu of prompt-toolkit
+            # scrolls, so a large scope fills a bounded box rather than the
+            # terminal, and the branch below already yields every name that
+            # starts with one letter without a cap of its own.
+            if complete_event.completion_requested:
+                for name in await self._repl.scope_names():
+                    yield Completion(name, start_position=0)
+            return
         command, separator, _argument = before_cursor.partition(" ")
         if not separator and command.startswith(":"):
             for name, description in _COMMANDS.items():
@@ -257,17 +272,27 @@ class _ReplCompleter(Completer):
                     yield Completion(name, start_position=-len(command), display_meta=description)
             return
 
+        async for item in self._name_completions(before_cursor):
+            yield item
+
+    async def _name_completions(self, before_cursor: str) -> AsyncGenerator[Completion]:
+        """Each name of the scope, or of an attribute set, that continues the last word.
+
+        A branch of its own, and not of the caller: the three cases together
+        cost more complexity than the strict lint allows one function.
+        """
         source_and_offset = _nix_input(before_cursor)
-        if source_and_offset is not None:
-            source, _offset = source_and_offset
-            target = completion_prefix_at(source, len(source.encode()))
-            if target is not None:
-                prefix, partial = target
-                candidates = await self._repl.scope_names() if prefix is None else await self._attr_names(prefix)
-                for name in candidates:
-                    if name.startswith(partial):
-                        yield Completion(name, start_position=-len(partial))
-                return
+        if source_and_offset is None:
+            return
+        source, _offset = source_and_offset
+        target = completion_prefix_at(source, len(source.encode()))
+        if target is None:
+            return
+        prefix, partial = target
+        candidates = await self._repl.scope_names() if prefix is None else await self._attr_names(prefix)
+        for name in candidates:
+            if name.startswith(partial):
+                yield Completion(name, start_position=-len(partial))
 
     async def _attr_names(self, expression: str) -> list[str]:
         try:
