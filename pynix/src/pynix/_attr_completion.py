@@ -78,9 +78,19 @@ type FlakeSearch = Literal["base", "dev-shell", "repl", "exact"]
 #: Seconds a completion may take before it answers with nothing.
 #:
 #: **Long enough for a local file, short enough to feel like a keypress.**
-#: A small `default.nix` answers in well under a second. nixpkgs does not, and
-#: a caller who asks for it gets nothing rather than a wedged terminal.
-BUDGET_SECONDS = float(os.environ.get("PYNIX_COMPLETION_BUDGET", "2.0"))
+#: A small `default.nix` answers in well under a second, and a whole command
+#: costs 0.639 s measured. nixpkgs does not, and a caller who asks for it gets
+#: nothing rather than a wedged terminal.
+#:
+#: **5.0 s, and it was 2.0 s.** The old figure was under the cost of the case
+#: it existed for: issue #231 measured a flake whose input never answers, and
+#: the call returned at 4.086 s. A budget that a real case overruns is a
+#: budget that reports nothing about the case, so it moved above it.
+#:
+#: :data:`BUDGET_VARIABLE` overrides it. Read once, from the environment, and
+#: not through the settings model of `pynix`: this is one number that every
+#: keypress pays for, and a settings tree would cost the start it saves.
+BUDGET_SECONDS = float(os.environ.get("PYNIX_COMPLETION_BUDGET", "5.0"))
 
 #: The variable that overrides the budget, named here so a test can set it.
 BUDGET_VARIABLE = "PYNIX_COMPLETION_BUDGET"
