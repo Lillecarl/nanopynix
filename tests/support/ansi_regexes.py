@@ -64,17 +64,11 @@ ESCAPE_SPELLINGS = ("\x1b", "\\x1b", "\\x1B", "\\033", "\\u001b", "\\u001B", "\\
 # not when calling it is merely inconvenient. Same shape as the ledger in
 # `tests/meta/test_consumer_surface.py`, and for the same reason: an exemption
 # that a machine records is an exemption a reader can find.
-EXEMPT: dict[str, str] = {
-    "test-support/src/test_support/shell_pty.py": (
-        "Not Nix output. This reads what a *shell* draws on a pty -- cursor "
-        "movement, an OSC title, and a private-parameter sequence that fish "
-        "writes -- so `nix::filterANSIEscapes` is not the authority on it. It "
-        "also applies a backspace rather than removing it, which no filter of "
-        "Nix log text does. And `test-support` is the project that names no "
-        "Nix concept at all, so importing `nanopynix` there would reverse the "
-        "one rule that project exists to keep."
-    ),
-}
+# Empty, and that is the result of issue #216. The one entry it held was
+# `test-support/src/test_support/shell_pty.py`, which read what a shell draws
+# on a pty. `pyte` reads it now, so no file in this repository writes its own
+# pattern for an escape sequence.
+EXEMPT: dict[str, str] = {}
 
 
 @dataclass(frozen=True)

@@ -19,6 +19,7 @@
   cyclopts,
   pytestCheckHook,
   pexpect,
+  pyte,
   bashInteractive,
   fish,
   zsh,
@@ -64,6 +65,7 @@ buildPythonApplication {
     pytestCheckHook
     testSupport
     pexpect
+    pyte
     bashInteractive
     fish
     zsh

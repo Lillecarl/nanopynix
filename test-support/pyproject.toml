@@ -17,12 +17,13 @@ requires-python = ">=3.10"
 # the sdist.
 license = "Apache-2.0"
 license-files = [ "LICENSE" ]
-# `anyio` for the subprocess runner, `pygit2` for the Git fixtures and
-# `pexpect` for the pty driver in `shell_pty`. Neither `pytest` nor
-# `pytest-agent` is here: `notes.py` finds pytest-agent at run time when it is
-# present, and a helper that a non-pytest program can call should not drag a
-# test runner into that program's closure.
-dependencies = ["anyio", "pygit2", "pexpect"]
+# `anyio` for the subprocess runner, `pygit2` for the Git fixtures, and
+# `pexpect` with `pyte` for the pty driver in `shell_pty`: `pexpect` drives the
+# shell, and `pyte` is the terminal that reads what the shell drew. Neither
+# `pytest` nor `pytest-agent` is here: `notes.py` finds pytest-agent at run
+# time when it is present, and a helper that a non-pytest program can call
+# should not drag a test runner into that program's closure.
+dependencies = ["anyio", "pygit2", "pexpect", "pyte"]
 
 [project.optional-dependencies]
 test = ["pytest", "anyio"]

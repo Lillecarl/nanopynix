@@ -18,6 +18,7 @@
   anyio,
   pygit2,
   pexpect,
+  pyte,
 }:
 
 buildPythonPackage {
@@ -39,6 +40,7 @@ buildPythonPackage {
     anyio
     pygit2
     pexpect
+    pyte
   ];
 
   # `checks.test-support` runs this project's own suite, against the builders
