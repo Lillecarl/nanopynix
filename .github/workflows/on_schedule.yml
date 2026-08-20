@@ -119,12 +119,13 @@ jobs:
         useDaemon: false
       timeout-minutes: 15
     - name: Run the gates (completion-spike, completions, format, grpclib-transports,
-        lint, lint-strict, nanopynix-helpers, nix-daemon-protocol, nixos-module, pynix-isolated,
-        pynixd, pytest-agent, shell, test-support, types)
+        libpynix, lint, lint-strict, nanopynix-helpers, nix-daemon-protocol, nixos-module,
+        pynix-isolated, pynixd, pytest-agent, shell, test-support, types)
       run: nix build --file . --no-link --print-build-logs --keep-going checks.completion-spike
-        checks.completions checks.format checks.grpclib-transports checks.lint checks.lint-strict
-        checks.nanopynix-helpers checks.nix-daemon-protocol checks.nixos-module checks.pynix-isolated
-        checks.pynixd checks.pytest-agent checks.shell checks.test-support checks.types
+        checks.completions checks.format checks.grpclib-transports checks.libpynix
+        checks.lint checks.lint-strict checks.nanopynix-helpers checks.nix-daemon-protocol
+        checks.nixos-module checks.pynix-isolated checks.pynixd checks.pytest-agent
+        checks.shell checks.test-support checks.types
       timeout-minutes: 20
   test-asan:
     runs-on: ubuntu-24.04

@@ -59,6 +59,9 @@ if TYPE_CHECKING:
 # The packages that consume nanopynix as a library, relative to the repository
 # root. `tests/` is absent on purpose -- see the module docstring.
 CONSUMER_ROOTS = (
+    # The CLI layer of issue #222. It depends on no part of nanopynix, and
+    # this entry is what reports the day that stops being true.
+    "libpynix/src",
     "pynix/src",
     # The language server, which issue #107 moved out of `pynix/src`. It is a
     # first-party consumer of `nanopynix` exactly as `pynix` is, and without

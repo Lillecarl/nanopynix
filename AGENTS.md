@@ -40,7 +40,7 @@ reach, in the `static-checks` job. Each one is a derivation in
 `nix/checks.nix`, and each is a package. Build them to run a gate the way CI
 runs it, in a sandbox and not in the dev shell:
 
-- nix build --file . --no-link --keep-going checks.lint checks.lint-strict checks.format checks.types checks.shell checks.grpclib-transports checks.pytest-agent checks.test-support checks.nanopynix-helpers checks.nix-daemon-protocol checks.pynixd checks.nixos-module checks.pynix-isolated checks.completions
+- nix build --file . --no-link --keep-going checks.lint checks.lint-strict checks.format checks.types checks.shell checks.grpclib-transports checks.pytest-agent checks.test-support checks.nanopynix-helpers checks.libpynix checks.nix-daemon-protocol checks.pynixd checks.nixos-module checks.pynix-isolated checks.completions
 
 Do not use `nix flake check` for this. That command evaluates every package,
 and `packages.shell` cannot evaluate in a pure flake evaluation.

@@ -64,6 +64,9 @@ known-first-party = [
   # `pynix-lsp/` that imports `pynix` had it sorted as a third-party package,
   # and one project cannot be in two groups.
   "pynix",
+  # The CLI layer of issue #222, here for the same reason as `pynix` above:
+  # every command module of `pynix/` imports it.
+  "libpynix",
   # The support package of `pynix-lsp/tests/`, importable by bare name for
   # the reason that `support` above gives.
   "lsp_support",

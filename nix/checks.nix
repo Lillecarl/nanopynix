@@ -62,6 +62,10 @@ let
       ../nanopynix-bindings
       ../nanopynix-helpers
       ../nanopynix-proto
+      # The CLI layer, which issue #222 moved out of `../pynix`. Without it
+      # `check-lint`, `check-format` and `check-types` read a smaller tree
+      # than `ruff check .` in the dev shell reads.
+      ../libpynix
       ../greeter-proto
       ../grpclib-transports
       # The whole tree, and not the one subproject that `checks.nix-daemon-protocol`
@@ -124,6 +128,9 @@ let
   pythonEnv = pythonSet.mkVirtualEnv "nanopynix-check-env" {
     nanopynix = [ "test" ];
     nanopynix-helpers = [ "test" ];
+    # pyright reads `libpynix/src` and `libpynix/tests`, and that suite
+    # imports `argcomplete` and `pytest` directly.
+    libpynix = [ "test" ];
     pynix = [
       "test"
       "docs"
@@ -185,7 +192,16 @@ let
     nanopynix-helpers = [ "test" ];
   };
 
-  # And a sixth. `nix-daemon-protocol` is the wire package under `pynixd/`,
+  # And a sixth. `libpynix` is the command-line layer that issue #222 moved
+  # out of `pynix`. A venv holding this project alone is what proves it stands
+  # up without `pynix`, and without any part of Nix: the whole reason it is a
+  # separate project is that a consumer should be able to take the parser
+  # without the evaluator.
+  libpynixEnv = pythonSet.mkVirtualEnv "libpynix-test-env" {
+    libpynix = [ "test" ];
+  };
+
+  # And a seventh. `nix-daemon-protocol` is the wire package under `pynixd/`,
   # and its suite is the pure half of what pynixd tests: no daemon, no Nix
   # binary and no SSH, so it is the suite of that project that a sandbox can
   # run. A venv holding this project alone is what proves the package stands
@@ -194,7 +210,7 @@ let
     nix-daemon-protocol = [ "test" ];
   };
 
-  # And a seventh, for pynixd itself. Only its unit suite runs here. The
+  # And an eighth, for pynixd itself. Only its unit suite runs here. The
   # functional suite drives a real `nix`, a real daemon and a real SSH
   # session, and a build sandbox offers none of the three, so a gate that ran
   # it would report the sandbox rather than the code.
@@ -202,14 +218,14 @@ let
     pynixd = [ "test" ];
   };
 
-  # And an eighth. `pynix` and nothing else, which is what the `pynix-isolated`
+  # And a ninth. `pynix` and nothing else, which is what the `pynix-isolated`
   # gate below asks a question of. The dev shell carries the language server
   # on purpose, so no environment that a person works in can answer it.
   pynixOnlyEnv = pythonSet.mkVirtualEnv "pynix-only-env" {
     pynix = [ ];
   };
 
-  # And a ninth, for the completion suite of `pynix`. `test-support` carries
+  # And a tenth, for the completion suite of `pynix`. `test-support` carries
   # `shell_pty`, which drives a shell on a pty, and its `test` extra carries
   # pytest. **`pynix` is deliberately not in it**: that suite completes against
   # the *installed* application, which the gate names by its store path, and a
@@ -442,6 +458,13 @@ in
   nanopynix-helpers = mkCheck "nanopynix-helpers" [
     helpersEnv
   ] "python -m pytest -p no:cacheprovider nanopynix-helpers";
+
+  # The CLI layer of issue #222. The directory and not `libpynix/tests`, for
+  # the same reason as the gate above: this project carries its own
+  # `pytest.ini`, and pointing pytest at the project makes `testpaths` apply.
+  libpynix = mkCheck "libpynix" [
+    libpynixEnv
+  ] "python -m pytest -p no:cacheprovider libpynix";
 
   # The directory, and not `test-support/tests`. This project carries its own
   # `pytest.ini`, so pointing pytest at the project makes `testpaths` and
