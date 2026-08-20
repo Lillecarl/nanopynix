@@ -14,7 +14,9 @@ import pytest
 from rich.console import Console
 from rich.text import Text
 
+from nanopynix.exceptions import EvalError
 from pynix import _util
+from pynix._impl import main
 
 # What Nix sends for `error: value is a string`, with its own colour. `\x1b[`
 # starts each escape, `31;1m` is bold red, and `0m` ends the run.
@@ -103,3 +105,56 @@ def test_error_exit_writes_to_stderr(capsys: pytest.CaptureFixture[str]) -> None
 
     assert "something went wrong" in captured.err
     assert captured.out == ""
+
+
+def test_a_failure_of_nix_is_printed_in_the_words_of_nix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One marker, and not three.
+
+    `str(exc)` reads `[EvalError] error: ...`: the class comes from
+    `NixError.__str__`, `error:` comes from Nix, and `Error:` came from
+    `error_exit`. `pynix._impl.main.run` prints `exc.msg`, which is the line
+    the `nix` CLI prints for the same failure.
+    """
+    buffer = io.StringIO()
+    monkeypatch.setattr(main, "error_console", Console(file=buffer, force_terminal=False, width=200))
+
+    async def _fail() -> None:
+        raise EvalError("EvalError", NIX_MESSAGE)
+
+    with pytest.raises(SystemExit):
+        main.run(_fail)
+
+    written = buffer.getvalue()
+    assert PLAIN_WORDS in written
+    assert "[EvalError]" not in written
+    assert "Error:" not in written
+
+
+def test_a_failure_of_nix_keeps_its_colour_on_a_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The same reader as `error_exit` uses, for the same reason."""
+    buffer = io.StringIO()
+    monkeypatch.setattr(main, "error_console", Console(file=buffer, force_terminal=True, width=200))
+
+    async def _fail() -> None:
+        raise EvalError("EvalError", NIX_MESSAGE)
+
+    with pytest.raises(SystemExit):
+        main.run(_fail)
+
+    written = buffer.getvalue()
+    assert PLAIN_WORDS in Text.from_ansi(written).plain
+    assert "\x1b[1;35m" in written
+
+
+def test_a_failure_that_is_not_nix_keeps_its_traceback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`NixError` and nothing wider. A `TypeError` here is a defect of this repository."""
+    buffer = io.StringIO()
+    monkeypatch.setattr(main, "error_console", Console(file=buffer, force_terminal=False, width=200))
+
+    async def _fail() -> None:
+        raise TypeError("a defect")
+
+    with pytest.raises(TypeError, match="a defect"):
+        main.run(_fail)
+
+    assert buffer.getvalue() == ""

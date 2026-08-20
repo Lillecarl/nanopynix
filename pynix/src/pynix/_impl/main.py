@@ -30,10 +30,11 @@ from collections.abc import Callable, Coroutine
 
 import anyio
 import rich.traceback
+from rich.text import Text
 
 from nanopynix import set_manager_title
 from nanopynix.exceptions import NixError
-from pynix._util import configure_logging, error_exit
+from pynix._util import configure_logging, error_console
 
 
 def prepare() -> None:
@@ -64,8 +65,20 @@ def run(body: Callable[[], Coroutine[object, object, None]]) -> None:
 
     `NixError` and nothing wider. A `TypeError` in this repository is a defect,
     and a defect deserves the traceback.
+
+    **The message of Nix, in the words of Nix, with no prefix of our own.**
+    `str(exc)` reads `[EvalError] error: selected value is not a derivation`:
+    `NixError.__str__` writes the class, Nix writes `error:`, and `error_exit`
+    writes `Error:`. Three markers for one failure. `exc.msg` is the line that
+    the `nix` CLI prints for the same failure, so a reader who knows Nix reads
+    it unchanged. A failure of pynix itself still goes through `error_exit`
+    and still says `Error:`.
     """
     try:
         anyio.run(body)
     except NixError as exc:
-        error_exit(str(exc), cause=exc)
+        # `Text.from_ansi`, and not an interpolation: Nix colours its own
+        # output, and `error_exit` holds the measurement of what an escape
+        # sequence does to the highlighter of rich.
+        error_console.print(Text.from_ansi(exc.msg))
+        raise SystemExit(1) from exc
