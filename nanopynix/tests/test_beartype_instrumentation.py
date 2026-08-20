@@ -25,6 +25,7 @@ import sys
 import beartype.roar
 import pytest
 
+from beartype_bootstrap import PACKAGES
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix.settings import normalize_nix_path, normalize_nix_settings
 from nanopynix_testing.nix_markers import LINUX_FORK_THEN_INIT
@@ -222,9 +223,15 @@ _UNDECORATABLE_PATTERN = re.compile(r"BeartypeClawDecorWarning: .*? ([\w.]+)\(\)
 # Imports everything instrumented, then probes whether the hook actually fired.
 # The probe matters for the day UNDECORATABLE is empty: without it, a child
 # where beartype never installed would emit no warnings and pass vacuously.
-_INSTRUMENTED_IMPORT_PROBE = """
+#
+# **The import line is built from `PACKAGES`, and is not written out.** It was
+# written out, and issue #222 added `libpynix` to that tuple without adding it
+# here. The scan then covered four of the five instrumented packages and
+# reported nothing, which is the failure this whole test exists to catch. A
+# package added to the hook is now in the probe by construction.
+_INSTRUMENTED_IMPORT_PROBE = f"""
 import beartype.roar
-import nanopynix, nanopynix_helpers, pynix, pynix_lsp
+import {", ".join(PACKAGES)}
 from nanopynix.settings import normalize_nix_path
 
 try:

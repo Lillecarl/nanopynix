@@ -582,6 +582,11 @@ known-first-party = [
   # The support package of `pynix-lsp/tests/`, importable by bare name for
   # the reason that `support` above gives.
   "lsp_support",
+  # The startup shim of a spawned interpreter. `nanopynix-testing` puts its
+  # directory on PYTHONPATH rather than making it a package, so ruff sorted it
+  # with the third-party imports. `nanopynix/tests/test_beartype_instrumentation.py`
+  # reads `PACKAGES` out of it.
+  "beartype_bootstrap",
   # The two distributions of `pynixd/`. `exclude` above keeps this
   # configuration off that tree today, so neither name changes a run yet.
   # They are here for the day issue #131 removes the exclusion: `--config
