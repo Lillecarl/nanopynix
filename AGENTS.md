@@ -197,8 +197,14 @@ lines in the terminal alone.
 
 **Read `pytest-agent/SKILL.md` for the procedure to run pytest here and to read
 the results.** That file is the source of truth for the full workflow, and this
-file summarises only the first part of it. `SKILL.md` also documents these
-commands:
+file summarises only the first part of it.
+
+`.claude/skills/pytest-agent/SKILL.md` is a symlink to it, so the file is a
+registered skill and an agent reaches it by name rather than by remembering a
+path. The symlink points at the real file, which stays in the subproject that
+owns it. Edit `pytest-agent/SKILL.md`, and never the link.
+
+`SKILL.md` also documents these commands:
 
 - `pytest-agent digest` groups the failures by root cause. Start with this
   command, and do not read each failure separately first.
