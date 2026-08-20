@@ -17,11 +17,22 @@ fully checked, and the suite was green throughout.
 
 from __future__ import annotations
 
+import inspect
 import multiprocessing
 import os
 import re
+import signal
+import subprocess
 import sys
+import threading
+import time
+from collections.abc import Generator
+from contextlib import contextmanager
+from pathlib import Path
+from types import FrameType
+from typing import NoReturn
 
+import anyio
 import beartype.roar
 import pytest
 
@@ -43,6 +54,25 @@ _PROBE_ARGUMENT = 123
 # daemon-backend suite runs in about 6 minutes locally, so 120s here cannot
 # turn a slow runner into a spurious failure.
 _CHILD_TIMEOUT_SECONDS = 120
+
+# How long the whole forkserver block below gets, construction and teardown
+# included. Issue #205: `Pool()` starts the forkserver helper, and the helper
+# imports each preload module before it answers the first request. An import
+# that blocks therefore holds `Pool()`, the bound on `.get()` never fires, and
+# GitHub kills the job at 30 minutes with no summary and no `junit.xml`.
+# Larger than `_CHILD_TIMEOUT_SECONDS`, so a child that starts and then stalls
+# still fails at the inner bound, which names the more specific cause.
+_BLOCK_TIMEOUT_SECONDS = 180
+
+# The bound re-arms itself at this interval once it fires. Teardown of a
+# half-built pool can block as well, and a second wedge must not be silent.
+_REARM_SECONDS = 5.0
+
+# What the probe below gives the bound, and what it gives the whole probe
+# process. The preload it plants sleeps for ten minutes, so any bound at all
+# proves the point and a short one keeps this module fast.
+_PROBE_BOUND_SECONDS = 1.5
+_PROBE_PROCESS_BOUND_SECONDS = 60.0
 
 
 def _is_instrumented() -> bool:
@@ -67,6 +97,41 @@ def _child_report() -> tuple[bool, bool]:
     from nanopynix._typechecking import BEARTYPING as CHILD_BEARTYPING  # noqa: PLC0415 -- read in the child, see above
 
     return CHILD_BEARTYPING, _is_instrumented()
+
+
+@contextmanager
+def _bounded(seconds: float, what: str) -> Generator[None]:
+    """Raise :class:`TimeoutError` when the body runs longer than *seconds*.
+
+    **A bound on the body, and not on one call inside it.** The forkserver
+    block below blocks in three places, and only the middle one takes a
+    ``timeout=`` argument: ``Pool()`` waits for the helper to answer,
+    ``.get()`` waits for the child, and the ``with`` exit waits for the pool
+    to stop. Issue #205 measured a job that died at the first of the three.
+
+    ``SIGALRM`` is what reaches a blocking read that Python does not own. The
+    interpreter runs the handler on the main thread when the read returns
+    ``EINTR``, so the exception comes out of whichever call is blocked.
+
+    Linux only, and the one caller is Linux only for its own reasons.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        # `signal.signal` accepts the main thread alone. An unbounded body is
+        # worse than a bounded one and better than an error here, so this
+        # yields rather than raises.
+        yield
+        return
+
+    def _fire(signum: int, frame: FrameType | None) -> NoReturn:  # noqa: ARG001 -- the signature is the one `signal.signal` calls
+        raise TimeoutError(f"{what} did not finish within {seconds:g}s")
+
+    previous = signal.signal(signal.SIGALRM, _fire)
+    signal.setitimer(signal.ITIMER_REAL, seconds, _REARM_SECONDS)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 def test_the_pytest_process_is_instrumented() -> None:
@@ -117,17 +182,23 @@ def test_a_forkserver_child_is_instrumented_not_merely_flagged() -> None:
     """
     ctx = multiprocessing.get_context("forkserver")
     ctx.set_forkserver_preload(["nanopynix.rpc.worker._worker"])
-    with ctx.Pool(processes=1) as pool:
-        # Bounded, because a plain `pool.apply()` waits forever if the child
-        # never comes up -- and it sometimes does not. Twice now this exact
-        # call has hung a CI job until it was cancelled, at 117 and 145
-        # minutes, on two different Nix versions, with the forkserver child
-        # still alive as an orphan process at cleanup. A hang that long
-        # reports nothing at all: no test name, no traceback, just a job that
-        # never ends. Failing at 120s instead names the test and leaves the
-        # preload -- the whole Nix worker module graph, imported in a child
-        # that has just been forked from the forkserver helper -- as the
-        # thing to look at.
+    # Bounded twice, because the block blocks in three places and a plain
+    # `pool.apply()` waits forever at any of them. Four CI jobs have hung on
+    # this block and been killed: two at 117 and 145 minutes, and two at the
+    # 30-minute limit of GitHub, on four Nix versions, with the forkserver
+    # child still alive as an orphan process at cleanup. A hang that long
+    # reports nothing at all -- no test name, no traceback, no `junit.xml`,
+    # and no summary for the tests that already passed.
+    #
+    # The inner bound covers the child. The outer bound covers `Pool()`, which
+    # waits for the forkserver helper to import the preload, and the `with`
+    # exit, which waits for the pool to stop. Issue #205 measured a job that
+    # died at `Pool()`, where the inner bound cannot reach.
+    #
+    # Either bound names the test and leaves the preload -- the whole Nix
+    # worker module graph, imported in a child that has just been forked from
+    # the forkserver helper -- as the thing to look at.
+    with _bounded(_BLOCK_TIMEOUT_SECONDS, "the forkserver pool"), ctx.Pool(processes=1) as pool:
         flag_set, instrumented = pool.apply_async(_child_report).get(timeout=_CHILD_TIMEOUT_SECONDS)
 
     assert flag_set is True, "the child did not inherit NANOPYNIX_BEARTYPING"
@@ -135,6 +206,141 @@ def test_a_forkserver_child_is_instrumented_not_merely_flagged() -> None:
         "the child inherited NANOPYNIX_BEARTYPING but no import hook: its "
         "`if TYPE_CHECKING or BEARTYPING:` imports were promoted while nothing "
         "checked the hints they exist to resolve"
+    )
+
+
+class TestTheBoundHasTeeth:
+    """``_bounded`` is the machinery that turns a hang into a report.
+
+    The block it guards hangs on a CI runner and on no machine here, so these
+    exercise the bound directly. Without them the guard is code that has never
+    run, and issue #205 is about a bound that was there and did not fire.
+    """
+
+    def test_a_body_that_blocks_raises_inside_the_bound(self) -> None:
+        """A sleep far longer than the bound ends at the bound.
+
+        `time.sleep` is a blocking call the interpreter does not own, which is
+        the shape of `Pool()` and of the pool teardown.
+        """
+        started = time.monotonic()
+        with (
+            pytest.raises(TimeoutError, match=re.escape("the probe did not finish within 0.2s")),
+            _bounded(0.2, "the probe"),
+        ):
+            time.sleep(30)
+
+        assert time.monotonic() - started < 10, "the bound did not interrupt the blocking call"
+
+    def test_a_body_that_finishes_raises_nothing(self) -> None:
+        """The control. Without it the test above passes on a broken bound."""
+        with _bounded(30, "the probe"):
+            time.sleep(0)
+
+    def test_the_bound_puts_the_handler_and_the_timer_back(self) -> None:
+        """A leaked timer would fire in an unrelated test, far from here."""
+        before = signal.getsignal(signal.SIGALRM)
+        with _bounded(30, "the probe"):
+            pass
+
+        assert signal.getsignal(signal.SIGALRM) is before
+        assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
+
+    def test_the_bound_puts_them_back_after_it_fires(self) -> None:
+        """The path that matters, because it unwinds through the handler."""
+        before = signal.getsignal(signal.SIGALRM)
+        with pytest.raises(TimeoutError), _bounded(0.2, "the probe"):
+            time.sleep(30)
+
+        assert signal.getsignal(signal.SIGALRM) is before
+        assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
+
+
+# The failure of issue #205, built on purpose. A preload module that blocks at
+# import holds the forkserver helper, which holds `Pool()`, which is above the
+# bound on `.get()`. That is what a CI job died of, four times.
+#
+# **The bound comes from `_bounded` itself, through `inspect.getsource`.** A
+# copy in this string would be a second declaration that drifts, which is the
+# mistake `_INSTRUMENTED_IMPORT_PROBE` below records.
+#
+# The body of the `with` never runs, because `Pool()` never returns. So the
+# probe pickles nothing and needs no importable `__main__`.
+_HANGING_PRELOAD_PROBE = f"""
+from __future__ import annotations
+
+import multiprocessing
+import pathlib
+import signal
+import sys
+import threading
+from collections.abc import Generator
+from contextlib import contextmanager
+from types import FrameType
+from typing import NoReturn
+
+_REARM_SECONDS = {_REARM_SECONDS!r}
+
+{inspect.getsource(_bounded)}
+
+sys.path.insert(0, sys.argv[1])
+
+ctx = multiprocessing.get_context("forkserver")
+ctx.set_forkserver_preload(["slow_preload"])
+try:
+    with _bounded({_PROBE_BOUND_SECONDS!r}, "the forkserver pool"), ctx.Pool(processes=1):
+        pass
+except TimeoutError as timed_out:
+    answer = f"BOUNDED: {{timed_out}}"
+else:
+    answer = "NOT BOUNDED"
+
+pathlib.Path(sys.argv[2]).write_text(answer, encoding="utf-8")
+"""
+
+
+@pytest.mark.skipif(
+    "forkserver" not in multiprocessing.get_all_start_methods(),
+    reason="the bound guards a forkserver pool; nothing to check without one",
+)
+async def test_the_bound_reaches_a_preload_that_never_finishes_importing(tmp_path: Path) -> None:
+    """Issue #205, reproduced and then caught.
+
+    The three tests above bound a `time.sleep`, which proves the timer fires.
+    This one builds the real shape: the helper of the forkserver imports a
+    module that never returns, so `Pool()` blocks and the bound on `.get()`
+    cannot reach it. Before the outer bound, this hung until something killed
+    it -- four CI jobs, at 117 minutes, 145 minutes and twice at the 30-minute
+    limit of GitHub, each losing its summary and its `junit.xml`.
+
+    A subprocess, and a bound on the subprocess too. If `_bounded` stops
+    working, this test fails on the outer bound rather than hanging the run,
+    which is the whole property under test.
+    """
+    # Written here rather than inside the probe, so the source of the probe
+    # needs no escaped newline inside an f-string that already holds one. The
+    # sleep outlives the bound by far and still clears itself: the helper of
+    # the forkserver survives the probe as an orphan, and a short sleep means
+    # it is gone in half a minute rather than in ten.
+    (tmp_path / "slow_preload.py").write_text("import time\n\ntime.sleep(30)\n", encoding="utf-8")
+    answer = tmp_path / "answer.txt"
+
+    # **No pipe, and the answer comes through a file.** The orphan inherits
+    # whatever the probe writes to, so a piped stdout never reaches end of
+    # file and the parent waits on the orphan rather than on the probe. That
+    # is why `run_process` is not the tool here.
+    process = await anyio.open_process(
+        [sys.executable, "-c", _HANGING_PRELOAD_PROBE, str(tmp_path), str(answer)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    async with process:
+        with anyio.fail_after(_PROBE_PROCESS_BOUND_SECONDS):
+            await process.wait()
+
+    assert process.returncode == 0, f"the probe exited {process.returncode}"
+    assert answer.read_text(encoding="utf-8").startswith("BOUNDED: the forkserver pool did not finish"), (
+        "`Pool()` blocked on the preload and the bound did not fire"
     )
 
 
