@@ -240,8 +240,12 @@ class ShellSession:
         # the wrong place. The session therefore keeps one screen for its whole
         # life, and `raw_complete` reads the rows below the point where the
         # line began. The screen holds no scrollback, so a session that draws
-        # more than `WINDOW` rows loses its oldest ones; a session lives for
-        # one test and draws a few rows, which is well inside that.
+        # more than `WINDOW` rows loses its oldest ones. That is safe however
+        # long a session lives: `raw_complete` reads from the row the cursor
+        # is on, which is an index into the screen as it is now, and pyte
+        # keeps the cursor on the last row once the buffer scrolls. The rows
+        # it drops are the answers of earlier completions, which no caller
+        # holds any more.
         self._screen = pyte.Screen(columns, rows)
         self._stream = pyte.Stream(self._screen)
         self._child = pexpect.spawn(

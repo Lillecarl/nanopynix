@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from test_support.shell_pty import ShellSession
 
 #: The shells this table runs against. Every row runs in all three: a row that
@@ -191,8 +193,8 @@ CASES = (
     ),
     Case(
         name="a-flake-reference-does-not-swallow-the-rest-of-the-line",
-        line="pynix build --file .#hello --at",
-        line_after="pynix build --file .#hello --attr",
+        line="pynix build --file {nix}#hello --at",
+        line_after="pynix build --file {nix}#hello --attr",
         note=(
             "**A `#` earlier on the line used to drop everything after it.** "
             "`argcomplete.lexers.split_line` lexes with a vendored `shlex` whose `commenters` is "
@@ -227,18 +229,25 @@ CASES = (
 #: `xfail(strict=True)` against clypi. Issue #214 changed the library and they
 #: went green, so the marks came off with it. A row that breaks again belongs
 #: marked rather than deleted -- `git log` holds the shape.
-ROWS = [pytest.param(case, shell, id=f"{case.name}-{shell}") for case in CASES for shell in SHELL_NAMES]
+#: **The shell is the outer loop.** The `shell` fixture is session-scoped, so
+#: one fish, one bash and one zsh answer the whole table. Grouping the rows by
+#: shell means pytest builds each of the three once, in order, rather than
+#: leaving that to the reordering that a higher-scoped parameter usually gets.
+ROWS = [pytest.param(case, shell, id=f"{case.name}-{shell}") for shell in SHELL_NAMES for case in CASES]
 
 
 @pytest.mark.parametrize(("case", "shell"), ROWS, indirect=["shell"])
-def test_the_shell_offers_what_the_command_owes(case: Case, shell: ShellSession) -> None:
-    answer = shell.complete(case.line)
+def test_the_shell_offers_what_the_command_owes(case: Case, shell: ShellSession, nix_fixture: Path) -> None:
+    # A row that names no Nix file is unchanged by this: no line holds a brace
+    # unless it wrote `{nix}` on purpose.
+    line = case.line.format(nix=nix_fixture)
+    answer = shell.complete(line)
     if case.candidates is not None:
         assert answer.candidates == set(case.candidates), answer.drawn
     forbidden = answer.candidates & set(case.forbidden)
-    assert not forbidden, f"offered {sorted(forbidden)} for {case.line!r}: {answer.drawn}"
+    assert not forbidden, f"offered {sorted(forbidden)} for {line!r}: {answer.drawn}"
     if case.line_after is not None:
-        assert answer.line == case.line_after, answer.drawn
+        assert answer.line == case.line_after.format(nix=nix_fixture), answer.drawn
 
 
 #: The case that a candidate list alone cannot see. When no candidate carries

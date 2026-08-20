@@ -20,8 +20,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from conftest import RENDERER
-
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -96,7 +94,7 @@ def test_the_script_sends_the_line_and_the_cursor(shell: str, scripts: dict[str,
         assert "_ARGCOMPLETE_COMP_WORDBREAKS" in text, text
 
 
-def test_the_renderer_writes_where_it_is_told(tmp_path: Path) -> None:
+def test_the_renderer_writes_where_it_is_told(tmp_path: Path, renderer: Path) -> None:
     """``render-completions.py`` takes a program and a directory, in that order.
 
     **The guard for a stale argument.** clypi needed a display name between the
@@ -111,8 +109,8 @@ def test_the_renderer_writes_where_it_is_told(tmp_path: Path) -> None:
     could see it, and this states the contract that the fixture depends on.
     """
     out = tmp_path / "rendered"
-    subprocess.run(  # noqa: S603 -- this interpreter, and a path from `conftest`
-        [sys.executable, str(RENDERER), "pynix", str(out)],
+    subprocess.run(  # noqa: S603 -- this interpreter, and a path from the `renderer` fixture
+        [sys.executable, str(renderer), "pynix", str(out)],
         check=True,
         capture_output=True,
     )
