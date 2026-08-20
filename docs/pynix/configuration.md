@@ -68,6 +68,35 @@ way to turn it off. Each such option has a negative form:
 $ pynix build --no-print-build-logs ...
 ```
 
+## The two variables a completion reads
+
+A Tab evaluates Nix, so it has a budget. These two are read from the
+environment alone: they are not options of the command, they have no entry in
+the configuration file, and they do not go through the settings model. A
+completion runs on every keypress that ends in Tab, and a settings tree costs
+more than the number is worth.
+
+| variable | default | what it does |
+| --- | --- | --- |
+| `PYNIX_COMPLETION_BUDGET` | `5.0` | Seconds a completion may take. When it runs out, the completion offers nothing, and the shell shows what it shows when no program answers. |
+| `PYNIX_COMPLETION_DEBUG` | unset | A file name. A completion that fails writes its traceback there. |
+
+Raise the budget when you complete against something large and you would
+rather wait:
+
+```console
+$ export PYNIX_COMPLETION_BUDGET=15
+```
+
+**A completion that answers nothing looks the same whatever went wrong.** That
+is deliberate -- a traceback would land in the middle of your command line --
+and it means a defect here is invisible. `PYNIX_COMPLETION_DEBUG` is the way
+to look.
+
+**The budget does not stop a flake input that never answers.** The fetch runs
+below the layer that the budget cancels, so a flake with an unreachable input
+outlasts it. Issue #231 holds that.
+
 ## What `pynix build` does not need
 
 `nix build` writes a `result` symlink, which is a GC root, and it prints
