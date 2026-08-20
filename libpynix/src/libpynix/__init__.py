@@ -39,10 +39,18 @@ Issue #222 made this a library. Before it, ``pynix/src/pynix/_cli.py`` was
 # every import in it is a deliberate re-export that no runtime line reads, so
 # 'unused' is what a correct entry looks like.
 #
-# Eager, and not the lazy PEP 562 table that `nanopynix_helpers` uses. The two
-# modules below import argparse, inspect, dataclasses and pathlib and nothing
-# else, so there is no cost for a lazy table to defer. `argcomplete` is the one
-# import worth deferring, and `command.complete` already defers it.
+# Eager, and not the lazy PEP 562 table that `nanopynix_helpers` uses.
+#
+# Measured: a bare interpreter holds 34 modules, `import libpynix` holds 92,
+# and `import libpynix.command` alone holds the same 92. So `command` is the
+# whole cost, and the other two modules add nothing on top of it. `argparse`
+# is 22 of the 58, and `inspect` and `dataclasses` are most of the rest.
+#
+# A lazy table defers a cost that some callers never pay, which is why
+# `nanopynix` has one: a program uses one engine and not both. Nothing here
+# is like that -- every name below leads to `command`, and a program that
+# imports this library builds a parser. `argcomplete` is the one import worth
+# deferring, at 39 further modules, and `command.complete` already defers it.
 
 from __future__ import annotations
 
