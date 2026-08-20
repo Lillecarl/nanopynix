@@ -22,26 +22,35 @@ here for a reason that a person met before:
   line, which is what makes the output readable by a program.
 - **No pagination.** Each shell asks "show all N possibilities?" beyond some
   count, and that question consumes the answer this module wants to read.
-- **The escape sequences removed.** A shell draws a menu with colour and with
-  cursor movement, and neither carries information here.
+- **A terminal emulator, and not an approximation of one.** A shell draws a
+  menu with colour and with cursor movement. `pyte` applies both and answers
+  with the rows a person would see, so this module reads a screen and never
+  interprets a byte itself.
 """
 
 # pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false
+# pyright: reportUnknownVariableType=false
 # `pexpect` ships no type information and nixpkgs carries no `types-pexpect`,
-# so every call on the spawned child is an unknown member. Scoped to this
-# module, which is the only one that touches pexpect, and to those two rules.
+# so every call on the spawned child is an unknown member, and every local
+# variable that holds what such a call returned is an unknown type. Scoped to
+# this module, which is the only one that touches pexpect, and to those three
+# rules. `pyte` needs none of them: it ships `py.typed`.
 
 from __future__ import annotations
 
 import re
+
+# **Imported for real, and not under `TYPE_CHECKING`.** beartype resolves an
+# annotation at run time when `NANOPYNIX_BEARTYPING` is set, and a name that
+# only a type checker can see is an unresolvable forward reference then. The
+# module is already loaded by the interpreter, so the import costs nothing.
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from types import TracebackType
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 import pexpect
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+import pyte
 
 #: The shells this module drives. Named here rather than imported, because the
 #: driver must stay useful to a suite that has no completion library at all.
@@ -55,7 +64,7 @@ PROMPT = "@@READY@@"
 #: candidate list to the width it believes it has, and a narrow window makes it
 #: cut a candidate short: measured at 40 columns, zsh offered
 #: `--no-print-build-logs  -- Print buil`. Nothing here is longer than this, so
-#: nothing is cut, and `_candidates` below separates the columns instead.
+#: nothing is cut, and `candidates` below separates the columns instead.
 #: Tall, so that nothing paginates.
 WINDOW = (200, 200)
 
@@ -92,13 +101,6 @@ ANSWER = SETTLE
 TIMEOUT = 20.0
 
 _TAB = "\t"
-
-#: A CSI or OSC sequence. Two details are measured rather than assumed. An OSC
-#: title string has to be matched whole, because it carries text that would
-#: otherwise read as a candidate. And the parameter bytes include the private
-#: ones: fish writes `\x1b[>4;0m`, and a class of `[0-9;?]` alone left `>4;0m`
-#: in the output.
-_ESCAPE = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[\[\(][0-9;?>=<!]*[A-Za-z]|\x1b.")
 
 #: A command line whose last word is an option and its value written together,
 #: as in `demo build --attr=he`. `candidates` reads it to know that a shell may
@@ -177,22 +179,34 @@ SHELLS: dict[str, ShellSpec] = {
 }
 
 
-def strip_escapes(text: str) -> str:
-    r"""*text* as it would look on the screen.
+def render(text: str, size: tuple[int, int] = WINDOW) -> tuple[str, ...]:
+    """*text* as the rows of a terminal that received it.
 
-    A backspace is applied rather than removed. A shell redraws a line by
-    writing one character, backing over it and writing the whole line, so
-    dropping the backspace turns `d\bdemo store` into `ddemo store` and every
-    candidate read out of it is wrong by one character.
+    Use it to read a recording. `ShellSession` keeps a screen of its own, so
+    that the emulator sees every byte the shell writes and stays in step with
+    it.
     """
-    screen: list[str] = []
-    for char in _ESCAPE.sub("", text).replace("\r", "").replace("\a", ""):
-        if char == "\b":
-            if screen:
-                screen.pop()
-        else:
-            screen.append(char)
-    return "".join(screen)
+    columns, rows = size
+    screen = pyte.Screen(columns, rows)
+    pyte.Stream(screen).feed(text)
+    return _rows_of(screen)
+
+
+def _rows_of(screen: pyte.Screen, first: int = 0) -> tuple[str, ...]:
+    """The rows of *screen* from *first* down, with the empty tail dropped.
+
+    A screen pads each row to its full width, so each row is stripped on the
+    right.
+    """
+    rows = [row.rstrip() for row in screen.display[first:]]
+    while rows and not rows[-1]:
+        rows.pop()
+    return tuple(rows)
+
+
+def _visible(row: str) -> str:
+    """*row* as the user reads it: no sentinel prompt, and no padding."""
+    return row.replace(PROMPT, "").strip()
 
 
 class ShellSession:
@@ -220,6 +234,16 @@ class ShellSession:
         self._settle = settle
         self._answer = answer
         columns, rows = WINDOW
+        # **The screen sees every byte the shell writes, from the first one.**
+        # A shell moves the cursor to a column it counted itself, so an
+        # emulator that starts in the middle of a line puts the next redraw in
+        # the wrong place. The session therefore keeps one screen for its whole
+        # life, and `raw_complete` reads the rows below the point where the
+        # line began. The screen holds no scrollback, so a session that draws
+        # more than `WINDOW` rows loses its oldest ones; a session lives for
+        # one test and draws a few rows, which is well inside that.
+        self._screen = pyte.Screen(columns, rows)
+        self._stream = pyte.Stream(self._screen)
         self._child = pexpect.spawn(
             spec.argv[0],
             list(spec.argv[1:]),
@@ -273,26 +297,43 @@ class ShellSession:
     def _run(self, line: str) -> None:
         """Send one line, and wait for the prompt to come back."""
         self._child.send(line + "\n")
-        self._child.expect_exact(PROMPT, timeout=TIMEOUT)
+        self._wait_for_prompt()
 
-    def _read_until_quiet(self, first: float | None = None) -> str:
-        """Everything the shell writes, until it goes quiet for `settle`.
+    def _wait_for_prompt(self) -> None:
+        """Wait for the sentinel prompt, and give the screen what arrived.
+
+        `expect_exact` takes the bytes out of the pty, so a wait that does not
+        feed them leaves the screen behind the real terminal by exactly that
+        much.
+        """
+        self._child.expect_exact(PROMPT, timeout=TIMEOUT)
+        # `before` and `after` are `None` before the first match, and `after`
+        # is a class rather than text when the match failed. Neither can reach
+        # this line, because `expect_exact` raises instead of returning, so the
+        # test keeps the reader honest rather than hiding a case.
+        matched = (self._child.before, self._child.after)
+        self._stream.feed("".join(part for part in matched if isinstance(part, str)))
+
+    def _read_until_quiet(self, first: float | None = None) -> None:
+        """Feed the screen until the shell goes quiet for `settle`.
 
         *first* is how long to wait for the first chunk, for a caller that
         knows the shell has slow work to do before it draws anything.
         """
-        chunks: list[str] = []
+        read_one = False
         while True:
-            wait = first if first is not None and not chunks else self._settle
+            wait = first if first is not None and not read_one else self._settle
             try:
-                chunks.append(self._child.read_nonblocking(size=4096, timeout=wait))
+                chunk = self._child.read_nonblocking(size=4096, timeout=wait)
             except pexpect.TIMEOUT:
-                return "".join(chunks)
+                return
             except pexpect.EOF:
                 raise RuntimeError(f"{self.spec.name} hung up while completing") from None
+            self._stream.feed(chunk)
+            read_one = True
 
-    def raw_complete(self, line: str) -> str:
-        """Type *line*, press Tab, and return what the shell drew.
+    def raw_complete(self, line: str) -> tuple[str, ...]:
+        """Type *line*, press Tab, and return the rows the shell drew.
 
         The line is abandoned afterwards, and the prompt waited for, so that
         one session can answer many completions.
@@ -301,21 +342,23 @@ class ShellSession:
         # echo of the keys that abandoned the last line arrives late, and it
         # landed in the front of the next answer.
         self._read_until_quiet()
+        # The row that the command line starts on. Every row above it belongs
+        # to an earlier completion, or to the setup of the shell.
+        start = self._screen.cursor.y
         self._child.send(line)
-        # **The echo is read before Tab, and it is put back afterwards.** The
-        # echo of the typed line arrives at once, so it would be the first
-        # chunk of the read below and the long wait would never apply. The two
-        # halves are joined again because `candidates` and `completed_line`
-        # read one text, and the echo is part of what they read.
-        echo = self._read_until_quiet()
+        # **The echo is read before Tab.** The echo of the typed line arrives
+        # at once, so it would be the first chunk of the read below and the
+        # long wait would never apply to what Tab produced.
+        self._read_until_quiet()
         self._child.send(_TAB)
-        drawn = echo + self._read_until_quiet(first=self._answer)
+        self._read_until_quiet(first=self._answer)
+        rows = _rows_of(self._screen, start)
         # Ctrl-U clears the line, Ctrl-C leaves any pager or menu, and the
         # empty line brings the prompt back so the next call starts clean.
         self._child.send("\x15\x03")
         self._child.send("\n")
-        self._child.expect_exact(PROMPT, timeout=TIMEOUT)
-        return strip_escapes(drawn)
+        self._wait_for_prompt()
+        return rows
 
     def complete(self, line: str) -> Completion:
         """What the shell did with *line* when Tab was pressed.
@@ -324,11 +367,11 @@ class ShellSession:
         what an ambiguous prefix produces, and a finished command line is what
         an unambiguous one produces, and the same key produces each.
         """
-        drawn = self.raw_complete(line)
+        rows = self.raw_complete(line)
         return Completion(
-            candidates=candidates(drawn, line),
-            line=completed_line(drawn, line),
-            drawn=drawn,
+            candidates=candidates(rows, line),
+            line=completed_line(rows, line),
+            drawn="\n".join(rows),
         )
 
 
@@ -345,16 +388,16 @@ class Completion:
     drawn: str
 
 
-def candidates(drawn: str, line: str) -> set[str]:
-    """The candidates in *drawn*, given that the caller typed *line*.
+def candidates(rows: Sequence[str], line: str) -> set[str]:
+    """The candidates in *rows*, given that the caller typed *line*.
 
     **The three shells lay a candidate list out in three ways, and one rule
     reads all three.** A shell separates one column from the next by two or
     more spaces, and it separates a candidate from its description the same
-    way. So the drawn text is cut on runs of two or more spaces, and each piece
-    is either a candidate or a description:
+    way. So each row is cut on runs of two or more spaces, and each piece is
+    either a candidate or a description:
 
-    - bash writes names only, one for each line or several to a line;
+    - bash writes names only, one for each row or several to a row;
     - fish writes `--help  (Display this message and exit.)`;
     - zsh writes `--help                 -- Display this message and exit.`
 
@@ -362,9 +405,9 @@ def candidates(drawn: str, line: str) -> set[str]:
     a bracket, or by opening with zsh's `-- ` separator. A candidate never does
     any of those: it is one word, and it is a word the user could type.
 
-    The echo of what the caller typed is a piece too, and it goes the same way:
-    `demo build --attr` holds spaces. A one-word echo, which is what a caller
-    who typed a single word leaves, is removed by name.
+    The command line is a row too, and it goes the same way: `demo build
+    --attr` holds spaces. A one-word line, which is what a caller who typed a
+    single word leaves, is removed by name.
 
     **After `--attr=he` the three shells draw the same completion in two
     shapes**, and this returns the value in both. bash and zsh draw `hello`,
@@ -374,14 +417,14 @@ def candidates(drawn: str, line: str) -> set[str]:
     `…ttr=hello`. The value is what the three agree on, so a whole word is cut
     back to its value here rather than in each test.
     """
-    words = line.split()
-    typed = set(words)
+    typed = set(line.split())
     whole_word = _EQUALS_FORM.search(line) is not None
     found: set[str] = set()
-    for piece in _pieces(drawn, words[0] if words else ""):
-        if piece in typed or " " in piece or piece.startswith(("(", "-- ")):
-            continue
-        found.add(_value_drawn(piece) if whole_word else piece)
+    for row in rows:
+        for piece in re.split(r"\s{2,}", _visible(row)):
+            if not piece or piece in typed or " " in piece or piece.startswith(("(", "-- ")):
+                continue
+            found.add(_value_drawn(piece) if whole_word else piece)
     return found
 
 
@@ -394,60 +437,16 @@ def _value_drawn(piece: str) -> str:
     return piece.lstrip(_ELISION).split("=", 1)[-1]
 
 
-def completed_line(drawn: str, line: str) -> str:
+def completed_line(rows: Sequence[str], line: str) -> str:
     """The command line that the shell was left showing.
 
-    The shell redraws the line after every change, so the last redraw is the
-    result. An unambiguous prefix is the case this answers: there is no list to
-    read then, only a line that grew.
+    The command line is a row, and a shell redraws that row in place, so the
+    last row that starts with the name of the program is the result. An
+    unambiguous prefix is the case this answers: there is no list to read then,
+    only a line that grew.
     """
     words = line.split()
     if not words:
         return ""
-    redrawn = [
-        piece.strip()
-        for piece in _split_at_redraw(drawn.replace(PROMPT, "\n"), words[0]).splitlines()
-        if piece.strip().startswith(words[0])
-    ]
-    return redrawn[-1] if redrawn else ""
-
-
-def _split_at_redraw(text: str, program: str) -> str:
-    r"""*text*, with a break before every redraw of the command line.
-
-    A redraw is an occurrence of the name of the program that is not the first
-    thing on its line. The lookbehind accepts a space as well as a non-space,
-    because fish separates one redraw from the next with a space and zsh with
-    nothing at all: `demo store demo store` and `python3Packages.richdemo`
-    are both one line, and both hold two things.
-
-    The name has to be followed by a space or by the end of the text, and not
-    merely by a word boundary. A file called `demo.fish` sits in the menu of
-    `demo store gc ` -- fish adds the files of the working directory, because
-    the static half sets no `-f` -- and a word boundary alone read that file
-    name as a redrawn command line.
-
-    There is no leading boundary, on purpose: the joined form `richdemo` has
-    none in front of `demo`, and it is exactly the case this exists for.
-    """
-    return re.sub(rf"(?<=.)(?={re.escape(program)}(?:\s|$))", "\n", text)
-
-
-def _pieces(drawn: str, program: str) -> Iterator[str]:
-    """Each column of each line of *drawn*, with the prompts taken out.
-
-    **A shell redraws the command line as soon as it has drawn the list**, and
-    it moves the cursor there rather than writing a newline. That movement goes
-    with the other escape sequences, so the last candidate ends up joined to
-    the redrawn line: zsh gave `python3Packages.richdemo build --attr`, and the
-    joined piece then held a space and was read as a description. A break is
-    put back wherever the name of the program follows a non-space character,
-    which is the one place that can happen.
-    """
-    text = drawn.replace(PROMPT, "\n")
-    if program:
-        text = _split_at_redraw(text, program)
-    for line in text.splitlines():
-        for piece in re.split(r"\s{2,}", line.strip()):
-            if piece:
-                yield piece
+    drawn = [text for row in rows if (text := _visible(row)).startswith(words[0])]
+    return drawn[-1] if drawn else ""
