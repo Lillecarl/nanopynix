@@ -6,8 +6,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import override
 
-from libpynix import attr_option, file_option, flake_option, opt
+from libpynix import opt
 from pynix import _impl
+from pynix._nix_options import attr_option, file_option, flake_option
 from pynix._settings import (
     ConfiguredCommand,
     eval_store_option,
