@@ -250,11 +250,38 @@ def _converted(annotation: Any) -> type | None:
     collects, so a repeated option and a repeated positional convert the same
     way a single one does.
     """
+    inner = _element(annotation)
+    return inner if inner in _CONVERTED else None
+
+
+def _element(annotation: Any) -> Any:
+    """*annotation* with `| None` and a `list[...]` wrapper taken off.
+
+    argparse applies `type` and `choices` to each value it collects, so a
+    repeated option and a single one answer the same question about what one
+    value is.
+    """
     inner = _unwrapped(annotation)
     if typing.get_origin(inner) is list:
         args = typing.get_args(inner)
-        inner = _unwrapped(args[0]) if args else str
-    return inner if inner in _CONVERTED else None
+        return _unwrapped(args[0]) if args else str
+    return inner
+
+
+def _choices(annotation: Any) -> tuple[Any, ...] | None:
+    """The `choices=` argparse needs for *annotation*, or `None` for none.
+
+    **A `Literal` says the set of words, so the parser checks it and the shell
+    offers it.** Without this, a declaration wrote the words a second time in
+    its help text and nothing checked them: `pynix` lists the eight verbosity
+    names in prose and accepts any string. `easykubenix` reads
+    `Literal["yaml11", "yaml12"]` and gets both for free.
+
+    A `Literal` is not in `_CONVERTED`, so an option that has choices never
+    also gets a `type`.
+    """
+    inner = _element(annotation)
+    return typing.get_args(inner) if typing.get_origin(inner) is typing.Literal else None
 
 
 def _flags(field: str, spec: Spec) -> list[str]:
@@ -265,50 +292,66 @@ def _flags(field: str, spec: Spec) -> list[str]:
     return flags
 
 
-def _add(parser: argparse.ArgumentParser, field: str, spec: Spec, annotation: Any) -> None:
-    """Add one declared option or positional to *parser*."""
-    inner = _unwrapped(annotation)
-    repeated = typing.get_origin(inner) is list
-    kwargs: dict[str, Any] = {"help": spec.help}
+def _positional_kwargs(spec: Spec, *, repeated: bool) -> dict[str, Any]:
+    """What argparse needs to know about a positional, beyond its type."""
+    if repeated:
+        return {"nargs": "*"}
+    if spec.default is not MISSING:
+        return {"nargs": "?", "default": argparse.SUPPRESS}
+    return {}
 
-    converted = _converted(annotation)
 
-    if spec.positional:
-        if repeated:
-            kwargs["nargs"] = "*"
-        elif spec.default is not MISSING:
-            kwargs["nargs"] = "?"
-            kwargs["default"] = argparse.SUPPRESS
-        # **A positional needs `type` exactly as an option does.** It did not
-        # get one until issue #222 made this layer a library: every `pos()` in
-        # `pynix` is a `str`, so the fault was latent there, and `easykubenix`
-        # has three `Path` positionals and hit it.
-        if converted is not None:
-            kwargs["type"] = converted
-        action = parser.add_argument(field, **kwargs)
-        action.completer = spec.complete  # type: ignore[attr-defined] -- argcomplete reads this attribute off the action it did not create
-        return
+def _option_kwargs(spec: Spec, inner: Any, *, repeated: bool) -> dict[str, Any]:
+    """The same, for an option.
 
-    # **`SUPPRESS`, for every option.** An option the caller did not name is
-    # then absent from the namespace, and `Command.__init__` fills it from the
-    # declaration. That is one rule for the ordinary options and the
-    # configuration-backed ones together.
-    kwargs["default"] = argparse.SUPPRESS
+    **`SUPPRESS`, for every one.** An option the caller did not name is then
+    absent from the namespace, and `Command.__init__` fills it from the
+    declaration. That is one rule for the ordinary options and the
+    configuration-backed ones together.
+    """
+    kwargs: dict[str, Any] = {"default": argparse.SUPPRESS}
     if spec.negatable:
         kwargs["action"] = argparse.BooleanOptionalAction
     elif inner is bool:
         kwargs["action"] = "store_true"
     elif repeated:
         kwargs["action"] = "append"
-    # No guard for a flag here, and none is needed: `bool` is not in
-    # `_CONVERTED`, so `_converted` answers `None` for one. A `type` beside
-    # `store_true` or `BooleanOptionalAction` is an argparse error, and
-    # `test_a_flag_is_not_given_a_type` is what keeps that true.
-    if converted is not None:
-        kwargs["type"] = converted
     if spec.required:
         kwargs["required"] = True
-    action = parser.add_argument(*_flags(field, spec), **kwargs)
+    return kwargs
+
+
+def _add(parser: argparse.ArgumentParser, field: str, spec: Spec, annotation: Any) -> None:
+    """Add one declared option or positional to *parser*.
+
+    **`type` and `choices` are decided once, above the split.** A positional
+    got neither until issue #222 made this layer a library: every `pos()` in
+    `pynix` is a `str`, so the fault was latent there, and `easykubenix` has
+    three `Path` positionals and hit it.
+
+    No guard for a flag on either one, and none is needed: `bool` is in
+    neither `_CONVERTED` nor a `Literal`, so both helpers answer `None` for
+    one. A `type` beside `store_true` or `BooleanOptionalAction` is an
+    argparse error, and `test_a_flag_is_not_given_a_type` keeps that true.
+    """
+    inner = _unwrapped(annotation)
+    repeated = typing.get_origin(inner) is list
+
+    kwargs: dict[str, Any] = {"help": spec.help}
+    choices = _choices(annotation)
+    if choices is not None:
+        kwargs["choices"] = choices
+    converted = _converted(annotation)
+    if converted is not None:
+        kwargs["type"] = converted
+
+    if spec.positional:
+        kwargs |= _positional_kwargs(spec, repeated=repeated)
+        action = parser.add_argument(field, **kwargs)
+    else:
+        kwargs |= _option_kwargs(spec, inner, repeated=repeated)
+        action = parser.add_argument(*_flags(field, spec), **kwargs)
+    # argcomplete reads this attribute off the action it did not create.
     action.completer = spec.complete  # type: ignore[attr-defined] -- see above
 
 

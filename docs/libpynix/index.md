@@ -24,9 +24,19 @@ Three things make that file work:
 - **An annotated class attribute is an option.** The annotation decides what
   the parser does with the value. `bool` becomes a flag, `list[str]` becomes a
   repeated option, and `int`, `float` and `Path` are converted rather than
-  handed back as the string the caller typed.
+  handed back as the string the caller typed. A
+  `Literal["yaml11", "yaml12"]` becomes the set of words the parser checks and
+  the shell offers, so a declaration never has to write them a second time in
+  its help text.
 - **The docstring is the help.** The first line is what the subcommand list
   prints, and the whole docstring is what `--help` prints for that command.
+
+  **Write a one-line summary on that first line**, as PEP 257 asks. The
+  subcommand list has one short column for it, and this layer takes the line
+  and not the first paragraph on purpose: of the 22 commands of `pynix`, one
+  has a first paragraph of two sentences, and taking the paragraph would put
+  "Use --rip to actually delete them." into that column beside
+  `print-dead`.
 - **`subcommands` mounts a tree.** A class with subcommands and no `run` is a
   group. `libpynix.group` declares one in a single expression, for a group
   that needs no class of its own.

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -272,3 +273,49 @@ def test_a_flag_is_not_given_a_type() -> None:
     """
     assert parse(Leaf, "--loud").loud is True  # type: ignore[attr-defined] -- see above
     assert parse(Leaf, "--no-colour").colour is False  # type: ignore[attr-defined] -- see above
+
+
+class Chosen(Command):
+    """A command whose options name a fixed set of words."""
+
+    style: Literal["yaml11", "yaml12"] = opt("yaml12", help="Which YAML version to write.")
+    kinds: list[Literal["a", "b"]] = opt(help="A repeated choice.")
+    which: Literal["one", "two"] = pos(help="A positional choice.")
+
+
+def test_a_literal_becomes_the_set_of_words_the_parser_checks() -> None:
+    """`pynix` writes its eight verbosity names in prose and checks none.
+
+    A `Literal` says the set once, so the parser refuses anything else and the
+    shell offers the words. Issue #222.
+    """
+    assert parse(Chosen, "one", "--style", "yaml11").style == "yaml11"  # type: ignore[attr-defined] -- see above
+
+    parser = build_parser(Chosen)
+    with pytest.raises(SystemExit):
+        parser.parse_args(["one", "--style", "yaml13"])
+
+
+def test_a_literal_positional_is_checked_too() -> None:
+    assert parse(Chosen, "two").which == "two"  # type: ignore[attr-defined] -- see above
+    with pytest.raises(SystemExit):
+        build_parser(Chosen).parse_args(["three"])
+
+
+def test_a_repeated_literal_checks_each_value() -> None:
+    assert parse(Chosen, "one", "--kinds", "a", "--kinds", "b").kinds == ["a", "b"]  # type: ignore[attr-defined] -- see above
+    with pytest.raises(SystemExit):
+        build_parser(Chosen).parse_args(["one", "--kinds", "c"])
+
+
+def test_the_words_reach_the_help() -> None:
+    """The half a shell reads: argparse prints `choices` in the usage line."""
+    assert "yaml11" in build_parser(Chosen).format_help()
+
+
+def test_an_option_with_choices_is_not_also_given_a_type() -> None:
+    """The guard: a `Literal` is not in `_CONVERTED`, so the two never meet."""
+    parser = build_parser(Chosen)
+    style = next(a for a in parser._actions if a.dest == "style")
+    assert style.type is None
+    assert style.choices == ("yaml11", "yaml12")
