@@ -99,16 +99,24 @@ def nix_candidates(arguments: list[str], index: int = NIX_COMPLETION_INDEX) -> s
     return {line.split("\t", 1)[0] for line in lines[1:] if line}
 
 
-def argcomplete_candidates(line: str) -> set[str]:
+def argcomplete_candidates(line: str, bin_dir: str) -> set[str]:
     """What an argcomplete program offers for *line*, driven as a shell does.
 
     **The answer comes back on file descriptor 8**, which is what the script
     argcomplete generates redirects. A pipe on stdout gets nothing: the
     program writes its candidates to 8 and its ordinary output to 1.
+
+    **`bin_dir` goes on PATH, and it is not optional.** A gate run has no
+    `pynix` on its own PATH: it hands the suite a store path through
+    `PYNIX_INSTALLED_PREFIX`, and the program that answers has to be the
+    program under test. Without it `bash` reports "command not found", the
+    answer is empty, and an empty answer looks like a completer that offered
+    nothing rather than one that never ran.
     """
     program = shlex.split(line)[0]
     environment = {
         **os.environ,
+        "PATH": os.pathsep.join([bin_dir, os.environ["PATH"]]),
         "_ARGCOMPLETE": "1",
         "_ARGCOMPLETE_IFS": "\013",
         "_ARGCOMPLETE_SHELL": "bash",
@@ -130,15 +138,16 @@ def argcomplete_candidates(line: str) -> set[str]:
 
 
 @pytest.mark.parametrize("prefix", PREFIXES)
-def test_attr_offers_what_nix_offers(prefix: str, equivalence_file: Path) -> None:
+def test_attr_offers_what_nix_offers(prefix: str, equivalence_file: Path, pynix_bin: str) -> None:
     """`--attr` answers the set that `nix` answers for the same file."""
     baseline = nix_candidates(["build", "--file", str(equivalence_file), prefix])
-    ours = argcomplete_candidates(f"pynix build --file {equivalence_file} --attr {prefix}")
+    assert baseline, "nix offered nothing, so this row would pass on any answer at all"
+    ours = argcomplete_candidates(f"pynix build --file {equivalence_file} --attr {prefix}", pynix_bin)
     assert ours == baseline
 
 
 @pytest.mark.parametrize("prefix", PREFIXES)
-def test_the_hash_spelling_offers_what_nix_offers(prefix: str, equivalence_file: Path) -> None:
+def test_the_hash_spelling_offers_what_nix_offers(prefix: str, equivalence_file: Path, pynix_bin: str) -> None:
     """`--file F#a.b` answers the same set, with `F#` in front of each candidate.
 
     The spelling is ours and the answer is Nix's. `EvaluationTarget.selected_attr`
@@ -146,13 +155,14 @@ def test_the_hash_spelling_offers_what_nix_offers(prefix: str, equivalence_file:
     a completion that split them would be a defect a caller meets at run time.
     """
     baseline = nix_candidates(["build", "--file", str(equivalence_file), prefix])
-    ours = argcomplete_candidates(f"pynix build --file {equivalence_file}#{prefix}")
+    assert baseline, "nix offered nothing, so this row would pass on any answer at all"
+    ours = argcomplete_candidates(f"pynix build --file {equivalence_file}#{prefix}", pynix_bin)
     head = f"{equivalence_file}#"
     assert all(candidate.startswith(head) for candidate in ours), ours
     assert {candidate.removeprefix(head) for candidate in ours} == baseline
 
 
-def test_no_value_is_forced(equivalence_file: Path) -> None:
+def test_no_value_is_forced(equivalence_file: Path, pynix_bin: str) -> None:
     """The control for every row above.
 
     `nixos.config.system.build.toplevel` is `builtins.derivation { }`, which
@@ -160,5 +170,5 @@ def test_no_value_is_forced(equivalence_file: Path) -> None:
     must not touch it. Without this, a completer that forced every value would
     still pass each row that lists a set of plain strings.
     """
-    ours = argcomplete_candidates(f"pynix build --file {equivalence_file} --attr nixos.config.system.build.")
+    ours = argcomplete_candidates(f"pynix build --file {equivalence_file} --attr nixos.config.system.build.", pynix_bin)
     assert ours == {"nixos.config.system.build.toplevel"}
