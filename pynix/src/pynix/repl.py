@@ -21,7 +21,7 @@ class Repl(ConfiguredCommand):
     store: str = store_option("Store URI to evaluate with.")
     file: str | None = file_option()
     attr: str | None = attr_option()
-    flake: str | None = flake_option()
+    flake: str | None = flake_option(search="repl")
 
     @override
     async def run(self) -> None:

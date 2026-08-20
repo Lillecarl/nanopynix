@@ -19,7 +19,7 @@ class Osearch(ConfiguredCommand):
 
     attr: str | None = attr_option()
 
-    flake: str | None = flake_option()
+    flake: str | None = flake_option(search="exact")
 
     options_attr: str = opt("options", help="Attribute path to the options tree, relative to the target.")
 

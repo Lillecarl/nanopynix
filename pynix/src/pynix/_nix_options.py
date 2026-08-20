@@ -14,18 +14,26 @@ completion calls. So a command that lists an option pays for a function object
 and not for ``pynix.target``. ``tests/meta/test_import_budget.py`` is what
 keeps that true.
 
-``--flake`` gets no completer yet. Its attribute path goes through the search
-of ``select_flake_attr`` -- ``packages.<system>``, then
-``legacyPackages.<system>``, then the top level -- and a completion has to
-offer the union of those three under the name the caller typed. Issue #227
-holds it.
+**``--flake`` names its search, and each command names a different one.**
+``nix develop F#<TAB>`` offers what is under ``devShells.<system>`` and ``nix
+build F#<TAB>`` does not, because the two commands override
+`getDefaultFlakeAttrPathPrefixes` differently. So :func:`flake_option` takes
+the name of the search, and a command module passes the one it already passes
+to :func:`~pynix.target.evaluate_target` at run time. A name and not the search
+itself: building one means importing ``pynix.target``, which is the 101 ms that
+this module exists to keep off a start that evaluates nothing.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from libpynix import attr_option as _attr_option, file_option as _file_option, flake_option as _flake_option
 from nanopynix._typechecking import no_runtime_type_check
-from pynix._attr_completion import complete_attr, complete_file
+from pynix._attr_completion import complete_attr, complete_file, flake_completer
+
+if TYPE_CHECKING:
+    from pynix._attr_completion import FlakeSearch
 
 
 @no_runtime_type_check  # a declaration returns a Spec, not the annotated type; see libpynix.nix_options
@@ -41,6 +49,12 @@ def attr_option() -> str | None:
 
 
 @no_runtime_type_check  # see file_option
-def flake_option() -> str | None:
-    """``--flake``, with no completer. See the note in the module docstring."""
-    return _flake_option()
+def flake_option(*, search: FlakeSearch = "base") -> str | None:
+    """``--flake``, completing a fragment against the search *search* names.
+
+    ``"base"`` is the pair of `SourceExprCommand`, which is what `nix build`,
+    `nix eval` and `nix derivation show` use. A command that overrides the pair
+    passes the name of its own: ``"dev-shell"``, ``"repl"``, or ``"exact"`` for
+    a command that applies no search at all.
+    """
+    return _flake_option(complete=flake_completer(search))

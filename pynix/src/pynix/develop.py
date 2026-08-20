@@ -50,7 +50,7 @@ class PrintDevEnv(ConfiguredCommand):
 
     attr: str | None = attr_option()
 
-    flake: str | None = flake_option()
+    flake: str | None = flake_option(search="dev-shell")
 
     store: str = store_option("Store URI to build with.")
 
@@ -82,7 +82,7 @@ class Develop(ConfiguredCommand):
 
     attr: str | None = attr_option()
 
-    flake: str | None = flake_option()
+    flake: str | None = flake_option(search="dev-shell")
 
     store: str = store_option("Store URI to build with.")
 

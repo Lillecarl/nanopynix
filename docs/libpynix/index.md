@@ -87,10 +87,24 @@ one calling the declaration of this module with the completer of that one. Its
 command modules import the three from there rather than from `libpynix`, which
 is one changed import line for each of them.
 
-Read `pynix/src/pynix/_nix_options.py`. It is fourteen lines of code, and its
-docstring gives the cost that makes the split worth having: every import that
-reaches an evaluator sits inside the function a completion calls, so a start
-that only lists an option pays for a function object and nothing else.
+Read `pynix/src/pynix/_nix_options.py`. Its docstring gives the cost that makes
+the split worth having: every import that reaches an evaluator sits inside the
+function a completion calls, so a start that only lists an option pays for a
+function object and nothing else.
+
+**The walk itself is in `nanopynix_helpers.attr_completion`, and a second Nix
+CLI takes it from there.** That module holds the two rules `nix` applies -- one
+for `--file`, one for the fragment of a flake -- as two functions over a value
+the caller already evaluated. It opens no store and holds no budget, so a
+program keeps those decisions. It is not in `libpynix` for the reason this page
+opens with: `libpynix` depends on `argcomplete` and on nothing else, and the
+walk needs an evaluator.
+
+`--flake` names which search its fragment resolves against, because each
+subcommand of `nix` overrides the pair differently: `nix develop F#<TAB>`
+offers what is under `devShells.<system>` and `nix build F#<TAB>` does not. So
+`flake_option(search="dev-shell")` is what `pynix develop` declares, and the
+name is resolved inside the completion rather than at import.
 
 ## Answer a shell completion
 
