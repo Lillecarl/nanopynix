@@ -399,7 +399,10 @@ class _EvalProxyContext:
 type NixArg = ValueProxy | JsonScalar | list[NixArg] | dict[str, NixArg]
 
 
-class ValueProxy(AsyncValue):
+# `AsyncValue[Store]`: `build` takes this engine's own store, and the protocol
+# is generic so that neither engine has to accept the other's. See `AsyncValue`
+# in `nanopynix.protocols`, and issue #232.
+class ValueProxy(AsyncValue["Store"]):
     """Proxy for a Nix Value exported on the remote worker.
 
     Lifetime is tied to the ``EvalSession`` that created it — all gRPC

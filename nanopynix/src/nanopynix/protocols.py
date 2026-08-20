@@ -89,8 +89,21 @@ VerbosityT_co = TypeVar("VerbosityT_co", covariant=True)
 
 
 @runtime_checkable
-class AsyncValue(Protocol):
-    """The common asynchronous value lifecycle and forcing interface."""
+class AsyncValue[StoreT: AsyncStore = Any](Protocol):
+    """The common asynchronous value lifecycle and forcing interface.
+
+    ``StoreT`` is the store type of the engine that made this value, and it is
+    what :meth:`build` accepts. Each engine names its own, so neither has to
+    accept the other's.
+
+    **The default is ``Any`` and not :class:`AsyncStore`.** A bare
+    ``AsyncValue`` is the annotation almost every consumer writes, and it has
+    to keep meaning "a value of any engine". ``StoreT`` is invariant, so a
+    default of ``AsyncStore`` would make the bare name mean
+    ``AsyncValue[AsyncStore]``, which no engine's value satisfies. Measured:
+    that default gave 54 pyright errors across the bound sites and the test
+    doubles, where ``Any`` gives none.
+    """
 
     __slots__ = ()  # in the body, and load-bearing -- see the module docstring
 
@@ -231,13 +244,18 @@ class AsyncValue(Protocol):
         ...
 
     @abstractmethod
-    async def build(self, *, build_mode: BuildMode | int | None = None) -> dict[str, str]:
+    async def build(self, *, build_mode: BuildMode | int | None = None, store: StoreT | None = None) -> dict[str, str]:
         """Realise this derivation, returning output name to store path.
 
-        The engines' ``store`` parameter is omitted rather than declared: each
-        accepts only its own ``Store``, and naming ``AsyncStore`` here would
-        demand both accept the other's. Callers who need a separate build
-        store reach for the concrete class.
+        ``store`` was omitted here once, because each engine accepts only its
+        own ``Store`` and naming :class:`AsyncStore` would have demanded that
+        both accept the other's. ``StoreT`` answers that: it is this value's
+        own store type, so each engine names its own.
+
+        Issue #232 measured what the omission cost.
+        ``nanopynix_helpers.build`` had to import ``nanopynix.rpc`` to reach
+        this parameter, and beartype checks an annotation at call time, so the
+        helper then refused every value that ``nanopynix.inproc`` makes.
         """
         ...
 

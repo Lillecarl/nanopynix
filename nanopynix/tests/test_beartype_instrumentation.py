@@ -420,7 +420,24 @@ class TestTheExemptionDecoratorDoesWhatItClaims:
 # nanopynix's own protocols were in this list too, until `@runtime_checkable`
 # was added to them; see nanopynix/protocols.py. That is the other fix, and it
 # is the right one when the declaration is ours.
-UNDECORATABLE: dict[str, str] = {}
+UNDECORATABLE: dict[str, str] = {
+    "nanopynix.protocols.AsyncValue.build": (
+        "A beartype defect, and the annotation is the one this protocol needs. "
+        "`AsyncValue` is generic in the store its `build` accepts, and the "
+        "parameter defaults to `Any` so that a bare `AsyncValue` keeps meaning "
+        "a value of any engine -- see that class for what the other default "
+        "costs. beartype treats a type parameter defaulting to `Any` as "
+        "ignorable, and then asserts on the union that holds it: 'Union "
+        "StoreT | None containing ignorable child StoreT not itself ignored'. "
+        "Reproduced in 20 lines: `T: Base = Any` with `T | None` is skipped "
+        "and `T: Base = Base` with `T | None` is not, under the claw hook "
+        "only -- a direct `beartype.beartype()` call decorates all of them. "
+        "`Optional[T]` is the same hint and fails the same way. "
+        "Nothing is lost at run time: the body is `...` and no caller reaches "
+        "it, while a consumer annotated with `AsyncValue` is decorated and "
+        "checked as before."
+    ),
+}
 
 # beartype names the callable in the warning's first line, in one of several
 # phrasings ("Function ...()", "Coroutine factory function ...()").
