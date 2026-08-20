@@ -124,6 +124,30 @@ async def select_attr[ValueT: AsyncValue](value: ValueT, attrpath: str) -> Value
     return await select_attr_path(value, parse_attr_path(attrpath))
 
 
+async def flake_outputs[ValueT: AsyncValue](flake: ValueT) -> ValueT:
+    """The ``outputs`` of an evaluated flake, which is what `nix` resolves against.
+
+    `callFlake` returns the outputs merged with the metadata of the flake, so
+    the value it hands back also holds ``_type``, ``inputs``, ``lastModified``,
+    ``lastModifiedDate``, ``narHash``, ``outPath``, ``outputs`` and
+    ``sourceInfo``. Every command of `nix` selects ``outputs`` out of it before
+    it resolves anything, in `openEvalCache` of `src/libflake/flake.cc`::
+
+        auto aOutputs = vFlake->attrs()->get(state.symbols.create("outputs"));
+        assert(aOutputs);
+        return aOutputs->value;
+
+    A caller that skips this step accepts ``#outPath`` where `nix` reports that
+    the flake does not provide it, and shows the metadata where `nix` shows the
+    outputs alone. Issue #228 measured both.
+
+    The step is here and not in the binding. `nanopynix.rpc` returns what
+    `callFlake` returns, which is the honest binding and the only way to reach
+    the metadata at all.
+    """
+    return await select_attr(flake, "outputs")
+
+
 def show_attr_paths(paths: Sequence[str]) -> str:
     """Quote and join *paths* the way Nix reports a failed search.
 

@@ -871,10 +871,19 @@ class LockedFlakeHandle(AsyncLockedFlake):
             raise LockedFlakeReleasedError("LockedFlakeHandle has been released")
 
     async def eval(self, *, timeout: float | None = None) -> ValueProxy:
-        """Evaluate this locked flake's outputs, calling its ``outputs`` function.
+        """Evaluate this locked flake, calling its ``outputs`` function.
 
-        Uses the in-memory lock from a prior ``lock_flake()``, so an updated
-        lock can be evaluated before it is written to disk.
+            Uses the in-memory lock from a prior ``lock_flake()``, so an updated
+            lock can be evaluated before it is written to disk.
+
+        **The value is `callFlake`'s, and it is not the outputs alone.** It holds
+        the outputs merged with the metadata of the flake: ``_type``, ``inputs``,
+        ``lastModified``, ``lastModifiedDate``, ``narHash``, ``outPath``,
+        ``outputs`` and ``sourceInfo``. Every command of `nix` selects ``outputs``
+        out of it before it resolves an attribute path, in `openEvalCache` of
+        `src/libflake/flake.cc`. A caller that copies the `nix` CLI takes
+        :func:`nanopynix_helpers.flake_outputs`, which is that step. Issue #228
+        measured what skipping it accepted.
         """
         self._check_active()
         return await self._session._eval_locked_flake(self, timeout=timeout)  # type: ignore[reportPrivateUsage] -- LockedFlakeHandle is its session's public door onto this private by-handle call  # noqa: SLF001 -- same reason
@@ -1308,20 +1317,28 @@ class EvalSession(AsyncEvalSession["ValueProxy"]):
         flake_settings: NixFlakeSettings | None = None,
         timeout: float | None = None,
     ) -> ValueProxy:
-        """Lock and evaluate a flake in one step, returning its outputs as a ``ValueProxy``.
+        """Lock and evaluate a flake in one step, returning a ``ValueProxy``.
 
-        Equivalent to ``nix eval <ref>#`` — calls ``lockFlake`` then
-        ``callFlake`` and returns the outputs attrset.  Navigate with
-        ``.attr()``, ``.to_python()``, etc.
+            Calls ``lockFlake`` and then ``callFlake``. Navigate with ``.attr()``,
+            ``.to_python()``, etc.
 
-        For more control (e.g. updating locks in memory before evaluating),
-        use ``lock_flake()`` + ``locked.eval()`` instead.
+        **The value is `callFlake`'s, and it is not the outputs alone.** It holds
+        the outputs merged with the metadata of the flake: ``_type``, ``inputs``,
+        ``lastModified``, ``lastModifiedDate``, ``narHash``, ``outPath``,
+        ``outputs`` and ``sourceInfo``. Every command of `nix` selects ``outputs``
+        out of it before it resolves an attribute path, in `openEvalCache` of
+        `src/libflake/flake.cc`. A caller that copies the `nix` CLI takes
+        :func:`nanopynix_helpers.flake_outputs`, which is that step. Issue #228
+        measured what skipping it accepted.
 
-        ``flake_settings`` is merged over this session's flake defaults, as in
-        :meth:`lock_flake`.
+            For more control (e.g. updating locks in memory before evaluating),
+            use ``lock_flake()`` + ``locked.eval()`` instead.
 
-        Raises:
-            SettingOutOfScopeError: A field is not a flake setting.
+            ``flake_settings`` is merged over this session's flake defaults, as in
+            :meth:`lock_flake`.
+
+            Raises:
+                SettingOutOfScopeError: A field is not a flake setting.
         """
         flake_scope = narrow_to_scope(flake_settings, NixFlakeSettings, target="a flake operation")
         handle = await self._ensure_proxy().eval_flake(

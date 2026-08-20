@@ -40,6 +40,7 @@ from pynix.target import (
     derivation_path,
     dev_shell_attr_search,
     evaluate_target_locked,
+    flake_outputs,
     select_attr,
 )
 
@@ -314,7 +315,7 @@ async def _nixpkgs_bash(
     ``None`` when the build produced no ``bin/bash``, which
     ``develop.cc:676`` treats the same as a failed lookup.
     """
-    outputs = await session.eval_flake(await _nixpkgs_flake_ref(locked), write_lock_file=False)
+    outputs = await flake_outputs(await session.eval_flake(await _nixpkgs_flake_ref(locked), write_lock_file=False))
     attrpath = f"legacyPackages.{nanopynix.current_system()}.{_INTERACTIVE_BASH_ATTR}"
     value = await select_attr(outputs, attrpath)
     drv_path = await derivation_path(value)

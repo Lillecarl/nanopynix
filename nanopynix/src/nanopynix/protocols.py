@@ -580,7 +580,12 @@ class AsyncLockedFlake(Protocol):
 
     @abstractmethod
     async def eval(self) -> AsyncValue:
-        """Evaluate this locked flake's outputs."""
+        """Evaluate this locked flake; see :meth:`nanopynix.rpc.LockedFlakeHandle.eval`.
+
+        The value holds the outputs merged with the metadata of the flake, so
+        a caller that copies the `nix` CLI takes
+        :func:`nanopynix_helpers.flake_outputs` first. Issue #228 says why.
+        """
         ...
 
     @abstractmethod
@@ -803,7 +808,12 @@ class AsyncEvalSession[ValueT: AsyncValue = AsyncValue](AsyncVerbosityController
 
     @abstractmethod
     async def eval_flake(self, ref: str, /, *, write_lock_file: bool = True) -> ValueT:
-        """Lock and evaluate a flake in one step, returning its outputs."""
+        """Lock and evaluate a flake in one step; see :meth:`nanopynix.rpc.EvalSession.eval_flake`.
+
+        The value holds the outputs merged with the metadata of the flake, so
+        a caller that copies the `nix` CLI takes
+        :func:`nanopynix_helpers.flake_outputs` first. Issue #228 says why.
+        """
         ...
 
     @abstractmethod

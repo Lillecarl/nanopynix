@@ -11,6 +11,7 @@ from anyio import Path as AsyncPath
 from nanopynix_helpers import (
     AttrPathSearch as AttrPathSearch,
     EvaluationTargetError as EvaluationTargetError,
+    flake_outputs as flake_outputs,
     select_attr as select_attr,
     select_flake_attr as select_flake_attr,
 )
@@ -391,7 +392,12 @@ async def evaluate_target_locked[ValueT: AsyncValue](
             raise EvaluationTargetError("either --file or --flake is required")
         ref, _, flake_attr = target.flake.partition("#")
         locked = await session.lock_flake(ref)
-        value = cast("ValueT", await locked.eval())
+        # `outputs`, and not the value `callFlake` returns. That value also
+        # holds the metadata of the flake -- `outPath`, `narHash`, `inputs` --
+        # and `nix` selects the outputs out of it before it resolves anything.
+        # `openEvalCache` of `src/libflake/flake.cc` is the step, and issue
+        # #228 measured what skipping it accepted.
+        value = cast("ValueT", await flake_outputs(await locked.eval()))
         if attr_search is not None:
             value, _found = await select_flake_attr(value, attr_search, flake_attr or None, flake_ref=ref)
         elif flake_attr:
