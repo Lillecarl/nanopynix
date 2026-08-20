@@ -60,7 +60,7 @@ from nanopynix._typechecking import BEARTYPING
 # beartype resolves an annotation at call time, and a name that only a type
 # checker imported is not there to resolve.
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Sequence
 
     from nanopynix_helpers import AttrPathSearch
 
@@ -81,6 +81,23 @@ _FLAKE_SCHEME = "flake:"
 
 #: The setting whose empty value means "no global registry layer" to Nix.
 _NO_GLOBAL_REGISTRY = "flake-registry"
+
+#: What a completion tells `git` about a transfer that goes silent.
+#:
+#: **`git` reads none of Nix's settings, because it is a separate process.**
+#: `_completion_settings` bounds what curl fetches, and a `git+https:` flake
+#: input is fetched by `git`, which Nix runs as a child. These two variables
+#: are git's own, and Nix passes its environment to that child.
+#:
+#: Measured against a socket that accepts and never writes, completing a flake
+#: whose one input names it: at git's defaults the completion outlasted 120 s
+#: and was killed, and with these it answered nothing after 4.619 s and left
+#: no `git` process behind. Two seconds and not three, because Nix retries the
+#: fetch once, so the completion pays the figure twice and the budget is 5 s.
+_GIT_STALL_VARIABLES = {
+    "GIT_HTTP_LOW_SPEED_LIMIT": "1",
+    "GIT_HTTP_LOW_SPEED_TIME": "2",
+}
 
 
 def _completion_settings() -> NixSettings:
@@ -208,6 +225,31 @@ async def _names(source: str, attr_prefix: str) -> list[str]:
         return await complete_file_attr_path(root, attr_prefix)
 
 
+@contextlib.contextmanager
+def _impatient_git() -> Generator[None]:
+    """Give `git` the timeouts of a keypress, and give them back afterwards.
+
+    **A caller who set one keeps it.** These are ordinary git variables, and a
+    person who has chosen their own figure means it. Only a name that is unset
+    gets one here.
+
+    The restore matters because this module is called in a process, not only
+    in a fresh one: `pynix/tests/` completes in-process, and a test that left
+    these behind would set the timeouts of every later test.
+    """
+    previous = {name: os.environ.get(name) for name in _GIT_STALL_VARIABLES}
+    for name, value in _GIT_STALL_VARIABLES.items():
+        os.environ.setdefault(name, value)
+    try:
+        yield
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
 def _guarded(work: Callable[[], Awaitable[list[str]]]) -> list[str]:
     """Run *work* under the budget, and answer nothing when it fails.
 
@@ -228,7 +270,11 @@ def _guarded(work: Callable[[], Awaitable[list[str]]]) -> list[str]:
     # missing candidate. The shell reads the answer off file descriptor 8, so
     # nothing here needs the two standard streams.
     try:
-        with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+        with (
+            _impatient_git(),
+            contextlib.redirect_stderr(io.StringIO()),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
             return anyio.run(bounded)
     except Exception:
         # Every failure is one answer here; the docstring above says why. A
