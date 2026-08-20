@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-# A real import, not a TYPE_CHECKING one: `pynix._cli` resolves the annotations
+# A real import, not a TYPE_CHECKING one: `libpynix` resolves the annotations
 # of a command to build its parser, so `Path` has to exist as an object and not
 # just as a lazy PEP 563 string.
 from pathlib import Path
 from typing import override
 
+from libpynix import attr_option, file_option, flake_option, opt
 from pynix import _impl
-from pynix._cli import opt
 from pynix._settings import (
     ConfiguredCommand,
-    attr_option,
     eval_store_option,
-    file_option,
-    flake_option,
     print_build_logs_option,
     store_option,
     verbosity_option,
@@ -83,7 +80,7 @@ class Build(ConfiguredCommand):
         ),
     )
 
-    # No default is written: `pynix._cli` gives a repeated option a new empty
+    # No default is written: `libpynix` gives a repeated option a new empty
     # list for each command, because one shared literal would keep whatever a
     # previous parse appended to it.
     sandbox_path: list[str] = opt(

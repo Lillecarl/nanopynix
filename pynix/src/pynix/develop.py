@@ -27,14 +27,11 @@ from __future__ import annotations
 
 from typing import override
 
+from libpynix import attr_option, file_option, flake_option, opt, pos
 from pynix import _impl
-from pynix._cli import opt, pos
 from pynix._settings import (
     ConfiguredCommand,
-    attr_option,
     eval_store_option,
-    file_option,
-    flake_option,
     print_build_logs_option,
     store_option,
     verbosity_option,

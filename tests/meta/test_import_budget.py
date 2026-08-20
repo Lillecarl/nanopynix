@@ -229,7 +229,7 @@ FORBIDDEN_IN_PYNIX = (
     "rich",
     "structlog",
     "yaml",
-    # The completion machinery. `pynix._cli.complete` imports it behind the
+    # The completion machinery. `libpynix.complete` imports it behind the
     # `_ARGCOMPLETE` variable that the generated script sets, so a command a
     # person typed loads none of it. Issue #214.
     "argcomplete",
@@ -237,11 +237,15 @@ FORBIDDEN_IN_PYNIX = (
 
 #: The most modules ``import pynix`` may load.
 #:
-#: Measured at **105**, down from 202 when issue #123 finished and 866 before
+#: Measured at **113**, down from 202 when issue #123 finished and 866 before
 #: it. Issue #214 is the second half: clypi was 153 modules of the 202, and
 #: argparse is the standard library. argcomplete is 39 more and is not here at
-#: all, because ``pynix._cli.complete`` imports it only when ``_ARGCOMPLETE``
+#: all, because ``libpynix.complete`` imports it only when ``_ARGCOMPLETE``
 #: is set -- so a real command never pays for the completion machinery.
+#:
+#: Issue #222 added three of the 113: ``libpynix``, ``libpynix.command`` and
+#: ``libpynix.nix_options`` arrived, and ``pynix._cli`` left. That is what a
+#: layer costs once it is a package a second program can take.
 #:
 #: The dev shell reads the same tree as the release build, because ``pynix`` no
 #: longer mounts the language server. See ``MODULE_BUDGET`` for why a count

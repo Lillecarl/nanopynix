@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import override
 
+from libpynix import opt
 from pynix import _impl
-from pynix._cli import opt
 from pynix._settings import PynixCommand
 
 

@@ -6,8 +6,8 @@ from typing import override
 
 import rich.traceback
 
+from libpynix import build_parser, complete, dispatch
 from nanopynix import set_manager_title
-from pynix._cli import build_parser, complete, dispatch
 from pynix._impl.main import run
 from pynix._settings import PynixCommand
 from pynix._util import configure_logging
@@ -35,7 +35,7 @@ def main() -> None:
     """Run the server as the `pynix-lsp` program.
 
     **One name.** An editor configures one command, and `pynix-lsp` is the name
-    that every other Nix language server uses. `pynix._cli` reads the name of a
+    that every other Nix language server uses. `libpynix` reads the name of a
     command from the name of its class, so this class is spelled `PynixLsp` and
     the program is `pynix-lsp`.
 

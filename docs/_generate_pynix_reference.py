@@ -33,12 +33,12 @@ for _path in (_PYNIX_SRC, _PYNIX_LSP_SRC, _PYTHON_SRC):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-from pynix import Pynix  # noqa: E402 -- sys.path must be extended before pynix is importable
-from pynix._cli import (  # noqa: E402 -- see above; the name of a command on the command line, which this file must spell the same way the parser does
+from libpynix import (  # noqa: E402 -- see above; the name of a command on the command line, which this file must spell the same way the parser does
     MISSING,
     Command,
     command_name,
 )
+from pynix import Pynix  # noqa: E402 -- sys.path must be extended before pynix is importable
 from pynix._impl.settings import PynixDefaults  # noqa: E402 -- see above
 
 

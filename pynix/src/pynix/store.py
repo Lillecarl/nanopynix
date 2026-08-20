@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import override
 
+from libpynix import opt, pos
 from pynix import _impl
-from pynix._cli import opt, pos
 from pynix._settings import ConfiguredCommand, PynixCommand, store_option
 
 

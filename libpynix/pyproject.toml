@@ -17,6 +17,13 @@ license-files = [ "LICENSE" ]
 # standard library, so a program that could not import this dependency would
 # still parse every command line: it answers a Tab and nothing more.
 #
+# Issue #214 drove every candidate on a pty, in fish, bash and zsh.
+# argcomplete is the only one that answers all nine lines of issue #213
+# correctly in all three, because the shell sends it the raw command line and
+# the cursor offset rather than a list of words, and sends bash's
+# `COMP_WORDBREAKS` so that a value holding `:` or `=` survives. `--store
+# ssh://` and `--attr=hel` are the shapes that decided it.
+#
 # **`nanopynix` is deliberately absent, although `--file`, `--flake` and
 # `--attr` name Nix concepts.** This project declares those three options and
 # reads none of them, so it needs no evaluator. Two things follow. A consumer

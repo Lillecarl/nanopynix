@@ -2,7 +2,7 @@
 
 ``pynix._settings.option`` marks an option as configuration-backed, and
 ``ConfiguredCommand.__init__`` is the only thing that fills one in. A command
-that declares such an option and inherits plain ``pynix._cli.Command``
+that declares such an option and inherits plain ``libpynix.Command``
 therefore carries ``None`` into its ``run()``, and passes it to the library.
 
 Nothing else catches that. The parser is happy, the type checker sees the
@@ -18,8 +18,8 @@ import io
 
 import pytest
 
+from libpynix import Command, build_parser
 from pynix import Pynix
-from pynix._cli import Command, build_parser
 from pynix._impl.settings import configured_fields
 from pynix._settings import ConfiguredCommand
 

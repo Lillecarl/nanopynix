@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import override
 
+from libpynix import attr_option, file_option, flake_option, opt
 from pynix import _impl
-from pynix._cli import opt
-from pynix._settings import ConfiguredCommand, attr_option, file_option, flake_option, store_option
+from pynix._settings import ConfiguredCommand, store_option
 
 
 class Eval(ConfiguredCommand):

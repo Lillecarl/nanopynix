@@ -27,17 +27,11 @@ license-files = [ "LICENSE", "LICENSE.LGPL-2.1" ]
 dependencies = [
   "nanopynix",
   "nanopynix-helpers",
-  # `argcomplete`, and not `clypi`. The parser is `argparse`, which is the
-  # standard library, so this dependency answers a Tab and nothing else: a
-  # `pynix` that could not import it would still parse every command line.
-  #
-  # Issue #214 drove every candidate on a pty, in fish, bash and zsh.
-  # argcomplete is the only one that answers all nine lines of issue #213
-  # correctly in all three, because the shell sends it the raw command line and
-  # the cursor offset rather than a list of words, and sends bash's
-  # `COMP_WORDBREAKS` so that a value holding `:` or `=` survives. `--store
-  # ssh://` and `--attr=hel` are the shapes that decided it.
-  "argcomplete",
+  # The command-line layer, which issue #222 moved out of this project so that
+  # a second Nix CLI in Python does not have to copy 359 lines to exist. It
+  # depends on no part of nanopynix, which is why it is a project beside this
+  # one rather than a module of `nanopynix-helpers`.
+  "libpynix",
   "prompt-toolkit",
   "pydantic",
   "rapidfuzz",
