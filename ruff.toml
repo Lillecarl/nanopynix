@@ -70,6 +70,11 @@ known-first-party = [
   # The support package of `pynix-lsp/tests/`, importable by bare name for
   # the reason that `support` above gives.
   "lsp_support",
+  # The startup shim of a spawned interpreter. `nanopynix-testing` puts its
+  # directory on PYTHONPATH rather than making it a package, so ruff sorted it
+  # with the third-party imports. `nanopynix/tests/test_beartype_instrumentation.py`
+  # reads `PACKAGES` out of it.
+  "beartype_bootstrap",
   # The two distributions of `pynixd/`. ruff reads the nearest configuration
   # to each file, so `pynixd/ruff.toml` governs that tree and this list does
   # not reach it. The names are here so that the two answers agree: a module
