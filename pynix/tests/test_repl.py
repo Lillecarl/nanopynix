@@ -20,7 +20,7 @@ import anyio
 import pytest
 from nanopynix_bindings.store import BuildMode
 from nanopynix_proto.nix.common import LogLevel
-from prompt_toolkit.completion import CompleteEvent
+from prompt_toolkit.completion import CompleteEvent, Completion
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import ANSI
 
@@ -449,6 +449,26 @@ async def test_repl_completion_uses_commands_scope_and_attrsets() -> None:
     assert await complete(':shell "${pkgs.hel') == ["hello", "hello-unfree"]
     assert await complete(':shell "${pkgs.') == ["hello", "hello-unfree", "world"]
     assert completer._repl.value.released  # type: ignore[reportPrivateUsage] -- verifies temporary value lifetime
+
+
+async def test_repl_completion_on_an_empty_line_waits_for_a_keypress() -> None:
+    """Tab on an empty line offers every root binding, and typing offers none.
+
+    The shell convention is that Tab on an empty word offers everything that
+    can go there. `complete_while_typing` is on, so a completer that answered
+    an empty line unasked would open the menu as soon as the prompt appeared.
+    """
+    completer = _ReplCompleter(_CompletionRepl())
+    document = Document("")
+
+    async def complete(event: CompleteEvent) -> list[Completion]:
+        return [item async for item in completer.get_completions_async(document, event)]
+
+    offered = await complete(CompleteEvent(completion_requested=True))
+    assert [item.text for item in offered] == ["answer", "builtins", "pkgs"]
+    # Zero, so that the name is added and no typed character is replaced.
+    assert {item.start_position for item in offered} == {0}
+    assert await complete(CompleteEvent()) == []
 
 
 async def test_repl_completer_sync_hook_returns_no_completions() -> None:
