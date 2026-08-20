@@ -199,7 +199,8 @@ CASES = (
             "`#`, and it never clears it, so the finder saw `pynix build --file .` and completed an "
             "empty word. The shell then offered every option of `pynix build`. No shell reads `#` "
             "that way: bash treats it as a comment only at the start of a word, and it is in no "
-            "`COMP_WORDBREAKS`. `default.nix` patches the lexer. Issue #221. "
+            "`COMP_WORDBREAKS`. `libpynix.command._let_a_hash_stay_in_the_line` corrects the lexer, "
+            "at the point that already calls argcomplete. Issue #221. "
             "The unquoted spelling is the one to state here, because the quoted one always worked."
         ),
     ),
