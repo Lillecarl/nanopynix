@@ -1,11 +1,19 @@
 """The one decorator this package needs from the beartype plumbing.
 
 ``nanopynix._typechecking`` holds the same five lines, and this is a second
-copy on purpose. That module is inside the ``nanopynix`` package, so importing
-it runs ``nanopynix/__init__.py`` and everything that package loads, and this
-project declares no dependency on ``nanopynix`` at all -- see the note above
-``dependencies`` in ``pyproject.toml``. Restating two statements is the cheaper
-of the two costs.
+copy on purpose.
+
+**The cost avoided is the dependency, and not the import.** Measured:
+``import nanopynix._typechecking`` loads 55 modules against 34 for a bare
+interpreter, because ``nanopynix/__init__.py`` maps each public name to a
+module and resolves it on first read. So the import is cheap. What is not
+cheap is what naming ``nanopynix`` in ``pyproject.toml`` would drag in:
+``nanopynix-bindings``, a compiled extension linked against one Nix version.
+This project would then be built once per version of the matrix, and a program
+that has not built the bindings could not take it at all -- for five lines that
+set one attribute.
+
+See the note above ``dependencies`` in ``pyproject.toml`` for the rest.
 
 ``nanopynix/tests/test_beartype_instrumentation.py`` states what the attribute
 does, and that suite covers both copies: the attribute is beartype's, not this
