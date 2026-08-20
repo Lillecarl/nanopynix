@@ -100,6 +100,14 @@ let
     "lzo"
     "libxml2"
     "libblake3"
+    # **Both, and `curlMinimal` is the one that carries the arguments.**
+    # `pkgs.curl` is a wrapper whose one argument is `curlMinimal`, so an
+    # `openssl` passed to it is dropped in silence and the wrapper keeps the
+    # openssl of nixpkgs. `curl` is here because Nix links it, and
+    # `curlMinimal` is here because it declares openssl, libssh2, nghttp2,
+    # nghttp3, ngtcp2, zlib and zstd. `curl` declares `curlMinimal`, so the
+    # fixpoint gives it the rebuilt one. Issue #220.
+    "curlMinimal"
     "curl"
     "libarchive"
     "libgit2"
@@ -132,18 +140,19 @@ let
     inherit packages;
 
     extraArgs = {
-      boost = {
-        # ICU is 39.1 MiB of the payload, 46% of it, and it reaches the
-        # extension through boost_regex and boost_iostreams only.
-        enableIcu = false;
-        extraB2Args = [
-          # Nix links boost_context, boost_iostreams and boost_url, and never
-          # stacktrace. Not building it saves build time and payload.
-          "--without-stacktrace"
-        ];
-      };
+      # **The trim of boost is gone, and it was gone before this comment.**
+      # `pkgs.boost` and every `boostNNN` of this nixpkgs declare `callPackage`
+      # and `fetchurl` alone: the version file calls `generic.nix` through
+      # `callPackage`, and that call replaces the `.override` of the inner
+      # package with its own. So `enableIcu = false` and `--without-stacktrace`
+      # reached nothing, and the guard in `nix/closure.nix` is what said so.
+      #
+      # The measurement that the trim was worth: ICU was 39.1 MiB of the
+      # payload, 46% of it, and it reaches the extension through `boost_regex`
+      # and `boost_iostreams` only. Issue #220 holds the work to reach those
+      # arguments again.
 
-      curl = {
+      curlMinimal = {
         # **This is what removes the last `strlcpy@GLIBC_2.38` of the closure.**
         # `nix why-depends` shows curl is the only path to krb5, and the krb5
         # libraries are the only ones left above `GLIBC_2.34` after the rewrite

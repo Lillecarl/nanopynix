@@ -57,6 +57,26 @@ lib.fix (
       carries. Remove the feature that needs `${name}`, or give the package an
       `overrideAttrs` that reaches the same result.
     '';
+    # **An argument that a package does not declare is dropped in silence.**
+    # `.override` keeps only the arguments of the function it wraps, so a
+    # rename in nixpkgs turns a setting here into nothing at all and says so
+    # nowhere. Measured: nixpkgs made `pkgs.curl` a wrapper whose one argument
+    # is `curlMinimal`, and `gssSupport`, `idnSupport` and `pslSupport` stopped
+    # applying. The wheel then carried `libidn2` again, and `curl` took the
+    # openssl of nixpkgs rather than the rebuilt one, which put the whole wheel
+    # back on `GLIBC_2.38`. Issue #220.
+    assert
+      let
+        undeclared = lib.subtractLists (lib.attrNames declared) (lib.attrNames (extraArgs.${name} or { }));
+      in
+      lib.assertMsg (undeclared == [ ]) ''
+        `${name}` does not declare ${lib.concatStringsSep ", " undeclared}, so `extraArgs.${name}` would do nothing.
+
+        `.override` keeps only the arguments of the function it wraps. nixpkgs
+        has renamed the argument, or moved the real package behind a wrapper.
+        Name the package that declares the argument, and put it in `packages`
+        as well so that the wrapper takes the rebuilt one.
+      '';
     lib.pipe package [
       (built: built.override (dependencies // { inherit stdenv; } // (extraArgs.${name} or { })))
       (built: if extraAttrs ? ${name} then built.overrideAttrs extraAttrs.${name} else built)
