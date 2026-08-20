@@ -72,6 +72,19 @@ ANSWER = 5.0
 
 
 @pytest.fixture(scope="session")
+def renderer() -> Path:
+    """The renderer that `nix/mk-app.nix` runs.
+
+    A fixture and not an import. `test_installed_scripts.py` needs the same
+    path, and `from conftest import RENDERER` is a real import of a module
+    that pytest also loads as a plugin -- pyright resolves the name against
+    the wrong `conftest.py` of the several in this repository, and reports it
+    as unknown.
+    """
+    return RENDERER
+
+
+@pytest.fixture(scope="session")
 def installed_prefix() -> Path | None:
     """The store path of the built application, or None in a dev shell."""
     prefix = os.environ.get(PREFIX_VARIABLE)
@@ -132,32 +145,58 @@ def scripts(installed_prefix: Path | None, tmp_path_factory: pytest.TempPathFact
     return {shell: directory / shell for shell in SHELLS}
 
 
-@pytest.fixture
-def workdir(tmp_path: Path) -> Path:
+@pytest.fixture(scope="session")
+def workdir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """**An empty directory, and it stays empty.**
 
-    clypi's bash script ends in `complete -o default`, so bash offers the files
-    of the working directory when the program answers with nothing. A file
-    beside the shell would then read as a candidate of the program.
+    argcomplete's bash script ends in `complete -o default`, so bash offers the
+    files of the working directory when the program answers with nothing. A
+    file beside the shell would then read as a candidate of the program. That
+    is why `nix_fixture` below is a directory of its own and not this one.
     """
-    path = tmp_path / "work"
-    path.mkdir()
-    return path
+    return tmp_path_factory.mktemp("work")
 
 
-@pytest.fixture
-def home(tmp_path: Path) -> Path:
-    """A home directory of this test, and not of the developer.
+@pytest.fixture(scope="session")
+def home(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A home directory of this run, and not of the developer.
 
     Separate from `workdir`, so the history file a shell writes at exit cannot
     appear in a menu.
     """
-    path = tmp_path / "home"
-    path.mkdir()
-    return path
+    return tmp_path_factory.mktemp("home")
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
+def nix_fixture(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A Nix file and a flake that a completer can evaluate in milliseconds.
+
+    **A completion runs while a person holds a key down, so its target has to
+    be cheap.** A row that pointed at nixpkgs would measure the evaluation of
+    nixpkgs. These two files hold a handful of attributes and import nothing.
+
+    **Its own directory, and not `workdir`.** A `.nix` file beside the shell
+    would come back as a bash candidate through `complete -o default`, and two
+    rows of the table assert that the program offers nothing.
+
+    A row reaches it by writing `{nix}` in its line, which
+    `test_the_shell_offers_what_the_command_owes` fills in. Issue #223 is the
+    completer that will read these attributes; until it lands, the row that
+    uses this states that a real path with a `#` in it survives the lexer.
+    """
+    directory = tmp_path_factory.mktemp("nix")
+    (directory / "default.nix").write_text(
+        '{ }:\n{\n  hello = "fast";\n  nested = { attr = "fast"; };\n}\n',
+        encoding="utf-8",
+    )
+    (directory / "flake.nix").write_text(
+        '{\n  outputs = { self }: {\n    packages.x86_64-linux.hello = "fast";\n  };\n}\n',
+        encoding="utf-8",
+    )
+    return directory
+
+
+@pytest.fixture(scope="session")
 def session_env(pynix_bin: str, home: Path) -> dict[str, str]:
     """The whole environment a session gets, and nothing else.
 
@@ -181,7 +220,7 @@ def session_env(pynix_bin: str, home: Path) -> dict[str, str]:
     return env
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def shell(
     request: pytest.FixtureRequest, scripts: dict[str, Path], session_env: dict[str, str], workdir: Path
 ) -> Iterator[ShellSession]:
@@ -189,6 +228,17 @@ def shell(
 
     Indirectly parametrized: each test names the shell it wants, because the
     table of cases marks a row broken in one shell and correct in another.
+
+    **One shell for each name, for the whole run.** Starting fish, bash or zsh
+    and loading a completion script costs about a second, and the table asks
+    each shell for ten completions. `ShellSession.raw_complete` was written for
+    reuse: it abandons the line with Ctrl-U and Ctrl-C, waits for the sentinel
+    prompt, and reads the next answer from the row the cursor is on. So a
+    session answers many completions and each answer starts clean.
+
+    Three processes live at once, one for each name. `ROWS` groups its rows by
+    shell so pytest builds each one once, rather than relying on the reordering
+    that a higher-scoped parameter usually gets.
     """
     name = request.param
     with ShellSession(name, session_env, cwd=str(workdir), settle=SETTLE, answer=ANSWER) as session:
