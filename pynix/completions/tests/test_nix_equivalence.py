@@ -78,6 +78,20 @@ def equivalence_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return path
 
 
+@pytest.fixture(scope="session")
+def equivalence_directory(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A directory holding the same source as its ``default.nix``.
+
+    A directory is a shape of ``--file`` that a caller writes often, and it is
+    the one that needs the autocall: ``nix build --file DIR attr`` reads
+    ``DIR/default.nix``. A test that only ever named a file would not see a
+    completer that forgot to.
+    """
+    directory = tmp_path_factory.mktemp("equivalence-directory")
+    (directory / "default.nix").write_text(EQUIVALENCE_SOURCE, encoding="utf-8")
+    return directory
+
+
 def nix_candidates(arguments: list[str], index: int = NIX_COMPLETION_INDEX) -> set[str]:
     """What `nix` offers, through its own completion protocol.
 
@@ -172,3 +186,58 @@ def test_no_value_is_forced(equivalence_file: Path, pynix_bin: str) -> None:
     """
     ours = argcomplete_candidates(f"pynix build --file {equivalence_file} --attr nixos.config.system.build.", pynix_bin)
     assert ours == {"nixos.config.system.build.toplevel"}
+
+
+#: How a caller can spell the same target on the command line.
+#:
+#: **Every one of these is our own resolution, and every one has to agree with
+#: Nix.** `pynix.target.resolve_file_reference` adds a fragment and a bare name
+#: on top of the four shapes the evaluator resolves itself, so a spelling that
+#: worked for `nix` and not for `pynix` would be ours to answer for.
+SHAPES = ("absolute", "relative", "dot-relative", "directory")
+
+
+def spell(shape: str, path: Path, directory: Path) -> str:
+    """The command-line spelling of *shape*."""
+    if shape == "absolute":
+        return str(path)
+    if shape == "relative":
+        return os.path.relpath(path)
+    if shape == "dot-relative":
+        # `./` in front, spelled with the separator rather than by joining a
+        # `Path`: `Path("./x")` normalises the `.` away, and the `./` is the
+        # whole point of this shape.
+        return f".{os.sep}{os.path.relpath(path)}"
+    return str(directory)
+
+
+@pytest.mark.parametrize("shape", SHAPES)
+def test_every_spelling_of_file_offers_what_nix_offers(
+    shape: str, equivalence_file: Path, equivalence_directory: Path, pynix_bin: str
+) -> None:
+    """The four shapes of ``--file`` answer one set, and it is Nix's set.
+
+    A directory is the shape that needs the autocall of ``default.nix``, and a
+    relative path is the shape that depends on the working directory of the
+    program rather than of the shell.
+    """
+    source = spell(shape, equivalence_file, equivalence_directory)
+    baseline = nix_candidates(["build", "--file", source, "nixo"])
+    assert baseline == {"nixos", "nixosLater"}, f"nix answered {baseline} for {source}"
+
+    with_option = argcomplete_candidates(f"pynix build --file {source} --attr nixo", pynix_bin)
+    assert with_option == baseline
+
+    with_hash = argcomplete_candidates(f"pynix build --file {source}#nixo", pynix_bin)
+    assert {candidate.removeprefix(f"{source}#") for candidate in with_hash} == baseline
+
+
+def test_a_file_with_no_hash_leaves_the_names_to_the_shell(equivalence_file: Path, pynix_bin: str) -> None:
+    """Before a ``#``, ``--file`` answers nothing, and that is the right answer.
+
+    A shell offers file names when a program answers nothing, which is what a
+    caller wants while they are still typing the path. `nix` gives the same
+    answer at the same position: its completion kind there is ``filenames``.
+    """
+    partial = str(equivalence_file)[:-4]
+    assert argcomplete_candidates(f"pynix build --file {partial}", pynix_bin) == set()
