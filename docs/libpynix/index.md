@@ -71,10 +71,26 @@ and reads nothing; the base class fills the attribute in. `pynix._settings`
 is the one in this repository that does it, from the environment and from
 `$XDG_CONFIG_HOME/pynix/config.toml`.
 
-**No completer is set on the three.** `Spec.complete` exists, and a Tab after
-any of them offers file names, which is what the shell does when nothing
-answers. An `--attr` completer would evaluate Nix on a keypress, so it needs a
-budget and a way to give up. Issue #223 holds that question.
+**A completer is a parameter, and this module supplies none.** Each of the
+three takes `complete=`, and passes it through to `opt`. A program that gives
+nothing keeps what these three did before, which is to let the shell offer file
+names.
+
+The reason the completer comes from outside is the reason this module can be
+here at all. Answering a Tab after `--attr` means evaluating Nix while a person
+holds a key down: it needs an evaluator, a budget, and a way to give up when
+the budget runs out. A library that declares an option has none of the three.
+
+`pynix` supplies them, and the shape is worth copying. `pynix._attr_completion`
+holds the completer, and `pynix._nix_options` is the join: three wrappers, each
+one calling the declaration of this module with the completer of that one. Its
+command modules import the three from there rather than from `libpynix`, which
+is one changed import line for each of them.
+
+Read `pynix/src/pynix/_nix_options.py`. It is fourteen lines of code, and its
+docstring gives the cost that makes the split worth having: every import that
+reaches an evaluator sits inside the function a completion calls, so a start
+that only lists an option pays for a function object and nothing else.
 
 ## Answer a shell completion
 
