@@ -111,12 +111,21 @@ network and an expired cache, and Nix answers from the stale copy in that case
 rather than failing.
 
 **A Tab downloads once, where a command downloads five times.** Nix retries a
-download `download-attempts` times with a backoff, and waits `connect-timeout`
-seconds for each. The defaults are 5 and 15 s, and both outlast a keypress. A
-completion sets them to 1 and 3 s. Measured with no network: the registry call
-gives up after 4.646 s at the defaults and after 0.002 s at one attempt, and
-the first figure is over the budget. Only a completion reads these values; a
-real command keeps the patient ones.
+download `download-attempts` times with a backoff, waits `connect-timeout`
+seconds for each, and lets a connected transfer go silent for
+`stalled-download-timeout` seconds. The defaults are 5, 15 s and 300 s, and
+each of them outlasts a keypress. A completion sets them to 1, 3 s and 3 s.
+Only a completion reads these values; a real command keeps the patient ones.
+
+Measured. With no network, the registry call gives up after 4.646 s at the
+defaults and after 0.002 s at one attempt, and the first figure is over the
+budget. Against a socket that accepts the connection and then never writes,
+the call outlasted 25 s at the default stall timeout and gave up after
+3.004 s at three seconds.
+
+These bound what Nix fetches with curl, which is the registry and any
+tarball. A `git+https:` flake input runs `git` as a separate process, which
+reads none of them. Issue #231 holds that.
 
 **A Tab still completes with no network, and under `nix` it does not.**
 `getRegistries` builds all four registry layers before it returns any of them,
