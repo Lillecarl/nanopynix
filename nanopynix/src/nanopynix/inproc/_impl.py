@@ -71,6 +71,7 @@ from nanopynix.models import (
     MissingInfo,
     NixType,
     PathInfo,
+    RegistryEntry,
     StorePath,
 )
 from nanopynix.protocols import (
@@ -1101,6 +1102,11 @@ class Store(AsyncStore):
 
     async def find_roots(self, *, censor: bool = False) -> list[GcRoot]:
         return await self._session.run(functools.partial(self._require_core().find_roots, censor=censor))
+
+    async def registry_entries(self, *, fetch_settings: Mapping[str, str] | None = None) -> list[RegistryEntry]:
+        return await self._session.run(
+            functools.partial(self._require_core().registry_entries, fetch_settings=fetch_settings)
+        )
 
     async def compute_store_path(
         self,
