@@ -522,6 +522,11 @@ let
               inherit (final.pythonSet)
                 nanopynix-proto
                 nanopynix-helpers
+                # The command-line layer that issue #222 moved out of
+                # `pynix`. Exported so that a second Nix CLI in Python can
+                # take it instead of copying it, which is the whole reason it
+                # is a project of its own.
+                libpynix
                 # The pytest plugin, developed here alongside everything else.
                 # Exported because a consumer's test suite may want it too --
                 # see the note on the outer `inherit` for the one way to take
@@ -977,6 +982,12 @@ lib.throwIf (unlistedVariants != [ ])
       nanopynix-bindings
       nanopynix-helpers
       nanopynix-proto
+      # The command-line layer of issue #222. It reaches
+      # `nanopynix-bindings` through nothing, so this one attribute is the
+      # same package for every Nix version -- see `nixLinked` in
+      # `nix/py-packages.nix`. It is under `stable` for consistency with its
+      # neighbours here, and not because the version means anything to it.
+      libpynix
       # `nanopynix.pytest-agent` is the *package*, built in this repo's
       # `pythonSet`. A consumer that assembles its own venv should not add it
       # from here -- mixing a package built in one builders set into another

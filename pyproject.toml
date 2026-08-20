@@ -5,6 +5,7 @@ extraPaths = [
   ".",
   "nanopynix/src",
   "nanopynix-helpers/src",
+  "libpynix/src",
   "pynix/src",
   "pytest-agent/src",
   "grpclib-transports/src",
@@ -19,6 +20,7 @@ extraPaths = [
   "tests",
   "nanopynix/tests",
   "pynix/tests",
+  "libpynix/tests",
   "pynix-lsp/src",
   "pynix-lsp/tests",
   # Reached by a bare `import beartype_bootstrap` from both the sitecustomize
@@ -64,6 +66,13 @@ reportPrivateUsage = "none"
 root = "pynix/tests"
 reportPrivateUsage = "none"
 
+# The CLI layer that issue #222 made a library. Its suite reads
+# `libpynix.command._let_a_hash_stay_in_the_line`, which is the correction that
+# a completion applies before it answers.
+[[tool.pyright.executionEnvironments]]
+root = "libpynix/tests"
+reportPrivateUsage = "none"
+
 # The drivers call `pynix_lsp._handlers._hover` and its peers directly. Issue
 # #107 moved this suite out of `pynix/tests/`, and the entry moved with it.
 #
@@ -82,7 +91,7 @@ extraPaths = ["pytest-agent/tests"]
 reportPrivateUsage = "none"
 
 [tool.coverage.run]
-source_pkgs = ["nanopynix", "nanopynix_helpers", "pynix", "pynix_lsp"]
+source_pkgs = ["nanopynix", "nanopynix_helpers", "libpynix", "pynix", "pynix_lsp"]
 branch = true
 # The Nix worker runs in a process forked from a `multiprocessing` forkserver
 # helper, not a plain subprocess. `concurrency = multiprocessing` plus
@@ -102,6 +111,7 @@ nanopynix_helpers = [
   "nanopynix-helpers/src/nanopynix_helpers",
   "*/site-packages/nanopynix_helpers",
 ]
+libpynix = ["libpynix/src/libpynix", "*/site-packages/libpynix"]
 pynix = ["pynix/src/pynix", "*/site-packages/pynix"]
 pynix_lsp = ["pynix-lsp/src/pynix_lsp", "*/site-packages/pynix_lsp"]
 

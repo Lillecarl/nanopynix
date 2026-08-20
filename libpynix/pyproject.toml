@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "libpynix"
+version = "0.1.0"
+description = "The command-line layer of pynix, as a library any Nix CLI in Python can take"
+authors = [{ name = "nanopynix contributors" }]
+requires-python = ">=3.13"
+# PEP 639. The repository is Apache-2.0. The file is a copy of the one at the
+# root, because the source root of this project is this directory and a path
+# above it is not in the sdist.
+license = "Apache-2.0"
+license-files = [ "LICENSE" ]
+# **`argcomplete`, and nothing else.** The parser is `argparse`, which is the
+# standard library, so a program that could not import this dependency would
+# still parse every command line: it answers a Tab and nothing more.
+#
+# **`nanopynix` is deliberately absent, although `--file`, `--flake` and
+# `--attr` name Nix concepts.** This project declares those three options and
+# reads none of them, so it needs no evaluator. Two things follow. A consumer
+# that has not loaded Nix can still build its parser, and this project is one
+# package for every Nix version rather than one for each -- see `nixLinked`
+# in `nix/py-packages.nix`.
+dependencies = ["argcomplete"]
+
+[project.optional-dependencies]
+# The suite drives argparse and argcomplete and starts no store, so `pytest`
+# and the shared plugin are the whole harness. `nanopynix-testing` is absent
+# for the same reason as in `test-support`: that project supplies the beartype
+# hook, and the hook imports `nanopynix`. A gate for a package that names no
+# Nix concept must not build one.
+#
+# The repository run does instrument this package, because `pytest.ini` there
+# loads the hook and `beartype_bootstrap.PACKAGES` names `libpynix`.
+test = ["pytest", "test-support"]
+
+[project.urls]
+Homepage = "https://github.com/lillecarl/nanopynix"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/libpynix"]

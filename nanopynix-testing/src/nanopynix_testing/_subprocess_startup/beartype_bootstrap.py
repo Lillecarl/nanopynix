@@ -28,7 +28,7 @@ import os
 # `pynix_lsp` is here because issue #107 moved 14 modules out of `pynix`, and
 # a package that this tuple does not name is not instrumented at all. The
 # split would otherwise have taken the checks off those modules in silence.
-PACKAGES = ("nanopynix", "nanopynix_helpers", "pynix", "pynix_lsp")
+PACKAGES = ("nanopynix", "nanopynix_helpers", "libpynix", "pynix", "pynix_lsp")
 
 ENV_VAR = "NANOPYNIX_BEARTYPING"
 
