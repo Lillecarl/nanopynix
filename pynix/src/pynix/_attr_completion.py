@@ -60,11 +60,12 @@ from nanopynix._typechecking import BEARTYPING
 # beartype resolves an annotation at call time, and a name that only a type
 # checker imported is not there to resolve.
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import Awaitable, Callable, Sequence
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 
     from nanopynix_helpers import AttrPathSearch
 
     from libpynix.command import Completer
+    from nanopynix import AsyncEvalSession
 
 #: Which attribute-path search a command applies to the fragment of ``--flake``.
 #:
@@ -96,6 +97,42 @@ BUDGET_VARIABLE = "PYNIX_COMPLETION_BUDGET"
 DEBUG_VARIABLE = "PYNIX_COMPLETION_DEBUG"
 
 
+@contextlib.asynccontextmanager
+async def _completion_session() -> AsyncGenerator[AsyncEvalSession]:
+    """An evaluator for one completion, in this process.
+
+    **`inproc` and not `rpc`, and that is the whole latency of the feature.**
+    Every command of `pynix` opens `pynix._util.eval_session`, which builds a
+    `nanopynix.rpc.Session` and so starts a worker process. The child imports
+    the stack and loads libnixexpr and libnixstore, and a gRPC handshake
+    follows. Issue #226 measured what that costs a completion: 0.834 s of a
+    1.536 s answer, against 0.007 s for the same three objects here.
+
+    **The store is not what costs it, and the measurement says so.** Whichever
+    store a process opens first pays about one second, and `auto`, `daemon`
+    and `dummy://` each pay it. So `DEFAULT_STORE` stays: a completion answers
+    what the command would answer, and a narrower store would not be faster.
+
+    **A completion is the one caller that needs no worker.** The engines are
+    the same API, and a separate process exists for a separate Nix
+    configuration or an overlay namespace. A Tab evaluates one file, reads the
+    names of one attribute set, and the process then exits.
+    """
+    # Imported here for the reason `_names` gives.
+    from nanopynix import inproc  # noqa: PLC0415 -- see `_names`
+    from pynix._impl.settings import DEFAULT_STORE  # noqa: PLC0415 -- see `_names`
+
+    # `verbosity="error"` so the evaluator says nothing while a person is
+    # holding a key down, and no log forwarding: `_guarded` sends both streams
+    # to a buffer that nothing reads.
+    async with (
+        inproc.Session(verbosity="error") as nix,
+        nix.store(DEFAULT_STORE) as store,
+        nix.eval(store) as session,
+    ):
+        yield session
+
+
 async def _names(source: str, attr_prefix: str) -> list[str]:
     """The attribute paths of the file *source* that *attr_prefix* could mean."""
     # Imported here and not at the top of the module. Issue #123 measured what
@@ -105,14 +142,10 @@ async def _names(source: str, attr_prefix: str) -> list[str]:
     # that needs it.
     from nanopynix_helpers import complete_file_attr_path  # noqa: PLC0415 -- see above
 
-    from pynix._impl.settings import DEFAULT_STORE  # noqa: PLC0415 -- see above
-    from pynix._util import eval_session  # noqa: PLC0415 -- see above
     from pynix.target import EvaluationTarget, base_attr_search, evaluate_target  # noqa: PLC0415 -- see above
 
     target = EvaluationTarget(file=source, attr=None, flake=None)
-    # `"auto"`, which is what `--store` defaults to, and `verbosity="error"`
-    # so the evaluator says nothing while a person is holding a key down.
-    async with eval_session(DEFAULT_STORE, verbosity="error") as (_nix, _store, session):
+    async with _completion_session() as session:
         root = await evaluate_target(target, session, auto_call_file=True, attr_search=base_attr_search())
         return await complete_file_attr_path(root, attr_prefix)
 
@@ -232,11 +265,8 @@ async def _flake_names(reference: str, fragment: str, name: FlakeSearch) -> list
     # Imported here for the reason `_names` gives.
     from nanopynix_helpers import complete_flake_fragment, flake_outputs  # noqa: PLC0415 -- see `_names`
 
-    from pynix._impl.settings import DEFAULT_STORE  # noqa: PLC0415 -- see `_names`
-    from pynix._util import eval_session  # noqa: PLC0415 -- see `_names`
-
     search = _flake_search(name)
-    async with eval_session(DEFAULT_STORE, verbosity="error") as (_nix, _store, session):
+    async with _completion_session() as session:
         # **A completion never writes a lock file.** Nix locks with the flags
         # of the command it is completing, which may write one. A Tab is not a
         # command, and a keypress that changes the tree of the caller is a
