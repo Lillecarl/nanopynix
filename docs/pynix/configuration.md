@@ -123,9 +123,17 @@ budget. Against a socket that accepts the connection and then never writes,
 the call outlasted 25 s at the default stall timeout and gave up after
 3.004 s at three seconds.
 
-These bound what Nix fetches with curl, which is the registry and any
+Those three bound what Nix fetches with curl, which is the registry and any
 tarball. A `git+https:` flake input runs `git` as a separate process, which
-reads none of them. Issue #231 holds that.
+reads none of them, so a completion sets git's own pair as well:
+`GIT_HTTP_LOW_SPEED_LIMIT=1` and `GIT_HTTP_LOW_SPEED_TIME=2`. If you have set
+either yourself, yours is kept.
+
+Measured against a server that accepts the connection and then writes
+nothing, completing a flake whose one input names it: at git's defaults the
+completion outlasted 120 s and had to be killed, and with the pair it answered
+nothing after 4.6 s and left no `git` process behind. Two seconds and not
+three, because Nix retries the fetch once and the budget is five.
 
 **A Tab still completes with no network, and under `nix` it does not.**
 `getRegistries` builds all four registry layers before it returns any of them,
