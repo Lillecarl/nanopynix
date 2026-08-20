@@ -332,7 +332,50 @@ def complete(parser: argparse.ArgumentParser) -> None:
         return
     import argcomplete  # noqa: PLC0415 -- 39 modules that only a completion needs; see this function's docstring
 
+    _let_a_hash_stay_in_the_line()
     argcomplete.autocomplete(parser, exclude=_NOT_OFFERED)
+
+
+def _let_a_hash_stay_in_the_line() -> None:
+    """Stop argcomplete reading a `#` as the start of a comment.
+
+    **A command line is not a script, and no part of one is a comment.**
+    argcomplete lexes the line with a vendored `shlex` whose `commenters` is
+    `#`, and `argcomplete.lexers.split_line` never clears it. So everything
+    from the first `#` is dropped, and `pynix build --file .#hello --at<TAB>`
+    completed an empty word and offered every option of `pynix build`:
+
+        >>> split_line("pynix build --file .#hello --at", 31)
+        ('', '', '', ['pynix', 'build', '--file', '.'], None)
+
+    No shell reads it that way. bash treats `#` as a comment only at the start
+    of a word, `fish -c 'echo a#b'` prints `a#b`, and `#` is in no
+    `COMP_WORDBREAKS`. A flake reference is the shape a Nix program is typed
+    with most, so this is not a corner. Issue #221.
+
+    **Here, and not as a patch of the package.** The patch was one
+    substitution and it was measured to cost far more: `argcomplete` is a
+    dependency of `datamodel-code-generator`, whose test closure is
+    `httpx2`, `elasticsearch`, `ipython`, `prance` and more. Overriding
+    `argcomplete` rebuilt every one of them, and `httpx2` fails its own suite
+    on macOS. The one-line change belongs upstream; until it lands, this is
+    the cheapest place that reaches only this program.
+
+    `split_line` builds the lexer itself, so there is no argument to pass. It
+    reads the class off the module at call time, which is what makes a
+    subclass enough.
+    """
+    from argcomplete.packages import _shlex  # noqa: PLC0415 -- only a completion reaches this
+
+    class _Uncommented(_shlex.shlex):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            # The suppression sits on the call below, because the vendored
+            # `shlex` of argcomplete carries no annotations at all.
+            super().__init__(*args, **kwargs)  # type: ignore[reportUnknownMemberType] -- vendored shlex, no annotations
+            self.commenters = ""
+
+    # `lexers.py` binds this same module object, so the attribute reaches it.
+    _shlex.shlex = _Uncommented
 
 
 def dispatch(parser: argparse.ArgumentParser, namespace: argparse.Namespace) -> Command:
