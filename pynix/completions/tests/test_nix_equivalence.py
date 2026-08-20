@@ -30,11 +30,10 @@ rather than answer.
 from __future__ import annotations
 
 import os
-import shlex
-import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
+from _completion_probe import argcomplete_candidates, nix_candidates
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -64,11 +63,6 @@ in
 #: stem that matches one name, a trailing dot, and two levels of nesting.
 PREFIXES = ("", "nixo", "nixosL", "nixos.", "nixos.config.", "nixos.config.system.", "other.deep.")
 
-#: Where the attribute path sits in `nix build --file F <path>`.
-#: `nix` counts the arguments after the program name, and this line is
-#: `build`(1) `--file`(2) `F`(3) `<path>`(4).
-NIX_COMPLETION_INDEX = 4
-
 
 @pytest.fixture(scope="session")
 def equivalence_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
@@ -90,65 +84,6 @@ def equivalence_directory(tmp_path_factory: pytest.TempPathFactory) -> Path:
     directory = tmp_path_factory.mktemp("equivalence-directory")
     (directory / "default.nix").write_text(EQUIVALENCE_SOURCE, encoding="utf-8")
     return directory
-
-
-def nix_candidates(arguments: list[str], index: int = NIX_COMPLETION_INDEX) -> set[str]:
-    """What `nix` offers, through its own completion protocol.
-
-    `NIX_GET_COMPLETIONS=<n>` makes `nix` print the kind of completion on the
-    first line and then one candidate for each line after it, each one
-    optionally followed by a tab and a description.
-    """
-    completed = subprocess.run(  # noqa: S603 -- `nix` from PATH, with arguments this module wrote
-        ["nix", *arguments],  # noqa: S607 -- `nix` comes from the environment the gate builds
-        env={**os.environ, "NIX_GET_COMPLETIONS": str(index)},
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    lines = completed.stdout.splitlines()
-    if not lines:
-        raise AssertionError(f"nix answered nothing: {completed.stderr[:400]}")
-    # The first line is the kind (`normal`, `filenames`, `attrs`).
-    return {line.split("\t", 1)[0] for line in lines[1:] if line}
-
-
-def argcomplete_candidates(line: str, bin_dir: str) -> set[str]:
-    """What an argcomplete program offers for *line*, driven as a shell does.
-
-    **The answer comes back on file descriptor 8**, which is what the script
-    argcomplete generates redirects. A pipe on stdout gets nothing: the
-    program writes its candidates to 8 and its ordinary output to 1.
-
-    **`bin_dir` goes on PATH, and it is not optional.** A gate run has no
-    `pynix` on its own PATH: it hands the suite a store path through
-    `PYNIX_INSTALLED_PREFIX`, and the program that answers has to be the
-    program under test. Without it `bash` reports "command not found", the
-    answer is empty, and an empty answer looks like a completer that offered
-    nothing rather than one that never ran.
-    """
-    program = shlex.split(line)[0]
-    environment = {
-        **os.environ,
-        "PATH": os.pathsep.join([bin_dir, os.environ["PATH"]]),
-        "_ARGCOMPLETE": "1",
-        "_ARGCOMPLETE_IFS": "\013",
-        "_ARGCOMPLETE_SHELL": "bash",
-        "COMP_LINE": line,
-        "COMP_POINT": str(len(line)),
-        "COMP_TYPE": "9",
-        "_ARGCOMPLETE_COMP_WORDBREAKS": " \t\n\"'><=;|&(:",
-    }
-    completed = subprocess.run(  # noqa: S603 -- bash, with a command line this module wrote
-        ["bash", "-c", f"exec {shlex.quote(program)} 8>&1 1>/dev/null"],  # noqa: S607 -- same environment as `nix` above
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    # argcomplete puts a trailing space on a candidate it considers finished,
-    # which is a hint to the shell and not part of the word.
-    return {candidate.rstrip() for candidate in completed.stdout.split("\013") if candidate}
 
 
 @pytest.mark.parametrize("prefix", PREFIXES)
