@@ -176,9 +176,11 @@ CASES = (
         line="pynix build --attr ",
         forbidden=BUILD_OPTIONS | BUILD_SHORT,
         note=(
-            "No `candidates` set: the right answer is the attributes of the file or the flake, and "
-            "no completer declares them yet. What this row states is that the parser no longer "
-            "answers a value with the option list, which is what clypi did."
+            "No `--file` on this line, so there is nothing to evaluate and the right answer is "
+            "nothing. `pynix._attr_completion.complete_attr` answers the attributes of the file "
+            "when there is one, and `test_nix_equivalence.py` measures that against `nix` itself. "
+            "What this row states is the other half: the parser does not answer a value with the "
+            "option list, which is what clypi did."
         ),
     ),
     Case(
