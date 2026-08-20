@@ -9,7 +9,8 @@
 # that is missing is a test that cannot run, and `TERM=xterm` with no terminfo
 # is a fish that draws no candidate list at all.
 #
-# `cyclopts` and `pexpect` are not in the repository's own dev shell venv --
+# `cyclopts`, `pexpect` and `pyte` are not in the repository's own dev shell
+# venv --
 # this subproject is a nixpkgs `buildPythonApplication` rather than one of the
 # pyproject.nix builders projects, so its dependencies are resolved here and
 # in nix/completion-spike.nix, and nowhere else.
@@ -21,6 +22,7 @@ let
     ps: with ps; [
       cyclopts
       pexpect
+      pyte
       pytest
     ]
   );
@@ -42,6 +44,10 @@ pkgs.mkShellNoCC {
   # `src` on the path, and no install step: an edit is live, which is what a
   # spike needs. The Nix build tests the installed program instead, and
   # tests/conftest.py takes whichever of the two it finds.
-  PYTHONPATH = toString ./src;
+  #
+  # `test-support` is on the path as well, because the pty driver lives there
+  # now. Issue #213 moved it out of `completion_spike._pty`, so that
+  # `pynix/completions/tests/` could drive the same three shells.
+  PYTHONPATH = "${toString ./src}:${toString ../test-support/src}";
   TERMINFO_DIRS = "${pkgs.ncurses}/share/terminfo";
 }
