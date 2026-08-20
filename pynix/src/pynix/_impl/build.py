@@ -40,6 +40,8 @@ from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
     base_attr_search,
+    configuration_kind,
+    configuration_message,
     evaluate_target,
 )
 
@@ -123,9 +125,18 @@ async def _require_a_local_file(target: EvaluationTarget) -> None:
 
 async def _evaluate_build_target(target: EvaluationTarget, session: Any) -> ValueProxy:
     try:
-        return await evaluate_target(target, session, auto_call_file=True, attr_search=base_attr_search())
+        root = await evaluate_target(target, session, auto_call_file=True, attr_search=base_attr_search())
     except EvaluationTargetError as exc:
         raise BuildTargetError(str(exc)) from exc
+    # **Before the build, and not after it.** Nix answers a configuration with
+    # `selected value is not a derivation`, which is true and is the end of the
+    # road: it says neither what the value is nor which path would work. The
+    # test costs two attribute reads, and only a value that is an attribute set
+    # reaches even the first one.
+    kind = await configuration_kind(root)
+    if kind is not None:
+        raise BuildTargetError(configuration_message(kind, target.selected_attr()))
+    return root
 
 
 class BuildTargetError(EvaluationTargetError):

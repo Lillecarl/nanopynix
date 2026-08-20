@@ -190,7 +190,7 @@ async def build_dev_env(
                     root, locked = await evaluate_target_locked(
                         target, session, auto_call_file=True, attr_search=dev_shell_attr_search()
                     )
-                    drv_path = await derivation_path(root)
+                    drv_path = await derivation_path(root, selected=target.selected_attr())
                 except EvaluationTargetError as exc:
                     report_and_exit(exc)
                 if resolve_shell:
