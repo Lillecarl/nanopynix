@@ -110,6 +110,14 @@ first Tab of an hour pays for it. Measured: 0.54 s warm, 4.10 s with no
 network and an expired cache, and Nix answers from the stale copy in that case
 rather than failing.
 
+**A Tab downloads once, where a command downloads five times.** Nix retries a
+download `download-attempts` times with a backoff, and waits `connect-timeout`
+seconds for each. The defaults are 5 and 15 s, and both outlast a keypress. A
+completion sets them to 1 and 3 s. Measured with no network: the registry call
+gives up after 4.646 s at the defaults and after 0.002 s at one attempt, and
+the first figure is over the budget. Only a completion reads these values; a
+real command keeps the patient ones.
+
 **A Tab still completes with no network, and under `nix` it does not.**
 `getRegistries` builds all four registry layers before it returns any of them,
 so `nix` throws away your `/etc/nix/registry.json` and your own
