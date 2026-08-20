@@ -100,7 +100,23 @@ in
     # TSAN's default die_after_fork=1 refuses ("starting new threads after
     # multi-threaded fork is not supported"). This is normal daemon behavior,
     # not a bug, so tell TSAN to tolerate it instead of aborting the child.
-    export TSAN_OPTIONS="halt_on_error=1 history_size=7 second_deadlock_stack=1 die_after_fork=0 suppressions=${tsanSuppressions}"
+    # report_thread_leaks=0: a thread that finished and that nothing joined is
+    # not a race, and two producers of exactly that pattern are in this
+    # process by design. anyio's `WorkerThread` carries `MAX_IDLE_TIME = 10`,
+    # no `daemon=True` and no join, so an idle worker is reaped and returns;
+    # `concurrent.futures` does the same. With `halt_on_error=1` above, one
+    # such thread ends the process at exit status 66 and fails the job.
+    # Measured on commit 824beb96: 11 seed runs across the three TSAN jobs of
+    # CI run 32401477688, one of which reported a thread leak and none of
+    # which reported a race. Issue #235.
+    #
+    # This turns off one class of report and leaves races -- which
+    # `tsanSoakSeeds` in `ci/steps.nix` calls the genuine finding -- fatal. It
+    # is deliberately not a `nix/tsan-suppressions.txt` entry: the only frame
+    # in the report is CPython's `do_start_joinable_thread`, through which
+    # every Python thread here is created, so a `thread:` line would read as
+    # targeted and would not be.
+    export TSAN_OPTIONS="halt_on_error=1 history_size=7 second_deadlock_stack=1 die_after_fork=0 report_thread_leaks=0 suppressions=${tsanSuppressions}"
   ''
   + lib.optionalString (sanitizer != null && sanitizer.name == "undefined") ''
     # halt_on_error: UBSan prints a violation and carries on by default, so
