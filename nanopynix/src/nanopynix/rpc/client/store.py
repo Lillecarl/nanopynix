@@ -26,6 +26,7 @@ from nanopynix_proto.nix.store import (
     GetStoreDirsRequest,
     GetUriRequest,
     IsValidPathRequest,
+    ListRegistryEntriesRequest,
     OptimiseStoreRequest,
     ParseStorePathRequest,
     QueryAllValidPathsRequest,
@@ -37,6 +38,7 @@ from nanopynix_proto.nix.store import (
     QuerySubstitutablePathsRequest,
     QueryValidDeriversRequest,
     ReadDerivationRequest,
+    RegistryEntry,
     StoreDirs,
     StoreServiceBase,
     VerifyStoreRequest,
@@ -53,7 +55,7 @@ from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
 from nanopynix.settings import DEFAULT_RPC_TIMEOUT_SECONDS
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from betterproto2 import Message
     from nanopynix_proto.nix.common import PathInfo
@@ -407,6 +409,13 @@ class Store(AsyncStore):
         """Return the garbage collector roots."""
         response = await self.rpc.find_roots(FindRootsRequest(censor=censor))
         return list(response.roots)
+
+    async def registry_entries(self, *, fetch_settings: Mapping[str, str] | None = None) -> list[RegistryEntry]:
+        """Every flake registry entry Nix would consult, in Nix's own order."""
+        response = await self.rpc.list_registry_entries(
+            ListRegistryEntriesRequest(fetch_settings=dict(fetch_settings or {}))
+        )
+        return list(response.entries)
 
     async def store_dirs(self) -> StoreDirs:
         return await self.rpc.get_store_dirs(GetStoreDirsRequest())

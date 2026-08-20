@@ -47,6 +47,7 @@ from nanopynix_proto.nix.common import (
 )
 from nanopynix_proto.nix.store import (
     GcRoot as GcRoot,
+    RegistryEntry as RegistryEntry,
 )
 
 from nanopynix._ansi import strip_ansi as _strip_ansi

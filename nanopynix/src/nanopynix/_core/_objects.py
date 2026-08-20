@@ -26,12 +26,13 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 from nanopynix_bindings import (
     errors as nanopynix_errors,
     expr as nanopynix_expr,
+    fetchers as nanopynix_fetchers,
     flake as nanopynix_flake,
     store as nanopynix_store,
 )
 from nanopynix_proto.nix.store import GcAction, StoreDirs
 
-from nanopynix._core._extract import flake_ref_attrs, locked_node
+from nanopynix._core._extract import attrs_value_map, flake_ref_attrs, locked_node
 from nanopynix._core._nix_core import NixCore
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
@@ -47,6 +48,7 @@ from nanopynix.models import (
     MissingInfo,
     PathInfo,
     RealisedOutput,
+    RegistryEntry,
     StorePath,
 )
 from nanopynix.settings import (
@@ -456,6 +458,27 @@ class CoreStore:
 
     def find_roots(self, *, censor: bool = False) -> list[GcRoot]:
         return [GcRoot(link=root["link"], path=root["path"]) for root in self.require_raw().find_roots(censor)]
+
+    # --- The flake registry -----------------------------------------------
+
+    def registry_entries(self, *, fetch_settings: Mapping[str, str] | None = None) -> list[RegistryEntry]:
+        """Every registry entry Nix would consult, in the order Nix consults them.
+
+        The store is here because the global layer downloads its file into
+        one. Pass ``{"flake-registry": ""}`` to drop that layer, and no
+        download or GC root happens. ``list_registry_entries`` in
+        ``nix_fetchers.cpp`` gives the whole reason.
+        """
+        return [
+            RegistryEntry(
+                type=entry["type"],
+                from_=entry["from"],
+                to=entry["to"],
+                exact=entry["exact"],
+                extra_attrs=attrs_value_map(entry["extra_attrs"]),
+            )
+            for entry in nanopynix_fetchers.list_registry_entries(self.require_raw(), dict(fetch_settings or {}))
+        ]
 
     @no_runtime_type_check  # action validates its own membership in _RAW_GC_ACTIONS at
     # runtime for untyped callers (see the KeyError guard below); beartype's

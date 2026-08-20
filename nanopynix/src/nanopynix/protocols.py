@@ -64,7 +64,7 @@ from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncIterator, Mapping, Sequence
 
     from nanopynix.logging import BusSubscription, LogCallback, LogCapture
     from nanopynix.models import (
@@ -79,6 +79,7 @@ if TYPE_CHECKING or BEARTYPING:
         MissingInfo,
         NixType,
         PathInfo,
+        RegistryEntry,
         StorePath,
     )
     from nanopynix.settings import NixEvalSettings, NixFetchSettings, NixGlobalSettings, SettingsProvenance
@@ -517,6 +518,16 @@ class AsyncStore(Protocol):
     @abstractmethod
     async def find_roots(self, *, censor: bool = False) -> list[GcRoot]:
         """Return the garbage collector's roots."""
+        ...
+
+    @abstractmethod
+    async def registry_entries(self, *, fetch_settings: Mapping[str, str] | None = None) -> list[RegistryEntry]:
+        """Every flake registry entry Nix would consult, in Nix's own order.
+
+        A store is the receiver because the global layer downloads its file
+        into one. Pass ``{"flake-registry": ""}`` to drop that layer, and the
+        call reads local files alone.
+        """
         ...
 
     @abstractmethod

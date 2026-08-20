@@ -36,6 +36,7 @@ service StoreService {
   rpc GetBuildLog(GetBuildLogRequest) returns (GetBuildLogResponse);
   rpc AddToStore(AddToStoreRequest) returns (AddToStoreResponse);
   rpc ComputeStorePath(ComputeStorePathRequest) returns (ComputeStorePathResponse);
+  rpc ListRegistryEntries(ListRegistryEntriesRequest) returns (ListRegistryEntriesResponse);
 }
 
 message GetUriRequest {
@@ -212,6 +213,33 @@ message AddTempRootRequest {
   int64 store_handle = 100;
 }
 message AddTempRootResponse {}
+
+// The flake registry, which a flake reference completes against.
+//
+// `store_handle` is here because the global layer downloads its file into a
+// store. Every other layer reads a local file and needs no store at all.
+message ListRegistryEntriesRequest {
+  int64 request_id = 1000;
+  // Fetch settings for this call. `flake-registry: ""` drops the global
+  // layer, and with it the download.
+  map<string, string> fetch_settings = 1;
+  int64 store_handle = 100;
+}
+message RegistryEntry {
+  // The layer, as `Registry::RegistryType` names it in lower case: "flag",
+  // "user", "system", "global" or "custom".
+  string type = 1;
+  // Nix calls the two halves of an entry `from` and `to`. `from` is a Python
+  // keyword, so the generated field takes the trailing underscore that
+  // betterproto2 gives a reserved name.
+  string from = 2;
+  string to = 3;
+  bool exact = 4;
+  map<string, nix.common.AttrsValue> extra_attrs = 5;
+}
+message ListRegistryEntriesResponse {
+  repeated RegistryEntry entries = 1;
+}
 
 message FindRootsRequest {
   int64 request_id = 1000;

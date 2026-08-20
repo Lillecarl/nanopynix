@@ -40,6 +40,8 @@ from nanopynix_proto.nix.store import (
     GetUriResponse,
     IsValidPathRequest,
     IsValidPathResponse,
+    ListRegistryEntriesRequest,
+    ListRegistryEntriesResponse,
     OptimiseStoreRequest,
     OptimiseStoreResponse,
     ParseStorePathRequest,
@@ -323,6 +325,12 @@ class StoreServiceHandler(StoreServiceBase):
                 GcRoot(link=root.link, path=root.path)
                 for root in self._resolve(message.store_handle).find_roots(censor=message.censor)
             ],
+        )
+
+    @worker_op
+    def list_registry_entries(self, message: ListRegistryEntriesRequest) -> ListRegistryEntriesResponse:
+        return ListRegistryEntriesResponse(
+            entries=self._resolve(message.store_handle).registry_entries(fetch_settings=message.fetch_settings),
         )
 
     @worker_op

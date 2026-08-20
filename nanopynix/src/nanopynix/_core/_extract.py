@@ -26,10 +26,14 @@ def _attrs_map(d: dict[str, Any]) -> common_pb.AttrsMap:  # type: ignore[reportU
     return common_pb.AttrsMap(entries={k: _attrs_value(v) for k, v in d.items()})
 
 
+def attrs_value_map(d: dict[str, Any], /) -> dict[str, common_pb.AttrsValue]:
+    """Convert a raw L1 attrs dict to the map that a proto field holds."""
+    return {str(k): _attrs_value(v) for k, v in d.items()}
+
+
 def input_attrs(inp: Any, /) -> dict[str, common_pb.AttrsValue]:
     """Extract L1 Input.to_attrs() to ``dict[str, AttrsValue]``."""
-    raw = inp.to_attrs()
-    return {str(k): _attrs_value(v) for k, v in raw.items()}
+    return attrs_value_map(inp.to_attrs())
 
 
 def flake_ref_attrs(fr: Any, /) -> dict[str, common_pb.AttrsValue]:
