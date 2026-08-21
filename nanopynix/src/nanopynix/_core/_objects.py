@@ -49,15 +49,9 @@ from nanopynix.models import (
     PathInfo,
     RealisedOutput,
     RegistryEntry,
+    SettingsProvenance,
     StorePath,
 )
-from nanopynix.settings import (
-    NixEvalSettings,
-    NixFetchSettings,
-    SettingsProvenance,
-    reject_construction_time_keys,
-)
-from nanopynix.stores import resolve_auto_uri
 
 _RAW_GC_ACTIONS = {
     GcAction.RETURN_LIVE: nanopynix_store.GCAction.ReturnLive,
@@ -675,6 +669,12 @@ class CoreEvalState:
         """
         eval_rendered = eval_settings or {}
         fetch_rendered = fetch_settings or {}
+        from nanopynix.settings import (  # noqa: PLC0415 -- deferred import to avoid loading pydantic settings at startup
+            NixEvalSettings,
+            NixFetchSettings,
+            reject_construction_time_keys,
+        )
+
         reject_construction_time_keys(eval_rendered, model=NixEvalSettings, target="evaluator")
         reject_construction_time_keys(fetch_rendered, model=NixFetchSettings, target="evaluator")
         raw = self.require_raw()
@@ -904,13 +904,18 @@ class CoreRuntime:
         # `auto` alone cannot carry the connection limit that a daemon store
         # needs, so the limit goes on a second open. `resolve_auto_uri` gives
         # the reason. Both engines reach this method, so both get the rule.
-        reopen_uri = resolve_auto_uri(uri, raw.get_uri())
-        if reopen_uri is not None:
-            # The first store never took a connection, so this releases
-            # nothing. It runs because a store that this layer opened and does
-            # not return is a store this layer closes.
-            raw.close()
-            raw = self._core.open_store(reopen_uri)
+        if uri == "auto" or uri.startswith("auto?"):
+            from nanopynix.stores import (  # noqa: PLC0415 -- deferred import to avoid loading pydantic stores at startup
+                resolve_auto_uri,
+            )
+
+            reopen_uri = resolve_auto_uri(uri, raw.get_uri())
+            if reopen_uri is not None:
+                # The first store never took a connection, so this releases
+                # nothing. It runs because a store that this layer opened and does
+                # not return is a store this layer closes.
+                raw.close()
+                raw = self._core.open_store(reopen_uri)
         return CoreStore(raw)
 
     def open_eval_state(

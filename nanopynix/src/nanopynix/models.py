@@ -13,7 +13,7 @@ data types here, despite both crossing the same process boundary.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 from nanopynix_proto.nix.common import (
@@ -422,3 +422,34 @@ NixType.from_string = classmethod(_nix_type_from_string)  # type: ignore[attr-de
 
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
+
+
+@dataclass
+class SettingsProvenance:
+    """Where the effective Nix configuration of a session came from.
+
+    Nix tracks an ``overridden`` flag for each setting, so the values a
+    ``nix.conf`` supplied can be told apart from the values nanopynix applied
+    afterwards. Without this a caller cannot tell an applied setting from one
+    that was accepted and discarded.
+    """
+
+    from_config: dict[str, str] = field(default_factory=dict[str, str])
+    applied: dict[str, str] = field(default_factory=dict[str, str])
+
+    @property
+    def overridden_from_config(self) -> dict[str, str]:
+        """The settings nanopynix changed that ``nix.conf`` had also set.
+
+        These are the ones worth showing a user: the host asked for one value
+        and this session uses another.
+        """
+        return {name: value for name, value in self.applied.items() if name in self.from_config}
+
+    def model_copy(self, *, update: dict[str, Any] | None = None) -> SettingsProvenance:
+        """Return a copy of this provenance, applying any updates."""
+        updates = update or {}
+        return SettingsProvenance(
+            from_config=updates.get("from_config", self.from_config),
+            applied=updates.get("applied", self.applied),
+        )
