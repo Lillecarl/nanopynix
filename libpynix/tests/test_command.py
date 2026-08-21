@@ -10,6 +10,7 @@ what the layer promises to a program that declares different ones.
 from __future__ import annotations
 
 import argparse
+import gettext
 from pathlib import Path
 from typing import Literal
 
@@ -319,3 +320,13 @@ def test_an_option_with_choices_is_not_also_given_a_type() -> None:
     style = next(a for a in parser._actions if a.dest == "style")
     assert style.type is None
     assert style.choices == ("yaml11", "yaml12")
+
+
+def test_gettext_caches_missing_translation_lookups() -> None:
+    """Missing translations do not repeat filesystem lookups across parsers.
+
+    gettext.dgettext is cached so creating many parsers avoids repeated
+    disk searches when no .mo file exists. Issue #240.
+    """
+    assert gettext.dgettext("argparse", "options") == "options"
+    assert gettext.dgettext("messages", "positional arguments") == "positional arguments"
