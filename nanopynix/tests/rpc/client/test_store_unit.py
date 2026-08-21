@@ -16,6 +16,7 @@ import pytest
 from nanopynix_proto.nix.common import (
     BuildResult,
     Derivation,
+    GcAction,
     MissingInfo,
 )
 from nanopynix_proto.nix.store import (
@@ -33,7 +34,6 @@ from nanopynix_proto.nix.store import (
     FindRootsRequest,
     FollowLinksToStorePathRequest,
     FollowLinksToStorePathResponse,
-    GcAction,
     GetBuildLogRequest,
     GetStoreDirRequest,
     GetUriRequest,

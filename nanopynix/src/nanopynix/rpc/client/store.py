@@ -5,6 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix_bindings.store import BuildMode
+from nanopynix_proto.nix.common import (
+    GcAction,
+    GcRoot,
+    RegistryEntry,
+    StoreDirs,
+)
 from nanopynix_proto.nix.store import (
     AddIndirectRootRequest,
     AddPermRootRequest,
@@ -19,8 +25,6 @@ from nanopynix_proto.nix.store import (
     EnsurePathRequest,
     FindRootsRequest,
     FollowLinksToStorePathRequest,
-    GcAction,
-    GcRoot,
     GetBuildLogRequest,
     GetStoreDirRequest,
     GetStoreDirsRequest,
@@ -38,8 +42,6 @@ from nanopynix_proto.nix.store import (
     QuerySubstitutablePathsRequest,
     QueryValidDeriversRequest,
     ReadDerivationRequest,
-    RegistryEntry,
-    StoreDirs,
     StoreServiceBase,
     VerifyStoreRequest,
     WriteDevShellDerivationRequest,
@@ -369,7 +371,7 @@ class Store(AsyncStore):
 
         Args:
             action: What the collector should do — e.g. list or delete dead
-                paths (see :class:`~nanopynix_proto.nix.store.GcAction`).
+                paths (see :class:`~nanopynix_proto.nix.common.GcAction`).
             ignore_liveness: Delete ``paths_to_delete`` even if reachable
                 from a root.
             paths_to_delete: Restrict the action to these paths, if given.
@@ -380,7 +382,7 @@ class Store(AsyncStore):
 
         Raises:
             ValueError: The action is not a member of
-                :class:`~nanopynix_proto.nix.store.GcAction`.
+                :class:`~nanopynix_proto.nix.common.GcAction`.
         """
         # **This guard used to be a side effect of one protoc option.**
         # `nanopynix-proto/generated.nix` passed `pydantic_dataclasses`, so

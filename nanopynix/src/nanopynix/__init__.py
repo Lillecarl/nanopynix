@@ -64,8 +64,10 @@ if typing.TYPE_CHECKING:
         remove_logger,
         set_verbosity,
     )
-    from nanopynix_proto.nix.common import LogLevel
-    from nanopynix_proto.nix.store import GcAction as GcAction
+    from nanopynix_proto.nix.common import (
+        GcAction as GcAction,
+        LogLevel as LogLevel,
+    )
 
     from nanopynix import (
         inproc as inproc,
@@ -241,7 +243,7 @@ _NAME_TO_MODULE: typing.Final[dict[str, str]] = {
     "FlakeRef": "nanopynix.models",
     "ForeignValueError": "nanopynix.exceptions",
     "ForkedSessionError": "nanopynix.exceptions",
-    "GcAction": "nanopynix_proto.nix.store",
+    "GcAction": "nanopynix_proto.nix.common",
     "GcResult": "nanopynix.models",
     "GcRoot": "nanopynix.models",
     "HashMismatchError": "nanopynix.exceptions",

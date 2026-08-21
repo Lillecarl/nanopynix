@@ -30,7 +30,7 @@ from nanopynix_bindings import (
     flake as nanopynix_flake,
     store as nanopynix_store,
 )
-from nanopynix_proto.nix.store import GcAction, StoreDirs
+from nanopynix_proto.nix.common import GcAction, StoreDirs
 
 from nanopynix._core._extract import attrs_value_map, flake_ref_attrs, locked_node
 from nanopynix._core._nix_core import NixCore

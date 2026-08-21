@@ -29,6 +29,7 @@ from nanopynix_proto.nix.common import (
     DerivationOutput as DerivationOutput,
     DerivationOutputs as DerivationOutputs,
     FlakeRef as FlakeRef,
+    GcRoot as GcRoot,
     Input as Input,
     LockedFlake as LockedFlake,
     LockedNode as LockedNode,
@@ -40,14 +41,11 @@ from nanopynix_proto.nix.common import (
     PathInfo as PathInfo,
     PrimOpSpec as PrimOpSpec,
     RealisedOutput as RealisedOutput,
+    RegistryEntry as RegistryEntry,
     RemoteCallArg as RemoteCallArg,
     ResultType as ResultType,
     ScalarValue as ScalarValue,
     ValueHandle as ValueHandle,
-)
-from nanopynix_proto.nix.store import (
-    GcRoot as GcRoot,
-    RegistryEntry as RegistryEntry,
 )
 
 from nanopynix._ansi import strip_ansi as _strip_ansi

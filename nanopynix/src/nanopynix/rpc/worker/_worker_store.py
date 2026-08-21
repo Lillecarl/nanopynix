@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from nanopynix_proto.nix.common import BuildResultList, Derivation, MissingInfo, PathInfo
+from nanopynix_proto.nix.common import (
+    BuildResultList,
+    Derivation,
+    GcRoot,
+    MissingInfo,
+    PathInfo,
+    StoreDirs,
+)
 from nanopynix_proto.nix.store import (
     AddIndirectRootRequest,
     AddIndirectRootResponse,
@@ -30,7 +37,6 @@ from nanopynix_proto.nix.store import (
     FindRootsResponse,
     FollowLinksToStorePathRequest,
     FollowLinksToStorePathResponse,
-    GcRoot,
     GetBuildLogRequest,
     GetBuildLogResponse,
     GetStoreDirRequest,
@@ -57,7 +63,6 @@ from nanopynix_proto.nix.store import (
     QuerySubstitutablePathsRequest,
     QueryValidDeriversRequest,
     ReadDerivationRequest,
-    StoreDirs,
     StoreServiceBase,
     VerifyStoreRequest,
     VerifyStoreResponse,

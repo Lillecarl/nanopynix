@@ -298,6 +298,44 @@ message Derivation {
   optional string structured_attrs = 9;
 }
 
+// ── Store domain models ────────────────────────────
+
+message StoreDirs {
+  string store_dir = 1;
+  string uri = 2;
+  optional string root_dir = 3;
+  optional string state_dir = 4;
+  optional string log_dir = 5;
+  optional string real_store_dir = 6;
+  optional string build_dir = 7;
+}
+
+message RegistryEntry {
+  // The layer, as `Registry::RegistryType` names it in lower case: "flag",
+  // "user", "system", "global" or "custom".
+  string type = 1;
+  // Nix calls the two halves of an entry `from` and `to`. `from` is a Python
+  // keyword, so the generated field takes the trailing underscore that
+  // betterproto2 gives a reserved name.
+  string from = 2;
+  string to = 3;
+  bool exact = 4;
+  map<string, AttrsValue> extra_attrs = 5;
+}
+
+message GCRoot {
+  string link = 1;
+  string path = 2;
+}
+
+enum GCAction {
+  GC_ACTION_UNSPECIFIED = 0;
+  GC_ACTION_RETURN_LIVE = 1;
+  GC_ACTION_RETURN_DEAD = 2;
+  GC_ACTION_DELETE_DEAD = 3;
+  GC_ACTION_DELETE_SPECIFIC = 4;
+}
+
 // ── Error detail ───────────────────────────────────
 //
 // Every nix::Error carries a nix::ErrorInfo -- severity, source position,
