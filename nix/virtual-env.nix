@@ -1,7 +1,9 @@
-# The interactive development environment: one venv containing every project
-# in this repo as an editable install, so an edit is live with no rebuild.
+# The repository virtual environment: a virtualenv containing every project
+# in this repo, built via pyproject.nix's `mkVirtualEnv`.
 #
-# The whole thing is a `mkVirtualEnv` spec. What it replaces was a hand-written
+# Parameterized over `pythonSet`:
+# - `editablePythonSet` builds an editable virtualenv for interactive development.
+# - `pythonSet` builds a packaged, non-editable virtualenv.
 # `python.withPackages` list that had to append each project's `.dependencies`
 # alongside the project itself, because nixpkgs' Python environments keep only
 # importable modules and so drop an application *together with everything it
@@ -20,14 +22,14 @@
 # with nothing for the consumer to export. Does not include nanopynix's own
 # devtools (pyright/ruff/...) -- see nix/shell.nix for the full shell.
 {
-  editablePythonSet,
+  pythonSet,
   # Merged over the spec below, replacing the entry for any project it names.
   # The full nanopynix shell uses it to turn on pynix's `docs` extra, which
   # the exported `pynixDevEnv` has no use for.
   extraSpec ? { },
 }:
 
-editablePythonSet.mkVirtualEnv "nanopynix-dev-env" (
+pythonSet.mkVirtualEnv "nanopynix-dev-env" (
   {
     nanopynix = [ "test" ];
     nanopynix-helpers = [ "test" ];

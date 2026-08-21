@@ -616,14 +616,24 @@ let
               suiteRuntime = final.callPackage ./nix/suite-runtime.nix {
                 inherit tofuCoreSchemaTool storeExecTools;
               };
-              shell = final.callPackage ./nix/shell.nix { };
+              shell = final.callPackage ./nix/shell.nix {
+                pythonSet = final.editablePythonSet;
+              };
+              nonEditableShell = final.callPackage ./nix/shell.nix {
+                inherit (final) pythonSet;
+              };
               # A live, editable-install `pynix`/`ekn` env (no devtools --
               # see nix/shell.nix for the full interactive nanopynix shell),
               # exported so other repos can drop a hot-reloading `pynix`
               # into their own devShell/direnv without rebuilding on every
-              # edit here. See nix/dev-env.nix's own docstring for why no
+              # edit here. See nix/virtual-env.nix's own docstring for why no
               # env var is needed.
-              pynixDevEnv = final.callPackage ./nix/dev-env.nix { };
+              pynixDevEnv = final.callPackage ./nix/virtual-env.nix {
+                pythonSet = final.editablePythonSet;
+              };
+              pynixNonEditableDevEnv = final.callPackage ./nix/virtual-env.nix {
+                inherit (final) pythonSet;
+              };
               nanopynix-docs = final.callPackage ./nix/docs.nix { };
               # An attrset of derivations, not one derivation, so a failing
               # run names the gate. `flake.nix` puts it under `checks`; the
@@ -1009,7 +1019,9 @@ lib.throwIf (unlistedVariants != [ ])
       # `nix build --file . nixFunctionalTests.nix_2_34`.
       nixFunctionalTests
       pynixDevEnv
+      pynixNonEditableDevEnv
       shell
+      nonEditableShell
       nanopynix-docs
       checks
       # For a consumer that builds one of *its own* projects against this

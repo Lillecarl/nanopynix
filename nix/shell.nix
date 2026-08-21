@@ -11,18 +11,18 @@
   treefmt,
   actionlint,
   shellcheck,
-  editablePythonSet,
+  pythonSet,
   cachix,
   statix,
   suiteRuntime,
 }:
 let
-  # Reuses dev-env.nix's editable venv rather than assembling a second one.
+  # Reuses virtual-env.nix's venv rather than assembling a second one.
   # The docs toolchain goes *into* that venv, via pynix's `docs` extra, rather
   # than onto PATH beside it: `sphinx-build` has to import what it documents,
   # and a second Python environment would have its own `sys.path` without it.
-  pythonEnv = import ./dev-env.nix {
-    inherit editablePythonSet;
+  pythonEnv = import ./virtual-env.nix {
+    inherit pythonSet;
     extraSpec = {
       pynix = [
         "test"
