@@ -359,6 +359,10 @@ Closes #9
 
 Follow these rules:
 
+- **Do not call `gh issue close`.** The commit message is the only mechanism
+  that closes an issue, and it closes the issue when the commit reaches
+  `develop`. Write `Closes #<number>` in the commit, and stop there. A manual
+  close before the push reports the work as done when it is not on `develop`.
 - Use `Closes #<number>` for a commit that satisfies the whole issue. Use
   `Refs #<number>` for a commit that is one part of a larger issue. Do not
   write `Closes` for partial work, because GitHub closes the issue anyway.
