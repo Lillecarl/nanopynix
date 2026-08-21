@@ -105,6 +105,9 @@
       checks = forAllSystems (system: eachDefNix.${system}.checks);
       devShells = forAllSystems (system: {
         default = eachDefNix.${system}.shell;
+        editable = eachDefNix.${system}.shell;
+        nonEditable = eachDefNix.${system}.nonEditableShell;
+        non-editable = eachDefNix.${system}.nonEditableShell;
       });
       # The service modules this repository ships, and the answer issue #131
       # asked for. Not per-system: a module is evaluated by the configuration
