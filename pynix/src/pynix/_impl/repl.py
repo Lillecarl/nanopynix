@@ -12,13 +12,19 @@ import asyncio
 import contextlib
 import os
 import shlex
+import shutil
 import signal
 import sys
+import textwrap
 from io import StringIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any, ClassVar, override
 
 import anyio
+from markdown_it.renderer import RendererHTML
+from markdown_it.token import Token
+from myst_parser.config.main import MdParserConfig
+from myst_parser.parsers.mdit import create_md_parser
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.formatted_text import ANSI, StyleAndTextTuples
@@ -27,7 +33,18 @@ from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.shortcuts import print_formatted_text
 from prompt_toolkit.styles import Style
-from rich.console import Console
+from rich.console import Console, ConsoleOptions, JustifyMethod, RenderResult
+from rich.containers import Renderables
+from rich.markdown import (
+    CodeBlock,
+    Heading,
+    Markdown,
+    MarkdownContext,
+    MarkdownElement,
+    TextElement,
+)
+from rich.segment import Segment
+from rich.syntax import Syntax
 from rich.table import Table
 from tree_sitter import Query, QueryCursor
 
@@ -197,6 +214,141 @@ def _render_help() -> str:
 
 
 _HELP = _render_help()
+
+
+class _LeftHeading(Heading):
+    """A heading that stays aligned to the left margin."""
+
+    LEVEL_ALIGN: ClassVar[dict[str, JustifyMethod]] = {
+        f"h{i}": "left"
+        for i in range(1, 7)  # type: ignore[misc] -- rich TypedDict JustifyMethod is Literal
+    }
+
+
+class _NixCodeBlock(CodeBlock):
+    """A code block with syntax highlighting and a left border bar."""
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        code = str(self.text).rstrip()
+        lexer = "nix" if self.lexer_name in ("text", "") else self.lexer_name
+        syntax = Syntax(
+            code,
+            lexer,
+            theme="ansi_dark",
+            background_color="default",
+            word_wrap=True,
+            line_numbers=False,
+        )
+        bar_style = console.get_style("dim", default="none")
+        bar_prefix = Segment("  │ ", bar_style)
+        new_line = Segment("\n")
+        render_options = options.update(width=max(options.max_width - 4, 20))
+        lines = console.render_lines(syntax, render_options)
+        for line in lines:
+            yield bar_prefix
+            yield from line
+            yield new_line
+
+
+class _DefList(MarkdownElement):
+    new_line = True
+
+
+class _DefTerm(TextElement):
+    new_line = True
+    style_name = "bold"
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        yield self.text
+
+
+class _DefDesc(MarkdownElement):
+    new_line = True
+
+    def __init__(self) -> None:
+        self.elements: Renderables = Renderables()
+        super().__init__()
+
+    def on_child_close(self, context: MarkdownContext, child: MarkdownElement) -> bool:
+        del context
+        self.elements.append(child)
+        return False
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        render_options = options.update(width=max(options.max_width - 4, 20))
+        lines = console.render_lines(self.elements, render_options)
+        prefix = Segment("  : ")
+        indent = Segment("    ")
+        new_line = Segment("\n")
+        first = True
+        for line in lines:
+            yield prefix if first else indent
+            yield from line
+            yield new_line
+            first = False
+
+
+class _ColonFence(MarkdownElement):
+    """Render MyST colon fence container (:::{...} ... :::)."""
+
+    new_line = True
+
+    @classmethod
+    def create(cls, markdown: Markdown, token: Token) -> _ColonFence:  # noqa: ARG003 -- MarkdownElement protocol requires the parameter name markdown
+        return cls(token.content)
+
+    def __init__(self, content: str) -> None:
+        self.content = content
+        super().__init__()
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        if self.content:
+            yield _NixMarkdown(self.content)
+
+
+class _NixMarkdown(Markdown):
+    """Markdown customized for Nix and MyST documentation."""
+
+    elements: ClassVar[dict[str, type[MarkdownElement]]] = {
+        **Markdown.elements,
+        "heading_open": _LeftHeading,
+        "fence": _NixCodeBlock,
+        "code_block": _NixCodeBlock,
+        "colon_fence": _ColonFence,
+        "dl_open": _DefList,
+        "dt_open": _DefTerm,
+        "dd_open": _DefDesc,
+    }
+
+    def __init__(self, markup: str, **kwargs: Any) -> None:
+        super().__init__(markup, **kwargs)
+        config = MdParserConfig(
+            enable_extensions={
+                "colon_fence",
+                "deflist",
+                "strikethrough",
+                "tasklist",
+            }
+        )
+        parser = create_md_parser(config, RendererHTML)
+        tokens = parser.parse(markup)
+        for t in tokens:
+            if t.type == "colon_fence":
+                t.tag = ""
+        self.parsed = tokens
+
+
+def _render_markdown(text: str) -> ANSI:
+    """Render Markdown into formatted ANSI text bounded by the longest line."""
+    lines = text.splitlines()
+    max_line = max((len(line.rstrip()) for line in lines), default=80)
+    terminal_width = shutil.get_terminal_size(fallback=(80, 24)).columns
+    render_width = min(max(max_line + 4, 60), terminal_width)
+
+    output = StringIO()
+    console = Console(file=output, force_terminal=True, width=render_width)
+    console.print(_NixMarkdown(text))
+    return ANSI(output.getvalue().rstrip("\n"))
 
 
 def _repl_history() -> FileHistory:
@@ -389,11 +541,13 @@ async def _cmd_doc(state: _ReplState, argument: str) -> None:
     value = await state.repl.string(argument)
     doc = await value.get_doc()
     if doc is not None:
+        doc_text = textwrap.dedent(doc.doc).strip()
         if doc.args and doc.name:
             args = " ".join(f"*{arg}*" for arg in doc.args)
-            print_formatted_text(f"**Synopsis:** `builtins.{doc.name}` {args}\n\n{doc.doc}".strip())
+            md = f"**Synopsis:** `builtins.{doc.name}` {args}\n\n{doc_text}"
         else:
-            print_formatted_text(doc.doc.strip())
+            md = doc_text
+        print_formatted_text(_render_markdown(md))
         return
 
     sel = await state.repl.repl_select(argument)
@@ -403,7 +557,8 @@ async def _cmd_doc(state: _ReplState, argument: str) -> None:
         if attr is not None:
             pos_str = f"{attr.path}:{attr.line}"
             comment = attr.doc if attr.doc is not None else "No documentation found."
-            print_formatted_text(f"Attribute `{name}`\n\n  … defined at {pos_str}\n\n{comment}".strip())
+            md = f"Attribute `{name}`\n\n  … defined at {pos_str}\n\n{comment}".strip()
+            print_formatted_text(_render_markdown(md))
             return
 
     raise ReplRunError("value does not have documentation")
