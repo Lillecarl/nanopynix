@@ -661,3 +661,51 @@ class TestEvaluatorThreadRegistration:
 
         assert _off_thread(registered_here) is True
         assert _off_thread(registered_nowhere) is False
+
+
+class TestValueDoc:
+    def test_get_doc_builtin(self, eval_state: nanopynix.EvalState) -> None:
+        v = eval_state.eval_string("builtins.add")
+        doc = v.get_doc()
+        assert doc is not None
+        assert doc["name"] == "add"
+        assert doc["args"] == ["e1", "e2"]
+        assert doc["arity"] == 2
+        assert "sum" in doc["doc"]
+
+    def test_get_doc_lambda(self, eval_state: nanopynix.EvalState) -> None:
+        v = eval_state.eval_string("/** Adds one */ x: x + 1")
+        doc = v.get_doc()
+        assert doc is not None
+        assert "Function" in doc["doc"]
+        assert "Adds one" in doc["doc"]
+
+    def test_get_doc_scalar_returns_none(self, eval_state: nanopynix.EvalState) -> None:
+        v = eval_state.eval_string("42")
+        assert v.get_doc() is None
+
+    def test_attr_doc(self, eval_state: nanopynix.EvalState, tmp_path: Path) -> None:
+        nix_file = tmp_path / "attrs.nix"
+        nix_file.write_text("{ /** First attribute */ foo = 123; bar = 456; }")
+        v = eval_state.eval_file(str(nix_file))
+        doc_foo = v.attr_doc("foo")
+        assert doc_foo is not None
+        assert doc_foo["doc"] is not None
+        assert doc_foo["doc"].strip() == "First attribute"
+        assert doc_foo["line"] == 1
+
+        doc_bar = v.attr_doc("bar")
+        assert doc_bar is not None
+        assert doc_bar["doc"] is None
+
+        assert v.attr_doc("nonexistent") is None
+
+    def test_repl_select(self, eval_state: nanopynix.EvalState) -> None:
+        eval_state.begin_repl()
+        eval_state.repl_process_line("pkgs = { hello = 1; };")
+        res = eval_state.repl_select("pkgs.hello")
+        assert res is not None
+        assert res["name"] == "hello"
+        assert res["attrs"].is_attrs()
+
+        assert eval_state.repl_select("1 + 2") is None

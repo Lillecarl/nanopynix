@@ -25,7 +25,7 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import ANSI
 
 from nanopynix.exceptions import EvaluatorAbandonedError, NixError
-from nanopynix.models import NixType
+from nanopynix.models import AttrDoc, Doc, NixType
 from nanopynix.rpc import ReplSession, Store, ValueProxy
 from nanopynix.settings import NixFlakeSettings
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
@@ -168,13 +168,32 @@ class _TypedValue(ValueProxy):
         return NixType.INT
 
 
+class _DocValue(ValueProxy):
+    def __init__(self, doc: Doc | None) -> None:
+        self._doc = doc
+
+    async def get_doc(self, *, timeout: float | None = None) -> Doc | None:
+        return self._doc
+
+
+class _AttrDocValue(ValueProxy):
+    def __init__(self, attr_doc: AttrDoc | None) -> None:
+        self._attr_doc = attr_doc
+
+    async def get_doc(self, *, timeout: float | None = None) -> Doc | None:
+        return None
+
+    async def attr_doc(self, name: str, *, timeout: float | None = None) -> AttrDoc | None:
+        return self._attr_doc
+
+
 class _Repl(ReplSession):
     def __init__(self) -> None:
         self.lines: list[str] = []
         self.loaded_files: list[str] = []
         self.loaded_flakes: list[str] = []
         self.file_cache_resets = 0
-        self.value: _Value | _RunValue | _CommandValue | _EditValue | _TypedValue = _Value()
+        self.value: _Value | _RunValue | _CommandValue | _EditValue | _TypedValue | _DocValue | _AttrDocValue = _Value()
         self.verbosity = LogLevel.NOTICE
         self.raise_on_line: str | None = None
 
@@ -214,13 +233,19 @@ class _Repl(ReplSession):
         self.verbosity = normalize_log_level(verbosity)
         return self.verbosity
 
+    async def repl_select(self, expr: str, *, timeout: float | None = None) -> tuple[str, ValueProxy] | None:
+        if "." in expr:
+            _prefix, _, name = expr.rpartition(".")
+            return name, self.value
+        return None
+
     async def string(
         self,
         expr: str,
         path: str = "<string>",
         *,
         timeout: float | None = None,
-    ) -> _Value | _RunValue | _CommandValue | _EditValue | _TypedValue:
+    ) -> _Value | _RunValue | _CommandValue | _EditValue | _TypedValue | _DocValue | _AttrDocValue:
         return self.value
 
 
@@ -1168,3 +1193,83 @@ async def test_the_repl_leaves_no_sigint_handler_behind() -> None:
     with _interruptible():
         assert signal.getsignal(signal.SIGINT) is not signal.default_int_handler
     assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
+
+
+async def test_repl_doc_builtin(monkeypatch: Any) -> None:
+    output: list[str] = []
+    monkeypatch.setattr("pynix._impl.repl.print_formatted_text", output.append)
+    repl = _Repl()
+    repl.value = _DocValue(
+        Doc(name="add", args=["e1", "e2"], arity=2, doc="Return the sum of the numbers e1 and e2.", path=None, line=0)
+    )
+
+    await _run_repl_loop(repl, _Prompt([":doc builtins.add", ":quit"]))
+    assert output == [
+        _HELP,
+        "**Synopsis:** `builtins.add` *e1* *e2*\n\nReturn the sum of the numbers e1 and e2.",
+    ]
+
+
+async def test_repl_doc_lambda(monkeypatch: Any) -> None:
+    output: list[str] = []
+    monkeypatch.setattr("pynix._impl.repl.print_formatted_text", output.append)
+    repl = _Repl()
+    repl.value = _DocValue(
+        Doc(
+            name=None,
+            args=[],
+            arity=0,
+            doc="Function `f`\n  … defined at /tmp/f.nix:1\n\nAdds one.",
+            path="/tmp/f.nix",
+            line=1,
+        )
+    )
+
+    await _run_repl_loop(repl, _Prompt([":doc f", ":quit"]))
+    assert output == [
+        _HELP,
+        "Function `f`\n  … defined at /tmp/f.nix:1\n\nAdds one.",
+    ]
+
+
+async def test_repl_doc_attr_selection(monkeypatch: Any) -> None:
+    output: list[str] = []
+    monkeypatch.setattr("pynix._impl.repl.print_formatted_text", output.append)
+    repl = _Repl()
+    repl.value = _AttrDocValue(AttrDoc(path="/tmp/pkgs.nix", line=42, doc="Hello package."))
+
+    await _run_repl_loop(repl, _Prompt([":doc pkgs.hello", ":quit"]))
+    assert output == [
+        _HELP,
+        "Attribute `hello`\n\n  … defined at /tmp/pkgs.nix:42\n\nHello package.",
+    ]
+
+
+async def test_repl_doc_attr_selection_no_doc(monkeypatch: Any) -> None:
+    output: list[str] = []
+    monkeypatch.setattr("pynix._impl.repl.print_formatted_text", output.append)
+    repl = _Repl()
+    repl.value = _AttrDocValue(AttrDoc(path="/tmp/pkgs.nix", line=42, doc=None))
+
+    await _run_repl_loop(repl, _Prompt([":doc pkgs.hello", ":quit"]))
+    assert output == [
+        _HELP,
+        "Attribute `hello`\n\n  … defined at /tmp/pkgs.nix:42\n\nNo documentation found.",
+    ]
+
+
+async def test_repl_doc_value_without_doc_prints_error(monkeypatch: Any) -> None:
+    output: list[str] = []
+    monkeypatch.setattr("pynix._impl.repl.print_formatted_text", output.append)
+    repl = _Repl()
+    repl.value = _DocValue(None)
+
+    await _run_repl_loop(repl, _Prompt([":doc 42", ":quit"]))
+    assert output == [
+        _HELP,
+        "error: value does not have documentation",
+    ]
+
+
+def test_repl_help_includes_doc_command() -> None:
+    assert ":d, :doc <expr>" in _HELP

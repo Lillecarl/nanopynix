@@ -68,8 +68,10 @@ if TYPE_CHECKING or BEARTYPING:
 
     from nanopynix.logging import BusSubscription, LogCallback, LogCapture
     from nanopynix.models import (
+        AttrDoc,
         BuildResult,
         Derivation,
+        Doc,
         FlakeRef,
         GcResult,
         GcRoot,
@@ -143,6 +145,25 @@ class AsyncValue[StoreT: AsyncStore = Any](Protocol):
     @abstractmethod
     async def edit_location(self) -> tuple[str, int]:
         """Return the physical file path and line Nix would open for this value."""
+        ...
+
+    @abstractmethod
+    async def get_doc(self) -> Doc | None:
+        """Return this value's documentation, or ``None`` when it has none.
+
+        Nix's ``EvalState::getDoc``: a builtin, a lambda, or a functor answer;
+        a plain value does not.
+        """
+        ...
+
+    @abstractmethod
+    async def attr_doc(self, name: str) -> AttrDoc | None:
+        """Return attribute ``name``'s definition position and doc comment.
+
+        ``None`` when the attribute has no source position. This is the
+        fallback that ``:doc foo.bar`` reads when ``foo.bar`` itself carries no
+        documentation.
+        """
         ...
 
     @abstractmethod
@@ -888,6 +909,18 @@ class AsyncReplSession[ValueT: AsyncValue = AsyncValue](AsyncEvalSession[ValueT]
     @abstractmethod
     async def scope_names(self) -> list[str]:
         """Return the identifiers visible in this REPL's lexical scope."""
+        ...
+
+    @abstractmethod
+    async def repl_select(self, expr: str, /) -> tuple[str, ValueT] | None:
+        """Split a plain attribute selection into (``name``, ``parent``), or ``None``.
+
+        ``expr`` is parsed in this REPL's lexical scope; when it is a plain
+        attribute selection like ``foo.bar``, this returns the final attribute
+        name and the parent attrset, so a caller can read the attribute's
+        definition position and doc comment. ``None`` when ``expr`` is not a
+        selection.
+        """
         ...
 
 

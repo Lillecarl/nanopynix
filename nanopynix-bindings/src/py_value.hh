@@ -87,6 +87,8 @@ struct PyValue {
     std::string realise_string();
     std::vector<std::string> realise_argv();
     nanobind::dict edit_location();
+    nanobind::object get_doc();
+    nanobind::object attr_doc(const std::string &name) const;
 
     nanobind::object to_python();
     nanobind::object to_json(bool copy_to_store = false);

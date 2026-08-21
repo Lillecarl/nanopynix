@@ -33,6 +33,9 @@ from nanopynix_proto.nix.common import (
 )
 from nanopynix_proto.nix.eval import (
     AsScalarRequest,
+    AttrDoc,
+    AttrDocRequest,
+    AttrDocResponse,
     AttrNamesRequest,
     AttrNamesResponse,
     AttrRequest,
@@ -47,6 +50,7 @@ from nanopynix_proto.nix.eval import (
     CloseEvalResponse,
     ConfigureEvalRequest,
     ConfigureEvalResponse,
+    Doc,
     EditLocationRequest,
     EditLocationResponse,
     EvalFileRequest,
@@ -61,6 +65,8 @@ from nanopynix_proto.nix.eval import (
     FlakeMetadataJsonResponse,
     ForceJsonRequest,
     ForceJsonResponse,
+    GetDocRequest,
+    GetDocResponse,
     GetEvalVerbosityRequest,
     GetEvalVerbosityResponse,
     GetFlakeRequest,
@@ -87,6 +93,8 @@ from nanopynix_proto.nix.eval import (
     ReplProcessLineResponse,
     ReplScopeNamesRequest,
     ReplScopeNamesResponse,
+    ReplSelectRequest,
+    ReplSelectResponse,
     ResetFileCacheRequest,
     ResetFileCacheResponse,
     SetEvalCountersRequest,
@@ -380,6 +388,14 @@ class EvalServiceHandler(EvalServiceBase):
         return ReplScopeNamesResponse(names=self._get_es(message.eval_handle).repl_scope_names())
 
     @worker_op
+    def repl_select(self, message: ReplSelectRequest) -> ReplSelectResponse:
+        local = self._get_es(message.eval_handle).repl_select(message.expr)
+        if local is None:
+            return ReplSelectResponse()
+        name, core_value = local
+        return ReplSelectResponse(attrs=self._export(core_value, message.eval_handle), name=name)
+
+    @worker_op
     def reset_file_cache(self, message: ResetFileCacheRequest) -> ResetFileCacheResponse:
         self._get_es(message.eval_handle).reset_file_cache()
         return ResetFileCacheResponse()
@@ -425,6 +441,35 @@ class EvalServiceHandler(EvalServiceBase):
     def edit_location(self, message: EditLocationRequest) -> EditLocationResponse:
         location = self._resolve(message.handle).edit_location()
         return EditLocationResponse(path=location["path"], line=location["line"])
+
+    @worker_op
+    def get_doc(self, message: GetDocRequest) -> GetDocResponse:
+        raw = self._resolve(message.handle).get_doc()
+        if raw is None:
+            return GetDocResponse()
+        return GetDocResponse(
+            doc=Doc(
+                name=raw["name"],
+                args=raw["args"],
+                arity=raw["arity"],
+                doc=raw["doc"],
+                path=raw["path"],
+                line=raw["line"],
+            ),
+        )
+
+    @worker_op
+    def attr_doc(self, message: AttrDocRequest) -> AttrDocResponse:
+        raw = self._resolve(message.handle).attr_doc(message.name)
+        if raw is None:
+            return AttrDocResponse()
+        return AttrDocResponse(
+            attr_doc=AttrDoc(
+                path=raw["path"],
+                line=raw["line"],
+                doc=raw["doc"],
+            ),
+        )
 
     @worker_op
     def attr(self, message: AttrRequest) -> ValueHandle:

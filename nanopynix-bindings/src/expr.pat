@@ -3,6 +3,20 @@ nanopynix_bindings.expr.__prefix__$:
     class EditLocation(TypedDict):
         path: str
         line: int
+    class Doc(TypedDict):
+        name: str | None
+        args: list[str]
+        arity: int
+        doc: str
+        path: str | None
+        line: int
+    class AttrDoc(TypedDict):
+        path: str
+        line: int
+        doc: str | None
+    class ReplSelection(TypedDict):
+        name: str
+        attrs: Value
     \from collections.abc import Callable, Sequence
     \from typing import TypedDict, overload
     \from nanopynix_bindings.store import Store
@@ -37,6 +51,12 @@ nanopynix_bindings.expr._gc_stats$:
 
 nanopynix_bindings.expr.Value.edit_location$:
     def edit_location(self) -> EditLocation: ...
+
+nanopynix_bindings.expr.Value.get_doc$:
+    def get_doc(self) -> Doc | None: ...
+
+nanopynix_bindings.expr.Value.attr_doc$:
+    def attr_doc(self, name: str) -> AttrDoc | None: ...
 
 nanopynix_bindings.expr.Value.to_python$:
     def to_python(self) -> ValueType: ...
@@ -74,3 +94,5 @@ nanopynix_bindings.expr.EvalState.set_eval_setting$:
     def set_eval_setting(self, name: str, value: str) -> None: ...
 nanopynix_bindings.expr.EvalState.set_fetch_setting$:
     def set_fetch_setting(self, name: str, value: str) -> None: ...
+nanopynix_bindings.expr.EvalState.repl_select$:
+    def repl_select(self, expr: str, path: str = "<string>") -> ReplSelection | None: ...

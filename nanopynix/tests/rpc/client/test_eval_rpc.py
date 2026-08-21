@@ -266,6 +266,62 @@ async def test_repl_session_edit_location_uses_function_source(rpc_session: RpcS
     assert line == 1
 
 
+async def test_repl_session_get_doc_builtin(rpc_session: RpcSessionFactory):
+    async with (
+        rpc_session() as session,
+        session.store() as store,
+        session.repl(store) as repl,
+    ):
+        value = await repl.string("builtins.add")
+        doc = await value.get_doc()
+        assert doc is not None
+        assert doc.name == "add"
+        assert doc.args == ["e1", "e2"]
+        assert "sum" in doc.doc
+
+        scalar = await repl.string("42")
+        assert await scalar.get_doc() is None
+
+
+async def test_repl_session_attr_doc(rpc_session: RpcSessionFactory, tmp_path: Path):
+    nix_file = tmp_path / "attrs.nix"
+    nix_file.write_text("{ /** First attribute */ foo = 1; bar = 2; }\n")
+
+    async with (
+        rpc_session() as session,
+        session.store() as store,
+        session.repl(store) as repl,
+    ):
+        attrs = await repl.file(str(nix_file))
+        doc = await attrs.attr_doc("foo")
+        assert doc is not None
+        assert doc.doc is not None
+        assert doc.doc.strip() == "First attribute"
+        assert doc.line == 1
+
+        bar_doc = await attrs.attr_doc("bar")
+        assert bar_doc is not None
+        assert bar_doc.doc is None
+
+        assert await attrs.attr_doc("missing") is None
+
+
+async def test_repl_session_repl_select(rpc_session: RpcSessionFactory):
+    async with (
+        rpc_session() as session,
+        session.store() as store,
+        session.repl(store) as repl,
+    ):
+        await repl.line("pkgs = { hello = 1; };")
+        sel = await repl.repl_select("pkgs.hello")
+        assert sel is not None
+        name, parent = sel
+        assert name == "hello"
+        assert (await parent.get_type()).name == "ATTRS"
+
+        assert await repl.repl_select("1 + 2") is None
+
+
 async def test_repl_session_adds_attrs_to_scope(rpc_session: RpcSessionFactory):
     """ReplSession can merge an evaluated attrset into its lexical scope."""
     async with (

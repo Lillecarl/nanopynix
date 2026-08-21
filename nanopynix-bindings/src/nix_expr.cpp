@@ -310,6 +310,87 @@ nb::dict PyValue::edit_location() {
     return result;
 }
 
+nanobind::object PyValue::get_doc() {
+    auto *es = evalState();
+    if (es == nullptr) throw std::runtime_error("value has no evaluation state");
+    std::optional<nix::EvalState::Doc> what;
+    {
+        nb::gil_scoped_release release;
+        what = es->getDoc(*checkedValue());
+    }
+    if (!what)
+        return nb::none();
+    std::string path;
+    if (what->pos) {
+        if (auto source_path = what->pos.getSourcePath()) {
+            if (auto physical = source_path->getPhysicalPath())
+                path = physical->string();
+            else
+                path = source_path->to_string();
+        } else if (std::holds_alternative<nix::Pos::String>(what->pos.origin)) {
+            path = "«string»";
+        } else if (std::holds_alternative<nix::Pos::Stdin>(what->pos.origin)) {
+            path = "«stdin»";
+        }
+    }
+    nb::dict result;
+    if (what->name)
+        result["name"] = *what->name;
+    else
+        result["name"] = nb::none();
+    result["args"] = what->args;
+    result["arity"] = what->arity;
+    result["doc"] = std::string(what->doc);
+    if (path.empty())
+        result["path"] = nb::none();
+    else
+        result["path"] = path;
+    result["line"] = what->pos.line;
+    return result;
+}
+
+nanobind::object PyValue::attr_doc(const std::string &name) const {
+    auto *v = checkedValue();
+    auto &es = requireEvalState();
+    {
+        nb::gil_scoped_release release;
+        es.forceAttrs(*v, nix::noPos, "while looking for documentation of a Nix attribute");
+    }
+    auto sym = es.symbols.create(name);
+    nix::PosIdx pos = nix::noPos;
+    for (auto &attr : *v->attrs()) {
+        if (attr.name == sym) {
+            pos = attr.pos;
+            break;
+        }
+    }
+    if (!pos)
+        return nb::none();
+    auto location = es.positions[pos];
+    std::string path;
+    if (auto source_path = location.getSourcePath()) {
+        if (auto physical = source_path->getPhysicalPath())
+            path = physical->string();
+        else
+            path = source_path->to_string();
+    } else if (std::holds_alternative<nix::Pos::String>(location.origin)) {
+        path = "«string»";
+    } else if (std::holds_alternative<nix::Pos::Stdin>(location.origin)) {
+        path = "«stdin»";
+    } else {
+        path = "«none»";
+    }
+    nb::dict result;
+    result["path"] = path;
+    result["line"] = location.line;
+    auto comment = es.getDocCommentForPos(pos);
+    if (comment)
+        result["doc"] = comment.getInnerText(es.positions);
+    else
+        result["doc"] = nb::none();
+    return result;
+}
+
 // to_python and to_json are implemented below.
 
 // The five navigation accessors below all go through nix's own forceAttrs /
@@ -856,6 +937,31 @@ std::vector<std::string> PyEvalState::repl_scope_names() const {
     }
     std::sort(names.begin(), names.end());
     return names;
+}
+
+nanobind::object PyEvalState::repl_select(const std::string &expr, const std::string &path) {
+    checkThread();
+    if (repl_env == nullptr || !repl_static_env)
+        throw std::runtime_error("REPL scope is not active");
+
+    std::string name;
+    nix::Value *attrs = nullptr;
+    {
+        nb::gil_scoped_release release;
+        auto *parsed = state->parseExprFromString(
+            expr, state->rootPath(nix::CanonPath(path)), repl_static_env);
+        if (auto *select = dynamic_cast<nix::ExprSelect *>(parsed)) {
+            attrs = state->allocValue();
+            auto sym = select->evalExceptFinalSelect(*state, *repl_env, *attrs);
+            name = state->symbols[sym];
+        }
+    }
+    if (attrs == nullptr)
+        return nb::none();
+    nb::dict result;
+    result["name"] = name;
+    result["attrs"] = PyValue(attrs, this, alive);
+    return result;
 }
 
 PyValue PyEvalState::alloc_value() {
@@ -1532,6 +1638,8 @@ static void bind_value(nb::module_ &m) {
         .def("realise_string", &PyValue::realise_string)
         .def("realise_argv", &PyValue::realise_argv)
         .def("edit_location", &PyValue::edit_location)
+        .def("get_doc", &PyValue::get_doc)
+        .def("attr_doc", &PyValue::attr_doc, "name"_a)
         .def("list_length", &PyValue::list_length)
         .def("list_get", &PyValue::list_get, "idx"_a, nb::call_policy<KeepEvaluatorAlive>())
         .def("attr_names", &PyValue::attr_names)
@@ -1584,6 +1692,7 @@ static void bind_eval_state(nb::module_ &m) {
              "line"_a, "path"_a = "<string>", nb::keep_alive<0, 1>())
         .def("repl_add_attrs", &PyEvalState::repl_add_attrs, "attrs"_a)
         .def("repl_scope_names", &PyEvalState::repl_scope_names)
+        .def("repl_select", &PyEvalState::repl_select, "expr"_a, "path"_a = "<string>")
         .def("statistics_json", &PyEvalState::statistics_json,
              "Return the evaluation statistics of this evaluator, as a JSON document.\n\n"
              "The report holds the same fields that `NIX_SHOW_STATS=1 nix` prints. The\n"

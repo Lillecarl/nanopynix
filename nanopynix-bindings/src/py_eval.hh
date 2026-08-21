@@ -207,6 +207,7 @@ struct PyEvalState {
     std::optional<PyValue> repl_process_line(const std::string &line, const std::string &path = "<string>");
     std::vector<std::string> repl_add_attrs(PyValue attrs);
     std::vector<std::string> repl_scope_names() const;
+    nanobind::object repl_select(const std::string &expr, const std::string &path = "<string>");
 
     /// The evaluation statistics of this evaluator, as a JSON document.
     ///
