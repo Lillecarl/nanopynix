@@ -121,17 +121,17 @@ class NixTestEnvironment:
 
     def rpc_session(self, **kwargs: Any) -> nanopynix.rpc.Session:
         return nanopynix.rpc.Session(
-            store_uri=self.store_uri,
-            load_config=False,
-            settings=self.settings,
+            store_uri=kwargs.pop("store_uri", self.store_uri),
+            load_config=kwargs.pop("load_config", False),
+            settings=kwargs.pop("settings", self.settings),
             **kwargs,
         )
 
     def inproc_session(self, **kwargs: Any) -> nanopynix.inproc.Session:
         return nanopynix.inproc.Session(
-            store_uri=self.store_uri,
-            load_config=False,
-            settings=self.settings,
+            store_uri=kwargs.pop("store_uri", self.store_uri),
+            load_config=kwargs.pop("load_config", False),
+            settings=kwargs.pop("settings", self.settings),
             **kwargs,
         )
 

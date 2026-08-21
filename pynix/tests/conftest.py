@@ -403,7 +403,7 @@ def pynix_live_log(
     stack_file.close()
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="module", autouse=True)
 async def _shared_pynix_sessions(  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     anyio_backend: str,  # noqa: ARG001 -- see below; requested for its side effect on the fixture closure
 ) -> AsyncIterator[None]:

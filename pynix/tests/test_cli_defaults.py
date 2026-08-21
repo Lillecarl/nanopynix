@@ -14,9 +14,11 @@ by that.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 
 import pytest
 
+import nanopynix
 from nanopynix.settings import field_key
 from pynix import parse
 from pynix._impl.build import (
@@ -30,9 +32,11 @@ from pynix._impl.settings import (
     configured_fields,
     nix_settings,
 )
+from pynix._util import nix_session
 from pynix.build import Build
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from pathlib import Path
 
 
@@ -376,3 +380,63 @@ def test_the_file_takes_the_nix_conf_spelling_of_a_list(tmp_path: Path, monkeypa
     write_config(tmp_path, monkeypatch, '[nix]\nsubstituters = "https://a.example/ https://b.example/"\n')
 
     assert nix_settings().substituters == ["https://a.example/", "https://b.example/"]
+
+
+# ── nix_session engine selection ─────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_nix_session_defaults_to_inproc_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A CLI command defaults to in-process evaluation without worker overhead."""
+    recorded: list[str] = []
+
+    class FakeInproc:
+        def __init__(self, **kwargs: object) -> None:
+            recorded.append("inproc")
+
+        async def __aenter__(self) -> FakeInproc:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        def log_stream(self) -> AsyncIterator[nanopynix.models.LogEvent]:
+            async def _empty() -> AsyncIterator[nanopynix.models.LogEvent]:
+                if False:
+                    yield  # type: ignore[unreachable] -- generator typing helper
+
+            return _empty()
+
+    monkeypatch.setattr(nanopynix.inproc, "Session", FakeInproc)
+    async with nix_session():
+        pass
+    assert recorded == ["inproc"]
+
+
+@pytest.mark.anyio
+async def test_nix_session_uses_rpc_when_namespace_given(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An overlay namespace requires process isolation, so it uses RPC."""
+    recorded: list[str] = []
+
+    class FakeRpc:
+        def __init__(self, **kwargs: object) -> None:
+            recorded.append("rpc")
+
+        async def __aenter__(self) -> FakeRpc:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        def log_stream(self) -> AsyncIterator[nanopynix.models.LogEvent]:
+            async def _empty() -> AsyncIterator[nanopynix.models.LogEvent]:
+                if False:
+                    yield  # type: ignore[unreachable] -- generator typing helper
+
+            return _empty()
+
+    monkeypatch.setattr(nanopynix.rpc, "Session", FakeRpc)
+    namespace = MagicMock(spec=nanopynix.OverlayNamespace)
+    async with nix_session(namespace=namespace):
+        pass
+    assert recorded == ["rpc"]

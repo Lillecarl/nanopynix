@@ -110,8 +110,6 @@ _CONSTRUCTS = (
 # own value. The protocols express this with an invariant type parameter, which
 # is honest and which is exactly what makes them non-substitutable here.
 CONSUMER_ENGINE_ANNOTATIONS: dict[tuple[str, str], str] = {
-    ("pynix/src/pynix/_util.py", "Session"): _CONSTRUCTS,
-    ("pynix/src/pynix/_util.py", "Store"): _OWN_STORE,
     ("pynix-lsp/src/pynix_lsp/_context.py", "Session"): _CONSTRUCTS,
     ("pynix-lsp/src/pynix_lsp/_context.py", "Store"): _OWN_STORE,
     ("pynix-lsp/src/pynix_lsp/_handlers.py", "Session"): _CONSTRUCTS,
