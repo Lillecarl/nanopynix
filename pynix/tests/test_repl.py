@@ -1196,7 +1196,7 @@ async def test_the_repl_leaves_no_sigint_handler_behind() -> None:
 
 
 async def test_repl_doc_builtin(monkeypatch: Any) -> None:
-    output: list[str] = []
+    output: list[object] = []
     monkeypatch.setattr("pynix._impl.repl.print_formatted_text", output.append)
     repl = _Repl()
     repl.value = _DocValue(
@@ -1204,14 +1204,15 @@ async def test_repl_doc_builtin(monkeypatch: Any) -> None:
     )
 
     await _run_repl_loop(repl, _Prompt([":doc builtins.add", ":quit"]))
-    assert output == [
-        _HELP,
-        "**Synopsis:** `builtins.add` *e1* *e2*\n\nReturn the sum of the numbers e1 and e2.",
-    ]
+    assert len(output) == 2
+    assert output[0] == _HELP
+    assert isinstance(output[1], ANSI)
+    assert "builtins.add" in output[1].value
+    assert "Return the sum of the numbers" in output[1].value
 
 
 async def test_repl_doc_lambda(monkeypatch: Any) -> None:
-    output: list[str] = []
+    output: list[object] = []
     monkeypatch.setattr("pynix._impl.repl.print_formatted_text", output.append)
     repl = _Repl()
     repl.value = _DocValue(
@@ -1226,36 +1227,44 @@ async def test_repl_doc_lambda(monkeypatch: Any) -> None:
     )
 
     await _run_repl_loop(repl, _Prompt([":doc f", ":quit"]))
-    assert output == [
-        _HELP,
-        "Function `f`\n  … defined at /tmp/f.nix:1\n\nAdds one.",
-    ]
+    assert len(output) == 2
+    assert output[0] == _HELP
+    assert isinstance(output[1], ANSI)
+    assert "Function" in output[1].value
+    assert "/tmp/f.nix:1" in output[1].value
+    assert "Adds one." in output[1].value
 
 
 async def test_repl_doc_attr_selection(monkeypatch: Any) -> None:
-    output: list[str] = []
+    output: list[object] = []
     monkeypatch.setattr("pynix._impl.repl.print_formatted_text", output.append)
     repl = _Repl()
     repl.value = _AttrDocValue(AttrDoc(path="/tmp/pkgs.nix", line=42, doc="Hello package."))
 
     await _run_repl_loop(repl, _Prompt([":doc pkgs.hello", ":quit"]))
-    assert output == [
-        _HELP,
-        "Attribute `hello`\n\n  … defined at /tmp/pkgs.nix:42\n\nHello package.",
-    ]
+    assert len(output) == 2
+    assert output[0] == _HELP
+    assert isinstance(output[1], ANSI)
+    assert "Attribute" in output[1].value
+    assert "hello" in output[1].value
+    assert "/tmp/pkgs.nix:42" in output[1].value
+    assert "Hello package." in output[1].value
 
 
 async def test_repl_doc_attr_selection_no_doc(monkeypatch: Any) -> None:
-    output: list[str] = []
+    output: list[object] = []
     monkeypatch.setattr("pynix._impl.repl.print_formatted_text", output.append)
     repl = _Repl()
     repl.value = _AttrDocValue(AttrDoc(path="/tmp/pkgs.nix", line=42, doc=None))
 
     await _run_repl_loop(repl, _Prompt([":doc pkgs.hello", ":quit"]))
-    assert output == [
-        _HELP,
-        "Attribute `hello`\n\n  … defined at /tmp/pkgs.nix:42\n\nNo documentation found.",
-    ]
+    assert len(output) == 2
+    assert output[0] == _HELP
+    assert isinstance(output[1], ANSI)
+    assert "Attribute" in output[1].value
+    assert "hello" in output[1].value
+    assert "/tmp/pkgs.nix:42" in output[1].value
+    assert "No documentation found." in output[1].value
 
 
 async def test_repl_doc_value_without_doc_prints_error(monkeypatch: Any) -> None:

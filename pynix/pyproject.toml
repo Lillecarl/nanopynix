@@ -32,6 +32,7 @@ dependencies = [
   # depends on no part of nanopynix, which is why it is a project beside this
   # one rather than a module of `nanopynix-helpers`.
   "libpynix",
+  "myst-parser",
   "prompt-toolkit",
   "pydantic",
   "rapidfuzz",
