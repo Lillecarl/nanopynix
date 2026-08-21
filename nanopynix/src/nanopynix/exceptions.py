@@ -43,11 +43,13 @@ from __future__ import annotations
 
 import re
 import signal
-from typing import Any, cast
-
-from nanopynix_proto.nix.common import NixType
+from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix._ansi import strip_ansi
+from nanopynix._typechecking import BEARTYPING
+
+if TYPE_CHECKING or BEARTYPING:
+    from nanopynix_proto.nix.common import NixType
 
 # ════════════════════════════════════════════════════════════════════
 # Exception hierarchy
@@ -508,8 +510,8 @@ class WrongNixTypeError(ObjectMisuseError, TypeError):
     """A Nix value had a different type than the operation requires."""
 
     def __init__(self, *, expected: NixType | str, actual: NixType | str) -> None:
-        self.expected = expected.name.lower() if isinstance(expected, NixType) else expected
-        self.actual = actual.name.lower() if isinstance(actual, NixType) else actual
+        self.expected: str = expected if isinstance(expected, str) else expected.name.lower()
+        self.actual: str = actual if isinstance(actual, str) else actual.name.lower()
         super().__init__(f"Nix value is {self.actual}, expected {self.expected}")
 
 
