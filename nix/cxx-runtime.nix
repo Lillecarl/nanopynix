@@ -64,7 +64,7 @@
 {
   lib,
   stdenv,
-  python3,
+  nanopython,
   # **This derivation lowers its own floor, and nothing else does it.**
   #
   # `nix/cxx-stdenv.nix` installs the rewrite as a setup hook, and every package
@@ -95,7 +95,7 @@ stdenv.mkDerivation {
   dontUnpack = true;
   strictDeps = true;
 
-  nativeBuildInputs = [ python3 ];
+  nativeBuildInputs = [ nanopython ];
 
   buildPhase = ''
     runHook preBuild
@@ -130,7 +130,7 @@ stdenv.mkDerivation {
     # hook of `nix/cxx-stdenv.nix`. The head of this file says why it has to
     # happen here instead. `libstdc++.a` calls `strtoul` and `sscanf`, so the
     # link writes `__isoc23_*@GLIBC_2.38` without this line.
-    python3 ${./lower-glibc.py} --target ${glibcVersion} ${soname}
+    ${nanopython.interpreter} ${./lower-glibc.py} --target ${glibcVersion} ${soname}
 
     runHook postBuild
   '';

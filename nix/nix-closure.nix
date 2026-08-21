@@ -20,18 +20,21 @@
   # The interpreter that `callPythonPackage` in `default.nix` builds against.
   # It must be that one: `buildPythonPackage` below has to come from the same
   # interpreter set, or the extension builds for a different Python.
-  python,
+  nanopython,
   glibcVersion ? "2.34",
 }:
 let
+  python = nanopython;
   # `glibcVersion` is passed and not left to the default of that file. The
   # runtime lowers its own floor, so a floor that disagreed with the stdenv
   # would ship one library above the rest and `auditwheel` would refuse the tag.
-  cxxRuntime = pkgs.callPackage ./cxx-runtime.nix { inherit glibcVersion; };
+  cxxRuntime = pkgs.callPackage ./cxx-runtime.nix {
+    inherit glibcVersion nanopython;
+  };
 
   cxxStdenv = import ./cxx-stdenv.nix {
-    inherit (pkgs) lib python3;
-    inherit pkgs cxxRuntime glibcVersion;
+    inherit (pkgs) lib;
+    inherit pkgs cxxRuntime glibcVersion nanopython;
   };
 
   # The collector rides in the wheel like every other library, so it takes the

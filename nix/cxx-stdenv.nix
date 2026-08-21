@@ -84,7 +84,7 @@
   pkgs,
   stdenv ? pkgs.stdenv,
   cxxRuntime,
-  python3,
+  nanopython,
   # The floor the wheel claims. `nix/wheel.nix` passes the same number to
   # `auditwheel`, and a mismatch fails that build rather than shipping a wheel
   # that does not load.
@@ -103,7 +103,7 @@ let
       ''
         mkdir -p "$out/bin"
         {
-          echo '#!${python3.interpreter}'
+          echo '#!${nanopython.interpreter}'
           cat ${./lower-glibc.py}
         } > "$out/bin/nanopynix-lower-glibc"
         chmod +x "$out/bin/nanopynix-lower-glibc"
