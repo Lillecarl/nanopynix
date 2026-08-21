@@ -39,6 +39,7 @@ reads none of them.
 from __future__ import annotations
 
 import argparse
+import functools
 import gettext
 import inspect
 import os
@@ -53,7 +54,7 @@ import typing
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, override
 
 from libpynix._typecheck import no_runtime_type_check
 
@@ -373,6 +374,75 @@ def _describe(command: type[Command]) -> str:
     return inspect.getdoc(command) or ""
 
 
+class _LazyParserMap(dict[str, argparse.ArgumentParser]):
+    """A dictionary that builds a subparser on demand when looked up."""
+
+    def __init__(self, action: _LazySubParsersAction) -> None:
+        super().__init__()
+        self._action = action
+
+    def set_raw(self, key: str, value: argparse.ArgumentParser | None) -> None:
+        if value is not None:
+            super().__setitem__(key, value)
+        else:
+            super().__setitem__(key, None)  # type: ignore[arg-type] -- placeholder until materialized
+
+    def get_raw(self, key: str) -> argparse.ArgumentParser | None:
+        return super().get(key, None)
+
+    @override
+    def __getitem__(self, key: str) -> argparse.ArgumentParser:
+        self._action.materialize(key)
+        return super().__getitem__(key)
+
+    @override
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+
+class _LazySubParsersAction(argparse._SubParsersAction):  # type: ignore[reportPrivateUsage, type-arg] -- subclassing standard subparser action for on-demand subparser instantiation  # noqa: SLF001
+    """Subparsers action that builds child parsers on demand."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)  # type: ignore[reportUnknownMemberType] -- argparse type stubs
+        self._lazy_map: _LazyParserMap = _LazyParserMap(self)
+        self._name_parser_map = self._lazy_map
+        self.choices = self._lazy_map
+        self._factories: dict[str, tuple[Callable[[argparse.ArgumentParser], None], dict[str, Any]]] = {}
+
+    def add_lazy_parser(
+        self,
+        name: str,
+        *,
+        help: str,  # noqa: A002 -- argparse names the parameter `help`
+        factory: Callable[[argparse.ArgumentParser], None],
+        **kwargs: Any,
+    ) -> None:
+        choice_action = self._ChoicesPseudoAction(name, (), help)  # type: ignore[reportUnknownMemberType, reportPrivateUsage] -- argparse _ChoicesPseudoAction
+        self._choices_actions.append(choice_action)
+        self._factories[name] = (factory, kwargs)
+        self._lazy_map.set_raw(name, None)
+
+    def materialize(self, name: str) -> argparse.ArgumentParser | None:
+        parser = self._lazy_map.get_raw(name)
+        if parser is None and name in self._factories:
+            factory, kwargs = self._factories[name]
+            if kwargs.get("prog") is None:
+                kwargs["prog"] = f"{self._prog_prefix} {name}"
+            color = getattr(self, "_color", None)
+            if kwargs.get("color") is None and color is not None:
+                kwargs["color"] = color
+            parser_class = getattr(self, "_parser_class", argparse.ArgumentParser)
+            created = parser_class(**kwargs)
+            factory(created)
+            self._lazy_map.set_raw(name, created)
+            return created
+        return parser
+
+
 def _configure(parser: argparse.ArgumentParser, command: type[Command]) -> None:
     """Put the options of *command* on *parser*, and mount what is under it."""
     for field, spec in command.specs.items():
@@ -387,15 +457,15 @@ def _configure(parser: argparse.ArgumentParser, command: type[Command]) -> None:
     if not command.subcommands:
         parser.set_defaults(_command=command)
         return
-    sub = parser.add_subparsers(metavar="COMMAND")
+    sub = parser.add_subparsers(metavar="COMMAND", action=_LazySubParsersAction)
+    if not isinstance(sub, _LazySubParsersAction):
+        raise TypeError(f"expected _LazySubParsersAction, got {type(sub)}")
     for child in command.subcommands:
-        _configure(
-            sub.add_parser(
-                command_name(child),
-                help=_describe(child).partition("\n")[0],
-                description=_describe(child),
-            ),
-            child,
+        sub.add_lazy_parser(
+            command_name(child),
+            help=_describe(child).partition("\n")[0],
+            factory=functools.partial(_configure, command=child),
+            description=_describe(child),
         )
 
 

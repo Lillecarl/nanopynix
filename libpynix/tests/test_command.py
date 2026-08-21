@@ -17,6 +17,7 @@ from typing import Literal
 import pytest
 
 from libpynix import MISSING, Command, Spec, build_parser, command_name, dispatch, group, opt, pos
+from libpynix.command import _LazySubParsersAction
 
 
 class Leaf(Command):
@@ -330,3 +331,29 @@ def test_gettext_caches_missing_translation_lookups() -> None:
     """
     assert gettext.dgettext("argparse", "options") == "options"
     assert gettext.dgettext("messages", "positional arguments") == "positional arguments"
+
+
+def test_subparsers_instantiate_lazily() -> None:
+    """Subparsers are created on demand when looked up, not eagerly.
+
+    Issue #241.
+    """
+
+    class SubLeaf(Command):
+        """A child command."""
+
+        flag: bool = opt(False, help="Flag.")
+
+    class RootCmd(Command):
+        """A root command with subcommands."""
+
+        subcommands = (SubLeaf,)
+
+    parser = build_parser(RootCmd)
+    subaction = next(a for a in parser._actions if isinstance(a, _LazySubParsersAction))
+    lazy_map = subaction._lazy_map
+    assert "sub-leaf" in lazy_map
+    assert lazy_map.get_raw("sub-leaf") is None
+    subparser = lazy_map["sub-leaf"]
+    assert isinstance(subparser, argparse.ArgumentParser)
+    assert lazy_map.get_raw("sub-leaf") is subparser
