@@ -215,6 +215,40 @@ class GcResult:
     bytes_freed: int
 
 
+@dataclass(frozen=True)
+class Doc:
+    """Documentation of one Nix value, as ``nix::EvalState::getDoc`` reports it.
+
+    ``name`` and ``path`` are absent when the value has neither: a builtin
+    carries a name and no source path, an anonymous lambda carries a path and
+    no name. ``args`` and ``arity`` are non-zero only for a builtin, and ``doc``
+    is Nix's text for the value -- raw markdown for a builtin, or the rendered
+    "Function `name` ... defined at ..." preamble plus a doc comment for a
+    lambda.
+    """
+
+    name: str | None
+    args: list[str]
+    arity: int
+    doc: str
+    path: str | None
+    line: int
+
+
+@dataclass(frozen=True)
+class AttrDoc:
+    """The definition position and doc comment of one attribute.
+
+    ``doc`` is ``None`` when the attribute has no ``/** ... */`` comment. This
+    is the fallback that ``:doc foo.bar`` reads when the value of ``foo.bar``
+    itself carries no documentation.
+    """
+
+    path: str
+    line: int
+    doc: str | None
+
+
 class LogEventExt(_LogEventProto):
     """Typed worker log event with Nix-log convenience accessors."""
 

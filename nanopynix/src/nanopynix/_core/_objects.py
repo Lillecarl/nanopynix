@@ -584,6 +584,12 @@ class CoreEvalState:
     def repl_scope_names(self) -> list[str]:
         return self.require_raw().repl_scope_names()
 
+    def repl_select(self, expression: str, path: str = "<string>") -> tuple[str, CoreValue] | None:
+        raw = self.require_raw().repl_select(expression, path)
+        if raw is None:
+            return None
+        return raw["name"], self.wrap_value(raw["attrs"])
+
     def reset_file_cache(self) -> None:
         self.require_raw().reset_file_cache()
 
@@ -751,6 +757,14 @@ class CoreValue:
     @no_runtime_type_check  # stub-only return type; see to_python above
     def edit_location(self) -> nanopynix_expr.EditLocation:
         return self.require_raw().edit_location()
+
+    @no_runtime_type_check  # stub-only return type; see to_python above
+    def get_doc(self) -> nanopynix_expr.Doc | None:
+        return self.require_raw().get_doc()
+
+    @no_runtime_type_check  # stub-only return type; see to_python above
+    def attr_doc(self, name: str) -> nanopynix_expr.AttrDoc | None:
+        return self.require_raw().attr_doc(name)
 
     def attr_get(self, name: str) -> CoreValue:
         return self._eval_state.wrap_value(self.require_raw().attr_get(name))

@@ -25,6 +25,7 @@ from nanopynix_proto.nix.common import (
 )
 from nanopynix_proto.nix.eval import (
     AsScalarRequest,
+    AttrDocRequest,
     AttrNamesRequest,
     AttrRequest,
     AutoCallRequest,
@@ -43,6 +44,7 @@ from nanopynix_proto.nix.eval import (
     FindFlakeInputRequest,
     FlakeMetadataJsonRequest,
     ForceJsonRequest,
+    GetDocRequest,
     GetEvalVerbosityRequest,
     GetFlakeRequest,
     HasAttrRequest,
@@ -58,6 +60,7 @@ from nanopynix_proto.nix.eval import (
     ReplLoadFileRequest,
     ReplProcessLineRequest,
     ReplScopeNamesRequest,
+    ReplSelectRequest,
     ResetFileCacheRequest,
     SetEvalCountersRequest,
     SetEvalVerbosityRequest,
@@ -81,7 +84,7 @@ from nanopynix.exceptions import (
     WorkerDiedError,
     build_error_from_result,
 )
-from nanopynix.models import FlakeRef, JsonScalar, JsonValue, LockedNode, NixType
+from nanopynix.models import AttrDoc, Doc, FlakeRef, JsonScalar, JsonValue, LockedNode, NixType
 from nanopynix.protocols import AsyncEvalSession, AsyncLockedFlake, AsyncReplSession, AsyncValue
 from nanopynix.rpc.client._rpc_proxy import RpcProxyMixin
 from nanopynix.settings import (
@@ -639,6 +642,31 @@ class ValueProxy(AsyncValue["Store"]):
         await self._ensure_resolved(timeout=timeout)
         response = await self._ctx.proxy.edit_location(EditLocationRequest(handle=self.handle))
         return response.path, response.line
+
+    async def get_doc(self, *, timeout: float | None = None) -> Doc | None:
+        await self._ensure_resolved(timeout=timeout)
+        response = await self._ctx.proxy.get_doc(GetDocRequest(handle=self.handle))
+        if response.doc is None:
+            return None
+        return Doc(
+            name=response.doc.name,
+            args=list(response.doc.args),
+            arity=response.doc.arity,
+            doc=response.doc.doc,
+            path=response.doc.path,
+            line=response.doc.line,
+        )
+
+    async def attr_doc(self, name: str, *, timeout: float | None = None) -> AttrDoc | None:
+        await self._ensure_resolved(timeout=timeout)
+        response = await self._ctx.proxy.attr_doc(AttrDocRequest(handle=self.handle, name=name))
+        if response.attr_doc is None:
+            return None
+        return AttrDoc(
+            path=response.attr_doc.path,
+            line=response.attr_doc.line,
+            doc=response.attr_doc.doc,
+        )
 
     async def build(
         self,
@@ -1454,3 +1482,12 @@ class ReplSession(EvalSession, AsyncReplSession["ValueProxy"]):
     async def scope_names(self, *, timeout: float | None = None) -> list[str]:
         response = await self._ensure_proxy().repl_scope_names(ReplScopeNamesRequest())
         return response.names
+
+    async def repl_select(self, expr: str, *, timeout: float | None = None) -> tuple[str, ValueProxy] | None:
+        response = await self._ensure_proxy().repl_select(
+            ReplSelectRequest(expr=expr),
+        )
+        if response.attrs is None or not response.attrs.handle:
+            return None
+        value = self._proxy_context().value(response.attrs.handle, response.attrs.type)
+        return response.name, value

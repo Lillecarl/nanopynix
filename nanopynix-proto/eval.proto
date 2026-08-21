@@ -30,6 +30,9 @@ service EvalService {
   rpc RealiseString(RealiseStringRequest) returns (RealiseStringResponse);
   rpc RealiseArgv(RealiseArgvRequest) returns (RealiseArgvResponse);
   rpc EditLocation(EditLocationRequest) returns (EditLocationResponse);
+  rpc GetDoc(GetDocRequest) returns (GetDocResponse);
+  rpc AttrDoc(AttrDocRequest) returns (AttrDocResponse);
+  rpc ReplSelect(ReplSelectRequest) returns (ReplSelectResponse);
   rpc Attr(AttrRequest) returns (nix.common.ValueHandle);
   rpc ListGet(ListGetRequest) returns (nix.common.ValueHandle);
   rpc ListLength(ListLengthRequest) returns (ListLengthResponse);
@@ -226,6 +229,59 @@ message EditLocationRequest {
 message EditLocationResponse {
   string path = 1;
   uint32 line = 2;
+}
+
+// The documentation of one value, as nix::EvalState::Doc carries it. The
+// enclosing DocResponse holds this only when the value has documentation; a
+// value without it (a plain int, say) produces a DocResponse with no doc.
+message Doc {
+  optional string name = 1;
+  repeated string args = 2;
+  uint64 arity = 3;
+  string doc = 4;
+  optional string path = 5;
+  uint32 line = 6;
+}
+
+message GetDocRequest {
+  int64 request_id = 1000;
+  int64 handle = 1;
+  int64 eval_handle = 100;
+}
+message GetDocResponse {
+  Doc doc = 1;
+}
+
+// The definition position and doc comment of one attribute, the fallback that
+// `:doc foo.bar` needs when foo.bar itself carries no documentation. Absent
+// from the enclosing response when the attribute has no source position.
+message AttrDoc {
+  string path = 1;
+  uint32 line = 2;
+  optional string doc = 3;
+}
+
+message AttrDocRequest {
+  int64 request_id = 1000;
+  int64 handle = 1;
+  string name = 2;
+  int64 eval_handle = 100;
+}
+message AttrDocResponse {
+  AttrDoc attr_doc = 1;
+}
+
+// The final attribute name and its parent attrset, when expr is a plain
+// attribute selection. The attrs field is absent when expr is not one, or
+// when the name is dynamic (e.g. foo.${bar}).
+message ReplSelectRequest {
+  int64 request_id = 1000;
+  string expr = 1;
+  int64 eval_handle = 100;
+}
+message ReplSelectResponse {
+  nix.common.ValueHandle attrs = 1;
+  string name = 2;
 }
 
 message AttrRequest {

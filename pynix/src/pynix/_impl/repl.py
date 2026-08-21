@@ -60,6 +60,8 @@ _COMMANDS = {
     ":add": "Add an attribute set to scope",
     ":b": "Build a derivation",
     ":build": "Build a derivation",
+    ":d": "Show documentation of an expression",
+    ":doc": "Show documentation of an expression",
     ":e": "Open a value's source in $EDITOR",
     ":edit": "Open a value's source in $EDITOR",
     ":exec": "Realise a Nix argv list and execute it",
@@ -83,7 +85,23 @@ _COMMANDS = {
     ":?": "Show this help",
 }
 _NIX_EXPRESSION_COMMANDS = frozenset(
-    {":a", ":add", ":b", ":build", ":e", ":edit", ":exec", ":p", ":print", ":run", ":shell", ":t", ":type"}
+    {
+        ":a",
+        ":add",
+        ":b",
+        ":build",
+        ":d",
+        ":doc",
+        ":e",
+        ":edit",
+        ":exec",
+        ":p",
+        ":print",
+        ":run",
+        ":shell",
+        ":t",
+        ":type",
+    }
 )
 _NIX_HIGHLIGHTS = Query(
     NIX_LANGUAGE,
@@ -147,6 +165,7 @@ _HELP_ROWS = (
     ("<name> = <expr>", "Bind an expression to a name"),
     (":a, :add <expr>", "Add an attrset's attributes to scope"),
     (":b, :build <expr>", "Build an evaluated derivation"),
+    (":d, :doc <expr>", "Show documentation of an expression"),
     (":e, :edit <expr>", "Open a package, function, path, or string in $EDITOR"),
     (":l, :load <path>", "Load a Nix file and add its attributes to scope"),
     (":lf, :load-flake <ref>", "Load flake outputs into scope"),
@@ -366,6 +385,30 @@ async def _cmd_build(state: _ReplState, argument: str) -> None:
     print_formatted_text(format_json(outputs))
 
 
+async def _cmd_doc(state: _ReplState, argument: str) -> None:
+    value = await state.repl.string(argument)
+    doc = await value.get_doc()
+    if doc is not None:
+        if doc.args and doc.name:
+            args = " ".join(f"*{arg}*" for arg in doc.args)
+            print_formatted_text(f"**Synopsis:** `builtins.{doc.name}` {args}\n\n{doc.doc}".strip())
+        else:
+            print_formatted_text(doc.doc.strip())
+        return
+
+    sel = await state.repl.repl_select(argument)
+    if sel is not None:
+        name, parent_attrs = sel
+        attr = await parent_attrs.attr_doc(name)
+        if attr is not None:
+            pos_str = f"{attr.path}:{attr.line}"
+            comment = attr.doc if attr.doc is not None else "No documentation found."
+            print_formatted_text(f"Attribute `{name}`\n\n  … defined at {pos_str}\n\n{comment}".strip())
+            return
+
+    raise ReplRunError("value does not have documentation")
+
+
 async def _cmd_edit(state: _ReplState, argument: str) -> None:
     await _edit(await state.repl.string(argument), state.line_editors)
     await state.reload_sources()
@@ -436,6 +479,8 @@ _COMMAND_HANDLERS: dict[str, Callable[[_ReplState, str], Awaitable[None]]] = {
     ":type": _cmd_type,
     ":b": _cmd_build,
     ":build": _cmd_build,
+    ":d": _cmd_doc,
+    ":doc": _cmd_doc,
     ":e": _cmd_edit,
     ":edit": _cmd_edit,
     ":run": _cmd_run,

@@ -59,9 +59,11 @@ from nanopynix.logging import (
     events_dropped_event,
 )
 from nanopynix.models import (
+    AttrDoc,
     BuildResult,
     Derivation,
     DerivedPath,
+    Doc,
     FlakeRef,
     GcResult,
     GcRoot,
@@ -1630,6 +1632,13 @@ class ReplSession(EvalSession, AsyncReplSession["Value"]):
     async def scope_names(self) -> list[str]:
         return await self.run(self._require_raw().repl_scope_names)
 
+    async def repl_select(self, expr: str, path: str = "<string>") -> tuple[str, Value] | None:
+        local = await self.run(self._require_core().repl_select, expr, path)
+        if local is None:
+            return None
+        name, core_value = local
+        return name, self._track_value(core_value)
+
     async def string(self, expr: str, path: str = "<string>") -> Value:
         """Evaluate ``expr`` in this REPL's scope rather than the base scope.
 
@@ -1892,6 +1901,25 @@ class Value(AsyncValue["Store"]):
     async def edit_location(self) -> tuple[str, int]:
         location = await self._eval_session.run((await self._resolve()).edit_location)
         return location["path"], location["line"]
+
+    async def get_doc(self) -> Doc | None:
+        raw = await self._eval_session.run((await self._resolve()).get_doc)
+        if raw is None:
+            return None
+        return Doc(
+            name=raw["name"],
+            args=raw["args"],
+            arity=raw["arity"],
+            doc=raw["doc"],
+            path=raw["path"],
+            line=raw["line"],
+        )
+
+    async def attr_doc(self, name: str) -> AttrDoc | None:
+        raw = await self._eval_session.run((await self._resolve()).attr_doc, name)
+        if raw is None:
+            return None
+        return AttrDoc(path=raw["path"], line=raw["line"], doc=raw["doc"])
 
     def attr(self, name: str) -> Value:
         """Select attribute ``name``, deferring the Nix work until forced.

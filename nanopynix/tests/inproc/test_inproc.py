@@ -969,6 +969,53 @@ async def test_inproc_value_edit_location(tmp_path: Path, inproc_session: Inproc
 
 
 @pytest.mark.anyio
+async def test_inproc_value_get_doc(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
+        value = await eval.string("builtins.add")
+        doc = await value.get_doc()
+        assert doc is not None
+        assert doc.name == "add"
+        assert doc.args == ["e1", "e2"]
+        assert "sum" in doc.doc
+
+        scalar = await eval.string("42")
+        assert await scalar.get_doc() is None
+
+
+@pytest.mark.anyio
+async def test_inproc_value_attr_doc(tmp_path: Path, inproc_session: InprocSessionFactory) -> None:
+    nix_file = tmp_path / "attrs.nix"
+    nix_file.write_text("{ /** First attribute */ foo = 1; bar = 2; }\n")
+
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
+        attrs = await eval.file(str(nix_file))
+        doc = await attrs.attr_doc("foo")
+        assert doc is not None
+        assert doc.doc is not None
+        assert doc.doc.strip() == "First attribute"
+        assert doc.line == 1
+
+        bar_doc = await attrs.attr_doc("bar")
+        assert bar_doc is not None
+        assert bar_doc.doc is None
+
+        assert await attrs.attr_doc("missing") is None
+
+
+@pytest.mark.anyio
+async def test_inproc_repl_select(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session() as nix, nix.store() as store, nix.repl(store) as repl:
+        await repl.line("pkgs = { hello = 1; };")
+        sel = await repl.repl_select("pkgs.hello")
+        assert sel is not None
+        name, parent = sel
+        assert name == "hello"
+        assert (await parent.get_type()).name == "ATTRS"
+
+        assert await repl.repl_select("1 + 2") is None
+
+
+@pytest.mark.anyio
 async def test_inproc_value_auto_call(inproc_session: InprocSessionFactory) -> None:
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as eval:
         function = await eval.string("{ x ? 1 }: x + 1")
