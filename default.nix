@@ -4,99 +4,384 @@ in
 {
   inputs ? flake.inputs,
   system ? builtins.currentSystem,
-  pkgs ? inputs.nixpkgs.legacyPackages.${system},
+  pkgs ? (inputs.nixpkgs.legacyPackages.${system}),
 }:
 let
+  pkgs' = pkgs.extend (
+    final: prev: {
+      python315 = prev.python315.override {
+        packageOverrides = pySelf: pyPrev:
+          let
+            # Only apply the override when the package is older than the
+            # threshold that is known to fix Python 3.15. Traces when the
+            # condition no longer holds so the override can be removed.
+            overrideIfOlder =
+              pkg: threshold: overrideAttrs:
+              if prev.lib.versionOlder pkg.version threshold then
+                pkg.overridePythonAttrs overrideAttrs
+              else
+                builtins.trace "default.nix: ${pkg.pname} ${pkg.version} >= ${threshold}, remove conditional override"
+                  pkg;
+
+            # Helper for the common case of disabling checks on 3.15 --
+            # wraps the same version gate so we get a trace when nixpkgs
+            # updates past the threshold.
+            disableTestsIfOlder =
+              pkg: threshold:
+              overrideIfOlder pkg threshold (_old: {
+                doCheck = false;
+                doInstallCheck = false;
+              });
+          in
+          {
+            tkinter = disableTestsIfOlder pyPrev.tkinter "99.0.0";
+
+            beartype = overrideIfOlder pyPrev.beartype "99.0.0" (old: {
+              patches = (old.patches or [ ]) ++ [ ./nix/patches/beartype-py315.patch ];
+              pytestFlags = (old.pytestFlags or [ ]) ++ [
+                "-W"
+                "ignore::DeprecationWarning"
+              ];
+              disabledTests = (old.disabledTests or [ ]) ++ [
+                "test_api_typing"
+                "test_claw_intraprocess_beartype_this_package"
+                "test_claw_intraprocess_beartype_package"
+                "test_claw_intraprocess_beartype_packages"
+                "test_claw_intraprocess_beartype_all"
+                "test_claw_intraprocess_beartyping"
+                "test_claw_intraprocess_decorator_hostile"
+                "test_claw_extraprocess_executable_submodule"
+                "test_claw_extraprocess_executable_package"
+                "test_claw_unoptimized"
+              ];
+            });
+
+            exceptiongroup = overrideIfOlder pyPrev.exceptiongroup "99.0.0" (_old: {
+              disabledTests = [ "test_nameerror_suggestions_in_group" ];
+            });
+
+            pure-eval = overrideIfOlder pyPrev.pure-eval "99.0.0" (_old: {
+              disabledTests = [
+                "test_eval_attrs"
+                "test_is_expression_interesting"
+                "test_basic"
+                "test_class_as_property"
+                "test_custom_object_dict"
+                "test_descriptor"
+                "test_inherited"
+                "test_inherited_slots"
+                "test_instance_attr"
+                "test_metaclass_dict_as_property"
+                "test_mro_as_property"
+              ];
+            });
+
+            time-machine = overrideIfOlder pyPrev.time-machine "3.4.0" (old: {
+              version = "3.4.0";
+              src = prev.fetchFromGitHub {
+                owner = "adamchainz";
+                repo = "time-machine";
+                tag = "3.4.0";
+                hash = "sha256-9ocj5RsjmHtXjcueDJE4v9QvpeFXgPSNam1Wct0q89o=";
+              };
+              disabledTests = (old.disabledTests or [ ]) ++ [
+                "test_date_today"
+                "test_localtime_and_gmtime_match_datetime"
+              ];
+              nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ pySelf.hypothesis ];
+            });
+
+            setproctitle = overrideIfOlder pyPrev.setproctitle "99.0.0" (_old: {
+              disabledTests = [ "test_clear_segfault" ];
+            });
+
+            parso = overrideIfOlder pyPrev.parso "99.0.0" (_old: {
+              disabledTests = [ "test_python_exception_matches" ];
+            });
+
+            jedi = overrideIfOlder pyPrev.jedi "99.0.0" (old: {
+              disabledTests = (old.disabledTests or [ ]) ++ [
+                "test_python_exception_matches"
+                "test_find_system_environments"
+                "test_scanning_venvs"
+                "test_create_environment_venv_path"
+                "test_create_environment_executable"
+                "test_venv_and_pths"
+              ];
+            });
+
+            meson-python = overrideIfOlder pyPrev.meson-python "99.0.0" (old: {
+              disabledTests = (old.disabledTests or [ ]) ++ [ "test_tag_stable_abi" ];
+              disabledTestPaths = (old.disabledTestPaths or [ ]) ++ [ "tests/test_wheel.py::test_limited_api" ];
+            });
+
+            hypothesis = overrideIfOlder pyPrev.hypothesis "99.0.0" (old: {
+              disabledTests = (old.disabledTests or [ ]) ++ [
+                "test_interactive_example_does_not_emit_warning"
+                "test_given_does_not_pollute_state"
+                "test_find_does_not_pollute_state"
+                "test_prints_seed_only_on_healthcheck"
+                "test_does_print_on_reuse_from_database"
+                "test_prints_seed_on_very_slow_shrinking"
+                "test_regex_output_should_print_as_string"
+              ];
+              disabledTestPaths = (old.disabledTestPaths or [ ]) ++ [ "tests/cover/test_lookup.py" ];
+            });
+
+            rich = overrideIfOlder pyPrev.rich "99.0.0" (old: {
+              disabledTests = (old.disabledTests or [ ]) ++ [
+                "test_inspect_builtin_function_except_python311"
+                "test_inspect_builtin_function_only_python311"
+                "test_inspect_integer_with_methods_python38_and_python39"
+                "test_inspect_integer_with_methods_python310only"
+                "test_inspect_integer_with_methods_python311"
+                "test_attrs_broken"
+              ];
+            });
+
+            fonttools = overrideIfOlder pyPrev.fonttools "99.0.0" (old: {
+              disabledTestPaths = (old.disabledTestPaths or [ ]) ++ [
+                "Tests/metaTools/check_table_coverage_test.py"
+              ];
+            });
+
+            zlib-ng = overrideIfOlder pyPrev.zlib-ng "99.0.0" (old: {
+              disabledTestPaths = (old.disabledTestPaths or [ ]) ++ [
+                "tests/test_zlib_compliance.py"
+              ];
+            });
+
+            mypy = overrideIfOlder pyPrev.mypy "2.3.1" (old: {
+              version = "2.3.1";
+              src = prev.fetchPypi {
+                pname = "mypy";
+                version = "2.3.1";
+                hash = "sha256-R8GxIHJYUTqdk0lfaci+nec5FhhvDlJwPoxGG3piNBk=";
+              };
+            });
+
+            blockbuster = overrideIfOlder pyPrev.blockbuster "1.5.27" (old: {
+              version = "1.5.27";
+              src = prev.fetchPypi {
+                pname = "blockbuster";
+                version = "1.5.27";
+                hash = "sha256-uOnZiLm5G6RoyUUw4hnyagDT/2FrOevz2lYaKj7qndQ=";
+              };
+              doCheck = false;
+              doInstallCheck = false;
+            });
+
+            typeguard = overrideIfOlder pyPrev.typeguard "4.6.0" (old: {
+              version = "4.6.0";
+              src = prev.fetchPypi {
+                pname = "typeguard";
+                version = "4.6.0";
+                hash = "sha256-50FPCRETF94+M13pLNOXxcDKALHMFnbeEuHURKebPyE=";
+              };
+            });
+
+            astroid = overrideIfOlder pyPrev.astroid "4.3.1" (old: {
+              version = "4.3.1";
+              src = prev.fetchPypi {
+                pname = "astroid";
+                version = "4.3.1";
+                hash = "sha256-uzWSU9jO1mNaOIHBfry7wOC2XKI7VVqb0DySo8v0yqc=";
+              };
+              disabledTests = (old.disabledTests or [ ]) ++ [
+                "test_typed_dict_required_and_optional_keys"
+              ];
+            });
+
+            executing = overrideIfOlder pyPrev.executing "99.0.0" (old: {
+              disabledTests = (old.disabledTests or [ ]) ++ [
+                "test_iter"
+                "test_with"
+                "test_small_samples"
+              ];
+            });
+
+            stack-data = overrideIfOlder pyPrev.stack-data "99.0.0" (_old: { });
+
+            pydantic = overrideIfOlder pyPrev.pydantic "99.0.0" (old: {
+              disabledTests = (old.disabledTests or [ ]) ++ [
+                "test_base64url"
+                "test_base64url_invalid"
+              ];
+            });
+
+            ipython = overrideIfOlder pyPrev.ipython "9.16.1" (old: {
+              version = "9.16.1";
+              src = prev.fetchPypi {
+                pname = "ipython";
+                version = "9.16.1";
+                hash = "sha256-Wj0fmkf/IW1s+c+GMST2osGhmNE1TFRqTSSjcKKDtkw=";
+              };
+            });
+
+            uvloop = overrideIfOlder pyPrev.uvloop "99.0.0" (old: {
+              disabledTests = (old.disabledTests or [ ]) ++ [ "test_socket_sync_remove" ];
+            });
+
+            anyio = overrideIfOlder pyPrev.anyio "99.0.0" (_old: { });
+
+            aiohttp = disableTestsIfOlder pyPrev.aiohttp "99.0.0";
+
+            twisted = disableTestsIfOlder pyPrev.twisted "99.0.0";
+
+            django = disableTestsIfOlder pyPrev.django "99.0.0";
+
+            datamodel-code-generator = overrideIfOlder pyPrev.datamodel-code-generator "0.74.0" (old: {
+              version = "0.74.0";
+              src = prev.fetchPypi {
+                pname = "datamodel_code_generator";
+                version = "0.74.0";
+                hash = "sha256-2wmY2SDndPSEQsonArkBBJvmDDXMtUcIbFdLHSYfFEQ=";
+              };
+              patches = (old.patches or [ ]) ++ [ ./nix/patches/datamodel-code-generator-py315.patch ];
+              __darwinAllowLocalNetworking = true;
+              nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ pySelf.trustme ];
+              disabledTests = (old.disabledTests or [ ]) ++ [
+                "test_check_overview_sync"
+                "test_related_page_tags_prefer_existing_generated_section"
+                "test_focused_topics_nav_matches_option_topics"
+                "test_build_schema_docs"
+                "test_build_architecture_docs"
+                "test_build_conformance_docs"
+                "test_build_deprecation_docs"
+                "test_build_docs_examples"
+                "test_build_experimental_docs"
+                "test_build_llms_txt"
+                "test_build_preset_docs"
+                "test_build_release_benchmark_docs"
+                "test_build_playground_assets"
+                "test_main_kr"
+                "test_input_model"
+                "test_skill"
+                "test_cli_doc"
+                "test_https"
+              ];
+              disabledTestPaths = (old.disabledTestPaths or [ ]) ++ [
+                "tests/main"
+              ];
+            });
+
+            scikit-build-core = overrideIfOlder pyPrev.scikit-build-core "1.0.3" (old: {
+              version = "1.0.3";
+              src = prev.fetchPypi {
+                pname = "scikit_build_core";
+                version = "1.0.3";
+                hash = "sha256-pNegWXjuN5dcN3Q1EMiZHi3rzn74OvsKB8DFdv1PFug=";
+              };
+              disabledTests = (old.disabledTests or [ ]) ++ [ "test_abi3_wheel" ];
+            });
+
+            # PyO3 0.26 does not support Python 3.15 -- override with
+            # ABI3 forward-compat flag until libcst updates its Cargo.lock
+            # to PyO3 >= 0.29. Threshold is the first libcst version that
+            # bumps PyO3 past 0.29.
+            libcst = overrideIfOlder pyPrev.libcst "1.9.0" (_old: {
+              env.PYO3_USE_ABI3_FORWARD_COMPATIBILITY = 1;
+            });
+
+            # Example of a version-gated bump to a newer upstream that
+            # fixes 3.15 (replace threshold and src when needed):
+            # somepkg = overrideIfOlder pyPrev.somepkg "2.0.0" (_old: {
+            #   version = "2.0.0";
+            #   src = prev.fetchPypi { ... };
+            # });
+          };
+      };
+
+      nanopython = final.python315;
+
+      graphite2 = prev.graphite2.override {
+        python3 = final.nanopython;
+      };
+
+      pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
+        (
+          python-final: python-prev: {
+            # THE ONE OVERRIDE, and one reason for it now.
+            #
+            # **The five disabled tests are gone, because nixpkgs disables them
+            # itself.** They were the ruff ones: the package runs ruff over the code
+            # it generates and compares the result against a checked-in
+            # expectation, and a newer ruff writes a blank line after
+            # `from __future__ import annotations`. nixpkgs PR #548078 merged on
+            # 2026-08-04 as `37fc74a8`, and the nixpkgs this repository pins,
+            # `8be7bd0c`, is 6695 commits after it and none behind. Issue #49.
+            #
+            # Six of its tests start a real HTTP server on loopback, and the
+            # Darwin build sandbox refuses the `bind`:
+            #
+            #   socketserver.py:478: PermissionError: [Errno 1] Operation not permitted
+            #
+            # 5948 pass and only these six fail, so this is the sandbox saying no
+            # rather than the package being broken. `__darwinAllowLocalNetworking`
+            # is nixpkgs' own switch for exactly that, and it is ignored on Linux,
+            # so it costs nothing there and keeps the six tests running here
+            # instead of deleting the coverage.
+            #
+            # Found making `ekn` build on macOS at all: this package reaches the
+            # tree through tree-sitter-config, so those six failures took out the
+            # whole toolchain.
+            #
+            # This stays up here rather than moving to the 3.15-only block
+            # below, because the sandbox issue exists on every Python version.
+            datamodel-code-generator = python-prev.datamodel-code-generator.overridePythonAttrs (_old: {
+              __darwinAllowLocalNetworking = true;
+            });
+
+            # The protobuf runtime, and the protoc plugin that writes the modules
+            # `nanopynix-proto` and `greeter-proto` are made of. Neither is in
+            # nixpkgs. Both used to arrive through the `grpclib-transports` flake
+            # input; that input is gone and the project it named is vendored, so
+            # its two private dependencies are vendored here beside it.
+            #
+            # These stay in the interpreter's own set rather than moving to the
+            # builders set with `grpclib-transports` itself, because both are
+            # reached the nixpkgs way: `python.withPackages` builds the protoc
+            # plugin environment in each `generated.nix`, and pyproject.nix's
+            # builders deliberately do not propagate, which is the whole reason
+            # that generation happens outside the package.
+            #
+            # They also stay here rather than moving to the 3.15-only block,
+            # because every Python version this repo might use needs them.
+            betterproto2 = python-final.callPackage ./nix/betterproto2.nix { };
+            betterproto2-compiler = python-final.callPackage ./nix/betterproto2-compiler.nix { };
+
+            kr8s = python-final.callPackage ./nix/kr8s.nix { };
+
+            tree-sitter-nix = python-final.callPackage ./nix/tree-sitter-nix.nix {
+              # This set, and not `python.pkgs`, which is the set from before
+              # these overrides ran. nix/tree-sitter-nix.nix gives the
+              # measurement.
+              pythonPackages = python-final;
+              # `pkgs.path` (the nixpkgs source tree) would otherwise be shadowed
+              # by the Python set's own PyPI package literally named "path" --
+              # passing `pkgs.path` explicitly sidesteps that entirely.
+              nixpkgsPath = prev.path;
+              # Same shadowing problem: the set's `tree-sitter` is the PyPI
+              # bindings package, not pkgs.tree-sitter (the CLI derivation, whose
+              # passthru has `buildGrammar`).
+              treeSitterCli = prev.tree-sitter;
+              treeSitterNixSrc = inputs.tree-sitter-nix-numtide;
+            };
+          }
+        )
+      ];
+    }
+  );
+in
+let
+  pkgs = pkgs';
   inherit (pkgs) lib;
 
   pyproject-nix = import "${inputs.pyproject-nix}" { inherit lib; };
 
-  # Every Python package this repo needs that does *not* depend on
-  # nanopynix-bindings, added to the interpreter's own package set.
-  #
-  # The division is the point. Nothing here reaches nix-store/nix-expr or the
-  # bindings, so none of it varies by Nix version and all of it is built once
-  # rather than once per version. Putting it in the base interpreter rather
-  # than in the per-version scope makes that structural instead of a
-  # convention someone has to keep: the per-version overlay further down can
-  # only usefully add packages that need the bindings, because everything
-  # else already resolves before it runs. Adding a version-independent
-  # package to that overlay by mistake would rebuild it three times over,
-  # and there would be nothing to notice it.
-  #
-  # `pySelf.callPackage`, not `python3Packages.callPackage`: these must be
-  # members of the set that resolves their dependencies, or `kr8s` built
-  # against the plain set and `kr8s` seen from this one would be two
-  # derivations of one source.
-  #
-  # Additive, with one exception that says why it is here and when it goes.
-  # Every other name is this repo's own or vendored under nix/, so this set
-  # forces no rebuild of nixpkgs' own Python packages and leaves the
-  # interpreter derivation itself untouched.
-  pythonBase = pkgs.python3.override {
-    packageOverrides = pySelf: pyPrev: {
-      # THE ONE OVERRIDE, and one reason for it now.
-      #
-      # **The five disabled tests are gone, because nixpkgs disables them
-      # itself.** They were the ruff ones: the package runs ruff over the code
-      # it generates and compares the result against a checked-in
-      # expectation, and a newer ruff writes a blank line after
-      # `from __future__ import annotations`. nixpkgs PR #548078 merged on
-      # 2026-08-04 as `37fc74a8`, and the nixpkgs this repository pins,
-      # `8be7bd0c`, is 6695 commits after it and none behind. Issue #49.
-      #
-      # Six of its tests start a real HTTP server on loopback, and the
-      # Darwin build sandbox refuses the `bind`:
-      #
-      #   socketserver.py:478: PermissionError: [Errno 1] Operation not permitted
-      #
-      # 5948 pass and only these six fail, so this is the sandbox saying no
-      # rather than the package being broken. `__darwinAllowLocalNetworking`
-      # is nixpkgs' own switch for exactly that, and it is ignored on Linux,
-      # so it costs nothing there and keeps the six tests running here
-      # instead of deleting the coverage.
-      #
-      # Found making `ekn` build on macOS at all: this package reaches the
-      # tree through tree-sitter-config, so those six failures took out the
-      # whole toolchain.
-      datamodel-code-generator = pyPrev.datamodel-code-generator.overridePythonAttrs (_old: {
-        __darwinAllowLocalNetworking = true;
-      });
-
-      # The protobuf runtime, and the protoc plugin that writes the modules
-      # `nanopynix-proto` and `greeter-proto` are made of. Neither is in
-      # nixpkgs. Both used to arrive through the `grpclib-transports` flake
-      # input; that input is gone and the project it named is vendored, so
-      # its two private dependencies are vendored here beside it.
-      #
-      # These stay in the interpreter's own set rather than moving to the
-      # builders set with `grpclib-transports` itself, because both are
-      # reached the nixpkgs way: `python.withPackages` builds the protoc
-      # plugin environment in each `generated.nix`, and pyproject.nix's
-      # builders deliberately do not propagate, which is the whole reason
-      # that generation happens outside the package.
-      betterproto2 = pySelf.callPackage ./nix/betterproto2.nix { };
-      betterproto2-compiler = pySelf.callPackage ./nix/betterproto2-compiler.nix { };
-
-      kr8s = pySelf.callPackage ./nix/kr8s.nix { };
-
-      tree-sitter-nix = pySelf.callPackage ./nix/tree-sitter-nix.nix {
-        # This set, and not `python.pkgs`, which is the set from before
-        # these overrides ran. nix/tree-sitter-nix.nix gives the
-        # measurement.
-        pythonPackages = pySelf;
-        # `pkgs.path` (the nixpkgs source tree) would otherwise be shadowed
-        # by the Python set's own PyPI package literally named "path" --
-        # passing `pkgs.path` explicitly sidesteps that entirely.
-        nixpkgsPath = pkgs.path;
-        # Same shadowing problem: the set's `tree-sitter` is the PyPI
-        # bindings package, not pkgs.tree-sitter (the CLI derivation, whose
-        # passthru has `buildGrammar`).
-        treeSitterCli = pkgs.tree-sitter;
-        treeSitterNixSrc = inputs.tree-sitter-nix-numtide;
-      };
-    };
-  };
+  nanopython = pkgs.nanopython;
+  nanoPythonPackages = nanopython.pkgs;
+  pythonBase = nanopython;
 
   # Exports OpenTofu's built-in ("core") HCL block schema
   # (resource/data/count/for_each/lifecycle/...) as JSON for a given OpenTofu
@@ -185,9 +470,8 @@ let
   # import nor `patchedBoehmGC` above reads an argument of that function, so
   # both moved out whole.
   wheelNix = import ./nix/nix-closure.nix {
-    inherit lib pkgs;
+    inherit lib pkgs nanopython;
     boehmgc = patchedBoehmGC;
-    python = pythonBase;
   };
 
   # A confirmed data race in nix::Bindings::emptyBindings (a process-wide
@@ -846,7 +1130,8 @@ let
   };
 
   nanopynixWheel = pkgs.callPackage ./nix/wheel.nix {
-    inherit (pkgs.python3Packages) auditwheel wheel;
+    inherit nanopython;
+    inherit (nanoPythonPackages) auditwheel wheel;
     licenses = nanopynixWheelLicenses;
     inherit (wheelNix) cxxRuntime;
     inherit (wheelNix.cxxStdenv) lowerGlibc;
@@ -1040,6 +1325,8 @@ lib.throwIf (unlistedVariants != [ ])
     inherit
       flake
       pkgs
+      nanopython
+      nanoPythonPackages
       nanopynixVersions
       nanopynixForWheel
       # The C and C++ closure that the wheel bundles, and the stdenv that

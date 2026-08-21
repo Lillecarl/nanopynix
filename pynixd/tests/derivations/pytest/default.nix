@@ -1,11 +1,13 @@
-{ pkgs
-, pynixd-lib
-, src
-, system ? builtins.currentSystem
+{
+  pkgs,
+  pynixd-lib,
+  src,
+  nanopython,
+  system ? builtins.currentSystem,
 }:
 
 let
-  pytestEnv = pkgs.python3.withPackages (ps: [
+  pytestEnv = nanopython.withPackages (ps: [
     pynixd-lib
     ps.pytest
     ps.pytest-timeout

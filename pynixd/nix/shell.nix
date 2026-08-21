@@ -6,12 +6,12 @@
   ruff,
   pyupgrade,
   sqlite,
-  python3,
   pynixd,
   nix,
+  nanopython,
 }:
 let
-  python = python3.withPackages (
+  python = nanopython.withPackages (
     ps:
     pynixd.dependencies
     ++ [

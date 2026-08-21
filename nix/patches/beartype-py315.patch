@@ -1,0 +1,11 @@
+diff --git a/beartype/typing/__init__.py b/beartype/typing/__init__.py
+--- a/beartype/typing/__init__.py
++++ b/beartype/typing/__init__.py
+@@ -213,7 +213,6 @@ from typing import (
+     get_origin as get_origin,  # pyright: ignore
+     get_type_hints as get_type_hints,
+     is_typeddict as is_typeddict,  # pyright: ignore
+     no_type_check as no_type_check,
+-    no_type_check_decorator as no_type_check_decorator,
+     overload as overload,
+ )

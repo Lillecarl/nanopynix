@@ -16,9 +16,9 @@
 # in nix/completion-spike.nix, and nowhere else.
 let
   repo = import ../. { };
-  inherit (repo) pkgs;
+  inherit (repo) pkgs nanopython;
 
-  python = pkgs.python3.withPackages (
+  python = nanopython.withPackages (
     ps: with ps; [
       cyclopts
       pexpect

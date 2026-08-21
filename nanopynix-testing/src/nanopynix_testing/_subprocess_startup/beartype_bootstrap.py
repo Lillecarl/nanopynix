@@ -18,6 +18,7 @@ an installed package.
 from __future__ import annotations
 
 import os
+import sys
 
 # nanopynix_bindings is deliberately absent: its submodules are
 # nanobind-compiled .so extensions, not Python source, so there is no AST for
@@ -64,6 +65,9 @@ def install() -> None:
     changes here.)
     """
     os.environ[ENV_VAR] = "1"
+
+    if sys.version_info >= (3, 15):  # beartype 0.22.9 hook dies on 3.15 source_to_code 4-arg change
+        return
 
     # Deferred deliberately, and this is the one place in the repo where that
     # is not a code smell: importing beartype is what arms the hook, and the

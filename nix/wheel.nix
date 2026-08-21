@@ -15,7 +15,7 @@
   runCommand,
   auditwheel,
   patchelf,
-  python3,
+  nanopython,
   # `wheel unpack` and `wheel pack`. The pack step rewrites `RECORD` from what
   # is on disk, so the licence files that this build adds are hashed and
   # listed. A plain `zip` would leave `RECORD` describing the wheel before the
@@ -64,7 +64,7 @@ runCommand "nanopynix-bindings-wheel-${platform}"
     nativeBuildInputs = [
       auditwheel
       patchelf
-      python3
+      nanopython
       wheel
       unzip
     ];
@@ -142,7 +142,7 @@ runCommand "nanopynix-bindings-wheel-${platform}"
     unpacked=$(echo unpacked/*/)
     dist_info=$(cd "$unpacked" && echo ./*.dist-info)
 
-    python3 ${./wheel-notice.py} "$unpacked" ${licenses} "$dist_info"
+    ${nanopython.interpreter} ${./wheel-notice.py} "$unpacked" ${licenses} "$dist_info"
 
     # The gates that a wheel which installs would otherwise pass. The header of
     # `nix/wheel-gates.py` names each one, and names what `auditwheel` already
@@ -153,7 +153,7 @@ runCommand "nanopynix-bindings-wheel-${platform}"
     # would build the whole wheel closure for every lint run. Here it is a step of
     # the build that makes the thing it reads, so no wheel exists without it.
     echo "--- gates ---"
-    python3 ${./wheel-gates.py} "$unpacked" ${toString payloadCeiling} ${cxxRuntime.soname} \
+    ${nanopython.interpreter} ${./wheel-gates.py} "$unpacked" ${toString payloadCeiling} ${cxxRuntime.soname} \
       ${if bindings.stableAbi then "1" else "0"}
 
     # `wheel pack` writes the file name from `WHEEL` and `METADATA`, so the

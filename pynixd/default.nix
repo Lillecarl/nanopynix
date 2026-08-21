@@ -1,44 +1,22 @@
 {
-  pkgs ?
-    let
-      inputs =
-        (
-          let
-            lock = builtins.fromJSON (builtins.readFile ./flake.lock);
-            flake-compatish = import (fetchTree lock.nodes.flake-compatish.locked);
-          in
-          flake-compatish {
-            source = ./.;
-            overrides = {
-              self = ./.;
-              # use nixpkgs from NIX_PATH if set, else flake. Show notice to user
-              nixpkgs =
-                let
-                  result = builtins.tryEval <nixpkgs>;
-                in
-                if result.success then
-                  builtins.warn "using nixpkgs from NIX_PATH" result.value
-                else
-                  builtins.warn "using nixpkgs from flake.lock" null;
-            };
-          }
-        ).inputs;
-    in
-    import inputs.nixpkgs { },
+  pkgs,
+  nanopython,
 }:
 let
   inherit (pkgs) lib;
 
-  daemon-protocol = pkgs.python3Packages.callPackage ./nix/nix-daemon-protocol.nix {
-    pythonBuilder = pkgs.python3Packages.buildPythonPackage;
+  nanoPythonPackages = pkgs.nanoPythonPackages or pkgs.python315Packages;
+
+  daemon-protocol = nanoPythonPackages.callPackage ./nix/nix-daemon-protocol.nix {
+    pythonBuilder = nanoPythonPackages.buildPythonPackage;
   };
 
-  package = pkgs.python3Packages.callPackage ./nix/pynixd.nix {
-    pythonBuilder = pkgs.python3Packages.buildPythonApplication;
+  package = nanoPythonPackages.callPackage ./nix/pynixd.nix {
+    pythonBuilder = nanoPythonPackages.buildPythonApplication;
     nix-daemon-protocol = daemon-protocol;
   };
-  library = pkgs.python3Packages.callPackage ./nix/pynixd.nix {
-    pythonBuilder = pkgs.python3Packages.buildPythonPackage;
+  library = nanoPythonPackages.callPackage ./nix/pynixd.nix {
+    pythonBuilder = nanoPythonPackages.buildPythonPackage;
     nix-daemon-protocol = daemon-protocol;
   };
 
@@ -50,7 +28,7 @@ let
     pkgs.writeShellApplication {
       inherit name;
       runtimeInputs = [
-        (pkgs.python3.withPackages (ps: [
+        (nanopython.withPackages (ps: [
           library
           ps.pytest
           ps.pyinstrument
@@ -106,7 +84,7 @@ package
     pkgs
     ;
 
-  pynixd-docs = pkgs.python3Packages.callPackage ./nix/docs.nix { pynixd = library; };
+  pynixd-docs = nanoPythonPackages.callPackage ./nix/docs.nix { pynixd = library; };
 
   shell = pkgs.callPackage ./nix/shell.nix { pynixd = package; };
   nixosModule = import ./nix/nixos/default.nix;
