@@ -72,8 +72,21 @@ def extract_fod_hash_mismatch(message: str) -> FodHashMismatch | None:
 
 def extract_unique_fod_hash_mismatch(messages: Iterable[str]) -> FodHashMismatch | None:
     """Return one mismatch from log messages, refusing ambiguous diagnostics."""
-    matches = [mismatch for message in messages if (mismatch := extract_fod_hash_mismatch(message)) is not None]
-    return matches[0] if len(matches) == 1 else None
+    by_drv: dict[str | None, list[FodHashMismatch]] = {}
+    for message in messages:
+        mismatch = extract_fod_hash_mismatch(message)
+        if mismatch is not None:
+            by_drv.setdefault(mismatch.drv_path, []).append(mismatch)
+    if not by_drv:
+        return None
+    unambiguous: list[FodHashMismatch] = []
+    for items in by_drv.values():
+        first = items[0]
+        if all(item == first for item in items[1:]):
+            unambiguous.append(first)
+        else:
+            return None
+    return unambiguous[0] if unambiguous else None
 
 
 def find_fod_hash_literal(source: str, specified: str, *, derivation_name: str | None = None) -> FodHashLiteral:

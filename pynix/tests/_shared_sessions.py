@@ -197,7 +197,10 @@ class SharedSessions:
             if not module_name.startswith("pynix"):
                 continue
             for name in _PATCHED_NAMES:
-                if getattr(module, name, None) is self._originals[name]:
+                current = getattr(module, name, None)
+                if current is self._originals[name] or (
+                    callable(current) and getattr(current, "__qualname__", "").startswith("SharedSessions.")
+                ):
                     monkeypatch.setattr(module, name, replacements[name])
                     patched += 1
         if patched == 0:
