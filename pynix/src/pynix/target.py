@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-import structlog
 from anyio import Path as AsyncPath
 from nanopynix_helpers import (
     AttrPathSearch as AttrPathSearch,
@@ -17,7 +16,6 @@ from nanopynix_helpers import (
 )
 
 import nanopynix
-from nanopynix import NixType
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import ThrownError
 
@@ -25,8 +23,6 @@ if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Awaitable, Callable
 
     from nanopynix import AsyncEvalSession, AsyncLockedFlake, AsyncReplSession, AsyncValue
-
-logger = structlog.get_logger("pynix.target")
 
 _FLAKE_PREFIX = "flake:"
 
@@ -194,7 +190,11 @@ async def open_file_reference[ValueT: AsyncValue](
         except ThrownError as exc:
             if not _is_a_search_path_miss(exc):
                 raise
-            logger.debug("pynix file reference not in the lookup path", candidate=candidate)
+            import structlog  # noqa: PLC0415 -- deferred import to keep target evaluation startup fast
+
+            structlog.get_logger("pynix.target").debug(
+                "pynix file reference not in the lookup path", candidate=candidate
+            )
             last = exc
     if last is None:  # pragma: no cover -- a reference always holds a candidate
         raise EvaluationTargetError("--file resolved to no candidate")
@@ -427,6 +427,8 @@ async def configuration_kind(value: AsyncValue) -> tuple[str, str] | None:
 
     ``None`` for every other value, so a caller keeps the message it has.
     """
+    from nanopynix import NixType  # noqa: PLC0415 -- deferred import to keep target evaluation startup fast
+
     if await value.get_type() != NixType.ATTRS:
         return None
     if not await value.has_attr("_type") or not await value.has_attr("class"):
@@ -457,6 +459,8 @@ async def derivation_path(value: AsyncValue, *, selected: str | None = None) -> 
     for a configuration puts in front of the path it suggests. A caller that
     selected the value itself, and not through an option, passes nothing.
     """
+    from nanopynix import NixType  # noqa: PLC0415 -- deferred import to keep target evaluation startup fast
+
     # has_attr() is an attrset question, so ask whether this is an attrset
     # first. It used to answer False for any non-attrset, which made
     # "is this a derivation?" work by accident on a string or a list; it
