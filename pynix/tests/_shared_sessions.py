@@ -81,7 +81,7 @@ class SharedSessions:
             # developer machine are none of its business. This mattered less
             # while a session sent its own defaults over the file anyway; it
             # matters now that the file stands unless a caller speaks.
-            self._session = await self._stack.enter_async_context(nanopynix.rpc.Session(load_config=False))
+            self._session = await self._stack.enter_async_context(nanopynix.inproc.Session())
         return self._session
 
     async def _shared_store(self, store_uri: str) -> tuple[Any, Any]:
@@ -113,7 +113,7 @@ class SharedSessions:
         verbosity: nanopynix.LogLevelInput | None = None,
         print_build_logs: bool = False,
     ) -> AsyncGenerator[Any]:
-        if _nix_is_stubbed() or _configures_the_worker(settings, experimental_features, verbosity):
+        if _nix_is_stubbed():
             async with self._originals["nix_session"](
                 settings=settings,
                 experimental_features=experimental_features,
@@ -140,7 +140,7 @@ class SharedSessions:
         verbosity: nanopynix.LogLevelInput | None = None,
         print_build_logs: bool = False,
     ) -> AsyncGenerator[tuple[Any, Any]]:
-        if _nix_is_stubbed() or _configures_the_worker(settings, experimental_features, verbosity):
+        if _nix_is_stubbed():
             async with self._originals["store_session"](
                 store_uri,
                 settings=settings,
@@ -165,7 +165,7 @@ class SharedSessions:
         verbosity: nanopynix.LogLevelInput | None = None,
         print_build_logs: bool = False,
     ) -> AsyncGenerator[tuple[Any, Any, Any]]:
-        if _nix_is_stubbed() or _configures_the_worker(settings, experimental_features, verbosity):
+        if _nix_is_stubbed():
             async with self._originals["eval_session"](
                 store_uri,
                 settings=settings,
@@ -209,15 +209,6 @@ class SharedSessions:
 
     async def aclose(self) -> None:
         await self._stack.aclose()
-
-
-def _configures_the_worker(
-    settings: object,
-    experimental_features: object,
-    verbosity: object,
-) -> bool:
-    """Whether this call sets up its worker differently from the shared one."""
-    return settings is not None or experimental_features is not None or verbosity is not None
 
 
 def _nix_is_stubbed() -> bool:

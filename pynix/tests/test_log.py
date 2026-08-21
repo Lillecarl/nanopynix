@@ -49,7 +49,14 @@ async def test_pynix_log_errors_when_build_log_unavailable(
 ) -> None:
     path = "/nix/store/00000000000000000000000000000000-no-log"
     monkeypatch.setattr(util_module, "forward_nix_logs", _noop_forward_nix_logs)
-    monkeypatch.setattr(util_module, "nanopynix", SimpleNamespace(rpc=SimpleNamespace(Session=_FakeSession)))
+    monkeypatch.setattr(
+        util_module,
+        "nanopynix",
+        SimpleNamespace(
+            inproc=SimpleNamespace(Session=_FakeSession),
+            rpc=SimpleNamespace(Session=_FakeSession),
+        ),
+    )
 
     cmd = parse(["log", path, *shared_nix_environment.pynix_store_args()])
     with pytest.raises(SystemExit, match=r"build log of .* is not available"):

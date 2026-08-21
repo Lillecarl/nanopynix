@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+import pynix._impl.osearch as osearch_module
 from pynix import parse
 
 if TYPE_CHECKING:
@@ -38,9 +39,11 @@ def _results(out: str) -> list[dict[str, object]]:
 
 @pytest.fixture(autouse=True)
 def cache_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point XDG_CACHE_HOME at a fresh per-test directory so tests don't share a cache."""
+    """Point osearch cache at a fresh per-test directory so tests don't share a cache."""
     cache_home = tmp_path / "cache"
-    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+    osearch_dir = cache_home / "pynix" / "osearch"
+    osearch_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(osearch_module, "_cache_dir", lambda: osearch_dir)
     return cache_home
 
 

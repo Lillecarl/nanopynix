@@ -914,6 +914,9 @@ async def run_repl(command: Repl) -> None:
         print_formatted_text(f"error: {exc}")
         raise SystemExit(1) from exc
 
+    # The REPL keeps an RPC session. A REPL runs new expressions from the user
+    # repeatedly. Process isolation ensures that an unrecoverable evaluator fault
+    # or abandoned evaluator thread does not crash the interactive prompt.
     async with nanopynix.rpc.Session(experimental_features=["flakes", "nix-command"]) as nix:
         with patch_stdout():
             async with (

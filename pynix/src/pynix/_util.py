@@ -21,8 +21,7 @@ if TYPE_CHECKING or BEARTYPING:
 
     from nanopynix_helpers import EvaluationTargetError
 
-    from nanopynix import AsyncEvalSession
-    from nanopynix.rpc import Session, Store
+    from nanopynix import AsyncEvalSession, AsyncSession, AsyncStore
 
 _RESULT_BUILD_LOG_LINE = 101
 _RESULT_POST_BUILD_LOG_LINE = 107
@@ -146,14 +145,12 @@ async def nix_session(
     verbosity: nanopynix.LogLevelInput | None = None,
     print_build_logs: bool = False,
     namespace: nanopynix.OverlayNamespace | None = None,
-) -> AsyncGenerator[Session]:
-    """Open an RPC session and forward its Nix logs for the duration of the block.
+) -> AsyncGenerator[AsyncSession[Any, Any, Any]]:
+    """Open a Nix session and forward its logs for the duration of the block.
 
-    Only forwards settings/experimental_features/verbosity to ``Session`` when
-    the caller actually overrides them, so this degrades to the plain
-    ``Session()`` call most command modules use (also keeps this a
-    faithful drop-in for tests that stub ``nanopynix.rpc.Session`` with a
-    zero-argument fake).
+    Defaults to :class:`nanopynix.inproc.Session`. When *namespace* is given,
+    opens :class:`nanopynix.rpc.Session` instead, because entering an overlay
+    namespace requires process isolation.
     """
     kwargs: dict[str, Any] = {}
     if settings is not None:
@@ -164,8 +161,11 @@ async def nix_session(
         kwargs["verbosity"] = verbosity
     if namespace is not None:
         kwargs["namespace"] = namespace
+        session_factory = nanopynix.rpc.Session
+    else:
+        session_factory = nanopynix.inproc.Session
     async with (
-        nanopynix.rpc.Session(**kwargs) as nix,
+        session_factory(**kwargs) as nix,
         forward_nix_logs(nix, print_build_logs=print_build_logs),
     ):
         yield nix
@@ -179,7 +179,7 @@ async def store_session(
     experimental_features: Sequence[str] | None = None,
     verbosity: nanopynix.LogLevelInput | None = None,
     print_build_logs: bool = False,
-) -> AsyncGenerator[tuple[Session, Store]]:
+) -> AsyncGenerator[tuple[AsyncSession[Any, Any, Any], AsyncStore]]:
     """Open a session and store, forwarding logs for the duration of the block."""
     async with (
         nix_session(
@@ -201,7 +201,7 @@ async def eval_session(
     experimental_features: Sequence[str] | None = None,
     verbosity: nanopynix.LogLevelInput | None = None,
     print_build_logs: bool = False,
-) -> AsyncGenerator[tuple[Session, Store, AsyncEvalSession]]:
+) -> AsyncGenerator[tuple[AsyncSession[Any, Any, Any], AsyncStore, AsyncEvalSession[Any]]]:
     """Open a session, store, and eval session, forwarding logs for the duration of the block."""
     async with (
         store_session(

@@ -414,17 +414,17 @@ def _install_fake_nanopynix(
     nar_sizes: dict[str, int] | None = None,
 ) -> None:
     monkeypatch.setattr(util_module, "forward_nix_logs", _noop_forward_nix_logs)
+    fake_factory = lambda: _FakeSession(  # noqa: E731 -- inline lambda for SimpleNamespace test double
+        store_root,
+        closures=closures or {},
+        nar_sizes=nar_sizes or {},
+    )
     monkeypatch.setattr(
         util_module,
         "nanopynix",
         SimpleNamespace(
-            rpc=SimpleNamespace(
-                Session=lambda: _FakeSession(
-                    store_root,
-                    closures=closures or {},
-                    nar_sizes=nar_sizes or {},
-                ),
-            ),
+            inproc=SimpleNamespace(Session=fake_factory),
+            rpc=SimpleNamespace(Session=fake_factory),
         ),
     )
 

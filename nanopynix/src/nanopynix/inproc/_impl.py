@@ -378,6 +378,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         # absent key means "open set nothing" and a key holding `None` means
         # "open added this name".
         self._env_before: dict[str, str | None] = {}
+        self._verbosity_before: int | None = None
         # `close` reads this. Every *operation* is refused one level down, by
         # the executor's own guard, because `EvalSession.run` reaches its
         # executor without passing through this class at all.
@@ -400,6 +401,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         logger_installed = False
         try:
             self._apply_environment()
+            self._verbosity_before = nanopynix_util.get_default_verbosity()
             nanopynix_util.install_logger(self._collector.callback)
             logger_installed = True
             await executor.run(self._init_nix)
@@ -462,32 +464,15 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
                 os.environ[name] = previous
 
     def _initialization_signature(self) -> tuple[object, ...]:
-        # The globals only, because process-global state is all this guard
-        # guards. Two sessions that differ in an eval or a fetch setting are
-        # compatible: those live on each `EvalState`, not on the process, so
-        # refusing them was over-strict. The store defaults are likewise per
-        # store, and travel in each store's URI.
+        # Process-global initialization state that cannot be undone or reloaded:
+        # 1. `nix_conf` (`NIX_USER_CONF_FILES` read during `loadConfFile`),
+        # 2. `env` (environment variables set for library initialization).
         #
-        # `nix_path` leaves for the same reason, and it is the clearest case:
-        # `_init_nix` below never reads it. It reaches `open_eval_state`, once
-        # for each evaluator, which is why the same session may already give
-        # two evaluators two different search paths. Keeping it here made
-        # `Session(nix_path=...)` refuse what `NixSettings(nix_path=...)`
-        # allows -- two spellings of one per-evaluator setting, disagreeing.
+        # Global settings, experimental features, and verbosity are dynamically
+        # applied to the Nix runtime on each session open.
         return (
             self._nix_conf,
-            # Process-global, which is exactly what this guard guards: `open`
-            # writes it into `os.environ`, and Nix reads it from there. Two
-            # sessions that name different values for one variable cannot both
-            # be right in one process.
             tuple(sorted(self._env.items())),
-            self._load_config,
-            tuple(sorted(self._global_settings.items())),
-            # Part of the key, because the features are no longer a setting:
-            # two sessions that differ only in their features are not the same
-            # session.
-            tuple(self._experimental_features),
-            self._verbosity,
         )
 
     def _init_nix(self) -> None:
@@ -565,6 +550,10 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
             self._executor = None
             self._opened = False
             self._restore_environment()
+            if self._verbosity_before is not None:
+                nanopynix_util.set_default_verbosity(self._verbosity_before)
+                nanopynix_util.set_verbosity(self._verbosity_before)
+                self._verbosity_before = None
             _process_guard.release(self)
             # The teardown marker. It ends every `log_stream` iterator, and
             # inproc did not send it: the forwarding task simply stopped, so
@@ -1777,8 +1766,8 @@ class ReplSession(EvalSession, AsyncReplSession["Value"]):
     async def scope_names(self) -> list[str]:
         return await self.run(self._require_raw().repl_scope_names)
 
-    async def repl_select(self, expr: str, path: str = "<string>") -> tuple[str, Value] | None:
-        local = await self.run(self._require_core().repl_select, expr, path)
+    async def repl_select(self, expr: str) -> tuple[str, Value] | None:
+        local = await self.run(self._require_core().repl_select, expr)
         if local is None:
             return None
         name, core_value = local
@@ -2203,8 +2192,14 @@ class Value(AsyncValue["Store"]):
                 error_msg=results[0].error_msg,
                 drv_path=results[0].drv_path or derived_path,
             )
-        derivation = await target_store.read_derivation(derived_path)
-        return {name: output.path for name, output in derivation.outputs.items() if output.path is not None}
+        built_paths: dict[str, str] = {}
+        for name, output in results[0].built_outputs.items():
+            if output.out_path:
+                built_paths[name] = output.out_path
+        if not built_paths:
+            derivation = await target_store.read_derivation(derived_path)
+            built_paths = {name: output.path for name, output in derivation.outputs.items() if output.path is not None}
+        return built_paths
 
 
 def _attr_values(local: Any) -> dict[str, Any]:

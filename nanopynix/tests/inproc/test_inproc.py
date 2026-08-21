@@ -15,7 +15,7 @@ import anyio
 import pytest
 from anyio import Path as AnyioPath
 from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
-from nanopynix_proto.nix.common import GcAction
+from nanopynix_proto.nix.common import GcAction, LogLevel
 
 import nanopynix
 from nanopynix import Derivation, GcResult, MissingInfo, NixType, StorePath, inproc, yaml_primops
@@ -1103,12 +1103,20 @@ async def test_inproc_session_rejects_second_concurrent_session(inproc_session: 
 
 
 @pytest.mark.anyio
-async def test_inproc_session_rejects_mismatched_reinitialization(inproc_session: InprocSessionFactory) -> None:
-    async with inproc_session():
-        pass
+async def test_inproc_session_rejects_mismatched_reinitialization(inproc_session: InprocSessionFactory, tmp_path: Path) -> None:
+    conf = tmp_path / "custom.conf"
+    conf.write_text("max-jobs = 1\n")
     with pytest.raises(RuntimeError, match="already initialized"):
-        async with inproc_session(verbosity="debug"):
+        async with inproc_session(nix_conf=conf):
             pass
+
+
+@pytest.mark.anyio
+async def test_inproc_session_allows_sequential_verbosity_and_settings(inproc_session: InprocSessionFactory) -> None:
+    async with inproc_session(load_config=False, verbosity="warn") as first:
+        assert await first.get_verbosity() == LogLevel.WARN
+    async with inproc_session(load_config=False, verbosity="debug") as second:
+        assert await second.get_verbosity() == LogLevel.DEBUG
 
 
 @pytest.mark.anyio
