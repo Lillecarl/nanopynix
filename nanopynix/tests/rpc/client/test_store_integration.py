@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from nanopynix_proto.nix.common import GcAction
 from nanopynix_proto.nix.store import (
     AddIndirectRootRequest,
     AddPermRootRequest,
@@ -17,7 +18,6 @@ from nanopynix_proto.nix.store import (
     EnsurePathRequest,
     FindRootsRequest,
     FollowLinksToStorePathRequest,
-    GcAction,
     OptimiseStoreRequest,
     QueryDerivationOutputsRequest,
     QueryMissingRequest,

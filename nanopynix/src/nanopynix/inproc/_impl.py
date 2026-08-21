@@ -111,7 +111,7 @@ if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncIterator, Callable, Mapping, Sequence
     from os import PathLike
 
-    from nanopynix_proto.nix.store import GcAction, StoreDirs
+    from nanopynix_proto.nix.common import GcAction, StoreDirs
 
     from nanopynix.logging import LogCallback
     from nanopynix.models import PrimOpSpec

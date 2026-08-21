@@ -54,11 +54,10 @@ from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar, runtime_checkabl
 
 from nanopynix_bindings.store import BuildMode
 
-# LogLevel is a runtime import, unlike the type-only names below:
-# AsyncEvalSession parameterises AsyncVerbosityController with it, and a base
-# class expression is evaluated when the module loads.
-from nanopynix_proto.nix.common import LogLevel
-from nanopynix_proto.nix.store import GcAction, StoreDirs
+# LogLevel, GcAction, and StoreDirs are runtime imports, unlike the type-only
+# names below: AsyncEvalSession parameterises AsyncVerbosityController with it,
+# and a base class expression is evaluated when the module loads.
+from nanopynix_proto.nix.common import GcAction, LogLevel, StoreDirs
 
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT

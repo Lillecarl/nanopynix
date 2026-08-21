@@ -15,7 +15,7 @@ import anyio
 import pytest
 from anyio import Path as AnyioPath
 from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
-from nanopynix_proto.nix.store import GcAction
+from nanopynix_proto.nix.common import GcAction
 
 import nanopynix
 from nanopynix import Derivation, GcResult, MissingInfo, NixType, StorePath, inproc, yaml_primops
