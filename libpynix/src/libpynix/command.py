@@ -39,6 +39,7 @@ reads none of them.
 from __future__ import annotations
 
 import argparse
+import gettext
 import inspect
 import os
 import types
@@ -477,6 +478,41 @@ def _let_a_hash_stay_in_the_line() -> None:
 
     # `lexers.py` binds this same module object, so the attribute reaches it.
     _shlex.shlex = _Uncommented
+
+
+def _speed_up_gettext() -> None:
+    """Cache translation misses so argparse does not repeat disk searches.
+
+    **dgettext searches the disk on every call when no .mo file exists.**
+    argparse calls gettext.dgettext for every standard section title and usage
+    phrase across every subparser. Because standard gettext catches OSError and
+    returns the message without caching missing translations in _translations,
+    each parser construction searches locale directories repeatedly via
+    hundreds of filesystem checks.
+
+    Caching the NullTranslations fallback per (domain, localedir) eliminates
+    the repeated filesystem searches while preserving real translations if
+    present. Issue #240.
+    """
+    null = gettext.NullTranslations()
+    cache: dict[tuple[str, str | None], Any] = {}
+
+    def cached_dgettext(domain: str, message: str) -> str:
+        localedir = getattr(gettext, "_localedirs", {}).get(domain, None)
+        key = (domain, localedir)
+        trans = cache.get(key)
+        if trans is None:
+            try:
+                trans = gettext.translation(domain, localedir)
+            except OSError:
+                trans = null
+            cache[key] = trans
+        return trans.gettext(message)
+
+    gettext.dgettext = cached_dgettext
+
+
+_speed_up_gettext()
 
 
 def dispatch(parser: argparse.ArgumentParser, namespace: argparse.Namespace) -> Command:
