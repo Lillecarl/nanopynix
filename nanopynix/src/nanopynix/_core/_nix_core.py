@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from nanopynix_bindings import expr as nanopynix_expr, store as nanopynix_store, util as nanopynix_util
 
 from nanopynix._typechecking import BEARTYPING
-from nanopynix.settings import SettingsProvenance
+from nanopynix.models import SettingsProvenance
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Mapping, Sequence

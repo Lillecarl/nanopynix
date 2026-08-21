@@ -24,6 +24,7 @@ from nanopynix._features import DEFAULT_EXPERIMENTAL_FEATURES as DEFAULT_EXPERIM
 from nanopynix._fork import process_is_forked
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix.exceptions import SettingNotLiveError, SettingOutOfScopeError
+from nanopynix.models import SettingsProvenance as SettingsProvenance
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Iterator, Mapping, Sequence
@@ -252,31 +253,6 @@ class NixSettingMetadata(BaseModel):
     default_value: Any = Field(default=None, alias="defaultValue")
     document_default: bool | None = Field(default=None, alias="documentDefault")
     experimental_feature: str | None = Field(default=None, alias="experimentalFeature")
-
-
-class SettingsProvenance(BaseModel):
-    """Where the effective Nix configuration of a session came from.
-
-    Nix tracks an ``overridden`` flag for each setting, so the values a
-    ``nix.conf`` supplied can be told apart from the values nanopynix applied
-    afterwards. Without this a caller cannot tell an applied setting from one
-    that was accepted and discarded.
-    """
-
-    #: What ``nix.conf``, ``NIX_CONFIG``, and the environment supplied, read
-    #: immediately after ``initLibStore``. Empty when ``load_config`` is False.
-    from_config: dict[str, str] = Field(default_factory=dict)
-    #: What nanopynix applied afterwards, and Nix accepted.
-    applied: dict[str, str] = Field(default_factory=dict)
-
-    @property
-    def overridden_from_config(self) -> dict[str, str]:
-        """The settings nanopynix changed that ``nix.conf`` had also set.
-
-        These are the ones worth showing a user: the host asked for one value
-        and this session uses another.
-        """
-        return {name: value for name, value in self.applied.items() if name in self.from_config}
 
 
 class SettingsDrift(BaseModel):

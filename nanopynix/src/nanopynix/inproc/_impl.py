@@ -14,6 +14,7 @@ import itertools
 import json
 import os
 import threading
+from collections.abc import Mapping
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -74,6 +75,7 @@ from nanopynix.models import (
     NixType,
     PathInfo,
     RegistryEntry,
+    SettingsProvenance,
     StorePath,
 )
 from nanopynix.protocols import (
@@ -84,28 +86,20 @@ from nanopynix.protocols import (
     AsyncStore,
     AsyncValue,
 )
-from nanopynix.settings import (
-    DEFAULT_LINE_EDITORS,
-    NIX_PATH_SETTING_KEY,
-    NixEvalSettings,
-    NixFetchSettings,
-    NixFlakeSettings,
-    NixGlobalSettings,
-    NixSettings,
-    NixStoreDefaults,
-    SettingsProvenance,
-    merge_defaults,
-    narrow_to_scope,
-    normalize_nix_path,
-    normalize_nix_settings,
-    reject_construction_time_keys,
-    reject_out_of_scope_settings,
-    reject_settings_write_while_open,
-    render_for_scope,
-    split_evaluator_settings,
-)
-from nanopynix.stores import StoreConfig, resolve_store_spec
 from nanopynix.verbosity import LogLevelInput, normalize_log_level
+
+DEFAULT_LINE_EDITORS = ("emacs", "nano", "vim", "kak", "hx")
+NIX_PATH_SETTING_KEY = "nix-path"
+
+
+def normalize_nix_path(nix_path: str | Sequence[str] | None) -> list[str]:
+    """Coerce ``nix_path`` to a resolved list of ``NIX_PATH`` entries."""
+    if nix_path is None:
+        return list(nanopynix_expr.parse_nix_path())
+    if isinstance(nix_path, str):
+        return list(nanopynix_expr.parse_nix_path(nix_path))
+    return list(nix_path)
+
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncIterator, Callable, Mapping, Sequence
@@ -115,6 +109,14 @@ if TYPE_CHECKING or BEARTYPING:
 
     from nanopynix.logging import LogCallback
     from nanopynix.models import PrimOpSpec
+    from nanopynix.settings import (
+        NixEvalSettings,
+        NixFetchSettings,
+        NixFlakeSettings,
+        NixGlobalSettings,
+        NixSettings,
+    )
+    from nanopynix.stores import StoreConfig
 
 
 BuildMode = nanopynix_store.BuildMode
@@ -286,13 +288,13 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
     # nanopynix._env.validate_session_env); beartype's parameter check would
     # otherwise intercept before that guard runs and raise its own exception
     # type instead of the documented TypeError.
-    def __init__(  # noqa: PLR0913 -- tracked complexity/arg-count debt, see TODO.md
+    def __init__(  # noqa: PLR0913, PLR0915 -- tracked complexity/arg-count debt, see TODO.md
         self,
         *,
         nix_conf: Path | None = None,
         load_config: bool = True,
         env: Mapping[str, str] | None = None,
-        settings: NixSettings | PathLike[str] | str | None = None,
+        settings: NixSettings | Mapping[str, str] | PathLike[str] | str | None = None,
         experimental_features: Sequence[str] | None = None,
         verbosity: LogLevelInput | None = None,
         nix_path: str | Sequence[str] | None = None,
@@ -310,31 +312,51 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         # The same refusals as rpc, for a stronger reason: Nix loaded when this
         # process imported nanopynix, which is before this constructor ran.
         self._env = validate_session_env(env)
-        self._settings = normalize_nix_settings(settings).with_experimental_features(list(experimental_features or []))
+        if settings is None or isinstance(settings, Mapping):
+            self._settings = None
+            self._global_settings = (
+                {str(k).replace("_", "-"): str(v) for k, v in settings.items()} if settings is not None else {}
+            )
+            self._store_defaults = None
+            self._eval_defaults = None
+            self._fetch_defaults = None
+            self._flake_defaults = None
+            self._experimental_features = list(experimental_features or [])
+            if isinstance(store_uri, str):
+                self._store_uri = store_uri
+            else:
+                from nanopynix.stores import (  # noqa: PLC0415 -- deferred import to keep inproc startup fast
+                    resolve_store_spec,
+                )
+
+                self._store_uri = resolve_store_spec(store_uri, None)
+        else:
+            from nanopynix.settings import (  # noqa: PLC0415 -- deferred import to keep inproc startup fast
+                NixEvalSettings,
+                NixFetchSettings,
+                NixFlakeSettings,
+                NixGlobalSettings,
+                NixStoreDefaults,
+                normalize_nix_settings,
+                render_for_scope,
+            )
+            from nanopynix.stores import (  # noqa: PLC0415 -- deferred import to keep inproc startup fast
+                resolve_store_spec,
+            )
+
+            normalized = normalize_nix_settings(settings).with_experimental_features(list(experimental_features or []))
+            self._settings = normalized
+            self._global_settings = render_for_scope(normalized, NixGlobalSettings, explicit_only=True)
+            self._store_defaults = NixStoreDefaults.for_scope(normalized)
+            self._eval_defaults = NixEvalSettings.for_scope(normalized)
+            self._fetch_defaults = NixFetchSettings.for_scope(normalized)
+            self._flake_defaults = NixFlakeSettings.for_scope(normalized)
+            self._experimental_features = list(normalized.experimental_features or [])
+            self._store_uri = resolve_store_spec(store_uri, self._store_defaults)
         self._verbosity = normalize_log_level(verbosity) if verbosity is not None else None
-        # The live level, which the session owns because the bindings hold it
-        # per thread and a Nix thread only learns it from the dispatch wrapper.
-        # `_verbosity` beside it stays what the caller asked for at
-        # construction: it identifies the session to the process guard, and
-        # `None` there means "leave Nix's own default alone". `open` resolves
-        # this one.
         self._level = LogLevel.INFO
         self._nix_path = normalize_nix_path(nix_path)
         self._primops = to_primop_specs(primops)
-        # One scope for each door Nix opens -- see the same block in
-        # rpc.client.session.Session.__init__, which must agree with this one.
-        # A rendered mapping, and not a model: only what the caller named goes
-        # to Nix. `NixGlobalSettings.for_scope(...).to_worker_settings()`
-        # re-validates first and so marks every default as explicitly set,
-        # which sent every non-None field and overrode the host's `nix.conf`
-        # for each one. The four scope calls below stay: those build session
-        # defaults, which are models and read None-ness.
-        self._global_settings = render_for_scope(self._settings, NixGlobalSettings, explicit_only=True)
-        self._store_defaults = NixStoreDefaults.for_scope(self._settings)
-        self._eval_defaults = NixEvalSettings.for_scope(self._settings)
-        self._fetch_defaults = NixFetchSettings.for_scope(self._settings)
-        self._flake_defaults = NixFlakeSettings.for_scope(self._settings)
-        self._store_uri = resolve_store_spec(store_uri, self._store_defaults)
         if store_workers < 1:
             raise ValueError("store_workers must be at least 1")
         self._store_workers = store_workers
@@ -464,14 +486,14 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
             # Part of the key, because the features are no longer a setting:
             # two sessions that differ only in their features are not the same
             # session.
-            tuple(self._settings.experimental_features or []),
+            tuple(self._experimental_features),
             self._verbosity,
         )
 
     def _init_nix(self) -> None:
         self._provenance = self._runtime.initialize(
             settings=self._global_settings,
-            experimental_features=list(self._settings.experimental_features or []),
+            experimental_features=self._experimental_features,
             load_config=self._load_config,
             verbosity=None if self._verbosity is None else int(self._verbosity),
         )
@@ -641,7 +663,16 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
                 this session's default store. A model has this session's store
                 defaults merged under it, so a value set on the model wins.
         """
-        selected = self._store_uri if uri is None else resolve_store_spec(uri, self._store_defaults)
+        if uri is None:
+            selected = self._store_uri
+        elif isinstance(uri, str):
+            selected = uri
+        else:
+            from nanopynix.stores import (  # noqa: PLC0415 -- deferred import to keep inproc startup fast
+                resolve_store_spec,
+            )
+
+            selected = resolve_store_spec(uri, self._store_defaults)
         store = Store(self, selected)
         self._stores.add(store)
         return store
@@ -669,13 +700,37 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
             SettingOutOfScopeError: A field belongs to neither evaluator scope.
         """
         self._require_own_stores(store, build_store)
-        eval_scope, fetch_scope = split_evaluator_settings(eval_settings, fetch_settings)
+        if (
+            eval_settings is not None
+            or fetch_settings is not None
+            or self._eval_defaults is not None
+            or self._fetch_defaults is not None
+        ):
+            from nanopynix.settings import (  # noqa: PLC0415 -- deferred import to keep inproc startup fast
+                merge_defaults,
+                split_evaluator_settings,
+            )
+
+            eval_scope, fetch_scope = split_evaluator_settings(eval_settings, fetch_settings)
+            merged_eval = (
+                merge_defaults(eval_scope, self._eval_defaults)
+                if self._eval_defaults is not None
+                else eval_scope
+            )
+            merged_fetch = (
+                merge_defaults(fetch_scope, self._fetch_defaults)
+                if self._fetch_defaults is not None
+                else fetch_scope
+            )
+        else:
+            merged_eval = None
+            merged_fetch = None
         return EvalSession(
             self,
             store,
             build_store,
-            eval_settings=merge_defaults(eval_scope, self._eval_defaults),
-            fetch_settings=merge_defaults(fetch_scope, self._fetch_defaults),
+            eval_settings=merged_eval,
+            fetch_settings=merged_fetch,
             flake_defaults=self._flake_defaults,
         )
 
@@ -705,15 +760,39 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
             SettingOutOfScopeError: A field belongs to neither evaluator scope.
         """
         self._require_own_stores(store, build_store)
-        eval_scope, fetch_scope = split_evaluator_settings(eval_settings, fetch_settings)
+        if (
+            eval_settings is not None
+            or fetch_settings is not None
+            or self._eval_defaults is not None
+            or self._fetch_defaults is not None
+        ):
+            from nanopynix.settings import (  # noqa: PLC0415 -- deferred import to keep inproc startup fast
+                merge_defaults,
+                split_evaluator_settings,
+            )
+
+            eval_scope, fetch_scope = split_evaluator_settings(eval_settings, fetch_settings)
+            merged_eval = (
+                merge_defaults(eval_scope, self._eval_defaults)
+                if self._eval_defaults is not None
+                else eval_scope
+            )
+            merged_fetch = (
+                merge_defaults(fetch_scope, self._fetch_defaults)
+                if self._fetch_defaults is not None
+                else fetch_scope
+            )
+        else:
+            merged_eval = None
+            merged_fetch = None
         return ReplSession(
             self,
             store,
             build_store,
-            eval_settings=merge_defaults(eval_scope, self._eval_defaults),
-            fetch_settings=merge_defaults(fetch_scope, self._fetch_defaults),
-            flake_defaults=self._flake_defaults,
+            eval_settings=merged_eval,
+            fetch_settings=merged_fetch,
             line_editors=DEFAULT_LINE_EDITORS if line_editors is None else line_editors,
+            flake_defaults=self._flake_defaults,
         )
 
     def _require_own_stores(self, store: Store, build_store: Store | None) -> None:
@@ -797,15 +876,22 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
             SettingNotLiveError: A store or an evaluator is open.
             SettingOutOfScopeError: A field is not a global setting.
         """
+        from nanopynix.settings import (  # noqa: PLC0415 -- deferred import to keep inproc startup fast
+            NixGlobalSettings as NixGlobalSettingsCls,
+            reject_out_of_scope_settings,
+            reject_settings_write_while_open,
+            render_for_scope,
+        )
+
         reject_settings_write_while_open(
             open_stores=sum(1 for store in self._stores if store.is_open),
             open_evaluators=len(self._evals),
         )
-        reject_out_of_scope_settings(settings, scopes=(NixGlobalSettings,), target="the session globals")
+        reject_out_of_scope_settings(settings, scopes=(NixGlobalSettingsCls,), target="the session globals")
         applied = dict(
             await self.run(
                 self._runtime.apply_settings,
-                render_for_scope(settings, NixGlobalSettings, explicit_only=True),
+                render_for_scope(settings, NixGlobalSettingsCls, explicit_only=True),
             )
         )
         self._provenance = self._provenance.model_copy(
@@ -1241,7 +1327,7 @@ class EvalSession(AsyncEvalSession["Value"]):
         # Not `_flake_settings`: a flake setting belongs to one flake
         # operation, not to the evaluator, so this is only what those
         # operations fall back to. `Session.eval` passes the session's.
-        self._flake_defaults = flake_defaults if flake_defaults is not None else NixFlakeSettings()
+        self._flake_defaults = flake_defaults
         self._core: CoreEvalState | None = None
         self._active = False
         # The level this evaluator logs at, or `None` while it follows the
@@ -1276,12 +1362,26 @@ class EvalSession(AsyncEvalSession["Value"]):
             )
         nix_path = (
             self._eval_settings.nix_path
-            if self._eval_settings is not None and self._eval_settings.nix_path is not None
+            if self._eval_settings is not None and getattr(self._eval_settings, "nix_path", None) is not None
             else self._session._nix_path  # type: ignore[reportPrivateUsage] -- Session owns evaluator configuration  # noqa: SLF001
         )
-        rendered_eval = self._eval_settings.to_worker_settings() if self._eval_settings is not None else {}
+        if self._eval_settings is not None:
+            rendered_eval = (
+                self._eval_settings.to_worker_settings()
+                if hasattr(self._eval_settings, "to_worker_settings")
+                else dict(self._eval_settings)
+            )
+        else:
+            rendered_eval = {}
         rendered_eval.pop(NIX_PATH_SETTING_KEY, None)  # applied via nix_path/searchPath, not the generic settings map
-        rendered_fetch = self._fetch_settings.to_worker_settings() if self._fetch_settings is not None else {}
+        if self._fetch_settings is not None:
+            rendered_fetch = (
+                self._fetch_settings.to_worker_settings()
+                if hasattr(self._fetch_settings, "to_worker_settings")
+                else dict(self._fetch_settings)
+            )
+        else:
+            rendered_fetch = {}
         try:
             self._core = await self.run(
                 self._session._runtime.open_eval_state,  # type: ignore[reportPrivateUsage] -- Session owns local runtime  # noqa: SLF001
@@ -1325,11 +1425,18 @@ class EvalSession(AsyncEvalSession["Value"]):
                 evaluator with it: ``session.eval(store, eval_settings=...)``.
             SettingOutOfScopeError: A field belongs to neither evaluator scope.
         """
+        from nanopynix.settings import (  # noqa: PLC0415 -- deferred import to keep inproc startup fast
+            NixEvalSettings as NixEvalSettingsCls,
+            NixFetchSettings as NixFetchSettingsCls,
+            reject_construction_time_keys,
+            split_evaluator_settings,
+        )
+
         eval_scope, fetch_scope = split_evaluator_settings(eval_settings, fetch_settings)
         rendered_eval = eval_scope.to_worker_settings() if eval_scope is not None else {}
         rendered_fetch = fetch_scope.to_worker_settings() if fetch_scope is not None else {}
-        reject_construction_time_keys(rendered_eval, model=NixEvalSettings, target="evaluator")
-        reject_construction_time_keys(rendered_fetch, model=NixFetchSettings, target="evaluator")
+        reject_construction_time_keys(rendered_eval, model=NixEvalSettingsCls, target="evaluator")
+        reject_construction_time_keys(rendered_fetch, model=NixFetchSettingsCls, target="evaluator")
         await self.run(self._require_core().configure, rendered_eval, rendered_fetch)
 
     async def close(self) -> None:
@@ -1485,14 +1592,33 @@ class EvalSession(AsyncEvalSession["Value"]):
         Raises:
             SettingOutOfScopeError: A field is not a flake setting.
         """
-        flake_scope = narrow_to_scope(flake_settings, NixFlakeSettings, target="a flake operation")
+        if flake_settings is not None or self._flake_defaults is not None:
+            from nanopynix.settings import (  # noqa: PLC0415 -- deferred import to keep inproc startup fast
+                NixFlakeSettings as NixFlakeSettingsCls,
+                merge_defaults,
+                narrow_to_scope,
+            )
+
+            flake_scope = narrow_to_scope(flake_settings, NixFlakeSettingsCls, target="a flake operation")
+            merged = (
+                merge_defaults(flake_scope, self._flake_defaults)
+                if self._flake_defaults is not None
+                else flake_scope
+            )
+            rendered_flake = (
+                merged.to_worker_settings()
+                if merged is not None
+                else {}
+            )
+        else:
+            rendered_flake = {}
         local = await self.run(
             partial(
                 self._require_core().lock_flake,
                 ref,
                 update_inputs=update_inputs,
                 write_lock_file=write_lock_file,
-                flake_settings=merge_defaults(flake_scope, self._flake_defaults).to_worker_settings(),
+                flake_settings=rendered_flake,
             ),
         )
         proto = await self.run(_locked_flake_proto, local.require_raw())
@@ -1515,13 +1641,32 @@ class EvalSession(AsyncEvalSession["Value"]):
         Raises:
             SettingOutOfScopeError: A field is not a flake setting.
         """
-        flake_scope = narrow_to_scope(flake_settings, NixFlakeSettings, target="a flake operation")
+        if flake_settings is not None or self._flake_defaults is not None:
+            from nanopynix.settings import (  # noqa: PLC0415 -- deferred import to keep inproc startup fast
+                NixFlakeSettings as NixFlakeSettingsCls,
+                merge_defaults,
+                narrow_to_scope,
+            )
+
+            flake_scope = narrow_to_scope(flake_settings, NixFlakeSettingsCls, target="a flake operation")
+            merged = (
+                merge_defaults(flake_scope, self._flake_defaults)
+                if self._flake_defaults is not None
+                else flake_scope
+            )
+            rendered_flake = (
+                merged.to_worker_settings()
+                if merged is not None
+                else {}
+            )
+        else:
+            rendered_flake = {}
         local = await self.run(
             partial(
                 self._require_core().eval_flake,
                 ref,
                 write_lock_file=write_lock_file,
-                flake_settings=merge_defaults(flake_scope, self._flake_defaults).to_worker_settings(),
+                flake_settings=rendered_flake,
             ),
         )
         return self._track_value(local)

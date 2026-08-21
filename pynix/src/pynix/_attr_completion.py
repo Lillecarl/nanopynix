@@ -66,7 +66,6 @@ if TYPE_CHECKING or BEARTYPING:
 
     from libpynix.command import Completer
     from nanopynix import AsyncEvalSession
-    from nanopynix.settings import NixSettings
 
 #: Which attribute-path search a command applies to the fragment of ``--flake``.
 #:
@@ -100,7 +99,7 @@ _GIT_STALL_VARIABLES = {
 }
 
 
-def _completion_settings() -> NixSettings:
+def _completion_settings() -> dict[str, str]:
     """Nix's own retry settings, cut down to what a keypress can afford.
 
     **One attempt, and not five.** `download-attempts` defaults to 5, and Nix
@@ -132,12 +131,11 @@ def _completion_settings() -> NixSettings:
     for a real command still gets them, because a real command does not come
     through here.
     """
-    # Imported here for the reason `_names` gives. The type-only import above
-    # is the same name, and it costs a plain run nothing: `BEARTYPING` is off
-    # there, so the block does not execute.
-    from nanopynix.settings import NixSettings as Settings  # noqa: PLC0415 -- see `_names`
-
-    return Settings(download_attempts=1, connect_timeout=3, stalled_download_timeout=3)
+    return {
+        "download-attempts": "1",
+        "connect-timeout": "3",
+        "stalled-download-timeout": "3",
+    }
 
 
 #: Seconds a completion may take before it answers with nothing.
