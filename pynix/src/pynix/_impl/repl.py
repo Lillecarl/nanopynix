@@ -272,10 +272,14 @@ class _ReplCompleter(Completer):
                     yield Completion(name, start_position=-len(command), display_meta=description)
             return
 
-        async for item in self._name_completions(before_cursor):
+        async for item in self._name_completions(before_cursor, complete_event):
             yield item
 
-    async def _name_completions(self, before_cursor: str) -> AsyncGenerator[Completion]:
+    async def _name_completions(
+        self,
+        before_cursor: str,
+        complete_event: CompleteEvent,
+    ) -> AsyncGenerator[Completion]:
         """Each name of the scope, or of an attribute set, that continues the last word.
 
         A branch of its own, and not of the caller: the three cases together
@@ -285,6 +289,16 @@ class _ReplCompleter(Completer):
         if source_and_offset is None:
             return
         source, _offset = source_and_offset
+        if not source:
+            # An expression command with nothing typed after the space (":e ")
+            # is a bare position, like an empty line. Complete from the ambient
+            # scope on a keypress, and not while typing: `complete_while_typing`
+            # is on, so answering the space itself would pop the menu open the
+            # moment it is typed.
+            if complete_event.completion_requested:
+                for name in await self._repl.scope_names():
+                    yield Completion(name, start_position=0)
+            return
         target = completion_prefix_at(source, len(source.encode()))
         if target is None:
             return

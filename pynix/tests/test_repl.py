@@ -448,6 +448,9 @@ async def test_repl_completion_uses_commands_scope_and_attrsets() -> None:
     assert await complete(':shell "${pk') == ["pkgs"]
     assert await complete(':shell "${pkgs.hel') == ["hello", "hello-unfree"]
     assert await complete(':shell "${pkgs.') == ["hello", "hello-unfree", "world"]
+    assert await complete(":e p") == ["pkgs"]
+    assert await complete(":e pkgs.") == ["hello", "hello-unfree", "world"]
+    assert await complete(":e pkgs.hel") == ["hello", "hello-unfree"]
     assert completer._repl.value.released  # type: ignore[reportPrivateUsage] -- verifies temporary value lifetime
 
 
@@ -467,6 +470,26 @@ async def test_repl_completion_on_an_empty_line_waits_for_a_keypress() -> None:
     offered = await complete(CompleteEvent(completion_requested=True))
     assert [item.text for item in offered] == ["answer", "builtins", "pkgs"]
     # Zero, so that the name is added and no typed character is replaced.
+    assert {item.start_position for item in offered} == {0}
+    assert await complete(CompleteEvent()) == []
+
+
+async def test_repl_completion_after_an_expression_command_waits_for_a_keypress() -> None:
+    """Tab after ":e " offers every root binding, and typing offers none.
+
+    An expression command with nothing typed after the space is a bare
+    position, like an empty line. `complete_while_typing` is on, so answering
+    the space itself would pop the menu open the moment it is typed.
+    """
+    completer = _ReplCompleter(_CompletionRepl())
+    document = Document(":e ", cursor_position=len(":e "))
+
+    async def complete(event: CompleteEvent) -> list[Completion]:
+        return [item async for item in completer.get_completions_async(document, event)]
+
+    offered = await complete(CompleteEvent(completion_requested=True))
+    assert [item.text for item in offered] == ["answer", "builtins", "pkgs"]
+    # Zero, so that the name is added after the space and nothing is replaced.
     assert {item.start_position for item in offered} == {0}
     assert await complete(CompleteEvent()) == []
 
