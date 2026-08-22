@@ -1103,7 +1103,9 @@ async def test_inproc_session_rejects_second_concurrent_session(inproc_session: 
 
 
 @pytest.mark.anyio
-async def test_inproc_session_rejects_mismatched_reinitialization(inproc_session: InprocSessionFactory, tmp_path: Path) -> None:
+async def test_inproc_session_rejects_mismatched_reinitialization(
+    inproc_session: InprocSessionFactory, tmp_path: Path
+) -> None:
     conf = tmp_path / "custom.conf"
     conf.write_text("max-jobs = 1\n")
     with pytest.raises(RuntimeError, match="already initialized"):
