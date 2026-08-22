@@ -702,14 +702,10 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
 
             eval_scope, fetch_scope = split_evaluator_settings(eval_settings, fetch_settings)
             merged_eval = (
-                merge_defaults(eval_scope, self._eval_defaults)
-                if self._eval_defaults is not None
-                else eval_scope
+                merge_defaults(eval_scope, self._eval_defaults) if self._eval_defaults is not None else eval_scope
             )
             merged_fetch = (
-                merge_defaults(fetch_scope, self._fetch_defaults)
-                if self._fetch_defaults is not None
-                else fetch_scope
+                merge_defaults(fetch_scope, self._fetch_defaults) if self._fetch_defaults is not None else fetch_scope
             )
         else:
             merged_eval = None
@@ -762,14 +758,10 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
 
             eval_scope, fetch_scope = split_evaluator_settings(eval_settings, fetch_settings)
             merged_eval = (
-                merge_defaults(eval_scope, self._eval_defaults)
-                if self._eval_defaults is not None
-                else eval_scope
+                merge_defaults(eval_scope, self._eval_defaults) if self._eval_defaults is not None else eval_scope
             )
             merged_fetch = (
-                merge_defaults(fetch_scope, self._fetch_defaults)
-                if self._fetch_defaults is not None
-                else fetch_scope
+                merge_defaults(fetch_scope, self._fetch_defaults) if self._fetch_defaults is not None else fetch_scope
             )
         else:
             merged_eval = None
@@ -1590,15 +1582,9 @@ class EvalSession(AsyncEvalSession["Value"]):
 
             flake_scope = narrow_to_scope(flake_settings, NixFlakeSettingsCls, target="a flake operation")
             merged = (
-                merge_defaults(flake_scope, self._flake_defaults)
-                if self._flake_defaults is not None
-                else flake_scope
+                merge_defaults(flake_scope, self._flake_defaults) if self._flake_defaults is not None else flake_scope
             )
-            rendered_flake = (
-                merged.to_worker_settings()
-                if merged is not None
-                else {}
-            )
+            rendered_flake = merged.to_worker_settings() if merged is not None else {}
         else:
             rendered_flake = {}
         local = await self.run(
@@ -1639,15 +1625,9 @@ class EvalSession(AsyncEvalSession["Value"]):
 
             flake_scope = narrow_to_scope(flake_settings, NixFlakeSettingsCls, target="a flake operation")
             merged = (
-                merge_defaults(flake_scope, self._flake_defaults)
-                if self._flake_defaults is not None
-                else flake_scope
+                merge_defaults(flake_scope, self._flake_defaults) if self._flake_defaults is not None else flake_scope
             )
-            rendered_flake = (
-                merged.to_worker_settings()
-                if merged is not None
-                else {}
-            )
+            rendered_flake = merged.to_worker_settings() if merged is not None else {}
         else:
             rendered_flake = {}
         local = await self.run(
