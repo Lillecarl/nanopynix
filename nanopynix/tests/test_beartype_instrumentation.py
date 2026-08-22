@@ -37,6 +37,10 @@ import beartype.roar
 import pytest
 
 from beartype_bootstrap import PACKAGES
+from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
+from nanopynix.settings import normalize_nix_path, normalize_nix_settings
+from nanopynix_testing.nix_markers import LINUX_FORK_THEN_INIT
+from test_support.subprocess_output import run_process
 
 # beartype 0.22.9 does not support Python 3.15: BeartypeSourceFileLoader.source_to_code
 # takes 3 args while CPython 3.15's SourceFileLoader.source_to_code takes 4 (relax_is),
@@ -46,10 +50,6 @@ pytestmark = pytest.mark.skipif(
     sys.version_info >= (3, 15),
     reason="beartype 0.22.9 hook dies on 3.15 (source_to_code 4-arg change at beartype/claw/_importlib/_clawimpload.py:359)",
 )
-from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
-from nanopynix.settings import normalize_nix_path, normalize_nix_settings
-from nanopynix_testing.nix_markers import LINUX_FORK_THEN_INIT
-from test_support.subprocess_output import run_process
 
 # An `int` is wrong for both functions probed below -- `normalize_nix_path`
 # takes `str | Sequence[str] | None`, `normalize_nix_settings` takes
