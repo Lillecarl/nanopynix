@@ -56,8 +56,10 @@ let
               ];
             });
 
-            exceptiongroup = overrideIfOlder pyPrev.exceptiongroup "99.0.0" (_old: {
-              disabledTests = [ "test_nameerror_suggestions_in_group" ];
+            exceptiongroup = overrideIfOlder pyPrev.exceptiongroup "99.0.0" (old: {
+              # Appended, and not replaced: nixpkgs carries two disables of
+              # its own here, and replacing the list drops them.
+              disabledTests = (old.disabledTests or [ ]) ++ [ "test_nameerror_suggestions_in_group" ];
             });
 
             pure-eval = overrideIfOlder pyPrev.pure-eval "99.0.0" (_old: {
@@ -91,8 +93,13 @@ let
               nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ pySelf.hypothesis ];
             });
 
-            setproctitle = overrideIfOlder pyPrev.setproctitle "99.0.0" (_old: {
-              disabledTests = [ "test_clear_segfault" ];
+            setproctitle = overrideIfOlder pyPrev.setproctitle "99.0.0" (old: {
+              # Appended, and not replaced: nixpkgs carries its own darwin
+              # list here (`test_setproctitle_darwin`, `test_fork_segfault`,
+              # `test_thread_fork_segfault`), and CI run 32597840744 is what
+              # replacing it cost -- all three ran on aarch64-darwin and one
+              # took the build down.
+              disabledTests = (old.disabledTests or [ ]) ++ [ "test_clear_segfault" ];
             });
 
             parso = overrideIfOlder pyPrev.parso "99.0.0" (_old: {
