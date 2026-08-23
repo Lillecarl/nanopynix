@@ -229,6 +229,15 @@ let
               disabledTests = (old.disabledTests or [ ]) ++ [ "test_socket_sync_remove" ];
             });
 
+            tornado = overrideIfOlder pyPrev.tornado "99.0.0" (old: {
+              # CI run 32654314705: this assertion times two parsing
+              # strategies against each other, and a runner that builds
+              # dozens of packages in parallel fails it on load alone.
+              disabledTests = (
+                old.disabledTests or [ ]
+              ) ++ [ "test_disposition_param_linear_performance" ];
+            });
+
             anyio = overrideIfOlder pyPrev.anyio "99.0.0" (_old: { });
 
             aiohttp = disableTestsIfOlder pyPrev.aiohttp "99.0.0";
