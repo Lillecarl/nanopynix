@@ -31,6 +31,8 @@ _ENTER = "\r"
 _CTRL_C = "\x03"
 _CTRL_D = "\x04"
 _CTRL_Q = "\x11"
+_LEFT = "\x1b[D"
+_RIGHT = "\x1b[C"
 
 
 @dataclass(frozen=True)
@@ -113,26 +115,42 @@ async def test_typing_re_ranks_the_records() -> None:
 
 
 async def test_the_arrow_keys_move_the_selection() -> None:
-    tui = await _drive(f"{_DOWN}{_DOWN}{_CTRL_C}")
+    """Left and right step one match, because the list reads across."""
+    tui = await _drive(f"{_RIGHT}{_RIGHT}{_CTRL_C}")
     assert tui.selected == 2
     assert tui.selection is not None
     assert tui.selection.name == "banana"
 
-    tui = await _drive(f"{_DOWN}{_UP}{_CTRL_C}")
+    tui = await _drive(f"{_RIGHT}{_LEFT}{_CTRL_C}")
     assert tui.selected == 0
+
+
+async def test_up_and_down_move_by_a_whole_row() -> None:
+    """A row holds `grid.columns` matches, so that is what `down` steps.
+
+    The list held one match on each row until issue #265, and `down` stepped
+    one match. It now reads across and then down, so a step of one match is
+    `right` and a step of one row is `down`.
+    """
+    tui = await _drive(f"{_DOWN}{_CTRL_C}")
+    assert tui.grid.columns >= 1
+    assert tui.selected == min(tui.grid.columns, len(_FRUIT) - 1)
+
+    back = await _drive(f"{_DOWN}{_UP}{_CTRL_C}")
+    assert back.selected == 0
 
 
 async def test_the_selection_stops_at_each_end() -> None:
     tui = await _drive(f"{_UP}{_UP}{_CTRL_C}")
     assert tui.selected == 0
 
-    tui = await _drive(_DOWN * 20 + _CTRL_C)
+    tui = await _drive(_RIGHT * 20 + _CTRL_C)
     assert tui.selected == len(_FRUIT) - 1
 
 
 async def test_a_new_query_puts_the_selection_back_on_the_best_match() -> None:
     """Typing after a move must not leave the selection past the new results."""
-    tui = await _drive(f"{_DOWN * 4}cherry{_CTRL_C}")
+    tui = await _drive(f"{_RIGHT * 4}cherry{_CTRL_C}")
     assert tui.selected == 0
     assert _names(tui) == ["cherry"]
 
@@ -148,7 +166,13 @@ async def test_the_detail_pane_never_scrolls_above_its_top() -> None:
 
 
 async def test_moving_the_selection_returns_the_detail_pane_to_the_top() -> None:
-    tui = await _drive(f"{_ALT_DOWN}{_ALT_DOWN}{_DOWN}{_CTRL_C}")
+    """The subject is the scroll, so the move is the one-match step.
+
+    `down` steps a whole row, and a row of this fixture holds every match, so
+    a `down` here lands on the last one. `right` states the same thing about
+    the scroll and says what it means.
+    """
+    tui = await _drive(f"{_ALT_DOWN}{_ALT_DOWN}{_RIGHT}{_CTRL_C}")
     assert tui.selected == 1
     assert tui.detail_scroll == 0
 
@@ -190,12 +214,20 @@ def test_the_footer_counts_the_matches_and_names_the_subject() -> None:
     assert "1 fruit of 5" in text
 
 
-def test_the_list_marks_the_selected_row() -> None:
+def test_the_list_marks_the_selected_cell() -> None:
+    """One cell carries the selected style, and it is the selected one.
+
+    The list emits a gutter and a newline between cells, so this reads the
+    styled cells alone. A test that read every fragment would count the
+    separators as cells and land on the wrong one.
+    """
     tui = SearchTui(_source())
     tui.selected = 2
-    styles = [fragment[0] for fragment in tui.list_fragments() if fragment[1] != "\n"]
-    assert styles[2] == "class:search-tui.row.selected"
-    assert styles[0] == "class:search-tui.row"
+    cells = [fragment[0] for fragment in tui.list_fragments() if fragment[0].startswith("class:search-tui.row")]
+    assert len(cells) == len(_FRUIT)
+    assert cells[2] == "class:search-tui.row.selected"
+    assert cells.count("class:search-tui.row.selected") == 1
+    assert cells[0] == "class:search-tui.row"
 
 
 def test_the_detail_pane_gets_its_measured_width() -> None:

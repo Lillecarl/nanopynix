@@ -17,6 +17,7 @@ up.
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 from nanopynix._typechecking import BEARTYPING
@@ -38,15 +39,40 @@ if TYPE_CHECKING or BEARTYPING:
 #: `test_no_style_class_collides_with_a_prompt_toolkit_default` states that.
 STYLE: dict[str, str] = {**options_tui.STYLE, **package_tui.STYLE}
 
-#: What a row says the answer came from. The two are the same width, so the
+#: What a cell says the answer came from. Both are two columns wide, so the
 #: names of a mixed list line up under each other.
-TAGS = {"option": "opt", "package": "pkg"}
+#:
+#: **An emoji is one character and two columns.** Every measurement of the
+#: layout is a display width for that reason, and `pynix._impl._columns` says
+#: so where it does the arithmetic.
+TAGS = {"option": "🔩", "package": "📦"}
+
+#: What a terminal that cannot encode an emoji gets instead. Both are one
+#: column, so the names still line up.
+ASCII_TAGS = {"option": "o", "package": "p"}
+
+
+def tags() -> dict[str, str]:
+    """The tags this terminal can draw.
+
+    **The test is whether the stream can encode the emoji, and not a guess
+    from the name of the terminal.** A stream that cannot encode it raises on
+    the write, or draws a replacement character, and either one is worse than
+    a letter.
+    """
+    encoding = getattr(sys.stdout, "encoding", None) or ""
+    try:
+        "".join(TAGS.values()).encode(encoding or "ascii")
+    except (LookupError, UnicodeEncodeError):
+        return ASCII_TAGS
+    return TAGS
 
 
 def row(hit: SearchHit) -> str:
-    """One line of the list of matches, tagged with the index it came from."""
-    tag = TAGS["option"] if isinstance(hit, OptionRecord) else TAGS["package"]
-    return f"{tag}  {hit_name(hit)}"
+    """One cell of the list of matches, tagged with the index it came from."""
+    drawn = tags()
+    tag = drawn["option"] if isinstance(hit, OptionRecord) else drawn["package"]
+    return f"{tag} {hit_name(hit)}"
 
 
 def detail(hit: SearchHit, width: int) -> StyleAndTextTuples:
