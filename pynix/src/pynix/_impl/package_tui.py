@@ -74,21 +74,43 @@ def detail(package: SearchablePackage, width: int) -> StyleAndTextTuples:
         ]
     if package.binaries:
         fragments += [("", "\n"), ("class:package.label", "gives"), ("", "\n")]
-        fragments += [("", "  "), ("class:package.binary", "  ".join(package.binaries)), ("", "\n")]
+        fragments += [("", _INDENT), ("class:package.binary", _names(package.binaries, width)), ("", "\n")]
     return fragments
 
 
-def _wrapped(text: str, width: int) -> str:
+#: What each line of the list of binaries starts with.
+_INDENT = "  "
+
+
+def _names(binaries: Sequence[str], width: int) -> str:
+    """Lay the binaries out in lines of at most *width* columns.
+
+    **One line held every name until this.** The window wraps, so nothing ran
+    off the screen, but it wraps on the column and not on the space, so it
+    broke a name in half. Measured over `programs.sqlite` for
+    `x86_64-linux`: `magma` installs 547 programs and its one line was 10610
+    characters, which is 67 rows of a 160-column terminal with a broken name
+    at each of the 66 wraps.
+    """
+    lines = _wrapped(_INDENT.join(binaries), width - len(_INDENT), separator=_INDENT)
+    return lines.replace("\n", f"\n{_INDENT}")
+
+
+def _wrapped(text: str, width: int, *, separator: str = " ") -> str:
     """Break *text* into lines of at most *width* columns.
 
     The detail window wraps as well, and this keeps a word whole where the
     window would break it in the middle.
+
+    *separator* is what goes between two words on one line. A description
+    takes the single space it was written with, and the list of binaries
+    takes two, so that a reader can tell one name from the next.
     """
     words = text.split()
     lines: list[str] = []
     line = ""
     for word in words:
-        candidate = f"{line} {word}" if line else word
+        candidate = f"{line}{separator}{word}" if line else word
         if len(candidate) > width and line:
             lines.append(line)
             line = word

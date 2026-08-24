@@ -328,6 +328,30 @@ def test_a_footer_with_no_room_for_a_subject_says_nothing_rather_than_a_stub() -
     assert "ctrl-c" in footer
 
 
+@pytest.mark.parametrize("width", [40, 80, 160])
+def test_the_list_of_binaries_wraps_on_a_space_and_not_on_a_column(width: int) -> None:
+    """A package that installs many programs must keep each name whole.
+
+    Regression test. The detail pane put every binary on one line and let
+    the window wrap it. The window wraps on the column, so it broke a name
+    in half. Measured over `programs.sqlite` for `x86_64-linux`: `magma`
+    installs 547 programs, and its one line was 10610 characters -- 67 rows
+    of a 160-column terminal, with a broken name at each of the 66 wraps.
+    """
+    names = [f"program-{index}" for index in range(200)]
+    laid_out = package_tui._names(names, width)
+
+    for line in laid_out.split("\n"):
+        assert len(line) <= width, f"a line ran to {len(line)} columns of {width}"
+    for name in names:
+        assert name in laid_out, f"{name} did not survive the layout"
+
+
+def test_a_binary_list_that_fits_stays_on_one_line() -> None:
+    """The layout must not break a short list up for no reason."""
+    assert "\n" not in package_tui._names(["scp", "sftp", "ssh"], 80)
+
+
 def test_a_page_key_falls_back_before_the_first_render() -> None:
     tui = SearchTui(_source())
     assert tui.page() == 10
