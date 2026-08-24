@@ -36,9 +36,11 @@ from prompt_toolkit.layout.containers import HSplit, ScrollOffsets, VSplit, Wind
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.styles import Style, merge_styles
+from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import HorizontalLine
 
 from nanopynix._typechecking import BEARTYPING
+from pynix._impl._columns import GUTTER, Grid, lay_out
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Callable, Mapping, Sequence
@@ -80,8 +82,8 @@ _FALLBACK_WIDTH = 80
 
 #: What the footer says the keys do. A terminal that cannot hold the first
 #: form gets the second, which drops the verbs and keeps the keys.
-_KEYS = "   up/down select   alt+up/down scroll   ctrl-c quit "
-_KEYS_SHORT = "   up/down   alt+up/down   ctrl-c "
+_KEYS = "   arrows select   alt+up/down scroll   ctrl-c quit "
+_KEYS_SHORT = "   arrows   alt+up/down   ctrl-c "
 
 #: What the footer writes before a subject it had to cut, and the text it
 #: cuts. The length of the whole prefix is what `_subject` does its arithmetic
@@ -208,6 +210,11 @@ class SearchTui[ItemT]:
     #: How wide the detail pane was at the last render, in columns.
     detail_width: int = _FALLBACK_WIDTH
 
+    #: The grid that the list drew last. `list_fragments` writes it, and the
+    #: keys read it, because how far `up` moves is the width of a row and
+    #: that is only known once the list has been laid out.
+    grid: Grid = field(default_factory=lambda: Grid(columns=1, widths=(), rows=0))
+
     def __post_init__(self) -> None:
         self.buffer = Buffer(
             multiline=False,
@@ -252,24 +259,51 @@ class SearchTui[ItemT]:
         self.detail_scroll = max(0, self.detail_scroll + delta)
 
     def page(self) -> int:
-        """How many rows one page of the list holds."""
+        """How many matches one page of the list holds.
+
+        A page is a screen of rows, and a row holds `grid.columns` matches,
+        so the two multiply. The list used to hold one match on each row and
+        the two numbers were the same.
+        """
         info = self._list_window.render_info
-        if info is None:
-            return _FALLBACK_PAGE
-        return max(1, info.window_height - 1)
+        rows = _FALLBACK_PAGE if info is None else max(1, info.window_height - 1)
+        return rows * self.grid.columns
 
     # -- what the windows draw ---------------------------------------------
 
     def list_fragments(self) -> StyleAndTextTuples:
-        """The list of matches, one row for each."""
+        """The matches, laid out across the width and then down.
+
+        **The padding of a cell carries the cell's style.** A selected row
+        draws in reverse, and a highlight that stopped at the last character
+        of the name left a ragged block whose right edge moved with every
+        keypress. The whole cell draws, so the block is a rectangle.
+        """
         if not self.results:
             return [("class:search-tui.empty", "no match")]
+
+        cells = [self.source.row(item) for item in self.results]
+        self.grid = lay_out(cells, self.detail_width)
+
         fragments: StyleAndTextTuples = []
-        for index, item in enumerate(self.results):
+        for index, cell in enumerate(cells):
+            column, _row = self.grid.position(index)
             style = "class:search-tui.row.selected" if index == self.selected else "class:search-tui.row"
-            fragments.append((style, self.source.row(item)))
-            fragments.append(("", "\n"))
+            padding = self.grid.widths[column] - get_cwidth(cell)
+            fragments.append((style, cell + " " * padding))
+            last_of_row = column == self.grid.columns - 1
+            if last_of_row or index == len(cells) - 1:
+                fragments.append(("", "\n"))
+            else:
+                fragments.append(("", " " * GUTTER))
         return fragments
+
+    def cursor(self) -> Point:
+        """Where the selected cell is, so the window scrolls it into view."""
+        if not self.results or not self.grid.widths:
+            return Point(x=0, y=0)
+        column, row = self.grid.position(self.selected)
+        return Point(x=self.grid.left_edge(min(column, len(self.grid.widths) - 1)), y=row)
 
     def detail_fragments(self) -> StyleAndTextTuples:
         """The detail of the selected record, drawn under the list."""
@@ -317,7 +351,7 @@ class SearchTui[ItemT]:
         return Window(
             content=FormattedTextControl(
                 self.list_fragments,
-                get_cursor_position=lambda: Point(x=0, y=self.selected),
+                get_cursor_position=self.cursor,
             ),
             height=Dimension(weight=_LIST_WEIGHT, preferred=_PANE),
             always_hide_cursor=True,
@@ -394,10 +428,16 @@ class SearchTui[ItemT]:
         directly, and pyright can see that each one is used.
         """
         keys = KeyBindings()
-        for key in ("up", "c-p"):
+        # left and right step one match; up and down step one row, which is
+        # `grid.columns` matches, because the list reads across and then down.
+        for key in ("left", "c-b"):
             keys.add(key)(self._on_previous)
-        for key in ("down", "c-n"):
+        for key in ("right", "c-f"):
             keys.add(key)(self._on_next)
+        for key in ("up", "c-p"):
+            keys.add(key)(self._on_row_up)
+        for key in ("down", "c-n"):
+            keys.add(key)(self._on_row_down)
         keys.add("pageup")(self._on_page_up)
         keys.add("pagedown")(self._on_page_down)
         keys.add("escape", "up")(self._on_scroll_up)
@@ -412,6 +452,12 @@ class SearchTui[ItemT]:
 
     def _on_next(self, _event: KeyPressEvent) -> None:
         self.move(1)
+
+    def _on_row_up(self, _event: KeyPressEvent) -> None:
+        self.move(-self.grid.columns)
+
+    def _on_row_down(self, _event: KeyPressEvent) -> None:
+        self.move(self.grid.columns)
 
     def _on_page_up(self, _event: KeyPressEvent) -> None:
         self.move(-self.page())
