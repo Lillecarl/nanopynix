@@ -31,6 +31,7 @@ if TYPE_CHECKING or BEARTYPING:
 
     from prompt_toolkit.formatted_text import StyleAndTextTuples
 
+    from pynix._option_values import OptionValues
     from pynix._package_search import SearchablePackage
     from pynix._search_merge import SearchHit
 
@@ -75,10 +76,14 @@ def row(hit: SearchHit) -> str:
     return f"{tag} {hit_name(hit)}"
 
 
-def detail(hit: SearchHit, width: int) -> StyleAndTextTuples:
-    """Draw one row in the detail pane, whichever index it came from."""
+def detail(hit: SearchHit, width: int, values: OptionValues | None = None) -> StyleAndTextTuples:
+    """Draw one row in the detail pane, whichever index it came from.
+
+    *values* reaches the option half alone. A package carries its own fields
+    in the index and needs no evaluator.
+    """
     if isinstance(hit, OptionRecord):
-        return options_tui.detail(hit, width)
+        return options_tui.detail(hit, width, values)
     return package_tui.detail(hit, width)
 
 
@@ -87,17 +92,23 @@ def source(
     packages: Sequence[SearchablePackage],
     *,
     subject: str,
+    values: OptionValues | None = None,
 ) -> SearchSource[SearchHit]:
     """Describe both indexes to the generic interface."""
+
+    def draw(hit: SearchHit, width: int) -> StyleAndTextTuples:
+        return detail(hit, width, values)
+
     return SearchSource(
         items=[*options, *packages],
         rank=make_merged_ranker(options, packages),
         row=row,
-        detail=detail,
+        detail=draw,
         noun="match",
         plural="matches",
         subject=subject,
         style=STYLE,
+        background=None if values is None else values.serve,
     )
 
 
@@ -107,6 +118,7 @@ async def browse(
     *,
     subject: str,
     initial_query: str = "",
+    values: OptionValues | None = None,
 ) -> None:
     """Open the full-screen interface over both indexes."""
-    await SearchTui(source(options, packages, subject=subject), initial_query=initial_query).run()
+    await SearchTui(source(options, packages, subject=subject, values=values), initial_query=initial_query).run()

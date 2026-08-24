@@ -16,6 +16,14 @@ One file for each target holds the options and the two paths that the package
 half needs: the source of nixpkgs, and the ``programs.sqlite`` that names the
 binaries. Without those two a warm search would still evaluate ``pkgs`` to
 read ``pkgs.path``, which is the whole cost that the cache exists to avoid.
+
+**One field is not in the cache, and it opens an evaluator of its own.** An
+option's ``default`` and ``example`` have to be forced to be read, and a
+default that only a realized system can evaluate must not stop the walk, so
+``pynix._options`` leaves both out of the index. ``_values`` gives the detail
+pane a resolver that opens a session on the first request and keeps it for as
+long as the interface is on the screen. A search that reads names and
+descriptions still evaluates nothing.
 """
 
 from __future__ import annotations
@@ -25,6 +33,7 @@ import json
 import os
 import platform
 from collections.abc import Mapping, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -38,7 +47,8 @@ from nanopynix.exceptions import NixError
 from pynix import _impl
 from pynix._impl._quiet import quiet_terminal
 from pynix._option_search import rank as rank_options
-from pynix._options import OptionRecord, fetch_option_doc_list
+from pynix._option_values import EvaluatorUnavailableError, OptionValues
+from pynix._options import OptionRecord, fetch_option_doc_list, fetch_option_values
 from pynix._package_search import SearchablePackage, join, rank as rank_packages
 from pynix._packages import (
     cache_path as package_cache_path,
@@ -58,7 +68,9 @@ from pynix.target import (
 )
 
 if TYPE_CHECKING or BEARTYPING:
-    from nanopynix import AsyncEvalSession
+    from collections.abc import AsyncGenerator
+
+    from nanopynix import AsyncEvalSession, AsyncValue
 
 logger = structlog.get_logger("pynix.search")
 console = Console()
@@ -260,8 +272,9 @@ async def run_search(command: Search) -> None:
 
     found = _read(command, target, ask, cached)
     if _use_tui(command):
-        # The interface draws the whole terminal. `quiet_terminal` says what
-        # one stray line of stderr does to the screen.
+        # The interface draws the whole terminal, and the resolver of the
+        # detail pane opens an evaluator while it is up. `quiet_terminal`
+        # says what one stray line of stderr does to the screen.
         with quiet_terminal():
             # This attribute read is what imports the interface.
             # `pynix._impl` holds the PEP 562 table that defers it, so a
@@ -272,6 +285,7 @@ async def run_search(command: Search) -> None:
                 found.packages,
                 subject=found.subject,
                 initial_query=command.query or "",
+                values=_values(command, target, found),
             )
         return
 
@@ -294,6 +308,52 @@ def _read(command: Search, target: EvaluationTarget, ask: Wanted, cached: Cached
     if cached.origin and ask.packages:
         subject = f"{subject}, packages from {cached.origin}"
     return Found(options=options, packages=packages, subject=subject)
+
+
+def _values(command: Search, target: EvaluationTarget, found: Found) -> OptionValues | None:
+    """The resolver that forces one option's `default`, on the first request.
+
+    **It opens no evaluator here.** A warm search reads its whole index from
+    the cache, and opening an evaluator to draw a list of names would charge
+    every search the 5 s that the cache exists to avoid. The reader who
+    selects an option is the one who waits, and only the first one waits.
+
+    The session lives inside the task that serves the requests, and closes
+    with the interface. :class:`OptionValues` says why it cannot live outside
+    that task.
+    """
+    if not found.options:
+        return None
+
+    @asynccontextmanager
+    async def open_tree() -> AsyncGenerator[AsyncValue]:
+        async with eval_session(command.store) as (_nix, _store, session):
+            yield await _option_tree(command, target, session)
+
+    return OptionValues(open_tree)
+
+
+async def _option_tree(command: Search, target: EvaluationTarget, session: AsyncEvalSession) -> AsyncValue:
+    """Evaluate *target* again, and return its lazy attrset of option values.
+
+    **This reports a failure as a `NixError`, and does not exit.** The
+    interface is on the screen when this runs, so a call to `error_exit` would
+    leave a full-screen application drawn over the message. The pane says what
+    went wrong instead, in the one option the reader selected.
+    """
+    try:
+        value = await evaluate_target(target, session, auto_call_file=True)
+        where = await resolve(
+            value,
+            options_attr=command.options_attr,
+            pkgs_attr=command.pkgs_attr,
+            lib_attr=command.lib_attr,
+        )
+    except EvaluationTargetError as exc:
+        raise EvaluatorUnavailableError(str(exc)) from exc
+    if where.options is None or where.lib is None:
+        raise EvaluatorUnavailableError(f"{_target_description(target)} holds no options tree to read a default from")
+    return await fetch_option_values(session, where.options.value, where.lib.value)
 
 
 def _use_tui(command: Search) -> bool:

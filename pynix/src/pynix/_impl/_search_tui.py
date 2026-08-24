@@ -26,6 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import anyio
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
@@ -43,7 +44,7 @@ from nanopynix._typechecking import BEARTYPING
 from pynix._impl._columns import GUTTER, Grid, lay_out
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Awaitable, Callable, Mapping, Sequence
 
     from prompt_toolkit.formatted_text import StyleAndTextTuples
     from prompt_toolkit.input import Input
@@ -157,6 +158,15 @@ class SearchSource[ItemT]:
     #: Style classes that `detail` and `row` use, over the base ones above.
     #: A caller that styles nothing of its own leaves this empty.
     style: Mapping[str, str] = field(default_factory=dict[str, str])
+
+    #: Work that runs beside the interface, for a source that cannot answer
+    #: every question from memory. The interface passes a function that asks
+    #: for a redraw, and cancels this when the interface closes.
+    #:
+    #: `pynix search` fills this in with the resolver that forces one option's
+    #: `default`. `detail` is called during a render, so it cannot wait for
+    #: an evaluator; it reads what is known, and this fills in the rest.
+    background: Callable[[Callable[[], None]], Awaitable[None]] | None = None
 
 
 def _subject(subject: str, room: int) -> str:
@@ -492,5 +502,19 @@ class SearchTui[ItemT]:
         `Application.run` calls `asyncio.run`, and every `pynix` command
         already runs inside an event loop, so that call raises "asyncio.run()
         cannot be called from a running event loop".
+
+        A source with background work gets a task beside the application, and
+        that task ends when the application does.
         """
-        await self.application.run_async()
+        work = self.source.background
+        if work is None:
+            await self.application.run_async()
+            return
+
+        async def background() -> None:
+            await work(self.application.invalidate)
+
+        async with anyio.create_task_group() as tasks:
+            tasks.start_soon(background)
+            await self.application.run_async()
+            tasks.cancel_scope.cancel()

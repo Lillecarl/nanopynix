@@ -30,6 +30,7 @@ if TYPE_CHECKING or BEARTYPING:
 
     from prompt_toolkit.formatted_text import StyleAndTextTuples
 
+    from pynix._option_values import OptionValues, Value
     from pynix._options import OptionRecord
 
 #: The style classes that the detail pane uses, over the ones that
@@ -48,15 +49,30 @@ STYLE: dict[str, str] = {
     "option.flag": "ansiyellow",
     "option.label": "bold",
     "option.path": "ansigreen",
+    "option.value": "ansiwhite",
+    "option.pending": "italic",
+    "option.error": "ansired",
 }
 
+#: What each line of a rendered value starts with, so that a value of several
+#: lines reads as one block under its label.
+_INDENT = "  "
 
-def detail(record: OptionRecord, width: int) -> StyleAndTextTuples:
+#: What the pane says while the evaluator is still working. The first option a
+#: reader selects pays for the whole options tree, so this line is on the
+#: screen for about 5 s and then never again.
+_PENDING = "resolving the default and the example..."
+
+
+def detail(record: OptionRecord, width: int, values: OptionValues | None = None) -> StyleAndTextTuples:
     """Draw one option in the detail pane under the list.
 
     A description is MyST Markdown, and `render_markdown` is the renderer that
     the REPL uses for the same text. It takes the width of the pane, which is
     the full width of the terminal since issue #261 stacked the two panes.
+
+    *values* forces the `default` and the `example`, which the index does not
+    hold. It is `None` for a search that has no evaluator to open.
     """
     fragments: StyleAndTextTuples = [
         ("class:option.name", record.name),
@@ -70,6 +86,7 @@ def detail(record: OptionRecord, width: int) -> StyleAndTextTuples:
         fragments.append(("", "\n"))
         fragments += to_formatted_text(render_markdown(record.description, width))
         fragments.append(("", "\n"))
+    fragments += _values(record, width, values)
     if record.declarations:
         fragments += [("", "\n"), ("class:option.label", "declared in"), ("", "\n")]
         for path in record.declarations:
@@ -77,23 +94,72 @@ def detail(record: OptionRecord, width: int) -> StyleAndTextTuples:
     return fragments
 
 
-def source(records: Sequence[OptionRecord], subject: str) -> SearchSource[OptionRecord]:
+def _values(record: OptionRecord, width: int, values: OptionValues | None) -> StyleAndTextTuples:
+    """Draw the `default` and the `example`, or say that they are on the way."""
+    if values is None:
+        return []
+    known = values.known(record.name)
+    if known is None:
+        return [("", "\n"), ("class:option.pending", _PENDING), ("", "\n")]
+    return _field("default", known.default, width) + _field("example", known.example, width)
+
+
+def _field(label: str, value: Value | None, width: int) -> StyleAndTextTuples:
+    """Draw one rendered field under its label, or nothing when there is none.
+
+    **A failure is a line of this one field, and not of the pane.** An option
+    whose default is an expression over a whole realized system cannot answer
+    here, and that is the ordinary case rather than an error of `pynix`. The
+    reader still gets the name, the type, the description and the example.
+    """
+    if value is None:
+        return []
+    fragments: StyleAndTextTuples = [("", "\n"), ("class:option.label", label), ("", "\n")]
+    if value.error:
+        return [*fragments, ("class:option.error", f"{_INDENT}does not evaluate: {value.error}"), ("", "\n")]
+    if value.markdown:
+        return [*fragments, *to_formatted_text(render_markdown(value.text, width)), ("", "\n")]
+    return [*fragments, ("class:option.value", _indented(value.text)), ("", "\n")]
+
+
+def _indented(text: str) -> str:
+    """*text*, with every line under the label it belongs to."""
+    return "\n".join(f"{_INDENT}{line}" for line in text.splitlines())
+
+
+def source(
+    records: Sequence[OptionRecord],
+    subject: str,
+    *,
+    values: OptionValues | None = None,
+) -> SearchSource[OptionRecord]:
     """Describe the options to the generic interface."""
+
+    def draw(record: OptionRecord, width: int) -> StyleAndTextTuples:
+        return detail(record, width, values)
+
     return SearchSource(
         items=records,
         rank=rank(records),
         row=lambda record: record.name,
-        detail=detail,
+        detail=draw,
         noun="option",
         subject=subject,
         style=STYLE,
+        background=None if values is None else values.serve,
     )
 
 
-async def browse(records: Sequence[OptionRecord], *, subject: str, initial_query: str = "") -> None:
+async def browse(
+    records: Sequence[OptionRecord],
+    *,
+    subject: str,
+    initial_query: str = "",
+    values: OptionValues | None = None,
+) -> None:
     """Open the full-screen interface over *records*.
 
     *subject* is what the footer says the search covers, and *initial_query* is
     what the search bar holds when the interface opens.
     """
-    await SearchTui(source(records, subject), initial_query=initial_query).run()
+    await SearchTui(source(records, subject, values=values), initial_query=initial_query).run()
