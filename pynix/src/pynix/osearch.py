@@ -21,9 +21,16 @@ class Osearch(ConfiguredCommand):
 
     flake: str | None = flake_option(search="exact")
 
-    options_attr: str = opt("options", help="Attribute path to the options tree, relative to the target.")
+    options_attr: str | None = opt(
+        None,
+        help="Attribute path to the options tree, relative to the target. The default tries 'options'.",
+    )
 
-    lib_attr: str = opt("pkgs.lib", help="Attribute path to nixpkgs lib, relative to the target.")
+    lib_attr: str | None = opt(
+        None,
+        help="Attribute path to nixpkgs lib, relative to the target. The default tries 'lib', "
+        "then the 'lib' of the package set that the target holds.",
+    )
 
     update_index: bool = opt(False, help="Re-evaluate and rebuild the cached index instead of using it.")
 
