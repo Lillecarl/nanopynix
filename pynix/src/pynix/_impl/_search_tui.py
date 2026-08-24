@@ -24,18 +24,19 @@ from typing import TYPE_CHECKING
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
+from prompt_toolkit.document import Document
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import HSplit, ScrollOffsets, VSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
-from prompt_toolkit.styles import Style
+from prompt_toolkit.styles import Style, merge_styles
 from prompt_toolkit.widgets import HorizontalLine, VerticalLine
 
 from nanopynix._typechecking import BEARTYPING
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from prompt_toolkit.formatted_text import StyleAndTextTuples
     from prompt_toolkit.input import Input
@@ -54,16 +55,21 @@ _FALLBACK_PAGE = 10
 #: pane. It is the conventional width of a terminal.
 _FALLBACK_WIDTH = 80
 
-STYLE = Style.from_dict(
-    {
-        "search.label": "bold",
-        "search.row": "",
-        "search.row.selected": "reverse bold",
-        "search.empty": "italic",
-        "search.footer": "reverse",
-        "line": "",
-    }
-)
+#: **The namespace is `search-tui` and not `search`, and it must stay that
+#: way.** `prompt_toolkit` matches a dotted class name against each of its
+#: prefixes, and its own default style defines `search` as
+#: `bg:ansibrightyellow ansiblack` for an incremental search. A class called
+#: `search.row` therefore inherits that, and the whole list draws black on
+#: bright yellow.
+STYLE_RULES: dict[str, str] = {
+    "search-tui.label": "bold",
+    "search-tui.row": "",
+    "search-tui.row.selected": "reverse bold",
+    "search-tui.empty": "italic",
+    "search-tui.footer": "reverse",
+}
+
+STYLE = Style.from_dict(STYLE_RULES)
 
 
 @dataclass(frozen=True)
@@ -104,6 +110,10 @@ class SearchSource[ItemT]:
     #: What the footer says the search covers, for example a flake reference.
     subject: str = ""
 
+    #: Style classes that `detail` and `row` use, over the base ones above.
+    #: A caller that styles nothing of its own leaves this empty.
+    style: Mapping[str, str] = field(default_factory=dict[str, str])
+
 
 @dataclass
 class SearchTui[ItemT]:
@@ -114,6 +124,10 @@ class SearchTui[ItemT]:
     """
 
     source: SearchSource[ItemT]
+
+    #: What the search bar holds when the interface opens. `osearch --tui
+    #: <query>` puts the query of the command line here.
+    initial_query: str = ""
 
     #: Where the application reads its keys. `None` gives the real terminal,
     #: and a test gives a pipe.
@@ -136,8 +150,12 @@ class SearchTui[ItemT]:
     detail_width: int = _FALLBACK_WIDTH
 
     def __post_init__(self) -> None:
-        self.buffer = Buffer(multiline=False, on_text_changed=self._on_query_changed)
-        self.results = list(self.source.rank(""))
+        self.buffer = Buffer(
+            multiline=False,
+            document=Document(self.initial_query, len(self.initial_query)),
+            on_text_changed=self._on_query_changed,
+        )
+        self.results = list(self.source.rank(self.initial_query))
         self._list_window = self._build_list_window()
         self._detail_window = self._build_detail_window()
         self.application = self._build_application()
@@ -186,10 +204,10 @@ class SearchTui[ItemT]:
     def list_fragments(self) -> StyleAndTextTuples:
         """The list on the left, one row for each match."""
         if not self.results:
-            return [("class:search.empty", "no match")]
+            return [("class:search-tui.empty", "no match")]
         fragments: StyleAndTextTuples = []
         for index, item in enumerate(self.results):
-            style = "class:search.row.selected" if index == self.selected else "class:search.row"
+            style = "class:search-tui.row.selected" if index == self.selected else "class:search-tui.row"
             fragments.append((style, self.source.row(item)))
             fragments.append(("", "\n"))
         return fragments
@@ -198,7 +216,7 @@ class SearchTui[ItemT]:
         """The detail of the selected record, drawn on the right."""
         item = self.selection
         if item is None:
-            return [("class:search.empty", "No match. Change the query.")]
+            return [("class:search-tui.empty", "No match. Change the query.")]
         return self.source.detail(item, self.detail_width)
 
     def footer_fragments(self) -> StyleAndTextTuples:
@@ -209,8 +227,8 @@ class SearchTui[ItemT]:
         if self.source.subject:
             left = f"{left} in {self.source.subject}"
         return [
-            ("class:search.footer", left),
-            ("class:search.footer", "   up/down select   alt+up/down scroll   ctrl-c quit "),
+            ("class:search-tui.footer", left),
+            ("class:search-tui.footer", "   up/down select   alt+up/down scroll   ctrl-c quit "),
         ]
 
     # -- the application ----------------------------------------------------
@@ -242,7 +260,7 @@ class SearchTui[ItemT]:
                     VSplit(
                         [
                             Window(
-                                content=FormattedTextControl([("class:search.label", " search ")]),
+                                content=FormattedTextControl([("class:search-tui.label", " search ")]),
                                 width=8,
                                 height=1,
                             ),
@@ -259,7 +277,7 @@ class SearchTui[ItemT]:
         return Application(
             layout=layout,
             key_bindings=self._key_bindings(),
-            style=STYLE,
+            style=merge_styles([STYLE, Style.from_dict(dict(self.source.style))]),
             full_screen=True,
             mouse_support=True,
             before_render=self._measure_detail_pane,
@@ -326,10 +344,12 @@ class SearchTui[ItemT]:
         """
         return
 
-    def run(self) -> None:
-        """Draw the interface, and return when the caller leaves it."""
-        self.application.run()
+    async def run(self) -> None:
+        """Draw the interface, and return when the caller leaves it.
 
-    async def run_async(self) -> None:
-        """Draw the interface from inside a running event loop."""
+        **There is no synchronous entry point, on purpose.**
+        `Application.run` calls `asyncio.run`, and every `pynix` command
+        already runs inside an event loop, so that call raises "asyncio.run()
+        cannot be called from a running event loop".
+        """
         await self.application.run_async()

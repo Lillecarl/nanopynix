@@ -19,6 +19,8 @@ import structlog
 from rapidfuzz import fuzz, process
 from rich.console import Console
 
+from libpynix import human_at_terminal
+from pynix import _impl
 from pynix._options import OptionRecord, fetch_option_doc_list
 from pynix._util import error_console, eval_session, print_json, report_and_exit
 from pynix.osearch import Osearch
@@ -77,8 +79,35 @@ async def run_osearch(command: Osearch) -> None:
         else await _build_index(command, target, cache_path)
     )
 
+    if _use_tui(command):
+        # This attribute read is what imports the interface. `pynix._impl`
+        # holds the PEP 562 table that defers it, so a caller who gave a query
+        # pays for neither `prompt_toolkit` nor the Markdown renderer.
+        await _impl.osearch_tui.browse(
+            records,
+            subject=_target_description(target),
+            initial_query=command.query or "",
+        )
+        return
+
     if command.query is not None:
         _search(command, records, command.query)
+
+
+def _use_tui(command: Osearch) -> bool:
+    """Say whether to open the full-screen interface rather than print a list.
+
+    `--tui` and `--no-tui` answer this outright. Without one of them, the
+    interface opens for a person at a terminal who gave no query, because a
+    person then has nothing to read and a search to start. A query on the
+    command line asks a question that a list answers, and `--json-output` asks
+    for a machine-readable answer, so neither opens the interface.
+    """
+    if command.tui is not None:
+        return command.tui
+    if command.json_output or command.query:
+        return False
+    return human_at_terminal()
 
 
 async def _build_index(command: Osearch, target: EvaluationTarget, cache_path: Path) -> list[OptionRecord]:
