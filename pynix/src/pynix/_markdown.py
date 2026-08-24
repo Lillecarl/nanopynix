@@ -131,6 +131,66 @@ class _ColonFence(MarkdownElement):
             yield NixMarkdown(self.content)
 
 
+def _renderable_inline(children: list[Token]) -> list[Token]:
+    """Rewrite the inline tokens that Rich cannot draw.
+
+    Rich knows CommonMark. MyST adds tokens on top of it, and Rich drops a
+    token it does not know rather than showing the text inside it. Two of them
+    reach a NixOS option description, and this pass rewrites both.
+    """
+    result: list[Token] = []
+    index = 0
+    while index < len(children):
+        token = children[index]
+        if _is_self_link(children, index):
+            result.append(children[index + 1])
+            index += 3
+            continue
+        result.append(_role_as_code(token))
+        index += 1
+    return result
+
+
+def _is_self_link(children: list[Token], index: int) -> bool:
+    """Say whether the link at *index* has its own address as its text.
+
+    `hyperlinks=False` makes Rich print the address after the text. An
+    autolink, which nixpkgs writes as `<https://example.com>`, already has the
+    address as its text, so Rich prints the address twice. One option of
+    home-manager carries an 88-character URL, and the repeat cost four lines of
+    the detail pane rather than two.
+    """
+    token = children[index]
+    return (
+        token.type == "link_open"
+        and index + 2 < len(children)
+        and children[index + 1].type == "text"
+        and children[index + 2].type == "link_close"
+        and children[index + 1].content == token.attrs.get("href")
+    )
+
+
+def _role_as_code(token: Token) -> Token:
+    """Turn a MyST role into inline code, and leave every other token alone.
+
+    nixpkgs writes a cross reference as a role: ``{option}`nixpkgs.pkgs```,
+    ``{var}`pkgs```, ``{file}`/etc/passwd```. Rich has no element for
+    `myst_role`, so it drew none of them: the description of `_module.args`
+    read "• : The nixpkgs package set", with the name of the option missing.
+
+    There is nothing to link to in a terminal, and the role means "this is a
+    name and not prose", which is what inline code means as well.
+    """
+    if token.type != "myst_role":
+        return token
+    # All three fields, and not the type alone: Rich reads `tag` to decide that
+    # a node is inline code, and a role carries an empty one.
+    token.type = "code_inline"
+    token.tag = "code"
+    token.markup = "`"
+    return token
+
+
 class NixMarkdown(Markdown):
     """Markdown customized for Nix and MyST documentation."""
 
@@ -146,6 +206,14 @@ class NixMarkdown(Markdown):
     }
 
     def __init__(self, markup: str, **kwargs: Any) -> None:
+        # **`hyperlinks=False`, and this is not a preference.** With it on,
+        # Rich wraps the link text in an OSC 8 escape. `prompt_toolkit.ANSI`
+        # reads CSI escapes and not OSC ones, so it drops the leading escape
+        # byte and prints the rest of the sequence as text: a description that
+        # named a URL showed `8;id=16117648;https://...` on the screen. With it
+        # off, Rich prints the address after the text, which a terminal can
+        # read and which wraps to the width like any other text.
+        kwargs.setdefault("hyperlinks", False)
         super().__init__(markup, **kwargs)
         config = MdParserConfig(
             enable_extensions={
@@ -160,15 +228,24 @@ class NixMarkdown(Markdown):
         for t in tokens:
             if t.type == "colon_fence":
                 t.tag = ""
+            if t.type == "inline" and t.children:
+                t.children = _renderable_inline(t.children)
         self.parsed = tokens
 
 
-def render_markdown(text: str) -> ANSI:
-    """Render Markdown into formatted ANSI text bounded by the longest line."""
+def render_markdown(text: str, width: int | None = None) -> ANSI:
+    """Render Markdown into formatted ANSI text bounded by the longest line.
+
+    *width* is how many columns the result may use. The REPL prints into the
+    whole terminal and gives no width, so the terminal decides. The `osearch`
+    interface draws into one pane of a split screen, and gives the width of
+    that pane.
+    """
     lines = text.splitlines()
     max_line = max((len(line.rstrip()) for line in lines), default=80)
-    terminal_width = shutil.get_terminal_size(fallback=(80, 24)).columns
-    render_width = min(max(max_line + 4, 60), terminal_width)
+    if width is None:
+        width = shutil.get_terminal_size(fallback=(80, 24)).columns
+    render_width = min(max(max_line + 4, 60), width)
 
     output = StringIO()
     console = Console(file=output, force_terminal=True, width=render_width)
