@@ -77,12 +77,81 @@ def one_line(message: str) -> str:
     return first if len(first) <= MAX_MESSAGE_CHARS else f"{first[:MAX_MESSAGE_CHARS]}..."
 
 
+#: How far below the cwd to look for an agent directory. A repository of
+#: several projects puts each one a level down, and a project can put its own
+#: suite a level below that.
+SEARCH_DEPTH = 3
+
+#: Directories that hold no agent store, and that cost a lot to walk.
+_SKIPPED = frozenset(
+    {
+        ".direnv",
+        ".git",
+        ".jj",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".venv",
+        "__pycache__",
+        "node_modules",
+        "target",
+    }
+)
+
+
+def _recorded_at(directory: Path) -> float:
+    """When the store at *directory* last recorded a run, or 0.0.
+
+    Every run appends one line to `history.jsonl`, so the time that file
+    changed is the time the store last answered a question.
+    """
+    try:
+        return (directory / "history.jsonl").stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _stores_below(start: Path, name: str, depth: int) -> list[Path]:
+    """Every agent directory called *name* under *start*, within *depth*."""
+    found: list[Path] = []
+    frontier = [(start, 0)]
+    while frontier:
+        directory, level = frontier.pop()
+        if level >= depth:
+            continue
+        try:
+            entries = sorted(directory.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if not entry.is_dir() or entry.is_symlink():
+                continue
+            if entry.name == name:
+                found.append(entry)
+            elif entry.name not in _SKIPPED and not entry.name.startswith("."):
+                frontier.append((entry, level + 1))
+    return found
+
+
 def resolve_agent_dir(explicit: str | None) -> Path:
     """Locate the agent directory to read.
 
     Searching upward from the cwd (rather than only looking in it) is what
     makes these commands usable from a subdirectory of the project, which is
     where an agent inspecting one package's tests usually is.
+
+    **A repository holds more than one store, so the newest run wins.** pytest
+    writes the store under its own rootdir, and a project with its own
+    `pytest.ini` is its own rootdir. So `pytest sub/tests/x.py` from the top of
+    a repository writes to `sub/.pytest-agent`, while a query from the same
+    place used to find `./.pytest-agent` first and answer about a different run
+    altogether. Measured in one repository: five stores, and the upward search
+    reached one of them. The answer looked real, which is the part that makes
+    it costly -- a stale failure from another suite reads exactly like the
+    failure you were asking about.
+
+    The search therefore collects every store at or above the cwd and every
+    store below it, and returns the one whose `history.jsonl` is newest. A tie
+    keeps the nearest, which is what the upward search alone gave.
     """
     name = explicit if explicit is not None else os.environ.get("PYTEST_AGENT_DIR", ".pytest-agent")
     candidate = Path(name)
@@ -93,14 +162,17 @@ def resolve_agent_dir(explicit: str | None) -> Path:
         return directory
 
     start = Path.cwd()
-    for parent in (start, *start.parents):
-        found = parent / name
-        if found.is_dir():
-            return found
-    # Spelled out in full here, not shortened to "." by display_path: when
-    # the answer is "there is nothing to read", where you were looking is
-    # the whole content of the message.
-    raise QueryError(
-        f"no {name}/ found in {start} or any parent directory -- "
-        "run `pytest --agent` first, or point at one with --dir",
-    )
+    above = [parent / name for parent in (start, *start.parents) if (parent / name).is_dir()]
+    candidates = list(dict.fromkeys([*above, *_stores_below(start, name, SEARCH_DEPTH)]))
+    if not candidates:
+        # Spelled out in full here, not shortened to "." by display_path: when
+        # the answer is "there is nothing to read", where you were looking is
+        # the whole content of the message.
+        raise QueryError(
+            f"no {name}/ found in {start}, in any parent directory, or "
+            f"within {SEARCH_DEPTH} levels below it -- "
+            "run `pytest --agent` first, or point at one with --dir",
+        )
+    # `max` keeps the first of equal values, and `above` comes first, so a
+    # repository where nothing has run yet still answers with the nearest.
+    return max(candidates, key=_recorded_at)

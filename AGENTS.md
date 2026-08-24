@@ -207,7 +207,11 @@ owns it. Edit `pytest-agent/SKILL.md`, and never the link.
 `SKILL.md` also documents these commands:
 
 - `pytest-agent digest` groups the failures by root cause. Start with this
-  command, and do not read each failure separately first.
+  command, and do not read each failure separately first. Each project with
+  its own `pytest.ini` is its own pytest rootdir, so it writes its own
+  `.pytest-agent/`, and this repository holds five. `digest` reads the store
+  of the newest run and prints the path of that store, so the path tells you
+  which suite the answer covers.
 - `pytest-agent watch --run <label>` follows a run that is still going. It
   prints one line for each failure, stuck test, finish and death. Start a long
   run in the background, put `watch` under a `Monitor`, and then wait. Do not
