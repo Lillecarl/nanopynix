@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 _FIXTURE_DIR = Path(__file__).parent / "test_osearch"
 _SYSTEM_NIX = _FIXTURE_DIR / "system.nix"
+_TARGET_DIR = Path(__file__).parent / "test_search_target"
 
 
 def _parse_json_output(out: str) -> object:
@@ -589,3 +590,51 @@ def test_a_sub_option_is_searchable(
 
     ranked = osearch_tui.rank(indexed_options)("vhosts port")
     assert [record.name for record in ranked] == ["services.example-daemon.vhosts.<name>.port"]
+
+
+async def test_osearch_finds_lib_where_the_old_default_could_not(
+    shared_nix_environment: NixTestEnvironment,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A module system that gives `pkgs` through `_module.args` needs no flag.
+
+    The default of `--lib-attr` was the literal `pkgs.lib`, which required the
+    target to re-export `pkgs` at the top. `nixosSystem` does, and a plain
+    `lib.evalModules` does not. The chain reaches both.
+    """
+    cmd = parse(
+        [
+            "osearch",
+            "--file",
+            str(_TARGET_DIR / "module_args.nix"),
+            "--json-output",
+            "services.example-daemon.port",
+            *shared_nix_environment.pynix_store_args(),
+        ],
+    )
+    await cmd.run()
+    captured = capsys.readouterr()
+    assert "_module.args.pkgs.lib" in captured.err
+    assert _results(captured.out)[0]["name"] == "services.example-daemon.port"
+
+
+async def test_osearch_names_what_it_tried_when_there_is_no_options_tree(
+    shared_nix_environment: NixTestEnvironment,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A bare package set is a real thing to point at, and holds no options."""
+    cmd = parse(
+        [
+            "osearch",
+            "--file",
+            str(_TARGET_DIR / "bare_pkgs.nix"),
+            "--json-output",
+            "anything",
+            *shared_nix_environment.pynix_store_args(),
+        ],
+    )
+    with pytest.raises(SystemExit):
+        await cmd.run()
+    captured = capsys.readouterr()
+    assert "no options tree" in captured.err
+    assert "--options-attr" in captured.err

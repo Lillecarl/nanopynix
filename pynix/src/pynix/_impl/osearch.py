@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Sequence
 from dataclasses import asdict
 from pathlib import Path
 
@@ -22,13 +23,13 @@ from rich.console import Console
 from libpynix import human_at_terminal
 from pynix import _impl
 from pynix._options import OptionRecord, fetch_option_doc_list
-from pynix._util import error_console, eval_session, print_json, report_and_exit
+from pynix._search_target import LIB_CHAIN, OPTIONS_CHAIN, Resolved, resolve
+from pynix._util import error_console, error_exit, eval_session, print_json, report_and_exit
 from pynix.osearch import Osearch
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
     evaluate_target,
-    select_attr,
 )
 
 logger = structlog.get_logger("pynix.osearch")
@@ -43,7 +44,7 @@ def _cache_dir() -> Path:
     return path
 
 
-def _cache_path(target: EvaluationTarget, options_attr: str, lib_attr: str) -> Path:
+def _cache_path(target: EvaluationTarget, options_attr: str | None, lib_attr: str | None) -> Path:
     canonical = f"{target.file}|{target.attr}|{target.flake}|{options_attr}|{lib_attr}"
     key = hashlib.sha256(canonical.encode()).hexdigest()[:16]
     return _cache_dir() / f"{key}.json"
@@ -114,14 +115,32 @@ async def _build_index(command: Osearch, target: EvaluationTarget, cache_path: P
     async with eval_session(command.store) as (_nix, _store, session):
         try:
             target_value = await evaluate_target(target, session, auto_call_file=True)
-            options_value = await select_attr(target_value, command.options_attr)
-            lib_value = await select_attr(target_value, command.lib_attr)
+            found = await resolve(
+                target_value,
+                options_attr=command.options_attr,
+                lib_attr=command.lib_attr,
+            )
         except EvaluationTargetError as exc:
             report_and_exit(exc)
-        records = await fetch_option_doc_list(session, options_value, lib_value)
+        options = _required(found.options, "options tree", OPTIONS_CHAIN, "--options-attr")
+        lib = _required(found.lib, "nixpkgs lib", (*LIB_CHAIN, "<the lib of the package set>"), "--lib-attr")
+        records = await fetch_option_doc_list(session, options.value, lib.value)
     _save_cache(cache_path, target, records)
-    error_console.print(f"indexed {len(records)} options from {_target_description(target)}")
+    where = f"{options.path} and {lib.path}"
+    error_console.print(f"indexed {len(records)} options from {_target_description(target)} ({where})")
     return records
+
+
+def _required(found: Resolved | None, what: str, tried: Sequence[str], flag: str) -> Resolved:
+    """*found*, or exit with a message that names every path that was tried.
+
+    A target that holds no options tree is a real thing to point at, and a
+    person who did it by mistake needs to read which paths the search used.
+    """
+    if found is None:
+        candidates = ", ".join(tried)
+        error_exit(f"the target holds no {what}: tried {candidates}. Name one with {flag}.")
+    return found
 
 
 def _search(command: Osearch, records: list[OptionRecord], query: str) -> None:
