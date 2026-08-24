@@ -154,7 +154,7 @@ async def test_search_second_run_hits_the_cache_without_a_working_store(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    build_cmd = parse(["search", "--file", str(_SYSTEM_NIX), *shared_nix_environment.pynix_store_args()])
+    build_cmd = parse(["search", "--options", "--file", str(_SYSTEM_NIX), *shared_nix_environment.pynix_store_args()])
     await build_cmd.run()
     capsys.readouterr()
 
@@ -181,12 +181,19 @@ async def test_search_update_index_rebuilds_the_cache(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    build_cmd = parse(["search", "--file", str(_SYSTEM_NIX), *shared_nix_environment.pynix_store_args()])
+    build_cmd = parse(["search", "--options", "--file", str(_SYSTEM_NIX), *shared_nix_environment.pynix_store_args()])
     await build_cmd.run()
     capsys.readouterr()
 
     rebuild_cmd = parse(
-        ["search", "--file", str(_SYSTEM_NIX), "--update-index", *shared_nix_environment.pynix_store_args()],
+        [
+            "search",
+            "--options",
+            "--file",
+            str(_SYSTEM_NIX),
+            "--update-index",
+            *shared_nix_environment.pynix_store_args(),
+        ],
     )
     await rebuild_cmd.run()
     captured = capsys.readouterr()
@@ -755,6 +762,81 @@ async def test_a_query_reaches_an_option_and_a_package_in_one_list(
     await cmd.run()
     kinds = {row["kind"] for row in _results(capsys.readouterr().out)}
     assert kinds == {"option", "package"}
+
+
+async def test_a_channel_it_cannot_reach_still_leaves_the_packages_searchable(
+    shared_nix_environment: NixTestEnvironment,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A binaries index that cannot be had must cost the binaries alone.
+
+    Regression test. `programs.sqlite` ships in the channel expressions and
+    in no git checkout, so a target that is a flake input or a checkout has
+    to download a channel to get one. The whole search died when that
+    download could not happen: measured in a build sandbox, a search of a
+    module-system fixture raised `FileNotFoundError: the channel expressions
+    hold no programs.sqlite` and lost the packages it had already walked.
+
+    The walk is the answer, and the binaries only add "which package
+    installs this program".
+    """
+
+    async def _unreachable(
+        _session: object,
+        _pkgs_path: Path,
+        _system: str,
+        _channel: str = "nixos-unstable",
+    ) -> ProgramIndex:
+        raise FileNotFoundError("the channel expressions hold no programs.sqlite at /nix/store/probe")
+
+    monkeypatch.setattr(search_module, "program_index_for", _unreachable)
+
+    cmd = parse(_search_args(shared_nix_environment, _BOTH_NIX, "--packages", "--limit", "50", "hello"))
+    await cmd.run()
+    captured = capsys.readouterr()
+
+    # A package row is keyed by `attr`, and an option row by `name`.
+    names = {str(result["attr"]) for result in _results(captured.out)}
+    assert names, "the search answered nothing at all"
+    assert any("hello" in name for name in names)
+    assert "and no binaries" in captured.err, "the search did not say that the binaries are missing"
+
+
+async def test_a_missing_binaries_index_does_not_rebuild_on_every_search(
+    shared_nix_environment: NixTestEnvironment,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The cache is complete without the binaries, so the second run is warm.
+
+    Without this the cache would count as incomplete for ever, and every
+    search would walk the package set and try the download again.
+    """
+    attempts = 0
+
+    async def _unreachable(
+        _session: object,
+        _pkgs_path: Path,
+        _system: str,
+        _channel: str = "nixos-unstable",
+    ) -> ProgramIndex:
+        nonlocal attempts
+        attempts += 1
+        raise FileNotFoundError("no channel here")
+
+    monkeypatch.setattr(search_module, "program_index_for", _unreachable)
+
+    args = _search_args(shared_nix_environment, _BOTH_NIX, "--packages", "hello")
+    await parse(args).run()
+    capsys.readouterr()
+    assert attempts == 1
+
+    # A store URI that cannot work, so a second walk would fail outright.
+    await parse([*args, "--store", "local://?root=/nonexistent-store-root"]).run()
+    captured = capsys.readouterr()
+    assert attempts == 1, "the second search tried the download again"
+    assert _results(captured.out), "the second search answered nothing"
 
 
 async def test_the_options_flag_leaves_the_packages_out(
