@@ -185,7 +185,7 @@ Open an interactive Nix evaluation session.
 
 ### `pynix search`
 
-Search NixOS module options, using a cached, offline index.
+Search the NixOS options and the packages of one target.
 
 | Argument | Type | Help |
 | --- | --- | --- |
@@ -193,8 +193,13 @@ Search NixOS module options, using a cached, offline index.
 | `--file` | `str or None` | Evaluate FILE as a Nix expression. FILE is a path, a lookup path, a URL, or a flake reference, and it may end with '#' and an attribute path. (default: `None`) |
 | `--attr` | `str or None` | Dot-separated attribute path within the evaluation result. (default: `None`) |
 | `--flake` | `str or None` | Evaluate FLAKE, optionally with a '#'-separated attribute path. (default: `None`) |
+| `--options` | `bool` | Search the NixOS module options only. Without this and --packages, the search reads whichever of the two the target offers. (default: `False`) |
+| `--packages` | `bool` | Search the packages only. Without this and --options, the search reads whichever of the two the target offers. (default: `False`) |
 | `--options-attr` | `str or None` | Attribute path to the options tree, relative to the target. The default tries 'options'. (default: `None`) |
 | `--lib-attr` | `str or None` | Attribute path to nixpkgs lib, relative to the target. The default tries 'lib', then the 'lib' of the package set that the target holds. (default: `None`) |
+| `--pkgs-attr` | `str or None` | Attribute path to the package set, relative to the target. The default tries 'pkgs', then '_module.args.pkgs', and then the target itself. (default: `None`) |
+| `--system` | `str or None` | The system whose binaries the package index answers for. The default is this machine. (default: `None`) |
+| `--channel` | `str` | The channel to read programs.sqlite from, when the nixpkgs of the target carries none. (default: `'nixos-unstable'`) |
 | `--update-index` | `bool` | Re-evaluate and rebuild the cached index instead of using it. (default: `False`) |
 | `--limit` | `int` | Maximum number of results to print. (default: `20`) |
 | `--json-output` | `bool` | Print results as JSON instead of a human-readable list. (default: `False`) |

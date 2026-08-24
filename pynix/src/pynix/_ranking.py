@@ -256,8 +256,13 @@ def make_tiered_ranker(  # noqa: UP047 -- beartype cannot resolve a PEP 695 func
         # An empty query has nothing to match, and every record ranks alike.
         # Give the caller the records by name instead.
         if not query:
+            # **The length is left out of the key here, and only here.** An
+            # empty query ranks every record alike, so the name alone should
+            # order them. With the length in, a merged list put every short
+            # package above every long option path and no option was on the
+            # first screen at all.
             taken = range(min(limit, len(read.ordered)))
-            return [((WORDS, -_CERTAIN, len(read.names[i]), read.names[i]), read.ordered[i]) for i in taken]
+            return [((WORDS, -_CERTAIN, 0, read.names[i]), read.ordered[i]) for i in taken]
         lowered = query.lower().strip()
         tiers = read.tiers(lowered)
         if tiers:
