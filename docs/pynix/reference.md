@@ -159,6 +159,7 @@ Search NixOS module options, using a cached, offline index.
 | `--update-index` | `bool` | Re-evaluate and rebuild the cached index instead of using it. (default: `False`) |
 | `--limit` | `int` | Maximum number of results to print. (default: `20`) |
 | `--json-output` | `bool` | Print results as JSON instead of a human-readable list. (default: `False`) |
+| `--tui` | `bool or None` | Browse the results in a full-screen interface. The default opens it for a person at a terminal who gave no query, and prints a list otherwise. (default: `None`) |
 | `--store` | `str` | Store URI to evaluate with. (default: `'auto'`) |
 
 ### `pynix path-info`
