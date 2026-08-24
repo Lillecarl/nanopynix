@@ -20,7 +20,7 @@ from prompt_toolkit.formatted_text import to_formatted_text
 from nanopynix._typechecking import BEARTYPING
 from pynix._impl._search_tui import SearchSource, SearchTui
 from pynix._markdown import render_markdown
-from pynix._ranking import make_ranker
+from pynix._ranking import Texts, make_ranker
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Callable, Sequence
@@ -48,6 +48,18 @@ STYLE: dict[str, str] = {
 }
 
 
+def option_keys(record: OptionRecord) -> Sequence[str]:
+    """The texts that an exact or a prefix match may hit for one option.
+
+    **Every component of the path, and the whole path.** An option is named
+    `services.openssh.enable`, and a person types `openssh`. Without the
+    components that query reaches the option through the word filter alone,
+    which sorts by the alphabet: measured over 14 752 real options, `openssh`
+    put `services.openssh.allowSFTP` above `services.openssh.enable`.
+    """
+    return (record.name, *record.name.split("."))
+
+
 def rank(records: Sequence[OptionRecord]) -> Callable[[str], Sequence[OptionRecord]]:
     """Return the function that the interface calls on every keystroke.
 
@@ -56,7 +68,7 @@ def rank(records: Sequence[OptionRecord]) -> Callable[[str], Sequence[OptionReco
     behind it, and a package search calls the same function with a haystack
     that is wider than a name.
     """
-    return make_ranker(records, name=lambda record: record.name)
+    return make_ranker(records, Texts(name=lambda record: record.name, keys=option_keys))
 
 
 def detail(record: OptionRecord, width: int) -> StyleAndTextTuples:
