@@ -17,6 +17,11 @@ Issue #123 measured what this saves, on the release build:
 - ``pynix.build`` was 112.2 ms, nearly all of it ``tree_sitter_nix``, which
   pulls ``tree_sitter_config`` and through it ``email_validator``.
 
+One entry is not a subcommand. ``osearch_tui`` is the second mode of one
+subcommand, and the table defers it for the same reason: it costs 115
+``prompt_toolkit`` modules and 69 Markdown ones, and ``pynix osearch <query>``
+prints a list and needs none of them.
+
 ``CLAUDE.md`` bans an import inside a function, and this is not one: the
 mechanism is a package-level ``__getattr__``, the same one that
 ``nanopynix/__init__.py`` uses for its public names.
@@ -39,6 +44,7 @@ if typing.TYPE_CHECKING:
         log as log,
         main as main,
         osearch as osearch,
+        osearch_tui as osearch_tui,
         path_info as path_info,
         repl as repl,
         settings as settings,
@@ -57,6 +63,7 @@ _SUBMODULES: typing.Final[frozenset[str]] = frozenset(
         "log",
         "main",
         "osearch",
+        "osearch_tui",
         "path_info",
         "repl",
         "settings",

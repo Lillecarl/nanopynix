@@ -14,8 +14,9 @@ import pytest
 from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
+from prompt_toolkit.styles.defaults import PROMPT_TOOLKIT_STYLE, WIDGETS_STYLE
 
-from pynix._impl._search_tui import SearchSource, SearchTui
+from pynix._impl._search_tui import STYLE_RULES, SearchSource, SearchTui
 
 #: The escape sequences that a terminal sends for the keys under test. Each one
 #: goes through the real key parser of `prompt_toolkit`.
@@ -153,8 +154,8 @@ async def test_no_match_leaves_no_selection() -> None:
     tui = await _drive(f"zzz{_CTRL_C}")
     assert tui.results == []
     assert tui.selection is None
-    assert tui.list_fragments() == [("class:search.empty", "no match")]
-    assert tui.detail_fragments() == [("class:search.empty", "No match. Change the query.")]
+    assert tui.list_fragments() == [("class:search-tui.empty", "no match")]
+    assert tui.detail_fragments() == [("class:search-tui.empty", "No match. Change the query.")]
 
 
 def test_the_footer_counts_the_matches_and_names_the_subject() -> None:
@@ -172,8 +173,8 @@ def test_the_list_marks_the_selected_row() -> None:
     tui = SearchTui(_source())
     tui.selected = 2
     styles = [fragment[0] for fragment in tui.list_fragments() if fragment[1] != "\n"]
-    assert styles[2] == "class:search.row.selected"
-    assert styles[0] == "class:search.row"
+    assert styles[2] == "class:search-tui.row.selected"
+    assert styles[0] == "class:search-tui.row"
 
 
 def test_the_detail_pane_gets_its_measured_width() -> None:
@@ -187,3 +188,24 @@ def test_the_detail_pane_gets_its_measured_width() -> None:
 def test_a_page_key_falls_back_before_the_first_render() -> None:
     tui = SearchTui(_source())
     assert tui.page() == 10
+
+
+def test_no_style_class_collides_with_a_prompt_toolkit_default() -> None:
+    """A class name must not begin with one that `prompt_toolkit` defines.
+
+    Regression test. `prompt_toolkit` matches a dotted class name against each
+    of its prefixes, and its default style defines `search` as
+    `bg:ansibrightyellow ansiblack` for an incremental search. The classes here
+    were `search.row` and `search.footer`, so the whole list drew black on
+    bright yellow in a real terminal. No headless test saw it: a style reaches
+    the screen through the renderer, and `DummyOutput` renders nothing.
+
+    The rule reaches a `SearchSource` that carries a style of its own as well.
+    This test reads the classes of this module, because they are the ones that
+    every source inherits.
+    """
+    reserved = {name for name, _value in PROMPT_TOOLKIT_STYLE}
+    reserved |= {name for name, _value in WIDGETS_STYLE}
+    for class_name in STYLE_RULES:
+        head = class_name.split(".")[0]
+        assert head not in reserved, f"class:{class_name} inherits the default style of {head!r}"

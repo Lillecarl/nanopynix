@@ -31,6 +31,13 @@ class Osearch(ConfiguredCommand):
 
     json_output: bool = opt(False, short="j", help="Print results as JSON instead of a human-readable list.")
 
+    tui: bool | None = opt(
+        None,
+        negatable=True,
+        help="Browse the results in a full-screen interface. The default opens it "
+        "for a person at a terminal who gave no query, and prints a list otherwise.",
+    )
+
     store: str = store_option("Store URI to evaluate with.")
 
     @override
