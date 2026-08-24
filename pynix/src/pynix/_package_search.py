@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from nanopynix._typechecking import BEARTYPING
-from pynix._ranking import make_ranker
+from pynix._ranking import Texts, make_ranker
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Callable, Mapping, Sequence
@@ -98,56 +98,44 @@ def join(
     return [SearchablePackage(record=record, binaries=tuple(known.get(record.attr, ()))) for record in records]
 
 
+def package_keys(package: SearchablePackage) -> Sequence[str]:
+    """The texts that name one package: its attribute and its pname."""
+    return (package.record.attr, package.record.pname)
+
+
+def package_aliases(package: SearchablePackage) -> Sequence[str]:
+    """Every binary the package installs.
+
+    These are the whole reason `pynix/_programs.py` exists: `ssh-keygen` is
+    not the `mainProgram` of `openssh`, so nothing else reaches it.
+
+    **An alias, and not a key.** `vim` installs `xxd`, and so does `xxd`. A
+    person who types `xxd` means the package of that name, and the two names
+    are the same length, so only a lower tier can put the alias second.
+    """
+    return package.binaries
+
+
 def rank(packages: Sequence[SearchablePackage]) -> Callable[[str], Sequence[SearchablePackage]]:
     """Return the function that a search calls on every keystroke.
 
-    **An exact match on a name comes before any fuzzy one, in three tiers.**
-    The general ranking asks whether each word of the query appears in the
-    haystack, and that question is wrong for a binary: a binary either *is*
-    `rg` or it is not, and "contains rg" is noise. Measured before the tiers,
-    over the real 24 571 packages: `rg` gave 500 results led by `erg` and
-    `rgl`, `convert` gave 500 led by `convertx`, and `ssh-keygen` put
-    `opensshWithKerberos` above `openssh`. Issue #85 asks instead that
-    `pynix search rg` put `ripgrep` in the first three.
+    **An exact match on a name or on a binary comes before any fuzzy one.**
+    Measured before the tiers, over the real 24 571 packages: `rg` gave 500
+    results led by `erg` and `rgl`, `convert` gave 500 led by `convertx`, and
+    `ssh-keygen` put `opensshWithKerberos` above `openssh`. Issue #85 asks
+    instead that `pynix search rg` put `ripgrep` in the first three.
 
-    The tiers:
-
-    1. the attribute or the pname is exactly the query;
-    2. a binary the package installs is exactly the query;
-    3. everything the general ranking finds.
-
-    Inside a tier the shorter attribute wins, then the alphabet. That is what
-    puts `openssh` above `opensshTest` and `opensshWithKerberos`, all three of
-    which really do install `ssh-keygen`.
+    `pynix._ranking` holds the tiers now, and this function names the keys and
+    the haystack that they read. It held its own three tiers until issue #257,
+    which needed the same order over options as well, so that one list can
+    hold both.
     """
-    general = make_ranker(
+    return make_ranker(
         packages,
-        name=lambda package: package.name,
-        haystack=lambda package: package.haystack,
+        Texts(
+            name=lambda package: package.name,
+            keys=package_keys,
+            aliases=package_aliases,
+            haystack=lambda package: package.haystack,
+        ),
     )
-    by_binary: dict[str, list[SearchablePackage]] = {}
-    by_exact_name: dict[str, list[SearchablePackage]] = {}
-    for package in packages:
-        for binary in package.binaries:
-            by_binary.setdefault(binary.lower(), []).append(package)
-        for text in (package.record.attr, package.record.pname):
-            by_exact_name.setdefault(text.lower(), []).append(package)
-
-    def specific_first(found: list[SearchablePackage]) -> list[SearchablePackage]:
-        return sorted(found, key=lambda package: (len(package.name), package.name))
-
-    def rank_query(query: str) -> Sequence[SearchablePackage]:
-        if not query:
-            return general(query)
-        wanted = query.lower().strip()
-        ranked: list[SearchablePackage] = []
-        seen: set[str] = set()
-        for tier in (by_exact_name.get(wanted, []), by_binary.get(wanted, [])):
-            for package in specific_first(tier):
-                if package.name not in seen:
-                    seen.add(package.name)
-                    ranked.append(package)
-        ranked.extend(package for package in general(query) if package.name not in seen)
-        return ranked
-
-    return rank_query
