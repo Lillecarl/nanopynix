@@ -280,16 +280,29 @@ class SearchTui[ItemT]:
             style=merge_styles([STYLE, Style.from_dict(dict(self.source.style))]),
             full_screen=True,
             mouse_support=True,
-            before_render=self._measure_detail_pane,
+            after_render=self._measure_detail_pane,
             input=self.input,
             output=self.output,
         )
 
-    def _measure_detail_pane(self, _application: Application[None]) -> None:
-        """Record how wide the detail pane is, for a renderer that wraps text."""
+    def _measure_detail_pane(self, application: Application[None]) -> None:
+        """Record how wide the detail pane is, for a renderer that wraps text.
+
+        **This runs after a render, and draws again when the width changed.**
+        A window knows its width only once it has been rendered, so the first
+        render has to use `_FALLBACK_WIDTH` -- and before this hook drew again,
+        nothing ever corrected it: the opening screen wrapped its text to 80
+        columns in a pane of 83, and the window then broke a word in half.
+        Measured with a probe that drew its own width: 80 on the first render
+        and 83 on every one after a keypress.
+
+        The second render settles it, because the width then matches and this
+        asks for no third. A terminal that is resized takes the same path.
+        """
         info = self._detail_window.render_info
-        if info is not None:
+        if info is not None and info.window_width != self.detail_width:
             self.detail_width = info.window_width
+            application.invalidate()
 
     def _key_bindings(self) -> KeyBindings:
         """Bind each key to the method that answers it.

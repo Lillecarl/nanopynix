@@ -209,3 +209,37 @@ def test_no_style_class_collides_with_a_prompt_toolkit_default() -> None:
     for class_name in STYLE_RULES:
         head = class_name.split(".")[0]
         assert head not in reserved, f"class:{class_name} inherits the default style of {head!r}"
+
+
+async def test_the_detail_pane_is_drawn_at_its_real_width() -> None:
+    """The opening screen must not draw at the fallback width.
+
+    Regression test. A window knows its width only once it has been rendered,
+    so the first render uses `_FALLBACK_WIDTH`. Nothing then drew again, so the
+    opening screen wrapped its text to 80 columns inside a pane of 83 and the
+    window broke a word in half. Measured with a probe that drew its own width:
+    80 on the first render, and 83 only after a keypress.
+
+    The application now measures after a render and draws once more when the
+    width changed, so the width the pane really has reaches `detail` with no
+    input at all.
+    """
+    widths: list[int] = []
+    source = SearchSource(
+        items=_FRUIT,
+        rank=lambda _query: _FRUIT,
+        row=lambda fruit: fruit.name,
+        detail=lambda _fruit, width: [("", str(widths.append(width) or width))],
+        noun="fruit",
+    )
+    with create_pipe_input() as pipe:
+        tui = SearchTui(source, input=pipe, output=DummyOutput())
+        pipe.send_text(_CTRL_C)
+        with create_app_session(input=pipe, output=DummyOutput()):
+            await tui.application.run_async()
+
+    assert widths, "the detail pane never drew"
+    assert tui.detail_width != 80, "the pane kept the fallback width"
+    assert widths[-1] == tui.detail_width
+    # The second render is what settles it, and no third is asked for.
+    assert widths.count(tui.detail_width) >= 1
