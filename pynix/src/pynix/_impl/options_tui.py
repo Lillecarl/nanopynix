@@ -52,11 +52,11 @@ STYLE: dict[str, str] = {
 
 
 def detail(record: OptionRecord, width: int) -> StyleAndTextTuples:
-    """Draw one option in the pane on the right.
+    """Draw one option in the detail pane under the list.
 
     A description is MyST Markdown, and `render_markdown` is the renderer that
-    the REPL uses for the same text. It takes the width of the pane, because
-    the pane is one half of a split screen and not the whole terminal.
+    the REPL uses for the same text. It takes the width of the pane, which is
+    the full width of the terminal since issue #261 stacked the two panes.
     """
     fragments: StyleAndTextTuples = [
         ("class:option.name", record.name),
