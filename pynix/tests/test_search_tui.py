@@ -62,7 +62,60 @@ def _source() -> SearchSource[_Fruit]:
     )
 
 
-async def _drive(keys: str) -> SearchTui[_Fruit]:
+#: How many lines the tall source draws, which is more than any pane holds.
+_TALL = 200
+
+
+def _tall_source() -> SearchSource[_Fruit]:
+    """A source whose detail is taller than the pane, so a scroll can move it.
+
+    The plain source draws one line, and a window that already shows every
+    line has nowhere to scroll to. A test of the scroll needs text under the
+    fold, which is the shape of a real option: `nixpkgs.pkgs` has 18 lines of
+    description.
+    """
+    plain = _source()
+    lines = "\n".join(f"line {number}" for number in range(_TALL))
+    return SearchSource(
+        items=plain.items,
+        rank=plain.rank,
+        row=plain.row,
+        detail=lambda _fruit, _width: [("", lines)],
+        noun=plain.noun,
+        subject=plain.subject,
+    )
+
+
+#: How long a settled drive waits for the application to draw, in seconds.
+_SETTLE = 0.05
+
+
+async def _drive_drawn(keys: str, source: SearchSource[_Fruit] | None = None) -> SearchTui[_Fruit]:
+    """Feed *keys*, let the application draw, and only then leave it.
+
+    **A queued quit key leaves before the redraw, and this matters here.**
+    `prompt_toolkit` reads whatever is already in the input in the same pass
+    as the first render, so `_drive` never draws the state that its keys
+    made. A test that reads `detail_scroll` cannot tell; a test that reads
+    what the window drew reads the first render every time.
+    """
+    with create_pipe_input() as pipe:
+        tui = SearchTui(source or _source(), input=pipe, output=DummyOutput())
+        with create_app_session(input=pipe, output=DummyOutput()):
+
+            async def press_and_quit() -> None:
+                await anyio.sleep(_SETTLE)
+                pipe.send_text(keys)
+                await anyio.sleep(_SETTLE)
+                pipe.send_text(_CTRL_C)
+
+            async with anyio.create_task_group() as group:
+                group.start_soon(tui.application.run_async)
+                group.start_soon(press_and_quit)
+        return tui
+
+
+async def _drive(keys: str, source: SearchSource[_Fruit] | None = None) -> SearchTui[_Fruit]:
     """Feed *keys* to the real application, and return it once it exits.
 
     The caller ends *keys* with a key that leaves the interface. Without one
@@ -70,7 +123,7 @@ async def _drive(keys: str) -> SearchTui[_Fruit]:
     would hang rather than fail.
     """
     with create_pipe_input() as pipe:
-        tui = SearchTui(_source(), input=pipe, output=DummyOutput())
+        tui = SearchTui(source or _source(), input=pipe, output=DummyOutput())
         pipe.send_text(keys)
         with create_app_session(input=pipe, output=DummyOutput()):
             await tui.application.run_async()
@@ -156,13 +209,48 @@ async def test_a_new_query_puts_the_selection_back_on_the_best_match() -> None:
 
 
 async def test_alt_arrow_scrolls_the_detail_pane() -> None:
-    tui = await _drive(f"{_ALT_DOWN}{_ALT_DOWN}{_CTRL_C}")
+    tui = await _drive_drawn(f"{_ALT_DOWN}{_ALT_DOWN}", _tall_source())
     assert tui.detail_scroll == 2
 
 
 async def test_the_detail_pane_never_scrolls_above_its_top() -> None:
-    tui = await _drive(f"{_ALT_DOWN}{_ALT_UP * 5}{_CTRL_C}")
+    tui = await _drive_drawn(f"{_ALT_DOWN}{_ALT_UP * 5}", _tall_source())
     assert tui.detail_scroll == 0
+
+
+async def test_alt_down_moves_what_the_detail_window_draws() -> None:
+    """The window has to move, and not only the number that counts the keys.
+
+    Regression test for issue #270. `wrap_lines=True` makes `prompt_toolkit`
+    pick the scroll function that never reads `get_vertical_scroll`, so the
+    hook this screen passed was dead code and the pane stood still. Every
+    test above reads `detail_scroll`, which was right the whole time.
+    """
+    tui = await _drive_drawn(f"{_ALT_DOWN * 3}", _tall_source())
+    assert tui.detail_scroll == 3
+    assert tui.detail_top == 3
+
+
+async def test_the_end_of_a_long_detail_is_reachable() -> None:
+    """A scroll that stops early hides the end of the text.
+
+    `default` and `example` are drawn under the description, so an option
+    with a long description hides its own default when this fails.
+    """
+    tui = await _drive_drawn(f"{_ALT_DOWN * _TALL}", _tall_source())
+    assert tui.detail_top > 0
+    assert tui.detail_scroll == tui.detail_top
+
+
+async def test_a_detail_that_fits_does_not_scroll() -> None:
+    """A key held down must not leave the count below the last line.
+
+    The next `alt+up` would then move nothing, once for each press over the
+    end. `_measure_detail_pane` cuts the request back to what the window did.
+    """
+    tui = await _drive_drawn(f"{_ALT_DOWN * 5}")
+    assert tui.detail_scroll == 0
+    assert tui.detail_top == 0
 
 
 async def test_moving_the_selection_returns_the_detail_pane_to_the_top() -> None:
@@ -172,7 +260,7 @@ async def test_moving_the_selection_returns_the_detail_pane_to_the_top() -> None
     a `down` here lands on the last one. `right` states the same thing about
     the scroll and says what it means.
     """
-    tui = await _drive(f"{_ALT_DOWN}{_ALT_DOWN}{_RIGHT}{_CTRL_C}")
+    tui = await _drive_drawn(f"{_ALT_DOWN}{_ALT_DOWN}{_RIGHT}", _tall_source())
     assert tui.selected == 1
     assert tui.detail_scroll == 0
 

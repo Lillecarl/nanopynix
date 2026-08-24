@@ -81,6 +81,17 @@ _FALLBACK_PAGE = 10
 #: pane. It is the conventional width of a terminal.
 _FALLBACK_WIDTH = 80
 
+#: The bottom scroll offset of the detail pane, which is larger than any
+#: terminal is tall on purpose.
+#:
+#: `_scroll_when_linewrapping` puts the scroll between two bounds: never past
+#: the cursor line, and never nearer the bottom than
+#: `height - scroll_offsets.bottom` rows. An offset above the height collapses
+#: the two bounds onto the cursor line, so the cursor line becomes the *top*
+#: line rather than merely a visible one. `detail_cursor` says why the cursor
+#: is what carries the scroll here.
+_TO_THE_TOP = 10_000
+
 #: What the footer says the keys do. A terminal that cannot hold the first
 #: form gets the second, which drops the verbs and keeps the keys.
 _KEYS = "   arrows select   alt+up/down scroll   ctrl-c quit "
@@ -220,6 +231,11 @@ class SearchTui[ItemT]:
     #: How wide the detail pane was at the last render, in columns.
     detail_width: int = _FALLBACK_WIDTH
 
+    #: How many lines the detail of the selected record holds.
+    #: `detail_fragments` writes it, and `detail_cursor` reads it, so that the
+    #: cursor stays inside the text however far the scroll was asked to go.
+    detail_lines: int = 1
+
     #: The grid that the list drew last. `list_fragments` writes it, and the
     #: keys read it, because how far `up` moves is the width of a row and
     #: that is only known once the list has been laid out.
@@ -265,7 +281,16 @@ class SearchTui[ItemT]:
         self.detail_scroll = 0
 
     def scroll_detail(self, delta: int) -> None:
-        """Scroll the detail pane by *delta* lines, and never above the top."""
+        """Scroll the detail pane by *delta* lines, and never above the top.
+
+        **The bottom end is not here, and it cannot be.** A window knows how
+        far it can scroll only once it has drawn, and a key can arrive before
+        the first render: `prompt_toolkit` reads whatever is already in the
+        input before it draws. Two other places hold that end instead.
+        `detail_cursor` keeps the cursor inside the text, and
+        `_measure_detail_pane` cuts this count back to where the window really
+        stopped.
+        """
         self.detail_scroll = max(0, self.detail_scroll + delta)
 
     def page(self) -> int:
@@ -320,7 +345,38 @@ class SearchTui[ItemT]:
         item = self.selection
         if item is None:
             return [("class:search-tui.empty", "No match. Change the query.")]
-        return self.source.detail(item, self.detail_width)
+        fragments = self.source.detail(item, self.detail_width)
+        self.detail_lines = 1 + sum(text.count("\n") for _style, text, *_rest in fragments)
+        return fragments
+
+    def detail_cursor(self) -> Point:
+        """Where the detail pane is scrolled to, as a cursor in its own text.
+
+        **A window that wraps its lines never reads `get_vertical_scroll`.**
+        `prompt_toolkit` picks the scroll function from `wrap_lines`, and only
+        the half that does not wrap reads that hook. So the pane stood still
+        while `alt+down` counted: measured on a 160-column terminal, twelve
+        presses on `nixpkgs.pkgs` left the first line of the description on
+        the first row, and the `default` under an 18-line description could
+        not be reached at all. Issue #270.
+
+        The half that wraps scrolls to keep the cursor of the content in
+        view, so the cursor is where the scroll goes. `_TO_THE_TOP` is the
+        other half of that: it makes the cursor line the *top* line rather
+        than merely a visible one.
+        """
+        return Point(x=0, y=min(self.detail_scroll, max(0, self.detail_lines - 1)))
+
+    @property
+    def detail_top(self) -> int:
+        """The first line of the detail that the window really drew.
+
+        `detail_scroll` is what the keys asked for, and this is what the
+        window did with it. The two were not the same until issue #270, and a
+        test that reads the first one alone cannot tell.
+        """
+        info = self._detail_window.render_info
+        return 0 if info is None else info.vertical_scroll
 
     def footer_fragments(self) -> StyleAndTextTuples:
         """The status line, which counts the records and names the keys.
@@ -370,11 +426,11 @@ class SearchTui[ItemT]:
 
     def _build_detail_window(self) -> Window:
         return Window(
-            content=FormattedTextControl(self.detail_fragments),
+            content=FormattedTextControl(self.detail_fragments, get_cursor_position=self.detail_cursor),
             height=Dimension(weight=_DETAIL_WEIGHT, preferred=_PANE),
             wrap_lines=True,
             always_hide_cursor=True,
-            get_vertical_scroll=lambda _window: self.detail_scroll,
+            scroll_offsets=ScrollOffsets(bottom=_TO_THE_TOP),
         )
 
     def _build_application(self) -> Application[None]:
@@ -424,11 +480,21 @@ class SearchTui[ItemT]:
 
         The second render settles it, because the width then matches and this
         asks for no third. A terminal that is resized takes the same path.
+
+        It also cuts the scroll back to what the window really did. Read the
+        line that does it for the reason.
         """
         info = self._detail_window.render_info
-        if info is not None and info.window_width != self.detail_width:
+        if info is None:
+            return
+        if info.window_width != self.detail_width:
             self.detail_width = info.window_width
             application.invalidate()
+        # **The request meets the answer here.** The window refuses to scroll
+        # past the end of its text, so a key held down would otherwise leave
+        # the count far below the last line, and the first `alt+up` after it
+        # would move nothing.
+        self.detail_scroll = min(self.detail_scroll, info.vertical_scroll)
 
     def _key_bindings(self) -> KeyBindings:
         """Bind each key to the method that answers it.
