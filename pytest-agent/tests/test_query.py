@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -674,3 +675,107 @@ def test_a_label_whose_every_run_recorded_nothing_says_that_rather_than_guessing
     assert run(["last-failures", "--run", "nightly"]) == 1
 
     assert "that run recorded nothing" in capsys.readouterr().err
+
+
+def _touch_history(agent_dir: Path, when: float) -> None:
+    """Record that the store at *agent_dir* last answered at *when*."""
+    history = agent_dir / "history.jsonl"
+    history.write_text('{"run": 1}\n', encoding="utf-8")
+    os.utime(history, (when, when))
+
+
+def test_a_query_reads_the_store_of_the_newest_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A repository of several projects holds several stores.
+
+    pytest writes the store under its own rootdir, and a project with its own
+    `pytest.ini` is its own rootdir. So `pytest sub/tests/x.py` from the top of
+    a repository writes to `sub/.pytest-agent`, and the upward search alone
+    found `./.pytest-agent` and answered about a different suite. That answer
+    reads exactly like the one the caller asked for, which is what makes the
+    defect costly.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PYTEST_AGENT_DIR", raising=False)
+    _write_run(tmp_path / ".pytest-agent", 1, [_record("tests/test_old.py::test_stale", "failed", **_crash("A: old"))])
+    _touch_history(tmp_path / ".pytest-agent", 1000.0)
+    _write_run(
+        tmp_path / "sub" / ".pytest-agent",
+        7,
+        [_record("tests/test_new.py::test_fresh", "failed", **_crash("B: fresh"))],
+    )
+    _touch_history(tmp_path / "sub" / ".pytest-agent", 2000.0)
+
+    assert run(["digest"]) == 0
+    printed = capsys.readouterr().out
+    assert "sub/.pytest-agent/runs-0007" in printed
+    assert "B: fresh" in printed
+    assert "test_stale" not in printed
+
+
+def test_the_nearest_store_wins_when_no_run_is_newer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """With no history to compare, the answer stays what the upward search gave."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PYTEST_AGENT_DIR", raising=False)
+    _write_run(tmp_path / ".pytest-agent", 1, [_record("tests/test_a.py::test_near", "failed", **_crash("A: near"))])
+    _write_run(
+        tmp_path / "sub" / ".pytest-agent", 1, [_record("tests/test_b.py::test_far", "failed", **_crash("B: far"))]
+    )
+
+    assert run(["digest"]) == 0
+    printed = capsys.readouterr().out
+    assert "A: near" in printed
+
+
+def test_an_explicit_dir_still_wins(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--dir` names one store, and the search must not overrule it."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PYTEST_AGENT_DIR", raising=False)
+    _write_run(tmp_path / ".pytest-agent", 1, [_record("tests/test_a.py::test_near", "failed", **_crash("A: near"))])
+    _touch_history(tmp_path / ".pytest-agent", 1000.0)
+    _write_run(
+        tmp_path / "sub" / ".pytest-agent", 7, [_record("tests/test_b.py::test_far", "failed", **_crash("B: far"))]
+    )
+    _touch_history(tmp_path / "sub" / ".pytest-agent", 2000.0)
+
+    assert run(["digest", "--dir", ".pytest-agent"]) == 0
+    printed = capsys.readouterr().out
+    assert "A: near" in printed
+    assert "B: far" not in printed
+
+
+def test_the_search_skips_a_directory_that_holds_no_store(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A build tree or a checkout must not cost the search a walk.
+
+    The store lives four levels down, one past `SEARCH_DEPTH`, and `.git` and
+    `node_modules` beside it are the two that a real repository makes large.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PYTEST_AGENT_DIR", raising=False)
+    (tmp_path / ".git" / "objects").mkdir(parents=True)
+    (tmp_path / "node_modules" / "pkg").mkdir(parents=True)
+    _write_run(tmp_path / ".pytest-agent", 1, [_record("tests/test_a.py::test_near", "failed", **_crash("A: near"))])
+    _touch_history(tmp_path / ".pytest-agent", 1000.0)
+    deep = tmp_path / "a" / "b" / "c" / ".pytest-agent"
+    _write_run(deep, 9, [_record("tests/test_c.py::test_deep", "failed", **_crash("C: deep"))])
+    _touch_history(deep, 3000.0)
+
+    assert run(["digest"]) == 0
+    printed = capsys.readouterr().out
+    assert "A: near" in printed
+    assert "C: deep" not in printed
