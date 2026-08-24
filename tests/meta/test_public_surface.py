@@ -228,10 +228,24 @@ def test_the_impl_table_names_every_module_that_is_there() -> None:
     other suite stayed green.
 
     The files on disk are the truth here, so this derives from them.
+
+    **A module whose name starts with an underscore is not in the table, and
+    must not be.** The table answers an attribute read of ``pynix._impl``, and
+    a subcommand is what reads one: ``pynix.osearch`` reaches
+    ``_impl.osearch``, so the name of the module is the name of the subcommand
+    and never carries an underscore. ``_impl._search_tui`` is a library that
+    another module of ``_impl`` imports directly, by its own name, at the top
+    of the file. Nothing reads it off the package, so the table would defer an
+    import that no attribute read ever triggers.
+
+    The rule still catches what it exists to catch. A subcommand module is
+    named after its subcommand, so it has no underscore and stays in the set.
     """
     package = importlib.import_module("pynix._impl")
     directory = Path(str(package.__file__)).parent
-    on_disk = {path.stem for path in directory.glob("*.py") if path.stem != "__init__"}
+    on_disk = {
+        path.stem for path in directory.glob("*.py") if path.stem != "__init__" and not path.stem.startswith("_")
+    }
 
     assert on_disk, "no implementation modules found; the glob is wrong"
 
