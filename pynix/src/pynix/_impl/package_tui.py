@@ -100,7 +100,13 @@ def _wrapped(text: str, width: int) -> str:
 
 
 def source(packages: Sequence[SearchablePackage], subject: str) -> SearchSource[SearchablePackage]:
-    """Describe the packages to the generic interface."""
+    """Describe the packages to the generic interface.
+
+    *subject* says where the answers came from, and the footer prints it. Pass
+    `ProgramIndex.origin` in it, because a package search reads two sources
+    that disagree by design: the walk describes the nixpkgs the caller pinned,
+    and the binaries describe one channel release.
+    """
     return SearchSource(
         items=packages,
         rank=rank(packages),
