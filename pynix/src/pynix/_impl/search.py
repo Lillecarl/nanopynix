@@ -36,6 +36,7 @@ from libpynix import human_at_terminal
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import NixError
 from pynix import _impl
+from pynix._impl._quiet import quiet_terminal
 from pynix._option_search import rank as rank_options
 from pynix._options import OptionRecord, fetch_option_doc_list
 from pynix._package_search import SearchablePackage, join, rank as rank_packages
@@ -259,15 +260,19 @@ async def run_search(command: Search) -> None:
 
     found = _read(command, target, ask, cached)
     if _use_tui(command):
-        # This attribute read is what imports the interface. `pynix._impl`
-        # holds the PEP 562 table that defers it, so a caller who gave a query
-        # pays for neither `prompt_toolkit` nor the Markdown renderer.
-        await _impl.merged_tui.browse(
-            found.options,
-            found.packages,
-            subject=found.subject,
-            initial_query=command.query or "",
-        )
+        # The interface draws the whole terminal. `quiet_terminal` says what
+        # one stray line of stderr does to the screen.
+        with quiet_terminal():
+            # This attribute read is what imports the interface.
+            # `pynix._impl` holds the PEP 562 table that defers it, so a
+            # caller who gave a query pays for neither `prompt_toolkit` nor
+            # the Markdown renderer.
+            await _impl.merged_tui.browse(
+                found.options,
+                found.packages,
+                subject=found.subject,
+                initial_query=command.query or "",
+            )
         return
 
     if command.query is not None:
