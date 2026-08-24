@@ -28,7 +28,8 @@ argparse parser, answers a shell completion and dispatches::
 :mod:`libpynix.command` holds that layer, and nothing in it knows about Nix.
 :mod:`libpynix.nix_options` holds the three options that every Nix CLI takes,
 and declares them without reading them -- read that module for why the two
-halves are apart.
+halves are apart. :mod:`libpynix.agent_harness` answers one question about
+the caller: whether a person is at the terminal, or an AI-agent harness.
 
 Issue #222 made this a library. Before it, ``pynix/src/pynix/_cli.py`` was
 359 lines and ``easykubenix``'s ``ekn/src/ekn/_cli.py`` was a copy of them.
@@ -48,12 +49,21 @@ Issue #222 made this a library. Before it, ``pynix/src/pynix/_cli.py`` was
 #
 # A lazy table defers a cost that some callers never pay, which is why
 # `nanopynix` has one: a program uses one engine and not both. Nothing here
-# is like that -- every name below leads to `command`, and a program that
-# imports this library builds a parser. `argcomplete` is the one import worth
-# deferring, at 39 further modules, and `command.complete` already defers it.
+# is like that -- a program that imports this library builds a parser.
+# `argcomplete` is the one import worth deferring, at 39 further modules, and
+# `command.complete` already defers it.
+#
+# `agent_harness` is the one module that does not lead to `command`, and it
+# is free: it imports `os` and `sys`, which every interpreter holds already,
+# so the count above stays at 92.
 
 from __future__ import annotations
 
+from libpynix.agent_harness import (
+    HARNESS_ENV_VARS as HARNESS_ENV_VARS,
+    detect_agent_harness as detect_agent_harness,
+    human_at_terminal as human_at_terminal,
+)
 from libpynix.command import (
     MISSING as MISSING,
     Command as Command,
