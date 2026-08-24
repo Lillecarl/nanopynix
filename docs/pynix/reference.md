@@ -144,24 +144,6 @@ Show the build log for a store path
 | `path` | `str` | Store path whose build log should be printed. *(required)* |
 | `--store` | `str` | Store URI to query. (default: `'auto'`) |
 
-### `pynix osearch`
-
-Search NixOS module options, using a cached, offline index.
-
-| Argument | Type | Help |
-| --- | --- | --- |
-| `query` | `str or None` | Search query. Omit to just (re)build the index. (default: `None`) |
-| `--file` | `str or None` | Evaluate FILE as a Nix expression. FILE is a path, a lookup path, a URL, or a flake reference, and it may end with '#' and an attribute path. (default: `None`) |
-| `--attr` | `str or None` | Dot-separated attribute path within the evaluation result. (default: `None`) |
-| `--flake` | `str or None` | Evaluate FLAKE, optionally with a '#'-separated attribute path. (default: `None`) |
-| `--options-attr` | `str or None` | Attribute path to the options tree, relative to the target. The default tries 'options'. (default: `None`) |
-| `--lib-attr` | `str or None` | Attribute path to nixpkgs lib, relative to the target. The default tries 'lib', then the 'lib' of the package set that the target holds. (default: `None`) |
-| `--update-index` | `bool` | Re-evaluate and rebuild the cached index instead of using it. (default: `False`) |
-| `--limit` | `int` | Maximum number of results to print. (default: `20`) |
-| `--json-output` | `bool` | Print results as JSON instead of a human-readable list. (default: `False`) |
-| `--tui` | `bool or None` | Browse the results in a full-screen interface. The default opens it for a person at a terminal who gave no query, and prints a list otherwise. (default: `None`) |
-| `--store` | `str` | Store URI to evaluate with. (default: `'auto'`) |
-
 ### `pynix path-info`
 
 Show information about a store path
@@ -200,6 +182,24 @@ Open an interactive Nix evaluation session.
 | `--file` | `str or None` | Evaluate FILE as a Nix expression. FILE is a path, a lookup path, a URL, or a flake reference, and it may end with '#' and an attribute path. (default: `None`) |
 | `--attr` | `str or None` | Dot-separated attribute path within the evaluation result. (default: `None`) |
 | `--flake` | `str or None` | Evaluate FLAKE, optionally with a '#'-separated attribute path. (default: `None`) |
+
+### `pynix search`
+
+Search NixOS module options, using a cached, offline index.
+
+| Argument | Type | Help |
+| --- | --- | --- |
+| `query` | `str or None` | Search query. Omit to just (re)build the index. (default: `None`) |
+| `--file` | `str or None` | Evaluate FILE as a Nix expression. FILE is a path, a lookup path, a URL, or a flake reference, and it may end with '#' and an attribute path. (default: `None`) |
+| `--attr` | `str or None` | Dot-separated attribute path within the evaluation result. (default: `None`) |
+| `--flake` | `str or None` | Evaluate FLAKE, optionally with a '#'-separated attribute path. (default: `None`) |
+| `--options-attr` | `str or None` | Attribute path to the options tree, relative to the target. The default tries 'options'. (default: `None`) |
+| `--lib-attr` | `str or None` | Attribute path to nixpkgs lib, relative to the target. The default tries 'lib', then the 'lib' of the package set that the target holds. (default: `None`) |
+| `--update-index` | `bool` | Re-evaluate and rebuild the cached index instead of using it. (default: `False`) |
+| `--limit` | `int` | Maximum number of results to print. (default: `20`) |
+| `--json-output` | `bool` | Print results as JSON instead of a human-readable list. (default: `False`) |
+| `--tui` | `bool or None` | Browse the results in a full-screen interface. The default opens it for a person at a terminal who gave no query, and prints a list otherwise. (default: `None`) |
+| `--store` | `str` | Store URI to evaluate with. (default: `'auto'`) |
 
 ### `pynix store`
 

@@ -6,7 +6,7 @@ code blocks hold Nix with no language tag. Rich renders none of those
 correctly on its own, so this module subclasses the Rich Markdown elements
 that get it wrong.
 
-The REPL prints this with `print_formatted_text`, and the `osearch` TUI puts
+The REPL prints this with `print_formatted_text`, and the `search` TUI puts
 it in the detail pane. Both are heavy readers, and neither is a subcommand
 module: this module imports `rich` and `myst_parser`, so only a module under
 `pynix._impl` may import it. `pynix._impl` says why that rule exists.
@@ -237,7 +237,7 @@ def render_markdown(text: str, width: int | None = None) -> ANSI:
     """Render Markdown into formatted ANSI text bounded by the longest line.
 
     *width* is how many columns the result may use. The REPL prints into the
-    whole terminal and gives no width, so the terminal decides. The `osearch`
+    whole terminal and gives no width, so the terminal decides. The `search`
     interface draws into one pane of a split screen, and gives the width of
     that pane.
     """

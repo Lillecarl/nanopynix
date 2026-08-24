@@ -20,7 +20,7 @@
     };
     # A real MyST description, of the shape nixpkgs writes: paragraphs, a Nix
     # code fence with no language tag, and a colon fence. The detail pane of
-    # `pynix osearch --tui` renders these through `pynix._markdown`, so the
+    # `pynix search --tui` renders these through `pynix._markdown`, so the
     # fixture has to carry one or that renderer is never tested on real prose.
     configFiles = lib.mkOption {
       type = lib.types.listOf lib.types.str;

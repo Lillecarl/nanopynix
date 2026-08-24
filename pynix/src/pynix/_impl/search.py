@@ -1,8 +1,8 @@
-"""The implementation of the ``pynix osearch`` command.
+"""The implementation of the ``pynix search`` command.
 
 Search NixOS module options, using a cached, offline index.
 
-``pynix.osearch`` holds the command class and its options, and this module holds
+``pynix.search`` holds the command class and its options, and this module holds
 what ``run`` needs. ``pynix._impl`` says why: the parser loads every subcommand module
 on every start, and none of these imports is needed to list an option.
 """
@@ -25,21 +25,21 @@ from pynix import _impl
 from pynix._options import OptionRecord, fetch_option_doc_list
 from pynix._search_target import LIB_CHAIN, OPTIONS_CHAIN, Resolved, resolve
 from pynix._util import error_console, error_exit, eval_session, print_json, report_and_exit
-from pynix.osearch import Osearch
+from pynix.search import Search
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
     evaluate_target,
 )
 
-logger = structlog.get_logger("pynix.osearch")
+logger = structlog.get_logger("pynix.search")
 console = Console()
 
 
 def _cache_dir() -> Path:
-    """Return (creating if needed) the XDG cache directory for osearch indexes."""
+    """Return (creating if needed) the XDG cache directory for search indexes."""
     cache_home = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    path = cache_home / "pynix" / "osearch"
+    path = cache_home / "pynix" / "search"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -65,8 +65,8 @@ def _save_cache(path: Path, target: EvaluationTarget, records: list[OptionRecord
     path.write_text(json.dumps(payload))
 
 
-async def run_osearch(command: Osearch) -> None:
-    """The body of :meth:`pynix.osearch.Osearch.run`."""
+async def run_search(command: Search) -> None:
+    """The body of :meth:`pynix.search.Search.run`."""
     target = EvaluationTarget.from_command(command)
     try:
         target.validate(required=True)
@@ -84,7 +84,7 @@ async def run_osearch(command: Osearch) -> None:
         # This attribute read is what imports the interface. `pynix._impl`
         # holds the PEP 562 table that defers it, so a caller who gave a query
         # pays for neither `prompt_toolkit` nor the Markdown renderer.
-        await _impl.osearch_tui.browse(
+        await _impl.options_tui.browse(
             records,
             subject=_target_description(target),
             initial_query=command.query or "",
@@ -95,7 +95,7 @@ async def run_osearch(command: Osearch) -> None:
         _search(command, records, command.query)
 
 
-def _use_tui(command: Osearch) -> bool:
+def _use_tui(command: Search) -> bool:
     """Say whether to open the full-screen interface rather than print a list.
 
     `--tui` and `--no-tui` answer this outright. Without one of them, the
@@ -111,7 +111,7 @@ def _use_tui(command: Osearch) -> bool:
     return human_at_terminal()
 
 
-async def _build_index(command: Osearch, target: EvaluationTarget, cache_path: Path) -> list[OptionRecord]:
+async def _build_index(command: Search, target: EvaluationTarget, cache_path: Path) -> list[OptionRecord]:
     async with eval_session(command.store) as (_nix, _store, session):
         try:
             target_value = await evaluate_target(target, session, auto_call_file=True)
@@ -143,7 +143,7 @@ def _required(found: Resolved | None, what: str, tried: Sequence[str], flag: str
     return found
 
 
-def _search(command: Osearch, records: list[OptionRecord], query: str) -> None:
+def _search(command: Search, records: list[OptionRecord], query: str) -> None:
     by_name = {record.name: record for record in records}
     matches = process.extract(query, list(by_name), scorer=fuzz.WRatio, limit=command.limit)
     results = [by_name[name] for name, _score, _index in matches]

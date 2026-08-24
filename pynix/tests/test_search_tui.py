@@ -16,6 +16,7 @@ from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.styles.defaults import PROMPT_TOOLKIT_STYLE, WIDGETS_STYLE
 
+from pynix._impl import options_tui, package_tui
 from pynix._impl._search_tui import STYLE_RULES, SearchSource, SearchTui
 
 #: The escape sequences that a terminal sends for the keys under test. Each one
@@ -200,15 +201,25 @@ def test_no_style_class_collides_with_a_prompt_toolkit_default() -> None:
     bright yellow in a real terminal. No headless test saw it: a style reaches
     the screen through the renderer, and `DummyOutput` renders nothing.
 
-    The rule reaches a `SearchSource` that carries a style of its own as well.
-    This test reads the classes of this module, because they are the ones that
-    every source inherits.
+    **Every style dictionary of the program is here, and not this one alone.**
+    The first version of this test read `STYLE_RULES` only, because those are
+    the classes each source inherits. A `SearchSource` carries classes of its
+    own, and issue #257 renamed `osearch` to `search` across the tree, which
+    turned `osearch.name` into `search.name` in the detail pane of an option
+    and reintroduced the same defect one layer down. One test over every
+    dictionary is what catches that.
     """
     reserved = {name for name, _value in PROMPT_TOOLKIT_STYLE}
     reserved |= {name for name, _value in WIDGETS_STYLE}
-    for class_name in STYLE_RULES:
-        head = class_name.split(".")[0]
-        assert head not in reserved, f"class:{class_name} inherits the default style of {head!r}"
+    dictionaries = {
+        "pynix._impl._search_tui.STYLE_RULES": STYLE_RULES,
+        "pynix._impl.options_tui.STYLE": options_tui.STYLE,
+        "pynix._impl.package_tui.STYLE": package_tui.STYLE,
+    }
+    for where, rules in dictionaries.items():
+        for class_name in rules:
+            head = class_name.split(".")[0]
+            assert head not in reserved, f"{where}: class:{class_name} inherits the default style of {head!r}"
 
 
 async def test_the_detail_pane_is_drawn_at_its_real_width() -> None:

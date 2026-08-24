@@ -1,4 +1,4 @@
-"""Tests for the Markdown renderer that the REPL and `osearch` share.
+"""Tests for the Markdown renderer that the REPL and `search` share.
 
 A NixOS option description is MyST Markdown, and Rich knows CommonMark. Each
 test here pins one place where the two disagree, and each one comes from a real

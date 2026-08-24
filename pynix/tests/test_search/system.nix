@@ -1,6 +1,6 @@
 # A minimal nixosSystem-shaped value: `options`/`config` from `lib.evalModules`
 # plus a top-level `pkgs` sibling, exactly like the real `nixosSystem` wrapper
-# exposes -- this is the shape `pynix osearch` expects by default (`options`
+# exposes -- this is the shape `pynix search` expects by default (`options`
 # and `pkgs.lib`).
 { }:
 let

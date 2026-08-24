@@ -2,7 +2,7 @@
 
 ``pynix._impl._search_tui`` draws the screen and knows nothing about Nix. This
 module is the half that knows what a package is: how to name one in the list,
-and how to draw one in the detail pane. ``pynix._impl.osearch_tui`` is the same
+and how to draw one in the detail pane. ``pynix._impl.options_tui`` is the same
 half for a NixOS option, and the two share the interface and the ranking.
 
 It imports ``prompt_toolkit``, so it lives under ``pynix._impl`` and no

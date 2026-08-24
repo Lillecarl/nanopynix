@@ -18,7 +18,7 @@ includes = ["*.nix"]
 # only those two would silence that error and leave the marker files to be
 # re-broken on the next run, so the whole fixture tree is out of scope.
 #
-# Deliberately not excluded: `pynix/tests/test_osearch/*.nix`, which are
+# Deliberately not excluded: `pynix/tests/test_search/*.nix`, which are
 # ordinary option-tree fixtures with no markers and nothing positional.
 #
 # Scoped to this formatter rather than made a global exclude because the one

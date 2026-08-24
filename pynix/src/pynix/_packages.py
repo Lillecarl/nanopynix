@@ -180,7 +180,7 @@ def cache_path(identity: str) -> Path:
     is the source of nixpkgs in the store, and a store path is the hash of what
     is under it. Evaluation is pure, so the same path gives the same walk for
     ever: a hit is exactly right, and a different pin simply has a different
-    file. `osearch` keys its own cache by the target it was given, and has to
+    file. `search` keys its own cache by the target it was given, and has to
     trust that; this one cannot be stale.
     """
     cache_home = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))

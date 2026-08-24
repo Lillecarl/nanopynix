@@ -192,7 +192,7 @@ async def test_the_flake_branch_rebuilds_the_path_from_the_names() -> None:
 
 
 async def test_the_empty_search_reads_the_fragment_as_one_path() -> None:
-    """`pynix osearch` passes no search, and no search applies no prefix.
+    """`pynix search` passes no search, and no search applies no prefix.
 
     It also offers no empty candidate, because it has no default to resolve.
     """

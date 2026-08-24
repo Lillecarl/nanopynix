@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from nanopynix_testing.nix_environment import NixTestEnvironment
 
 _FIXTURES = Path(__file__).parent / "test_search_target"
-_NIXOS_SHAPE = Path(__file__).parent / "test_osearch" / "system.nix"
+_NIXOS_SHAPE = Path(__file__).parent / "test_search" / "system.nix"
 
 
 @pytest.fixture

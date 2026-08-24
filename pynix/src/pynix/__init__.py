@@ -15,9 +15,9 @@ from pynix.develop import Develop, PrintDevEnv
 from pynix.eval import Eval
 from pynix.flake import Flake
 from pynix.log import Log
-from pynix.osearch import Osearch
 from pynix.path_info import PathInfo
 from pynix.repl import Repl
+from pynix.search import Search
 from pynix.store import Store
 
 # **One list, and the order is the order `pynix --help` prints.**
@@ -35,7 +35,7 @@ from pynix.store import Store
 Pynix = group(
     "pynix",
     help="pynix — nanopynix CLI",
-    subcommands=[Build, Config, Eval, Derivation, Develop, Flake, Log, Osearch, PathInfo, PrintDevEnv, Repl, Store],
+    subcommands=[Build, Config, Eval, Derivation, Develop, Flake, Log, PathInfo, PrintDevEnv, Repl, Search, Store],
 )
 
 

@@ -4,7 +4,7 @@
 on every Sphinx build -- but only into the *rendered site*. The copy in the
 repository refreshes only when a human runs the generator and commits, and
 nothing checked that they had. Measured: it was 252 lines stale, missing
-``pynix lsp`` (a subcommand at the time), ``pynix osearch`` and two
+``pynix lsp`` (a subcommand at the time), ``pynix search`` and two
 ``pynix build`` flags outright.
 
 This compares rendered-now against checked-in and does not write, so a stale
