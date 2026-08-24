@@ -7,8 +7,11 @@ query on the command line pays for neither. Measured: this module adds 115
 ``prompt_toolkit`` modules and 69 Markdown ones.
 
 ``pynix._impl._search_tui`` draws the screen, and knows nothing about Nix. This
-module is the half that knows what a NixOS option is: how to rank one, and how
-to draw one in the detail pane.
+module is the half that knows how to draw a NixOS option in the detail pane.
+
+**The ranking is not here.** ``pynix._option_search`` holds it, so that a
+caller who prints a list, and a caller who merges options with packages, reach
+it without importing the screen. Issue #257 moved it.
 """
 
 from __future__ import annotations
@@ -20,10 +23,10 @@ from prompt_toolkit.formatted_text import to_formatted_text
 from nanopynix._typechecking import BEARTYPING
 from pynix._impl._search_tui import SearchSource, SearchTui
 from pynix._markdown import render_markdown
-from pynix._ranking import Texts, make_ranker
+from pynix._option_search import rank
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
 
     from prompt_toolkit.formatted_text import StyleAndTextTuples
 
@@ -46,29 +49,6 @@ STYLE: dict[str, str] = {
     "option.label": "bold",
     "option.path": "ansigreen",
 }
-
-
-def option_keys(record: OptionRecord) -> Sequence[str]:
-    """The texts that an exact or a prefix match may hit for one option.
-
-    **Every component of the path, and the whole path.** An option is named
-    `services.openssh.enable`, and a person types `openssh`. Without the
-    components that query reaches the option through the word filter alone,
-    which sorts by the alphabet: measured over 14 752 real options, `openssh`
-    put `services.openssh.allowSFTP` above `services.openssh.enable`.
-    """
-    return (record.name, *record.name.split("."))
-
-
-def rank(records: Sequence[OptionRecord]) -> Callable[[str], Sequence[OptionRecord]]:
-    """Return the function that the interface calls on every keystroke.
-
-    An option matches on its name alone, so the haystack and the name are the
-    same text here. `pynix._ranking` holds the algorithm and the measurements
-    behind it, and a package search calls the same function with a haystack
-    that is wider than a name.
-    """
-    return make_ranker(records, Texts(name=lambda record: record.name, keys=option_keys))
 
 
 def detail(record: OptionRecord, width: int) -> StyleAndTextTuples:

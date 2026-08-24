@@ -28,12 +28,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from nanopynix._typechecking import BEARTYPING
-from pynix._ranking import Texts, make_ranker
+from pynix._ranking import RESULTS, Texts, make_ranker, make_tiered_ranker
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Callable, Mapping, Sequence
 
     from pynix._packages import PackageRecord
+    from pynix._ranking import RankKey
 
 
 @dataclass(frozen=True)
@@ -116,6 +117,25 @@ def package_aliases(package: SearchablePackage) -> Sequence[str]:
     return package.binaries
 
 
+def texts() -> Texts[SearchablePackage]:
+    """How a ranker reads one package."""
+    return Texts(
+        name=lambda package: package.name,
+        keys=package_keys,
+        aliases=package_aliases,
+        haystack=lambda package: package.haystack,
+    )
+
+
+def tiered(
+    packages: Sequence[SearchablePackage],
+    *,
+    limit: int = RESULTS,
+) -> Callable[[str], Sequence[tuple[RankKey, SearchablePackage]]]:
+    """The ranking, with the key that a merge sorts on."""
+    return make_tiered_ranker(packages, texts(), limit=limit)
+
+
 def rank(packages: Sequence[SearchablePackage]) -> Callable[[str], Sequence[SearchablePackage]]:
     """Return the function that a search calls on every keystroke.
 
@@ -130,12 +150,4 @@ def rank(packages: Sequence[SearchablePackage]) -> Callable[[str], Sequence[Sear
     which needed the same order over options as well, so that one list can
     hold both.
     """
-    return make_ranker(
-        packages,
-        Texts(
-            name=lambda package: package.name,
-            keys=package_keys,
-            aliases=package_aliases,
-            haystack=lambda package: package.haystack,
-        ),
-    )
+    return make_ranker(packages, texts())
