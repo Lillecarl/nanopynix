@@ -29,13 +29,16 @@ of the difference between 24 571 here and 148 251 there.
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from nanopynix._typechecking import BEARTYPING
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from nanopynix import AsyncEvalSession, AsyncValue
 
@@ -128,6 +131,27 @@ async def fetch_package_list(
     return records
 
 
+def _record_fields(record: PackageRecord) -> dict[str, object]:
+    """One record, in the shape the walk itself produces.
+
+    **Not `dataclasses.asdict`.** That writes the field names of the class, and
+    `_parse_record` reads the names the Nix expression uses: `mainProgram`
+    against `main_program`. The two disagreed, so every cached package lost its
+    main program and `rg` stopped finding `ripgrep` from a warm cache. Writing
+    the walk's own shape keeps one parser for both paths, which is the only
+    thing that makes them agree by construction.
+    """
+    return {
+        "attr": record.attr,
+        "pname": record.pname,
+        "version": record.version,
+        "description": record.description,
+        "mainProgram": record.main_program,
+        "broken": record.broken,
+        "unfree": record.unfree,
+    }
+
+
 def _optional_str(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
@@ -142,3 +166,111 @@ def _parse_record(entry: Mapping[str, object]) -> PackageRecord:
         broken=bool(entry.get("broken", False)),
         unfree=bool(entry.get("unfree", False)),
     )
+
+
+#: Bump this when `PackageRecord` gains or loses a field. A cache written by an
+#: older `pynix` is then ignored rather than read into the wrong shape.
+_CACHE_VERSION = 1
+
+
+def cache_path(identity: str) -> Path:
+    """Where the walk of the nixpkgs named by *identity* is kept.
+
+    **The identity is a store path, so the cache needs no expiry.** `pkgs.path`
+    is the source of nixpkgs in the store, and a store path is the hash of what
+    is under it. Evaluation is pure, so the same path gives the same walk for
+    ever: a hit is exactly right, and a different pin simply has a different
+    file. `osearch` keys its own cache by the target it was given, and has to
+    trust that; this one cannot be stale.
+    """
+    cache_home = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    directory = cache_home / "pynix" / "packages"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / f"{Path(identity).name}.json"
+
+
+def _cached_entries(path: Path) -> list[object] | None:
+    """The package entries in the cache at *path*, or `None` for anything else.
+
+    A cache is a convenience, so a file that is missing, truncated or written
+    by another version is not an error: the caller walks nixpkgs again.
+    """
+    if not path.is_file():
+        return None
+    try:
+        payload: object = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    fields = cast("dict[str, object]", payload)
+    if fields.get("version") != _CACHE_VERSION:
+        return None
+    packages = fields.get("packages")
+    return cast("list[object]", packages) if isinstance(packages, list) else None
+
+
+def load_cache(path: Path) -> list[PackageRecord] | None:
+    """Read a cached walk, or `None` when there is none this version can read.
+
+    The entries go through `_parse_record`, the same function the walk itself
+    uses, so a cache and a fresh walk cannot disagree about the shape.
+    """
+    entries = _cached_entries(path)
+    if entries is None:
+        return None
+    records: list[PackageRecord] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return None
+        records.append(_parse_record(cast("Mapping[str, object]", entry)))
+    return records
+
+
+def save_cache(path: Path, identity: str, records: Sequence[PackageRecord]) -> None:
+    """Write the walk to *path*, whole or not at all.
+
+    The write goes to a neighbouring file and is then renamed, because two
+    `pynix` processes can index at once and a reader must never see half a
+    file. A rename within one directory is atomic.
+    """
+    payload = {
+        "version": _CACHE_VERSION,
+        "identity": identity,
+        "packages": [_record_fields(record) for record in records],
+    }
+    partial = path.with_suffix(f".{os.getpid()}.partial")
+    partial.write_text(json.dumps(payload))
+    partial.replace(path)
+
+
+async def package_identity(pkgs_value: AsyncValue) -> str:
+    """The store path of the nixpkgs that *pkgs_value* came from.
+
+    `pkgs.path` is what nixpkgs itself calls its own source.
+    """
+    path_value = pkgs_value.attr("path")
+    return str(await path_value.to_python())
+
+
+async def indexed_packages(
+    session: AsyncEvalSession,
+    pkgs_value: AsyncValue,
+    lib_value: AsyncValue,
+    *,
+    refresh: bool = False,
+) -> list[PackageRecord]:
+    """Return the packages of *pkgs_value*, from the cache when there is one.
+
+    Measured on nixpkgs unstable: the walk costs 15 s and 2.08 GB, and reading
+    the cache costs 0.1 s. Pass *refresh* to walk again and overwrite.
+    """
+    identity = await package_identity(pkgs_value)
+    path = cache_path(identity)
+    if not refresh:
+        cached = load_cache(path)
+        if cached is not None:
+            return cached
+    records = await fetch_package_list(session, pkgs_value, lib_value)
+    save_cache(path, identity, records)
+    return records
