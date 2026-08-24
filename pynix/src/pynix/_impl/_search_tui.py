@@ -78,6 +78,21 @@ _FALLBACK_PAGE = 10
 #: pane. It is the conventional width of a terminal.
 _FALLBACK_WIDTH = 80
 
+#: What the footer says the keys do. A terminal that cannot hold the first
+#: form gets the second, which drops the verbs and keeps the keys.
+_KEYS = "   up/down select   alt+up/down scroll   ctrl-c quit "
+_KEYS_SHORT = "   up/down   alt+up/down   ctrl-c "
+
+#: What the footer writes before a subject it had to cut, and the text it
+#: cuts. The length of the whole prefix is what `_subject` does its arithmetic
+#: with, so the two live here together.
+_IN = " in "
+_CUT = "..."
+
+#: The shortest tail of a subject that still says something. Below this the
+#: footer says nothing rather than ` in ...p`.
+_MIN_TAIL = 4
+
 #: **The namespace is `search-tui` and not `search`, and it must stay that
 #: way.** `prompt_toolkit` matches a dotted class name against each of its
 #: prefixes, and its own default style defines `search` as
@@ -140,6 +155,23 @@ class SearchSource[ItemT]:
     #: Style classes that `detail` and `row` use, over the base ones above.
     #: A caller that styles nothing of its own leaves this empty.
     style: Mapping[str, str] = field(default_factory=dict[str, str])
+
+
+def _subject(subject: str, room: int) -> str:
+    """Say what the search covers, in exactly *room* columns.
+
+    **A subject that does not fit keeps its end.** The tail is the part that
+    changes between one run and the next: the attribute of a flake reference,
+    or the release that the packages came from. The head is a directory that
+    the reader already knows. `...` marks the cut.
+    """
+    text = f"{_IN}{subject}" if subject else ""
+    if len(text) <= room:
+        return text.ljust(room)
+    keep = room - len(_IN) - len(_CUT)
+    if keep < _MIN_TAIL:
+        return " " * room
+    return f"{_IN}{_CUT}{subject[-keep:]}"
 
 
 @dataclass
@@ -247,16 +279,37 @@ class SearchTui[ItemT]:
         return self.source.detail(item, self.detail_width)
 
     def footer_fragments(self) -> StyleAndTextTuples:
-        """The status line, which counts the records and names the keys."""
+        """The status line, which counts the records and names the keys.
+
+        **The keys never run off the end of the line, and the subject gives
+        way to them.** The footer is one row, so a narrow terminal cut the
+        right-hand side off -- and the right-hand side is where the keys
+        were. Measured at 80 columns: the whole key help was gone, and the
+        line ended in the middle of a store path. The keys are the only place
+        this screen says what the keys do, so the count and the keys come
+        first and the subject takes what is left.
+
+        The width is the width of the detail pane, because that pane is the
+        full width of the screen. It is `_FALLBACK_WIDTH` until the first
+        render measures it, and `_measure_detail_pane` draws again when the
+        real number arrives.
+        """
         found = len(self.results)
         noun = self.source.noun if found == 1 else (self.source.plural or f"{self.source.noun}s")
-        left = f" {found} {noun} of {len(self.source.items)}"
-        if self.source.subject:
-            left = f"{left} in {self.source.subject}"
-        return [
-            ("class:search-tui.footer", left),
-            ("class:search-tui.footer", "   up/down select   alt+up/down scroll   ctrl-c quit "),
-        ]
+        count = f" {found} {noun} of {len(self.source.items)}"
+        width = self.detail_width
+        whole = f"{_IN}{self.source.subject}" if self.source.subject else ""
+        # Give up the verbs of the key help before giving up the subject: a
+        # short key help still names all three keys, and a cut subject still
+        # names the target.
+        for keys in (_KEYS, _KEYS_SHORT):
+            room = width - len(count) - len(keys)
+            if room >= len(whole):
+                return [("class:search-tui.footer", f"{count}{whole.ljust(room)}{keys}")]
+        room = width - len(count) - len(_KEYS_SHORT)
+        if room >= 0:
+            return [("class:search-tui.footer", f"{count}{_subject(self.source.subject, room)}{_KEYS_SHORT}")]
+        return [("class:search-tui.footer", count[:width].ljust(width))]
 
     # -- the application ----------------------------------------------------
 
