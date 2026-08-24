@@ -156,15 +156,55 @@ async def fetch_program_index(session: AsyncEvalSession, system: str, channel: s
     if not isinstance(root, str):
         raise TypeError(f"fetchTarball must give a path, got {type(root).__name__}")
     source = Path(root)
+    index = index_at(source, system)
+    if index is None:
+        raise FileNotFoundError(f"the channel expressions hold no programs.sqlite at {source}")
+    return index
+
+
+def index_at(source: Path, system: str) -> ProgramIndex | None:
+    """The index inside the nixpkgs source at *source*, or `None`.
+
+    **A nixpkgs source tree usually holds none.** Hydra runs
+    `generate-programs-index` for the channel job alone, and puts the result
+    into `nixexprs.tar.xz`. A git checkout, a flake input, and the tarball
+    that the flake registry serves are the same tree without it. Measured on
+    one NixOS machine: `<nixpkgs>` and `/etc/nixpkgs` resolve to one store
+    path, that path carries `.version` and `.git-revision`, and it carries no
+    database.
+
+    The check costs one `stat`, and it answers for a caller who does read a
+    channel. So :func:`program_index_for` asks this first, and fetches second.
+    """
     database = source / "programs.sqlite"
     if not database.is_file():
-        raise FileNotFoundError(f"the channel expressions hold no programs.sqlite at {database}")
+        return None
     return ProgramIndex(
         path=database,
         system=system,
         release=_read(source / ".version"),
         revision=_read(source / ".git-revision"),
     )
+
+
+async def program_index_for(
+    session: AsyncEvalSession,
+    pkgs_path: Path,
+    system: str,
+    channel: str = "nixos-unstable",
+) -> ProgramIndex:
+    """The binary index for the nixpkgs at *pkgs_path*, local first.
+
+    *pkgs_path* is what nixpkgs calls its own source, which
+    :func:`~pynix._packages.package_identity` reads. The local database
+    matches the pinned nixpkgs exactly and costs nothing. The channel is the
+    fallback, and it describes a different revision, so
+    :attr:`ProgramIndex.origin` has to reach the reader either way.
+    """
+    local = index_at(pkgs_path, system)
+    if local is not None:
+        return local
+    return await fetch_program_index(session, system, channel)
 
 
 def _read(path: Path) -> str:
