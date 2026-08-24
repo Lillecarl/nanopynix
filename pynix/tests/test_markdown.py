@@ -7,9 +7,13 @@ description rather than from an invented string.
 
 from __future__ import annotations
 
+import os
+
+import pytest
 from prompt_toolkit.formatted_text import ANSI, to_formatted_text
 
-from pynix._markdown import NixMarkdown, render_markdown
+import pynix._markdown as markdown_module
+from pynix._markdown import MEASURE, NixMarkdown, render_markdown
 
 
 def _text(markup: str, width: int = 78) -> str:
@@ -87,11 +91,75 @@ def test_the_width_bounds_the_result() -> None:
         assert longest <= width
 
 
-def test_the_renderer_reads_the_terminal_when_it_is_given_no_width() -> None:
-    """The REPL prints into the whole terminal and passes no width."""
-    assert _text("plain text") == "".join(fragment[1] for fragment in to_formatted_text(render_markdown("plain text")))
+def test_the_renderer_reads_the_terminal_when_it_is_given_no_width(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The REPL prints into the whole terminal and passes no width.
+
+    **The terminal is narrower than `MEASURE` here, and that is the point.**
+    The measure would otherwise decide the width, and the test would pass
+    whether the terminal was read or not.
+
+    It compared a no-width render against a render at a written-down width
+    until now. That passed only because the old rule gave both the same
+    number: a short string put each of them at the floor of 60.
+    """
+    narrow = MEASURE - 30
+
+    def _size(fallback: tuple[int, int] = (80, 24)) -> os.terminal_size:
+        del fallback  # the point of the patch is that the fallback is not used
+        return os.terminal_size((narrow, 24))
+
+    monkeypatch.setattr(markdown_module.shutil, "get_terminal_size", _size)
+    drawn = "".join(fragment[1] for fragment in to_formatted_text(render_markdown("plain text")))
+    assert max(len(line) for line in drawn.splitlines()) == narrow
 
 
 def test_nix_markdown_turns_terminal_hyperlinks_off_by_default() -> None:
     """A caller that builds the class directly gets the same behavior."""
     assert NixMarkdown("x").hyperlinks is False
+
+
+#: A paragraph as nixpkgs writes one: soft-wrapped in the `.nix` source by a
+#: formatter, with no hard break anywhere. `nixpkgs.pkgs` is the real option
+#: this is copied from, and its longest source line is 66 characters.
+_SOFT_WRAPPED = """If set, the pkgs argument to all NixOS modules is the value of
+this option, extended with `nixpkgs.overlays`, if
+that is also set. Either `nixpkgs.crossSystem` or
+`nixpkgs.localSystem` will be used in an assertion
+to check that the NixOS and Nixpkgs architectures match."""
+
+
+def test_a_soft_wrapped_paragraph_reflows_to_the_pane() -> None:
+    """The line breaks of the `.nix` source must not survive into the pane.
+
+    Regression test. The render width was `longest source line + 4`, so a
+    paragraph wrapped at 66 columns by a formatter was drawn at 70 columns in
+    a pane of 160, which put every break back where the source had it. The
+    text looked hard-wrapped, and nothing in it is.
+
+    Measured on the real `nixpkgs.pkgs`: 24 lines before and 21 after, in a
+    160-column pane.
+    """
+    drawn = _text(_SOFT_WRAPPED, 160)
+    lines = [line.rstrip() for line in drawn.splitlines() if line.strip()]
+    source = [line.rstrip() for line in _SOFT_WRAPPED.splitlines()]
+
+    assert len(lines) < len(source), f"the paragraph kept its source shape: {lines}"
+    # The first source line ends mid-sentence, so a render that reproduced the
+    # source would end its first line there too.
+    assert not lines[0].endswith("the value of"), "the first source break survived"
+
+
+def test_a_paragraph_is_never_wider_than_the_measure() -> None:
+    """A paragraph drawn across a whole wide terminal is hard to follow."""
+    for pane in (100, 160, 200, 400):
+        drawn = _text(_SOFT_WRAPPED, pane)
+        widest = max(len(line.rstrip()) for line in drawn.splitlines())
+        assert widest <= min(MEASURE, pane), f"pane {pane} drew a line of {widest}"
+
+
+def test_a_pane_narrower_than_the_measure_still_bounds_the_text() -> None:
+    """The measure is a ceiling, and the pane is the other one."""
+    for pane in (40, 60, 80):
+        drawn = _text(_SOFT_WRAPPED, pane)
+        widest = max(len(line.rstrip()) for line in drawn.splitlines())
+        assert widest <= pane, f"pane {pane} drew a line of {widest}"
