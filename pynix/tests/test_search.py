@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, cast
 
+import anyio
 import pytest
 from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import create_pipe_input
@@ -15,6 +17,7 @@ import pynix._impl.search as search_module
 from pynix import parse
 from pynix._impl import options_tui
 from pynix._impl._search_tui import SearchTui
+from pynix._option_values import EvaluatorUnavailableError
 from pynix._options import OptionRecord
 from pynix._programs import ProgramIndex
 from pynix.search import Search
@@ -27,6 +30,10 @@ if TYPE_CHECKING:
 _FIXTURE_DIR = Path(__file__).parent / "test_search"
 _SYSTEM_NIX = _FIXTURE_DIR / "system.nix"
 _TARGET_DIR = Path(__file__).parent / "test_search_target"
+
+#: How long a test waits for the interface to draw and for the pump to place
+#: its first request, in seconds.
+_DRAWN = 0.3
 
 
 def _parse_json_output(out: str) -> object:
@@ -537,6 +544,54 @@ async def test_the_command_opens_the_interface_inside_its_event_loop(
                 ],
             )
             await cmd.run()
+
+
+async def test_the_command_writes_nothing_while_the_interface_is_drawn(
+    shared_nix_environment: NixTestEnvironment,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """Nothing reaches the terminal between the first draw and the last.
+
+    **The detail pane opens a Nix evaluator while the interface is up**, and
+    `pynix._util.forward_nix_logs` prints one structlog line for each log
+    event that the evaluator sends. One such line lands in the middle of the
+    drawing, and the screen stays wrong until the next full redraw.
+
+    This drives the whole command and reads what the resolver saw. `sys.stderr`
+    inside it must not be the object the test holds, because `quiet_terminal`
+    swapped it. The line the resolver wrote still reaches the terminal after
+    the interface closes, because the guard holds that line and does not drop
+    it.
+    """
+    seen: list[object] = []
+
+    async def watched(*_args: object, **_kwargs: object) -> object:
+        seen.append(sys.stderr)
+        sys.stderr.write("a line from the resolver\n")
+        raise EvaluatorUnavailableError("this test opens no second evaluator")
+
+    monkeypatch.setattr(search_module, "_option_tree", watched)
+    with create_pipe_input() as pipe:
+        pipe.send_text("port")
+        with create_app_session(input=pipe, output=DummyOutput()):
+            cmd = parse(
+                [
+                    "search",
+                    "--options",
+                    "--file",
+                    str(_SYSTEM_NIX),
+                    "--tui",
+                    *shared_nix_environment.pynix_store_args(),
+                ],
+            )
+            async with anyio.create_task_group() as tasks:
+                tasks.start_soon(cmd.run)
+                await anyio.sleep(_DRAWN)
+                pipe.send_text("\x03")
+    assert seen, "the detail pane never asked the resolver for a default"
+    assert seen[0] is not sys.stderr
+    assert "a line from the resolver" in capfd.readouterr().err
 
 
 # -- options inside a submodule ------------------------------------------------

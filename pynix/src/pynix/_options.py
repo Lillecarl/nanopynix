@@ -47,6 +47,14 @@ combined with `deepSeq` (verified empirically: `builtins.tryEval ({}.b)`
 fails uncaught). So this walk never forces `default`/`example` at all --
 only `name`/`type`/`description`/`declarations`/`readOnly`, which are always
 safe, static data on the option declaration itself.
+
+**That reason covers the bulk pass, and it does not cover one option at
+render time.** ``fetch_option_values`` returns a *lazy* attrset of the same
+options, keyed by the same name, and forces nothing. ``pynix._option_values``
+selects one key and forces that, so an "attribute X missing" failure arrives
+in Python as an ordinary exception that a ``try`` catches -- which is the
+thing ``tryEval`` cannot do inside Nix. One option that cannot answer then
+costs its own detail pane a line, and costs no other option anything.
 """
 
 from __future__ import annotations
@@ -70,9 +78,35 @@ if TYPE_CHECKING or BEARTYPING:
 #: margin for a tree deeper than any that exists today.
 _SUB_OPTION_DEPTH = 8
 
+#: The walk itself, shared by the two collectors below.
+#:
+#: It defines `walk`, which takes the function that describes one option and
+#: returns one entry for each option under the tree. Both collectors are the
+#: same walk with a different `entry`, and a copy of the walk in each one would
+#: let the two disagree about which options exist.
+#:
+#: `lib` comes from the scope this is interpolated into. Both collectors are
+#: functions of `lib` and `options`, so `lib` is in scope where they use this.
+_WALK = f"""
+    walkWith = entry: depth: opts:
+      builtins.concatMap
+        (opt:
+          let
+            v = opt.visible or true;
+            subVisible = if builtins.isBool v then v else v == "transparent";
+            sub = (opt.type or {{ }}).getSubOptions or (_: {{ }}) opt.loc;
+          in
+            [ (entry opt) ]
+            ++ (if depth > 0 && subVisible && sub != {{ }} then walkWith entry (depth - 1) sub else [ ])
+        )
+        (lib.collect lib.isOption opts);
+    walk = entry: walkWith entry {_SUB_OPTION_DEPTH};
+"""
+
 _COLLECT_OPTION_METADATA = f"""
 lib: options:
   let
+{_WALK}
     entry = opt: {{
       name = lib.showOption opt.loc;
       description = opt.description or null;
@@ -84,20 +118,46 @@ lib: options:
       readOnly = opt.readOnly or false;
       type = opt.type.description or "unspecified";
     }};
-    walk = depth: opts:
-      builtins.concatMap
-        (opt:
-          let
-            v = opt.visible or true;
-            subVisible = if builtins.isBool v then v else v == "transparent";
-            sub = (opt.type or {{ }}).getSubOptions or (_: {{ }}) opt.loc;
-          in
-            [ (entry opt) ]
-            ++ (if depth > 0 && subVisible && sub != {{ }} then walk (depth - 1) sub else [ ])
-        )
-        (lib.collect lib.isOption opts);
   in
-    walk {_SUB_OPTION_DEPTH} options
+    walk entry options
+"""
+
+#: The second collector. It answers "what is the default of this one option",
+#: and it forces no default until a caller asks for one.
+#:
+#: **The result is one attrset, keyed by the name the metadata walk writes.**
+#: Nix builds an attrset lazily, so `builtins.listToAttrs` forces the walk and
+#: every `lib.showOption` and forces no `default` and no `example` at all. A
+#: caller selects one name, forces that, and pays for that option alone. An
+#: option that cannot answer raises where the caller can catch it, which is
+#: the whole difference from the bulk pass: the module docstring above says
+#: why one list forced in one JSON pass makes one bad default the failure of
+#: all 24 941.
+#:
+#: `defaultText` comes before `default`, because a module declares one exactly
+#: for a default that cannot print. `lib.options.renderOptionValue` is the
+#: same two branches, and this states them rather than depending on a name
+#: under `lib.options`.
+_COLLECT_OPTION_VALUES = f"""
+lib: options:
+  let
+{_WALK}
+    render = value:
+      if lib.isAttrs value && value ? _type && value ? text
+      then {{ type = value._type; text = value.text; }}
+      else {{ type = "literalExpression"; text = lib.generators.toPretty {{ multiline = true; }} value; }};
+    entry = opt: {{
+      name = lib.showOption opt.loc;
+      value = {{
+        default =
+          if opt ? defaultText then render opt.defaultText
+          else if opt ? default then render opt.default
+          else null;
+        example = if opt ? example then render opt.example else null;
+      }};
+    }};
+  in
+    builtins.listToAttrs (walk entry options)
 """
 
 
@@ -155,3 +215,19 @@ def _parse_record(entry: Mapping[str, object]) -> OptionRecord:
         declarations=_string_list(entry.get("declarations")),
         read_only=bool(entry.get("readOnly", False)),
     )
+
+
+async def fetch_option_values(
+    session: AsyncEvalSession,
+    options_value: AsyncValue,
+    lib_value: AsyncValue,
+) -> AsyncValue:
+    """Return the lazy attrset of ``default``/``example``, keyed by option name.
+
+    The keys are what :func:`fetch_option_doc_list` writes in
+    ``OptionRecord.name``, so a caller selects one record's values by that
+    name. Nothing under a key is forced here. ``pynix._option_values`` forces
+    one at a time, and catches what one bad default raises.
+    """
+    collector = await session.string(_COLLECT_OPTION_VALUES)
+    return await collector.call(lib_value, options_value)

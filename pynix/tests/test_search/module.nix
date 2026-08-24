@@ -5,6 +5,7 @@
     port = lib.mkOption {
       type = lib.types.port;
       default = 8080;
+      example = 9090;
       description = "Port the daemon listens on.";
     };
     extraConfig = lib.mkOption {
@@ -100,6 +101,30 @@
           };
         }
       );
+    };
+    # A default that `throw` raises. `builtins.tryEval` catches this one and
+    # does not catch `brokenDefault` below, and the detail pane has to say the
+    # same thing about both, because it catches on the Python side of the
+    # bindings where each one is an ordinary exception.
+    thrownDefault = lib.mkOption {
+      type = lib.types.str;
+      default = throw "this default is not available here";
+      description = "An option whose default throws.";
+    };
+    # `defaultText` is what a module writes exactly for a default that cannot
+    # print, and the collector reads it in place of the default. This one
+    # would otherwise be an infinite recursion.
+    describedDefault = lib.mkOption {
+      type = lib.types.str;
+      default = throw "never forced, because defaultText answers first";
+      defaultText = lib.literalExpression ''"the name of the host"'';
+      description = "An option that describes its own default.";
+    };
+    # An option with no default at all. The pane draws no `default` line for
+    # it, rather than an empty one.
+    withoutDefault = lib.mkOption {
+      type = lib.types.str;
+      description = "An option that the caller must set.";
     };
     # Mirrors real-world modules (e.g. disko) whose defaults are expressions
     # over `config` that only resolve once a whole system is realized --
