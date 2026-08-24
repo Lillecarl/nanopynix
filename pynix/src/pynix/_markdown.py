@@ -238,8 +238,8 @@ def render_markdown(text: str, width: int | None = None) -> ANSI:
 
     *width* is how many columns the result may use. The REPL prints into the
     whole terminal and gives no width, so the terminal decides. The `search`
-    interface draws into one pane of a split screen, and gives the width of
-    that pane.
+    interface draws into the detail pane of a stacked screen, and gives the
+    width of that pane.
     """
     lines = text.splitlines()
     max_line = max((len(line.rstrip()) for line in lines), default=80)

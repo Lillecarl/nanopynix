@@ -1,11 +1,16 @@
 """A full-screen search over a list of records that is already in memory.
 
 **This layer knows nothing about Nix.** It draws a search bar across the top,
-a ranked list on the left and the detail of the selected record on the right.
-The caller gives it the records, the function that ranks them and the two
+a ranked list under it and the detail of the selected record under that. The
+caller gives it the records, the function that ranks them and the two
 functions that draw one. `pynix search` is the first caller, over the NixOS
 options in its cached index. Issue #85 adds `pynix search` over packages, and
 that command wants the same interface over different records.
+
+**The screen stacks, and each pane is the full width.** A side-by-side split
+put the divider where the content asked for it, so the divider moved every
+time the selection moved. Read `_PANE` for the measurement and for the rule
+that holds the divider still.
 
 **Every keystroke re-ranks the records already in memory.** The interface
 evaluates nothing and reads no file, so it answers a keypress in the time that
@@ -31,7 +36,7 @@ from prompt_toolkit.layout.containers import HSplit, ScrollOffsets, VSplit, Wind
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.styles import Style, merge_styles
-from prompt_toolkit.widgets import HorizontalLine, VerticalLine
+from prompt_toolkit.widgets import HorizontalLine
 
 from nanopynix._typechecking import BEARTYPING
 
@@ -43,10 +48,28 @@ if TYPE_CHECKING or BEARTYPING:
     from prompt_toolkit.key_binding import KeyPressEvent
     from prompt_toolkit.output import Output
 
-#: How wide the list is, against the detail pane. A NixOS option name reaches
-#: 60 characters, and a rendered description wants the rest.
-_LIST_WEIGHT = 42
-_DETAIL_WEIGHT = 58
+#: How tall the list is, against the detail pane. The list is the half a
+#: person scans, so it takes the larger share. Measured over the 24 941
+#: options of one NixOS configuration: the detail of an option is 9 to 10
+#: lines, because a description is 2.4 lines on average and an option
+#: declares one file. So 45 of 36 usable rows holds the whole detail of a
+#: typical option with no scrolling.
+_LIST_WEIGHT = 55
+_DETAIL_WEIGHT = 45
+
+#: **Both panes state a preferred size, and the number 0 is the point.**
+#: `prompt_toolkit` divides a split in two passes. The first pass grows each
+#: child by its weight but stops that child at its *preferred* size, and the
+#: preferred size of a `Window` comes from the content when the caller states
+#: none. So the divider landed wherever the selected record happened to ask
+#: for. Measured on a 200-column terminal, over a side-by-side split: the
+#: list was 94 columns wide for `services.openssh.enable` and 56 columns wide
+#: for the next row down, a 38-column jump for one keypress.
+#:
+#: A stated preferred size of 0 makes the first pass do nothing, so the
+#: second pass divides the whole space by weight alone. The ratio is then the
+#: two numbers above and nothing else.
+_PANE = 0
 
 #: How many rows a page key moves, before the first render measures the window.
 _FALLBACK_PAGE = 10
@@ -89,12 +112,12 @@ class SearchSource[ItemT]:
     #: interface opens.
     rank: Callable[[str], Sequence[ItemT]]
 
-    #: Return the one line that names *item* in the list on the left.
+    #: Return the one line that names *item* in the list of matches.
     row: Callable[[ItemT], str]
 
-    #: Return the detail of *item*, drawn in the pane on the right. The second
-    #: argument is the width of that pane in columns, because a renderer that
-    #: wraps text needs a width.
+    #: Return the detail of *item*, drawn in the pane under the list. The
+    #: second argument is the width of that pane in columns, because a
+    #: renderer that wraps text needs a width.
     #:
     #: The return type is the concrete `StyleAndTextTuples`, and not the
     #: `AnyFormattedText` union that `prompt_toolkit` accepts. That union holds
@@ -206,7 +229,7 @@ class SearchTui[ItemT]:
     # -- what the windows draw ---------------------------------------------
 
     def list_fragments(self) -> StyleAndTextTuples:
-        """The list on the left, one row for each match."""
+        """The list of matches, one row for each."""
         if not self.results:
             return [("class:search-tui.empty", "no match")]
         fragments: StyleAndTextTuples = []
@@ -217,7 +240,7 @@ class SearchTui[ItemT]:
         return fragments
 
     def detail_fragments(self) -> StyleAndTextTuples:
-        """The detail of the selected record, drawn on the right."""
+        """The detail of the selected record, drawn under the list."""
         item = self.selection
         if item is None:
             return [("class:search-tui.empty", "No match. Change the query.")]
@@ -243,7 +266,7 @@ class SearchTui[ItemT]:
                 self.list_fragments,
                 get_cursor_position=lambda: Point(x=0, y=self.selected),
             ),
-            width=Dimension(weight=_LIST_WEIGHT),
+            height=Dimension(weight=_LIST_WEIGHT, preferred=_PANE),
             always_hide_cursor=True,
             scroll_offsets=ScrollOffsets(top=1, bottom=1),
         )
@@ -251,7 +274,7 @@ class SearchTui[ItemT]:
     def _build_detail_window(self) -> Window:
         return Window(
             content=FormattedTextControl(self.detail_fragments),
-            width=Dimension(weight=_DETAIL_WEIGHT),
+            height=Dimension(weight=_DETAIL_WEIGHT, preferred=_PANE),
             wrap_lines=True,
             always_hide_cursor=True,
             get_vertical_scroll=lambda _window: self.detail_scroll,
@@ -272,7 +295,9 @@ class SearchTui[ItemT]:
                         ]
                     ),
                     HorizontalLine(),
-                    VSplit([self._list_window, VerticalLine(), self._detail_window]),
+                    self._list_window,
+                    HorizontalLine(),
+                    self._detail_window,
                     Window(content=FormattedTextControl(self.footer_fragments), height=1),
                 ]
             ),

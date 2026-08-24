@@ -39,7 +39,7 @@ STYLE: dict[str, str] = {
 
 
 def row(package: SearchablePackage) -> str:
-    """Name one package in the list on the left.
+    """Name one package in the list of matches.
 
     The version comes along, because two packages that differ only by version
     are otherwise the same row twice.
@@ -50,7 +50,7 @@ def row(package: SearchablePackage) -> str:
 
 
 def detail(package: SearchablePackage, width: int) -> StyleAndTextTuples:
-    """Draw one package in the pane on the right.
+    """Draw one package in the detail pane under the list.
 
     A `meta.description` is one line of plain text, and not the MyST that a
     NixOS option carries, so this does not run the Markdown renderer over it.

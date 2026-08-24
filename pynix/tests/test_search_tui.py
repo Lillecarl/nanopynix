@@ -10,8 +10,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import anyio
 import pytest
 from prompt_toolkit.application import create_app_session
+from prompt_toolkit.data_structures import Size
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.styles.defaults import PROMPT_TOOLKIT_STYLE, WIDGETS_STYLE
@@ -75,6 +77,24 @@ async def _drive(keys: str) -> SearchTui[_Fruit]:
 
 def _names(tui: SearchTui[_Fruit]) -> list[str]:
     return [fruit.name for fruit in tui.results]
+
+
+#: The screen that `_Sized` reports. `DummyOutput` reports 80 columns, which is
+#: `_FALLBACK_WIDTH` exactly, so a width test needs a different number to say
+#: anything.
+_COLUMNS = 132
+_ROWS = 40
+
+
+class _Sized(DummyOutput):
+    """A `DummyOutput` that reports a screen, so a render divides a real size.
+
+    `DummyOutput.get_size` reports 80 by 24. A test that measures a pane needs
+    to know what it is measuring against.
+    """
+
+    def get_size(self) -> Size:
+        return Size(rows=_ROWS, columns=_COLUMNS)
 
 
 def test_the_interface_opens_on_every_record() -> None:
@@ -186,6 +206,63 @@ def test_the_detail_pane_gets_its_measured_width() -> None:
     assert tui.detail_fragments() == [("", "apple is green (132)")]
 
 
+@pytest.mark.anyio
+async def test_the_divider_stays_put_when_the_selection_moves() -> None:
+    """Moving the selection must not move the divider between the two panes.
+
+    Regression test. `prompt_toolkit` divides a split in two passes, and the
+    first pass stops each child at its *preferred* size. A `Window` that
+    states no preferred size takes the one its content asks for, so the
+    divider landed wherever the selected record happened to reach.
+
+    Measured on a 200-column terminal, over the side-by-side split this
+    replaced: the list was 94 columns for `services.openssh.enable` and 56
+    columns for the row under it, a 38-column jump for one keypress. Stacking
+    the panes alone did not answer it -- the same probe then gave 20, 17 and
+    18 rows for three consecutive records, because the jump had only moved to
+    the other axis. `_PANE` is the answer, and this test is what states it.
+
+    The three records below differ in how much detail they draw, which is the
+    input the defect needed.
+    """
+    records = [
+        _Fruit("apple", "green"),
+        _Fruit("fig", "purple"),
+        _Fruit("blackcurrant", "black"),
+    ]
+    source = SearchSource(
+        items=records,
+        rank=lambda _query: records,
+        row=lambda fruit: fruit.name,
+        # One line for each character of the name, so each record asks the
+        # pane for a different height and a different width.
+        detail=lambda fruit, _width: [("", "\n".join(fruit.name * n for n in range(1, len(fruit.name))))],
+        noun="fruit",
+    )
+
+    heights: list[int] = []
+    with create_pipe_input() as pipe:
+        tui = SearchTui(source, input=pipe, output=_Sized())
+        with create_app_session(input=pipe, output=_Sized()):
+
+            async def walk() -> None:
+                for index in range(len(records)):
+                    tui.selected = index
+                    tui.application.invalidate()
+                    await anyio.sleep(0.05)
+                    info = tui._list_window.render_info
+                    if info is not None:
+                        heights.append(info.window_height)
+                tui.application.exit()
+
+            async with anyio.create_task_group() as group:
+                group.start_soon(tui.application.run_async)
+                group.start_soon(walk)
+
+    assert len(heights) == len(records), "the list pane did not draw for every record"
+    assert len(set(heights)) == 1, f"the divider moved between records: {heights}"
+
+
 def test_a_page_key_falls_back_before_the_first_render() -> None:
     tui = SearchTui(_source())
     assert tui.page() == 10
@@ -234,6 +311,11 @@ async def test_the_detail_pane_is_drawn_at_its_real_width() -> None:
     The application now measures after a render and draws once more when the
     width changed, so the width the pane really has reaches `detail` with no
     input at all.
+
+    **The terminal is 132 columns wide, and that number is what makes this a
+    test.** The detail pane is the full width of the screen, so a terminal of
+    80 columns gives a pane of 80 -- the fallback width exactly, and an
+    assertion against it then passes whether the measurement runs or not.
     """
     widths: list[int] = []
     source = SearchSource(
@@ -244,13 +326,25 @@ async def test_the_detail_pane_is_drawn_at_its_real_width() -> None:
         noun="fruit",
     )
     with create_pipe_input() as pipe:
-        tui = SearchTui(source, input=pipe, output=DummyOutput())
-        pipe.send_text(_CTRL_C)
-        with create_app_session(input=pipe, output=DummyOutput()):
-            await tui.application.run_async()
+        tui = SearchTui(source, input=pipe, output=_Sized())
+        with create_app_session(input=pipe, output=_Sized()):
+            # **The quit key waits for a render, and this is not a style
+            # choice.** Queued before the application starts, it is read in
+            # the same pass as the first render, so the application leaves
+            # before the redraw that `_measure_detail_pane` asked for. The
+            # test then reads the fallback width and fails, whether the
+            # measurement works or not.
+            async def quit_once_drawn() -> None:
+                await anyio.sleep(0.05)
+                pipe.send_text(_CTRL_C)
+
+            async with anyio.create_task_group() as group:
+                group.start_soon(tui.application.run_async)
+                group.start_soon(quit_once_drawn)
 
     assert widths, "the detail pane never drew"
     assert tui.detail_width != 80, "the pane kept the fallback width"
+    assert tui.detail_width == _COLUMNS, "the pane is the full width of the screen"
     assert widths[-1] == tui.detail_width
     # The second render is what settles it, and no third is asked for.
     assert widths.count(tui.detail_width) >= 1

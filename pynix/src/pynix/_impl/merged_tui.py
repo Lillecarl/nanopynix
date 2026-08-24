@@ -44,13 +44,13 @@ TAGS = {"option": "opt", "package": "pkg"}
 
 
 def row(hit: SearchHit) -> str:
-    """One line of the list on the left, tagged with the index it came from."""
+    """One line of the list of matches, tagged with the index it came from."""
     tag = TAGS["option"] if isinstance(hit, OptionRecord) else TAGS["package"]
     return f"{tag}  {hit_name(hit)}"
 
 
 def detail(hit: SearchHit, width: int) -> StyleAndTextTuples:
-    """Draw one row in the pane on the right, whichever index it came from."""
+    """Draw one row in the detail pane, whichever index it came from."""
     if isinstance(hit, OptionRecord):
         return options_tui.detail(hit, width)
     return package_tui.detail(hit, width)
