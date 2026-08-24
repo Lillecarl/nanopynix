@@ -60,6 +60,30 @@ class ProgramIndex:
     #: The system whose rows this index answers for, such as `x86_64-linux`.
     system: str
 
+    #: The nixpkgs release these rows describe, such as `26.11`. Empty when
+    #: the caller built the index by hand rather than from a channel.
+    release: str = ""
+
+    #: The nixpkgs commit these rows describe, in full.
+    revision: str = ""
+
+    @property
+    def origin(self) -> str:
+        """What to print so that an answer names where it came from.
+
+        **An answer has to say which release answered it.** Issue #85 asks for
+        this, and the reason is that the two sources of a package search
+        disagree by design: this index describes one channel release, and the
+        walk of `pkgs` describes the nixpkgs the caller pinned. A binary that
+        only one of them knows is not a defect, and a reader can only tell the
+        two apart if the answer says which is which.
+        """
+        if not self.release:
+            return "an unnamed index"
+        if not self.revision:
+            return self.release
+        return f"{self.release} ({self.revision[:12]})"
+
     def packages_for_binary(self, binary: str) -> list[str]:
         """The packages that install a binary called *binary*, by attribute.
 
@@ -131,7 +155,25 @@ async def fetch_program_index(session: AsyncEvalSession, system: str, channel: s
     root = await fetched.to_python()
     if not isinstance(root, str):
         raise TypeError(f"fetchTarball must give a path, got {type(root).__name__}")
-    database = Path(root) / "programs.sqlite"
+    source = Path(root)
+    database = source / "programs.sqlite"
     if not database.is_file():
         raise FileNotFoundError(f"the channel expressions hold no programs.sqlite at {database}")
-    return ProgramIndex(path=database, system=system)
+    return ProgramIndex(
+        path=database,
+        system=system,
+        release=_read(source / ".version"),
+        revision=_read(source / ".git-revision"),
+    )
+
+
+def _read(path: Path) -> str:
+    """The text of *path*, or an empty string when it is not there.
+
+    nixpkgs writes `.version` and `.git-revision` beside its own source, and
+    a channel that stops doing so must not stop the search.
+    """
+    try:
+        return path.read_text().strip()
+    except OSError:
+        return ""

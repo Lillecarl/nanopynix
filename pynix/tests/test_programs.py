@@ -122,3 +122,32 @@ def test_the_index_never_writes_to_the_database(index: ProgramIndex) -> None:
     index.packages_for_binary("rg")
     with sqlite3.connect(f"file:{index.path}?mode=ro", uri=True) as connection, pytest.raises(sqlite3.OperationalError):
         connection.execute("insert into Programs values ('x', 'x86_64-linux', 'y')")
+
+
+# -- naming the release --------------------------------------------------------
+#
+# Issue #85 asks that an answer say which release produced it. The reason is
+# that a package search reads two sources that disagree by design: the walk of
+# `pkgs` describes the nixpkgs the caller pinned, and this index describes one
+# channel release. A binary only one of them knows is not a defect, and a
+# reader can tell the two apart only if the answer says which is which.
+
+
+def test_the_index_names_its_release_and_revision(tmp_path: Path) -> None:
+    index = ProgramIndex(
+        path=tmp_path / "programs.sqlite",
+        system="x86_64-linux",
+        release="26.11",
+        revision="56c02bc00adcf003215cc4bd996d6efaf4cff188",
+    )
+    assert index.origin == "26.11 (56c02bc00adc)"
+
+
+def test_a_release_with_no_revision_still_names_itself(tmp_path: Path) -> None:
+    index = ProgramIndex(path=tmp_path / "x.sqlite", system="x86_64-linux", release="26.11")
+    assert index.origin == "26.11"
+
+
+def test_an_index_built_by_hand_says_so(tmp_path: Path) -> None:
+    """A test or a caller may build one, and it names no release."""
+    assert ProgramIndex(path=tmp_path / "x.sqlite", system="x86_64-linux").origin == "an unnamed index"
