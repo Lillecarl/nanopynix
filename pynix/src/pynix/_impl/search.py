@@ -24,7 +24,7 @@ import hashlib
 import json
 import os
 import platform
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -34,6 +34,7 @@ from rich.console import Console
 
 from libpynix import human_at_terminal
 from nanopynix._typechecking import BEARTYPING
+from nanopynix.exceptions import NixError
 from pynix import _impl
 from pynix._option_search import rank as rank_options
 from pynix._options import OptionRecord, fetch_option_doc_list
@@ -228,10 +229,17 @@ def save_cache(path: Path, target: EvaluationTarget, cached: Cached) -> None:
 
 
 def _missing(cached: Cached, ask: Wanted) -> bool:
-    """Say whether the cache lacks anything that *ask* needs."""
+    """Say whether the cache lacks anything that *ask* needs.
+
+    **The binaries index is not part of the answer.** A package search runs
+    on the walk of the package set, and the binaries only add the question
+    "which package installs this program". A cache that holds the walk and
+    no binaries is complete, because asking again means downloading the
+    channel again on every single search.
+    """
     if ask.options and cached.options is None:
         return True
-    return ask.packages and (cached.pkgs_path is None or cached.programs_db is None)
+    return ask.packages and cached.pkgs_path is None
 
 
 async def run_search(command: Search) -> None:
@@ -270,10 +278,13 @@ def _read(command: Search, target: EvaluationTarget, ask: Wanted, cached: Cached
     """Turn the cache into the records that a search ranks."""
     options = cached.options or [] if ask.options else []
     packages: list[SearchablePackage] = []
-    if ask.packages and cached.pkgs_path is not None and cached.programs_db is not None:
+    if ask.packages and cached.pkgs_path is not None:
         records = load_packages(package_cache_path(cached.pkgs_path)) or []
-        index = ProgramIndex(path=Path(cached.programs_db), system=_system(command), release="", revision="")
-        packages = join(records, index.binaries_by_package())
+        binaries: Mapping[str, list[str]] = {}
+        if cached.programs_db is not None:
+            index = ProgramIndex(path=Path(cached.programs_db), system=_system(command), release="", revision="")
+            binaries = index.binaries_by_package()
+        packages = join(records, binaries)
     subject = _target_description(target)
     if cached.origin and ask.packages:
         subject = f"{subject}, packages from {cached.origin}"
@@ -381,10 +392,24 @@ async def _index_packages(
     lib = _named(where.lib)
     records = await indexed_packages(session, pkgs.value, lib.value)
     built.pkgs_path = await package_identity(pkgs.value)
-    index = await program_index_for(session, Path(built.pkgs_path), built.system, command.channel)
+    built.paths["pkgs"] = pkgs.path
+
+    # **The binaries are best effort, and the walk is not.** `programs.sqlite`
+    # is in the channel expressions and in no git checkout, so a target that
+    # is a flake input or a checkout has to download a channel to get one. A
+    # machine with no network then answered nothing at all, where it holds
+    # every package name already: measured in a build sandbox, a search of a
+    # module-system fixture died with "the channel expressions hold no
+    # programs.sqlite" and lost the 24 571 packages it had just walked.
+    try:
+        index = await program_index_for(session, Path(built.pkgs_path), built.system, command.channel)
+    except (OSError, NixError) as exc:
+        built.programs_db = None
+        built.origin = ""
+        error_console.print(f"indexed {len(records)} packages from {pkgs.path}, and no binaries: {exc}")
+        return
     built.programs_db = str(index.path)
     built.origin = index.origin
-    built.paths["pkgs"] = pkgs.path
     error_console.print(f"indexed {len(records)} packages from {pkgs.path}, binaries from {index.origin}")
 
 
