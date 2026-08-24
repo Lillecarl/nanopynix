@@ -107,6 +107,10 @@ class SearchSource[ItemT]:
     #: "s" for a count that is not one.
     noun: str = "match"
 
+    #: What the footer says for more than one, when adding an `s` is wrong.
+    #: `match` gives `matchs` without it.
+    plural: str = ""
+
     #: What the footer says the search covers, for example a flake reference.
     subject: str = ""
 
@@ -222,7 +226,7 @@ class SearchTui[ItemT]:
     def footer_fragments(self) -> StyleAndTextTuples:
         """The status line, which counts the records and names the keys."""
         found = len(self.results)
-        noun = self.source.noun if found == 1 else f"{self.source.noun}s"
+        noun = self.source.noun if found == 1 else (self.source.plural or f"{self.source.noun}s")
         left = f" {found} {noun} of {len(self.source.items)}"
         if self.source.subject:
             left = f"{left} in {self.source.subject}"

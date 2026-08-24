@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, cast
 
@@ -15,6 +16,7 @@ from pynix import parse
 from pynix._impl import options_tui
 from pynix._impl._search_tui import SearchTui
 from pynix._options import OptionRecord
+from pynix._programs import ProgramIndex
 from pynix.search import Search
 
 if TYPE_CHECKING:
@@ -49,10 +51,19 @@ def _results(out: str) -> list[dict[str, object]]:
 
 @pytest.fixture(autouse=True)
 def cache_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point search cache at a fresh per-test directory so tests don't share a cache."""
+    """Point every search cache at a fresh per-test directory.
+
+    **`XDG_CACHE_HOME` as well, and not the target cache alone.** The package
+    half writes a second cache, keyed by `pkgs.path`, and
+    `pynix._packages.cache_path` reads the environment for it. Without this a
+    test read the 24 571 packages of the machine's own nixpkgs in place of the
+    eight of the fixture, and the merged search then had no room for an
+    option. It also wrote into the cache of the person running the suite.
+    """
     cache_home = tmp_path / "cache"
     search_dir = cache_home / "pynix" / "search"
     search_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
     monkeypatch.setattr(search_module, "_cache_dir", lambda: search_dir)
     return cache_home
 
@@ -65,6 +76,7 @@ async def test_search_builds_index_and_finds_a_match(
     cmd = parse(
         [
             "search",
+            "--options",
             "--file",
             str(_SYSTEM_NIX),
             "--json-output",
@@ -96,6 +108,7 @@ async def test_search_survives_an_option_whose_default_cannot_be_evaluated(
     cmd = parse(
         [
             "search",
+            "--options",
             "--file",
             str(_SYSTEM_NIX),
             "--json-output",
@@ -121,6 +134,7 @@ async def test_search_filters_out_internal_options(
     cmd = parse(
         [
             "search",
+            "--options",
             "--file",
             str(_SYSTEM_NIX),
             "--json-output",
@@ -148,6 +162,7 @@ async def test_search_second_run_hits_the_cache_without_a_working_store(
     cached_cmd = parse(
         [
             "search",
+            "--options",
             "--file",
             str(_SYSTEM_NIX),
             "--json-output",
@@ -185,6 +200,7 @@ async def test_search_limit_truncates_results(
     cmd = parse(
         [
             "search",
+            "--options",
             "--file",
             str(_SYSTEM_NIX),
             "--json-output",
@@ -260,11 +276,20 @@ async def indexed_options(
 ) -> list[OptionRecord]:
     """Every option of the fixture module, indexed by a real evaluation."""
     cmd = parse(
-        ["search", "--file", str(_SYSTEM_NIX), "--no-tui", *shared_nix_environment.pynix_store_args()],
+        [
+            "search",
+            "--options",
+            "--file",
+            str(_SYSTEM_NIX),
+            "--no-tui",
+            *shared_nix_environment.pynix_store_args(),
+        ],
     )
     await cmd.run()
     (cache_file,) = (cache_home / "pynix" / "search").glob("*.json")
-    return search_module._load_cache(cache_file)
+    options = search_module.load_cache(cache_file).options
+    assert options is not None
+    return options
 
 
 def _by_name(records: list[OptionRecord], name: str) -> OptionRecord:
@@ -497,6 +522,7 @@ async def test_the_command_opens_the_interface_inside_its_event_loop(
             cmd = parse(
                 [
                     "search",
+                    "--options",
                     "--file",
                     str(_SYSTEM_NIX),
                     "--tui",
@@ -605,6 +631,7 @@ async def test_search_finds_lib_where_the_old_default_could_not(
     cmd = parse(
         [
             "search",
+            "--options",
             "--file",
             str(_TARGET_DIR / "module_args.nix"),
             "--json-output",
@@ -626,6 +653,7 @@ async def test_search_names_what_it_tried_when_there_is_no_options_tree(
     cmd = parse(
         [
             "search",
+            "--options",
             "--file",
             str(_TARGET_DIR / "bare_pkgs.nix"),
             "--json-output",
@@ -638,3 +666,159 @@ async def test_search_names_what_it_tried_when_there_is_no_options_tree(
     captured = capsys.readouterr()
     assert "no options tree" in captured.err
     assert "--options-attr" in captured.err
+
+
+_BOTH_NIX = _FIXTURE_DIR / "both.nix"
+
+
+@pytest.fixture
+def offline_program_index(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Stand in for the channel, and for nothing else.
+
+    `program_index_for` reads `${pkgs.path}/programs.sqlite` when there is one,
+    and fetches `nixexprs.tar.xz` when there is not. The fixture package set
+    points `path` at real nixpkgs, which carries no database, so an unpatched
+    run would reach the network. This replaces that one fetch with a real
+    SQLite file of the published shape: the rows below are copied from the
+    index, and `openssh` really does install `ssh-keygen`.
+    """
+    database = tmp_path / "programs.sqlite"
+    connection = sqlite3.connect(database)
+    with connection:
+        connection.execute(
+            "create table Programs ("
+            " name text not null, system text not null, package text not null,"
+            " primary key (name, system, package))"
+        )
+        connection.executemany(
+            "insert into Programs values (?, ?, ?)",
+            [
+                ("rg", "x86_64-linux", "ripgrep"),
+                # A binary that no package of the fixture is named after, and
+                # that no `meta.mainProgram` names either. Only this index can
+                # reach it, which is the whole reason the index exists.
+                ("gpg-agent", "x86_64-linux", "hello-no-main"),
+            ],
+        )
+    connection.close()
+
+    async def _index(
+        _session: object,
+        _pkgs_path: Path,
+        system: str,
+        _channel: str = "nixos-unstable",
+    ) -> ProgramIndex:
+        return ProgramIndex(path=database, system=system, release="26.11", revision="0123456789ab")
+
+    monkeypatch.setattr(search_module, "program_index_for", _index)
+    return database
+
+
+def _search_args(environment: NixTestEnvironment, target: Path, *extra: str) -> list[str]:
+    return [
+        "search",
+        "--file",
+        str(target),
+        "--system",
+        "x86_64-linux",
+        "--no-tui",
+        "--json-output",
+        *extra,
+        *environment.pynix_store_args(),
+    ]
+
+
+async def test_the_default_searches_both_indexes(
+    shared_nix_environment: NixTestEnvironment,
+    offline_program_index: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No flag means whichever of the two the target offers.
+
+    The query names a package and an option at once, so a merged answer holds
+    both and a single-index answer cannot.
+    """
+    del offline_program_index
+    cmd = parse(_search_args(shared_nix_environment, _BOTH_NIX, "ripgrep"))
+    await cmd.run()
+    kinds = {row["kind"] for row in _results(capsys.readouterr().out)}
+    assert kinds == {"package"}
+
+
+async def test_a_query_reaches_an_option_and_a_package_in_one_list(
+    shared_nix_environment: NixTestEnvironment,
+    offline_program_index: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    del offline_program_index
+    cmd = parse(_search_args(shared_nix_environment, _BOTH_NIX, "--limit", "200", "e"))
+    await cmd.run()
+    kinds = {row["kind"] for row in _results(capsys.readouterr().out)}
+    assert kinds == {"option", "package"}
+
+
+async def test_the_options_flag_leaves_the_packages_out(
+    shared_nix_environment: NixTestEnvironment,
+    offline_program_index: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    del offline_program_index
+    cmd = parse(_search_args(shared_nix_environment, _BOTH_NIX, "--options", "--limit", "200", "e"))
+    await cmd.run()
+    assert {row["kind"] for row in _results(capsys.readouterr().out)} == {"option"}
+
+
+async def test_the_packages_flag_leaves_the_options_out(
+    shared_nix_environment: NixTestEnvironment,
+    offline_program_index: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    del offline_program_index
+    cmd = parse(_search_args(shared_nix_environment, _BOTH_NIX, "--packages", "--limit", "200", "e"))
+    await cmd.run()
+    assert {row["kind"] for row in _results(capsys.readouterr().out)} == {"package"}
+
+
+async def test_a_binary_finds_the_package_that_installs_it(
+    shared_nix_environment: NixTestEnvironment,
+    offline_program_index: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The question `meta.mainProgram` cannot answer, through the command.
+
+    `hello-no-main` names no main program at all, and nothing in the fixture
+    is called `gpg-agent`. So the binary index is the only thing that can
+    reach it, and a hit proves that the join reached the command.
+    """
+    del offline_program_index
+    cmd = parse(_search_args(shared_nix_environment, _BOTH_NIX, "gpg-agent"))
+    await cmd.run()
+    rows = _results(capsys.readouterr().out)
+    assert rows[0]["attr"] == "hello-no-main"
+    binaries = rows[0]["binaries"]
+    assert isinstance(binaries, list)
+    assert "gpg-agent" in cast("list[object]", binaries)
+
+
+async def test_the_packages_flag_on_a_target_with_no_package_set_names_what_it_tried(
+    shared_nix_environment: NixTestEnvironment,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A flag asks for something, so a target that lacks it is an error."""
+    cmd = parse(_search_args(shared_nix_environment, _FIXTURE_DIR / "options_only.nix", "--packages", "anything"))
+    with pytest.raises(SystemExit):
+        await cmd.run()
+    printed = capsys.readouterr().err
+    assert "no package set" in printed
+    assert "--pkgs-attr" in printed
+
+
+async def test_the_default_on_a_target_with_no_package_set_still_searches_options(
+    shared_nix_environment: NixTestEnvironment,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No flag asks for whatever is there, so the other half answers alone."""
+    cmd = parse(_search_args(shared_nix_environment, _FIXTURE_DIR / "options_only.nix", "port"))
+    await cmd.run()
+    rows = _results(capsys.readouterr().out)
+    assert {row["kind"] for row in rows} == {"option"}

@@ -1,10 +1,21 @@
 """The implementation of the ``pynix search`` command.
 
-Search NixOS module options, using a cached, offline index.
+Search the NixOS options and the packages of one target.
 
 ``pynix.search`` holds the command class and its options, and this module holds
-what ``run`` needs. ``pynix._impl`` says why: the parser loads every subcommand module
-on every start, and none of these imports is needed to list an option.
+what ``run`` needs. ``pynix._impl`` says why: the parser loads every subcommand
+module on every start, and none of these imports is needed to list an option.
+
+**One target answers both searches.** ``pynix._search_target`` finds the
+options tree, the package set and the ``lib`` of whatever the caller pointed
+at, and reports which attribute path answered. A target that holds only one of
+the two still answers the search it can answer.
+
+**The cache holds what the evaluator found, so a warm search needs none.**
+One file for each target holds the options and the two paths that the package
+half needs: the source of nixpkgs, and the ``programs.sqlite`` that names the
+binaries. Without those two a warm search would still evaluate ``pkgs`` to
+read ``pkgs.path``, which is the whole cost that the cache exists to avoid.
 """
 
 from __future__ import annotations
@@ -12,18 +23,30 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
 from collections.abc import Sequence
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
-from rapidfuzz import fuzz, process
 from rich.console import Console
 
 from libpynix import human_at_terminal
+from nanopynix._typechecking import BEARTYPING
 from pynix import _impl
+from pynix._option_search import rank as rank_options
 from pynix._options import OptionRecord, fetch_option_doc_list
-from pynix._search_target import LIB_CHAIN, OPTIONS_CHAIN, Resolved, resolve
+from pynix._package_search import SearchablePackage, join, rank as rank_packages
+from pynix._packages import (
+    cache_path as package_cache_path,
+    indexed_packages,
+    load_cache as load_packages,
+    package_identity,
+)
+from pynix._programs import ProgramIndex, program_index_for
+from pynix._search_merge import OPTION, PACKAGE, kind, make_merged_ranker, name as hit_name
+from pynix._search_target import LIB_CHAIN, OPTIONS_CHAIN, PKGS_CHAIN, Resolved, SearchTarget, resolve
 from pynix._util import error_console, error_exit, eval_session, print_json, report_and_exit
 from pynix.search import Search
 from pynix.target import (
@@ -32,8 +55,64 @@ from pynix.target import (
     evaluate_target,
 )
 
+if TYPE_CHECKING or BEARTYPING:
+    from nanopynix import AsyncEvalSession
+
 logger = structlog.get_logger("pynix.search")
 console = Console()
+
+#: The shape of a cache file. A file of another version rebuilds, because a
+#: field that an older `pynix` did not write is a field this one needs.
+CACHE_VERSION = 2
+
+#: What `_has` calls each half, in the message it prints.
+_OPTIONS_TREE = "options tree"
+_PACKAGE_SET = "package set"
+
+
+@dataclass(frozen=True)
+class Wanted:
+    """Which of the two indexes the caller asked for.
+
+    Neither flag means both, and that is the default the user asked for: a
+    person types one word and gets the good answer from whichever index holds
+    it. A flag narrows the search, and it never widens one.
+    """
+
+    options: bool
+    packages: bool
+
+    #: Whether a flag named the indexes, rather than the default choosing
+    #: both. It decides what a missing half means.
+    explicit: bool
+
+
+@dataclass
+class Cached:
+    """What one target wrote to the cache, and what a warm search reads back."""
+
+    options: list[OptionRecord] | None = None
+    pkgs_path: str | None = None
+    programs_db: str | None = None
+    origin: str = ""
+    system: str = ""
+    paths: dict[str, str] = field(default_factory=dict[str, str])
+
+
+@dataclass(frozen=True)
+class Found:
+    """The records that a search ranks, and where they came from."""
+
+    options: list[OptionRecord]
+    packages: list[SearchablePackage]
+    subject: str
+
+
+def wanted(command: Search) -> Wanted:
+    """Which indexes *command* asks for. Neither flag means both."""
+    if command.options or command.packages:
+        return Wanted(options=command.options, packages=command.packages, explicit=True)
+    return Wanted(options=True, packages=True, explicit=False)
 
 
 def _cache_dir() -> Path:
@@ -44,10 +123,31 @@ def _cache_dir() -> Path:
     return path
 
 
-def _cache_path(target: EvaluationTarget, options_attr: str | None, lib_attr: str | None) -> Path:
-    canonical = f"{target.file}|{target.attr}|{target.flake}|{options_attr}|{lib_attr}"
+def _cache_path(command: Search, target: EvaluationTarget) -> Path:
+    canonical = "|".join(
+        str(part)
+        for part in (
+            target.file,
+            target.attr,
+            target.flake,
+            command.options_attr,
+            command.lib_attr,
+            command.pkgs_attr,
+            _system(command),
+            command.channel,
+        )
+    )
     key = hashlib.sha256(canonical.encode()).hexdigest()[:16]
     return _cache_dir() / f"{key}.json"
+
+
+def _system(command: Search) -> str:
+    """The system whose binaries the package index answers for."""
+    if command.system is not None:
+        return command.system
+    machine = platform.machine()
+    system = "linux" if platform.system() == "Linux" else "darwin"
+    return f"{machine}-{system}"
 
 
 def _target_description(target: EvaluationTarget) -> str:
@@ -55,14 +155,83 @@ def _target_description(target: EvaluationTarget) -> str:
     return f"{base}#{target.attr}" if target.attr else base
 
 
-def _load_cache(path: Path) -> list[OptionRecord]:
-    data = json.loads(path.read_text())
-    return [OptionRecord(**entry) for entry in data["options"]]
+def _fields(path: Path) -> dict[str, object] | None:
+    """The fields of the cache at *path*, or `None` for anything else.
+
+    A cache is a convenience, so a file that is missing, truncated or written
+    by another version is not an error: the caller evaluates again.
+    `pynix._packages` reads its own cache the same way.
+    """
+    try:
+        payload: object = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    fields = cast("dict[str, object]", payload)
+    return fields if fields.get("version") == CACHE_VERSION else None
 
 
-def _save_cache(path: Path, target: EvaluationTarget, records: list[OptionRecord]) -> None:
-    payload = {"target": _target_description(target), "options": [asdict(record) for record in records]}
+def _text(value: object) -> str | None:
+    """*value* when it is a string, and `None` for anything else."""
+    return value if isinstance(value, str) else None
+
+
+def _options_of(value: object) -> list[OptionRecord] | None:
+    """The option records in *value*, or `None` when it holds none."""
+    if not isinstance(value, list):
+        return None
+    records: list[OptionRecord] = []
+    for entry in cast("list[object]", value):
+        if not isinstance(entry, dict):
+            return None
+        records.append(OptionRecord(**cast("dict[str, Any]", entry)))
+    return records
+
+
+def _paths_of(value: object) -> dict[str, str]:
+    """The attribute path that answered for each half, from *value*."""
+    if not isinstance(value, dict):
+        return {}
+    found = cast("dict[str, object]", value)
+    return {key: text for key, text in found.items() if isinstance(text, str)}
+
+
+def load_cache(path: Path) -> Cached:
+    """What *path* holds, or an empty record when it holds nothing usable."""
+    fields = _fields(path)
+    if fields is None:
+        return Cached()
+    return Cached(
+        options=_options_of(fields.get("options")),
+        pkgs_path=_text(fields.get("pkgs_path")),
+        programs_db=_text(fields.get("programs_db")),
+        origin=_text(fields.get("origin")) or "",
+        system=_text(fields.get("system")) or "",
+        paths=_paths_of(fields.get("paths")),
+    )
+
+
+def save_cache(path: Path, target: EvaluationTarget, cached: Cached) -> None:
+    """Write *cached* to *path*, whole."""
+    payload = {
+        "version": CACHE_VERSION,
+        "target": _target_description(target),
+        "options": [asdict(record) for record in cached.options] if cached.options is not None else None,
+        "pkgs_path": cached.pkgs_path,
+        "programs_db": cached.programs_db,
+        "origin": cached.origin,
+        "system": cached.system,
+        "paths": cached.paths,
+    }
     path.write_text(json.dumps(payload))
+
+
+def _missing(cached: Cached, ask: Wanted) -> bool:
+    """Say whether the cache lacks anything that *ask* needs."""
+    if ask.options and cached.options is None:
+        return True
+    return ask.packages and (cached.pkgs_path is None or cached.programs_db is None)
 
 
 async def run_search(command: Search) -> None:
@@ -73,26 +242,42 @@ async def run_search(command: Search) -> None:
     except EvaluationTargetError as exc:
         report_and_exit(exc)
 
-    cache_path = _cache_path(target, command.options_attr, command.lib_attr)
-    records = (
-        _load_cache(cache_path)
-        if cache_path.exists() and not command.update_index
-        else await _build_index(command, target, cache_path)
-    )
+    ask = wanted(command)
+    path = _cache_path(command, target)
+    cached = Cached() if command.update_index else load_cache(path)
+    if _missing(cached, ask):
+        cached = await _build_index(command, target, ask, cached)
+        save_cache(path, target, cached)
 
+    found = _read(command, target, ask, cached)
     if _use_tui(command):
         # This attribute read is what imports the interface. `pynix._impl`
         # holds the PEP 562 table that defers it, so a caller who gave a query
         # pays for neither `prompt_toolkit` nor the Markdown renderer.
-        await _impl.options_tui.browse(
-            records,
-            subject=_target_description(target),
+        await _impl.merged_tui.browse(
+            found.options,
+            found.packages,
+            subject=found.subject,
             initial_query=command.query or "",
         )
         return
 
     if command.query is not None:
-        _search(command, records, command.query)
+        _print(command, found, command.query)
+
+
+def _read(command: Search, target: EvaluationTarget, ask: Wanted, cached: Cached) -> Found:
+    """Turn the cache into the records that a search ranks."""
+    options = cached.options or [] if ask.options else []
+    packages: list[SearchablePackage] = []
+    if ask.packages and cached.pkgs_path is not None and cached.programs_db is not None:
+        records = load_packages(package_cache_path(cached.pkgs_path)) or []
+        index = ProgramIndex(path=Path(cached.programs_db), system=_system(command), release="", revision="")
+        packages = join(records, index.binaries_by_package())
+    subject = _target_description(target)
+    if cached.origin and ask.packages:
+        subject = f"{subject}, packages from {cached.origin}"
+    return Found(options=options, packages=packages, subject=subject)
 
 
 def _use_tui(command: Search) -> bool:
@@ -111,47 +296,145 @@ def _use_tui(command: Search) -> bool:
     return human_at_terminal()
 
 
-async def _build_index(command: Search, target: EvaluationTarget, cache_path: Path) -> list[OptionRecord]:
+async def _build_index(command: Search, target: EvaluationTarget, ask: Wanted, cached: Cached) -> Cached:
+    """Evaluate the target, and fill in whatever the cache lacks."""
+    built = Cached(
+        options=cached.options,
+        pkgs_path=cached.pkgs_path,
+        programs_db=cached.programs_db,
+        origin=cached.origin,
+        system=_system(command),
+        paths=dict(cached.paths),
+    )
     async with eval_session(command.store) as (_nix, _store, session):
         try:
-            target_value = await evaluate_target(target, session, auto_call_file=True)
-            found = await resolve(
-                target_value,
+            value = await evaluate_target(target, session, auto_call_file=True)
+            where = await resolve(
+                value,
                 options_attr=command.options_attr,
+                pkgs_attr=command.pkgs_attr,
                 lib_attr=command.lib_attr,
             )
         except EvaluationTargetError as exc:
             report_and_exit(exc)
-        options = _required(found.options, "options tree", OPTIONS_CHAIN, "--options-attr")
-        lib = _required(found.lib, "nixpkgs lib", (*LIB_CHAIN, "<the lib of the package set>"), "--lib-attr")
-        records = await fetch_option_doc_list(session, options.value, lib.value)
-    _save_cache(cache_path, target, records)
-    where = f"{options.path} and {lib.path}"
-    error_console.print(f"indexed {len(records)} options from {_target_description(target)} ({where})")
-    return records
+        if ask.options and built.options is None and _has(where.options, where.lib, ask, _OPTIONS_TREE):
+            await _index_options(session, target, where, built)
+        if ask.packages and built.pkgs_path is None and _has(where.pkgs, where.lib, ask, _PACKAGE_SET):
+            await _index_packages(session, command, where, built)
+    if built.options is None and built.pkgs_path is None:
+        error_exit(
+            f"{_target_description(target)} holds neither an options tree nor a package set. "
+            f"Tried {', '.join(OPTIONS_CHAIN)} and {', '.join(PKGS_CHAIN)}; "
+            "name one with --options-attr or --pkgs-attr."
+        )
+    return built
 
 
-def _required(found: Resolved | None, what: str, tried: Sequence[str], flag: str) -> Resolved:
-    """*found*, or exit with a message that names every path that was tried.
+def _has(half: Resolved | None, lib: Resolved | None, ask: Wanted, what: str) -> bool:
+    """Say whether this half of the search can run, and report when it cannot.
 
-    A target that holds no options tree is a real thing to point at, and a
-    person who did it by mistake needs to read which paths the search used.
+    **A flag makes a missing half an error, and the default does not.** A
+    person who wrote `--packages` and pointed at a module system that hides
+    its package set asked for something the target does not hold, and has to
+    be told. A person who wrote no flag asked for whatever is there, so the
+    search answers with the other half and says nothing.
     """
+    if half is not None and lib is not None:
+        return True
+    if ask.explicit:
+        chain = OPTIONS_CHAIN if what == _OPTIONS_TREE else PKGS_CHAIN
+        flag = "--options-attr" if what == _OPTIONS_TREE else "--pkgs-attr"
+        missing, tried, name_it = (
+            (what, chain, flag)
+            if half is None
+            else ("nixpkgs lib", (*LIB_CHAIN, "the lib of the package set"), "--lib-attr")
+        )
+        error_exit(f"the target holds no {missing}: tried {', '.join(tried)}. Name one with {name_it}.")
+    return False
+
+
+async def _index_options(
+    session: AsyncEvalSession,
+    target: EvaluationTarget,
+    where: SearchTarget,
+    built: Cached,
+) -> None:
+    """Walk the options tree, and record which paths answered."""
+    options = _named(where.options)
+    lib = _named(where.lib)
+    built.options = await fetch_option_doc_list(session, options.value, lib.value)
+    built.paths["options"] = options.path
+    built.paths["lib"] = lib.path
+    error_console.print(
+        f"indexed {len(built.options)} options from {_target_description(target)} ({options.path} and {lib.path})"
+    )
+
+
+async def _index_packages(
+    session: AsyncEvalSession,
+    command: Search,
+    where: SearchTarget,
+    built: Cached,
+) -> None:
+    """Walk the package set, find the binaries it installs, and record both."""
+    pkgs = _named(where.pkgs)
+    lib = _named(where.lib)
+    records = await indexed_packages(session, pkgs.value, lib.value)
+    built.pkgs_path = await package_identity(pkgs.value)
+    index = await program_index_for(session, Path(built.pkgs_path), built.system, command.channel)
+    built.programs_db = str(index.path)
+    built.origin = index.origin
+    built.paths["pkgs"] = pkgs.path
+    error_console.print(f"indexed {len(records)} packages from {pkgs.path}, binaries from {index.origin}")
+
+
+def _named(found: Resolved | None) -> Resolved:
+    """*found*, which `_has` already proved is there."""
     if found is None:
-        candidates = ", ".join(tried)
-        error_exit(f"the target holds no {what}: tried {candidates}. Name one with {flag}.")
+        raise ValueError("the resolver reported this half of the search as present")
     return found
 
 
-def _search(command: Search, records: list[OptionRecord], query: str) -> None:
-    by_name = {record.name: record for record in records}
-    matches = process.extract(query, list(by_name), scorer=fuzz.WRatio, limit=command.limit)
-    results = [by_name[name] for name, _score, _index in matches]
+def _print(command: Search, found: Found, query: str) -> None:
+    """Print the best matches, tagged with the index that answered."""
+    results = _ranked(found, query, command.limit)
     if command.json_output:
-        print_json([asdict(record) for record in results])
+        print_json([_as_json(hit) for hit in results])
         return
-    for record in results:
-        console.print(f"[bold]{record.name}[/bold] :: {record.type}")
-        if record.description:
-            first_line = record.description.strip().splitlines()[0]
-            console.print(f"  {first_line}")
+    for hit in results:
+        tag = "opt" if kind(hit) == OPTION else "pkg"
+        console.print(f"[dim]{tag}[/dim] [bold]{hit_name(hit)}[/bold] :: {_summary(hit)}")
+
+
+def _as_json(hit: OptionRecord | SearchablePackage) -> dict[str, object]:
+    """One machine-readable row, tagged with the index that answered.
+
+    A package writes the binaries it installs beside its record, because that
+    is what the join added and a caller who asked "which package gives me
+    `rg`" needs to read the answer back.
+    """
+    if isinstance(hit, OptionRecord):
+        return {"kind": OPTION, **asdict(hit)}
+    return {"kind": PACKAGE, **asdict(hit.record), "binaries": list(hit.binaries)}
+
+
+def _summary(hit: OptionRecord | SearchablePackage) -> str:
+    """One line about *hit*, for the list."""
+    if isinstance(hit, OptionRecord):
+        first = hit.description.strip().splitlines()[0] if hit.description else ""
+        return f"{hit.type}{f' -- {first}' if first else ''}"
+    description = hit.record.description or ""
+    return f"{hit.record.version}{f' -- {description}' if description else ''}"
+
+
+def _ranked(found: Found, query: str, limit: int) -> Sequence[OptionRecord | SearchablePackage]:
+    """The best *limit* matches of *query*, over whichever indexes are there.
+
+    A search over one index calls that index's own ranker, so a caller who
+    passed `--options` reads exactly what the interface would draw.
+    """
+    if found.options and not found.packages:
+        return rank_options(found.options, limit=limit)(query)
+    if found.packages and not found.options:
+        return rank_packages(found.packages)(query)[:limit]
+    return make_merged_ranker(found.options, found.packages, limit=limit)(query)

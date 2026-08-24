@@ -248,6 +248,13 @@ async def package_identity(pkgs_value: AsyncValue) -> str:
     """The store path of the nixpkgs that *pkgs_value* came from.
 
     `pkgs.path` is what nixpkgs itself calls its own source.
+
+    **Two package sets from one source share this key, and issue #260 holds
+    the measurement.** `import <nixpkgs> { }` and `import <nixpkgs> {
+    config.allowUnfree = true; }` have the same `path`, so the second reads
+    the walk of the first. `pkgs.config` cannot join the key as it stands,
+    because a real config holds functions and `builtins.toJSON` raises on one
+    where `builtins.tryEval` does not catch it.
     """
     path_value = pkgs_value.attr("path")
     return str(await path_value.to_python())

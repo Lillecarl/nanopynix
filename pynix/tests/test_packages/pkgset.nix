@@ -18,7 +18,10 @@ in
   inherit lib;
 
   # `package_identity` reads this, the way nixpkgs names its own source.
-  inherit (pkgs) path;
+  # `stdenv` is here for `pynix._search_target`, which reads `path` and
+  # `stdenv` to say that a target is itself a package set. Both are what real
+  # nixpkgs carries, and neither is forced by the walk.
+  inherit (pkgs) path stdenv;
 
   ripgrep = pkgs.runCommand "ripgrep-14.1.1" {
     meta = {
