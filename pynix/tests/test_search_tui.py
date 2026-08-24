@@ -19,7 +19,7 @@ from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.styles.defaults import PROMPT_TOOLKIT_STYLE, WIDGETS_STYLE
 
 from pynix._impl import options_tui, package_tui
-from pynix._impl._search_tui import STYLE_RULES, SearchSource, SearchTui
+from pynix._impl._search_tui import _CUT, _IN, _KEYS_SHORT, _MIN_TAIL, STYLE_RULES, SearchSource, SearchTui
 
 #: The escape sequences that a terminal sends for the keys under test. Each one
 #: goes through the real key parser of `prompt_toolkit`.
@@ -261,6 +261,71 @@ async def test_the_divider_stays_put_when_the_selection_moves() -> None:
 
     assert len(heights) == len(records), "the list pane did not draw for every record"
     assert len(set(heights)) == 1, f"the divider moved between records: {heights}"
+
+
+_SUBJECT = "/home/lillecarl/Code/croshome#nixosConfigurations.hetztop"
+
+
+def _footer_at(width: int) -> str:
+    """The whole footer line, as the screen would draw it at *width*."""
+    source = SearchSource(
+        items=_FRUIT,
+        rank=lambda _query: _FRUIT,
+        row=lambda fruit: fruit.name,
+        detail=lambda fruit, _width: [("", fruit.name)],
+        noun="fruit",
+        subject=_SUBJECT,
+    )
+    tui = SearchTui(source)
+    tui.detail_width = width
+    return "".join(text for _style, text, *_rest in tui.footer_fragments())
+
+
+@pytest.mark.parametrize("width", [200, 160, 120, 100, 80, 60, 40, 20])
+def test_the_footer_is_exactly_as_wide_as_the_screen(width: int) -> None:
+    """The footer draws a bar, so it fills the line and never overruns it."""
+    assert len(_footer_at(width)) == width
+
+
+@pytest.mark.parametrize("width", [200, 160, 120, 100, 80])
+def test_the_footer_keeps_the_keys_before_it_keeps_the_subject(width: int) -> None:
+    """The keys are the only place the screen says what the keys do.
+
+    Regression test. The footer put the count and the subject first and the
+    keys last, and a narrow terminal cut the end of the line off. Measured at
+    80 columns against one NixOS configuration: the whole key help was gone,
+    and the line ended in the middle of a store path.
+
+    80 columns is the narrow end of this list because a conventional terminal
+    is 80 columns, and it is where the old footer lost every key.
+    """
+    footer = _footer_at(width)
+    for key in ("up/down", "alt+up/down", "ctrl-c"):
+        assert key in footer, f"{width} columns lost {key}"
+
+
+def test_a_subject_the_footer_cannot_hold_keeps_its_tail() -> None:
+    """The tail is the part that changes between one run and the next."""
+    footer = _footer_at(100)
+    assert _SUBJECT not in footer, "the whole subject fitted, so this proves nothing"
+    assert "..." in footer
+    assert footer.count("nixosConfigurations.hetztop") == 1
+
+
+def test_a_footer_with_no_room_for_a_subject_says_nothing_rather_than_a_stub() -> None:
+    """` in ...p` is noise. Below a useful tail the subject goes.
+
+    The width is derived and not written down, so a change to the key help
+    moves the width with it rather than turning this into a test of nothing.
+    It is the widest screen that still refuses the subject: the count, the
+    short key help, and one column less than the shortest tail that says
+    something.
+    """
+    count = f" {len(_FRUIT)} fruits of {len(_FRUIT)}"
+    room = len(_IN) + len(_CUT) + _MIN_TAIL - 1
+    footer = _footer_at(len(count) + len(_KEYS_SHORT) + room)
+    assert "..." not in footer
+    assert "ctrl-c" in footer
 
 
 def test_a_page_key_falls_back_before_the_first_render() -> None:
