@@ -21,6 +21,22 @@ system is realized, not when generating a bare index of names/types/
 descriptions. A single such option throws and aborts the *entire* bulk fetch
 (it's one Nix list, forced in one JSON pass).
 
+**The walk follows ``opt.type.getSubOptions``, so a sub-option is in the
+index.** An ``attrsOf (submodule ...)`` is one option to ``lib.collect
+lib.isOption``, and the options inside the submodule are not in the tree at
+all: they are behind that function. Without the recursion, not one of 14 752
+options of a real ``nixosConfigurations`` held a ``<name>`` placeholder, and
+``systemd.services.<name>.serviceConfig`` could not be found. This is the same
+mechanism ``optionAttrSetToDocList`` uses, and it forces no ``default``, so it
+keeps the property below. Measured on that configuration: 14 752 options
+become 24 941, and the walk takes the same time, because the submodules were
+evaluated already.
+
+The recursion needs no filter of its own. Every submodule declares
+``_module.args``, ``_module.check``, ``_module.freeformType`` and
+``_module.specialArgs``, and each one is ``internal`` below the top level, so
+the filter that this module already applies removes all four.
+
 A ``builtins.tryEval``/``builtins.deepSeq`` guard around just the
 ``default``/``example`` fields was tried and does **not** work: per Nix's
 own documentation for `tryEval` (`nix/src/libexpr/primops.cc`), it "only
@@ -45,10 +61,19 @@ if TYPE_CHECKING or BEARTYPING:
 
     from nanopynix import AsyncEvalSession, AsyncValue
 
-_COLLECT_OPTION_METADATA = """
+#: How deep the walk follows a sub-option, before it stops.
+#:
+#: `lib.optionAttrSetToDocList` has no bound, and carries a comment on how to
+#: find the infinite recursion when a type builds one. This walk states a bound
+#: instead. Measured against a real `nixosConfigurations` of 24 941 options:
+#: depth 4 reaches 24 935 of them and depth 6 reaches every one, so 8 leaves
+#: margin for a tree deeper than any that exists today.
+_SUB_OPTION_DEPTH = 8
+
+_COLLECT_OPTION_METADATA = f"""
 lib: options:
-  map
-    (opt: {
+  let
+    entry = opt: {{
       name = lib.showOption opt.loc;
       description = opt.description or null;
       declarations = builtins.filter (x: x != lib.unknownModule) opt.declarations;
@@ -58,8 +83,21 @@ lib: options:
         in if builtins.isBool v then v else v == "shallow";
       readOnly = opt.readOnly or false;
       type = opt.type.description or "unspecified";
-    })
-    (lib.collect lib.isOption options)
+    }};
+    walk = depth: opts:
+      builtins.concatMap
+        (opt:
+          let
+            v = opt.visible or true;
+            subVisible = if builtins.isBool v then v else v == "transparent";
+            sub = (opt.type or {{ }}).getSubOptions or (_: {{ }}) opt.loc;
+          in
+            [ (entry opt) ]
+            ++ (if depth > 0 && subVisible && sub != {{ }} then walk (depth - 1) sub else [ ])
+        )
+        (lib.collect lib.isOption opts);
+  in
+    walk {_SUB_OPTION_DEPTH} options
 """
 
 

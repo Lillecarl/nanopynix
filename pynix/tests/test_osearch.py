@@ -503,3 +503,89 @@ async def test_the_command_opens_the_interface_inside_its_event_loop(
                 ],
             )
             await cmd.run()
+
+
+# -- options inside a submodule ------------------------------------------------
+#
+# `systemd.services.<name>.serviceConfig` was not in the index at all, because
+# `lib.collect lib.isOption` stops at `systemd.services`: an
+# `attrsOf (submodule ...)` is one option, and the options under it are behind
+# `opt.type.getSubOptions`. The fixture module carries the same shape.
+
+
+def test_an_option_inside_an_attrsof_submodule_is_in_the_index(
+    indexed_options: list[OptionRecord],
+) -> None:
+    """Regression test for the shape of `systemd.services.<name>.serviceConfig`.
+
+    Measured before the walk recursed: not one of the 14 752 options of a real
+    `nixosConfigurations` held a `<name>` placeholder.
+    """
+    names = {record.name for record in indexed_options}
+    assert "services.example-daemon.vhosts.<name>.port" in names
+
+
+def test_a_submodule_inside_a_submodule_is_in_the_index(
+    indexed_options: list[OptionRecord],
+) -> None:
+    """The walk enters a second level, and the depth bound still lets it."""
+    names = {record.name for record in indexed_options}
+    assert "services.example-daemon.vhosts.<name>.nested.<name>.deep" in names
+
+
+def test_a_list_of_submodules_names_its_element_with_a_star(
+    indexed_options: list[OptionRecord],
+) -> None:
+    """`listOf` names its element `*`, and `attrsOf` names it `<name>`."""
+    names = {record.name for record in indexed_options}
+    assert "services.example-daemon.upstreams.*.address" in names
+
+
+def test_a_sub_option_keeps_its_type_and_its_description(
+    indexed_options: list[OptionRecord],
+) -> None:
+    record = _by_name(indexed_options, "services.example-daemon.vhosts.<name>.port")
+    assert record.type.startswith("16 bit unsigned integer")
+    assert record.description is not None
+    assert "Port this host listens on." in record.description
+
+
+def test_a_sub_option_whose_default_cannot_be_evaluated_does_not_abort_the_walk(
+    indexed_options: list[OptionRecord],
+) -> None:
+    """The walk must force no `default`, at any depth.
+
+    `brokenSubDefault` is the trap that `brokenDefault` is, one level down. One
+    option that throws would end the whole bulk fetch, because the walk returns
+    one Nix list that is forced in one pass.
+    """
+    names = {record.name for record in indexed_options}
+    assert "services.example-daemon.vhosts.<name>.brokenSubDefault" in names
+    assert "services.example-daemon.vhosts.<name>.port" in names
+    assert "services.example-daemon.port" in names
+
+
+def test_the_plumbing_of_a_submodule_stays_out_of_the_index(
+    indexed_options: list[OptionRecord],
+) -> None:
+    """Every submodule declares four `_module.*` options, and all four are noise.
+
+    They are `internal` below the top level, so the filter this index already
+    applies removes them. The recursion needs no filter of its own, and this
+    test is what says so.
+    """
+    nested_plumbing = [
+        record.name for record in indexed_options if "_module." in record.name and record.name != "_module.args"
+    ]
+    assert nested_plumbing == []
+
+
+def test_a_sub_option_is_searchable(
+    indexed_options: list[OptionRecord],
+) -> None:
+    """The whole point: the interface finds the option, by its own name."""
+    ranked = osearch_tui.rank(indexed_options)("brokenSubDefault")
+    assert [record.name for record in ranked] == ["services.example-daemon.vhosts.<name>.brokenSubDefault"]
+
+    ranked = osearch_tui.rank(indexed_options)("vhosts port")
+    assert [record.name for record in ranked] == ["services.example-daemon.vhosts.<name>.port"]

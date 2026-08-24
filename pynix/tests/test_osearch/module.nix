@@ -47,6 +47,60 @@
       readOnly = true;
       description = "The release that this daemon state belongs to.";
     };
+    # An `attrsOf (submodule ...)` is one option to `lib.collect lib.isOption`,
+    # and the options inside it are behind `opt.type.getSubOptions`. This is the
+    # shape of `systemd.services` and of `services.nginx.virtualHosts`, and the
+    # walk has to enter it. `vhosts.<name>.nested.<name>.deep` nests one inside
+    # another, so the walk has to end as well.
+    vhosts = lib.mkOption {
+      default = { };
+      description = "Virtual hosts, by name.";
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            port = lib.mkOption {
+              type = lib.types.port;
+              default = 80;
+              description = "Port this host listens on.";
+            };
+            # The same trap as `brokenDefault` above, one level down: a default
+            # that only a realized system can evaluate must not abort the walk.
+            brokenSubDefault = lib.mkOption {
+              type = lib.types.str;
+              default = config.services.example-daemon.alsoDoesNotExist;
+              description = "A sub-option whose default cannot be evaluated.";
+            };
+            nested = lib.mkOption {
+              default = { };
+              description = "A submodule inside a submodule.";
+              type = lib.types.attrsOf (
+                lib.types.submodule {
+                  options.deep = lib.mkOption {
+                    type = lib.types.str;
+                    default = "";
+                    description = "Two levels down.";
+                  };
+                }
+              );
+            };
+          };
+        }
+      );
+    };
+    # `listOf` names its element `*` rather than `<name>`.
+    upstreams = lib.mkOption {
+      default = [ ];
+      description = "Upstream servers, in order.";
+      type = lib.types.listOf (
+        lib.types.submodule {
+          options.address = lib.mkOption {
+            type = lib.types.str;
+            default = "";
+            description = "Address of the upstream.";
+          };
+        }
+      );
+    };
     # Mirrors real-world modules (e.g. disko) whose defaults are expressions
     # over `config` that only resolve once a whole system is realized --
     # evaluating this option's default in isolation throws "attribute
