@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pynix._programs import ProgramIndex
+from pynix._programs import ProgramIndex, index_at
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -151,3 +151,62 @@ def test_a_release_with_no_revision_still_names_itself(tmp_path: Path) -> None:
 def test_an_index_built_by_hand_says_so(tmp_path: Path) -> None:
     """A test or a caller may build one, and it names no release."""
     assert ProgramIndex(path=tmp_path / "x.sqlite", system="x86_64-linux").origin == "an unnamed index"
+
+
+def _write_index(source: Path) -> None:
+    """Build a `programs.sqlite` under *source*, the way a channel ships one."""
+    source.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(source / "programs.sqlite")
+    with connection:
+        connection.execute(
+            "create table Programs ("
+            " name text not null, system text not null, package text not null,"
+            " primary key (name, system, package))"
+        )
+        connection.executemany("insert into Programs values (?, ?, ?)", _ROWS)
+    connection.close()
+
+
+def test_a_source_tree_with_a_database_answers_without_the_network(tmp_path: Path) -> None:
+    """A channel unpack carries the index, so the fetch never has to run."""
+    source = tmp_path / "channel"
+    _write_index(source)
+    (source / ".version").write_text("26.11\n")
+    (source / ".git-revision").write_text("56c02bc00adcf003215cc4bd996d6efaf4cff188\n")
+
+    found = index_at(source, "x86_64-linux")
+    assert found is not None
+    assert found.origin == "26.11 (56c02bc00adc)"
+    assert found.packages_for_binary("ssh-keygen") == ["openssh"]
+
+
+def test_a_source_tree_without_a_database_reports_nothing(tmp_path: Path) -> None:
+    """The common case, measured: a git checkout and a flake input hold none.
+
+    `<nixpkgs>` and `/etc/nixpkgs` on one NixOS machine are the same store
+    path, they carry `.version` and `.git-revision`, and they carry no
+    `programs.sqlite`. So this branch is the one that reaches the channel.
+    """
+    source = tmp_path / "checkout"
+    source.mkdir()
+    (source / ".version").write_text("26.11\n")
+    assert index_at(source, "x86_64-linux") is None
+
+
+def test_the_local_index_keeps_the_system_it_was_asked_for(tmp_path: Path) -> None:
+    source = tmp_path / "channel"
+    _write_index(source)
+    found = index_at(source, "aarch64-linux")
+    assert found is not None
+    assert found.packages_for_binary("only-on-arm") == ["somepackage"]
+    assert found.packages_for_binary("ssh-keygen") == []
+
+
+def test_a_local_index_that_names_no_release_still_answers(tmp_path: Path) -> None:
+    """A tree with no `.version` must not stop the search."""
+    source = tmp_path / "channel"
+    _write_index(source)
+    found = index_at(source, "x86_64-linux")
+    assert found is not None
+    assert found.release == ""
+    assert found.packages_for_binary("rg") == ["ripgrep"]
