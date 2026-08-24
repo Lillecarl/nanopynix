@@ -17,6 +17,9 @@ in
 {
   inherit lib;
 
+  # `package_identity` reads this, the way nixpkgs names its own source.
+  inherit (pkgs) path;
+
   ripgrep = pkgs.runCommand "ripgrep-14.1.1" {
     meta = {
       description = "Recursively search directories for a regex pattern";
