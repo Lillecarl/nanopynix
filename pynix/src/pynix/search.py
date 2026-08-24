@@ -10,7 +10,7 @@ from pynix._nix_options import attr_option, file_option, flake_option
 from pynix._settings import ConfiguredCommand, store_option
 
 
-class Osearch(ConfiguredCommand):
+class Search(ConfiguredCommand):
     """Search NixOS module options, using a cached, offline index."""
 
     query: str | None = pos(help="Search query. Omit to just (re)build the index.", default=None)
@@ -49,4 +49,4 @@ class Osearch(ConfiguredCommand):
 
     @override
     async def run(self) -> None:
-        await _impl.osearch.run_osearch(self)
+        await _impl.search.run_search(self)

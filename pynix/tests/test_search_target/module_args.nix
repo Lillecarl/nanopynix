@@ -10,6 +10,6 @@ in
 lib.evalModules {
   modules = [
     { _module.args.pkgs = pkgs; }
-    ../test_osearch/module.nix
+    ../test_search/module.nix
   ];
 }

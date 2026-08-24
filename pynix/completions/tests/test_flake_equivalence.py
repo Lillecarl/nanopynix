@@ -292,7 +292,7 @@ def test_a_directory_reaches_the_answer_too(equivalence_flake: Path, pynix_bin: 
 def test_a_command_with_no_search_reads_the_fragment_as_one_path(
     equivalence_flake: Path, pynix_bin: str, current_system: str
 ) -> None:
-    """`pynix osearch` applies no prefix, and `nix` has no subcommand like it.
+    """`pynix search` applies no prefix, and `nix` has no subcommand like it.
 
     So this row states the behaviour rather than comparing it. No prefix means
     the top of the flake and nothing else, and no defaults means the empty
@@ -300,7 +300,7 @@ def test_a_command_with_no_search_reads_the_fragment_as_one_path(
     because `packages.<system>.default` is there.
     """
     word = f"{equivalence_flake}#"
-    ours = bare(argcomplete_candidates(f"pynix osearch --flake {word}", pynix_bin), equivalence_flake)
+    ours = bare(argcomplete_candidates(f"pynix search --flake {word}", pynix_bin), equivalence_flake)
     assert ours == {"packages", "legacyPackages", "devShells", "topone", "toptwo"}
 
     with_a_default = bare(argcomplete_candidates(f"pynix build --flake {word}", pynix_bin), equivalence_flake)

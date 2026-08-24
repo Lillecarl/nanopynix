@@ -1,4 +1,4 @@
-"""Bulk NixOS option extraction, shared by ``pynix osearch`` and (potentially) the LSP.
+"""Bulk NixOS option extraction, shared by ``pynix search`` and (potentially) the LSP.
 
 Extracting one option's fields at a time (the pattern
 ``_lsp/_module_system.py``'s ``render_option_declaration`` uses for hover) is

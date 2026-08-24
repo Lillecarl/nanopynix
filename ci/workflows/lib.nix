@@ -535,7 +535,7 @@ let
           # across flake, repl, example and store tests, so it is the machine
           # and not one subsystem.
           #
-          # `test_osearch_builds_index_and_finds_a_match` crossed the 30 s
+          # `test_search_builds_index_and_finds_a_match` crossed the 30 s
           # deadline at 30.9 s in the slower run, having taken 20.4 s in the
           # faster one. 90 s restores the headroom that 30 s gives a Linux job.
           #

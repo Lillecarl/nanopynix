@@ -44,10 +44,10 @@ ROOT_SUBCOMMANDS = frozenset(
         "eval",
         "flake",
         "log",
-        "osearch",
         "path-info",
         "print-dev-env",
         "repl",
+        "search",
         "store",
     }
 )

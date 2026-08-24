@@ -173,7 +173,7 @@ let
         # in the second, and the increase was spread evenly over flake, repl,
         # example and store tests rather than concentrated anywhere.
         #
-        # `test_osearch_builds_index_and_finds_a_match` then crossed the
+        # `test_search_builds_index_and_finds_a_match` then crossed the
         # deadline at 30.9 s. It had measured 20.4 s against the same 30 s in
         # the faster run, so the headroom was already one and a half.
         #

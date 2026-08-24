@@ -1,6 +1,6 @@
 """The ranking that every `pynix` search shares.
 
-`osearch` searches NixOS options and issue #85 searches packages. The two hold
+`search` searches NixOS options and issue #85 searches packages. The two hold
 different records and ask the same question, so the algorithm is here and not
 in either of them.
 

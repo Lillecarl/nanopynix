@@ -10,19 +10,19 @@ from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
-import pynix._impl.osearch as osearch_module
+import pynix._impl.search as search_module
 from pynix import parse
-from pynix._impl import osearch_tui
+from pynix._impl import options_tui
 from pynix._impl._search_tui import SearchTui
 from pynix._options import OptionRecord
-from pynix.osearch import Osearch
+from pynix.search import Search
 
 if TYPE_CHECKING:
     from prompt_toolkit.formatted_text import StyleAndTextTuples
 
     from nanopynix_testing.nix_environment import NixTestEnvironment
 
-_FIXTURE_DIR = Path(__file__).parent / "test_osearch"
+_FIXTURE_DIR = Path(__file__).parent / "test_search"
 _SYSTEM_NIX = _FIXTURE_DIR / "system.nix"
 _TARGET_DIR = Path(__file__).parent / "test_search_target"
 
@@ -35,36 +35,36 @@ def _parse_json_output(out: str) -> object:
 
 
 def _results(out: str) -> list[dict[str, object]]:
-    """Parse an ``osearch --json`` result array into typed records."""
+    """Parse an ``search --json`` result array into typed records."""
     data = _parse_json_output(out)
     if not isinstance(data, list):
-        raise TypeError("expected osearch --json to print a JSON array")
+        raise TypeError("expected search --json to print a JSON array")
     records: list[dict[str, object]] = []
     for entry in cast("list[object]", data):
         if not isinstance(entry, dict):
-            raise TypeError("expected each osearch result to be a JSON object")
+            raise TypeError("expected each search result to be a JSON object")
         records.append(cast("dict[str, object]", entry))
     return records
 
 
 @pytest.fixture(autouse=True)
 def cache_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point osearch cache at a fresh per-test directory so tests don't share a cache."""
+    """Point search cache at a fresh per-test directory so tests don't share a cache."""
     cache_home = tmp_path / "cache"
-    osearch_dir = cache_home / "pynix" / "osearch"
-    osearch_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(osearch_module, "_cache_dir", lambda: osearch_dir)
+    search_dir = cache_home / "pynix" / "search"
+    search_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(search_module, "_cache_dir", lambda: search_dir)
     return cache_home
 
 
-async def test_osearch_builds_index_and_finds_a_match(
+async def test_search_builds_index_and_finds_a_match(
     shared_nix_environment: NixTestEnvironment,
     cache_home: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     cmd = parse(
         [
-            "osearch",
+            "search",
             "--file",
             str(_SYSTEM_NIX),
             "--json-output",
@@ -80,11 +80,11 @@ async def test_osearch_builds_index_and_finds_a_match(
     assert str(results[0]["name"]) == "services.example-daemon.port"
     assert str(results[0]["type"]).startswith("16 bit unsigned integer")
 
-    cache_files = list((cache_home / "pynix" / "osearch").glob("*.json"))
+    cache_files = list((cache_home / "pynix" / "search").glob("*.json"))
     assert len(cache_files) == 1
 
 
-async def test_osearch_survives_an_option_whose_default_cannot_be_evaluated(
+async def test_search_survives_an_option_whose_default_cannot_be_evaluated(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -95,7 +95,7 @@ async def test_osearch_survives_an_option_whose_default_cannot_be_evaluated(
     abort the entire bulk fetch, and the rest of the options still index."""
     cmd = parse(
         [
-            "osearch",
+            "search",
             "--file",
             str(_SYSTEM_NIX),
             "--json-output",
@@ -114,13 +114,13 @@ async def test_osearch_survives_an_option_whose_default_cannot_be_evaluated(
     assert "default" not in results[0]
 
 
-async def test_osearch_filters_out_internal_options(
+async def test_search_filters_out_internal_options(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     cmd = parse(
         [
-            "osearch",
+            "search",
             "--file",
             str(_SYSTEM_NIX),
             "--json-output",
@@ -136,18 +136,18 @@ async def test_osearch_filters_out_internal_options(
     assert all("secretInternal" not in str(result["name"]) for result in results)
 
 
-async def test_osearch_second_run_hits_the_cache_without_a_working_store(
+async def test_search_second_run_hits_the_cache_without_a_working_store(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    build_cmd = parse(["osearch", "--file", str(_SYSTEM_NIX), *shared_nix_environment.pynix_store_args()])
+    build_cmd = parse(["search", "--file", str(_SYSTEM_NIX), *shared_nix_environment.pynix_store_args()])
     await build_cmd.run()
     capsys.readouterr()
 
     # A bogus store URI would make evaluation fail if the cache were bypassed.
     cached_cmd = parse(
         [
-            "osearch",
+            "search",
             "--file",
             str(_SYSTEM_NIX),
             "--json-output",
@@ -162,29 +162,29 @@ async def test_osearch_second_run_hits_the_cache_without_a_working_store(
     assert str(results[0]["name"]) == "services.example-daemon.enable"
 
 
-async def test_osearch_update_index_rebuilds_the_cache(
+async def test_search_update_index_rebuilds_the_cache(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    build_cmd = parse(["osearch", "--file", str(_SYSTEM_NIX), *shared_nix_environment.pynix_store_args()])
+    build_cmd = parse(["search", "--file", str(_SYSTEM_NIX), *shared_nix_environment.pynix_store_args()])
     await build_cmd.run()
     capsys.readouterr()
 
     rebuild_cmd = parse(
-        ["osearch", "--file", str(_SYSTEM_NIX), "--update-index", *shared_nix_environment.pynix_store_args()],
+        ["search", "--file", str(_SYSTEM_NIX), "--update-index", *shared_nix_environment.pynix_store_args()],
     )
     await rebuild_cmd.run()
     captured = capsys.readouterr()
     assert "indexed" in captured.err
 
 
-async def test_osearch_limit_truncates_results(
+async def test_search_limit_truncates_results(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     cmd = parse(
         [
-            "osearch",
+            "search",
             "--file",
             str(_SYSTEM_NIX),
             "--json-output",
@@ -202,13 +202,13 @@ async def test_osearch_limit_truncates_results(
 
 # -- the full-screen interface -------------------------------------------------
 #
-# `osearch --tui` is a second reader of the same cached index. These tests build
+# `search --tui` is a second reader of the same cached index. These tests build
 # that index from the real module fixture, so the ranking and the detail pane
 # run against options that `lib.evalModules` produced, and not against a double.
 
 
 class _ModeCase(NamedTuple):
-    """One row of the table that decides which mode `osearch` runs."""
+    """One row of the table that decides which mode `search` runs."""
 
     tui: bool | None
     json_output: bool
@@ -237,8 +237,8 @@ def test_the_mode_follows_the_flags_the_query_and_the_caller(
     case: _ModeCase,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(osearch_module, "human_at_terminal", lambda: case.human)
-    argv = ["osearch", "--file", str(_SYSTEM_NIX)]
+    monkeypatch.setattr(search_module, "human_at_terminal", lambda: case.human)
+    argv = ["search", "--file", str(_SYSTEM_NIX)]
     if case.tui is True:
         argv.append("--tui")
     elif case.tui is False:
@@ -248,9 +248,9 @@ def test_the_mode_follows_the_flags_the_query_and_the_caller(
     if case.query is not None:
         argv.append(case.query)
     command = parse(argv)
-    if not isinstance(command, Osearch):
-        raise TypeError("expected the parser to build an Osearch command")
-    assert osearch_module._use_tui(command) is case.expected
+    if not isinstance(command, Search):
+        raise TypeError("expected the parser to build an Search command")
+    assert search_module._use_tui(command) is case.expected
 
 
 @pytest.fixture
@@ -260,11 +260,11 @@ async def indexed_options(
 ) -> list[OptionRecord]:
     """Every option of the fixture module, indexed by a real evaluation."""
     cmd = parse(
-        ["osearch", "--file", str(_SYSTEM_NIX), "--no-tui", *shared_nix_environment.pynix_store_args()],
+        ["search", "--file", str(_SYSTEM_NIX), "--no-tui", *shared_nix_environment.pynix_store_args()],
     )
     await cmd.run()
-    (cache_file,) = (cache_home / "pynix" / "osearch").glob("*.json")
-    return osearch_module._load_cache(cache_file)
+    (cache_file,) = (cache_home / "pynix" / "search").glob("*.json")
+    return search_module._load_cache(cache_file)
 
 
 def _by_name(records: list[OptionRecord], name: str) -> OptionRecord:
@@ -275,7 +275,7 @@ def test_the_ranking_puts_the_options_in_order_for_an_empty_query(
     indexed_options: list[OptionRecord],
 ) -> None:
     """An empty query has nothing to rank against, so the names are sorted."""
-    ranked = osearch_tui.rank(indexed_options)("")
+    ranked = options_tui.rank(indexed_options)("")
     names = [record.name for record in ranked]
     assert names == sorted(names)
     assert len(names) == len(indexed_options)
@@ -284,7 +284,7 @@ def test_the_ranking_puts_the_options_in_order_for_an_empty_query(
 def test_the_ranking_finds_an_option_by_a_part_of_its_name(
     indexed_options: list[OptionRecord],
 ) -> None:
-    ranked = osearch_tui.rank(indexed_options)("configFiles")
+    ranked = options_tui.rank(indexed_options)("configFiles")
     assert ranked[0].name == "services.example-daemon.configFiles"
 
 
@@ -298,7 +298,7 @@ def test_the_ranking_narrows_and_does_not_keep_every_option(
     order and the footer counted all of them. The score cutoff is what makes
     the interface narrow.
     """
-    ranked = osearch_tui.rank(indexed_options)("configFiles")
+    ranked = options_tui.rank(indexed_options)("configFiles")
     assert len(ranked) < len(indexed_options)
     assert all("onfig" in record.name for record in ranked)
 
@@ -310,12 +310,12 @@ def _named(*names: str) -> list[OptionRecord]:
 def test_the_ranking_finds_a_short_query_inside_a_long_option_name() -> None:
     """A caller who is still typing gives a query far shorter than the name."""
     long_name = "services.nginx.virtualHosts.<name>.locations.<name>.proxyWebsockets"
-    ranked = osearch_tui.rank(_named(long_name, "boot.loader.grub.enable"))("websock")
+    ranked = options_tui.rank(_named(long_name, "boot.loader.grub.enable"))("websock")
     assert [record.name for record in ranked] == [long_name]
 
 
 def test_the_ranking_ignores_the_case_of_the_query() -> None:
-    assert len(osearch_tui.rank(_named("services.a.proxyWebsockets"))("WEBSOCKETS")) == 1
+    assert len(options_tui.rank(_named("services.a.proxyWebsockets"))("WEBSOCKETS")) == 1
 
 
 def test_one_more_letter_never_gives_more_options() -> None:
@@ -337,7 +337,7 @@ def test_one_more_letter_never_gives_more_options() -> None:
         "services.openssh.enable",
         "networking.firewall.allowPing",
     )
-    rank_query = osearch_tui.rank(records)
+    rank_query = options_tui.rank(records)
     counts = [len(rank_query(query)) for query in ("v", "vs", "vsc", "vsco", "vscod", "vscode")]
     assert counts == sorted(counts, reverse=True), counts
 
@@ -349,7 +349,7 @@ def test_every_word_of_the_query_must_appear() -> None:
         "programs.vscode.package",
         "services.openssh.enable",
     )
-    rank_query = osearch_tui.rank(records)
+    rank_query = options_tui.rank(records)
     assert len(rank_query("vscode")) == 2
     assert [record.name for record in rank_query("vscode enable")] == ["programs.vscode.enable"]
 
@@ -359,7 +359,7 @@ def test_the_shorter_and_more_specific_option_ranks_first() -> None:
         "programs.vscode.profiles.<name>.userSettings.editorAssociations",
         "programs.vscode.enable",
     )
-    ranked = osearch_tui.rank(records)("vscode")
+    ranked = options_tui.rank(records)("vscode")
     assert ranked[0].name == "programs.vscode.enable"
 
 
@@ -370,14 +370,14 @@ def test_a_typo_falls_back_to_a_near_match() -> None:
     interface useful while the caller corrects the spelling.
     """
     records = _named("programs.vscode.enable", "networking.firewall.allowPing")
-    ranked = osearch_tui.rank(records)("vscodee")
+    ranked = options_tui.rank(records)("vscodee")
     assert [record.name for record in ranked] == ["programs.vscode.enable"]
 
 
 def test_the_ranking_finds_nothing_for_a_query_that_matches_nothing(
     indexed_options: list[OptionRecord],
 ) -> None:
-    assert osearch_tui.rank(indexed_options)("zzzzzzzz") == []
+    assert options_tui.rank(indexed_options)("zzzzzzzz") == []
 
 
 def test_the_detail_pane_renders_a_real_myst_description(
@@ -389,7 +389,7 @@ def test_the_detail_pane_renders_a_real_myst_description(
     over prose that the module system produced rather than a literal string.
     """
     record = _by_name(indexed_options, "services.example-daemon.configFiles")
-    text = "".join(fragment[1] for fragment in osearch_tui.detail(record, 70))
+    text = "".join(fragment[1] for fragment in options_tui.detail(record, 70))
 
     assert record.name in text
     assert "list of string" in text
@@ -412,8 +412,8 @@ def test_the_detail_pane_wraps_to_the_width_it_is_given(
     width and it hides what the description does.
     """
     record = _by_name(indexed_options, "services.example-daemon.configFiles")
-    narrow = _lines(osearch_tui.detail(record, 40))
-    wide = _lines(osearch_tui.detail(record, 100))
+    narrow = _lines(options_tui.detail(record, 40))
+    wide = _lines(options_tui.detail(record, 100))
     assert narrow > wide
 
 
@@ -426,19 +426,19 @@ def test_the_detail_pane_marks_a_read_only_option(
 ) -> None:
     record = _by_name(indexed_options, "services.example-daemon.stateVersion")
     assert record.read_only is True
-    text = "".join(fragment[1] for fragment in osearch_tui.detail(record, 70))
+    text = "".join(fragment[1] for fragment in options_tui.detail(record, 70))
     assert "read only" in text
 
     port = _by_name(indexed_options, "services.example-daemon.port")
     assert port.read_only is False
-    assert "read only" not in "".join(fragment[1] for fragment in osearch_tui.detail(port, 70))
+    assert "read only" not in "".join(fragment[1] for fragment in options_tui.detail(port, 70))
 
 
 def test_the_detail_pane_names_the_file_that_declares_the_option(
     indexed_options: list[OptionRecord],
 ) -> None:
     record = _by_name(indexed_options, "services.example-daemon.port")
-    text = "".join(fragment[1] for fragment in osearch_tui.detail(record, 70))
+    text = "".join(fragment[1] for fragment in options_tui.detail(record, 70))
     assert "declared in" in text
     assert "module.nix" in text
 
@@ -447,7 +447,7 @@ async def test_the_interface_narrows_the_real_index_as_the_caller_types(
     indexed_options: list[OptionRecord],
 ) -> None:
     """Drive the real application over a pipe, against the real index."""
-    source = osearch_tui.source(indexed_options, subject=str(_SYSTEM_NIX))
+    source = options_tui.source(indexed_options, subject=str(_SYSTEM_NIX))
     with create_pipe_input() as pipe:
         tui = SearchTui(source, input=pipe, output=DummyOutput())
         pipe.send_text("configFiles\x03")
@@ -463,8 +463,8 @@ async def test_the_interface_narrows_the_real_index_as_the_caller_types(
 async def test_the_interface_opens_on_the_query_of_the_command_line(
     indexed_options: list[OptionRecord],
 ) -> None:
-    """`osearch --tui <query>` puts that query in the search bar."""
-    source = osearch_tui.source(indexed_options, subject=str(_SYSTEM_NIX))
+    """`search --tui <query>` puts that query in the search bar."""
+    source = options_tui.source(indexed_options, subject=str(_SYSTEM_NIX))
     with create_pipe_input() as pipe:
         tui = SearchTui(source, initial_query="stateVersion", input=pipe, output=DummyOutput())
         pipe.send_text("\x03")
@@ -479,7 +479,7 @@ async def test_the_interface_opens_on_the_query_of_the_command_line(
 async def test_the_command_opens_the_interface_inside_its_event_loop(
     shared_nix_environment: NixTestEnvironment,
 ) -> None:
-    """`osearch --tui` runs the interface from inside the loop of the command.
+    """`search --tui` runs the interface from inside the loop of the command.
 
     Regression test. `SearchTui.run` called `Application.run`, which calls
     `asyncio.run`, and every `pynix` command already runs an event loop. The
@@ -496,7 +496,7 @@ async def test_the_command_opens_the_interface_inside_its_event_loop(
         with create_app_session(input=pipe, output=DummyOutput()):
             cmd = parse(
                 [
-                    "osearch",
+                    "search",
                     "--file",
                     str(_SYSTEM_NIX),
                     "--tui",
@@ -585,14 +585,14 @@ def test_a_sub_option_is_searchable(
     indexed_options: list[OptionRecord],
 ) -> None:
     """The whole point: the interface finds the option, by its own name."""
-    ranked = osearch_tui.rank(indexed_options)("brokenSubDefault")
+    ranked = options_tui.rank(indexed_options)("brokenSubDefault")
     assert [record.name for record in ranked] == ["services.example-daemon.vhosts.<name>.brokenSubDefault"]
 
-    ranked = osearch_tui.rank(indexed_options)("vhosts port")
+    ranked = options_tui.rank(indexed_options)("vhosts port")
     assert [record.name for record in ranked] == ["services.example-daemon.vhosts.<name>.port"]
 
 
-async def test_osearch_finds_lib_where_the_old_default_could_not(
+async def test_search_finds_lib_where_the_old_default_could_not(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -604,7 +604,7 @@ async def test_osearch_finds_lib_where_the_old_default_could_not(
     """
     cmd = parse(
         [
-            "osearch",
+            "search",
             "--file",
             str(_TARGET_DIR / "module_args.nix"),
             "--json-output",
@@ -618,14 +618,14 @@ async def test_osearch_finds_lib_where_the_old_default_could_not(
     assert _results(captured.out)[0]["name"] == "services.example-daemon.port"
 
 
-async def test_osearch_names_what_it_tried_when_there_is_no_options_tree(
+async def test_search_names_what_it_tried_when_there_is_no_options_tree(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A bare package set is a real thing to point at, and holds no options."""
     cmd = parse(
         [
-            "osearch",
+            "search",
             "--file",
             str(_TARGET_DIR / "bare_pkgs.nix"),
             "--json-output",

@@ -92,7 +92,7 @@ class Spec:
 
 
 #: The default of a positional that the caller must give. Not `None`, which is
-#: a legal default for an optional positional -- `pynix osearch` takes one.
+#: a legal default for an optional positional -- `pynix search` takes one.
 MISSING: typing.Final = object()
 
 

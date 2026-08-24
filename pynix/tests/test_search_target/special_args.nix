@@ -9,5 +9,5 @@ let
 in
 lib.evalModules {
   specialArgs.pkgs = pkgs;
-  modules = [ ../test_osearch/module.nix ];
+  modules = [ ../test_search/module.nix ];
 }

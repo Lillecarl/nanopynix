@@ -3,7 +3,7 @@
 **This layer knows nothing about Nix.** It draws a search bar across the top,
 a ranked list on the left and the detail of the selected record on the right.
 The caller gives it the records, the function that ranks them and the two
-functions that draw one. `pynix osearch` is the first caller, over the NixOS
+functions that draw one. `pynix search` is the first caller, over the NixOS
 options in its cached index. Issue #85 adds `pynix search` over packages, and
 that command wants the same interface over different records.
 
@@ -76,7 +76,7 @@ STYLE = Style.from_dict(STYLE_RULES)
 class SearchSource[ItemT]:
     """Everything the search interface needs to know about one kind of record.
 
-    `pynix osearch` fills this in with NixOS options, and issue #85 fills it in
+    `pynix search` fills this in with NixOS options, and issue #85 fills it in
     with packages. The interface itself reads no field of a record.
     """
 
@@ -125,7 +125,7 @@ class SearchTui[ItemT]:
 
     source: SearchSource[ItemT]
 
-    #: What the search bar holds when the interface opens. `osearch --tui
+    #: What the search bar holds when the interface opens. `search --tui
     #: <query>` puts the query of the command line here.
     initial_query: str = ""
 

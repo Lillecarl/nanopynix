@@ -345,7 +345,7 @@ def _flake_search(name: FlakeSearch) -> AttrPathSearch:
     """The :class:`~nanopynix_helpers.AttrPathSearch` that *name* stands for.
 
     ``"exact"`` is the empty search, which reads the fragment as one path and
-    applies no prefix. ``pynix osearch`` passes no search to
+    applies no prefix. ``pynix search`` passes no search to
     :func:`~pynix.target.evaluate_target`, and that is what no search means.
     """
     # Imported here for the reason `_names` gives.
@@ -519,7 +519,7 @@ def flake_completer(name: FlakeSearch) -> Completer:
     `getDefaultFlakeAttrPathPrefixes` differently. Seven commands of this
     program declare the option, and a single completer carrying the base pair
     would be wrong for four of them: both forms of ``develop``, ``repl``, and
-    ``osearch``, which applies no search at all.
+    ``search``, which applies no search at all.
     """
 
     def complete(*, prefix: str, **_: Any) -> Sequence[str]:
