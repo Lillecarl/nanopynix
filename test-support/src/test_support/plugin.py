@@ -1,4 +1,4 @@
-"""The two things every suite here needs and that name no Nix concept.
+"""What every suite here needs, and that names no Nix concept.
 
 Register it from a ``pytest.ini``::
 
@@ -34,8 +34,8 @@ before issue #130 split the suites into their own projects:
   the stand-in, every test that records a note errors at *collection* rather
   than on its own subject, in CI only, while every dev shell passes.
 
-Neither belongs to one suite, and copying either into each project's conftest
-is how the two copies start to differ.
+No item above belongs to one suite, and a copy in each project's conftest is
+how the copies start to differ.
 """
 
 from __future__ import annotations
