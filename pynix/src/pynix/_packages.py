@@ -24,7 +24,10 @@ two join on the package name.
 
 **The walk reads the top level of nixpkgs only.** It does not enter a set that
 carries ``recurseForDerivations``, such as ``python3Packages``, which is most
-of the difference between 24 571 here and 148 251 there.
+of the difference between 24 571 here and 148 251 there. So a reader who
+searches for ``python3Packages.requests`` finds nothing. Issue #281 tracks it,
+and names what makes it more than a one-line change: the cost of the deeper
+walk, where to stop, and what a name that many package sets carry should draw.
 """
 
 from __future__ import annotations
