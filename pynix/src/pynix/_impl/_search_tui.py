@@ -31,6 +31,7 @@ from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.document import Document
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import HSplit, ScrollOffsets, VSplit, Window
@@ -94,8 +95,14 @@ _TO_THE_TOP = 10_000
 
 #: What the footer says the keys do. A terminal that cannot hold the first
 #: form gets the second, which drops the verbs and keeps the keys.
-_KEYS = "   arrows select   alt+up/down scroll   ctrl-c quit "
-_KEYS_SHORT = "   arrows   alt+up/down   ctrl-c "
+_KEYS = "   arrows select   tab pane   alt+up/down scroll   ctrl-c quit "
+_KEYS_SHORT = "   arrows   tab   alt+up/down   ctrl-c "
+
+#: What the footer says while the detail pane holds the focus. The keys mean
+#: something else there, and a full-screen application that silently changes
+#: what a key does is worse than one that never offered the key.
+_KEYS_PANE = "   arrows/jk scroll   tab search   ctrl-c quit "
+_KEYS_PANE_SHORT = "   arrows/jk   tab   ctrl-c "
 
 #: What the footer writes before a subject it had to cut, and the text it
 #: cuts. The length of the whole prefix is what `_subject` does its arithmetic
@@ -307,6 +314,26 @@ class SearchTui[ItemT]:
         rows = _FALLBACK_PAGE if info is None else max(1, info.window_height - 1)
         return rows * self.grid.columns
 
+    def detail_page(self) -> int:
+        """How many lines one page of the detail pane holds.
+
+        A pane that has never drawn answers with the fallback, for the same
+        reason `page` does: a key can arrive before the first render.
+        """
+        info = self._detail_window.render_info
+        return _FALLBACK_PAGE if info is None else max(1, info.window_height - 1)
+
+    @property
+    def pane_has_focus(self) -> bool:
+        """Whether the detail pane holds the focus rather than the query.
+
+        **The layout is asked, and no flag is kept.** `prompt_toolkit` routes
+        a key to the control that the layout says is focused, so a second
+        answer stored here could disagree with the one that decides where the
+        key goes.
+        """
+        return self.application.layout.has_focus(self._detail_window)
+
     # -- what the windows draw ---------------------------------------------
 
     def list_fragments(self) -> StyleAndTextTuples:
@@ -402,16 +429,21 @@ class SearchTui[ItemT]:
         count = f" {found} {noun} of {len(self.source.items)}"
         width = self.detail_width
         whole = f"{_IN}{self.source.subject}" if self.source.subject else ""
+        # **The key help says what the keys do *now*.** `Tab` changes what an
+        # arrow means, and this line is the only place the screen says so.
+        in_pane = self.pane_has_focus
+        long_keys = _KEYS_PANE if in_pane else _KEYS
+        short_keys = _KEYS_PANE_SHORT if in_pane else _KEYS_SHORT
         # Give up the verbs of the key help before giving up the subject: a
-        # short key help still names all three keys, and a cut subject still
+        # short key help still names all the keys, and a cut subject still
         # names the target.
-        for keys in (_KEYS, _KEYS_SHORT):
+        for keys in (long_keys, short_keys):
             room = width - len(count) - len(keys)
             if room >= len(whole):
                 return [("class:search-tui.footer", f"{count}{whole.ljust(room)}{keys}")]
-        room = width - len(count) - len(_KEYS_SHORT)
+        room = width - len(count) - len(short_keys)
         if room >= 0:
-            return [("class:search-tui.footer", f"{count}{_subject(self.source.subject, room)}{_KEYS_SHORT}")]
+            return [("class:search-tui.footer", f"{count}{_subject(self.source.subject, room)}{short_keys}")]
         return [("class:search-tui.footer", count[:width].ljust(width))]
 
     # -- the application ----------------------------------------------------
@@ -505,26 +537,65 @@ class SearchTui[ItemT]:
         The bindings are named methods, and not the closures that the
         `prompt_toolkit` examples use. Two things follow: a test calls one
         directly, and pyright can see that each one is used.
+
+        **A motion key means one thing over the list and another over the
+        pane, so each one carries a filter.** `Tab` moves the focus, and with
+        the pane focused the arrows and `j`/`k` scroll it rather than moving
+        the selection. Without the filter every binding is global, and the
+        pane could only be scrolled through `alt+up` and `alt+down` -- which
+        a reader has to know about, because nothing on the screen offers a
+        pane that has no focus. Issue #277.
+
+        `j` and `k` are text, and they stay text: they are bound under the
+        pane filter alone, so typing them into the query still writes them.
         """
+        searching = Condition(lambda: not self.pane_has_focus)
+        in_pane = Condition(lambda: self.pane_has_focus)
         keys = KeyBindings()
         # left and right step one match; up and down step one row, which is
         # `grid.columns` matches, because the list reads across and then down.
         for key in ("left", "c-b"):
-            keys.add(key)(self._on_previous)
+            keys.add(key, filter=searching)(self._on_previous)
         for key in ("right", "c-f"):
-            keys.add(key)(self._on_next)
+            keys.add(key, filter=searching)(self._on_next)
         for key in ("up", "c-p"):
-            keys.add(key)(self._on_row_up)
+            keys.add(key, filter=searching)(self._on_row_up)
         for key in ("down", "c-n"):
-            keys.add(key)(self._on_row_down)
-        keys.add("pageup")(self._on_page_up)
-        keys.add("pagedown")(self._on_page_down)
+            keys.add(key, filter=searching)(self._on_row_down)
+        keys.add("pageup", filter=searching)(self._on_page_up)
+        keys.add("pagedown", filter=searching)(self._on_page_down)
+        # The same keys over the pane, which scrolls instead.
+        for key in ("up", "k", "c-p"):
+            keys.add(key, filter=in_pane)(self._on_scroll_up)
+        for key in ("down", "j", "c-n"):
+            keys.add(key, filter=in_pane)(self._on_scroll_down)
+        keys.add("pageup", filter=in_pane)(self._on_pane_page_up)
+        keys.add("pagedown", filter=in_pane)(self._on_pane_page_down)
+        # `alt+up` and `alt+down` scroll from either side, because they did
+        # before the focus existed and a reader who learned them keeps them.
         keys.add("escape", "up")(self._on_scroll_up)
         keys.add("escape", "down")(self._on_scroll_down)
+        keys.add("tab")(self._on_toggle_focus)
         for key in ("c-c", "c-d", "c-q", "escape"):
             keys.add(key)(self._on_quit)
         keys.add("enter")(self._on_select)
         return keys
+
+    def _on_toggle_focus(self, event: KeyPressEvent) -> None:
+        """Move the focus between the query and the detail pane.
+
+        The focus is what the layout says it is, and not a flag of this
+        object: `prompt_toolkit` routes a key to the focused control, so a
+        second answer here could disagree with the one that matters.
+        """
+        target = self.buffer if self.pane_has_focus else self._detail_window
+        event.app.layout.focus(target)
+
+    def _on_pane_page_up(self, _event: KeyPressEvent) -> None:
+        self.scroll_detail(-self.detail_page())
+
+    def _on_pane_page_down(self, _event: KeyPressEvent) -> None:
+        self.scroll_detail(self.detail_page())
 
     def _on_previous(self, _event: KeyPressEvent) -> None:
         self.move(-1)
