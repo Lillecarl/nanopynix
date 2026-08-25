@@ -75,6 +75,7 @@ from nanopynix.models import (
     NixType,
     PathInfo,
     RegistryEntry,
+    RegistryWrite,
     SettingsProvenance,
     StorePath,
 )
@@ -1175,6 +1176,64 @@ class Store(AsyncStore):
     async def registry_entries(self, *, fetch_settings: Mapping[str, str] | None = None) -> list[RegistryEntry]:
         return await self._session.run(
             functools.partial(self._require_core().registry_entries, fetch_settings=fetch_settings)
+        )
+
+    async def user_registry_path(self) -> str:
+        return await self._session.run(self._require_core().user_registry_path)
+
+    async def registry_add(
+        self,
+        from_ref: str,
+        to_ref: str,
+        /,
+        *,
+        path: str | None = None,
+        fetch_settings: Mapping[str, str] | None = None,
+    ) -> RegistryWrite:
+        return await self._session.run(
+            functools.partial(
+                self._require_core().registry_add,
+                from_ref,
+                to_ref,
+                path=path,
+                fetch_settings=fetch_settings,
+            )
+        )
+
+    async def registry_remove(
+        self,
+        from_ref: str,
+        /,
+        *,
+        path: str | None = None,
+        fetch_settings: Mapping[str, str] | None = None,
+    ) -> RegistryWrite:
+        return await self._session.run(
+            functools.partial(
+                self._require_core().registry_remove,
+                from_ref,
+                path=path,
+                fetch_settings=fetch_settings,
+            )
+        )
+
+    async def registry_pin(
+        self,
+        ref: str,
+        locked: str | None = None,
+        /,
+        *,
+        path: str | None = None,
+        fetch_settings: Mapping[str, str] | None = None,
+    ) -> RegistryWrite:
+        return await self._session.run(
+            functools.partial(
+                self._require_core().registry_pin,
+                ref,
+                locked,
+                path=path,
+                fetch_settings=fetch_settings,
+            )
         )
 
     async def compute_store_path(

@@ -81,6 +81,7 @@ if TYPE_CHECKING or BEARTYPING:
         NixType,
         PathInfo,
         RegistryEntry,
+        RegistryWrite,
         StorePath,
     )
     from nanopynix.settings import NixEvalSettings, NixFetchSettings, NixGlobalSettings, SettingsProvenance
@@ -547,6 +548,58 @@ class AsyncStore(Protocol):
         A store is the receiver because the global layer downloads its file
         into one. Pass ``{"flake-registry": ""}`` to drop that layer, and the
         call reads local files alone.
+        """
+        ...
+
+    @abstractmethod
+    async def user_registry_path(self) -> str:
+        """The registry file of the user, which is where a write goes by default."""
+        ...
+
+    @abstractmethod
+    async def registry_add(
+        self,
+        from_ref: str,
+        to_ref: str,
+        /,
+        *,
+        path: str | None = None,
+        fetch_settings: Mapping[str, str] | None = None,
+    ) -> RegistryWrite:
+        """Point ``from_ref`` at ``to_ref``, in one registry file.
+
+        An absent ``path`` names the registry of the user, which is the file
+        ``nix registry add`` writes.
+        """
+        ...
+
+    @abstractmethod
+    async def registry_remove(
+        self,
+        from_ref: str,
+        /,
+        *,
+        path: str | None = None,
+        fetch_settings: Mapping[str, str] | None = None,
+    ) -> RegistryWrite:
+        """Drop every entry for ``from_ref``, from one registry file."""
+        ...
+
+    @abstractmethod
+    async def registry_pin(
+        self,
+        ref: str,
+        locked: str | None = None,
+        /,
+        *,
+        path: str | None = None,
+        fetch_settings: Mapping[str, str] | None = None,
+    ) -> RegistryWrite:
+        """Pin ``ref`` to the reference it resolves to now.
+
+        ``locked`` names what to pin to, and an absent one pins ``ref`` to
+        itself. The call fetches, because an unfetched reference has no
+        revision to pin to.
         """
         ...
 

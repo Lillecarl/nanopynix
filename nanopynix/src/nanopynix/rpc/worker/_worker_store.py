@@ -10,6 +10,7 @@ from nanopynix_proto.nix.common import (
     GcRoot,
     MissingInfo,
     PathInfo,
+    RegistryWrite,
     StoreDirs,
 )
 from nanopynix_proto.nix.store import (
@@ -63,7 +64,12 @@ from nanopynix_proto.nix.store import (
     QuerySubstitutablePathsRequest,
     QueryValidDeriversRequest,
     ReadDerivationRequest,
+    RegistryAddRequest,
+    RegistryPinRequest,
+    RegistryRemoveRequest,
     StoreServiceBase,
+    UserRegistryPathRequest,
+    UserRegistryPathResponse,
     VerifyStoreRequest,
     VerifyStoreResponse,
     WriteDevShellDerivationRequest,
@@ -336,6 +342,36 @@ class StoreServiceHandler(StoreServiceBase):
     def list_registry_entries(self, message: ListRegistryEntriesRequest) -> ListRegistryEntriesResponse:
         return ListRegistryEntriesResponse(
             entries=self._resolve(message.store_handle).registry_entries(fetch_settings=message.fetch_settings),
+        )
+
+    @worker_op
+    def user_registry_path(self, message: UserRegistryPathRequest) -> UserRegistryPathResponse:
+        return UserRegistryPathResponse(path=self._resolve(message.store_handle).user_registry_path())
+
+    @worker_op
+    def registry_add(self, message: RegistryAddRequest) -> RegistryWrite:
+        return self._resolve(message.store_handle).registry_add(
+            message.from_,
+            message.to,
+            path=message.path,
+            fetch_settings=message.fetch_settings,
+        )
+
+    @worker_op
+    def registry_remove(self, message: RegistryRemoveRequest) -> RegistryWrite:
+        return self._resolve(message.store_handle).registry_remove(
+            message.from_,
+            path=message.path,
+            fetch_settings=message.fetch_settings,
+        )
+
+    @worker_op
+    def registry_pin(self, message: RegistryPinRequest) -> RegistryWrite:
+        return self._resolve(message.store_handle).registry_pin(
+            message.url,
+            message.locked,
+            path=message.path,
+            fetch_settings=message.fetch_settings,
         )
 
     @worker_op

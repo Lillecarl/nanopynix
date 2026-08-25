@@ -49,6 +49,7 @@ from nanopynix.models import (
     PathInfo,
     RealisedOutput,
     RegistryEntry,
+    RegistryWrite,
     SettingsProvenance,
     StorePath,
 )
@@ -86,6 +87,17 @@ class _DerivedPathNode(Protocol):
 
     @property
     def dynamic_outputs(self) -> Mapping[str, _DerivedPathNode]: ...
+
+
+def _registry_write(raw: Mapping[str, Any]) -> RegistryWrite:
+    """One dict from the bindings, as the model the wire also carries.
+
+    ``fetchers.pat`` declares the shape as ``RegistryWriteDict``, and that
+    name is not the annotation here. It exists in the stub alone, and
+    ``NANOPYNIX_BEARTYPING=1`` resolves every annotation at run time, so
+    naming it would fail the import of this module.
+    """
+    return RegistryWrite(path=raw["path"], removed=raw["removed"], to=raw["to"], locked=raw["locked"])
 
 
 def _derivation_outputs(node: _DerivedPathNode) -> DerivationOutputs:
@@ -473,6 +485,69 @@ class CoreStore:
             )
             for entry in nanopynix_fetchers.list_registry_entries(self.require_raw(), dict(fetch_settings or {}))
         ]
+
+    def user_registry_path(self) -> str:
+        """The registry file of the user, which is where a write goes by default."""
+        return nanopynix_fetchers.user_registry_path()
+
+    def registry_add(
+        self,
+        from_ref: str,
+        to_ref: str,
+        /,
+        *,
+        path: str | None = None,
+        fetch_settings: Mapping[str, str] | None = None,
+    ) -> RegistryWrite:
+        """Point ``from_ref`` at ``to_ref``, in one registry file.
+
+        An empty ``path`` names the registry of the user. The write reads the
+        file from disk each time, and not from Nix's per-process cache, so two
+        writes to two files in one process do not read each other.
+        ``registry_add`` in ``nix_fetchers.cpp`` gives the whole reason.
+        """
+        return _registry_write(
+            nanopynix_fetchers.registry_add(path or "", from_ref, to_ref, dict(fetch_settings or {})),
+        )
+
+    def registry_remove(
+        self,
+        from_ref: str,
+        /,
+        *,
+        path: str | None = None,
+        fetch_settings: Mapping[str, str] | None = None,
+    ) -> RegistryWrite:
+        """Drop every entry for ``from_ref``, from one registry file."""
+        return _registry_write(
+            nanopynix_fetchers.registry_remove(path or "", from_ref, dict(fetch_settings or {})),
+        )
+
+    def registry_pin(
+        self,
+        ref: str,
+        locked: str | None = None,
+        /,
+        *,
+        path: str | None = None,
+        fetch_settings: Mapping[str, str] | None = None,
+    ) -> RegistryWrite:
+        """Pin ``ref`` to the reference it resolves to now.
+
+        ``locked`` names what to pin to, and an absent one pins ``ref`` to
+        itself. **The call fetches**, because an unfetched reference has no
+        revision to pin to. ``RegistryWrite.locked`` reports whether the
+        result carries one.
+        """
+        return _registry_write(
+            nanopynix_fetchers.registry_pin(
+                self.require_raw(),
+                path or "",
+                ref,
+                locked or "",
+                dict(fetch_settings or {}),
+            ),
+        )
 
     @no_runtime_type_check  # action validates its own membership in _RAW_GC_ACTIONS at
     # runtime for untyped callers (see the KeyError guard below); beartype's

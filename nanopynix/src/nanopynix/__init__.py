@@ -150,6 +150,7 @@ if typing.TYPE_CHECKING:
         PrimOpSpec,
         ResultType,
         StorePath,
+        attrs_to_python,
     )
     from nanopynix.namespace import (
         NamespaceSupport as NamespaceSupport,
@@ -317,6 +318,7 @@ _NAME_TO_MODULE: typing.Final[dict[str, str]] = {
     "WorkerDiedError": "nanopynix.exceptions",
     "WorkerSignaledError": "nanopynix.exceptions",
     "WrongNixTypeError": "nanopynix.exceptions",
+    "attrs_to_python": "nanopynix.models",
     "build_info": "nanopynix_bindings.util",
     "check_all_settings_model_drift": "nanopynix.settings",
     "check_settings_model_drift": "nanopynix.settings",
@@ -527,6 +529,7 @@ __all__ = [
     "WorkerDiedError",
     "WorkerSignaledError",
     "WrongNixTypeError",
+    "attrs_to_python",
     "build_info",
     "check_all_settings_model_drift",
     "check_settings_model_drift",

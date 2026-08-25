@@ -4,6 +4,12 @@ Data types crossing the C++/Python boundary. Most are re-exported directly
 from the generated proto messages; a few (`StorePath`, `LogEvent`) add
 Python-side convenience methods.
 
+An attribute map from Nix -- `RegistryEntry.extra_attrs`, `Input.attrs`,
+`FlakeRef.attrs` -- holds an `AttrsValue`, which is a oneof of the three types
+`fetchers::Attrs` can hold. {func}`~nanopynix.attrs_to_python` unwraps a whole
+map into plain JSON scalars, which is what a caller that prints or serialises
+one wants.
+
 An `error` log event carries Nix's structured detail beside the flat message,
 in {attr}`~nanopynix.LogEvent.error_info`. It is the dict
 {attr}`~nanopynix.NixError.info` carries, from the same C++ builder, so a
@@ -66,4 +72,6 @@ failure carries a trace.
 
 .. autoclass:: nanopynix.LockedNode
    :members:
+
+.. autofunction:: nanopynix.attrs_to_python
 ```

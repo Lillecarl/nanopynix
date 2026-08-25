@@ -310,6 +310,20 @@ message StoreDirs {
   optional string build_dir = 7;
 }
 
+// What one change to a flake registry file did.
+//
+// `path` is the file that was written. `removed` counts the entries the
+// write replaced, which is how a caller tells "removed nothing" from
+// "removed one". `to` is the new target of the entry, and `locked` says
+// whether that target carries a revision. Both are absent for an operation
+// that resolves nothing, which is every operation but a pin.
+message RegistryWrite {
+  string path = 1;
+  uint64 removed = 2;
+  optional string to = 3;
+  optional bool locked = 4;
+}
+
 message RegistryEntry {
   // The layer, as `Registry::RegistryType` names it in lower case: "flag",
   // "user", "system", "global" or "custom".

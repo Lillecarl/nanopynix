@@ -9,6 +9,7 @@ from nanopynix_proto.nix.common import (
     GcAction,
     GcRoot,
     RegistryEntry,
+    RegistryWrite,
     StoreDirs,
 )
 from nanopynix_proto.nix.store import (
@@ -42,7 +43,11 @@ from nanopynix_proto.nix.store import (
     QuerySubstitutablePathsRequest,
     QueryValidDeriversRequest,
     ReadDerivationRequest,
+    RegistryAddRequest,
+    RegistryPinRequest,
+    RegistryRemoveRequest,
     StoreServiceBase,
+    UserRegistryPathRequest,
     VerifyStoreRequest,
     WriteDevShellDerivationRequest,
 )
@@ -418,6 +423,62 @@ class Store(AsyncStore):
             ListRegistryEntriesRequest(fetch_settings=dict(fetch_settings or {}))
         )
         return list(response.entries)
+
+    async def user_registry_path(self) -> str:
+        """The registry file of the user, which is where a write goes by default."""
+        response = await self.rpc.user_registry_path(UserRegistryPathRequest())
+        return response.path
+
+    async def registry_add(
+        self,
+        from_ref: str,
+        to_ref: str,
+        /,
+        *,
+        path: str | None = None,
+        fetch_settings: Mapping[str, str] | None = None,
+    ) -> RegistryWrite:
+        """Point ``from_ref`` at ``to_ref``, in one registry file."""
+        return await self.rpc.registry_add(
+            RegistryAddRequest(
+                path=path or "",
+                from_=from_ref,
+                to=to_ref,
+                fetch_settings=dict(fetch_settings or {}),
+            )
+        )
+
+    async def registry_remove(
+        self,
+        from_ref: str,
+        /,
+        *,
+        path: str | None = None,
+        fetch_settings: Mapping[str, str] | None = None,
+    ) -> RegistryWrite:
+        """Drop every entry for ``from_ref``, from one registry file."""
+        return await self.rpc.registry_remove(
+            RegistryRemoveRequest(path=path or "", from_=from_ref, fetch_settings=dict(fetch_settings or {}))
+        )
+
+    async def registry_pin(
+        self,
+        ref: str,
+        locked: str | None = None,
+        /,
+        *,
+        path: str | None = None,
+        fetch_settings: Mapping[str, str] | None = None,
+    ) -> RegistryWrite:
+        """Pin ``ref`` to the reference it resolves to now."""
+        return await self.rpc.registry_pin(
+            RegistryPinRequest(
+                path=path or "",
+                url=ref,
+                locked=locked or "",
+                fetch_settings=dict(fetch_settings or {}),
+            )
+        )
 
     async def store_dirs(self) -> StoreDirs:
         return await self.rpc.get_store_dirs(GetStoreDirsRequest())
