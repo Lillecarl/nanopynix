@@ -67,9 +67,19 @@ EMPTY_PATH_CALLS: dict[str, Callable[[Any, Path], Awaitable[object]]] = {
 # Path-taking by signature, but not store-path-taking, so the guard does not
 # apply and BadStorePathError is not the right answer. Listed explicitly so the
 # coverage check below can tell "deliberately excluded" from "forgotten".
+#: The three registry writes share one reason, so the table names it once.
+#:
+#: ``path`` is the registry file to change, and an empty one is not a bad
+#: value: it is how a caller says "the registry of the user", which is what
+#: ``nix registry add`` writes with no ``--registry``. Issue #87.
+_REGISTRY_PATH = "takes the filesystem path of a registry file, and an empty one means the registry of the user."
+
 NOT_STORE_PATHS: dict[str, str] = {
     "add_indirect_root": "takes the filesystem path of a GC root symlink, not a store path.",
     "query_path_from_hash_part": "takes a bare hash component, which never reaches parseStorePath.",
+    "registry_add": _REGISTRY_PATH,
+    "registry_pin": _REGISTRY_PATH,
+    "registry_remove": _REGISTRY_PATH,
 }
 
 

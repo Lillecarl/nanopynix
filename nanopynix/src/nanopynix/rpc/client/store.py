@@ -425,7 +425,6 @@ class Store(AsyncStore):
         return list(response.entries)
 
     async def user_registry_path(self) -> str:
-        """The registry file of the user, which is where a write goes by default."""
         response = await self.rpc.user_registry_path(UserRegistryPathRequest())
         return response.path
 
@@ -456,7 +455,6 @@ class Store(AsyncStore):
         path: str | None = None,
         fetch_settings: Mapping[str, str] | None = None,
     ) -> RegistryWrite:
-        """Drop every entry for ``from_ref``, from one registry file."""
         return await self.rpc.registry_remove(
             RegistryRemoveRequest(path=path or "", from_=from_ref, fetch_settings=dict(fetch_settings or {}))
         )
