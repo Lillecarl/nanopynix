@@ -29,7 +29,6 @@ import faulthandler
 import io
 import json
 import os
-import shutil
 import signal
 import tempfile
 import uuid
@@ -463,7 +462,7 @@ async def pynix_store_scenario(  # noqa: PLR0913 -- tracked complexity/arg-count
     pynix_live_log: PynixLiveLog,
     shared_nix_environment: NixTestEnvironment,
     tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[PynixStoreScenario]:
+) -> PynixStoreScenario:
     work_root = tmp_path_factory.mktemp("pynix-work")
     scenario = PynixStoreScenario(
         store_url=shared_nix_environment.store_uri,
@@ -476,10 +475,19 @@ async def pynix_store_scenario(  # noqa: PLR0913 -- tracked complexity/arg-count
     terminal = request.config.pluginmanager.get_plugin("terminalreporter")
     if terminal is not None:
         terminal.write_line(f"pynix scenario structlog: {scenario.log_path}")
-    try:
-        yield scenario
-    finally:
-        shutil.rmtree(work_root)
+    # **The work root stays, and that is what stops the next module reusing its
+    # name.** `mktemp` numbers from the highest directory that exists, so a
+    # `shutil.rmtree` here handed `pynix-work0` straight back to the next
+    # module. Nix 2.35 keeps a path cache for the life of the process, so the
+    # second module wrote a new file at the old path and the evaluation
+    # answered "path ... does not exist" for a file that was on disk. Issue
+    # #274 measured it: `pytest pynix/tests/test_log.py
+    # pynix/tests/test_real_store_scenario.py` failed on 2.35 and passed on
+    # 2.34, and the probe reported `exists=true` for the path Nix denied.
+    #
+    # `tmp_path_factory` removes all but the last few roots of earlier runs, so
+    # nothing accumulates. The directory holds a handful of small files.
+    return scenario
 
 
 @pytest.fixture(scope="module")
