@@ -452,10 +452,25 @@ _UNDECORATABLE_PATTERN = re.compile(r"BeartypeClawDecorWarning: .*? ([\w.]+)\(\)
 # here. The scan then covered four of the five instrumented packages and
 # reported nothing, which is the failure this whole test exists to catch. A
 # package added to the hook is now in the probe by construction.
+#
+# **It walks the submodules, and importing the five packages is not enough.**
+# beartype decorates a module when that module is imported, so a module that
+# nothing imports is never scanned. `pynix._impl` reaches its heavy modules
+# through a PEP 562 table, so `import pynix` loads none of them, and the probe
+# covered 5 modules where the checkout holds 131. `pynix._impl._quiet` lost its
+# runtime check that way and this test stayed green. Measured: the walk imports
+# 131 submodules in 1.4 s, and every one of them imports.
 _INSTRUMENTED_IMPORT_PROBE = f"""
+import importlib
+import pkgutil
+
 import beartype.roar
-import {", ".join(PACKAGES)}
 from nanopynix.settings import normalize_nix_path
+
+for name in {PACKAGES!r}:
+    package = importlib.import_module(name)
+    for found in pkgutil.walk_packages(package.__path__, prefix=name + "."):
+        importlib.import_module(found.name)
 
 try:
     normalize_nix_path(123)
