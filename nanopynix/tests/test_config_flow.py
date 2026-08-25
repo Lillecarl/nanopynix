@@ -684,6 +684,21 @@ async def test_both_engines_enable_the_features_without_the_setting(
     assert set(DEFAULT_EXPERIMENTAL_FEATURES) <= set(live["experimental-features"].split())
 
 
+# **Forked, because the inproc arm writes the settings of this process.**
+# `set_settings` on an inproc session reaches the `globalConfig` of the pytest
+# process itself, and every test that runs afterwards reads what this one
+# leaves. `keep-going` is not inert there: `Store::addMultipleToStore` catches
+# the failure of one path while it is on, counts it and returns, and
+# `copyPaths` never reads that count -- so a copy that writes nothing raises
+# nothing. `pynix/tests/test_copy.py` passed alone and failed in every
+# full-suite job of CI while this test leaked that setting.
+#
+# `test_support.plugin.pytest_collection_modifyitems` ranks every `forked`
+# test first, before anything has initialised Nix in this process, which is
+# what makes the fork both safe and clean. A restore in a `finally` was the
+# first fix here; the fork is better, because it needs the test to remember
+# nothing.
+@pytest.mark.forked
 @pytest.mark.parametrize("engine", ["inproc", "rpc"])
 async def test_both_engines_read_and_write_the_session_settings(
     shared_nix_environment: NixTestEnvironment,
@@ -709,37 +724,10 @@ async def test_both_engines_read_and_write_the_session_settings(
         seen["from_session"] = overridden.get("substituters")
         seen["provenance"] = (await session.settings_provenance()).applied.get("substituters")
 
-        before_write = await session.settings()
-        try:
-            seen["written"] = await session.set_settings(nanopynix.NixGlobalSettings(max_jobs=9, keep_going=True))
-            seen["read_back"] = (await session.settings(overridden_only=True)).get("max-jobs")
-            # The unfiltered read reports every setting, not only the overridden.
-            seen["read_sizes"] = (len(overridden), len(await session.settings()))
-        finally:
-            # **Put them back, because the inproc arm writes this process.**
-            # `globalConfig` belongs to the pytest process here, and every test
-            # that runs afterwards reads what this one left. `keep-going` in
-            # particular is not inert: measured, a copy of an unsigned path
-            # into a store that requires a signature raised nothing and wrote
-            # nothing while it was on, which made `pynix/tests/test_copy.py`
-            # fail in every full-suite job of CI and pass whenever it ran
-            # alone.
-            #
-            # In a `finally`, so that a failure between the write and here
-            # still puts them back. A forked test would isolate this properly
-            # and cannot: `nanopynix.inproc` refuses a session in a fork of a
-            # process that already initialised Nix, which every full run has.
-            #
-            # There is no "unset", so this writes back what the session
-            # reported before the write rather than a default guessed here.
-            # `max-jobs` has no obvious right answer: 0 means "build nothing
-            # locally", which is not the default and is worse than the leak.
-            await session.set_settings(
-                nanopynix.NixGlobalSettings(
-                    max_jobs=int(before_write["max-jobs"]),
-                    keep_going=before_write["keep-going"] == "true",
-                ),
-            )
+        seen["written"] = await session.set_settings(nanopynix.NixGlobalSettings(max_jobs=9, keep_going=True))
+        seen["read_back"] = (await session.settings(overridden_only=True)).get("max-jobs")
+        # The unfiltered read reports every setting, not only the overridden.
+        seen["read_sizes"] = (len(overridden), len(await session.settings()))
 
     note(**{f"{engine}/settings": {key: str(value)[:70] for key, value in seen.items()}})
 
