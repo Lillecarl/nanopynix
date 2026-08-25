@@ -143,6 +143,7 @@ static PyFlakeRef parse_flake_ref(const std::string &url,
     // On the heap and owned by the result: see the comment on
     // `PyFlakeRef::settings`.
     auto settings = std::make_shared<nix::fetchers::Settings>();
+    apply_nix_conf(*settings);
     apply_settings_overrides(*settings, fetch_settings);
     std::optional<nix::FlakeRef> ref;
     {
@@ -186,6 +187,7 @@ static PyLockedFlake lock_flake(
 {
     es.checkThread();
     nix::flake::Settings flakeSettings;
+    apply_nix_conf(flakeSettings);
     apply_settings_overrides(flakeSettings, flake_settings);
     nix::flake::LockFlags lockFlags;
     lockFlags.writeLockFile = write_lock_file;
@@ -324,6 +326,7 @@ static PyValue eval_flake(PyEvalState &es, const std::string &ref,
                            const std::map<std::string, std::string> &flake_settings = {}) {
     es.checkThread();
     nix::flake::Settings flakeSettings;
+    apply_nix_conf(flakeSettings);
     apply_settings_overrides(flakeSettings, flake_settings);
     nix::flake::LockFlags lockFlags;
     lockFlags.writeLockFile = write_lock_file;
@@ -380,6 +383,12 @@ void nanopynix_bind_flake(nb::module_ &m) {
     PyEvalState::evalSettingsConfigurators().push_back(
         [](nix::EvalSettings &es) {
             static nix::flake::Settings flakeSettings;
+            // Filled once, and not on every evaluator. `nix::Config` is not
+            // copyable, so the fill cannot be an initialiser of the static.
+            [[maybe_unused]] static const bool configured = [] {
+                apply_nix_conf(flakeSettings);
+                return true;
+            }();
             flakeSettings.configureEvalSettings(es);
         });
 
@@ -412,7 +421,10 @@ void nanopynix_bind_flake(nb::module_ &m) {
           nb::keep_alive<0, 1>(),
           "Lock and evaluate a flake, returning its outputs as a Value");
     m.def("list_flake_settings_metadata_json", []() {
+        // Filled from the file as well, for the reason
+        // `list_fetch_settings_metadata_json` gives.
         nix::flake::Settings flakeSettings;
+        apply_nix_conf(flakeSettings);
         return flakeSettings.toJSON().dump();
     });
 

@@ -11,9 +11,9 @@ time with an empty ``flake-registry``, which is Nix's own value for "no global
 layer", and answers from what did work. This file pins that.
 
 **The global layer is broken through the environment, and not through a
-setting.** `NIX_CONFIG` reaches `nix` and not this program -- issue #234 -- so
-a `flake-registry` written there would leave the completion on its ordinary
-path and the case would pass on nothing. `NIX_CACHE_HOME` does reach it:
+setting.** A setting would work now -- issue #234 made a `nix.conf` reach this
+program -- but it would break the layer by *replacing* it, where this case
+needs a layer that is configured and then fails. `NIX_CACHE_HOME` gives that:
 `getCacheDir` (`libutil/users.cc`) reads that variable first, and the download
 of the global layer needs to write its cache there. Pointing it below a
 regular file makes the directory impossible to create, which is the exact
@@ -22,9 +22,9 @@ failure a build sandbox produces with no network -- measured, in a
 
 **`NIX_CONFIG_HOME` is how the user layer gets an entry.** `getConfigDir`
 (`libutil/users.cc`) reads that variable first, and `getUserRegistryPath` is
-that directory plus `registry.json`. A setting would not do: nanopynix
-registers no fetch settings with `globalConfig`, so nothing in a `nix.conf`
-reaches this program. Issue #234.
+that directory plus `registry.json`. No setting names that layer:
+`flake-registry` is the global one. Issue #234 made a `nix.conf` reach this
+program, and it still cannot reach here.
 """
 
 from __future__ import annotations

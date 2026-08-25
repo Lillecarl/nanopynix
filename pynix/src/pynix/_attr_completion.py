@@ -126,10 +126,16 @@ def _completion_settings() -> dict[str, str]:
     these settings. Issue #231 keeps that half, and `GIT_HTTP_LOW_SPEED_TIME`
     is the thing to measure for it.
 
-    All three are Nix's own settings, and none reaches this program from a
-    `nix.conf` -- see issue #234 -- so a caller who wants the patient values
-    for a real command still gets them, because a real command does not come
-    through here.
+    All three are Nix's own settings, and all three are named here explicitly.
+    A `nix.conf` does reach this program since issue #234, and an explicit
+    value beats the file, so these three stand however patient the file is. A
+    caller who wants the patient values for a real command still gets them,
+    because a real command does not come through here.
+
+    **What the file now does reach is every other fetch setting**, which is
+    the point of #234 rather than a side effect of it: `flake-registry` is how
+    a person turns the downloading layer off, and a value in their `nix.conf`
+    used to do nothing here.
     """
     return {
         "download-attempts": "1",

@@ -153,7 +153,16 @@ async def test_init_writes_nix_conf_and_skips_empty_settings_render(monkeypatch:
     monkeypatch.setattr(worker.nanopynix_util, "init_libstore", _noop)
     monkeypatch.setattr(worker.nanopynix_util, "set_verbosity", _noop)
     monkeypatch.setattr(worker, "_register_primops", _noop)
-    monkeypatch.delenv("NIX_USER_CONF_FILES", raising=False)
+    # **`setenv` first, so `monkeypatch` has something to restore.** `delenv`
+    # on a variable that is already unset records nothing, and `handler.init`
+    # below writes this name straight into `os.environ` -- which monkeypatch
+    # never saw and therefore never undoes. The value then outlives this test
+    # and reaches every subprocess a later test starts, because
+    # `NIX_USER_CONF_FILES` replaces the user configuration file list outright.
+    # Measured: `test_nix_conf_reaches_a_session.py` read `/tmp/fake-nix.conf`
+    # from here in a whole-suite run, and passed when run alone.
+    monkeypatch.setenv("NIX_USER_CONF_FILES", "")
+    monkeypatch.delenv("NIX_USER_CONF_FILES")
 
     state = WorkerState()
     state.executor = NixThreadExecutor()

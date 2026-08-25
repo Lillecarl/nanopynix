@@ -66,9 +66,11 @@ struct PyInput {
 // =========================================================================
 
 static PyInput input_from_url(const std::string &url) {
-    // Default fetch settings, on the heap and owned by the result: see the
-    // comment on `PyInput::settings`.
+    // The settings `nix.conf` names, on the heap and owned by the result: see
+    // the comment on `PyInput::settings`, and `settings_util.hh` for why the
+    // file has to be applied rather than inherited. Issue #234.
     auto settings = std::make_shared<nix::fetchers::Settings>();
+    apply_nix_conf(*settings);
     std::optional<nix::fetchers::Input> input;
     {
         nb::gil_scoped_release release;
@@ -81,6 +83,7 @@ static PyInput input_from_attrs(const std::map<std::string, std::string> &attrs)
     nix::fetchers::Attrs a;
     for (auto &[k, v] : attrs) a[k] = v;
     auto settings = std::make_shared<nix::fetchers::Settings>();
+    apply_nix_conf(*settings);
     std::optional<nix::fetchers::Input> input;
     {
         nb::gil_scoped_release release;
@@ -135,9 +138,10 @@ static std::vector<nb::dict> list_registry_entries(
     nix::Store &store,
     const std::map<std::string, std::string> &fetch_settings)
 {
-    // A fresh settings object, so the caller is the only source of a
-    // non-default value: see `settings_util.hh`.
+    // A fresh settings object, filled from `nix.conf` and then from the
+    // caller, who wins: see `settings_util.hh`.
     nix::fetchers::Settings settings;
+    apply_nix_conf(settings);
     apply_settings_overrides(settings, fetch_settings);
 
     nix::fetchers::Registries registries;
@@ -195,7 +199,10 @@ void nanopynix_bind_fetchers(nb::module_ &m) {
           "fetch_settings"_a = std::map<std::string, std::string>{},
           "Every flake registry entry Nix would consult, tagged with its layer");
     m.def("list_fetch_settings_metadata_json", []() {
+        // Filled from the file as well, so the values this reports are the
+        // values a session really gets rather than the compiled defaults.
         nix::fetchers::Settings fetchSettings;
+        apply_nix_conf(fetchSettings);
         return fetchSettings.toJSON().dump();
     });
 

@@ -447,8 +447,15 @@ class NixGlobalSettings(NixConfigModel):
 
     One scope of several. :class:`NixSettings` inherits this together with the
     store, eval, fetch and flake scopes, and is what a caller normally passes.
-    This class exists on its own because ``globalConfig`` is a distinct registry,
+    This class exists on its own because ``globalConfig`` is a door of its own,
     and :func:`check_settings_model_drift` compares against it field for field.
+
+    **A door of its own, and no longer a disjoint set of names.** Issue #234
+    registered the eval, fetch and flake objects with ``globalConfig`` so that
+    ``nix.conf`` reaches them, which is what libcmd does. So those names appear
+    there too, and this model still does not claim them: writing one through
+    this scope would set a process-wide default rather than reach the evaluator
+    or the fetcher that a caller is holding.
 
     ``store`` here is the *URL of the store to use*, which is what
     ``globals.hh`` registers under that name. It is not the logical store
@@ -1171,13 +1178,27 @@ def check_settings_model_drift(
     """
     if metadata is None:
         metadata = _metadata_for_surface(surface)
-    # The global surface used to subtract the eval, fetch and flake names here,
-    # on the belief that `globalConfig` aggregates those registries. It does
-    # not: the four are disjoint, measured on every supported version --
-    # 2.31.5, 2.34.8 and 2.35.1 each report zero overlap between `globalConfig`
-    # and any of the other three. The step removed nothing, and
-    # `test_the_four_settings_registries_are_disjoint` now pins that.
+    # **The global surface subtracts the eval, fetch and flake names, and this
+    # subtraction came back.** It was here once, on the belief that
+    # `globalConfig` aggregates those registries. It did not then -- the four
+    # were disjoint, measured on 2.31.5, 2.34.8 and 2.35.1 -- so the step
+    # removed nothing and it went.
+    #
+    # It aggregates them now, because issue #234 registers one object of each
+    # kind with `GlobalConfig`. That is what libcmd does and what makes
+    # `nix.conf` reach an evaluator at all. Without the subtraction this
+    # reports 35 settings as missing from `NixGlobalSettings`, and the model is
+    # right not to name them: each belongs to a scope with a door of its own,
+    # and a caller reaches it through that door.
+    #
+    # Only the global surface subtracts. The other three answer for themselves.
     known = set(metadata.keys())
+    if surface == "global":
+        known -= (
+            set(list_eval_settings_metadata())
+            | set(list_fetch_settings_metadata())
+            | set(list_flake_settings_metadata())
+        )
     model_type = _model_for_surface(surface)
     model = {field_key(name, field) for name, field in model_type.model_fields.items() if field_is_supported(field)}
     registered_aliases = {alias for setting in metadata.values() for alias in setting.aliases}
