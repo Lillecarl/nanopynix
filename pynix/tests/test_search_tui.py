@@ -34,6 +34,9 @@ _ALT_DOWN = "\x1b\x1b[B"
 _ALT_UP = "\x1b\x1b[A"
 _ENTER = "\r"
 _CTRL_C = "\x03"
+
+#: The key that moves the focus between the query and the detail pane.
+_TAB = "\t"
 _CTRL_D = "\x04"
 _CTRL_Q = "\x11"
 _LEFT = "\x1b[D"
@@ -639,3 +642,89 @@ async def test_the_detail_pane_is_drawn_at_its_real_width() -> None:
     assert widths[-1] == tui.detail_width
     # The second render is what settles it, and no third is asked for.
     assert widths.count(tui.detail_width) >= 1
+
+
+# -- the focus, and what a key means on each side of it ----------------------
+#
+# The query held the focus for the whole session, so every motion key moved
+# the selection and the detail pane scrolled only through `alt+up` and
+# `alt+down` -- keys a reader has to already know about, because a pane with
+# no focus offers nothing. Issue #277.
+
+
+async def test_tab_moves_the_focus_to_the_detail_pane() -> None:
+    tui = await _drive_drawn(_TAB, _tall_source())
+    assert tui.pane_has_focus
+
+
+async def test_tab_gives_the_focus_back() -> None:
+    tui = await _drive_drawn(f"{_TAB}{_TAB}", _tall_source())
+    assert not tui.pane_has_focus
+
+
+async def test_the_query_holds_the_focus_when_the_interface_opens() -> None:
+    """A reader types first, so the query is where a key goes by default.
+
+    **`_drive` and not `_drive_drawn`, because there is no key to press.**
+    `_run` waits for a render before each write, and an empty write draws
+    nothing, so it waits out the whole 30 s deadline. Measured: this test and
+    the footer one below cost 30 s each that way.
+    """
+    tui = await _drive(_CTRL_C, _tall_source())
+    assert not tui.pane_has_focus
+
+
+async def test_an_arrow_scrolls_the_pane_once_it_has_the_focus() -> None:
+    """The same key, and the other meaning."""
+    tui = await _drive_drawn(f"{_TAB}{_DOWN}{_DOWN}", _tall_source())
+    assert tui.detail_scroll == 2
+    # The selection stayed where it was, because the arrow no longer reaches
+    # the list.
+    assert tui.selected == 0
+
+
+async def test_j_and_k_scroll_the_pane() -> None:
+    tui = await _drive_drawn(f"{_TAB}jjjk", _tall_source())
+    assert tui.detail_scroll == 2
+
+
+async def test_j_is_still_a_letter_in_the_query() -> None:
+    """`j` and `k` are text, and binding them must not take that away.
+
+    A reader searching for `jam` types a `j` first, and the pane does not have
+    the focus then.
+    """
+    tui = await _drive_drawn("j", _tall_source())
+    assert tui.query == "j"
+    assert tui.detail_scroll == 0
+
+
+async def test_an_arrow_moves_the_selection_while_the_query_has_the_focus() -> None:
+    """The behaviour every earlier test asserts, stated once against the focus."""
+    tui = await _drive_drawn(_DOWN, _tall_source())
+    assert not tui.pane_has_focus
+    assert tui.detail_scroll == 0
+
+
+async def test_alt_arrow_scrolls_from_either_side() -> None:
+    """A reader who learned `alt+down` keeps it, focus or no focus."""
+    focused = await _drive_drawn(f"{_TAB}{_ALT_DOWN}{_ALT_DOWN}", _tall_source())
+    assert focused.detail_scroll == 2
+    searching = await _drive_drawn(f"{_ALT_DOWN}{_ALT_DOWN}", _tall_source())
+    assert searching.detail_scroll == 2
+
+
+async def test_the_footer_says_which_half_has_the_focus() -> None:
+    """`Tab` changes what an arrow means, and this line is where it says so.
+
+    The marker is `jk` and not a verb: the footer gives up its verbs first on
+    a narrow terminal, and 80 columns is already narrow enough to lose them.
+    """
+    searching = _footer(await _drive(_CTRL_C, _tall_source()))
+    focused = _footer(await _drive_drawn(_TAB, _tall_source()))
+    assert "jk" not in searching, searching
+    assert "jk" in focused, focused
+
+
+def _footer(tui: SearchTui[_Fruit]) -> str:
+    return "".join(fragment[1] for fragment in tui.footer_fragments())
