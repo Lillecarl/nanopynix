@@ -30,7 +30,13 @@ import sys
 import tempfile
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
+from nanopynix._typechecking import BEARTYPING
+
+# `or BEARTYPING`, and not `TYPE_CHECKING` alone: beartype resolves the return
+# annotation at run time, and a name that only the type checker imported is not
+# there to resolve. It gave up on `quiet_terminal` in silence without this, so
+# the function had no runtime check at all.
+if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Generator
 
 #: The file descriptor of stderr.
