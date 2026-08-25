@@ -146,14 +146,17 @@ class SearchSource[ItemT]:
 
     #: Return the detail of *item*, drawn in the pane under the list. The
     #: second argument is the width of that pane in columns, because a
-    #: renderer that wraps text needs a width.
+    #: renderer that wraps text needs a width. The third is the query as it
+    #: stands, because a record can stand for many and only the query says
+    #: which one the reader means: `systemd.services.<name>.enable` is one
+    #: record, and `systemd.services.nix.enable` is the value to read.
     #:
     #: The return type is the concrete `StyleAndTextTuples`, and not the
     #: `AnyFormattedText` union that `prompt_toolkit` accepts. That union holds
     #: a forward reference to a name in another module, and beartype cannot
     #: resolve it from here. A caller that has ANSI text passes it through
     #: `prompt_toolkit.formatted_text.to_formatted_text` first.
-    detail: Callable[[ItemT, int], StyleAndTextTuples]
+    detail: Callable[[ItemT, int, str], StyleAndTextTuples]
 
     #: What the footer calls one record, in the singular. The footer adds an
     #: "s" for a count that is not one.
@@ -345,7 +348,7 @@ class SearchTui[ItemT]:
         item = self.selection
         if item is None:
             return [("class:search-tui.empty", "No match. Change the query.")]
-        fragments = self.source.detail(item, self.detail_width)
+        fragments = self.source.detail(item, self.detail_width, self.query)
         self.detail_lines = 1 + sum(text.count("\n") for _style, text, *_rest in fragments)
         return fragments
 

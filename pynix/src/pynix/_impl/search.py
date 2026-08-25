@@ -47,8 +47,8 @@ from nanopynix.exceptions import NixError
 from pynix import _impl
 from pynix._impl._quiet import quiet_terminal
 from pynix._option_search import rank as rank_options
-from pynix._option_values import EvaluatorUnavailableError, OptionValues
-from pynix._options import OptionRecord, fetch_option_doc_list, fetch_option_values
+from pynix._option_values import EvaluatorUnavailableError, OptionValues, Trees
+from pynix._options import OptionRecord, fetch_option_doc_list, fetch_option_values, fetch_value_renderer
 from pynix._package_search import SearchablePackage, join, rank as rank_packages
 from pynix._packages import (
     cache_path as package_cache_path,
@@ -70,7 +70,7 @@ from pynix.target import (
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncGenerator
 
-    from nanopynix import AsyncEvalSession, AsyncValue
+    from nanopynix import AsyncEvalSession
 
 logger = structlog.get_logger("pynix.search")
 console = Console()
@@ -326,15 +326,21 @@ def _values(command: Search, target: EvaluationTarget, found: Found) -> OptionVa
         return None
 
     @asynccontextmanager
-    async def open_tree() -> AsyncGenerator[AsyncValue]:
+    async def open_trees() -> AsyncGenerator[Trees]:
         async with eval_session(command.store) as (_nix, _store, session):
-            yield await _option_tree(command, target, session)
+            yield await _option_trees(command, target, session)
 
-    return OptionValues(open_tree)
+    return OptionValues(open_trees)
 
 
-async def _option_tree(command: Search, target: EvaluationTarget, session: AsyncEvalSession) -> AsyncValue:
-    """Evaluate *target* again, and return its lazy attrset of option values.
+async def _option_trees(command: Search, target: EvaluationTarget, session: AsyncEvalSession) -> Trees:
+    """Evaluate *target* again, and return what the pane reads from it.
+
+    **One evaluation gives all three.** The lazy attrset of `default` and
+    `example`, the `config` that says what each option came to, and the
+    renderer that prints one value. They travel together because the ~5 s that
+    the first request pays is the evaluation, and a second session for the
+    second field would pay it twice.
 
     **This reports a failure as a `NixError`, and does not exit.** The
     interface is on the screen when this runs, so a call to `error_exit` would
@@ -353,7 +359,14 @@ async def _option_tree(command: Search, target: EvaluationTarget, session: Async
         raise EvaluatorUnavailableError(str(exc)) from exc
     if where.options is None or where.lib is None:
         raise EvaluatorUnavailableError(f"{_target_description(target)} holds no options tree to read a default from")
-    return await fetch_option_values(session, where.options.value, where.lib.value)
+    # A target may declare options and hold no `config` -- a bare `options`
+    # attrset is one. The pane then draws the declaration alone, and says
+    # nothing about a value, which is the truth about that target.
+    return Trees(
+        values=await fetch_option_values(session, where.options.value, where.lib.value),
+        config=None if where.config is None else where.config.value,
+        render=await fetch_value_renderer(session, where.lib.value),
+    )
 
 
 def _use_tui(command: Search) -> bool:

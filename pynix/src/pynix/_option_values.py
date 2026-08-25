@@ -30,16 +30,17 @@ answers it.
 from __future__ import annotations
 
 from contextlib import AsyncExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import anyio
 
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import NixError
+from pynix._option_paths import join_path
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from contextlib import AbstractAsyncContextManager
 
     from nanopynix import AsyncValue
@@ -90,10 +91,15 @@ class Value:
 
 @dataclass(frozen=True)
 class Rendered:
-    """The two fields of one option. ``None`` means the option declares none."""
+    """The fields of one option. ``None`` means the option declares none."""
 
     default: Value | None = None
     example: Value | None = None
+
+    #: What the option came to in this configuration, at the concrete path the
+    #: reader typed. ``None`` means no path was asked for, which is every
+    #: target that holds no ``config``.
+    value: Value | None = None
 
 
 def _short(text: str) -> str:
@@ -152,6 +158,73 @@ async def rendered(tree: AsyncValue, name: str) -> Rendered:
     return Rendered(default=await _field(entry, "default"), example=await _field(entry, "example"))
 
 
+@dataclass(frozen=True)
+class Trees:
+    """What one evaluation of the target gives the pane.
+
+    The two arrive together because they come from one evaluation, and that
+    evaluation is the ~5 s a reader pays once. Splitting them would open a
+    second session for the second field.
+    """
+
+    #: The lazy attrset of ``default`` and ``example``, keyed by option name.
+    values: AsyncValue
+
+    #: The values of every option, or `None` for a target that holds none. A
+    #: bare package set and a `lib.evalModules` result that returns no
+    #: `config` both land here.
+    config: AsyncValue | None = None
+
+    #: A function of one value, giving its rendered text. It is the renderer
+    #: that wrote the ``default`` line, so the two read alike.
+    render: AsyncValue | None = None
+
+
+async def at_path(trees: Trees, segments: Sequence[str]) -> Value | None:
+    """Force the value of the configuration at *segments*, and render it.
+
+    `None` means the target holds no ``config``, or the path is not in it.
+    That is not an error: a reader part-way through typing names a path that
+    does not exist yet, and an option that no module ever set has no value
+    under ``config`` at all.
+
+    **The walk is one attribute at a time, from Python.** A segment can hold a
+    dot, and Nix writes that segment in quotes; walking from here means no Nix
+    path expression is written and nothing has to be escaped.
+    """
+    config = trees.config
+    render = trees.render
+    if config is None or render is None or not segments:
+        return None
+    current = config
+    try:
+        for segment in segments:
+            if not await current.has_attr(segment):
+                return None
+            current = current.attr(segment)
+        raw = await (await render.call(current)).to_python()
+    except NixError as exc:
+        return Value(error=_reason(exc))
+    if not isinstance(raw, dict):
+        return Value(error=f"the renderer returned {type(raw).__name__} and not a rendered value")
+    return Value(text=_short(str(raw.get("text", ""))), markdown=raw.get("type") == LITERAL_MD)
+
+
+@dataclass(frozen=True)
+class _Request:
+    """One thing the pane wants resolved.
+
+    It is frozen and compared as a whole, so a repeated render of the same
+    selection and the same query asks once. `path` is the joined form of
+    `segments`, kept beside them because it is the cache key and joining it on
+    every render would be work the render does not need.
+    """
+
+    name: str
+    path: str
+    segments: tuple[str, ...]
+
+
 class OptionValues:
     """Answer "what is the default of this option", one option at a time.
 
@@ -163,14 +236,24 @@ class OptionValues:
     :meth:`serve` owns the stack, and the session closes with that task.
     """
 
-    def __init__(self, open_tree: Callable[[], AbstractAsyncContextManager[AsyncValue]]) -> None:
-        #: Open the evaluator and yield the lazy attrset of values. This runs
-        #: once, on the first request that reaches the evaluator, and the
-        #: session stays open until :meth:`serve` ends.
-        self._open_tree = open_tree
-        self._tree: AsyncValue | None = None
+    def __init__(self, open_trees: Callable[[], AbstractAsyncContextManager[Trees]]) -> None:
+        #: Open the evaluator and yield what one evaluation of the target
+        #: gives. This runs once, on the first request that reaches the
+        #: evaluator, and the session stays open until :meth:`serve` ends.
+        self._open_trees = open_trees
+        self._trees: Trees | None = None
+
+        #: The `default` and the `example`, keyed by option name. They belong
+        #: to the declaration, so the query the reader typed cannot change
+        #: them and one entry answers every instance.
         self._known: dict[str, Rendered] = {}
-        self._asked: str | None = None
+
+        #: The value of the configuration, keyed by the concrete path. A
+        #: record stands for many instances, so this is keyed by the path and
+        #: not by the option.
+        self._values: dict[str, Value | None] = {}
+
+        self._asked: _Request | None = None
         self._wake = anyio.Event()
 
         #: Why the evaluator could not open. It is the same failure every
@@ -178,17 +261,33 @@ class OptionValues:
         #: on every keypress.
         self._broken = ""
 
-    def known(self, name: str) -> Rendered | None:
-        """What is known about *name*, and ask for it when nothing is.
+    def known(self, name: str, segments: Sequence[str] = ()) -> Rendered | None:
+        """What is known about *name* at *segments*, and ask for what is not.
 
         This is what a renderer calls, so it forces nothing and waits for
-        nothing. `None` means "not resolved yet", and the pane says so.
+        nothing. `None` means "nothing is resolved yet", and the pane says so.
+
+        *segments* is the concrete path the reader typed, which
+        `pynix._option_search.instance_of` binds. It is empty when the query
+        names no path, and the answer then carries no `value`.
+
+        **The declaration and the value are asked for separately.** A reader
+        who types one more character changes the path and not the option, so
+        the `default` stays answered while the new path resolves. Recomputing
+        both on every keystroke would put the pending line back on the screen
+        for a field that had not changed.
         """
-        found = self._known.get(name)
-        if found is None and self._asked != name:
-            self._asked = name
+        declaration = self._known.get(name)
+        path = join_path(segments) if segments else ""
+        value = self._values.get(path) if path else None
+        wanted = _Request(name=name, path=path, segments=tuple(segments))
+        missing = declaration is None or (bool(path) and path not in self._values)
+        if missing and self._asked != wanted:
+            self._asked = wanted
             self._wake.set()
-        return found
+        if declaration is None:
+            return None
+        return replace(declaration, value=value)
 
     async def serve(self, redraw: Callable[[], None]) -> None:
         """Answer each request, and call *redraw* with each answer.
@@ -201,21 +300,44 @@ class OptionValues:
             while True:
                 await self._wake.wait()
                 self._wake = anyio.Event()
-                name = self._asked
-                if name is None or name in self._known:
+                asked = self._asked
+                if asked is None:
                     continue
-                self._known[name] = await self._resolve(stack, name)
+                if not await self._answer(stack, asked):
+                    continue
                 redraw()
+
+    async def _answer(self, stack: AsyncExitStack, asked: _Request) -> bool:
+        """Resolve whatever *asked* still needs, and say whether anything changed."""
+        moved = False
+        if asked.name not in self._known:
+            self._known[asked.name] = await self._resolve(stack, asked.name)
+            moved = True
+        if asked.path and asked.path not in self._values:
+            self._values[asked.path] = await self._resolve_value(stack, asked.segments)
+            moved = True
+        return moved
+
+    async def _open(self, stack: AsyncExitStack) -> Trees | None:
+        """The trees, opening the evaluator on the first call that needs them."""
+        if not self._broken and self._trees is None:
+            try:
+                self._trees = await stack.enter_async_context(self._open_trees())
+            except (NixError, EvaluatorUnavailableError) as exc:
+                self._broken = _reason(exc)
+        return self._trees
 
     async def _resolve(self, stack: AsyncExitStack, name: str) -> Rendered:
         """Open the evaluator if it is not open, and read one option."""
-        if not self._broken and self._tree is None:
-            try:
-                self._tree = await stack.enter_async_context(self._open_tree())
-            except (NixError, EvaluatorUnavailableError) as exc:
-                self._broken = _reason(exc)
-        tree = self._tree
-        if tree is None:
+        trees = await self._open(stack)
+        if trees is None:
             failed = Value(error=self._broken)
             return Rendered(default=failed, example=failed)
-        return await rendered(tree, name)
+        return await rendered(trees.values, name)
+
+    async def _resolve_value(self, stack: AsyncExitStack, segments: Sequence[str]) -> Value | None:
+        """Read the configuration at one concrete path."""
+        trees = await self._open(stack)
+        if trees is None:
+            return Value(error=self._broken)
+        return await at_path(trees, segments)

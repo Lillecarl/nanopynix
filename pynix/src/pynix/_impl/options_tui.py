@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from nanopynix._typechecking import BEARTYPING
 from pynix._impl._search_tui import SearchSource, SearchTui
 from pynix._markdown import render_markdown
-from pynix._option_search import rank
+from pynix._option_search import instance_of, rank
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Sequence
@@ -62,7 +62,12 @@ _INDENT = "  "
 _PENDING = "resolving the default and the example..."
 
 
-def detail(record: OptionRecord, width: int, values: OptionValues | None = None) -> StyleAndTextTuples:
+def detail(
+    record: OptionRecord,
+    width: int,
+    query: str = "",
+    values: OptionValues | None = None,
+) -> StyleAndTextTuples:
     """Draw one option in the detail pane under the list.
 
     A description is MyST Markdown, and `render_markdown` is the renderer that
@@ -84,7 +89,7 @@ def detail(record: OptionRecord, width: int, values: OptionValues | None = None)
         fragments.append(("", "\n"))
         fragments += render_markdown(record.description, width)
         fragments.append(("", "\n"))
-    fragments += _values(record, width, values)
+    fragments += _values(record, width, query, values)
     if record.declarations:
         fragments += [("", "\n"), ("class:option.label", "declared in"), ("", "\n")]
         for path in record.declarations:
@@ -92,14 +97,29 @@ def detail(record: OptionRecord, width: int, values: OptionValues | None = None)
     return fragments
 
 
-def _values(record: OptionRecord, width: int, values: OptionValues | None) -> StyleAndTextTuples:
-    """Draw the `default` and the `example`, or say that they are on the way."""
+def _values(record: OptionRecord, width: int, query: str, values: OptionValues | None) -> StyleAndTextTuples:
+    """Draw the fields the index does not hold, or say that they are on the way.
+
+    **The query decides which value is drawn.** One record stands for every
+    instance of an `attrsOf (submodule ...)` option, so
+    `systemd.services.<name>.enable` alone names no value.
+    `pynix._option_search.instance_of` binds what the reader typed against the
+    record, and the concrete path it gives is what the configuration is read
+    at. A query that binds nothing asks for no value, and the pane draws the
+    declaration alone.
+    """
     if values is None:
         return []
-    known = values.known(record.name)
+    match = instance_of(record, query)
+    segments = match.segments if match is not None and match.whole else ()
+    known = values.known(record.name, segments)
     if known is None:
         return [("", "\n"), ("class:option.pending", _PENDING), ("", "\n")]
-    return _field("default", known.default, width) + _field("example", known.example, width)
+    return (
+        _field("value", known.value, width)
+        + _field("default", known.default, width)
+        + _field("example", known.example, width)
+    )
 
 
 def _field(label: str, value: Value | None, width: int) -> StyleAndTextTuples:
@@ -133,8 +153,8 @@ def source(
 ) -> SearchSource[OptionRecord]:
     """Describe the options to the generic interface."""
 
-    def draw(record: OptionRecord, width: int) -> StyleAndTextTuples:
-        return detail(record, width, values)
+    def draw(record: OptionRecord, width: int, query: str) -> StyleAndTextTuples:
+        return detail(record, width, query, values)
 
     return SearchSource(
         items=records,
