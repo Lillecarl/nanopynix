@@ -36,6 +36,9 @@ if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Iterable
 logger = structlog.get_logger("pynix.copy")
 
+#: How many stranded paths the failure message names before it says "...".
+_NAMED_IN_A_FAILURE = 3
+
 
 def _endpoints(command: Copy) -> tuple[str, str]:
     """The store to read from and the store to write to, in that order.
@@ -93,6 +96,15 @@ async def _closure(source: Any, paths: Iterable[str]) -> list[str]:
     return sorted(reached)
 
 
+async def _valid(store: Any, paths: Iterable[str]) -> list[str]:
+    """The subset of *paths* that *store* holds, in the order given.
+
+    One question for each path. Nix binds no bulk `queryValidPaths` here, and
+    the closure of a request is what this walks.
+    """
+    return [path for path in paths if await store.is_valid_path(path)]
+
+
 async def run_copy(command: Copy) -> None:
     """The body of :meth:`pynix.copy.Copy.run`."""
     source_uri, destination_uri = _endpoints(command)
@@ -113,10 +125,10 @@ async def run_copy(command: Copy) -> None:
         async with nix.store(destination_uri) as destination:
             # **Before the copy, and one question for each path.** Nix reports
             # nothing about what it wrote, so "what did this command copy" has
-            # to be the difference between the two stores beforehand.
-            # `query_missing` does not answer it: that one asks what a *build*
-            # would still have to do, over derived paths and substituters.
-            present = [path for path in closure if await destination.is_valid_path(path)]
+            # to be the difference between the two stores. `query_missing` does
+            # not answer it: that one asks what a *build* would still have to
+            # do, over derived paths and substituters.
+            present = await _valid(destination, closure)
             missing = [path for path in closure if path not in set(present)]
             logger.info(
                 "pynix copy starting",
@@ -128,12 +140,34 @@ async def run_copy(command: Copy) -> None:
             )
             await source.copy_closure(list(requested), destination, check_sigs=command.check_sigs)
 
+            # **And again afterwards, because a copy can end quietly.**
+            # `Store::addMultipleToStore` (`src/libstore/store-api.cc`) catches
+            # the failure of one path when `keep-going` is on: it counts it in
+            # `nrFailed`, logs it, and returns. `copyPaths` returns void and
+            # never reads `nrFailed`, so no caller of `copyClosure` can learn
+            # that a path failed.
+            #
+            # Measured on 2.34, 2.35 and git alike: a copy of an unsigned path
+            # into a store that requires a signature raised nothing, wrote
+            # nothing, and this command reported both paths as copied. That
+            # report was the difference computed above, which is what the
+            # command *meant* to copy. `arrived` is what it did copy.
+            arrived = sorted(await _valid(destination, missing))
+
+        stranded = [path for path in missing if path not in set(arrived)]
+        if stranded:
+            error_exit(
+                f"{len(stranded)} of {len(missing)} path(s) did not reach {destination_uri}, "
+                f"and Nix reported no error: {', '.join(stranded[:_NAMED_IN_A_FAILURE])}"
+                + (" ..." if len(stranded) > _NAMED_IN_A_FAILURE else ""),
+            )
+
     print_json(
         {
             "from": source_uri,
             "to": destination_uri,
             "requested": requested,
-            "copied": missing,
+            "copied": arrived,
             "alreadyPresent": present,
         },
     )
