@@ -25,7 +25,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from nanopynix._typechecking import BEARTYPING
-from pynix._option_paths import SEPARATOR, Instance, bind, split_path
+from pynix._option_paths import SEPARATOR, Instance, bind, join_path, split_path
 from pynix._ranking import ALIAS, PREFIX, RESULTS, Texts, make_tiered_ranker
 
 if TYPE_CHECKING or BEARTYPING:
@@ -55,6 +55,14 @@ def texts() -> Texts[OptionRecord]:
 #: tier above `WORDS` uses, because the tier has already ordered the match.
 _CERTAIN = 100.0
 
+#: The attribute that holds the values of every option. `options` declares an
+#: option and `config` reads it, and a reader types the one they read.
+CONFIG = "config"
+
+#: The shortest path that `config.` can lead: the word and one segment after
+#: it. A bare `config` names no option and must keep matching as a word.
+_CONFIG_AND_ONE_MORE = 2
+
 
 def _placeholder_index(records: Sequence[OptionRecord]) -> list[tuple[list[str], OptionRecord]]:
     """Each option that stands for many, with its path split once.
@@ -64,6 +72,28 @@ def _placeholder_index(records: Sequence[OptionRecord]) -> list[tuple[list[str],
     24 941 in one real configuration, so the pre-filter is most of the work.
     """
     return [(split_path(record.name), record) for record in records if "<" in record.name]
+
+
+def without_config(query: str) -> str | None:
+    """*query* without a leading ``config.``, or `None` when it has none.
+
+    **An option is declared under `options` and read under `config`, and a
+    reader types the one they read.** The index names the record
+    `systemd.services.<name>.name`, and the path that answers it is
+    `config.systemd.services.nix.name` -- that is what a REPL, a `nix eval`
+    and this project's own prose all write. Measured before this existed:
+    `config.systemd.services.nix` matched nothing at all, and
+    `config.systemd.services.nix.name` fell to the fuzzy tier where
+    `services.nginx.enable` came within one point of winning.
+
+    The raw query still ranks as well, and the better of the two answers
+    wins, so a target that really does declare a top-level `config` option
+    keeps it.
+    """
+    segments = split_path(query)
+    if len(segments) < _CONFIG_AND_ONE_MORE or segments[0] != CONFIG:
+        return None
+    return join_path(segments[1:])
 
 
 def _instances(
@@ -93,8 +123,27 @@ def instance_of(record: OptionRecord, query: str) -> Instance | None:
 
     The interface calls this for the one option a reader selected, so that it
     can name the concrete path. Issue #266 reads the value at that path.
+
+    A leading ``config.`` is dropped first, because the reader types the path
+    they would read the value at and the record is named without it.
     """
-    return bind(split_path(record.name), split_path(query))
+    stripped = without_config(query)
+    typed = split_path(record.name)
+    direct = bind(typed, split_path(query))
+    return direct if direct is not None or stripped is None else bind(typed, split_path(stripped))
+
+
+def _best_of(rows: Sequence[Sequence[tuple[RankKey, OptionRecord]]]) -> list[tuple[RankKey, OptionRecord]]:
+    """One list from several, keeping the best key that any of them gave a record."""
+    best: dict[str, tuple[RankKey, OptionRecord]] = {}
+    for group in rows:
+        for key, record in group:
+            found = best.get(record.name)
+            if found is None or key < found[0]:
+                best[record.name] = (key, record)
+    merged = list(best.values())
+    merged.sort(key=lambda pair: pair[0])
+    return merged
 
 
 def tiered(
@@ -106,19 +155,28 @@ def tiered(
     plain = make_tiered_ranker(records, texts(), limit=limit)
     index = _placeholder_index(records)
 
-    def rank_all(query: str) -> Sequence[tuple[RankKey, OptionRecord]]:
-        base = plain(query)
-        # A query with no separator names no path, so no placeholder can
-        # stand in for part of it.
+    def paths(query: str) -> Sequence[Sequence[tuple[RankKey, OptionRecord]]]:
+        """Every answer that reads *query* as an attribute path.
+
+        A query with no separator names no path, so no placeholder can stand
+        in for part of it, and the word filter already reaches it.
+        """
         if SEPARATOR not in query:
-            return base
-        instances = _instances(index, query)
-        if not instances:
-            return base
-        promoted = {record.name for _key, record in instances}
-        merged = [*instances, *((key, record) for key, record in base if record.name not in promoted)]
-        merged.sort(key=lambda pair: pair[0])
-        return merged[:limit]
+            return ()
+        return (_instances(index, query),)
+
+    def rank_all(query: str) -> Sequence[tuple[RankKey, OptionRecord]]:
+        groups: list[Sequence[tuple[RankKey, OptionRecord]]] = [plain(query), *paths(query)]
+        # **The `config.` form ranks as well, and the better answer wins.**
+        # The raw query stays in, so a target that really does declare a
+        # top-level `config` option keeps every match it had.
+        stripped = without_config(query)
+        if stripped:
+            groups.append(plain(stripped))
+            groups.extend(paths(stripped))
+        if not any(groups[1:]):
+            return groups[0]
+        return _best_of(groups)[:limit]
 
     return rank_all
 
