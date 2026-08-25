@@ -17,6 +17,12 @@ here for a reason that a person met before:
 
 - **A sentinel prompt, and a wait for it.** The alternative is a sleep, which
   is either slow or flaky, and which becomes both on a loaded machine.
+- **A sentinel for the end of a completion, and a key that asks for it.** A
+  shell cannot be asked to echo anything in the middle of a line, so each one
+  binds a key that prints `MARKER`. The line editor reads the keys in order,
+  so the marker arrives when the completion function returns. A read for
+  silence cannot do this: it ends early on a slow answer, and an empty answer
+  satisfies a test that asserts what must *not* be offered.
 - **A fixed window size.** A shell formats a candidate list into columns for
   the width it believes it has. A narrow window puts one candidate on each
   line, which is what makes the output readable by a program.
@@ -74,28 +80,44 @@ WINDOW = (200, 200)
 #: every one of these shells treats as a real terminal.
 TERM = "xterm"
 
-#: Seconds of silence that end a read. A completion is local work, so this is
-#: long against the work and short against the timeout below.
-SETTLE = 0.4
+#: What a shell prints when it has finished a completion. It appears nowhere
+#: else in the output of these tests, so a wait for it cannot end early.
+MARKER = "@@DONE@@"
 
-#: Seconds to wait for the *first* thing a shell draws after Tab, when a caller
-#: gives no other number.
+#: The end of the command line that a shell reports after `MARKER`.
 #:
-#: **A program that starts slowly needs more than `SETTLE`, and a read that is
-#: too short reports an empty answer rather than a slow one.** Measured against
-#: `pynix`: fish starts the program twice for one completion, once for the
-#: condition of `complete -n` and once for its candidates, and each start takes
-#: about 0.15 s. With 0.4 s the driver returned no candidates and an unchanged
-#: command line for `pynix build --<TAB>`, and the case table of
-#: `pynix/completions/tests/` passed. With 2.0 s the same line came back as
-#: `pynix build print-dev-env`, which is the defect issue #213 is about.
+#: **The command line comes from the shell, and no longer from the screen.**
+#: bash gives the marker its own reason: `bind -x` clears the command line
+#: before it runs the bound command, and it does not draw that line again, so
+#: the row that held the finished line is blank by the time a test reads it.
+#: Measured, `completion-spike`: three bash rows read `demo build --attr he`
+#: where the answer was `demo build --attr hello`.
 #:
-#: The wait applies to the first chunk alone. `settle` below ends the read
-#: after that, and it has to grow with this one: measured against `pynix`,
-#: fish drew its first bytes at once and then went quiet for longer than 0.4 s
-#: before it put `print-dev-env` on the command line, so a long `answer` with
-#: the default `settle` still read a truncated answer.
-ANSWER = SETTLE
+#: The candidate list above the line is untouched in all three shells, so
+#: `candidates` still reads the screen. Only the line moved.
+MARKER_END = "@@LINE@@"
+
+#: The key that asks a shell to print `MARKER`. Each shell binds it in
+#: `SHELLS` below.
+#:
+#: **The line editor reads the keys in order, so the marker prints only after
+#: the completion function returns.** That is the whole mechanism: a read that
+#: ends on the marker ends when the answer is complete, and not when the shell
+#: has been quiet for a while. Measured against the builtins of each shell,
+#: from the Tab to the marker: bash 101 ms, zsh 101 ms, fish 114 ms. A row of
+#: `pynix/completions/tests/` paid about 4.5 s of deliberate silence before
+#: this. Issue #225.
+#:
+#: **Not Ctrl-X Ctrl-D.** Ctrl-D on its own ends a shell that has an empty
+#: line, so a session in which the sequence does not reach its binding dies
+#: rather than fails. Ctrl-B on its own moves the cursor one place left, which
+#: costs nothing and leaves a session that a test can still report on.
+MARKER_KEY = "\x18\x02"
+
+#: Seconds of silence that end the one read which cannot wait for a marker.
+#: See `ShellSession.__init__`. A completion is local work, so this is long
+#: against the work and short against the timeout below.
+SETTLE = 0.4
 
 #: Seconds before a shell that never answers fails the test.
 TIMEOUT = 20.0
@@ -138,7 +160,10 @@ SHELLS: dict[str, ShellSpec] = {
     "fish": ShellSpec(
         name="fish",
         argv=("fish", "--no-config", "--private"),
-        setup=(f"function fish_prompt; printf '{PROMPT}'; end",),
+        setup=(
+            f"function fish_prompt; printf '{PROMPT}'; end",
+            f"""bind \\cx\\cb 'printf "{MARKER}%s{MARKER_END}" (commandline)'""",
+        ),
         export="set -gx {name} {value}",
     ),
     # `--norc --noprofile` for the dotfiles. The two `bind` lines are the
@@ -155,6 +180,12 @@ SHELLS: dict[str, ShellSpec] = {
             "bind 'set completion-query-items -1'",
             "bind 'set colored-stats off'",
             "bind 'set colored-completion-prefix off'",
+            # `bind -x` runs a command, where a plain `bind` can only insert
+            # text into the line. It clears the command line before it runs
+            # the command, and it does not draw that line again. Measured: the
+            # candidate list above the line is untouched, which is what a test
+            # reads, and `raw_complete` abandons the line straight afterwards.
+            f"""bind -x '"\\C-x\\C-b": printf "{MARKER}%s{MARKER_END}" "$READLINE_LINE"'""",
         ),
     ),
     # `-f` skips zshrc. `compinit -u` skips the check on the ownership of the
@@ -174,6 +205,10 @@ SHELLS: dict[str, ShellSpec] = {
             "unsetopt list_ambiguous",
             "zstyle ':completion:*' menu no",
             "zstyle ':completion:*' list-colors",
+            # A zle widget, because `bindkey` binds a widget and not a command.
+            f"""_marker() {{ printf '{MARKER}%s{MARKER_END}' "$BUFFER" }}""",
+            "zle -N _marker",
+            "bindkey '^X^B' _marker",
         ),
     ),
 }
@@ -225,14 +260,12 @@ class ShellSession:
         env: Mapping[str, str],
         cwd: str | None = None,
         settle: float = SETTLE,
-        answer: float = ANSWER,
     ) -> None:
         spec = SHELLS.get(shell)
         if spec is None:
             raise ValueError(f"unknown shell {shell!r}; expected one of {', '.join(SHELLS)}")
         self.spec = spec
         self._settle = settle
-        self._answer = answer
         columns, rows = WINDOW
         # **The screen sees every byte the shell writes, from the first one.**
         # A shell moves the cursor to a column it counted itself, so an
@@ -261,6 +294,19 @@ class ShellSession:
         for line in spec.setup:
             self._run(line)
         self._export_path(env.get("PATH", ""))
+        # **One read of silence, once, and never again.** The setup line that
+        # binds `MARKER_KEY` holds `MARKER` as text, so the echo of that line
+        # carries a marker of its own. `_run` does not consume it: the first
+        # prompt of a shell arrives before any line is sent, so each `_run`
+        # matches the prompt that came *before* its own echo and leaves that
+        # echo in the buffer. `_read_to_marker` would then match the marker in
+        # the setup and return before the shell had answered anything.
+        #
+        # Measured, without this: bash returned the echo of its own `bind`
+        # line as the candidate list, and zsh took the unread keys as an EOF
+        # and exited. This costs `settle` for a whole session, where the wait
+        # it replaces cost about three times that for every row.
+        self._read_until_quiet()
 
     def __enter__(self) -> ShellSession:
         return self
@@ -318,26 +364,50 @@ class ShellSession:
         matched = (self._child.before, self._child.after)
         self._stream.feed("".join(part for part in matched if isinstance(part, str)))
 
-    def _read_until_quiet(self, first: float | None = None) -> None:
+    def _read_until_quiet(self) -> None:
         """Feed the screen until the shell goes quiet for `settle`.
 
-        *first* is how long to wait for the first chunk, for a caller that
-        knows the shell has slow work to do before it draws anything.
+        **One caller, and it runs once for each session.** `__init__` uses it
+        to clear what the setup left behind. Every other read waits for a
+        marker, because a wait for silence cannot tell a slow answer from an
+        empty one -- issue #225, and issue #213 before it.
         """
-        read_one = False
         while True:
-            wait = first if first is not None and not read_one else self._settle
             try:
-                chunk = self._child.read_nonblocking(size=4096, timeout=wait)
+                chunk = self._child.read_nonblocking(size=4096, timeout=self._settle)
             except pexpect.TIMEOUT:
                 return
             except pexpect.EOF:
                 raise RuntimeError(f"{self.spec.name} hung up while completing") from None
             self._stream.feed(chunk)
-            read_one = True
 
-    def raw_complete(self, line: str) -> tuple[str, ...]:
-        """Type *line*, press Tab, and return the rows the shell drew.
+    def _read_to_marker(self) -> str:
+        """Ask the shell if it has finished, and answer with its command line.
+
+        The screen is given what arrived before the marker, and nothing after
+        it. Neither the marker nor the line it carries is fed: a user never
+        sees either, so a row that held one would become a candidate to
+        `candidates` below.
+
+        The line comes back stripped on the right. bash and fish report the
+        trailing space that each writes after a finished word, and zsh does
+        not; the screen dropped that space, so dropping it here keeps the
+        three shells answering alike.
+        """
+        self._child.send(MARKER_KEY)
+        try:
+            self._child.expect_exact(MARKER, timeout=TIMEOUT)
+            before = self._child.before
+            if isinstance(before, str):
+                self._stream.feed(before)
+            self._child.expect_exact(MARKER_END, timeout=TIMEOUT)
+        except pexpect.EOF:
+            raise RuntimeError(f"{self.spec.name} hung up while completing") from None
+        reported = self._child.before
+        return reported.rstrip() if isinstance(reported, str) else ""
+
+    def raw_complete(self, line: str) -> RawAnswer:
+        """Type *line*, press Tab, and return what the shell answered.
 
         The line is abandoned afterwards, and the prompt waited for, so that
         one session can answer many completions.
@@ -345,24 +415,26 @@ class ShellSession:
         # Whatever the previous call left behind, before this one starts. The
         # echo of the keys that abandoned the last line arrives late, and it
         # landed in the front of the next answer.
-        self._read_until_quiet()
+        self._read_to_marker()
         # The row that the command line starts on. Every row above it belongs
         # to an earlier completion, or to the setup of the shell.
         start = self._screen.cursor.y
         self._child.send(line)
         # **The echo is read before Tab.** The echo of the typed line arrives
-        # at once, so it would be the first chunk of the read below and the
-        # long wait would never apply to what Tab produced.
-        self._read_until_quiet()
+        # at once, so it would otherwise sit in front of what Tab produced.
+        self._read_to_marker()
         self._child.send(_TAB)
-        self._read_until_quiet(first=self._answer)
+        # The one read that has to wait for work. The marker arrives when the
+        # completion function returns, however long that function took, so a
+        # slow answer is read whole and a fast one costs nothing.
+        reported = self._read_to_marker()
         rows = _rows_of(self._screen, start)
         # Ctrl-U clears the line, Ctrl-C leaves any pager or menu, and the
         # empty line brings the prompt back so the next call starts clean.
         self._child.send("\x15\x03")
         self._child.send("\n")
         self._wait_for_prompt()
-        return rows
+        return RawAnswer(rows=rows, line=reported)
 
     def complete(self, line: str) -> Completion:
         """What the shell did with *line* when Tab was pressed.
@@ -371,12 +443,24 @@ class ShellSession:
         what an ambiguous prefix produces, and a finished command line is what
         an unambiguous one produces, and the same key produces each.
         """
-        rows = self.raw_complete(line)
+        answer = self.raw_complete(line)
         return Completion(
-            candidates=candidates(rows, line),
-            line=completed_line(rows, line),
-            drawn="\n".join(rows),
+            candidates=candidates(answer.rows, line),
+            line=answer.line,
+            drawn="\n".join(answer.rows),
         )
+
+
+@dataclass(frozen=True)
+class RawAnswer:
+    """What one Tab produced, before anything reads a candidate out of it.
+
+    `rows` is the screen, which is where the candidate list is. `line` is what
+    the shell says its command line now holds.
+    """
+
+    rows: tuple[str, ...]
+    line: str
 
 
 @dataclass(frozen=True)
@@ -448,6 +532,11 @@ def completed_line(rows: Sequence[str], line: str) -> str:
     last row that starts with the name of the program is the result. An
     unambiguous prefix is the case this answers: there is no list to read then,
     only a line that grew.
+
+    **`ShellSession` no longer reads the line this way, and asks the shell
+    instead.** See `MARKER_END`. This stays beside `render` and `candidates`,
+    which are the three functions that read a recording: a test that holds
+    bytes rather than a live shell has no shell to ask.
     """
     words = line.split()
     if not words:

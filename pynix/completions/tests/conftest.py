@@ -50,25 +50,16 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 #: The renderer that the build runs, for a run that has no built package.
 RENDERER = REPO_ROOT / "nix" / "render-completions.py"
 
-#: Seconds of silence that end a read of what a shell drew.
+#: Seconds of silence that end the one read of a session that cannot wait for
+#: a marker. `ShellSession.__init__` makes that read, to clear what the setup
+#: of the shell left behind.
 #:
-#: **The default of the driver is 0.4 s, and `pynix` is slower than that
-#: between one thing it draws and the next.** Measured: fish echoed the typed
-#: line at once, went quiet, and only then put `print-dev-env` on the command
-#: line. A read that ended in the gap reported an unchanged line, so the row
-#: that this suite exists for passed.
-SETTLE = 1.5
-
-#: Seconds to wait for the first thing a shell draws after Tab.
-#:
-#: **The default of the driver is 0.4 s, and it is too short for `pynix`.**
-#: fish starts the program twice for one completion, once for the condition of
-#: `complete -n` and once for its candidates. Measured: with 0.4 s this suite
-#: read an empty answer for `pynix build --<TAB>` and every row passed; with
-#: 2.0 s the same line came back as `pynix build print-dev-env`, which is the
-#: defect issue #213 is about. A false pass here is the worst outcome
-#: available, so the number is generous.
-ANSWER = 5.0
+#: **This suite raised it to 1.5 s while every read waited for silence.** The
+#: driver now waits for a marker instead, so no read of an answer depends on
+#: this number and the default of the driver is enough. Issue #225 holds the
+#: measurement; issue #213 holds the defect that a short wait hid, which was
+#: `pynix build --<TAB>` reading an empty answer and passing every row.
+SETTLE = 0.4
 
 
 @pytest.fixture(scope="session")
@@ -236,11 +227,15 @@ def shell(
     prompt, and reads the next answer from the row the cursor is on. So a
     session answers many completions and each answer starts clean.
 
+    Reuse also carries the marker binding, which the setup of the session
+    installs once. Issue #225 measured that reuse saves 1.8 s of 296 s on its
+    own, so it is the marker and not the reuse that makes a row cheap.
+
     Three processes live at once, one for each name. `ROWS` groups its rows by
     shell so pytest builds each one once, rather than relying on the reordering
     that a higher-scoped parameter usually gets.
     """
     name = request.param
-    with ShellSession(name, session_env, cwd=str(workdir), settle=SETTLE, answer=ANSWER) as session:
+    with ShellSession(name, session_env, cwd=str(workdir), settle=SETTLE) as session:
         session.load(str(scripts[name]))
         yield session
