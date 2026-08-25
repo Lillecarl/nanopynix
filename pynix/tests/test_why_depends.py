@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from nanopynix import strip_ansi
 from nanopynix_testing.nix_environment import with_nixpkgs
 from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
 from pynix import parse
@@ -186,6 +187,135 @@ async def test_the_chain_agrees_with_nix_why_depends(
     positions = [reported.find(path) for path in chain]
     assert all(position >= 0 for position in positions), reported
     assert positions == sorted(positions), reported
+
+
+@LINUX_CHROOT_BUILD
+async def test_precise_names_the_file_that_holds_each_reference(
+    shared_nix_environment: NixTestEnvironment,
+    reference_chain: dict[str, str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Each output of this chain is one regular file that holds one path.
+
+    So each link has exactly one hit, the file is the store path itself, and
+    the excerpt is the store path that the `printf` wrote. A chain of three
+    nodes gives two links. Issue #280.
+    """
+    cmd = parse(
+        [
+            "why-depends",
+            reference_chain["top"],
+            reference_chain["leaf"],
+            "--precise",
+            *shared_nix_environment.pynix_store_args(),
+        ],
+    )
+
+    await cmd.run()
+
+    result = json.loads(capsys.readouterr().out)
+    references = result["references"]
+    assert [(edge["from"], edge["to"]) for edge in references] == [
+        (reference_chain["top"], reference_chain["middle"]),
+        (reference_chain["middle"], reference_chain["leaf"]),
+    ]
+    for edge, referee in zip(references, ("middle", "leaf"), strict=True):
+        assert [hit["path"] for hit in edge["hits"]] == ["."]
+        # The whole content is the store path, which is shorter than the
+        # margin on each side, so the excerpt is that path and nothing else.
+        assert edge["hits"][0]["excerpt"] == reference_chain[referee]
+
+
+@LINUX_CHROOT_BUILD
+async def test_without_precise_the_key_is_absent(
+    shared_nix_environment: NixTestEnvironment,
+    reference_chain: dict[str, str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Absent, and not empty. A reader can then tell "did not look" from
+    "looked and found nothing"."""
+    cmd = parse(
+        ["why-depends", reference_chain["top"], reference_chain["leaf"], *shared_nix_environment.pynix_store_args()],
+    )
+
+    await cmd.run()
+
+    assert "references" not in json.loads(capsys.readouterr().out)
+
+
+@LINUX_CHROOT_BUILD
+async def test_precise_on_a_path_that_depends_on_itself_has_no_link(
+    shared_nix_environment: NixTestEnvironment,
+    reference_chain: dict[str, str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The chain is one node, so there is no link to explain."""
+    cmd = parse(
+        [
+            "why-depends",
+            reference_chain["leaf"],
+            reference_chain["leaf"],
+            "--precise",
+            *shared_nix_environment.pynix_store_args(),
+        ],
+    )
+
+    await cmd.run()
+
+    assert json.loads(capsys.readouterr().out)["references"] == []
+
+
+@LINUX_CHROOT_BUILD
+async def test_each_precise_excerpt_agrees_with_nix_why_depends(
+    shared_nix_environment: NixTestEnvironment,
+    reference_chain: dict[str, str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Nix prints the same excerpt, byte for byte, for the same hit.
+
+    That is the whole of what ``--precise`` promises: the file, and the text
+    around the reference in it. Nix colours the hash inside its own excerpt,
+    so the comparison strips the escape sequences first -- with
+    ``nanopynix.strip_ansi``, which is ``nix::filterANSIEscapes`` itself --
+    and then looks for each excerpt as a contiguous run.
+
+    Measured by hand on `nixpkgs#hello` against glibc before this test
+    existed, and the two strings were equal including the dots that stand for
+    the unprintable bytes of the ELF header.
+    """
+    await require_matching_nix_cli()
+    result = await run_process(
+        [
+            "nix",
+            "--extra-experimental-features",
+            "nix-command",
+            "--store",
+            shared_nix_environment.store_uri,
+            "why-depends",
+            "--precise",
+            reference_chain["top"],
+            reference_chain["leaf"],
+        ],
+    )
+    assert result.returncode == 0, result.describe()
+    reported = strip_ansi(result.stdout)
+
+    cmd = parse(
+        [
+            "why-depends",
+            reference_chain["top"],
+            reference_chain["leaf"],
+            "--precise",
+            *shared_nix_environment.pynix_store_args(),
+        ],
+    )
+    await cmd.run()
+
+    references = json.loads(capsys.readouterr().out)["references"]
+    excerpts = [hit["excerpt"] for edge in references for hit in edge["hits"] if "excerpt" in hit]
+    assert excerpts, references
+    for excerpt in excerpts:
+        assert excerpt in reported, reported
 
 
 async def test_why_depends_reports_an_invalid_path(

@@ -492,5 +492,6 @@ Show the chain of references that puts one store path in the closure of another
 | --- | --- | --- |
 | `package` | `str` | Store path whose closure to search (e.g. '/nix/store/hash-name'). *(required)* |
 | `dependency` | `str` | Store path to find in that closure. *(required)* |
+| `--precise` | `bool` | For each link of the chain, name the file that holds the reference. Needs a local store. (default: `False`) |
 | `--store` | `str` | Store URI to query. (default: `'auto'`) |
 
