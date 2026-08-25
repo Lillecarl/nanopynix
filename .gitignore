@@ -28,3 +28,19 @@ junit.xml
 gc-thread-debug.log
 test-gdb-output.log
 nanopynix-test-store-paths.txt
+
+# The three that the list above did not name. `ci/steps.nix` writes them into
+# the same directory, from the TSan legs: `tsan-output-<version>.log` at line
+# 257, `tsan-output-broad-<version>.log` at line 325, and one
+# `soak-<version>-run<seed>.json` for each seed at line 276. A local run of
+# `ciSteps.<version>-tsan` writes them too, so a developer got the same
+# result. One commit then carried a 610 KB TSan log and ten soak reports.
+# `nix/clean-source.nix` repeats these three rules, and a self-check keeps
+# the two files in agreement.
+tsan-output-*.log
+soak-*.json
+
+# A jj workspace that lives inside the repository. `jj` knows its own
+# workspaces and never offers one, so `jj st` stays silent, and only a `git
+# add` sees it. One workspace holds a whole second checkout.
+.workspaces/
