@@ -10,6 +10,8 @@
 #include <nix/expr/config.hh>
 
 #include <nix/store/globals.hh>
+
+#include "settings_util.hh"
 #include <nix/util/config-global.hh>
 #include <nix/util/configuration.hh>
 #include <nix/util/error.hh>
@@ -507,7 +509,15 @@ void nanopynix_bind_util(nb::module_ &m) {
     py_logger = new PyLogger();
     nanopynix::nix_compat::install_logger(std::unique_ptr<nix::Logger>(py_logger));
 
-    m.def("init_libstore", &nix::initLibStore, nb::call_guard<nb::gil_scoped_release>(),
+    // **The snapshot is part of this call and not a step after it.**
+    // `initLibStore` is what reads `nix.conf`, and the first thing
+    // `_nix_core.py` does afterwards is `reset_overridden()`, which clears
+    // the mark that says which values came from the file. `settings_util.hh`
+    // carries the measurement. Issue #234.
+    m.def("init_libstore", [](bool load_config) {
+        nix::initLibStore(load_config);
+        snapshot_nix_conf();
+    }, nb::call_guard<nb::gil_scoped_release>(),
           "load_config"_a = true,
           "Initialize the Nix store library.");
     m.def("build_info", &build_info,

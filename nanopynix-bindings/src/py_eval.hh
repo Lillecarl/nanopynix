@@ -23,6 +23,7 @@
 #include <nix/util/ref.hh>
 
 #include "nanopynix_gc_thread.hh"
+#include "settings_util.hh"
 
 struct PyValue;
 
@@ -253,6 +254,19 @@ private:
         // `assert`. Neither is catchable, and one call answers both.
         nanopynix_start_gc_owner_thread();
         nanopynix_ensure_gc_thread_registered();
+
+        // **What `nix.conf` says, before anything else writes to these.**
+        // Nix registers neither of these two objects, because libcmd is what
+        // registers its own and this library does not link libcmd. So the
+        // file reached neither until issue #234, and the caller was the only
+        // source of a non-default value.
+        //
+        // The order is file, then configurators, then the caller. The
+        // configurators install primops rather than set values, so only the
+        // outer pair really contend, and the caller winning over the file is
+        // what `nix` does. `settings_util.hh` carries the rest.
+        apply_nix_conf(evalSettings);
+        apply_nix_conf(fetchSettings);
 
         for (auto &cfg : evalSettingsConfigurators())
             cfg(evalSettings);

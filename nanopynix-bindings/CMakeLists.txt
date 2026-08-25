@@ -137,6 +137,7 @@ nanobind_add_module(_ext
   src/nix_errors.cpp
   src/nix_signals.cpp
   src/nix_util.cpp
+  src/settings_util.cpp
   src/nix_store.cpp
   src/py_store_impl.cpp
   src/nix_expr.cpp

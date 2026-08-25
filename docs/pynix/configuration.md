@@ -143,14 +143,17 @@ that pins `nixpkgs` in its system registry: `nix build nixp<TAB>` with an
 unreachable registry offers nothing at all. `pynix` asks again without the
 global layer and offers what the local ones hold.
 
-**`flake-registry` in your `nix.conf` does not reach this program.** Nix
-registers its one global fetch-settings object with `globalConfig`, and
-`nix.conf` fills that object in. nanopynix builds a fetch-settings object of
-its own for each call and registers none of them, so every fetch setting comes
-from the caller and none from the file. Measured: `flake-registry` is absent
-from `nanopynix.list_settings()`, which is `globalConfig` itself. Issue #234
-holds that gap. The layer is on here because it is Nix's own default, and not
-because the file said so.
+**`flake-registry` in your `nix.conf` reaches this program.** It did not
+until issue #234. Nix keeps four settings registries, and `nix.conf` fills in
+only what is registered with `globalConfig`; libcmd is what registers the
+other three, and nanopynix does not link libcmd. So every fetch setting came
+from the caller and none from the file, and `flake-registry` was absent from
+`nanopynix.list_settings()`.
+
+nanopynix now registers one object of each kind, which is what
+`src/libcmd/common-eval-args.cc` does. Each call still builds its own
+settings, and it starts from what the file said rather than from the compiled
+default. A value you pass still wins over the file, as it does in `nix`.
 
 ## What `pynix build` does not need
 

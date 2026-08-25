@@ -802,14 +802,28 @@ async def test_writing_settings_leaves_the_unnamed_ones_alone(
 # discarded one.
 
 
-def test_the_four_settings_registries_are_disjoint() -> None:
-    """No setting is registered in two of Nix's four registries.
+def test_global_config_aggregates_the_other_three_registries() -> None:
+    """Every eval, fetch and flake setting is in ``globalConfig`` as well.
 
-    ``check_settings_model_drift`` used to subtract the eval, fetch and flake
-    names from the global registry, on the belief that ``globalConfig``
-    aggregates them. It does not. That step removed nothing, and this is what
-    notices if a future Nix makes it necessary again -- at which point the
-    routing itself needs a rule for the setting that appears twice.
+    **This test used to state the opposite, and the opposite was true.** Nix
+    keeps four registries, and ``globalConfig`` held none of the other three
+    names, so ``check_settings_model_drift`` subtracting them removed nothing.
+
+    Issue #234 changed it, on purpose. ``initLibStore`` applies ``nix.conf`` to
+    ``globalConfig`` and to nothing else, so a setting from the file reached
+    only what was registered there -- and nothing registered the other three,
+    because libcmd is what does that and this library does not link libcmd.
+    ``nanopynix-bindings/src/settings_util.cpp`` now registers one object of
+    each kind, which is what ``src/libcmd/common-eval-args.cc`` does and why
+    ``nix config show`` lists all four.
+
+    So the overlap is total rather than empty, and that is the assertion: a
+    partial overlap would mean one of the three registrations was lost.
+
+    **This does not merge the routing, and the tests above state that.** Each
+    scope still reaches its own door, and a setting still has to be passed to
+    the parameter that owns it. What is registered is a *source of defaults*,
+    read once per instance before the caller's own settings go on top.
     """
     registries = {
         "eval": set(list_eval_settings_metadata()),
@@ -817,10 +831,10 @@ def test_the_four_settings_registries_are_disjoint() -> None:
         "flake": set(list_flake_settings_metadata()),
     }
     global_names = set(list_settings_metadata())
-    overlaps = {name: sorted(names & global_names) for name, names in registries.items()}
-    note(registry_sizes={name: len(names) for name, names in registries.items()}, overlaps=overlaps)
+    absent = {name: sorted(names - global_names) for name, names in registries.items()}
+    note(registry_sizes={name: len(names) for name, names in registries.items()}, absent=absent)
 
-    assert overlaps == {"eval": [], "fetch": [], "flake": []}
+    assert absent == {"eval": [], "fetch": [], "flake": []}
 
 
 @pytest.fixture

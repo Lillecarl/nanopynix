@@ -78,11 +78,13 @@ BASH_WORDBREAKS = " \t\n\"'><=;|&(:"
 def user_registry(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     """A user registry that both programs read, with one entry this file owns.
 
-    **`NIX_CONFIG_HOME`, and not a setting.** `getConfigDir` (`libutil/users.cc`)
-    reads that variable first, and `getUserRegistryPath` is that directory plus
-    `registry.json`. So it reaches `nix` and this program alike -- where
-    `flake-registry` in a `nix.conf` reaches only `nix`, because nanopynix
-    registers no fetch settings with `globalConfig`. Issue #234 holds that.
+    **`NIX_CONFIG_HOME`, and it is the *user* layer.** `getConfigDir`
+    (`libutil/users.cc`) reads that variable first, and `getUserRegistryPath`
+    is that directory plus `registry.json`. So it reaches `nix` and this
+    program alike, and it seeds a layer that `flake-registry` does not name --
+    that setting is the global layer. Issue #234 made a `nix.conf` reach this
+    program too, so a setting is now a second way to reach the *global* layer
+    and still not this one.
 
     **Without it the rows below pass on nothing.** A build sandbox has no
     `/etc/nix/registry.json`, no `$HOME/.config`, and no network for the global

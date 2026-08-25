@@ -214,7 +214,10 @@ def test_for_scope_takes_one_scope_out_of_the_catch_all() -> None:
 
     This is the split that makes the catch-all work. Sending all five to
     ``globalConfig`` is what used to happen, and four of them raised
-    ``unknown setting`` because the registries are disjoint.
+    ``unknown setting`` because the registries were disjoint. Issue #234
+    registered the other three, so that call no longer raises -- it writes the
+    process-wide defaults of the wrong scope instead, which is a quieter way
+    to be wrong and a better reason for the split, not a worse one.
     """
     everything = NixSettings(max_jobs=4, trusted=True, pure_eval=True, warn_dirty=False, use_registries=False)
 
