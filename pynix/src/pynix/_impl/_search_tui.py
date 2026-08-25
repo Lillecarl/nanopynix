@@ -38,11 +38,10 @@ from prompt_toolkit.layout.containers import HSplit, ScrollOffsets, VSplit, Wind
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.styles import Style, merge_styles
-from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.widgets import HorizontalLine
 
 from nanopynix._typechecking import BEARTYPING
-from pynix._impl._columns import GUTTER, Grid, lay_out
+from pynix._impl._columns import GUTTER, Flow, lay_out
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -249,7 +248,7 @@ class SearchTui[ItemT]:
     #: The grid that the list drew last. `list_fragments` writes it, and the
     #: keys read it, because how far `up` moves is the width of a row and
     #: that is only known once the list has been laid out.
-    grid: Grid = field(default_factory=lambda: Grid(columns=1, widths=(), rows=0))
+    flow: Flow = field(default_factory=lambda: Flow(offsets=(), rows=(), lines=()))
 
     def __post_init__(self) -> None:
         self.buffer = Buffer(
@@ -290,6 +289,20 @@ class SearchTui[ItemT]:
         self.selected = max(0, min(len(self.results) - 1, self.selected + delta))
         self.detail_scroll = 0
 
+    def move_rows(self, rows: int) -> None:
+        """Move the selection *rows* rows, landing on the nearest column.
+
+        **Not an index offset, and it used to be one.** Every row of a grid
+        held the same number of cells, so `up` was `move(-grid.columns)`. A
+        row of a flow holds however many cells fitted on it, and issue #272
+        is why it is a flow. `Flow.neighbour` carries the rule.
+        """
+        if not self.results:
+            self.selected = 0
+            return
+        self.selected = self.flow.neighbour(min(self.selected, len(self.flow.rows) - 1), rows)
+        self.detail_scroll = 0
+
     def scroll_detail(self, delta: int) -> None:
         """Scroll the detail pane by *delta* lines, and never above the top.
 
@@ -304,15 +317,16 @@ class SearchTui[ItemT]:
         self.detail_scroll = max(0, self.detail_scroll + delta)
 
     def page(self) -> int:
-        """How many matches one page of the list holds.
+        """How many rows one page of the list holds.
 
-        A page is a screen of rows, and a row holds `grid.columns` matches,
-        so the two multiply. The list used to hold one match on each row and
-        the two numbers were the same.
+        **Rows, and no longer matches.** A row of a flow holds however many
+        cells fitted on it, so a page cannot be a count of matches the way it
+        was when every row held `grid.columns` of them. `move_rows` takes it
+        from here and lands on the nearest column, which is what `up` and
+        `down` already do for one row.
         """
         info = self._list_window.render_info
-        rows = _FALLBACK_PAGE if info is None else max(1, info.window_height - 1)
-        return rows * self.grid.columns
+        return _FALLBACK_PAGE if info is None else max(1, info.window_height - 1)
 
     def detail_page(self) -> int:
         """How many lines one page of the detail pane holds.
@@ -348,27 +362,21 @@ class SearchTui[ItemT]:
             return [("class:search-tui.empty", "no match")]
 
         cells = [self.source.row(item) for item in self.results]
-        self.grid = lay_out(cells, self.detail_width)
+        self.flow = lay_out(cells, self.detail_width)
 
         fragments: StyleAndTextTuples = []
         for index, cell in enumerate(cells):
-            column, _row = self.grid.position(index)
             style = "class:search-tui.row.selected" if index == self.selected else "class:search-tui.row"
-            padding = self.grid.widths[column] - get_cwidth(cell)
-            fragments.append((style, cell + " " * padding))
-            last_of_row = column == self.grid.columns - 1
-            if last_of_row or index == len(cells) - 1:
-                fragments.append(("", "\n"))
-            else:
-                fragments.append(("", " " * GUTTER))
+            fragments.append((style, cell))
+            fragments.append(("", "\n" if self.flow.last_of_row(index) else " " * GUTTER))
         return fragments
 
     def cursor(self) -> Point:
         """Where the selected cell is, so the window scrolls it into view."""
-        if not self.results or not self.grid.widths:
+        if not self.results or not self.flow.lines:
             return Point(x=0, y=0)
-        column, row = self.grid.position(self.selected)
-        return Point(x=self.grid.left_edge(min(column, len(self.grid.widths) - 1)), y=row)
+        column, row = self.flow.position(self.selected)
+        return Point(x=column, y=row)
 
     def detail_fragments(self) -> StyleAndTextTuples:
         """The detail of the selected record, drawn under the list."""
@@ -552,8 +560,9 @@ class SearchTui[ItemT]:
         searching = Condition(lambda: not self.pane_has_focus)
         in_pane = Condition(lambda: self.pane_has_focus)
         keys = KeyBindings()
-        # left and right step one match; up and down step one row, which is
-        # `grid.columns` matches, because the list reads across and then down.
+        # left and right step one match; up and down step one row, and a row
+        # of a flow holds however many cells fitted on it, so `move_rows`
+        # answers that rather than an index offset.
         for key in ("left", "c-b"):
             keys.add(key, filter=searching)(self._on_previous)
         for key in ("right", "c-f"):
@@ -604,13 +613,13 @@ class SearchTui[ItemT]:
         self.move(1)
 
     def _on_row_up(self, _event: KeyPressEvent) -> None:
-        self.move(-self.grid.columns)
+        self.move_rows(-1)
 
     def _on_row_down(self, _event: KeyPressEvent) -> None:
-        self.move(self.grid.columns)
+        self.move_rows(1)
 
     def _on_page_up(self, _event: KeyPressEvent) -> None:
-        self.move(-self.page())
+        self.move_rows(-self.page())
 
     def _on_page_down(self, _event: KeyPressEvent) -> None:
         self.move(self.page())
