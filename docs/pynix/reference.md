@@ -187,6 +187,50 @@ Examples:
 | `--print-build-logs` | `bool` | Print build log lines to stderr. (default: `False`) |
 | `--json` | `bool` | Print the environment as JSON, instead of the bash that restores it. (default: `False`) |
 
+### `pynix registry`
+
+Manage the flake registry, which resolves an indirect flake reference
+
+#### `pynix registry list`
+
+List every flake registry entry, with the layer that holds it
+
+| Argument | Type | Help |
+| --- | --- | --- |
+| `--store` | `str` | Store URI to query. (default: `'auto'`) |
+
+#### `pynix registry add`
+
+Point one flake reference at another
+
+| Argument | Type | Help |
+| --- | --- | --- |
+| `from_ref` | `str` | Flake reference to resolve, for example 'nixpkgs'. *(required)* |
+| `to_ref` | `str` | Flake reference it resolves to, for example 'github:NixOS/nixpkgs'. *(required)* |
+| `--registry` | `str or None` | Registry file to change. Defaults to the registry of the user. (default: `None`) |
+| `--store` | `str` | Store URI to use. (default: `'auto'`) |
+
+#### `pynix registry remove`
+
+Drop every entry for one flake reference
+
+| Argument | Type | Help |
+| --- | --- | --- |
+| `from_ref` | `str` | Flake reference to drop, for example 'nixpkgs'. *(required)* |
+| `--registry` | `str or None` | Registry file to change. Defaults to the registry of the user. (default: `None`) |
+| `--store` | `str` | Store URI to use. (default: `'auto'`) |
+
+#### `pynix registry pin`
+
+Pin a flake reference to the reference it resolves to now
+
+| Argument | Type | Help |
+| --- | --- | --- |
+| `from_ref` | `str` | Flake reference to pin, for example 'nixpkgs'. *(required)* |
+| `locked` | `str or None` | Flake reference to pin it to. Defaults to the reference itself. (default: `None`) |
+| `--registry` | `str or None` | Registry file to change. Defaults to the registry of the user. (default: `None`) |
+| `--store` | `str` | Store URI to use. (default: `'auto'`) |
+
 ### `pynix repl`
 
 Open an interactive Nix evaluation session.
