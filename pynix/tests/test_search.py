@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import sqlite3
@@ -17,12 +18,14 @@ import pynix._impl.search as search_module
 from pynix import parse
 from pynix._impl import options_tui
 from pynix._impl._search_tui import SearchTui
-from pynix._option_values import EvaluatorUnavailableError
+from pynix._option_values import EvaluatorUnavailableError, OptionValues, Rendered, Trees, Value
 from pynix._options import OptionRecord
 from pynix._programs import ProgramIndex
 from pynix.search import Search
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator, Sequence
+
     from prompt_toolkit.formatted_text import StyleAndTextTuples
     from prompt_toolkit.input import PipeInput
 
@@ -485,6 +488,82 @@ def test_the_detail_pane_marks_a_read_only_option(
     assert "read only" not in "".join(fragment[1] for fragment in options_tui.detail(port, 70))
 
 
+class _StubValues(OptionValues):
+    """A resolver that answers at once, so the pane needs no evaluator.
+
+    **A subclass, and not a stand-in object.** `detail` annotates its
+    parameter as `OptionValues`, and beartype checks that at run time, so a
+    duck-typed double is rejected before the function body runs.
+
+    It records what the pane asked for, because the path is the half that the
+    query decides, and a test of the pane is a test of that decision.
+    """
+
+    def __init__(self, answer: Rendered) -> None:
+        super().__init__(_never_opened)
+        self.answer = answer
+        self.asked: list[tuple[str, tuple[str, ...]]] = []
+
+    def known(self, name: str, segments: Sequence[str] = ()) -> Rendered:
+        self.asked.append((name, tuple(segments)))
+        return self.answer
+
+
+@contextlib.asynccontextmanager
+async def _never_opened() -> AsyncGenerator[Trees]:
+    """The opener a stub never reaches, because it answers from memory."""
+    raise AssertionError("the stub answers without an evaluator")
+    yield  # pragma: no cover -- unreachable, and the generator needs it
+
+
+def test_the_detail_pane_reads_the_value_at_the_path_the_query_names() -> None:
+    """One record stands for many instances, and the query says which.
+
+    `services.example-daemon.vhosts.<name>.port` names no value on its own.
+    The reader types `...vhosts.web.port`, and that is the path the pane reads
+    the configuration at.
+    """
+    record = OptionRecord(
+        name="services.example-daemon.vhosts.<name>.port",
+        type="16 bit unsigned integer",
+        description=None,
+        declarations=[],
+        read_only=False,
+    )
+    answer = Rendered(default=Value(text="80"), value=Value(text="8081"))
+    values = _StubValues(answer)
+    text = "".join(
+        fragment[1]
+        for fragment in options_tui.detail(
+            record,
+            70,
+            "services.example-daemon.vhosts.web.port",
+            values,
+        )
+    )
+    assert values.asked == [
+        ("services.example-daemon.vhosts.<name>.port", ("services", "example-daemon", "vhosts", "web", "port"))
+    ]
+    assert "value" in text
+    assert "8081" in text
+    # The default stays on the screen beside it. A reader compares the two.
+    assert "80" in text
+
+
+def test_the_detail_pane_asks_for_no_value_when_the_query_names_no_instance() -> None:
+    """A bare option name binds no placeholder, so there is no path to read."""
+    record = OptionRecord(
+        name="services.example-daemon.vhosts.<name>.port",
+        type="16 bit unsigned integer",
+        description=None,
+        declarations=[],
+        read_only=False,
+    )
+    values = _StubValues(Rendered(default=Value(text="80")))
+    options_tui.detail(record, 70, "vhosts", values)
+    assert values.asked == [("services.example-daemon.vhosts.<name>.port", ())]
+
+
 def test_the_detail_pane_names_the_file_that_declares_the_option(
     indexed_options: list[OptionRecord],
 ) -> None:
@@ -633,7 +712,7 @@ async def test_the_command_writes_nothing_while_the_interface_is_drawn(
         asked.set()
         raise EvaluatorUnavailableError("this test opens no second evaluator")
 
-    monkeypatch.setattr(search_module, "_option_tree", watched)
+    monkeypatch.setattr(search_module, "_option_trees", watched)
     with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
         cmd = parse(
             [

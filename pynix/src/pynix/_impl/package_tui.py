@@ -49,12 +49,18 @@ def row(package: SearchablePackage) -> str:
     return package.record.attr
 
 
-def detail(package: SearchablePackage, width: int) -> StyleAndTextTuples:
+def detail(package: SearchablePackage, width: int, query: str = "") -> StyleAndTextTuples:
     """Draw one package in the detail pane under the list.
 
     A `meta.description` is one line of plain text, and not the MyST that a
     NixOS option carries, so this does not run the Markdown renderer over it.
+
+    *query* is what the reader typed, and a package ignores it. An option
+    reads it, because one record stands for many instances and only the query
+    says which one. The argument is here so that the two sources share one
+    signature.
     """
+    del query
     record = package.record
     fragments: StyleAndTextTuples = [("class:package.name", record.attr), ("", "\n")]
     if record.version:

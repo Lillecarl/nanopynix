@@ -61,7 +61,7 @@ def _source() -> SearchSource[_Fruit]:
         items=_FRUIT,
         rank=lambda query: [fruit for fruit in _FRUIT if query in fruit.name],
         row=lambda fruit: fruit.name,
-        detail=lambda fruit, width: [("", f"{fruit.name} is {fruit.colour} ({width})")],
+        detail=lambda fruit, width, _query: [("", f"{fruit.name} is {fruit.colour} ({width})")],
         noun="fruit",
         subject="the fruit bowl",
     )
@@ -85,7 +85,7 @@ def _tall_source() -> SearchSource[_Fruit]:
         items=plain.items,
         rank=plain.rank,
         row=plain.row,
-        detail=lambda _fruit, _width: [("", lines)],
+        detail=lambda _fruit, _width, _query: [("", lines)],
         noun=plain.noun,
         subject=plain.subject,
     )
@@ -438,7 +438,7 @@ async def test_the_divider_stays_put_when_the_selection_moves() -> None:
         row=lambda fruit: fruit.name,
         # One line for each character of the name, so each record asks the
         # pane for a different height and a different width.
-        detail=lambda fruit, _width: [("", "\n".join(fruit.name * n for n in range(1, len(fruit.name))))],
+        detail=lambda fruit, _width, _query: [("", "\n".join(fruit.name * n for n in range(1, len(fruit.name))))],
         noun="fruit",
     )
 
@@ -474,7 +474,7 @@ def _footer_at(width: int) -> str:
         items=_FRUIT,
         rank=lambda _query: _FRUIT,
         row=lambda fruit: fruit.name,
-        detail=lambda fruit, _width: [("", fruit.name)],
+        detail=lambda fruit, _width, _query: [("", fruit.name)],
         noun="fruit",
         subject=_SUBJECT,
     )
@@ -613,7 +613,7 @@ async def test_the_detail_pane_is_drawn_at_its_real_width() -> None:
         items=_FRUIT,
         rank=lambda _query: _FRUIT,
         row=lambda fruit: fruit.name,
-        detail=lambda _fruit, width: [("", str(widths.append(width) or width))],
+        detail=lambda _fruit, width, _query: [("", str(widths.append(width) or width))],
         noun="fruit",
     )
     with create_pipe_input() as pipe:

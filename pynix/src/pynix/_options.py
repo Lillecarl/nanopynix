@@ -161,6 +161,35 @@ lib: options:
 """
 
 
+#: Render one value of a configuration the way a `default` is rendered.
+#:
+#: **The same two branches as `_COLLECT_OPTION_VALUES`.** A value that a
+#: module wrote through `lib.literalMD` or `lib.literalExpression` carries its
+#: own text and says so, and every other value goes through
+#: `lib.generators.toPretty`. A reader who compares the `default` line with
+#: the `value` line under it must not be reading two different renderers.
+#:
+#: It takes `lib` and gives back a function of one value, so the caller walks
+#: the attribute path from Python and never has to write a Nix path
+#: expression. A quoted segment then needs no escaping at all.
+_RENDER_ONE_VALUE = """
+lib: value:
+  if lib.isAttrs value && value ? _type && value ? text
+  then { type = value._type; text = value.text; }
+  else { type = "literalExpression"; text = lib.generators.toPretty { multiline = true; } value; }
+"""
+
+
+async def fetch_value_renderer(session: AsyncEvalSession, lib_value: AsyncValue) -> AsyncValue:
+    """A function of one value, giving the rendered text of it.
+
+    The caller selects the value it wants by walking attributes, and applies
+    this to what it reaches. Nothing is forced until then.
+    """
+    renderer = await session.string(_RENDER_ONE_VALUE)
+    return await renderer.call(lib_value)
+
+
 @dataclass(frozen=True)
 class OptionRecord:
     """One NixOS option's identifying metadata (deliberately no ``default``/``example``)."""

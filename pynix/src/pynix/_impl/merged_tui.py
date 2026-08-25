@@ -76,15 +76,20 @@ def row(hit: SearchHit) -> str:
     return f"{tag} {hit_name(hit)}"
 
 
-def detail(hit: SearchHit, width: int, values: OptionValues | None = None) -> StyleAndTextTuples:
+def detail(
+    hit: SearchHit,
+    width: int,
+    query: str = "",
+    values: OptionValues | None = None,
+) -> StyleAndTextTuples:
     """Draw one row in the detail pane, whichever index it came from.
 
     *values* reaches the option half alone. A package carries its own fields
     in the index and needs no evaluator.
     """
     if isinstance(hit, OptionRecord):
-        return options_tui.detail(hit, width, values)
-    return package_tui.detail(hit, width)
+        return options_tui.detail(hit, width, query, values)
+    return package_tui.detail(hit, width, query)
 
 
 def source(
@@ -96,8 +101,8 @@ def source(
 ) -> SearchSource[SearchHit]:
     """Describe both indexes to the generic interface."""
 
-    def draw(hit: SearchHit, width: int) -> StyleAndTextTuples:
-        return detail(hit, width, values)
+    def draw(hit: SearchHit, width: int, query: str) -> StyleAndTextTuples:
+        return detail(hit, width, query, values)
 
     return SearchSource(
         items=[*options, *packages],

@@ -49,6 +49,16 @@ if TYPE_CHECKING or BEARTYPING:
 #: The attribute path that the automatic search tries for the options tree.
 OPTIONS_CHAIN: tuple[str, ...] = ("options",)
 
+#: The attribute path that the automatic search tries for the values of every
+#: option. `options` declares an option and `config` holds what it came to, and
+#: `eval-config.nix` returns the two beside each other.
+#:
+#: **No override goes with it, where the other three have one.** A `pkgs` that
+#: `specialArgs` hid is the reason `--pkgs-attr` exists, and no such shape is
+#: known for `config`: a module system that returns `options` returns `config`
+#: beside it. An override with no caller is surface to keep and to test.
+CONFIG_CHAIN: tuple[str, ...] = ("config",)
+
 #: The attribute paths that the automatic search tries for the package set,
 #: in order. A target that is itself a package set answers before them.
 PKGS_CHAIN: tuple[str, ...] = ("pkgs", "_module.args.pkgs")
@@ -82,12 +92,17 @@ class Resolved:
 class SearchTarget:
     """What one evaluation target offers to a search.
 
-    Any of the three is `None` when the target does not hold it.
+    Any of the four is `None` when the target does not hold it.
     """
 
     options: Resolved | None
     pkgs: Resolved | None
     lib: Resolved | None
+
+    #: The values of every option, which is what a reader sees in the pane
+    #: beside the default. A target that declares options always has it, and a
+    #: bare package set has neither.
+    config: Resolved | None = None
 
 
 async def _select(value: AsyncValue, path: str) -> Resolved | None:
@@ -132,7 +147,11 @@ async def resolve(
     pkgs_attr: str | None = None,
     lib_attr: str | None = None,
 ) -> SearchTarget:
-    """Find the options tree, the package set and the `lib` of *target*.
+    """Find the options tree, the package set, the `lib` and the `config` of *target*.
+
+    **`config` is never forced.** It is the whole evaluated system, and
+    forcing it here would charge every search for a field that a reader may
+    never open. The pane forces the one path it draws.
 
     Each argument overrides the automatic search for one value. An override
     that resolves nowhere raises
@@ -142,7 +161,8 @@ async def resolve(
     options = await _resolve_options(target, options_attr)
     pkgs = await _resolve_pkgs(target, pkgs_attr)
     lib = await _resolve_lib(target, pkgs, lib_attr)
-    return SearchTarget(options=options, pkgs=pkgs, lib=lib)
+    config = await _first(target, CONFIG_CHAIN)
+    return SearchTarget(options=options, pkgs=pkgs, lib=lib, config=config)
 
 
 async def _resolve_options(target: AsyncValue, options_attr: str | None) -> Resolved | None:
