@@ -32,9 +32,11 @@ _FIXTURE_DIR = Path(__file__).parent / "test_search"
 _SYSTEM_NIX = _FIXTURE_DIR / "system.nix"
 _TARGET_DIR = Path(__file__).parent / "test_search_target"
 
-#: How long a test waits for the interface to draw and for the pump to place
-#: its first request, in seconds.
-_DRAWN = 0.3
+#: How long a test waits for the pump to place its first request, in seconds.
+#: It covers the index build that comes before the interface, which the daemon
+#: backend takes seconds over. The deadline of `test_support.deadline` is 120,
+#: so a test that reaches this one still fails rather than hangs.
+_ASKED = 60.0
 
 #: How long a test waits between one write to the input and the next.
 _SETTLE = 0.05
@@ -598,30 +600,42 @@ async def test_the_command_writes_nothing_while_the_interface_is_drawn(
     it.
     """
     seen: list[object] = []
+    asked = anyio.Event()
 
     async def watched(*_args: object, **_kwargs: object) -> object:
         seen.append(sys.stderr)
         sys.stderr.write("a line from the resolver\n")
+        asked.set()
         raise EvaluatorUnavailableError("this test opens no second evaluator")
 
     monkeypatch.setattr(search_module, "_option_tree", watched)
-    with create_pipe_input() as pipe:
-        pipe.send_text("port")
-        with create_app_session(input=pipe, output=DummyOutput()):
-            cmd = parse(
-                [
-                    "search",
-                    "--options",
-                    "--file",
-                    str(_SYSTEM_NIX),
-                    "--tui",
-                    *shared_nix_environment.pynix_store_args(),
-                ],
-            )
-            async with anyio.create_task_group() as tasks:
-                tasks.start_soon(cmd.run)
-                await anyio.sleep(_DRAWN)
-                pipe.send_text("\x03")
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        cmd = parse(
+            [
+                "search",
+                "--options",
+                "--file",
+                str(_SYSTEM_NIX),
+                "--tui",
+                *shared_nix_environment.pynix_store_args(),
+            ],
+        )
+
+        # **The wait is for the request, and not for a number of seconds.**
+        # The command builds the index before it draws anything, and the
+        # daemon backend takes seconds over that where the local one takes
+        # under one. A fixed wait sent the quit key while the index was still
+        # building, so the interface never drew and the pump never ran.
+        async def write() -> None:
+            await anyio.sleep(_SETTLE)
+            pipe.send_text("port")
+            with anyio.move_on_after(_ASKED):
+                await asked.wait()
+            pipe.send_text(_QUIT)
+
+        async with anyio.create_task_group() as tasks:
+            tasks.start_soon(cmd.run)
+            tasks.start_soon(write)
     assert seen, "the detail pane never asked the resolver for a default"
     assert seen[0] is not sys.stderr
     assert "a line from the resolver" in capfd.readouterr().err
