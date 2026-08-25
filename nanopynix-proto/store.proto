@@ -37,6 +37,10 @@ service StoreService {
   rpc AddToStore(AddToStoreRequest) returns (AddToStoreResponse);
   rpc ComputeStorePath(ComputeStorePathRequest) returns (ComputeStorePathResponse);
   rpc ListRegistryEntries(ListRegistryEntriesRequest) returns (ListRegistryEntriesResponse);
+  rpc UserRegistryPath(UserRegistryPathRequest) returns (UserRegistryPathResponse);
+  rpc RegistryAdd(RegistryAddRequest) returns (nix.common.RegistryWrite);
+  rpc RegistryRemove(RegistryRemoveRequest) returns (nix.common.RegistryWrite);
+  rpc RegistryPin(RegistryPinRequest) returns (nix.common.RegistryWrite);
 }
 
 message GetUriRequest {
@@ -219,6 +223,60 @@ message ListRegistryEntriesRequest {
 message ListRegistryEntriesResponse {
   repeated nix.common.RegistryEntry entries = 1;
 }
+
+// The three writes, and the path they default to.
+//
+// `path` is the registry file to change. An empty one means the registry of
+// the user, which is what `nix registry add` writes. Every write reads the
+// named file from disk rather than from Nix's per-process cache, so two
+// writes to two files in one worker do not read each other.
+//
+// **`store_handle` is on every one of these, and only a pin uses it.** The
+// other two touch no store. The handle is what routes a request to the
+// worker that owns the session, so an operation without one would have to
+// invent a second route to the same process for no gain.
+message UserRegistryPathRequest {
+  int64 request_id = 1000;
+  int64 store_handle = 100;
+}
+message UserRegistryPathResponse {
+  string path = 1;
+}
+
+message RegistryAddRequest {
+  int64 request_id = 1000;
+  string path = 1;
+  string from = 2;
+  string to = 3;
+  map<string, string> fetch_settings = 4;
+  int64 store_handle = 100;
+}
+
+message RegistryRemoveRequest {
+  int64 request_id = 1000;
+  string path = 1;
+  string from = 2;
+  map<string, string> fetch_settings = 3;
+  int64 store_handle = 100;
+}
+
+// `store_handle` is here because a pin fetches: it resolves the reference
+// through the registry and then asks the fetcher for an accessor, and that is
+// what turns a branch into a revision.
+message RegistryPinRequest {
+  int64 request_id = 1000;
+  string path = 1;
+  string url = 2;
+  // The reference to pin to. Empty pins `url` to itself.
+  string locked = 3;
+  map<string, string> fetch_settings = 4;
+  int64 store_handle = 100;
+}
+
+// The three writes answer with `nix.common.RegistryWrite` itself, the way
+// `GetStoreDirs` answers with `nix.common.StoreDirs`. A wrapper message would
+// make the field optional, and a caller would then have to unwrap a value
+// that is always there.
 
 message FindRootsRequest {
   int64 request_id = 1000;

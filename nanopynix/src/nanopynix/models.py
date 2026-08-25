@@ -13,10 +13,12 @@ data types here, despite both crossing the same process boundary.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, cast
 
 from nanopynix_proto.nix.common import (
+    AttrsValue as AttrsValue,
     # Types with extension subclasses — imported as private for subclassing
     BuildResult as BuildResult,
     CallArg as CallArg,
@@ -42,6 +44,7 @@ from nanopynix_proto.nix.common import (
     PrimOpSpec as PrimOpSpec,
     RealisedOutput as RealisedOutput,
     RegistryEntry as RegistryEntry,
+    RegistryWrite as RegistryWrite,
     RemoteCallArg as RemoteCallArg,
     ResultType as ResultType,
     ScalarValue as ScalarValue,
@@ -203,6 +206,29 @@ class DerivedPath(str):
         if self.SEPARATOR in self or not self.endswith(".drv"):
             return self
         return DerivedPath(f"{self}{self.SEPARATOR}*")
+
+
+def attrs_to_python(attrs: Mapping[str, AttrsValue], /) -> dict[str, str | int | bool]:
+    """One attribute map from Nix, as plain JSON scalars.
+
+    ``RegistryEntry.extra_attrs``, ``Input.attrs`` and ``FlakeRef.attrs`` all
+    carry ``AttrsValue``, which is a oneof of the three types
+    ``fetchers::Attrs`` holds. A caller that prints or serialises one wants
+    the value, so this unwraps it.
+
+    An unset arm of the oneof reads back as ``None``, and a value with no arm
+    set has nothing to report. Such a value cannot come from the bindings, and
+    this drops it rather than inventing a scalar for it.
+    """
+    result: dict[str, str | int | bool] = {}
+    for name, value in attrs.items():
+        if value.string_value is not None:
+            result[name] = value.string_value
+        elif value.int_value is not None:
+            result[name] = value.int_value
+        elif value.bool_value is not None:
+            result[name] = value.bool_value
+    return result
 
 
 @dataclass(frozen=True)
