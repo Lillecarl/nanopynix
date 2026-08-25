@@ -30,6 +30,35 @@ _NIX_LANGUAGE = Language(cast("int", tree_sitter_nix.language()))  # type: ignor
 # An `apply_expression` node is always a binary (function, argument) application.
 _APPLY_EXPRESSION_ARITY = 2
 
+# `lib.fakeHash` and its two siblings are plain string constants in nixpkgs,
+# and an author writes one to mean "I have not computed this hash yet". Nix
+# normalises whatever it reads to SRI before it reports a mismatch, so the
+# `specified` hash of the failure is the SRI form of the constant. That is what
+# makes a symbol safe to update: the value the file names is known, and it is
+# the value the failure reports, so `find_fod_hash_literal` matches it on value
+# exactly as it matches a literal.
+#
+# `fakeHash` and `fakeSha256` are the same 32 zero bytes, written in base64 and
+# in hex, so both normalise to one SRI string. Read out of nixpkgs and checked
+# against `nix hash convert`.
+_FAKE_HASH_SYMBOLS = {
+    "fakeHash": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "fakeSha256": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "fakeSha512": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+}
+
+# A dotted path of plain identifiers, and nothing else. `lib.fakeHash` matches,
+# and so does a bare `fakeHash` under `with lib;`. `lib.fakeHash or "x"` and a
+# select with an interpolated attribute do not, because neither one still names
+# the constant.
+_SYMBOL_PATH = re.compile(r"[A-Za-z_][A-Za-z0-9_'-]*(?:\.[A-Za-z_][A-Za-z0-9_'-]*)*")
+
+_SYMBOL_EXPRESSIONS = frozenset({"variable_expression", "select_expression"})
+
+# `binding` is `attrpath "=" expression ";"`, so it has exactly two named
+# children and the value is the second.
+_BINDING_NAMED_CHILDREN = 2
+
 
 class FodSourceUpdateError(ValueError):
     """A fixed-output mismatch could not be mapped to one safe source literal."""
@@ -46,7 +75,16 @@ class FodHashMismatch:
 
 @dataclass(frozen=True)
 class FodHashLiteral:
-    """One plain-string fixed-output hash binding in a Nix source file."""
+    """One updatable fixed-output hash binding in a Nix source file.
+
+    ``value`` is the hash the binding names. For a string literal that is the
+    text between the quotes. For a `lib.fakeHash`-style symbol it is the
+    constant that symbol stands for, so a caller compares values and never has
+    to know which of the two shapes it holds.
+
+    ``start_byte`` and ``end_byte`` span the whole value node, so replacing it
+    with a quoted literal is one splice in either case.
+    """
 
     attribute: str
     value: str
@@ -90,7 +128,7 @@ def extract_unique_fod_hash_mismatch(messages: Iterable[str]) -> FodHashMismatch
 
 
 def find_fod_hash_literal(source: str, specified: str, *, derivation_name: str | None = None) -> FodHashLiteral:
-    """Find the unambiguous plain-string hash literal for a failed FOD."""
+    """Find the unambiguous hash binding for a failed FOD."""
     encoded = source.encode()
     candidates = _fod_hash_literals(encoded)
     exact = [candidate for candidate in candidates if candidate.value == specified]
@@ -103,14 +141,16 @@ def find_fod_hash_literal(source: str, specified: str, *, derivation_name: str |
     if len(candidates) == 1:
         return candidates[0]
     if not candidates:
-        raise FodSourceUpdateError("no plain hash, sha256, or outputHash string literal found")
+        raise FodSourceUpdateError(
+            "no hash, sha256, or outputHash binding found that is a plain string or a fakeHash symbol"
+        )
     raise FodSourceUpdateError(
         "multiple hash literals found; refusing to guess which one produced the failed derivation"
     )
 
 
 def replace_fod_hash(source: str, literal: FodHashLiteral, got: str) -> str:
-    """Replace exactly one plain-string FOD hash literal with Nix's reported hash."""
+    """Replace exactly one FOD hash binding with Nix's reported hash."""
     if '"' in got or "\n" in got:
         raise FodSourceUpdateError("the computed hash is not safe to insert into a Nix string literal")
     encoded = source.encode()
@@ -225,24 +265,47 @@ def _fod_hash_literals(source: bytes) -> list[FodHashLiteral]:
         nodes.extend(reversed(node.children))
         if node.type != "binding":
             continue
-        attrpath = next((child for child in node.named_children if child.type == "attrpath"), None)
-        string = next((child for child in node.named_children if child.type == "string_expression"), None)
-        if attrpath is None or string is None or any(child.type == "interpolation" for child in string.children):
+        named = node.named_children
+        if len(named) != _BINDING_NAMED_CHILDREN or named[0].type != "attrpath":
             continue
+        attrpath, value_node = named
         attribute = source[attrpath.start_byte : attrpath.end_byte].decode()
-        rendered = source[string.start_byte : string.end_byte]
-        if attribute not in _HASH_ATTRIBUTES or not rendered.startswith(b'"') or not rendered.endswith(b'"'):
+        if attribute not in _HASH_ATTRIBUTES:
+            continue
+        value = _hash_binding_value(value_node, source)
+        if value is None:
             continue
         literals.append(
             FodHashLiteral(
                 attribute,
-                rendered[1:-1].decode(),
-                string.start_byte,
-                string.end_byte,
+                value,
+                value_node.start_byte,
+                value_node.end_byte,
                 run_command_bindings.get(node.start_byte),
             ),
         )
     return literals
+
+
+def _hash_binding_value(node: Any, source: bytes) -> str | None:
+    """The hash a binding's value names, whether it is a literal or a symbol.
+
+    Returns ``None`` for every other shape, so a binding this function cannot
+    read stays invisible to the updater rather than becoming a guess.
+    """
+    rendered = source[node.start_byte : node.end_byte]
+    if node.type == "string_expression":
+        if any(child.type == "interpolation" for child in node.children):
+            return None
+        if not rendered.startswith(b'"') or not rendered.endswith(b'"'):
+            return None
+        return rendered[1:-1].decode()
+    if node.type in _SYMBOL_EXPRESSIONS:
+        text = rendered.decode()
+        if not _SYMBOL_PATH.fullmatch(text):
+            return None
+        return _FAKE_HASH_SYMBOLS.get(text.rsplit(".", 1)[-1])
+    return None
 
 
 def _run_command_hash_bindings(root: Any, source: bytes) -> dict[int, str]:  # noqa: C901 -- tracked complexity/arg-count debt, see TODO.md
