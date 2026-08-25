@@ -156,7 +156,17 @@ let
         # thread log down with it -- a full run that crashed produced zero
         # diagnostic lines. A file is outside pytest's capture.
         local gc_thread_log="$GITHUB_WORKSPACE/gc-thread-debug.log"
-        rm -f "$paths_to_delete" "$gc_thread_log"
+        # A hang report, written the moment a test crosses its deadline.
+        # `test_support.deadline` also attaches it to the `TimeoutError`, and
+        # pytest renders that note only in its end-of-run FAILURES section.
+        # This step is killed at `timeout-minutes: 30`, and six tests hanging
+        # for 120 s each spend 12 of those, so that section never prints. The
+        # upload step that collects this file carries `if: !cancelled()` and
+        # the job timeout is far above the step timeout, so the file arrives
+        # where the note does not. Issue #271 ran on CI many times and no
+        # report of it ever reached a log.
+        local hang_report_log="$GITHUB_WORKSPACE/hang-report.log"
+        rm -f "$paths_to_delete" "$gc_thread_log" "$hang_report_log"
 
         local status=0
         # NANOPYNIX_COVERAGE rather than pytest-cov's --cov: the runner then
@@ -190,6 +200,7 @@ let
             NANOPYNIX_COVERAGE=1 \
             NANOPYNIX_COVERAGE_XML="$GITHUB_WORKSPACE/coverage.xml" \
             NANOPYNIX_TEST_DELETE_PATHS_FILE="$paths_to_delete" \
+            NANOPYNIX_HANG_REPORT_FILE="$hang_report_log" \
           ${runner} ${quote baseArgs} \
           --nix-test-backends "$BACKEND" \
           -m "not soak" \
