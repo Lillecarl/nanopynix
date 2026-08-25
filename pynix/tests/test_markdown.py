@@ -10,16 +10,31 @@ from __future__ import annotations
 import os
 
 import pytest
-from prompt_toolkit.formatted_text import ANSI, to_formatted_text
+from prompt_toolkit.formatted_text import FormattedText, StyleAndTextTuples
+from prompt_toolkit.styles import Attrs, Style
 
 import pynix._markdown as markdown_module
 from pynix._markdown import MEASURE, NixMarkdown, render_markdown
 
 
+def _attrs(style_str: str) -> Attrs:
+    """What `prompt_toolkit` reads out of one style string."""
+    return Style([("probe", style_str)]).get_attrs_for_style_str("class:probe")
+
+
 def _text(markup: str, width: int = 78) -> str:
     """The visible text that the renderer produces, with the styles removed."""
-    rendered: ANSI = render_markdown(markup, width)
-    return "".join(fragment[1] for fragment in to_formatted_text(rendered))
+    return "".join(fragment[1] for fragment in render_markdown(markup, width))
+
+
+def _styled(markup: str, wanted: str, width: int = 78) -> str:
+    """The style string of the span that holds *wanted*."""
+    fragments: StyleAndTextTuples = render_markdown(markup, width)
+    for style, text, *_rest in fragments:
+        if wanted in text:
+            return style
+    message = f"no span holds {wanted!r}: {fragments}"
+    raise AssertionError(message)
 
 
 def test_an_autolink_shows_its_address_once() -> None:
@@ -42,18 +57,83 @@ def test_a_named_link_keeps_its_address() -> None:
     assert "https://example.com/a/b" in text
 
 
-def test_no_terminal_hyperlink_escape_reaches_the_output() -> None:
-    """Rich writes a link as an OSC 8 escape, and `ANSI` cannot read one.
+#: One sample of each construction that a NixOS option description uses.
+_EVERY_CONSTRUCTION = (
+    "Use **bold**, *it*, `code` and {var}`pkgs` here.",
+    "Text.\n\n```\n{ pkgs, ... }: { a = 1; }\n```\n",
+    "See <https://example.com/a/b> and [the docs](https://example.com/c).",
+    "::: {.note}\nRestart it after a change.\n:::\n",
+    "term\n: the description\n\nother\n: more\n",
+    "- one\n- two\n\n1. first\n2. second\n",
+    "# Title\n\n## Sub\n\nbody\n",
+    "~~gone~~ and normal\n",
+    "> a quote\n\n| a | b |\n|---|---|\n| 1 | 2 |\n",
+)
 
-    Regression test. `prompt_toolkit.ANSI` reads a CSI escape and not an OSC
-    one, so it dropped the escape byte and printed the rest of the sequence:
-    a description that named a URL showed `8;id=16117648;https://...` on the
-    screen. The test reads the string that Rich produces, before `ANSI` parses
-    it, because the parser is what destroys the evidence.
+
+@pytest.mark.parametrize("markup", _EVERY_CONSTRUCTION)
+def test_no_escape_byte_reaches_the_fragments(markup: str) -> None:
+    """The path from Markdown to fragments writes no escape byte at all.
+
+    Regression test, and it states the whole path rather than one flag. Rich
+    encoded each style into ANSI escapes and `prompt_toolkit.ANSI` parsed them
+    back one step later, so a style that Rich could write and that parser
+    could not read was lost: a link became an OSC 8 escape, and the option
+    `programs.vscode.enterprisePolicies` showed `8;id=16117648;https://...` as
+    text. Issue #255 removed the two steps in the middle.
     """
-    rendered = render_markdown("See <https://example.com/a/b> now.", 78)
-    assert "\x1b]8" not in rendered.value
-    assert "8;id=" not in _text("See <https://example.com/a/b> now.")
+    for style, text, *_rest in render_markdown(markup, 78):
+        assert "\x1b" not in text, f"an escape byte reached the text: {text!r}"
+        assert "\x1b" not in style, f"an escape byte reached the style: {style!r}"
+
+
+def test_a_bold_span_carries_the_bold_attribute() -> None:
+    assert _attrs(_styled("Use **bold** here.", "bold")).bold is True
+
+
+def test_an_italic_span_carries_the_italic_attribute() -> None:
+    assert _attrs(_styled("Use *slanted* here.", "slanted")).italic is True
+
+
+def test_inline_code_carries_its_colour() -> None:
+    """Rich draws inline code in cyan on black, and the colour must survive."""
+    attributes = _attrs(_styled("Use `code` here.", "code"))
+    assert attributes.color == "ansicyan"
+    assert attributes.bgcolor == "ansiblack"
+
+
+def test_a_code_block_keeps_its_syntax_highlighting() -> None:
+    """The Nix lexer colours a name and a number differently.
+
+    A code block reaches the fragments through `Syntax`, which is a second
+    renderer inside the first one. This states that its styles survive too.
+    """
+    markup = "```\n{ a = 1; }\n```\n"
+    name = _attrs(_styled(markup, "a"))
+    number = _attrs(_styled(markup, "1"))
+    assert name.color is not None
+    assert number.color is not None
+    assert name.color != number.color
+
+
+def test_the_result_is_formatted_text_and_not_a_bare_list() -> None:
+    """`print_formatted_text` reads the two apart, and the REPL uses it.
+
+    Regression test. It takes a bare list as a sequence of objects to print,
+    so `:doc builtins.map` printed the repr of the fragments as one line of
+    text. `to_formatted_text` names the same reason in its own comment, and a
+    test that compares the drawn text against the old renderer cannot see it.
+    """
+    assert isinstance(render_markdown("plain text"), FormattedText)
+
+
+def test_a_link_is_readable_and_carries_no_escape() -> None:
+    """A terminal cannot follow a link, so the address has to be text."""
+    fragments = render_markdown("See [the docs](https://example.com/a/b) now.", 78)
+    text = "".join(fragment[1] for fragment in fragments)
+    assert "the docs" in text
+    assert "https://example.com/a/b" in text
+    assert all("\x1b" not in fragment[1] for fragment in fragments)
 
 
 def test_a_myst_role_shows_its_content() -> None:
@@ -109,12 +189,17 @@ def test_the_renderer_reads_the_terminal_when_it_is_given_no_width(monkeypatch: 
         return os.terminal_size((narrow, 24))
 
     monkeypatch.setattr(markdown_module.shutil, "get_terminal_size", _size)
-    drawn = "".join(fragment[1] for fragment in to_formatted_text(render_markdown("plain text")))
+    drawn = "".join(fragment[1] for fragment in render_markdown("plain text"))
     assert max(len(line) for line in drawn.splitlines()) == narrow
 
 
 def test_nix_markdown_turns_terminal_hyperlinks_off_by_default() -> None:
-    """A caller that builds the class directly gets the same behavior."""
+    """With hyperlinks on, Rich draws the text and hides the address.
+
+    It puts the address in the `link` field of the style, which nothing here
+    reads. `test_a_named_link_keeps_its_address` states the effect, and this
+    states the mechanism for a caller that builds the class itself.
+    """
     assert NixMarkdown("x").hyperlinks is False
 
 

@@ -18,8 +18,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from prompt_toolkit.formatted_text import to_formatted_text
-
 from nanopynix._typechecking import BEARTYPING
 from pynix._impl._search_tui import SearchSource, SearchTui
 from pynix._markdown import render_markdown
@@ -84,7 +82,7 @@ def detail(record: OptionRecord, width: int, values: OptionValues | None = None)
         fragments += [("class:option.flag", "read only"), ("", "\n")]
     if record.description:
         fragments.append(("", "\n"))
-        fragments += to_formatted_text(render_markdown(record.description, width))
+        fragments += render_markdown(record.description, width)
         fragments.append(("", "\n"))
     fragments += _values(record, width, values)
     if record.declarations:
@@ -118,7 +116,7 @@ def _field(label: str, value: Value | None, width: int) -> StyleAndTextTuples:
     if value.error:
         return [*fragments, ("class:option.error", f"{_INDENT}does not evaluate: {value.error}"), ("", "\n")]
     if value.markdown:
-        return [*fragments, *to_formatted_text(render_markdown(value.text, width)), ("", "\n")]
+        return [*fragments, *render_markdown(value.text, width), ("", "\n")]
     return [*fragments, ("class:option.value", _indented(value.text)), ("", "\n")]
 
 
