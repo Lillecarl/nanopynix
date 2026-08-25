@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -517,6 +518,80 @@ async def test_build_update_fod_dry_run_reports_local_fetchurl_diff(
     assert "-builtins.fetchurl" in strip_ansi(captured.err)
     assert "+builtins.fetchurl" in strip_ansi(captured.err)
     assert nix_file.read_text() == source
+
+
+async def test_build_update_fod_dry_run_updates_a_lib_fakehash_binding(
+    shared_nix_environment: NixTestEnvironment,
+    nixpkgs_path: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`lib.fakeHash` is how nixpkgs says "I have not computed this hash".
+
+    The updater read a plain string and nothing else, so the convention an
+    author actually writes reported that the file holds no hash literal.
+    Issue #109.
+    """
+    payload = tmp_path / "payload"
+    payload.write_text("fixed-output payload\n")
+    nix_file = tmp_path / "source.nix"
+    source = with_nixpkgs(
+        f'with import <nixpkgs> {{}};\nbuiltins.fetchurl {{ url = "file://{payload}"; sha256 = lib.fakeHash; }}\n',
+        nixpkgs_path,
+    )
+    nix_file.write_text(source)
+    cmd = parse(
+        ["build", "--file", str(nix_file), "--update-fod", "--dry-run", *shared_nix_environment.pynix_store_args()],
+    )
+
+    await cmd.run()
+
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == {"dryRun": True, "outputs": {}, "updatedFods": 1}
+    diff = strip_ansi(captured.err)
+    # The symbol leaves and a quoted hash takes its place. Nix reports the
+    # computed hash in base32 here, so the assertion names the attribute and
+    # the algorithm and not the encoding.
+    assert "lib.fakeHash" in diff
+    assert re.search(r'sha256 = "sha256[:-][A-Za-z0-9+/=]+"', diff)
+    assert nix_file.read_text() == source
+
+
+@LINUX_CHROOT_BUILD
+async def test_build_update_fod_rewrites_a_lib_fakehash_binding_and_rebuilds(
+    shared_nix_environment: NixTestEnvironment,
+    nixpkgs_path: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The symbol leaves the file, a quoted hash takes its place, and the build runs.
+
+    `builtins.fetchurl` cannot carry this case: it yields a path rather than a
+    derivation, so the rebuild after the rewrite has nothing to build. Issue #109.
+    """
+    nix_file = tmp_path / "source.nix"
+    nix_file.write_text(
+        with_nixpkgs(
+            """with import <nixpkgs> {};
+runCommand "payload" {
+  outputHash = lib.fakeHash;
+  outputHashAlgo = "sha256";
+  outputHashMode = "flat";
+} "printf '%s\\n' fixed-output-payload > $out"
+""",
+            nixpkgs_path,
+        ),
+    )
+    cmd = parse(["build", "--file", str(nix_file), "--update-fod", *shared_nix_environment.pynix_store_args()])
+
+    await cmd.run()
+
+    data = json.loads(capsys.readouterr().out)
+    assert data["updatedFods"] == 1
+    assert data["outputs"]["out"]
+    updated = nix_file.read_text()
+    assert "lib.fakeHash" not in updated
+    assert re.search(r'outputHash = "sha256[:-][A-Za-z0-9+/=]+"', updated)
 
 
 @LINUX_CHROOT_BUILD
