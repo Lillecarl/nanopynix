@@ -37,6 +37,7 @@ from libpynix import (  # noqa: E402 -- see above; the name of a command on the 
     MISSING,
     Command,
     command_name,
+    option_flags,
 )
 from pynix import Pynix  # noqa: E402 -- sys.path must be extended before pynix is importable
 from pynix._impl.settings import PynixDefaults  # noqa: E402 -- see above
@@ -64,7 +65,7 @@ def _render_type(tp: Any) -> str:
     return str(tp).replace("typing.", "").replace("pathlib.", "")
 
 
-def _render_default_suffix(name: str, spec: Any) -> str:
+def _render_default_suffix(name: str, spec: Any, annotation: Any) -> str:
     """Render a trailing " (default: ...)" / " *(required)*" note for the Help column.
 
     Some defaults (e.g. the trusted-public-keys signing key) are very long —
@@ -72,6 +73,11 @@ def _render_default_suffix(name: str, spec: Any) -> str:
     other row wide with it. Folding the note into Help lets it wrap normally.
     """
     if spec.positional and spec.default is MISSING:
+        # A repeated positional is `nargs="*"`, so naming none of them is
+        # legal and the note would be wrong. `pynix copy` is the first one,
+        # and it takes no path at all when `--file` names the target.
+        if typing.get_origin(annotation) is list:
+            return " (default: `[]`)"
         return " *(required)*"
     if spec.configured:
         # A configuration-backed option, whose value comes from the environment
@@ -88,8 +94,14 @@ def _render_default_suffix(name: str, spec: Any) -> str:
 
 
 def _display_name(name: str, spec: Any) -> str:
-    """What the caller types: a flag for an option, the bare name otherwise."""
-    return name if spec.positional else "--" + name.replace("_", "-")
+    """What the caller types: a flag for an option, the bare name otherwise.
+
+    ``option_flags`` and not a spelling of its own, for the reason that
+    function gives: a field ending in an underscore declares a flag without
+    one, and this file rendered ``--from-`` while the parser answered
+    ``--from``.
+    """
+    return name if spec.positional else option_flags(name, spec)[0]
 
 
 def _render_args_table(cmd: type[Command]) -> list[str]:
@@ -100,7 +112,7 @@ def _render_args_table(cmd: type[Command]) -> list[str]:
         help_text = spec.help.replace("|", "\\|")
         type_text = _render_type(cmd.types[name])
         lines.append(
-            f"| `{_display_name(name, spec)}` | `{type_text}` | {help_text}{_render_default_suffix(name, spec)} |"
+            f"| `{_display_name(name, spec)}` | `{type_text}` | {help_text}{_render_default_suffix(name, spec, cmd.types[name])} |"
         )
     lines.append("")
     return lines
