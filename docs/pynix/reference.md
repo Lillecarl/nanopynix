@@ -101,7 +101,7 @@ Examples:
 | `--eval-store` | `str or None` | Store URI to evaluate with. Defaults to --store. (default: `None`) |
 | `--verbosity` | `str or None` | Nix log verbosity: error, warn, notice, info, talkative, chatty, debug, vomit, or 0-7. (default: `None`) |
 | `--print-build-logs` | `bool` | Print build log lines to stderr. (default: `False`) |
-| `command` | `list[str]` | Command to run in the environment, after --. Omit for an interactive bash. *(required)* |
+| `command` | `list[str]` | Command to run in the environment, after --. Omit for an interactive bash. (default: `[]`) |
 
 ### `pynix flake`
 
@@ -292,7 +292,7 @@ Show which paths would need building, substituting, or are unknown
 
 | Argument | Type | Help |
 | --- | --- | --- |
-| `paths` | `list[str]` | Store paths to query. *(required)* |
+| `paths` | `list[str]` | Store paths to query. (default: `[]`) |
 | `--store` | `str` | Store URI to query. (default: `'auto'`) |
 
 #### `pynix store query-derivation-outputs`
@@ -336,7 +336,7 @@ Show which paths are substitutable
 
 | Argument | Type | Help |
 | --- | --- | --- |
-| `paths` | `list[str]` | Store paths to query. *(required)* |
+| `paths` | `list[str]` | Store paths to query. (default: `[]`) |
 | `--store` | `str` | Store URI to query. (default: `'auto'`) |
 
 #### `pynix store add-temp-root`
