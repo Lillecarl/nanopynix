@@ -1106,8 +1106,18 @@ async def test_inproc_session_rejects_second_concurrent_session(inproc_session: 
 async def test_inproc_session_rejects_mismatched_reinitialization(
     inproc_session: InprocSessionFactory, tmp_path: Path
 ) -> None:
+    """Nix takes one configuration for each process, so the second one raises.
+
+    **The first session here is the precondition of the test, and not a
+    warm-up.** The test read whatever state an earlier test left until issue
+    #273. Run alone, nothing had initialized Nix, the mismatched configuration
+    became the first one, and nothing raised. The `nogc` and `asan` jobs put
+    this test at 4% of the run and failed on exactly that, in every version.
+    """
     conf = tmp_path / "custom.conf"
     conf.write_text("max-jobs = 1\n")
+    async with inproc_session():
+        pass
     with pytest.raises(RuntimeError, match="already initialized"):
         async with inproc_session(nix_conf=conf):
             pass
