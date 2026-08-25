@@ -28,6 +28,28 @@ terminal, pass `--agent-max-summary-lines=0`.
 - direnv exec . ruff check --fix
 - direnv exec . ruff check --config ruff-strict.toml --fix # This configuration reports zero findings now. Keep it at zero. A new finding comes from your change.
 
+**`direnv exec .` serves a cached environment, so a C++ change is invisible to
+it until you reload.** `.direnv` holds a built `nanopynix-bindings` from a
+store path, and nothing under `nanopynix-bindings/src/` is a file that direnv
+watches. A change there -- yours, or one that arrived with a `jj` update --
+reaches nothing until:
+
+- direnv reload
+
+Measured: with the bindings of issue #234 committed and the shell stale,
+`nanopynix.list_settings()` held 83 names and no `pure-eval`, and five tests
+failed locally that CI passed. After the reload it held 113, and all five
+passed. The reload takes a minute or two, takes no argument, and works from a
+non-interactive shell.
+
+Suspect this whenever a test fails locally and passes in CI. The one-line
+question is whether the binding carries the name you expect:
+
+- direnv exec . python -c "import nanopynix; print('pure-eval' in nanopynix.list_settings())"
+
+Reach for `nix develop --file . nanopynixVersions.<version>.shell` only when
+you need a *different* Nix version, and not merely a current one.
+
 Never run either ruff configuration with `--unsafe-fixes`. The strict
 configuration disables TC001-003, because these rules break type-checking at
 runtime. `ruff-strict.toml` gives the reason and the measurement behind it.
