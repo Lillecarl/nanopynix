@@ -286,9 +286,26 @@ def _choices(annotation: Any) -> tuple[Any, ...] | None:
     return typing.get_args(inner) if typing.get_origin(inner) is typing.Literal else None
 
 
-def _flags(field: str, spec: Spec) -> list[str]:
-    """The flag spellings of *field*, longest first, as argparse wants them."""
-    flags = ["--" + field.replace("_", "-")]
+def option_flags(field: str, spec: Spec) -> list[str]:
+    """The flag spellings of *field*, longest first, as argparse wants them.
+
+    Public, and for the same reason as `command_name`:
+    `docs/_generate_pynix_reference.py` has to spell an option the same way the
+    parser does. It spelled one itself until this function grew the rule below,
+    and then rendered `--from-` for a flag the parser calls `--from`.
+
+    **One trailing underscore is dropped, so a flag can carry a name that
+    Python reserves.** `--from` is the name `nix copy` gives its source store,
+    and `from` is a keyword, so no class attribute can hold it. A field called
+    `from_` spells the flag `--from` and keeps the attribute `from_`, which is
+    the convention PEP 8 already gives for this case. `--class`, `--import` and
+    `--lambda` are the same problem in another program.
+
+    `_add` passes `dest=field` for every option, so the attribute keeps the
+    underscore that the flag drops. Without that, argparse would name the
+    attribute after the flag and `Command.__init__` would never see the value.
+    """
+    flags = ["--" + field.removesuffix("_").replace("_", "-")]
     if spec.short is not None:
         flags.append("-" + spec.short.lstrip("-"))
     return flags
@@ -303,7 +320,7 @@ def _positional_kwargs(spec: Spec, *, repeated: bool) -> dict[str, Any]:
     return {}
 
 
-def _option_kwargs(spec: Spec, inner: Any, *, repeated: bool) -> dict[str, Any]:
+def _option_kwargs(field: str, spec: Spec, inner: Any, *, repeated: bool) -> dict[str, Any]:
     """The same, for an option.
 
     **`SUPPRESS`, for every one.** An option the caller did not name is then
@@ -311,7 +328,10 @@ def _option_kwargs(spec: Spec, inner: Any, *, repeated: bool) -> dict[str, Any]:
     declaration. That is one rule for the ordinary options and the
     configuration-backed ones together.
     """
-    kwargs: dict[str, Any] = {"default": argparse.SUPPRESS}
+    # `dest`, so that the attribute keeps the name the class declared. argparse
+    # otherwise reads it off the first long flag, and `_flags` drops a trailing
+    # underscore from that flag. See `_flags`.
+    kwargs: dict[str, Any] = {"default": argparse.SUPPRESS, "dest": field}
     if spec.negatable:
         kwargs["action"] = argparse.BooleanOptionalAction
     elif inner is bool:
@@ -351,8 +371,8 @@ def _add(parser: argparse.ArgumentParser, field: str, spec: Spec, annotation: An
         kwargs |= _positional_kwargs(spec, repeated=repeated)
         action = parser.add_argument(field, **kwargs)
     else:
-        kwargs |= _option_kwargs(spec, inner, repeated=repeated)
-        action = parser.add_argument(*_flags(field, spec), **kwargs)
+        kwargs |= _option_kwargs(field, spec, inner, repeated=repeated)
+        action = parser.add_argument(*option_flags(field, spec), **kwargs)
     # argcomplete reads this attribute off the action it did not create.
     action.completer = spec.complete  # type: ignore[attr-defined] -- see above
 

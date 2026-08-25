@@ -75,6 +75,7 @@ from libpynix.command import (
     dispatch as dispatch,
     group as group,
     opt as opt,
+    option_flags as option_flags,
     pos as pos,
 )
 from libpynix.nix_options import (

@@ -78,6 +78,36 @@ def test_a_flag_needs_no_value_and_a_negatable_flag_has_both_halves() -> None:
     assert parse(Leaf, "--colour").colour is True  # type: ignore[attr-defined] -- see above
 
 
+def test_a_trailing_underscore_spells_a_flag_that_python_reserves() -> None:
+    """``from_`` declares ``--from`` and keeps the attribute ``from_``.
+
+    ``nix copy`` names its source store ``--from``, and ``from`` is a keyword,
+    so no class attribute can hold it. The underscore is the convention PEP 8
+    already gives for this, and this layer drops one trailing underscore from
+    the flag alone.
+    """
+
+    class Mover(Command):
+        """Move a thing."""
+
+        from_: str | None = opt(None, help="Source.")
+        to: str | None = opt(None, help="Destination.")
+
+    command = parse(Mover, "--from", "a", "--to", "b")
+
+    assert command.from_ == "a"  # type: ignore[attr-defined] -- see above
+    assert command.to == "b"  # type: ignore[attr-defined] -- see above
+    assert parse(Mover).from_ is None  # type: ignore[attr-defined] -- see above
+
+
+def test_an_inner_underscore_still_becomes_a_dash() -> None:
+    """Only the trailing one is dropped, and every other one still separates."""
+    parser = build_parser(Leaf)
+    flags = {flag for action in parser._actions for flag in action.option_strings}
+
+    assert "--name-of-thing" in flags
+
+
 def test_a_repeated_option_collects_every_occurrence() -> None:
     assert parse(Leaf, "--tags", "a", "--tags", "b").tags == ["a", "b"]  # type: ignore[attr-defined] -- see above
 
