@@ -32,14 +32,43 @@ from pynix.registry import Add, List, Pin, Remove
 logger = structlog.get_logger("pynix.registry")
 
 
+#: Nix's own value for "no global registry", which is the layer that fetches.
+_NO_GLOBAL_REGISTRY = "flake-registry"
+
+
 async def run_list(command: List) -> None:
-    """The body of :meth:`pynix.registry.List.run`."""
+    """The body of :meth:`pynix.registry.List.run`.
+
+    **A local layer is not less readable because the remote one is
+    unreachable.** ``fetchers::getRegistries`` builds all four layers before it
+    returns any of them, so an exception from the global layer -- the one that
+    downloads -- discards the flag, user and system layers with it. A sandbox
+    with no network produces exactly that, and so does a cache directory that
+    cannot be created.
+
+    So this asks a second time with an empty ``flake-registry``, which is Nix's
+    own value for "no global layer", and reports what did work. ``globalLayer``
+    says which of the two answers the caller is reading, because a listing that
+    quietly lost a layer is worse than one that says so.
+    ``pynix._attr_completion._registry_references`` does the same for a Tab
+    press, and gives the measurement.
+    """
+    global_layer = "read"
     async with store_session(command.store) as (_nix, store):
-        entries = await store.registry_entries()
         path = await store.user_registry_path()
+        try:
+            entries = await store.registry_entries()
+        # Broad, because Nix reports every layer's failure the same way and the
+        # second call is harmless whatever the first one hit: a store that
+        # cannot answer at all fails again, and that failure reaches the caller.
+        except Exception:
+            logger.warning("the global registry layer is unreachable, so this lists the local layers alone")
+            global_layer = "unavailable"
+            entries = await store.registry_entries(fetch_settings={_NO_GLOBAL_REGISTRY: ""})
     print_json(
         {
             "userRegistry": path,
+            "globalLayer": global_layer,
             "entries": [
                 {
                     "type": entry.type,
