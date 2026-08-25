@@ -24,6 +24,7 @@ from pynix.search import Search
 
 if TYPE_CHECKING:
     from prompt_toolkit.formatted_text import StyleAndTextTuples
+    from prompt_toolkit.input import PipeInput
 
     from nanopynix_testing.nix_environment import NixTestEnvironment
 
@@ -34,6 +35,12 @@ _TARGET_DIR = Path(__file__).parent / "test_search_target"
 #: How long a test waits for the interface to draw and for the pump to place
 #: its first request, in seconds.
 _DRAWN = 0.3
+
+#: How long a test waits between one write to the input and the next.
+_SETTLE = 0.05
+
+#: The key that leaves the interface.
+_QUIT = "\x03"
 
 
 def _parse_json_output(out: str) -> object:
@@ -482,6 +489,27 @@ def test_the_detail_pane_names_the_file_that_declares_the_option(
     assert "module.nix" in text
 
 
+async def _typed(tui: SearchTui[OptionRecord], pipe: PipeInput, keys: str) -> None:
+    """Start *tui*, type *keys* into it, and then leave it.
+
+    **The keys go in after the application starts, and that is the point.**
+    `prompt_toolkit` attaches the read end of the input to the event loop
+    after its first render, so a key written before the start sits in a pipe
+    that nothing is reading yet. `pynix/tests/test_search_tui.py::_run` says
+    what that costs, and issue #271 is the CI job it costs it in.
+    """
+
+    async def write() -> None:
+        await anyio.sleep(_SETTLE)
+        pipe.send_text(keys)
+        await anyio.sleep(_SETTLE)
+        pipe.send_text(_QUIT)
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(tui.application.run_async)
+        group.start_soon(write)
+
+
 async def test_the_interface_narrows_the_real_index_as_the_caller_types(
     indexed_options: list[OptionRecord],
 ) -> None:
@@ -489,9 +517,8 @@ async def test_the_interface_narrows_the_real_index_as_the_caller_types(
     source = options_tui.source(indexed_options, subject=str(_SYSTEM_NIX))
     with create_pipe_input() as pipe:
         tui = SearchTui(source, input=pipe, output=DummyOutput())
-        pipe.send_text("configFiles\x03")
         with create_app_session(input=pipe, output=DummyOutput()):
-            await tui.application.run_async()
+            await _typed(tui, pipe, "configFiles")
 
     assert tui.query == "configFiles"
     assert tui.selection is not None
@@ -506,9 +533,8 @@ async def test_the_interface_opens_on_the_query_of_the_command_line(
     source = options_tui.source(indexed_options, subject=str(_SYSTEM_NIX))
     with create_pipe_input() as pipe:
         tui = SearchTui(source, initial_query="stateVersion", input=pipe, output=DummyOutput())
-        pipe.send_text("\x03")
         with create_app_session(input=pipe, output=DummyOutput()):
-            await tui.application.run_async()
+            await _typed(tui, pipe, "")
 
     assert tui.query == "stateVersion"
     assert tui.selection is not None
@@ -530,20 +556,27 @@ async def test_the_command_opens_the_interface_inside_its_event_loop(
     application takes no input of its own here, exactly as the command builds
     it, so it reads the input of the session.
     """
-    with create_pipe_input() as pipe:
-        pipe.send_text("port\x03")
-        with create_app_session(input=pipe, output=DummyOutput()):
-            cmd = parse(
-                [
-                    "search",
-                    "--options",
-                    "--file",
-                    str(_SYSTEM_NIX),
-                    "--tui",
-                    *shared_nix_environment.pynix_store_args(),
-                ],
-            )
-            await cmd.run()
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        cmd = parse(
+            [
+                "search",
+                "--options",
+                "--file",
+                str(_SYSTEM_NIX),
+                "--tui",
+                *shared_nix_environment.pynix_store_args(),
+            ],
+        )
+
+        async def write() -> None:
+            await anyio.sleep(_SETTLE)
+            pipe.send_text("port")
+            await anyio.sleep(_SETTLE)
+            pipe.send_text(_QUIT)
+
+        async with anyio.create_task_group() as group:
+            group.start_soon(cmd.run)
+            group.start_soon(write)
 
 
 async def test_the_command_writes_nothing_while_the_interface_is_drawn(
