@@ -88,7 +88,16 @@ class NixError(RuntimeError):
         self.msg = msg
         self.raw = raw
         self.info = info
-        super().__init__(f"[{error_type}] {msg}")
+        # **The message is the message of Nix, with nothing of ours in front
+        # of it.** `error_type` was written in here as `[EvalError] `, which
+        # put it in `str(exception)` for every consumer rather than only for
+        # the one that wanted it. A reader then saw the word "error" twice,
+        # because Nix writes `error: ` inside `msg` already. Issue #224.
+        #
+        # The type is not lost: it stays on `self.error_type`, `__repr__`
+        # prints it, and a traceback names the class. A caller that tells an
+        # `EvalError` from a `BuildError` reads the attribute or the class.
+        super().__init__(msg)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(error_type={self.error_type!r}, msg={self.msg!r})"
@@ -201,7 +210,11 @@ class MissingAttributeError(EvalError, KeyError):
         # Without this, the MRO reaches KeyError.__str__ first, which renders
         # `repr(args[0])` -- so every message would arrive wrapped in quotes.
         # That is a dict-lookup convention, not ours.
-        return f"[{self.error_type}] {self.msg}"
+        #
+        # It wrote the error type in front of the message until issue #224.
+        # `NixError.__str__` no longer does that, and an override that still
+        # did it would make this one class read differently from every other.
+        return self.msg
 
     @property
     def suggestions(self) -> list[str]:
@@ -230,7 +243,8 @@ class ListIndexError(EvalError, IndexError):
     def __str__(self) -> str:
         # IndexError does not repr its argument the way KeyError does, so this
         # is only here to keep the two halves of the pair rendering alike.
-        return f"[{self.error_type}] {self.msg}"
+        # Issue #224 took the error type out of both.
+        return self.msg
 
 
 class EvalHashMismatchError(EvalError, HashMismatchError):

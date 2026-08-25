@@ -13,7 +13,9 @@ from nanopynix.exceptions import (
     EvalHashMismatchError,
     HashMismatchError,
     InfiniteRecursionError,
+    ListIndexError,
     MissingArgumentError,
+    MissingAttributeError,
     NixAssertionError,
     NixError,
     NixTypeError,
@@ -40,8 +42,34 @@ def test_nix_error_repr():
 
 
 def test_nix_error_str():
+    """The message of Nix, and nothing of ours in front of it.
+
+    It read `[SomeType] the message` until issue #224. Nix writes `error: `
+    inside the message already, so a reader saw the word twice with a class
+    name between the two. The type is on `error_type` and in `repr`, which
+    `test_nix_error_repr` above pins.
+    """
     e = NixError("SomeType", "the message")
-    assert str(e) == "[SomeType] the message"
+    assert str(e) == "the message"
+
+
+def test_the_two_python_flavoured_errors_render_like_every_other_one():
+    """`MissingAttributeError` and `ListIndexError` say the message, and no more.
+
+    Each one overrides `__str__`, and each override had its own reason.
+    `KeyError.__str__` renders `repr(args[0])`, so an attribute message would
+    arrive wrapped in quotes without the override. `IndexError` does not do
+    that, and the second override is there to keep the pair alike.
+
+    Both overrides wrote `[{error_type}] ` in front of the message until issue
+    #224, which is what this test pins: the reason for the override survives,
+    and the prefix does not.
+    """
+    missing = MissingAttributeError("EvalError", "error: attribute 'nope' missing")
+    assert str(missing) == "error: attribute 'nope' missing"
+
+    index = ListIndexError("EvalError", "error: list index 99 is out of bounds")
+    assert str(index) == "error: list index 99 is out of bounds"
 
 
 def test_nix_error_defaults():
