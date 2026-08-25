@@ -17,6 +17,11 @@ It answers the two questions a hang raises:
   dedicated thread, and a subprocess reader runs on another, so "alive but
   parked in a read" and "gone" look completely different here and identical
   from a ``TimeoutError``.
+* **How many descriptors does the process hold?** :func:`open_descriptors`
+  counts them and names the highest. Above 1024 a descriptor is outside an
+  ``fd_set``, so every ``select.select`` on it raises, and issue #271 is what
+  that looks like from the outside: a full-screen application that cannot read
+  a key, and a suite that reads as slow.
 * **What is a thread waiting on, below Python?** :func:`kernel_state` reads
   the state and the wait channel of every thread from ``/proc``. A thread that
   stops inside a native call shows its last Python frame and nothing more, and
@@ -47,6 +52,10 @@ from pathlib import Path
 # A parked task is usually two or three frames deep. Ten is enough to cross a
 # few `async with` layers and short enough that twenty tasks stay readable.
 STACK_FRAMES = 10
+
+#: The size of an ``fd_set`` on Linux. ``select.select`` raises for a
+#: descriptor at or above it, and `open_descriptors` says so when it sees one.
+_FD_SETSIZE = 1024
 
 
 def _frame_lines(frames: list[object], indent: str) -> list[str]:
@@ -155,6 +164,37 @@ def _frames_of(frame: object) -> list[object]:
     return list(reversed(chain))
 
 
+def open_descriptors() -> str:
+    """How many descriptors the process holds, and the highest number of them.
+
+    **A count above 1024 is a defect on its own, and it breaks `select`.**
+    ``select.select`` raises ``ValueError: filedescriptor out of range in
+    select()`` for a descriptor at or above ``FD_SETSIZE``, which is 1024 on
+    Linux. ``prompt_toolkit`` reads its input that way, so a suite that leaks
+    descriptors turns into a full-screen application that cannot read a key.
+
+    Issue #271 cost a whole CI run to learn that, because the report said
+    nothing about descriptors and the exception reached no log. Two numbers
+    answer it outright: the count says whether anything leaks, and the highest
+    number says whether `select` can still work.
+
+    The directory is Linux alone. macOS gets one line that says so, because a
+    report that raises would replace the hang with itself.
+    """
+    fds = Path("/proc/self/fd")
+    if not fds.is_dir():
+        return "no /proc/self/fd on this platform, so no descriptor count"
+    try:
+        numbers = sorted(int(entry.name) for entry in fds.iterdir() if entry.name.isdigit())
+    except OSError as error:
+        return f"open descriptors: unreadable ({error})"
+    if not numbers:
+        return "open descriptors: none, which cannot be right"
+    highest = numbers[-1]
+    warning = "" if highest < _FD_SETSIZE else f"  <-- at or above FD_SETSIZE ({_FD_SETSIZE}), so select() raises"
+    return f"open descriptors: {len(numbers)}, highest {highest}{warning}"
+
+
 def kernel_state() -> str:
     """The state and the wait channel of every thread, from ``/proc``.
 
@@ -222,6 +262,7 @@ def hang_report(seconds: float) -> str:
             f"--- state at the {seconds:g}s deadline (tests/support/hang_report.py, #44) ---",
             pending_tasks(),
             live_threads(),
+            open_descriptors(),
             kernel_state(),
         )
     )

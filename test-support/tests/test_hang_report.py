@@ -22,8 +22,8 @@ from pathlib import Path
 import anyio
 import pytest
 
-from test_support import deadline
-from test_support.hang_report import hang_report, kernel_state, live_threads, pending_tasks
+from test_support import deadline, hang_report as hang_report_module
+from test_support.hang_report import hang_report, kernel_state, live_threads, open_descriptors, pending_tasks
 
 _MARKER = "hang_report_parked_here"
 
@@ -196,3 +196,26 @@ def test_the_report_says_so_where_proc_is_absent(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(Path, "is_dir", _never_a_directory)
     assert "no /proc/self/task" in kernel_state()
+
+
+def test_the_report_counts_the_open_descriptors() -> None:
+    """The count and the highest number, because 1024 breaks `select`.
+
+    Issue #271 was a `ValueError: filedescriptor out of range in select()`
+    that reached no log, and the report said nothing that would have named it.
+    """
+    text = deadline.hang_report(1.0)
+    assert "open descriptors:" in text
+
+
+def test_the_report_warns_when_a_descriptor_is_outside_an_fd_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A descriptor at or above `FD_SETSIZE` is called out, and not just counted."""
+    monkeypatch.setattr(hang_report_module, "_FD_SETSIZE", 3)
+    line = open_descriptors()
+    assert "at or above FD_SETSIZE" in line, line
+
+
+def test_the_count_says_so_when_the_platform_has_no_proc(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """macOS has no `/proc/self/fd`, and a report that raised would hide the hang."""
+    monkeypatch.setattr(hang_report_module, "Path", lambda _name: tmp_path / "absent")
+    assert "no /proc/self/fd" in open_descriptors()
