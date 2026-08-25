@@ -110,10 +110,11 @@ def test_error_exit_writes_to_stderr(capsys: pytest.CaptureFixture[str]) -> None
 def test_a_failure_of_nix_is_printed_in_the_words_of_nix(monkeypatch: pytest.MonkeyPatch) -> None:
     """One marker, and not three.
 
-    `str(exc)` reads `[EvalError] error: ...`: the class comes from
-    `NixError.__str__`, `error:` comes from Nix, and `Error:` came from
-    `error_exit`. `pynix._impl.main.run` prints `exc.msg`, which is the line
-    the `nix` CLI prints for the same failure.
+    `str(exc)` read `[EvalError] error: ...`: the class came from
+    `NixError`, `error:` comes from Nix, and `Error:` came from `error_exit`.
+    `pynix._impl.main.run` prints `exc.msg`, which is the line the `nix` CLI
+    prints for the same failure, and issue #224 took the class out of
+    `str(exc)` as well.
     """
     buffer = io.StringIO()
     monkeypatch.setattr(main, "error_console", Console(file=buffer, force_terminal=False, width=200))

@@ -67,12 +67,15 @@ def run(body: Callable[[], Coroutine[object, object, None]]) -> None:
     and a defect deserves the traceback.
 
     **The message of Nix, in the words of Nix, with no prefix of our own.**
-    `str(exc)` reads `[EvalError] error: selected value is not a derivation`:
-    `NixError.__str__` writes the class, Nix writes `error:`, and `error_exit`
-    writes `Error:`. Three markers for one failure. `exc.msg` is the line that
-    the `nix` CLI prints for the same failure, so a reader who knows Nix reads
-    it unchanged. A failure of pynix itself still goes through `error_exit`
-    and still says `Error:`.
+    A reader saw three markers for one failure: `error_exit` wrote `Error:`,
+    `NixError` wrote the class as `[EvalError]`, and Nix writes `error:`
+    inside the message. This function prints `exc.msg`, which is the line the
+    `nix` CLI prints for the same failure, so a reader who knows Nix reads it
+    unchanged. Issue #224 removed the second marker as well, at the source:
+    `str(exc)` is now `exc.msg`, for every consumer and not only this one.
+
+    A failure of pynix itself still goes through `error_exit` and still says
+    `Error:`, because that one is not a failure of Nix.
     """
     try:
         anyio.run(body)
