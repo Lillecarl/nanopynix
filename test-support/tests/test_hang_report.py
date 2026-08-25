@@ -223,3 +223,30 @@ def test_the_count_says_so_when_the_platform_has_no_proc(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(hang_report_module, "Path", _absent)
     assert "no /proc/self/fd" in open_descriptors()
+
+
+async def test_the_report_stops_walking_after_a_bound_and_says_so() -> None:
+    """A hang can park thousands of tasks, and the walk must not cost minutes.
+
+    Issue #271 parked 15712. `pending_tasks` walks the await chain of each
+    task it names, so an unbounded walk turns the diagnostic into a second
+    hang. The count above the list stays exact.
+    """
+    parked = hang_report_module.TASKS_REPORTED + 5
+    report = ""
+    async with anyio.create_task_group() as group:
+        started = anyio.Event()
+        for number in range(parked):
+            group.start_soon(_parked, started, name=f"{_MARKER}-{number}")
+        await started.wait()
+
+        report = pending_tasks()
+        group.cancel_scope.cancel()
+
+    named = [line for line in report.splitlines() if line.startswith("  - ")]
+    assert len(named) == hang_report_module.TASKS_REPORTED, report
+    assert "more, which this report does not walk" in report, report
+    # The count above the list is exact, and it is the number a reader acts on.
+    # anyio's own runner task is alive too, so the total is at least `parked`.
+    total = int(report.split(" ", 1)[0])
+    assert total >= parked, report

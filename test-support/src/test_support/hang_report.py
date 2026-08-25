@@ -53,6 +53,13 @@ from pathlib import Path
 # few `async with` layers and short enough that twenty tasks stay readable.
 STACK_FRAMES = 10
 
+#: How many parked tasks the report walks. Issue #271 parked 15712 of them, and
+#: a report that walks the await chain of each one costs minutes and prints
+#: more than a reader can use. Twenty of a repeated shape says the same thing
+#: as fifteen thousand, and the count above the list gives the number that
+#: matters. A diagnostic that takes as long as the hang replaces it.
+TASKS_REPORTED = 20
+
 #: The size of an ``fd_set`` on Linux. ``select.select`` raises for a
 #: descriptor at or above it, and `open_descriptors` says so when it sees one.
 _FD_SETSIZE = 1024
@@ -72,9 +79,12 @@ def _frame_lines(frames: list[object], indent: str) -> list[str]:
 
 
 def pending_tasks() -> str:
-    """Every task still alive on the running loop, with where it is suspended.
+    """The tasks still alive on the running loop, with where they are suspended.
 
     Skips the current task, whose frames the cancellation already unwound.
+
+    The count is always exact. The walk stops at :data:`TASKS_REPORTED`, and
+    the last line says how many the report left out.
     """
     try:
         current = asyncio.current_task()
@@ -86,12 +96,15 @@ def pending_tasks() -> str:
         return "no other task was alive; the hang is not a task waiting on another task"
 
     lines = [f"{len(alive)} task(s) still alive:"]
-    for task in alive:
+    for task in alive[:TASKS_REPORTED]:
         lines.append(f"  - {task.get_name()}: {task.get_coro()!r}")
         try:
             lines.extend(_frame_lines(_await_chain(task.get_coro()), "      "))
         except Exception as exc:
             lines.append(f"      <no stack: {exc}>")
+    dropped = len(alive) - TASKS_REPORTED
+    if dropped > 0:
+        lines.append(f"  ... and {dropped} more, which this report does not walk")
     return "\n".join(lines)
 
 
