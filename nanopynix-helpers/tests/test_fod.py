@@ -142,8 +142,76 @@ def test_find_fod_hash_literal_raises_when_derivation_name_matches_nothing() -> 
 def test_find_fod_hash_literal_raises_when_no_candidates_exist() -> None:
     source = '{ pname = "nothing-hash-shaped-here"; }'
 
-    with pytest.raises(FodSourceUpdateError, match="no plain hash"):
+    with pytest.raises(FodSourceUpdateError, match="no hash, sha256, or outputHash binding"):
         find_fod_hash_literal(source, "sha256-nomatch")
+
+
+# `lib.fakeHash` is 32 zero bytes in base64 and `lib.fakeSha256` is the same 32
+# bytes in hex, so Nix reports one SRI string for both. `lib.fakeSha512` is 64
+# zero bytes. Read out of nixpkgs, and checked against `nix hash convert`.
+_FAKE_SRI = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+_FAKE_SHA512_SRI = "sha512-" + "A" * 86 + "=="
+_REAL = "sha256-XG19bBLOoknhsnwV5rVaVGB8DYUiNPMklhyNotZNcD4="
+
+
+@pytest.mark.parametrize(
+    ("attribute", "symbol", "specified"),
+    [
+        ("hash", "lib.fakeHash", _FAKE_SRI),
+        ("sha256", "lib.fakeSha256", _FAKE_SRI),
+        ("outputHash", "lib.fakeSha512", _FAKE_SHA512_SRI),
+        # `with lib;` puts the name in scope on its own.
+        ("hash", "fakeHash", _FAKE_SRI),
+        # A longer path still ends in the name that carries the constant.
+        ("hash", "pkgs.lib.fakeHash", _FAKE_SRI),
+    ],
+)
+def test_updates_a_fake_hash_symbol_as_if_it_were_a_literal(attribute: str, symbol: str, specified: str) -> None:
+    """The nixpkgs convention for "not computed yet" is a symbol, not a string.
+
+    An author writes `hash = lib.fakeHash` far more often than the zero string
+    it stands for, and the updater saw neither the binding nor a reason to fail
+    clearly. Issue #109.
+    """
+    source = f'fetchurl {{ url = "u"; {attribute} = {symbol}; }}'
+
+    literal = find_fod_hash_literal(source, specified)
+
+    assert literal.value == specified
+    assert replace_fod_hash(source, literal, _REAL) == f'fetchurl {{ url = "u"; {attribute} = "{_REAL}"; }}'
+
+
+def test_a_real_hash_elsewhere_survives_an_update_of_a_fake_one() -> None:
+    """The acceptance criterion of #109: update the fake, touch nothing else."""
+    source = 'a = { hash = lib.fakeHash; }; b = { hash = "sha256-keepmekeepme"; };'
+
+    updated = replace_fod_hash(source, find_fod_hash_literal(source, _FAKE_SRI), _REAL)
+
+    assert updated == f'a = {{ hash = "{_REAL}"; }}; b = {{ hash = "sha256-keepmekeepme"; }};'
+
+
+def test_two_fake_hash_symbols_are_ambiguous_and_refused() -> None:
+    """Both name the same constant, so the reported hash cannot separate them."""
+    source = "a = { hash = lib.fakeHash; }; b = { sha256 = fakeSha256; };"
+
+    with pytest.raises(FodSourceUpdateError, match="refusing to guess"):
+        find_fod_hash_literal(source, _FAKE_SRI)
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [
+        # `or` gives the expression a value that is not the constant.
+        'hash = lib.fakeHash or "something-else"',
+        # A name that is not one of the three says nothing about its value.
+        "hash = lib.realHash",
+        "hash = myOwnHash",
+    ],
+)
+def test_a_symbol_that_does_not_name_a_known_constant_is_invisible(binding: str) -> None:
+    """An unknown symbol has an unknown value, so the updater must not guess."""
+    with pytest.raises(FodSourceUpdateError, match="no hash, sha256, or outputHash binding"):
+        find_fod_hash_literal(f"x = {{ {binding}; }}", _FAKE_SRI)
 
 
 def test_replace_fod_hash_rejects_a_computed_hash_with_unsafe_characters() -> None:
