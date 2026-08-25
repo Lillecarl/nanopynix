@@ -167,12 +167,39 @@ def test_every_spelling_of_file_offers_what_nix_offers(
     assert {candidate.removeprefix(f"{source}#") for candidate in with_hash} == baseline
 
 
-def test_a_file_with_no_hash_leaves_the_names_to_the_shell(equivalence_file: Path, pynix_bin: str) -> None:
-    """Before a ``#``, ``--file`` answers nothing, and that is the right answer.
+#: Where the path sits in `nix build --file <path>`.
+#: `build`(1) `--file`(2) `<path>`(3).
+FILE_COMPLETION_INDEX = 3
 
-    A shell offers file names when a program answers nothing, which is what a
-    caller wants while they are still typing the path. `nix` gives the same
-    answer at the same position: its completion kind there is ``filenames``.
+
+def test_a_file_path_offers_what_nix_offers(equivalence_file: Path, pynix_bin: str) -> None:
+    """Before the ``#``, both programs offer the paths the prefix could name.
+
+    `nix` gives ``--file`` the completer ``Args::completePath``, which globs
+    the prefix and offers a file and a directory alike. Its completion kind
+    there is ``filenames``, and the candidates come with it.
+
+    **This test used to state the opposite.** It said that answering nothing
+    was right, because the shell then offers file names. That holds for bash,
+    which argcomplete registers with ``-o default``. It does not hold for fish,
+    where the registration is ``complete --command pynix -f`` and ``-f`` turns
+    the fall-back off, so ``pynix build --file ~/Code/c<TAB>`` offered nothing
+    at all. Issue #279.
     """
     partial = str(equivalence_file)[:-4]
-    assert argcomplete_candidates(f"pynix build --file {partial}", pynix_bin) == set()
+    baseline = nix_candidates(["build", "--file", partial], FILE_COMPLETION_INDEX)
+    assert baseline == {str(equivalence_file)}, f"nix answered {baseline} for {partial}"
+    assert argcomplete_candidates(f"pynix build --file {partial}", pynix_bin) == baseline
+
+
+def test_a_directory_path_offers_what_nix_offers(equivalence_directory: Path, pynix_bin: str) -> None:
+    """A directory is a candidate too, and ``--file DIR`` reads its ``default.nix``.
+
+    ``completePath`` keeps every glob match, where ``completeDir`` keeps the
+    directories alone. A completer that copied the second one would drop the
+    file above and pass this row.
+    """
+    partial = str(equivalence_directory)[:-4]
+    baseline = nix_candidates(["build", "--file", partial], FILE_COMPLETION_INDEX)
+    assert str(equivalence_directory) in baseline, f"nix answered {baseline} for {partial}"
+    assert argcomplete_candidates(f"pynix build --file {partial}", pynix_bin) == baseline
