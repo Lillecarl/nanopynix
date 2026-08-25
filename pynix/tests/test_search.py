@@ -507,6 +507,11 @@ async def _typed(tui: SearchTui[OptionRecord], pipe: PipeInput, keys: str) -> No
     still lost 120 seconds to the deadline in `test-nogc-nix_2_35`.
     `pynix/tests/test_search_tui.py::_Renders` says the rest, and issue #271
     is the CI job it costs.
+
+    **`tui.run_application`, and not `Application.run_async`.** The second one
+    installs prompt_toolkit's own exception handler on the event loop, which
+    waits for a keypress that a CI runner never sends. `SearchTui.run_application`
+    says why in full.
     """
     drawn = anyio.Event()
 
@@ -522,7 +527,7 @@ async def _typed(tui: SearchTui[OptionRecord], pipe: PipeInput, keys: str) -> No
         pipe.send_text(_QUIT)
 
     async with anyio.create_task_group() as group:
-        group.start_soon(tui.application.run_async)
+        group.start_soon(tui.run_application)
         group.start_soon(write)
 
 
