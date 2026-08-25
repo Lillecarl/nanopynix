@@ -15,6 +15,14 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import tempfile
+from pathlib import Path
+
+#: The variable that makes `pynix` record why a completion answered nothing.
+#: It is the name `pynix._attr_completion` reads, and this module states it
+#: rather than importing it: the gate drives the *installed* program, and the
+#: suite has no `pynix` of its own to import.
+DEBUG_VARIABLE = "PYNIX_COMPLETION_DEBUG"
 
 #: What `nix` needs turned on before it answers a completion at all.
 #:
@@ -76,10 +84,41 @@ def argcomplete_candidates(line: str, bin_dir: str) -> set[str]:
     program under test. Without it `bash` reports "command not found", the
     answer is empty, and an empty answer looks like a completer that offered
     nothing rather than one that never ran.
+
+    **A program that failed says so, and does not answer an empty set.** That
+    is the same trap one step further in. `pynix` catches every failure of a
+    completion on purpose, because a traceback drawn into a command line is
+    worse than a missing candidate, so it exits 0 and offers nothing. This
+    turns on the record that `pynix._attr_completion.DEBUG_VARIABLE` names,
+    and reads it back: an empty answer with a recorded failure is a completer
+    that never ran, and it is never the intended answer.
+
+    Measured on `checks.completions`: 22 rows read `assert set() == {...}`
+    and named no cause, twice, at 5 m 47 s a build. Issue #264.
+
+    **Both programs get :data:`NIX_CONFIG`, and only one of them used to.**
+    The baseline was configured and the program under test was not, so every
+    row compared a `nix` that could read a flake against a `pynix` that could
+    not. What the record then held was
+    `experimental Nix feature 'flakes' is disabled`, from `lock_flake`. A gate
+    that hands the two programs different configurations is not comparing
+    them.
     """
+    with tempfile.TemporaryDirectory() as room:
+        record = Path(room) / "completion-failure.txt"
+        answer = _driven(line, bin_dir, record)
+        recorded = record.read_text(encoding="utf-8") if record.is_file() else ""
+    if not answer and recorded:
+        raise AssertionError(f"the completion of {line!r} failed and answered nothing:\n{recorded[:4000]}")
+    return answer
+
+
+def _driven(line: str, bin_dir: str, record: Path) -> set[str]:
+    """Drive one completion, and write any failure of it to *record*."""
     program = shlex.split(line)[0]
     environment = {
-        **os.environ,
+        **nix_environment(),
+        DEBUG_VARIABLE: str(record),
         "PATH": os.pathsep.join([bin_dir, os.environ["PATH"]]),
         "_ARGCOMPLETE": "1",
         "_ARGCOMPLETE_IFS": "\013",
@@ -96,6 +135,10 @@ def argcomplete_candidates(line: str, bin_dir: str) -> set[str]:
         text=True,
         check=False,
     )
+    if completed.returncode != 0:
+        raise AssertionError(
+            f"{program} exited {completed.returncode} while completing {line!r}:\n{completed.stderr[:4000]}"
+        )
     # argcomplete puts a trailing space on a candidate it considers finished,
     # which is a hint to the shell and not part of the word.
     return {candidate.rstrip() for candidate in completed.stdout.split("\013") if candidate}
