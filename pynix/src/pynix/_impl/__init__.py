@@ -51,6 +51,7 @@ if typing.TYPE_CHECKING:
         search as search,
         settings as settings,
         store as store,
+        why_depends as why_depends,
     )
 
 #: The implementation modules, one for each subcommand that has a heavy one.
@@ -72,6 +73,7 @@ _SUBMODULES: typing.Final[frozenset[str]] = frozenset(
         "search",
         "settings",
         "store",
+        "why_depends",
     }
 )
 

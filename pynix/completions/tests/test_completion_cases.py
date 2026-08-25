@@ -49,6 +49,7 @@ ROOT_SUBCOMMANDS = frozenset(
         "repl",
         "search",
         "store",
+        "why-depends",
     }
 )
 
