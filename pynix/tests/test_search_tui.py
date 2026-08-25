@@ -9,6 +9,7 @@ different key, is exactly the defect that these tests must catch.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import anyio
 import pytest
@@ -20,6 +21,9 @@ from prompt_toolkit.styles.defaults import PROMPT_TOOLKIT_STYLE, WIDGETS_STYLE
 
 from pynix._impl import options_tui, package_tui
 from pynix._impl._search_tui import _CUT, _IN, _KEYS_SHORT, _MIN_TAIL, STYLE_RULES, SearchSource, SearchTui
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 #: The escape sequences that a terminal sends for the keys under test. Each one
 #: goes through the real key parser of `prompt_toolkit`.
@@ -86,33 +90,52 @@ def _tall_source() -> SearchSource[_Fruit]:
     )
 
 
-#: How long a settled drive waits for the application to draw, in seconds.
+#: How long a drive waits between one write to the input and the next, in
+#: seconds. It is a wait for a render, and a render of this fixture is
+#: microseconds.
 _SETTLE = 0.05
 
 
-async def _drive_drawn(keys: str, source: SearchSource[_Fruit] | None = None) -> SearchTui[_Fruit]:
-    """Feed *keys*, let the application draw, and only then leave it.
+async def _run(source: SearchSource[_Fruit] | None, writes: Sequence[str]) -> SearchTui[_Fruit]:
+    """Start the application, write each of *writes* to it, and return it.
 
-    **A queued quit key leaves before the redraw, and this matters here.**
-    `prompt_toolkit` reads whatever is already in the input in the same pass
-    as the first render, so `_drive` never draws the state that its keys
-    made. A test that reads `detail_scroll` cannot tell; a test that reads
-    what the window drew reads the first render every time.
+    **Every write happens while the application is running, and that is not a
+    detail of style.** `prompt_toolkit` attaches the read end of the input to
+    the event loop after its first render, so a key written before the start
+    is read in the same pass as that render. Two things follow, and this
+    module met both:
+
+    - The application leaves before the redraw that the keys asked for, so a
+      test that reads what the window *drew* reads the opening screen every
+      time. Issue #270 is the defect that hid behind it.
+    - It is the shape that hangs in CI. `test-local-nix_2_35` and
+      `test-local-git` lose every test of this module to the 120-second
+      deadline, and neither reproduces in the dev shell. A key that is
+      already in the pipe when the reader attaches is the one difference
+      between this harness and a person at a terminal. Issue #271.
     """
     with create_pipe_input() as pipe:
         tui = SearchTui(source or _source(), input=pipe, output=DummyOutput())
         with create_app_session(input=pipe, output=DummyOutput()):
 
-            async def press_and_quit() -> None:
-                await anyio.sleep(_SETTLE)
-                pipe.send_text(keys)
-                await anyio.sleep(_SETTLE)
-                pipe.send_text(_CTRL_C)
+            async def write() -> None:
+                for text in writes:
+                    await anyio.sleep(_SETTLE)
+                    pipe.send_text(text)
 
             async with anyio.create_task_group() as group:
                 group.start_soon(tui.application.run_async)
-                group.start_soon(press_and_quit)
+                group.start_soon(write)
         return tui
+
+
+async def _drive_drawn(keys: str, source: SearchSource[_Fruit] | None = None) -> SearchTui[_Fruit]:
+    """Feed *keys*, let the application draw, and only then leave it.
+
+    The quit key is a write of its own, so a render happens between the keys
+    and the exit. `_run` says why that matters.
+    """
+    return await _run(source, [keys, _CTRL_C])
 
 
 async def _drive(keys: str, source: SearchSource[_Fruit] | None = None) -> SearchTui[_Fruit]:
@@ -122,12 +145,7 @@ async def _drive(keys: str, source: SearchSource[_Fruit] | None = None) -> Searc
     the application would wait for a keypress that never arrives, and the test
     would hang rather than fail.
     """
-    with create_pipe_input() as pipe:
-        tui = SearchTui(source or _source(), input=pipe, output=DummyOutput())
-        pipe.send_text(keys)
-        with create_app_session(input=pipe, output=DummyOutput()):
-            await tui.application.run_async()
-        return tui
+    return await _run(source, [keys])
 
 
 def _names(tui: SearchTui[_Fruit]) -> list[str]:
