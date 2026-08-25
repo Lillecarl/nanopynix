@@ -82,5 +82,15 @@ workflow.evalWorkflow {
         gates = builtins.attrNames gatingTestJobs;
       }
     );
+    # **The commit that a bisect can start from.** It waits for the same jobs
+    # the deploy waits for, and it moves a branch rather than publishing. See
+    # `mkLastGreenJob` for why the macOS job is not one of them, and why the
+    # gate sits on the step. Issue #283.
+    #
+    # `develop` alone. A green `main` is a merge of commits this branch has
+    # already named, and every other branch is somebody's work in progress.
+    last-green = withCond "github.ref == 'refs/heads/develop' && !cancelled()" (
+      workflow.mkLastGreenJob { gates = builtins.attrNames gatingTestJobs; }
+    );
   };
 }

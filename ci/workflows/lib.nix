@@ -172,6 +172,8 @@ let
     docsDeploy = 20;
     # One `echo` of a value that `env` already holds. Issue #132.
     docsGateReport = 2;
+    # A fetch of one ref and a push of one ref. Issue #283.
+    lastGreen = 5;
     # `actions/deploy-pages` polls the Pages API, and it gives up on its own
     # after `timeout` milliseconds. That limit defaults to ten minutes, which
     # is below `docsDeploy` above, so the action decided the deadline and the
@@ -935,6 +937,60 @@ let
   # and `commit-subjects` reads commit messages, and neither says whether the
   # documentation builds. The build either succeeds or it does not, and that
   # is the whole of what it proves. Issue #132.
+
+  # **The commit whose whole matrix passed, kept on a branch.**
+  #
+  # A red `develop` gives no answer to "what was the last commit that worked",
+  # and the person who needs that answer is the one bisecting. This job is
+  # that answer, written by CI rather than by hand.
+  #
+  # `gates` is the same list that a docs deploy waits for, and the argument
+  # for the list is the same: the macOS job is not in it, because
+  # `continue-on-error` lets the run conclude `success` while that job is red.
+  # So this branch means "every gate that this repository trusts today". The
+  # three runs of 2026-08-25 all concluded `success` with `test-darwin-nix_2_34`
+  # red, which is exactly the case a plain reading of the run conclusion would
+  # have got wrong.
+  #
+  # **The condition is on the steps, and not on the job**, for the reason
+  # `mkDocsDeployJob` gives: an `if` on the job that does not name `success()`
+  # replaces the rule that every dependency succeeded. `skipped` counts
+  # against as well, so a `workflow_dispatch` that selects a few jobs cannot
+  # move the branch on the strength of jobs that never ran.
+  #
+  # It installs no Nix. The work is one `git fetch` and one `git push`, and
+  # `scripts/last-green.sh` is read by `check-shell` like every other script
+  # there, so the body still meets a gate without a minute of installer.
+  mkLastGreenJob =
+    { gates, branch ? "last-green" }:
+    mkJob {
+      needs = gates;
+      permissions = {
+        contents = "write";
+      };
+      steps = [
+        (steps.checkout {
+          # **The whole history, because the script asks an ancestry
+          # question.** `git merge-base --is-ancestor` walks from one commit to
+          # the other, and the default checkout fetches one commit. On a
+          # shallow clone the two tips share no ancestry that git can see, so
+          # the check answers "not ahead" every time and the branch never
+          # advances past the first run -- the one failure this job cannot
+          # afford, because it is silent and it looks like nothing happening.
+          fetchDepth = 0;
+        })
+        (withCond "\${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}" {
+          name = "Move the last-green branch";
+          timeout-minutes = caps.lastGreen;
+          env = {
+            LAST_GREEN_BRANCH = branch;
+            LAST_GREEN_COMMIT = "\${{ github.sha }}";
+          };
+          run = "./scripts/last-green.sh";
+        })
+      ];
+    };
+
   mkDocsBuildJob =
     {
       needs ? [ ],
@@ -1054,6 +1110,7 @@ in
     mkCommitSubjectJob
     mkDocsBuildJob
     mkDocsDeployJob
+    mkLastGreenJob
     ;
 
   # **Every workflow sets this, and every workflow needs it.**

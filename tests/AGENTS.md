@@ -18,6 +18,7 @@ project and not the whole checkout.
 |---|---|---|
 | `tests/meta/` | self-checks: the repository examined as text and structure | the repository |
 | `tests/gates/` | the static gates of CI, run as tools | one gate |
+| `tests/scripts/` | the shell of `scripts/`, run against a real repository | one script |
 | `tests/support/` | scanners for the self-checks. **No tests.** | — |
 
 Each project carries its own suite, its own `pytest.ini` and therefore its own
@@ -132,6 +133,22 @@ it is in `nanopynix-testing` and not in `test-support`.
 helpers, `inproc/` and `rpc/` for the two engines, `primops/` for the Nix
 primops, and the top level for what crosses those layers -- settings routing,
 engine parity, the error taxonomy.
+
+## The rule for `tests/scripts/`
+
+**It runs the script, which is why it is not in `tests/meta/`.** `scripts/`
+holds hand-written shell that belongs to the repository and to no project, so
+its tests belong beside the other tests in that position rather than inside a
+project's suite.
+
+`check-shell` reads every file there, and `shellcheck` is a gate and not a
+test: it says the shell is well formed, and nothing about what the script
+decides. `scripts/last-green.sh` declines to move a branch backwards, and no
+gate can see that.
+
+A test here needs `git`, a temporary directory and nothing else. No Nix, no
+store, no network. Build the remote as a bare repository under `tmp_path` and
+push to it, so the test exercises the same commands the workflow runs.
 
 ## The rule for a test of the harness itself
 
