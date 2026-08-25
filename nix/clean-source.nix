@@ -47,8 +47,23 @@ let
     ".ruff_cache"
     ".terraform"
     ".test-runs"
+    ".workspaces"
     "__pycache__"
     "node_modules"
+  ];
+
+  # Prefix/suffix pairs, for the reports whose name carries the Nix version or
+  # the seed. `builtins.elem` cannot match one, and each of these is written
+  # into the repository root by the TSan legs of `ci/steps.nix`.
+  skipPatterns = [
+    {
+      prefix = "tsan-output-";
+      suffix = ".log";
+    }
+    {
+      prefix = "soak-";
+      suffix = ".json";
+    }
   ];
 
   skipFiles = [
@@ -82,5 +97,6 @@ lib.cleanSourceWith {
       # ran the suite would otherwise rebuild every derivation that reads this
       # source, for a file that no build reads.
       || builtins.elem base skipFiles
+      || lib.any (p: lib.hasPrefix p.prefix base && lib.hasSuffix p.suffix base) skipPatterns
     );
 }
