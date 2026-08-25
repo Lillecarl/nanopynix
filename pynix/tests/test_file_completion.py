@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
 from pynix._attr_completion import complete_file
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 def test_a_path_prefix_offers_the_file_and_the_directory(tmp_path: Path) -> None:
@@ -54,6 +54,7 @@ def test_a_bare_tilde_offers_the_home_directory(tmp_path: Path, monkeypatch: pyt
     assert set(complete_file(prefix="~")) == {"~"}
 
 
+@pytest.mark.forked
 def test_a_tilde_reaches_the_evaluator_expanded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """After the ``#`` the path is evaluated, and no directory holds a tilde.
 

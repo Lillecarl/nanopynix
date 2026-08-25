@@ -54,10 +54,25 @@ async def _session(*, store_workers: int = 4) -> AsyncGenerator[inproc.Session]:
     unlike the constructor-time settings the process guard locks in, so it is
     safe to bump per-session after open() instead of passing it to the
     constructor.
+
+    **And it is put back, because that setting belongs to the process.**
+    ``globalConfig`` is not the session's, so a value left here is read by
+    every test that runs afterwards -- sixteen tests in this module take this
+    helper, and each one used to leave ``max-jobs`` at 25 for whatever came
+    next. ``test_support.plugin`` fails a test that does this now, which is
+    how the leak was found at all. Issue #282.
     """
     async with _raw_session(store_workers=store_workers) as nix:
+        previous = await nix.run(nanopynix_util.get_setting, "max-jobs")
         await nix.run(nanopynix_util.set_setting, "max-jobs", "25")
-        yield nix
+        try:
+            yield nix
+        finally:
+            # Inside the session, because `set_setting` needs one. `None` means
+            # Nix reported no value to restore, and writing a guess would be
+            # worse than leaving the one this helper set.
+            if previous is not None:
+                await nix.run(nanopynix_util.set_setting, "max-jobs", previous)
 
 
 def _wait_for_peer(barrier: threading.Barrier) -> int:

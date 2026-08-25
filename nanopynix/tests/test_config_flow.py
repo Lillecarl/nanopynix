@@ -738,6 +738,10 @@ async def test_both_engines_read_and_write_the_session_settings(
     assert seen["read_sizes"][0] < seen["read_sizes"][1], "overridden_only must filter"
 
 
+# Forked for the reason above `test_both_engines_read_and_write_the_session_settings`:
+# the inproc arm writes `max-jobs` into the settings of this process, and every
+# test after it would read the value. Issue #282.
+@pytest.mark.forked
 @pytest.mark.parametrize("engine", ["inproc", "rpc"])
 async def test_writing_settings_is_refused_while_a_store_or_evaluator_is_open(
     shared_nix_environment: NixTestEnvironment,
@@ -777,6 +781,10 @@ async def test_writing_settings_is_refused_while_a_store_or_evaluator_is_open(
         assert "Close them first" in message, "the message must say what to do about it"
 
 
+# Forked for the reason above `test_both_engines_read_and_write_the_session_settings`:
+# the inproc arm writes `max-jobs` into the settings of this process, and every
+# test after it would read the value. Issue #282.
+@pytest.mark.forked
 @pytest.mark.parametrize("engine", ["inproc", "rpc"])
 async def test_writing_settings_leaves_the_unnamed_ones_alone(
     shared_nix_environment: NixTestEnvironment,
@@ -1179,6 +1187,10 @@ async def test_a_field_no_door_owns_is_refused(
             pass
 
 
+# Forked for the reason above `test_both_engines_read_and_write_the_session_settings`:
+# the inproc arm writes `max-jobs` into the settings of this process, and every
+# test after it would read the value. Issue #282.
+@pytest.mark.forked
 @pytest.mark.parametrize("engine", ["inproc", "rpc"])
 async def test_a_wider_object_writes_only_its_global_half(
     shared_nix_environment: NixTestEnvironment,

@@ -32,6 +32,9 @@ class TestSettings:
     def test_get_setting_nonexistent(self):
         assert nanopynix_util.get_setting("this-setting-does-not-exist-xyz") is None
 
+    # Forked: it writes `max-jobs` into the settings of this process, and every
+    # test after it would read the value. Issue #282.
+    @pytest.mark.forked
     def test_set_and_get_max_jobs(self):
         nanopynix_util.set_setting("max-jobs", "4")
         assert nanopynix_util.get_setting("max-jobs") == "4"

@@ -41,11 +41,12 @@ import pytest
 from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
 
 import nanopynix
+from nanopynix.inproc import _impl as inproc_impl
 from nanopynix.settings import DEFAULT_EXPERIMENTAL_FEATURES
 from test_support.subprocess_output import run_process
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Generator, Iterable, Iterator
 
     from nanopynix_testing.nix_environment import NixTestEnvironment
 
@@ -160,6 +161,82 @@ class StorePathRecorder:
             file.write(entries)
             file.flush()
             os.fsync(file.fileno())
+
+
+@pytest.fixture(autouse=True)
+def no_process_wide_nix_setting_survives_a_test(request: pytest.FixtureRequest) -> Generator[None]:
+    """Fail the test that leaves a Nix setting behind in this process.
+
+    **A setting written through an inproc session is written here.**
+    ``Session.set_settings`` reaches Nix's ``globalConfig``, which belongs to
+    the pytest process, so every test that runs afterwards reads what the last
+    writer left. Nothing said so, and the cost of that silence was a day:
+    ``test_config_flow.py`` left ``keep-going`` on, and
+    ``pynix/tests/test_copy.py`` then failed in twelve CI jobs and passed
+    whenever it ran alone. ``keep-going`` makes Nix end a failing copy quietly
+    -- ``Store::addMultipleToStore`` counts the failure and returns, and
+    ``copyPaths`` never reads that count.
+
+    This names the test that leaked, rather than leaving a later and unrelated
+    test to fail for it. It found seven, and the seventh was a helper that
+    sixteen tests share.
+
+    **It reports and does not restore.** Restoring needs a session, and
+    ``set_settings`` is refused while a store or an evaluator is open, so the
+    fixture could not always do it. Naming the culprit needs neither.
+
+    **A ``forked`` test is exempt, and that is the whole point of the marker.**
+    Its writes land in a child that exits, so they reach no other test.
+    ``test_support.plugin.pytest_collection_modifyitems`` runs those first,
+    before anything has initialised Nix here, which is what makes the fork
+    clean. ``request.keywords`` holds every marker of the item, and it is what
+    pyright can read: ``request.node`` is untyped in pytest's own stubs.
+
+    **This module and not ``test_support.plugin``.** That one holds what every
+    suite shares *and that names no Nix concept*, and ``nix/checks.nix``
+    enforces it with a venv that has no nanopynix in it. This names several.
+    It also lands in the right five suites for free: the `pytest.ini` files
+    that register this plugin are exactly the ones with nanopynix, so
+    ``libpynix`` and ``grpclib-transports`` never load it.
+
+    Measured before it went in: ``list_settings()`` costs 72 us and spawns no
+    thread, so this is 354 ms across a 2452-test run and leaves the process
+    single-threaded -- which it must, or the ``forked`` tests that run first
+    would be forking a dirty process. Issue #282.
+    """
+    if "forked" in request.keywords:
+        yield
+        return
+
+    # **The first session of a process applies its own settings here, and that
+    # is the session and not the test.** `NixTestEnvironment` gives every
+    # session its substituters and its experimental features, and those reach
+    # `globalConfig` when Nix is constructed. Measured: the first test to open
+    # one reported `substituters`, `experimental-features` and `nix-path`
+    # changing, and no test after it reported them again. So a test that finds
+    # Nix uninitialised is exempt, and every later one is judged.
+    #
+    # `_process_guard` is private, and this is the signal it owns. The public
+    # surface has `init_libstore`, which would *cause* the thing this needs to
+    # observe.
+    guard = inproc_impl._process_guard  # type: ignore[reportPrivateUsage] -- see the comment above  # noqa: SLF001 -- see the comment above
+    was_initialised = guard._initialized_pid is not None  # type: ignore[reportPrivateUsage] -- see above  # noqa: SLF001 -- see above
+    before = nanopynix.list_settings()
+    yield
+    if not was_initialised:
+        return
+    after = nanopynix.list_settings()
+
+    changed = sorted(
+        f"{name}: {before.get(name)!r} -> {value!r}" for name, value in after.items() if before.get(name) != value
+    )
+    if changed:
+        pytest.fail(
+            "this test left a Nix setting behind in the pytest process, where every test after it reads "
+            "the value. Mark it `@pytest.mark.forked`, which runs it in a child before anything here has "
+            "initialised Nix, or put the setting back.\n  " + "\n  ".join(changed),
+            pytrace=False,
+        )
 
 
 @pytest.fixture(scope="session")
