@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from pynix._option_paths import bind, is_placeholder, split_path
-from pynix._option_search import instance_of, tiered
+from pynix._option_search import instance_of, tiered, without_config
 from pynix._options import OptionRecord
 from pynix._ranking import ALIAS, EXACT, PREFIX
 
@@ -148,3 +148,104 @@ def test_the_interface_can_ask_what_the_selection_bound() -> None:
     assert match is not None
     assert match.path == "systemd.services.asdf.requires"
     assert instance_of(_option("services.openssh.enable"), "systemd.services.asdf") is None
+
+
+# -- the reader is still typing, and the path still leads somewhere -----------
+#
+# Every prefix of a path a reader is heading for has to keep that path at the
+# top. Measured before the last segment could match as a prefix:
+# `systemd.services.asdf.req` matched no option at all and fell to the fuzzy
+# tier, one keystroke after `systemd.services.asdf` had put the right records
+# first.
+
+
+def test_a_last_segment_part_way_typed_still_binds() -> None:
+    """`...asdf.req` is the reader half-way through `requires`."""
+    match = bind(split_path("systemd.services.<name>.requires"), split_path("systemd.services.asdf.req"))
+    assert match is not None
+    assert match.bound == (("<name>", "asdf"),)
+    # Not whole: the reader has not finished the segment, so a record that
+    # does line up to the end must rank above this one.
+    assert not match.whole
+
+
+def test_a_dot_just_typed_binds_the_front_of_the_path() -> None:
+    """`systemd.services.` is the reader who has opened the next segment."""
+    match = bind(split_path("systemd.services.<name>.requires"), split_path("systemd.services."))
+    assert match is not None
+    assert match.bound == ()
+    assert not match.whole
+
+
+def test_an_earlier_segment_must_still_be_whole() -> None:
+    """A dot ends a segment, so only the last one may be a prefix."""
+    assert bind(split_path("systemd.services.<name>.requires"), split_path("systemd.serv.asdf.requires")) is None
+
+
+def test_a_part_typed_last_segment_ranks_as_a_prefix_and_not_as_a_guess() -> None:
+    hits = tiered(_INDEX)("systemd.services.asdf.req")
+    assert hits
+    key, record = hits[0]
+    assert record.name == "systemd.services.<name>.requires"
+    assert key[0] == PREFIX
+
+
+def test_a_part_typed_quoted_key_still_reaches_its_option() -> None:
+    """A quoted segment holds a dot, and the tail after it stays in step."""
+    hits = tiered(_INDEX)('services.nginx.virtualHosts."a.example.com".ro')
+    key, record = hits[0]
+    assert record.name == "services.nginx.virtualHosts.<name>.root"
+    assert key[0] == PREFIX
+
+
+# -- a reader types the path they read the value at --------------------------
+#
+# `options` declares an option and `config` reads it. A reader types
+# `config.systemd.services.nix.name`, which is what a REPL, a `nix eval` and
+# this repository's own prose all write. Measured before `without_config`:
+# `config.systemd.services.asdf` matched nothing at all, and the whole path
+# fell to the fuzzy tier where an unrelated option came within one point of
+# winning.
+
+
+def test_a_config_prefix_reaches_the_option_it_names() -> None:
+    hits = tiered(_INDEX)("config.systemd.services.asdf.requires")
+    key, record = hits[0]
+    assert record.name == "systemd.services.<name>.requires"
+    assert key[0] == ALIAS
+
+
+def test_a_part_typed_config_path_ranks_as_a_prefix() -> None:
+    hits = tiered(_INDEX)("config.systemd.services.asdf")
+    assert hits
+    key, record = hits[0]
+    assert record.name.startswith("systemd.services.")
+    assert key[0] == PREFIX
+
+
+def test_the_config_form_and_the_bare_form_agree() -> None:
+    """The prefix is syntax, so it must not change which option answers."""
+    bare = [record.name for _key, record in tiered(_INDEX)("systemd.services.asdf.requires")]
+    with_config = [record.name for _key, record in tiered(_INDEX)("config.systemd.services.asdf.requires")]
+    assert with_config[0] == bare[0]
+
+
+def test_a_bare_config_names_no_path() -> None:
+    """`config` alone is a word to search for, and not a prefix to drop."""
+    assert without_config("config") is None
+    assert without_config("systemd.services") is None
+    assert without_config("config.systemd") == "systemd"
+
+
+def test_dropping_config_keeps_a_quoted_segment_whole() -> None:
+    """A rejoin that used a plain `.` would split the key that held one."""
+    assert without_config('config.services.nginx.virtualHosts."a.com".root') == (
+        'services.nginx.virtualHosts."a.com".root'
+    )
+
+
+def test_the_interface_reads_a_config_path_too() -> None:
+    """The pane names the concrete path, and the reader may have typed `config.`."""
+    match = instance_of(_option("systemd.services.<name>.requires"), "config.systemd.services.asdf.requires")
+    assert match is not None
+    assert match.path == "systemd.services.asdf.requires"

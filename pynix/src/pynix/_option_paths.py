@@ -95,12 +95,22 @@ class Instance:
     @property
     def path(self) -> str:
         """The concrete path, quoted where a segment needs it."""
-        return SEPARATOR.join(_quoted(segment) for segment in self.segments)
+        return join_path(self.segments)
 
 
 def _quoted(segment: str) -> str:
     """*segment*, in quotes when the path syntax needs them."""
     return f"{QUOTE}{segment}{QUOTE}" if SEPARATOR in segment else segment
+
+
+def join_path(segments: Sequence[str]) -> str:
+    """The inverse of :func:`split_path`, quoting each segment that needs it.
+
+    A caller that drops or replaces a segment has to write the path back, and
+    a plain ``".".join`` loses the quotes that made the split correct in the
+    first place.
+    """
+    return SEPARATOR.join(_quoted(segment) for segment in segments)
 
 
 def bind(option: Sequence[str], query: Sequence[str]) -> Instance | None:
@@ -112,15 +122,40 @@ def bind(option: Sequence[str], query: Sequence[str]) -> Instance | None:
     *query* may be shorter than *option*, which is the reader part-way
     through typing. The answer then says `whole=False`, so a caller can rank
     it below one that lines up to the end.
+
+    **The last segment of *query* may be the front of the segment it faces.**
+    A reader types one character at a time, and every prefix of what they are
+    typing has to keep the option they are heading for. Without this,
+    `systemd.services.nix.na` matched no option at all and fell to the fuzzy
+    tier, one keystroke after `systemd.services.nix` had put the right
+    records at the top: measured, the fuzzy answer put
+    `systemd.services.<name>.enable` second and `services.nginx.enable`
+    fourth. An earlier segment still has to be equal, because a path is
+    hierarchical and a reader who typed the dot has finished that segment.
     """
     if not query or len(query) > len(option):
         return None
+    last = len(query) - 1
+    # An empty segment is the reader who has just typed the dot, and it needs
+    # a segment in front of it to mean that. A query of one empty segment is
+    # an empty query, which names no path and must match nothing.
+    if last == 0 and not query[0]:
+        return None
     bound: list[tuple[str, str]] = []
-    for want, got in zip(option, query, strict=False):
+    for index, (want, got) in enumerate(zip(option, query, strict=False)):
         if is_placeholder(want):
-            if not got:
+            # An empty final segment is the reader who has just typed the
+            # dot. It binds nothing yet, and the path is not concrete, so it
+            # stays out of `bound`.
+            if got:
+                bound.append((want, got))
+            elif index != last:
                 return None
-            bound.append((want, got))
-        elif want != got:
+        elif want != got and not (index == last and want.startswith(got)):
             return None
-    return Instance(segments=tuple(query), bound=tuple(bound), whole=len(query) == len(option))
+    ends_on_a_whole_segment = bool(query[last]) and (is_placeholder(option[last]) or option[last] == query[last])
+    return Instance(
+        segments=tuple(query),
+        bound=tuple(bound),
+        whole=len(query) == len(option) and ends_on_a_whole_segment,
+    )
