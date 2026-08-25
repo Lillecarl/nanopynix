@@ -204,7 +204,7 @@ async def test_a_second_index_reads_the_cache(
         root = await evaluate_target(target, session, auto_call_file=True)
         lib_value = await select_attr(root, "lib")
         first = await indexed_packages(session, root, lib_value)
-        identity = await package_identity(root)
+        identity = await package_identity(session, root)
         assert cache_path(identity).is_file()
 
         # Corrupting the walk would change a fresh result and not a cached one.
@@ -213,3 +213,69 @@ async def test_a_second_index_reads_the_cache(
 
         refreshed = await indexed_packages(session, root, lib_value, refresh=True)
         assert refreshed == first
+
+
+#: Two package sets that differ in one config value and in nothing else. The
+#: fixture inherits `path` from real nixpkgs, so both carry the same source
+#: and the old key -- the store path alone -- gave them the same file.
+_ONE_CONFIG_APART = """
+let
+  base = import {fixture} {{ }};
+in {{
+  free = base // {{ config = {{ allowUnfree = false; }}; }};
+  unfree = base // {{ config = {{ allowUnfree = true; }}; }};
+}}
+"""
+
+
+async def test_two_package_sets_that_differ_only_in_config_get_different_keys(
+    shared_nix_environment: NixTestEnvironment,
+) -> None:
+    """Regression test for issue #260.
+
+    `pkgs.path` was the whole key, and `import <nixpkgs> {{ }}` and
+    `import <nixpkgs> {{ config.allowUnfree = true; }}` have the same one. The
+    second therefore read the walk of the first, silently.
+    """
+    expression = _ONE_CONFIG_APART.format(fixture=_PKGSET)
+    async with eval_session(shared_nix_environment.store_uri) as (_nix, _store, session):
+        both = await session.string(expression)
+        free = await package_identity(session, await select_attr(both, "free"))
+        unfree = await package_identity(session, await select_attr(both, "unfree"))
+
+    assert free != unfree, f"one config value apart, and the same key: {free}"
+    # The source still names the file, so a reader can still see which nixpkgs
+    # a cache file belongs to.
+    assert free.split("-")[0] == unfree.split("-")[0]
+
+
+async def test_the_same_package_set_keeps_one_key(
+    shared_nix_environment: NixTestEnvironment,
+) -> None:
+    """The key has to be stable, or every search would walk again."""
+    target = EvaluationTarget(file=str(_PKGSET), attr=None, flake=None)
+    async with eval_session(shared_nix_environment.store_uri) as (_nix, _store, session):
+        first = await package_identity(session, await evaluate_target(target, session, auto_call_file=True))
+        second = await package_identity(session, await evaluate_target(target, session, auto_call_file=True))
+
+    assert first == second
+
+
+async def test_a_config_holding_a_function_still_answers(
+    shared_nix_environment: NixTestEnvironment,
+) -> None:
+    """`builtins.toJSON` raises on a function, and a real config holds one.
+
+    `allowUnfreePredicate` is the entry that made `pkgs.config` unusable as a
+    key. The facts mark it by its type instead of its value, so the key is
+    built rather than the evaluation failing.
+    """
+    expression = f"""
+    let base = import {_PKGSET} {{ }};
+    in base // {{ config = {{ allowUnfreePredicate = _: true; }}; }}
+    """
+    async with eval_session(shared_nix_environment.store_uri) as (_nix, _store, session):
+        value = await session.string(expression)
+        identity = await package_identity(session, value)
+
+    assert identity
