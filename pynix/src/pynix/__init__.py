@@ -19,6 +19,7 @@ from pynix.path_info import PathInfo
 from pynix.repl import Repl
 from pynix.search import Search
 from pynix.store import Store
+from pynix.why_depends import WhyDepends
 
 # **One list, and the order is the order `pynix --help` prints.**
 #
@@ -35,7 +36,21 @@ from pynix.store import Store
 Pynix = group(
     "pynix",
     help="pynix — nanopynix CLI",
-    subcommands=[Build, Config, Eval, Derivation, Develop, Flake, Log, PathInfo, PrintDevEnv, Repl, Search, Store],
+    subcommands=[
+        Build,
+        Config,
+        Eval,
+        Derivation,
+        Develop,
+        Flake,
+        Log,
+        PathInfo,
+        PrintDevEnv,
+        Repl,
+        Search,
+        Store,
+        WhyDepends,
+    ],
 )
 
 

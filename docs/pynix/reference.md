@@ -469,3 +469,13 @@ Verify store integrity
 | `--repair` | `bool` | Attempt repair while verifying. (default: `False`) |
 | `--store` | `str` | Store URI to verify. (default: `'auto'`) |
 
+### `pynix why-depends`
+
+Show the chain of references that puts one store path in the closure of another
+
+| Argument | Type | Help |
+| --- | --- | --- |
+| `package` | `str` | Store path whose closure to search (e.g. '/nix/store/hash-name'). *(required)* |
+| `dependency` | `str` | Store path to find in that closure. *(required)* |
+| `--store` | `str` | Store URI to query. (default: `'auto'`) |
+
