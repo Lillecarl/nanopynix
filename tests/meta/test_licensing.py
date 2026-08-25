@@ -25,7 +25,7 @@ from typing import cast
 
 import pytest
 
-from tests.support.suite_roots import REPO_ROOT
+from tests.support.suite_roots import REPO_ROOT, is_skipped
 
 APACHE = "Apache-2.0"
 # The one exception, and the reason it is one. Read `AGENTS.md`.
@@ -42,8 +42,6 @@ EXPECTED = {
     "pynix": f"{APACHE} AND {LGPL}",
 }
 
-IGNORED_PARTS = frozenset({".pytest-agent", ".git", "result", "node_modules", ".venv"})
-
 
 def _projects() -> list[tuple[str, Path, dict[str, object]]]:
     """Each `pyproject.toml` that declares a distribution, with its table.
@@ -53,7 +51,7 @@ def _projects() -> list[tuple[str, Path, dict[str, object]]]:
     """
     found: list[tuple[str, Path, dict[str, object]]] = []
     for path in sorted(REPO_ROOT.rglob("pyproject.toml")):
-        if IGNORED_PARTS & set(path.parts):
+        if is_skipped(path):
             continue
         loaded = tomllib.loads(path.read_text())
         project = loaded.get("project")

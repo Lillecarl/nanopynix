@@ -53,6 +53,47 @@ HELPER_ROOTS = (
 
 SCANNED_ROOTS = SUITE_ROOTS + HELPER_ROOTS
 
+# Directory names that a walk of the whole repository must not descend into.
+#
+# **A jj workspace is a second checkout of this same repository.** `.workspaces`
+# is the reason this set exists rather than a literal beside each `rglob`: the
+# `py315` workspace holds its own copy of every `pytest.ini` and every
+# `pyproject.toml`, so a scanner that reads it finds each suite twice, at a path
+# no roster names. `tests/meta/test_suite_roster.py` failed that way, and the
+# other two scanners passed only because the copies still satisfied their rules.
+#
+# The rest are caches and build output. `result` is a prefix and not a name, so
+# a caller has to test it separately; `_is_skipped` does.
+#
+# **This is not `skipDirs` from `nix/clean-source.nix`.** That set answers
+# "which directory does no derivation need". This one answers "which directory
+# is not first-party source of this checkout", and the two disagree on purpose:
+# `.github` must reach a build and holds nothing for a scanner here.
+SKIP_DIRS = frozenset(
+    {
+        ".direnv",
+        ".git",
+        ".hypothesis",
+        ".jj",
+        ".pytest-agent",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".venv",
+        ".workspaces",
+        "__pycache__",
+        "node_modules",
+    },
+)
+
+
+def is_skipped(path: Path) -> bool:
+    """True when any part of `path` names a directory a scanner must not read.
+
+    `result` is a symlink that `nix build` writes, and the name carries a
+    suffix when a build writes more than one, so it is a prefix test.
+    """
+    return bool(SKIP_DIRS & set(path.parts)) or any(part.startswith("result") for part in path.parts)
+
 
 def check_roster() -> None:
     """Fail when an entry names a directory that is not there.
