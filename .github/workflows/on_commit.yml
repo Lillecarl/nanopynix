@@ -271,7 +271,7 @@ jobs:
     env:
       BACKEND: daemon
       CI_STEP: ciSteps.git
-    timeout-minutes: 220
+    timeout-minutes: 235
     steps:
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -315,6 +315,13 @@ jobs:
         name: gc-thread-debug-daemon-git
         path: ${{ github.workspace }}/gc-thread-debug.log
       timeout-minutes: 15
+    - name: Upload hang reports
+      uses: actions/upload-artifact@main
+      if: ${{ !cancelled() }}
+      with:
+        name: hang-report-daemon-git
+        path: ${{ github.workspace }}/hang-report.log
+      timeout-minutes: 15
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@main
       if: ${{ !cancelled() }}
@@ -342,7 +349,7 @@ jobs:
     env:
       BACKEND: daemon
       CI_STEP: ciSteps.nix_2_34
-    timeout-minutes: 220
+    timeout-minutes: 235
     steps:
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -386,6 +393,13 @@ jobs:
         name: gc-thread-debug-daemon-nix_2_34
         path: ${{ github.workspace }}/gc-thread-debug.log
       timeout-minutes: 15
+    - name: Upload hang reports
+      uses: actions/upload-artifact@main
+      if: ${{ !cancelled() }}
+      with:
+        name: hang-report-daemon-nix_2_34
+        path: ${{ github.workspace }}/hang-report.log
+      timeout-minutes: 15
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@main
       if: ${{ !cancelled() }}
@@ -413,7 +427,7 @@ jobs:
     env:
       BACKEND: daemon
       CI_STEP: ciSteps.nix_2_35
-    timeout-minutes: 220
+    timeout-minutes: 235
     steps:
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -456,6 +470,13 @@ jobs:
       with:
         name: gc-thread-debug-daemon-nix_2_35
         path: ${{ github.workspace }}/gc-thread-debug.log
+      timeout-minutes: 15
+    - name: Upload hang reports
+      uses: actions/upload-artifact@main
+      if: ${{ !cancelled() }}
+      with:
+        name: hang-report-daemon-nix_2_35
+        path: ${{ github.workspace }}/hang-report.log
       timeout-minutes: 15
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@main
@@ -531,7 +552,7 @@ jobs:
     env:
       BACKEND: local
       CI_STEP: ciSteps.git
-    timeout-minutes: 220
+    timeout-minutes: 235
     steps:
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -575,6 +596,13 @@ jobs:
         name: gc-thread-debug-local-git
         path: ${{ github.workspace }}/gc-thread-debug.log
       timeout-minutes: 15
+    - name: Upload hang reports
+      uses: actions/upload-artifact@main
+      if: ${{ !cancelled() }}
+      with:
+        name: hang-report-local-git
+        path: ${{ github.workspace }}/hang-report.log
+      timeout-minutes: 15
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@main
       if: ${{ !cancelled() }}
@@ -602,7 +630,7 @@ jobs:
     env:
       BACKEND: local
       CI_STEP: ciSteps.nix_2_34
-    timeout-minutes: 220
+    timeout-minutes: 235
     steps:
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -646,6 +674,13 @@ jobs:
         name: gc-thread-debug-local-nix_2_34
         path: ${{ github.workspace }}/gc-thread-debug.log
       timeout-minutes: 15
+    - name: Upload hang reports
+      uses: actions/upload-artifact@main
+      if: ${{ !cancelled() }}
+      with:
+        name: hang-report-local-nix_2_34
+        path: ${{ github.workspace }}/hang-report.log
+      timeout-minutes: 15
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@main
       if: ${{ !cancelled() }}
@@ -673,7 +708,7 @@ jobs:
     env:
       BACKEND: local
       CI_STEP: ciSteps.nix_2_35
-    timeout-minutes: 220
+    timeout-minutes: 235
     steps:
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -716,6 +751,13 @@ jobs:
       with:
         name: gc-thread-debug-local-nix_2_35
         path: ${{ github.workspace }}/gc-thread-debug.log
+      timeout-minutes: 15
+    - name: Upload hang reports
+      uses: actions/upload-artifact@main
+      if: ${{ !cancelled() }}
+      with:
+        name: hang-report-local-nix_2_35
+        path: ${{ github.workspace }}/hang-report.log
       timeout-minutes: 15
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@main

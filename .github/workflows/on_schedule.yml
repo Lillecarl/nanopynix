@@ -240,7 +240,7 @@ jobs:
     env:
       BACKEND: ${{ matrix.backend }}
       CI_STEP: ciSteps.${{ matrix.version }}
-    timeout-minutes: 230
+    timeout-minutes: 245
     steps:
     - uses: actions/checkout@main
       with:
@@ -291,6 +291,13 @@ jobs:
       with:
         name: gc-thread-debug-${{ matrix.backend }}-${{ matrix.version }}
         path: ${{ github.workspace }}/gc-thread-debug.log
+      timeout-minutes: 15
+    - name: Upload hang reports
+      uses: actions/upload-artifact@main
+      if: ${{ !cancelled() }}
+      with:
+        name: hang-report-${{ matrix.backend }}-${{ matrix.version }}
+        path: ${{ github.workspace }}/hang-report.log
       timeout-minutes: 15
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@main

@@ -420,6 +420,19 @@ let
             artifactName = "gc-thread-debug-${backend}-${version}";
             path = "\${{ github.workspace }}/gc-thread-debug.log";
           })
+          # **This is the only copy of a hang report that survives.**
+          # `test_support.deadline` attaches the report to the `TimeoutError`,
+          # and pytest renders that note in its end-of-run FAILURES section.
+          # The suite step is killed at 30 minutes, and six tests hanging for
+          # 120 s each spend 12 of those, so the section never prints. This
+          # step runs anyway, because `uploadArtifact` carries
+          # `if: !cancelled()` and the job timeout is far above the step one.
+          # Issue #271 ran on CI many times and produced no report at all.
+          (steps.uploadArtifact {
+            name = "Upload hang reports";
+            artifactName = "hang-report-${backend}-${version}";
+            path = "\${{ github.workspace }}/hang-report.log";
+          })
           (withCond "\${{ !cancelled() }}" (
             withTimeout caps.codecov {
               name = "Upload coverage reports to Codecov";
