@@ -20,6 +20,53 @@ let
   cleanSource = import ./clean-source.nix { inherit lib; };
 
   /*
+    The files of a project that its own `pyproject.toml` names.
+
+    **An allowlist, and the project writes it.** Every project here builds with
+    hatchling, which reads three keys and nothing else: `packages` under
+    `tool.hatch.build.targets.wheel`, and `license-files` and `readme` under
+    `project`. So the list of what the build reads is already in the file that
+    the build reads, and repeating it here would be a second copy to keep in
+    step. A project that adds a licence file or moves its package directory
+    gets the new source with no edit to this file.
+
+    This is a filter and not a list of paths to copy, so an entry that names
+    nothing in the checkout matches nothing and raises nothing. Two projects
+    rely on that: `nanopynix-proto` and `greeter-proto` have no `src/` at all,
+    because protoc writes every module of theirs. Both override `src` with the
+    generated tree anyway, so what this returns for them is read at evaluation
+    time and never built.
+
+    `pyproject.toml` itself is always kept: pyproject.nix reads it to render
+    the derivation, and hatchling reads it again inside the build.
+  */
+  buildInputsOf =
+    projectDir:
+    let
+      manifest = builtins.fromTOML (builtins.readFile (projectDir + "/pyproject.toml"));
+      project = manifest.project or { };
+      wheel = manifest.tool.hatch.build.targets.wheel or { };
+    in
+    [ "pyproject.toml" ]
+    ++ (wheel.packages or [ ])
+    ++ (project.license-files or [ ])
+    ++ lib.optional (project ? readme) project.readme;
+
+  /*
+    Whether *path* is *entry*, is inside it, or is a directory on the way to it.
+
+    The third case is what makes a nested entry work. `src/nanopynix` cannot be
+    reached unless the filter also says yes to `src`, and a filter that a
+    directory fails is never asked about anything under that directory.
+  */
+  isUnder =
+    prefix: entry: path:
+    let
+      relative = lib.removePrefix prefix (toString path);
+    in
+    relative == entry || lib.hasPrefix "${entry}/" relative || lib.hasPrefix "${relative}/" entry;
+
+  /*
     One project's directory, filtered, as the `src` of its derivation.
 
     **A raw `root + "/${name}"` copies the working directory of that project,
@@ -30,14 +77,41 @@ let
     gave the package a new source hash and rebuilt it, along with everything
     downstream.
 
+    **The tracked half of the same problem is `tests/`, and issue #145
+    measured it.** The `nanopynix` source was 2.2 MB over 147 files, of which
+    `tests/` was 1.3 MB over 86 -- so an edit to a test file changed the source
+    hash of the package and rebuilt everything downstream of it. A NixOS
+    configuration that takes `pynix` from a checkout rebuilt the C++ bindings,
+    once for each linked Nix version, and then the whole system, for five
+    edited test files.
+
+    `cleanSource` alone cannot answer that: it is a denylist, and `tests/` is
+    tracked content that a build simply does not read. `buildInputsOf` above is
+    the allowlist, and this composes the two -- the denylist still runs, for
+    the `__pycache__` directories that live inside `src/`.
+
+    The suites still run. `nanopynix/tests.nix` takes its tree from
+    `nix/source.nix`, which is the whole repository filtered, and
+    `nix/checks.nix` names its own inputs. Neither reads a package's `src`.
+
     Only the built overlay takes this. An editable install must point at the
     real checkout, so it keeps the unfiltered path -- a store path there would
     stop the install being live, which is the whole point of it.
   */
   projectSource =
     dir:
+    let
+      projectDir = root + "/${dir}";
+      # A trailing separator, so `removePrefix` leaves a path relative to the
+      # project and not one that starts with `/`.
+      prefix = "${toString projectDir}/";
+      kept = buildInputsOf projectDir;
+    in
     cleanSource {
-      src = root + "/${dir}";
+      src = lib.cleanSourceWith {
+        src = projectDir;
+        filter = path: _type: lib.any (entry: isUnder prefix entry path) kept;
+      };
       # A store name holds no `/`, and `dir` may be nested -- see `dirOf`
       # below and the `nix-daemon-protocol` entry that needs it.
       name = "${lib.replaceStrings [ "/" ] [ "-" ] dir}-source";
