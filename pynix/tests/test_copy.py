@@ -10,14 +10,18 @@ and leaves the store of the machine alone. Issue #80.
 from __future__ import annotations
 
 import json
+import re
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
 
+from nanopynix import stores
 from nanopynix.exceptions import NixError
 from nanopynix_testing.nix_environment import force_rmtree, with_nixpkgs
 from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
 from pynix import parse
+from test_support.subprocess_output import run_process
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -45,10 +49,23 @@ async def destination_store(tmp_path_factory: pytest.TempPathFactory) -> AsyncIt
 
     Function scope, and not session scope. Two of these tests copy the same
     closure, and one of them measures a store that has never seen it.
+
+    **``require-sigs`` is in the URI, and it is not left to the default.**
+    ``test_an_unsigned_path_needs_no_check_sigs`` needs a destination that
+    refuses an unsigned path, and a store reads its settings once, when it is
+    constructed --
+    ``nanopynix/tests/test_config_flow.py::test_a_store_setting_in_the_uri_beats_the_global``
+    measured that, and that the URI beats the global. So the fixture states
+    the precondition rather than borrowing whatever the process holds.
+
+    This is not what made that case fail in CI, and the note is here so that
+    nobody reads it as the cure. The cause was ``keep-going``, left on in the
+    pytest process by another test: Nix then ended the copy quietly, wrote
+    nothing, and raised nothing.
     """
     root = tmp_path_factory.mktemp("pynix-copy-destination")
     try:
-        yield f"local://?root={root}"
+        yield stores.Local(root=str(root), require_sigs=True).uri()
     finally:
         await force_rmtree(root)
 
@@ -157,18 +174,94 @@ async def test_an_unsigned_path_needs_no_check_sigs(
 
     A path built in the source store is ``ultimate`` there, and a copy drops
     that mark: the destination did not build it and has only the signatures to
-    go on. ``require-sigs`` is on by default, so the destination refuses.
+    go on. The destination carries ``require-sigs=true`` in its URI, so it
+    refuses -- see :func:`destination_store` for why that is not left to the
+    process-wide default.
     """
     signed = [built_closure["top"], "--to", destination_store, *shared_nix_environment.pynix_store_args()]
 
-    with pytest.raises(NixError) as error_info:
+    # `match`, so the case cannot pass on some other failure of Nix.
+    with pytest.raises(NixError, match="signature"):
         await _copy(signed, capsys)
-    # The message, so that the case cannot pass on some other failure of Nix.
-    assert "signature" in str(error_info.value)
 
     result = await _copy([*signed, "--no-check-sigs"], capsys)
 
     assert result["copied"] == sorted([built_closure["top"], built_closure["leaf"]])
+
+
+#: A child that turns the process-wide ``keep-going`` on and then copies.
+#:
+#: **A child, and not this process.** ``pynix/tests/_shared_sessions.py``
+#: patches ``pynix._util.nix_session`` so the whole suite reuses one inproc
+#: session with its stores open, and ``set_settings`` is refused while a store
+#: is open. A child has neither, so it is the only place this setting can be
+#: applied to the session that the command itself opens.
+_QUIET_COPY_PROBE = """
+import json
+import sys
+
+import anyio
+
+import nanopynix
+from pynix import parse
+from test_support.subprocess_output import run_process
+
+source, path, destination = sys.argv[1], sys.argv[2], sys.argv[3]
+
+
+async def main() -> None:
+    async with nanopynix.inproc.Session() as session:
+        await session.set_settings(nanopynix.NixGlobalSettings(keep_going=True))
+    command = parse(["copy", path, "--to", destination, "--store", source])
+    try:
+        await command.run()
+    except SystemExit as exit_request:
+        print(json.dumps({"exit": exit_request.code}))
+        return
+    print(json.dumps({"exit": 0}))
+
+
+anyio.run(main)
+"""
+
+
+@LINUX_CHROOT_BUILD
+async def test_a_copy_that_writes_nothing_is_not_reported_as_a_copy(
+    shared_nix_environment: NixTestEnvironment,
+    built_closure: dict[str, str],
+    destination_store: str,
+) -> None:
+    """Nix can end a copy quietly, and the command must not believe it.
+
+    **Measured.** With the process-wide ``keep-going`` on, copying an unsigned
+    path into a store that requires a signature raises nothing and writes
+    nothing. Before the check this test pins, ``pynix copy`` reported both
+    paths as copied, because its report was the difference between the two
+    stores computed *before* the copy -- what it meant to copy, and not what
+    it did. The destination held neither path afterwards.
+
+    That is how ``test_an_unsigned_path_needs_no_check_sigs`` came to fail in
+    every full-suite job of CI and to pass whenever it ran alone:
+    ``nanopynix/tests/test_config_flow.py`` wrote ``keep-going`` into the
+    pytest process and left it there. That test puts it back now, and this one
+    states what the command does when a copy is quiet, whatever the reason.
+    """
+    result = await run_process(
+        [
+            sys.executable,
+            "-c",
+            _QUIET_COPY_PROBE,
+            shared_nix_environment.store_uri,
+            built_closure["top"],
+            destination_store,
+        ],
+    )
+
+    assert json.loads(result.stdout.strip().splitlines()[-1])["exit"] == 1, result.describe()
+    # `error_console` wraps for a terminal, and the wrap point moves with the
+    # width and with the length of each store path. `test_why_depends.py`
+    # carries the full account of why the match ignores every run of space.
+    assert "didnotreach" in re.sub(r"\s+", "", result.stderr), result.describe()
 
 
 @LINUX_CHROOT_BUILD
