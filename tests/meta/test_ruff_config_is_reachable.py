@@ -20,15 +20,14 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-from tests.support.suite_roots import REPO_ROOT
+from tests.support.suite_roots import REPO_ROOT, is_skipped
 
 # Everything that ruff would read, in the order that ruff prefers them.
 DEDICATED = (".ruff.toml", "ruff.toml")
-IGNORED_PARTS = frozenset({".pytest-agent", ".git", "result", "node_modules", ".venv"})
 
 
 def _directories_with_a_pyproject() -> list[Path]:
-    return [path.parent for path in sorted(REPO_ROOT.rglob("pyproject.toml")) if not IGNORED_PARTS & set(path.parts)]
+    return [path.parent for path in sorted(REPO_ROOT.rglob("pyproject.toml")) if not is_skipped(path)]
 
 
 def test_no_directory_holds_a_ruff_config_that_ruff_ignores() -> None:

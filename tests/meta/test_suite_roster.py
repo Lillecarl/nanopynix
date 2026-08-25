@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.support.suite_roots import REPO_ROOT, SUITE_ROOTS, check_roster
+from tests.support.suite_roots import REPO_ROOT, SUITE_ROOTS, check_roster, is_skipped
 
 # Subprojects whose suites this repository's scanners deliberately do not read.
 # Each has its own rootdir, its own gate in `nix/checks.nix`, and its own
@@ -65,7 +65,7 @@ def _declared_suites() -> dict[str, list[Path]]:
     """
     found: dict[str, list[Path]] = {}
     for ini in sorted(REPO_ROOT.rglob("pytest.ini")):
-        if ".pytest-agent" in ini.parts or "result" in ini.parts:
+        if is_skipped(ini):
             continue
         relative = str(ini.relative_to(REPO_ROOT))
         if relative in EXEMPT_INIS:
