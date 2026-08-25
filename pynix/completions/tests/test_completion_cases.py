@@ -225,20 +225,25 @@ CASES = (
 )
 
 
-#: Every row of the table, once for each shell.
-#:
-#: **No `xfail` here any more, and that is the result.** Four rows carried
-#: `xfail(strict=True)` against clypi. Issue #214 changed the library and they
-#: went green, so the marks came off with it. A row that breaks again belongs
-#: marked rather than deleted -- `git log` holds the shape.
-#: **The shell is the outer loop.** The `shell` fixture is session-scoped, so
-#: one fish, one bash and one zsh answer the whole table. Grouping the rows by
-#: shell means pytest builds each of the three once, in order, rather than
-#: leaving that to the reordering that a higher-scoped parameter usually gets.
-ROWS = [pytest.param(case, shell, id=f"{case.name}-{shell}") for shell in SHELL_NAMES for case in CASES]
-
-
-@pytest.mark.parametrize(("case", "shell"), ROWS, indirect=["shell"])
+# **Two `parametrize` marks, and not one over a pair.** The `shell` fixture is
+# session-scoped, so one fish, one bash and one zsh should answer the whole
+# table. A single `parametrize(("case", "shell"), ROWS, indirect=["shell"])`
+# does not give that: pytest keys a parametrized fixture on the *index* of its
+# argument in the list, so 11 rows that all name `fish` are 11 different keys,
+# and the fixture is torn down and rebuilt for every one of them.
+#
+# Measured, issue #275: a fish row cost 11.3 s, of which 10.06 s was one fish
+# start. The 11 fish rows took 124 s, and they take 15.9 s with the two marks
+# below. Stacked marks give the cross product, the index of `shell` is the
+# same for every row that names one shell, and the fixture is built three
+# times for the whole table.
+#
+# **No `xfail` here any more, and that is the result.** Four rows carried
+# `xfail(strict=True)` against clypi. Issue #214 changed the library and they
+# went green, so the marks came off with it. A row that breaks again belongs
+# marked rather than deleted -- `git log` holds the shape.
+@pytest.mark.parametrize("case", CASES, ids=[case.name for case in CASES])
+@pytest.mark.parametrize("shell", SHELL_NAMES, indirect=True)
 def test_the_shell_offers_what_the_command_owes(case: Case, shell: ShellSession, nix_fixture: Path) -> None:
     # A row that names no Nix file is unchanged by this: no line holds a brace
     # unless it wrote `{nix}` on purpose.
