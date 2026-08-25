@@ -286,6 +286,42 @@ async def test_a_pin_of_a_path_reports_that_it_is_not_locked(
     assert pinned["locked"] is False
 
 
+@pytest.fixture
+def broken_global_layer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A global registry layer that is configured and then fails.
+
+    A setting would not do: replacing the layer is not the same as having one
+    that cannot be read. ``getCacheDir`` (``libutil/users.cc``) reads
+    ``NIX_CACHE_HOME`` first, and the download of the global layer has to
+    write its cache there. Pointing it below a regular file makes the
+    directory impossible to create, which is the failure a sandbox with no
+    network produces. ``test_completion_registry.py`` uses the same lever.
+    """
+    blocker = tmp_path / "a-regular-file"
+    blocker.write_text("", encoding="utf-8")
+    monkeypatch.setenv("NIX_CACHE_HOME", str(blocker / "cache"))
+
+
+async def test_the_list_survives_an_unreachable_global_layer(
+    own_registry: Path,
+    fixture_flake: str,
+    broken_global_layer: None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A local layer is not less readable because the remote one is not.
+
+    ``getRegistries`` builds all four layers before it returns any, so an
+    exception from the one that downloads used to discard the other three.
+    """
+    del broken_global_layer
+    await _run(["registry", "add", PROBE, fixture_flake, "--registry", str(own_registry)], capsys)
+
+    listing = await _list_in_a_subprocess()
+
+    assert listing["globalLayer"] == "unavailable"
+    assert [entry["from"] for entry in _user_entries(listing)] == [f"flake:{PROBE}"]
+
+
 async def test_the_list_agrees_with_the_nix_command(
     own_registry: Path,
     fixture_flake: str,
@@ -302,6 +338,8 @@ async def test_the_list_agrees_with_the_nix_command(
     await _run(["registry", "add", PROBE, fixture_flake, "--registry", str(own_registry)], capsys)
 
     listing = await _list_in_a_subprocess()
+    if listing["globalLayer"] != "read":
+        pytest.skip("the global registry layer is unreachable here, so the two commands list different layers")
     oracle = await run_process(["nix", "--extra-experimental-features", "nix-command flakes", "registry", "list"])
     assert oracle.returncode == 0, oracle.describe()
 
