@@ -264,15 +264,27 @@ async def test_the_arrow_keys_move_the_selection() -> None:
 
 
 async def test_up_and_down_move_by_a_whole_row() -> None:
-    """A row holds `grid.columns` matches, so that is what `down` steps.
+    """`down` steps a whole row, whatever number of matches that row holds.
 
     The list held one match on each row until issue #265, and `down` stepped
     one match. It now reads across and then down, so a step of one match is
     `right` and a step of one row is `down`.
+
+    **The step is no longer a count of matches.** Issue #272 made the layout a
+    flow, so a row holds however many cells fitted on it and `down` lands on
+    the nearest column of the next row. The selection starts at column 0, so
+    the nearest column of any row is the first cell of it. A list that fits on
+    one row has no next row, and `down` stays -- which is what a reader means
+    by `down`, and not the jump to the last match that the old index offset
+    gave by running off the end and clamping.
+
+    `pynix/tests/test_columns.py` states the nearest-column rule over a layout
+    this suite's five fruit cannot produce.
     """
     tui = await _drive(f"{_DOWN}{_CTRL_C}")
-    assert tui.grid.columns >= 1
-    assert tui.selected == min(tui.grid.columns, len(_FRUIT) - 1)
+    row = tui.flow.rows[tui.selected]
+    assert row == min(1, tui.flow.row_count - 1)
+    assert tui.selected == tui.flow.lines[row].start
 
     back = await _drive(f"{_DOWN}{_UP}{_CTRL_C}")
     assert back.selected == 0
