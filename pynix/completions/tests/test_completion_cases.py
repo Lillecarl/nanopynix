@@ -210,6 +210,19 @@ CASES = (
         ),
     ),
     Case(
+        name="a-partial-file-path-finishes-it",
+        line="pynix build --file {nix}/defau",
+        line_after="pynix build --file {nix}/default.nix",
+        note=(
+            "**The row for issue #279, and it needs all three shells.** `--file` answered nothing "
+            "before a `#` and left the file names to the shell. bash offers them, because "
+            "argcomplete registers it with `complete -o default`. fish does not: the line "
+            "argcomplete writes there is `complete --command pynix -f`, and `-f` turns the "
+            "fall-back off, so this line offered nothing at all. `pynix._attr_completion._paths` "
+            "answers it now, the way `Args::completePath` answers it for `nix`."
+        ),
+    ),
+    Case(
         name="two-dashes-at-the-root-list-no-subcommand",
         line="pynix --",
         candidates=frozenset(),

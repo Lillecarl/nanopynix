@@ -282,8 +282,15 @@ def _guarded(work: Callable[[], Awaitable[list[str]]]) -> list[str]:
 
 
 def _answer(source: str, attr_prefix: str) -> list[str]:
-    """The attribute paths of *source* under *attr_prefix*, or nothing."""
-    return _guarded(functools.partial(_names, source, attr_prefix))
+    """The attribute paths of *source* under *attr_prefix*, or nothing.
+
+    *source* is expanded here, and only here. A shell expands a ``~`` before it
+    runs a command, so ``--file ~/x.nix`` reaches a real run as an absolute
+    path and Nix never sees the tilde. A completion runs before that expansion,
+    on the word as the caller typed it, so the evaluator would be given a path
+    that no directory holds. Issue #279.
+    """
+    return _guarded(functools.partial(_names, os.path.expanduser(source), attr_prefix))  # noqa: PTH111 -- see `_paths`
 
 
 def _record_the_failure() -> None:
@@ -329,15 +336,18 @@ def complete_attr(*, prefix: str, parsed_args: Any = None, **_: Any) -> Sequence
 
 
 def complete_file(*, prefix: str, **_: Any) -> Sequence[str]:
-    """Candidates for ``--file``, once the caller has typed a ``#``.
+    """Candidates for ``--file``: a path before the ``#``, an attribute after it.
 
-    Before the ``#`` this answers nothing, so the shell offers file names --
-    which is the right answer, and the one Nix gives for the same position.
-    After it, the fragment is an attribute path of that file.
+    Nix gives this option ``Args::completePath``, which offers a file and a
+    directory alike, and :func:`_paths` is that function. Issue #279 is why it
+    is here: this answered nothing before the ``#`` and left the file names to
+    the shell, and a shell that offers no fall-back then offered nothing at
+    all. ``complete --command pynix -f`` is the line argcomplete writes for
+    fish, and ``-f`` is what turns the fall-back off.
     """
     path, separator, fragment = prefix.partition("#")
     if not separator:
-        return []
+        return _paths(prefix)
     return [f"{path}#{candidate}" for candidate in _answer(path, fragment)]
 
 
@@ -384,23 +394,56 @@ async def _flake_names(reference: str, fragment: str, name: FlakeSearch) -> list
         return await complete_flake_fragment(await flake_outputs(await locked.eval()), search, fragment)
 
 
-def _directories(prefix: str) -> list[str]:
-    """The directories that *prefix* could name, as ``Args::completeDir`` finds them.
+def _paths(prefix: str, *, only_dirs: bool = False) -> list[str]:
+    """The paths that *prefix* could name, as ``Args::_completePath`` finds them.
 
     That function (``libutil/args.cc``) globs ``expandTilde(prefix) + "*"`` and
-    keeps what ``stat`` calls a directory. This is the same two steps.
+    keeps every match, or keeps what ``stat`` calls a directory when
+    ``onlyDirs`` is set. This is the same two steps, and *only_dirs* is that
+    flag. ``completePath`` is the completer Nix gives ``--file``, and
+    ``completeDir`` is one of the three sources of the one it gives a flake
+    reference.
 
-    **A directory is a candidate of this program and not of the shell.** Before
-    this function ``--flake`` answered nothing before the ``#``, and the shell
-    fell back to file names on its own. A completer that answers cannot fall
-    back, so the half that the shell used to supply has to come from here.
+    **A path is a candidate of this program and not of the shell.** Before this
+    function ``--flake`` answered nothing before the ``#``, and the shell fell
+    back to file names on its own. A completer that answers cannot fall back,
+    so the half that the shell used to supply has to come from here.
+
+    **A tilde comes back as a tilde, and in `nix` it does not.** Nix offers the
+    expanded path, and its own bash completion puts that straight into
+    ``COMPREPLY``, which bash does not filter. argcomplete does filter: it
+    keeps a candidate only when ``candidate.startswith(prefix)``, so
+    ``~/Code/nanop`` and ``/home/me/Code/nanopynix`` cost the caller every
+    candidate. The head goes back on for that reason. The shell expands it
+    again, so the two spellings name one path.
+
+    ``os.path.expanduser`` also reads ``~user`` where ``expandTilde`` has a
+    ``TODO`` and reads only ``~``. That is a candidate more and never one
+    fewer, so it stands.
     """
     # Imported here for the reason `_names` gives. `glob` is cheap, and the
     # rule is one rule.
     import glob  # noqa: PLC0415 -- see `_names`
 
     expanded = os.path.expanduser(prefix)  # noqa: PTH111 -- the tilde rule of `_completePath`, and no I/O
-    return [candidate for candidate in glob.glob(expanded + "*") if os.path.isdir(candidate)]  # noqa: PTH207, PTH112 -- `glob.glob` is what Nix calls, and `anyio.Path` is async
+    matches = glob.glob(expanded + "*")  # noqa: PTH207 -- `glob.glob` is what Nix calls, and `anyio.Path` is async
+    if only_dirs:
+        matches = [candidate for candidate in matches if os.path.isdir(candidate)]  # noqa: PTH112 -- see above
+    return _retilde(prefix, matches)
+
+
+def _retilde(prefix: str, candidates: list[str]) -> list[str]:
+    """*candidates*, spelled with the ``~`` head that *prefix* carries.
+
+    A no-op for a prefix that has no tilde, and for a ``~user`` that names
+    nobody: ``expanduser`` answers such a head unchanged, so the replacement
+    replaces the head with itself.
+    """
+    if not prefix.startswith("~"):
+        return candidates
+    head = prefix.partition("/")[0]
+    home = os.path.expanduser(head)  # noqa: PTH111 -- see `_paths`
+    return [head + candidate[len(home) :] if candidate.startswith(home) else candidate for candidate in candidates]
 
 
 async def _registry_references(prefix: str) -> list[str]:
@@ -493,7 +536,7 @@ def _reference_candidates(prefix: str) -> list[str]:
     of one directory cannot hang, and a registry that is slow or unreachable
     must not take the file names down with it.
     """
-    candidates = set(_directories(prefix))
+    candidates = set(_paths(prefix, only_dirs=True))
     if not prefix:
         candidates.add(".")
     candidates.update(_guarded(functools.partial(_registry_references, prefix)))
