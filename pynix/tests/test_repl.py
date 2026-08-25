@@ -22,7 +22,7 @@ from nanopynix_bindings.store import BuildMode
 from nanopynix_proto.nix.common import LogLevel
 from prompt_toolkit.completion import CompleteEvent, Completion
 from prompt_toolkit.document import Document
-from prompt_toolkit.formatted_text import ANSI
+from prompt_toolkit.formatted_text import ANSI, FormattedText
 
 from nanopynix.exceptions import EvaluatorAbandonedError, NixError
 from nanopynix.models import AttrDoc, Doc, NixType
@@ -1195,6 +1195,17 @@ async def test_the_repl_leaves_no_sigint_handler_behind() -> None:
     assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
 
 
+def _doc_text(printed: object) -> str:
+    """The visible text of what `:doc` printed.
+
+    `render_markdown` gives `FormattedText` since issue #255, and no longer an
+    `ANSI` object with escape bytes inside it. A `NixError` still reaches the
+    screen as `ANSI`, so the type is what tells the two apart.
+    """
+    assert isinstance(printed, FormattedText)
+    return "".join(fragment[1] for fragment in printed)
+
+
 async def test_repl_doc_builtin(monkeypatch: Any) -> None:
     output: list[object] = []
     monkeypatch.setattr("pynix._impl.repl.print_formatted_text", output.append)
@@ -1206,9 +1217,9 @@ async def test_repl_doc_builtin(monkeypatch: Any) -> None:
     await _run_repl_loop(repl, _Prompt([":doc builtins.add", ":quit"]))
     assert len(output) == 2
     assert output[0] == _HELP
-    assert isinstance(output[1], ANSI)
-    assert "builtins.add" in output[1].value
-    assert "Return the sum of the numbers" in output[1].value
+    drawn = _doc_text(output[1])
+    assert "builtins.add" in drawn
+    assert "Return the sum of the numbers" in drawn
 
 
 async def test_repl_doc_lambda(monkeypatch: Any) -> None:
@@ -1229,10 +1240,10 @@ async def test_repl_doc_lambda(monkeypatch: Any) -> None:
     await _run_repl_loop(repl, _Prompt([":doc f", ":quit"]))
     assert len(output) == 2
     assert output[0] == _HELP
-    assert isinstance(output[1], ANSI)
-    assert "Function" in output[1].value
-    assert "/tmp/f.nix:1" in output[1].value
-    assert "Adds one." in output[1].value
+    drawn = _doc_text(output[1])
+    assert "Function" in drawn
+    assert "/tmp/f.nix:1" in drawn
+    assert "Adds one." in drawn
 
 
 async def test_repl_doc_attr_selection(monkeypatch: Any) -> None:
@@ -1244,11 +1255,11 @@ async def test_repl_doc_attr_selection(monkeypatch: Any) -> None:
     await _run_repl_loop(repl, _Prompt([":doc pkgs.hello", ":quit"]))
     assert len(output) == 2
     assert output[0] == _HELP
-    assert isinstance(output[1], ANSI)
-    assert "Attribute" in output[1].value
-    assert "hello" in output[1].value
-    assert "/tmp/pkgs.nix:42" in output[1].value
-    assert "Hello package." in output[1].value
+    drawn = _doc_text(output[1])
+    assert "Attribute" in drawn
+    assert "hello" in drawn
+    assert "/tmp/pkgs.nix:42" in drawn
+    assert "Hello package." in drawn
 
 
 async def test_repl_doc_attr_selection_no_doc(monkeypatch: Any) -> None:
@@ -1260,11 +1271,11 @@ async def test_repl_doc_attr_selection_no_doc(monkeypatch: Any) -> None:
     await _run_repl_loop(repl, _Prompt([":doc pkgs.hello", ":quit"]))
     assert len(output) == 2
     assert output[0] == _HELP
-    assert isinstance(output[1], ANSI)
-    assert "Attribute" in output[1].value
-    assert "hello" in output[1].value
-    assert "/tmp/pkgs.nix:42" in output[1].value
-    assert "No documentation found." in output[1].value
+    drawn = _doc_text(output[1])
+    assert "Attribute" in drawn
+    assert "hello" in drawn
+    assert "/tmp/pkgs.nix:42" in drawn
+    assert "No documentation found." in drawn
 
 
 async def test_repl_doc_value_without_doc_prints_error(monkeypatch: Any) -> None:

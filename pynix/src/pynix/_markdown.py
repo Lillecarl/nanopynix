@@ -21,7 +21,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from markdown_it.renderer import RendererHTML
 from myst_parser.config.main import MdParserConfig
 from myst_parser.parsers.mdit import create_md_parser
-from prompt_toolkit.formatted_text import ANSI
+from prompt_toolkit.formatted_text import FormattedText
+from rich.color import ColorType
 from rich.console import Console, ConsoleOptions, JustifyMethod, RenderResult
 from rich.containers import Renderables
 from rich.markdown import (
@@ -39,6 +40,8 @@ from nanopynix._typechecking import BEARTYPING
 
 if TYPE_CHECKING or BEARTYPING:
     from markdown_it.token import Token
+    from rich.color import Color
+    from rich.style import Style
 
 
 class _LeftHeading(Heading):
@@ -207,12 +210,15 @@ class NixMarkdown(Markdown):
 
     def __init__(self, markup: str, **kwargs: Any) -> None:
         # **`hyperlinks=False`, and this is not a preference.** With it on,
-        # Rich wraps the link text in an OSC 8 escape. `prompt_toolkit.ANSI`
-        # reads CSI escapes and not OSC ones, so it drops the leading escape
-        # byte and prints the rest of the sequence as text: a description that
-        # named a URL showed `8;id=16117648;https://...` on the screen. With it
-        # off, Rich prints the address after the text, which a terminal can
-        # read and which wraps to the width like any other text.
+        # Rich puts the address in the `link` field of the style and draws the
+        # text alone. Nothing here reads that field, and a terminal cannot
+        # follow a link, so the address would simply disappear. With it off,
+        # Rich prints the address after the text, which a reader can copy and
+        # which wraps to the width like any other text.
+        #
+        # The flag also kept an OSC 8 escape out of the output until issue
+        # #255. That reason is gone: this module builds fragments from `Style`
+        # objects now, and writes no escape byte at all.
         kwargs.setdefault("hyperlinks", False)
         super().__init__(markup, **kwargs)
         config = MdParserConfig(
@@ -266,19 +272,114 @@ class NixMarkdown(Markdown):
 MEASURE = 100
 
 
-def render_markdown(text: str, width: int | None = None) -> ANSI:
-    """Render Markdown into formatted ANSI text, reflowed to a readable width.
+#: The `prompt_toolkit` name of each of the 16 terminal colours, in the order
+#: that Rich numbers them. A name lets the terminal choose the shade, and
+#: `#rrggbb` does not, so a standard colour must not become a triplet.
+_ANSI_NAMES = (
+    "ansiblack",
+    "ansired",
+    "ansigreen",
+    "ansiyellow",
+    "ansiblue",
+    "ansimagenta",
+    "ansicyan",
+    "ansigray",
+    "ansibrightblack",
+    "ansibrightred",
+    "ansibrightgreen",
+    "ansibrightyellow",
+    "ansibrightblue",
+    "ansibrightmagenta",
+    "ansibrightcyan",
+    "ansiwhite",
+)
+
+#: Each flag of a Rich style, with the `prompt_toolkit` word for it.
+_FLAGS = (
+    ("bold", "bold"),
+    ("dim", "dim"),
+    ("italic", "italic"),
+    ("underline", "underline"),
+    ("strike", "strike"),
+    ("blink", "blink"),
+    ("reverse", "reverse"),
+    ("conceal", "hidden"),
+)
+
+
+def _colour(colour: Color | None) -> str:
+    """Say what one Rich colour is called in a `prompt_toolkit` style string.
+
+    A style that names no colour gives `None`, and the span inherits. A style
+    that names `Color.default()` gives the DEFAULT type, which means "reset to
+    the colour of the terminal" and not "inherit". `_NixCodeBlock` asks for
+    that one, to stop the syntax theme painting a background of its own.
+    """
+    if colour is None:
+        return ""
+    if colour.type is ColorType.DEFAULT:
+        return "ansidefault"
+    number = colour.number
+    if number is not None and number < len(_ANSI_NAMES):
+        return _ANSI_NAMES[number]
+    triplet = colour.get_truecolor()
+    return f"#{triplet.red:02x}{triplet.green:02x}{triplet.blue:02x}"
+
+
+def _style_string(style: Style | None) -> str:
+    """Turn one Rich style into a `prompt_toolkit` style string."""
+    if style is None:
+        return ""
+    parts = [word for field, word in _FLAGS if getattr(style, field)]
+    foreground = _colour(style.color)
+    if foreground:
+        parts.append(foreground)
+    background = _colour(style.bgcolor)
+    if background:
+        parts.append(f"bg:{background}")
+    return " ".join(parts)
+
+
+def render_markdown(text: str, width: int | None = None) -> FormattedText:
+    """Render Markdown into formatted text, reflowed to a readable width.
 
     *width* is how many columns the result may use. The REPL prints into the
     whole terminal and gives no width, so the terminal decides. The `search`
     interface draws into the detail pane of a stacked screen, and gives the
     width of that pane. Either way the text is drawn no wider than `MEASURE`.
+
+    **The result carries no escape byte, and that is the reason this function
+    reads segments rather than a string.** Rich wrote the style of each span
+    into ANSI escapes, and `prompt_toolkit.ANSI` parsed them back one step
+    later. A style that Rich could write and that parser could not read was
+    lost: a link became an OSC 8 escape, and the screen showed
+    `8;id=16117648;https://...` as text. `Console.render_lines` gives the same
+    spans with a `Style` object on each one, so no escape is ever written.
+
+    **The result is a `FormattedText` and not a plain list of tuples, and the
+    REPL can tell.** `print_formatted_text` reads a bare list as a sequence of
+    objects to print, so `:doc builtins.map` printed the repr of the fragments
+    as one line of text. `to_formatted_text` names the same reason in its own
+    comment.
     """
     if width is None:
         width = shutil.get_terminal_size(fallback=(80, 24)).columns
     render_width = min(MEASURE, width)
 
-    output = StringIO()
-    console = Console(file=output, force_terminal=True, width=render_width)
-    console.print(NixMarkdown(text))
-    return ANSI(output.getvalue().rstrip("\n"))
+    console = Console(file=StringIO(), force_terminal=True, width=render_width)
+    lines = console.render_lines(NixMarkdown(text), pad=False)
+    # `console.print` wrote a newline after the last line, and the caller
+    # stripped it. Drop an empty line here for the same reason. A line of
+    # spaces is not empty: a Rich table pads its bottom row that way, and the
+    # string path kept it.
+    while lines and not any(segment.text for segment in lines[-1]):
+        lines.pop()
+
+    fragments = FormattedText()
+    for index, line in enumerate(lines):
+        if index:
+            fragments.append(("", "\n"))
+        fragments += [
+            (_style_string(segment.style), segment.text) for segment in line if segment.text and not segment.control
+        ]
+    return fragments
