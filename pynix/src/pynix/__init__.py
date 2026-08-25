@@ -17,6 +17,7 @@ from pynix.eval import Eval
 from pynix.flake import Flake
 from pynix.log import Log
 from pynix.path_info import PathInfo
+from pynix.registry import Registry
 from pynix.repl import Repl
 from pynix.search import Search
 from pynix.store import Store
@@ -48,6 +49,7 @@ Pynix = group(
         Log,
         PathInfo,
         PrintDevEnv,
+        Registry,
         Repl,
         Search,
         Store,

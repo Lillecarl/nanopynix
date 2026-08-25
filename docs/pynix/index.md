@@ -62,6 +62,10 @@ lib.version`. The registry answers only when the lookup path holds no such
 name. A reference that names its scheme, such as `github:NixOS/nixpkgs`, skips
 the lookup path.
 
+`pynix registry` is what shows and changes that second answer. `pynix registry
+list` prints every entry with the layer that holds it, and `add`, `remove` and
+`pin` write the registry of the user. The four agree with `nix registry`.
+
 `--flake` resolves its `#` fragment the way the `nix` CLI resolves one. The
 fragment is not one attribute path: each command holds a list of prefixes,
 and the first path that resolves is the answer. `pynix build --flake

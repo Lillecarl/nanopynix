@@ -47,6 +47,7 @@ ROOT_SUBCOMMANDS = frozenset(
         "log",
         "path-info",
         "print-dev-env",
+        "registry",
         "repl",
         "search",
         "store",
