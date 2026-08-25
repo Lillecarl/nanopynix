@@ -29,6 +29,7 @@ of the difference between 24 571 here and 148 251 there.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import dataclass
@@ -244,20 +245,65 @@ def save_cache(path: Path, identity: str, records: Sequence[PackageRecord]) -> N
     partial.replace(path)
 
 
-async def package_identity(pkgs_value: AsyncValue) -> str:
-    """The store path of the nixpkgs that *pkgs_value* came from.
+#: The facts that tell two package sets built from one source apart.
+#:
+#: **A config entry may be a function, and `builtins.toJSON` raises on one
+#: where `builtins.tryEval` does not catch it.** `allowUnfreePredicate` is
+#: such an entry. `mark` therefore never hands a function to `toJSON`: a
+#: scalar joins the key by its value, and anything else by its type name. So
+#: `gitConfig` reads as `"set"` and `allowUnfreePackages` as `"list"`.
+#:
+#: The limit that follows is worth stating: a change from one predicate to a
+#: different predicate is not distinguished. Every scalar change is.
+#:
+#: The three fields cover the three cases of issue #260. `system` covers a
+#: cross-compiled set, `config` covers `allowUnfree` and `allowBroken`, which
+#: change which attributes evaluate at all, and `attrs` covers an overlay that
+#: adds or removes an attribute.
+_IDENTITY_FACTS = """
+pkgs:
+  let
+    config = pkgs.config or { };
+    mark = value:
+      if builtins.isBool value then (if value then "true" else "false")
+      else if builtins.isString value then value
+      else if builtins.isInt value then builtins.toString value
+      else builtins.typeOf value;
+  in
+    builtins.toJSON {
+      system = pkgs.stdenv.hostPlatform.system or "unknown";
+      attrs = builtins.length (builtins.attrNames pkgs);
+      config = builtins.listToAttrs (map (name: {
+        inherit name;
+        value = mark (config.${name} or null);
+      }) (builtins.attrNames config));
+    }
+"""
 
-    `pkgs.path` is what nixpkgs itself calls its own source.
+#: How much of the digest joins the identity. Sixteen hexadecimal characters
+#: is 64 bits, which no set of package sets on one machine will collide in,
+#: and it keeps the file name readable.
+_DIGEST_LENGTH = 16
 
-    **Two package sets from one source share this key, and issue #260 holds
-    the measurement.** `import <nixpkgs> { }` and `import <nixpkgs> {
-    config.allowUnfree = true; }` have the same `path`, so the second reads
-    the walk of the first. `pkgs.config` cannot join the key as it stands,
-    because a real config holds functions and `builtins.toJSON` raises on one
-    where `builtins.tryEval` does not catch it.
+
+async def package_identity(session: AsyncEvalSession, pkgs_value: AsyncValue) -> str:
+    """What names the walk of *pkgs_value*: its source, and what shapes it.
+
+    `pkgs.path` is what nixpkgs calls its own source, and a store path is the
+    hash of what is under it. That alone was the key until issue #260, and two
+    package sets built from one source shared it: `import <nixpkgs> { }` and
+    `import <nixpkgs> { config.allowUnfree = true; }` have the same `path`, so
+    the second read the walk of the first.
+
+    `_IDENTITY_FACTS` says what else joins the key, and why it cannot simply
+    be `pkgs.config`. Measured on real nixpkgs, 27 918 attributes: the facts
+    cost 0.043 s against a walk of 15 s.
     """
-    path_value = pkgs_value.attr("path")
-    return str(await path_value.to_python())
+    path = str(await pkgs_value.attr("path").to_python())
+    collector = await session.string(_IDENTITY_FACTS)
+    facts = str(await (await collector.call(pkgs_value)).to_python())
+    digest = hashlib.sha256(facts.encode()).hexdigest()[:_DIGEST_LENGTH]
+    return f"{Path(path).name}-{digest}"
 
 
 async def indexed_packages(
@@ -272,7 +318,7 @@ async def indexed_packages(
     Measured on nixpkgs unstable: the walk costs 15 s and 2.08 GB, and reading
     the cache costs 0.1 s. Pass *refresh* to walk again and overwrite.
     """
-    identity = await package_identity(pkgs_value)
+    identity = await package_identity(session, pkgs_value)
     path = cache_path(identity)
     if not refresh:
         cached = load_cache(path)

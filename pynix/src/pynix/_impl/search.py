@@ -456,7 +456,7 @@ async def _index_packages(
     pkgs = _named(where.pkgs)
     lib = _named(where.lib)
     records = await indexed_packages(session, pkgs.value, lib.value)
-    built.pkgs_path = await package_identity(pkgs.value)
+    built.pkgs_path = await package_identity(session, pkgs.value)
     built.paths["pkgs"] = pkgs.path
 
     # **The binaries are best effort, and the walk is not.** `programs.sqlite`
