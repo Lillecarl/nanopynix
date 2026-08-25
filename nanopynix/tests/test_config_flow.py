@@ -709,10 +709,37 @@ async def test_both_engines_read_and_write_the_session_settings(
         seen["from_session"] = overridden.get("substituters")
         seen["provenance"] = (await session.settings_provenance()).applied.get("substituters")
 
-        seen["written"] = await session.set_settings(nanopynix.NixGlobalSettings(max_jobs=9, keep_going=True))
-        seen["read_back"] = (await session.settings(overridden_only=True)).get("max-jobs")
-        # The unfiltered read reports every setting, not only the overridden.
-        seen["read_sizes"] = (len(overridden), len(await session.settings()))
+        before_write = await session.settings()
+        try:
+            seen["written"] = await session.set_settings(nanopynix.NixGlobalSettings(max_jobs=9, keep_going=True))
+            seen["read_back"] = (await session.settings(overridden_only=True)).get("max-jobs")
+            # The unfiltered read reports every setting, not only the overridden.
+            seen["read_sizes"] = (len(overridden), len(await session.settings()))
+        finally:
+            # **Put them back, because the inproc arm writes this process.**
+            # `globalConfig` belongs to the pytest process here, and every test
+            # that runs afterwards reads what this one left. `keep-going` in
+            # particular is not inert: measured, a copy of an unsigned path
+            # into a store that requires a signature raised nothing and wrote
+            # nothing while it was on, which made `pynix/tests/test_copy.py`
+            # fail in every full-suite job of CI and pass whenever it ran
+            # alone.
+            #
+            # In a `finally`, so that a failure between the write and here
+            # still puts them back. A forked test would isolate this properly
+            # and cannot: `nanopynix.inproc` refuses a session in a fork of a
+            # process that already initialised Nix, which every full run has.
+            #
+            # There is no "unset", so this writes back what the session
+            # reported before the write rather than a default guessed here.
+            # `max-jobs` has no obvious right answer: 0 means "build nothing
+            # locally", which is not the default and is worse than the leak.
+            await session.set_settings(
+                nanopynix.NixGlobalSettings(
+                    max_jobs=int(before_write["max-jobs"]),
+                    keep_going=before_write["keep-going"] == "true",
+                ),
+            )
 
     note(**{f"{engine}/settings": {key: str(value)[:70] for key, value in seen.items()}})
 
