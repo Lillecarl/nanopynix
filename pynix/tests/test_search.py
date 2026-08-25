@@ -32,6 +32,9 @@ _FIXTURE_DIR = Path(__file__).parent / "test_search"
 _SYSTEM_NIX = _FIXTURE_DIR / "system.nix"
 _TARGET_DIR = Path(__file__).parent / "test_search_target"
 
+#: How long a write waits for the render that must come before it, in seconds.
+_DRAWN = 30.0
+
 #: How long a test waits for the pump to place its first request, in seconds.
 #: It covers the index build that comes before the interface, which the daemon
 #: backend takes seconds over. The deadline of `test_support.deadline` is 120,
@@ -494,17 +497,28 @@ def test_the_detail_pane_names_the_file_that_declares_the_option(
 async def _typed(tui: SearchTui[OptionRecord], pipe: PipeInput, keys: str) -> None:
     """Start *tui*, type *keys* into it, and then leave it.
 
-    **The keys go in after the application starts, and that is the point.**
+    **The write waits for a render, and a fixed wait is not enough.**
     `prompt_toolkit` attaches the read end of the input to the event loop
-    after its first render, so a key written before the start sits in a pipe
-    that nothing is reading yet. `pynix/tests/test_search_tui.py::_run` says
-    what that costs, and issue #271 is the CI job it costs it in.
+    inside `run_async`, so a key written before that attach sits in a pipe
+    nothing is reading. `after_render` fires from inside `_redraw`, which runs
+    after the attach, so a render that happened means the input is being read.
+
+    Measured: a wait of 0.05 s answered this on a fast machine, and this test
+    still lost 120 seconds to the deadline in `test-nogc-nix_2_35`.
+    `pynix/tests/test_search_tui.py::_Renders` says the rest, and issue #271
+    is the CI job it costs.
     """
+    drawn = anyio.Event()
+
+    def mark(_app: object) -> None:
+        drawn.set()
+
+    tui.application.after_render += mark
 
     async def write() -> None:
-        await anyio.sleep(_SETTLE)
+        with anyio.move_on_after(_DRAWN):
+            await drawn.wait()
         pipe.send_text(keys)
-        await anyio.sleep(_SETTLE)
         pipe.send_text(_QUIT)
 
     async with anyio.create_task_group() as group:
@@ -570,15 +584,21 @@ async def test_the_command_opens_the_interface_inside_its_event_loop(
             ],
         )
 
-        async def write() -> None:
-            await anyio.sleep(_SETTLE)
-            pipe.send_text("port")
-            await anyio.sleep(_SETTLE)
-            pipe.send_text(_QUIT)
+        # **The quit key repeats, because this test cannot see the
+        # application.** The command builds the interface inside itself, so
+        # there is no `after_render` to hook, and a key written before
+        # `prompt_toolkit` attaches the input is lost. The first key that
+        # lands after the attach ends the application, and the rest are never
+        # read.
+        async def quit_until_it_takes() -> None:
+            while True:
+                await anyio.sleep(_SETTLE)
+                pipe.send_text(_QUIT)
 
         async with anyio.create_task_group() as group:
-            group.start_soon(cmd.run)
-            group.start_soon(write)
+            group.start_soon(quit_until_it_takes)
+            await cmd.run()
+            group.cancel_scope.cancel()
 
 
 async def test_the_command_writes_nothing_while_the_interface_is_drawn(

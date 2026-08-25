@@ -90,37 +90,62 @@ def _tall_source() -> SearchSource[_Fruit]:
     )
 
 
-#: How long a drive waits between one write to the input and the next, in
-#: seconds. It is a wait for a render, and a render of this fixture is
-#: microseconds.
-_SETTLE = 0.05
+#: How long a write waits for the render that must come before it, in seconds.
+#: A render of this fixture is microseconds, and the budget is large because a
+#: sanitized CI job is not this machine. `test_support.deadline` fails an async
+#: test at 120, so a test that reaches this one still fails with its own words.
+_DRAWN = 30.0
+
+
+class _Renders:
+    """Counts the renders of one application, so a write can wait for one.
+
+    **`after_render` is the signal, and `is_running` is not.**
+    `Application.run_async` sets `is_running` before `_run_async` attaches the
+    read end of the input, so a write that waits on that one still races the
+    attach. `after_render` fires from inside `_redraw`, which runs after the
+    attach, so a render that happened means the input is being read.
+    """
+
+    def __init__(self) -> None:
+        self._event = anyio.Event()
+
+    def fire(self, _app: object) -> None:
+        self._event.set()
+
+    async def wait(self) -> None:
+        """Wait for the next render, and give up rather than hang."""
+        with anyio.move_on_after(_DRAWN):
+            await self._event.wait()
+        self._event = anyio.Event()
 
 
 async def _run(source: SearchSource[_Fruit] | None, writes: Sequence[str]) -> SearchTui[_Fruit]:
     """Start the application, write each of *writes* to it, and return it.
 
-    **Every write happens while the application is running, and that is not a
-    detail of style.** `prompt_toolkit` attaches the read end of the input to
-    the event loop after its first render, so a key written before the start
-    is read in the same pass as that render. Two things follow, and this
-    module met both:
+    **Every write waits for a render, and that is not a detail of style.**
+    `prompt_toolkit` attaches the read end of the input to the event loop
+    inside `run_async`, so a key written before that attach sits in a pipe
+    nothing is reading. Three things followed, and this module met all three:
 
-    - The application leaves before the redraw that the keys asked for, so a
-      test that reads what the window *drew* reads the opening screen every
+    - The application left before the redraw that the keys asked for, so a
+      test that reads what the window *drew* read the opening screen every
       time. Issue #270 is the defect that hid behind it.
-    - It is the shape that hangs in CI. `test-local-nix_2_35` and
-      `test-local-git` lose every test of this module to the 120-second
-      deadline, and neither reproduces in the dev shell. A key that is
-      already in the pipe when the reader attaches is the one difference
-      between this harness and a person at a terminal. Issue #271.
+    - Every test of this module lost 120 seconds to the deadline in
+      `test-local-nix_2_35` and `test-local-git`, and none of it reproduced
+      in the dev shell. Issue #271.
+    - A fixed wait of 0.05 s answered the second of those on a fast machine
+      and not on a sanitized CI job, which is the same race one level down.
     """
     with create_pipe_input() as pipe:
         tui = SearchTui(source or _source(), input=pipe, output=DummyOutput())
+        renders = _Renders()
+        tui.application.after_render += renders.fire
         with create_app_session(input=pipe, output=DummyOutput()):
 
             async def write() -> None:
                 for text in writes:
-                    await anyio.sleep(_SETTLE)
+                    await renders.wait()
                     pipe.send_text(text)
 
             async with anyio.create_task_group() as group:
