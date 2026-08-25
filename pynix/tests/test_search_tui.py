@@ -8,6 +8,7 @@ different key, is exactly the defect that these tests must catch.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -149,7 +150,7 @@ async def _run(source: SearchSource[_Fruit] | None, writes: Sequence[str]) -> Se
                     pipe.send_text(text)
 
             async with anyio.create_task_group() as group:
-                group.start_soon(tui.application.run_async)
+                group.start_soon(tui.run_application)
                 group.start_soon(write)
         return tui
 
@@ -175,6 +176,44 @@ async def _drive(keys: str, source: SearchSource[_Fruit] | None = None) -> Searc
 
 def _names(tui: SearchTui[_Fruit]) -> list[str]:
     return [fruit.name for fruit in tui.results]
+
+
+async def test_the_application_leaves_the_exception_handler_of_the_loop_alone() -> None:
+    """An exception must reach the caller, and not a prompt for a keypress.
+
+    `Application.run_async` installs `Application._handle_exception` as the
+    exception handler of the **event loop**, for every task on it. That
+    handler ends in `await _do_wait_for_enter("Press ENTER to continue...")`,
+    and it runs an `Application` of its own to ask, which fails the same way
+    and asks again.
+
+    Measured, issue #271, CI run 32799936618: one test left 4681 of those
+    waits behind, and the tests after it on the same loop reached 15712. The
+    tests read as slow and were not.
+
+    `SearchTui.run_application` passes `set_exception_handler=False`, so the
+    handler is whatever the caller had. This reads it from inside a render,
+    which is a point at which the application is certainly running.
+    """
+    seen: list[object] = []
+
+    with create_pipe_input() as pipe:
+        tui = SearchTui(_source(), input=pipe, output=DummyOutput())
+
+        def record(_app: object) -> None:
+            seen.append(asyncio.get_running_loop().get_exception_handler())
+
+        tui.application.after_render += record
+        with create_app_session(input=pipe, output=DummyOutput()):
+            async with anyio.create_task_group() as group:
+                group.start_soon(tui.run_application)
+                pipe.send_text(_CTRL_C)
+
+    if not seen:
+        pytest.fail("the application never rendered, so the handler was never read")
+    handlers = {handler for handler in seen if handler is not None}
+    named = {getattr(handler, "__name__", "") for handler in handlers}
+    assert "_handle_exception" not in named, f"prompt_toolkit installed its handler: {handlers}"
 
 
 #: The screen that `_Sized` reports. `DummyOutput` reports 80 columns, which is
@@ -419,7 +458,7 @@ async def test_the_divider_stays_put_when_the_selection_moves() -> None:
                 tui.application.exit()
 
             async with anyio.create_task_group() as group:
-                group.start_soon(tui.application.run_async)
+                group.start_soon(tui.run_application)
                 group.start_soon(walk)
 
     assert len(heights) == len(records), "the list pane did not draw for every record"
@@ -591,7 +630,7 @@ async def test_the_detail_pane_is_drawn_at_its_real_width() -> None:
                 pipe.send_text(_CTRL_C)
 
             async with anyio.create_task_group() as group:
-                group.start_soon(tui.application.run_async)
+                group.start_soon(tui.run_application)
                 group.start_soon(quit_once_drawn)
 
     assert widths, "the detail pane never drew"

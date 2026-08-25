@@ -561,6 +561,34 @@ class SearchTui[ItemT]:
         """
         return
 
+    async def run_application(self) -> None:
+        """Run the application, and let an exception leave it.
+
+        **`set_exception_handler=False`, and this method exists to say it in
+        one place.** `Application.run_async` otherwise installs
+        `Application._handle_exception` as the exception handler of the event
+        loop, for every task on that loop and not only for this application.
+        That handler prints the traceback and then waits:
+
+            await _do_wait_for_enter("Press ENTER to continue...")
+
+        Nobody presses ENTER on a CI runner, or in a pipe. Worse,
+        `_do_wait_for_enter` runs an `Application` of its own on the same
+        loop, which fails for the same reason and starts another handler. It
+        feeds itself.
+
+        Measured, issue #271, CI run 32799936618: one test held 4681 of those
+        waits and 4681 applications, and the tests after it on the same loop
+        reached 15712 of each. The tests read as slow and were not. The loop
+        could never finish, and the 120 s was the deadline of
+        `test_support.deadline`.
+
+        The tests of this class run the application through this method, and
+        not through `Application.run_async`, so they get the same behaviour as
+        a user.
+        """
+        await self.application.run_async(set_exception_handler=False)
+
     async def run(self) -> None:
         """Draw the interface, and return when the caller leaves it.
 
@@ -574,7 +602,7 @@ class SearchTui[ItemT]:
         """
         work = self.source.background
         if work is None:
-            await self.application.run_async()
+            await self.run_application()
             return
 
         async def background() -> None:
@@ -582,5 +610,5 @@ class SearchTui[ItemT]:
 
         async with anyio.create_task_group() as tasks:
             tasks.start_soon(background)
-            await self.application.run_async()
+            await self.run_application()
             tasks.cancel_scope.cancel()
