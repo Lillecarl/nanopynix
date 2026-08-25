@@ -157,6 +157,19 @@ SHELLS: dict[str, ShellSpec] = {
     # `-f` skips config.fish. fish needs no readline settings: it has no
     # "show all possibilities" question, and its pager is off for a list this
     # small.
+    #
+    # **A fish costs 10.06 s to start on a pty, and nothing here can avoid
+    # it.** fish 4.8.1 writes a run of terminal queries at start -- the kitty
+    # keyboard protocol, XTVERSION, the background colour, two `XTGETTCAP`
+    # names and the primary device attributes -- and then blocks on the
+    # answer. Measured, issue #275: the wait is `poll_schedule_timeout` in one
+    # thread with no child; every real `TERM` pays it; `TERM=dumb` does not
+    # and then fish draws no candidate list at all; and a reply to each query
+    # changes nothing.
+    #
+    # So a suite pays it once for each fish it starts. Keep the session that
+    # holds a fish alive, and read `test_completion_cases.py` for the shape of
+    # a parametrization that really does build one.
     "fish": ShellSpec(
         name="fish",
         argv=("fish", "--no-config", "--private"),
