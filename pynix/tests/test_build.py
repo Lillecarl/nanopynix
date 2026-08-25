@@ -548,12 +548,17 @@ async def test_build_update_fod_dry_run_updates_a_lib_fakehash_binding(
 
     captured = capsys.readouterr()
     assert json.loads(captured.out) == {"dryRun": True, "outputs": {}, "updatedFods": 1}
-    diff = strip_ansi(captured.err)
+    # The diff is wrapped for a terminal, and the wrap point moves with the
+    # length of the temporary path, so it lands inside `sha256 = "sha256:...`
+    # under one root and not under another. Match the text with every run of
+    # whitespace removed: the rendering then cannot decide whether the
+    # assertion holds.
+    flattened = re.sub(r"\s+", "", strip_ansi(captured.err))
     # The symbol leaves and a quoted hash takes its place. Nix reports the
-    # computed hash in base32 here, so the assertion names the attribute and
-    # the algorithm and not the encoding.
-    assert "lib.fakeHash" in diff
-    assert re.search(r'sha256 = "sha256[:-][A-Za-z0-9+/=]+"', diff)
+    # computed hash in base32 here and in SRI elsewhere, so the assertion
+    # names the attribute and the algorithm and not the encoding.
+    assert "lib.fakeHash" in flattened
+    assert re.search(r'sha256="sha256[:-][A-Za-z0-9+/=]+"', flattened)
     assert nix_file.read_text() == source
 
 
