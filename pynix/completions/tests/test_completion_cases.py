@@ -39,6 +39,7 @@ ROOT_SUBCOMMANDS = frozenset(
     {
         "build",
         "config",
+        "copy",
         "derivation",
         "develop",
         "eval",

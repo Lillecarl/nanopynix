@@ -10,6 +10,7 @@ from libpynix import Command, build_parser, complete, dispatch, group
 from pynix import _impl
 from pynix.build import Build
 from pynix.config import Config
+from pynix.copy import Copy
 from pynix.derivation import Derivation
 from pynix.develop import Develop, PrintDevEnv
 from pynix.eval import Eval
@@ -39,6 +40,7 @@ Pynix = group(
     subcommands=[
         Build,
         Config,
+        Copy,
         Eval,
         Derivation,
         Develop,

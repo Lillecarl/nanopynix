@@ -48,6 +48,21 @@ Check that Nix configuration can be loaded
 
 Show the effective system used by builtins.currentSystem
 
+### `pynix copy`
+
+Copy the closure of a store path from one store to another
+
+| Argument | Type | Help |
+| --- | --- | --- |
+| `paths` | `list[str]` | Store paths to copy. Give none when --file or --flake names the target. (default: `[]`) |
+| `--file` | `str or None` | Evaluate FILE as a Nix expression. FILE is a path, a lookup path, a URL, or a flake reference, and it may end with '#' and an attribute path. (default: `None`) |
+| `--attr` | `str or None` | Dot-separated attribute path within the evaluation result. (default: `None`) |
+| `--flake` | `str or None` | Evaluate FLAKE, optionally with a '#'-separated attribute path. (default: `None`) |
+| `--to` | `str or None` | Store URI to copy into. --store is the other side. (default: `None`) |
+| `--from` | `str or None` | Store URI to copy out of. --store is the other side. (default: `None`) |
+| `--check-sigs` | `bool` | Refuse a path that the destination store cannot verify a signature for. (default: `True`) |
+| `--store` | `str` | Store URI for the side that --to or --from does not name. (default: `'auto'`) |
+
 ### `pynix eval`
 
 Evaluate a Nix expression and print the result as JSON
