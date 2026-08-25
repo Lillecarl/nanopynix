@@ -5,6 +5,10 @@ import json
 import sys
 import time
 from contextlib import asynccontextmanager
+
+# A real import, and not a `TYPE_CHECKING` one: `resolve_local_store_path`
+# builds a `Path` at run time.
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, TextIO, cast
 
 import anyio
@@ -191,6 +195,52 @@ async def store_session(
         nix.store(store_uri) as store,
     ):
         yield nix, store
+
+
+async def resolve_local_store_path(store: Any, path: str) -> Path:
+    """Where *path* really is on this filesystem, for a store that has one.
+
+    A chroot store reports ``storeDir`` as the logical ``/nix/store`` and puts
+    the files somewhere else, so the string a caller types is not a path that
+    ``open`` can take. ``store_dirs`` reports both, and this is the translation.
+
+    Raises ``SystemExit`` when the store exposes no local path, which is what
+    an ssh or an http store does.
+
+    Shared by ``pynix store cat``, ``pynix store ls`` and ``pynix why-depends
+    --precise``. It lived in ``pynix._impl.store`` until the third one needed
+    it, and a command reaching into the implementation module of another
+    command is what this module exists to avoid.
+
+    ``Any`` and not ``AsyncStore``, which is what every ``_impl`` helper that
+    takes a store uses. ``NANOPYNIX_BEARTYPING=1`` checks the annotation at
+    run time, and ``test_store_gc.py`` drives these two commands through a
+    double that answers ``store_dirs`` and ``query_path_info`` and is not an
+    instance of the protocol. Typing this parameter tightly failed both of
+    those tests with ``BeartypeCallHintParamViolation``.
+    """
+    dirs = await store.store_dirs()
+    store_dir = dirs.store_dir.rstrip("/")
+    store_path, suffix = _split_store_path(path, store_dir)
+    await store.query_path_info(store_path)
+
+    if dirs.real_store_dir is None:
+        raise SystemExit("store does not expose a local filesystem path")
+    return Path(dirs.real_store_dir) / store_path.removeprefix(f"{store_dir}/") / suffix
+
+
+def _split_store_path(path: str, store_dir: str) -> tuple[str, Path]:
+    prefix = f"{store_dir}/"
+    if not path.startswith(prefix):
+        raise SystemExit(f"{path} is not inside {store_dir}")
+    rest = path.removeprefix(prefix)
+    base_name, separator, suffix = rest.partition("/")
+    if not base_name:
+        raise SystemExit(f"{path} is not a store path")
+    suffix_path = Path(suffix) if separator else Path()
+    if suffix_path.is_absolute() or ".." in suffix_path.parts:
+        raise SystemExit(f"{path} escapes {store_dir}/{base_name}")
+    return f"{store_dir}/{base_name}", suffix_path
 
 
 @asynccontextmanager

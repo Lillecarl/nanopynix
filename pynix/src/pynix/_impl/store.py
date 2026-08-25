@@ -15,7 +15,7 @@ import structlog
 
 import nanopynix
 from nanopynix._typechecking import BEARTYPING
-from pynix._util import print_json, store_session
+from pynix._util import print_json, resolve_local_store_path, store_session
 from pynix.store import (
     Add,
     AddFile,
@@ -82,31 +82,6 @@ async def _add_to_store(  # noqa: PLR0913 -- tracked complexity/arg-count debt, 
         else:
             result_path = await store.add_to_store(path, name=name, method=method, hash_algo=hash_algo)
         print_json({"path": result_path})
-
-
-async def _resolve_local_store_path(store: Any, path: str) -> Path:
-    dirs = await store.store_dirs()
-    store_dir = dirs.store_dir.rstrip("/")
-    store_path, suffix = _split_store_path(path, store_dir)
-    await store.query_path_info(store_path)
-
-    if dirs.real_store_dir is None:
-        raise SystemExit("store does not expose a local filesystem path")
-    return Path(dirs.real_store_dir) / store_path.removeprefix(f"{store_dir}/") / suffix
-
-
-def _split_store_path(path: str, store_dir: str) -> tuple[str, Path]:
-    prefix = f"{store_dir}/"
-    if not path.startswith(prefix):
-        raise SystemExit(f"{path} is not inside {store_dir}")
-    rest = path.removeprefix(prefix)
-    base_name, separator, suffix = rest.partition("/")
-    if not base_name:
-        raise SystemExit(f"{path} is not a store path")
-    suffix_path = Path(suffix) if separator else Path()
-    if suffix_path.is_absolute() or ".." in suffix_path.parts:
-        raise SystemExit(f"{path} escapes {store_dir}/{base_name}")
-    return f"{store_dir}/{base_name}", suffix_path
 
 
 def _directory_entry_to_json(path: Path) -> dict[str, object]:
@@ -299,7 +274,7 @@ async def run_ensure_path(command: EnsurePath) -> None:
 async def run_cat(command: Cat) -> None:
     """The body of :meth:`pynix.store.Cat.run`."""
     async with store_session(command.store) as (_nix, store):
-        resolved = await _resolve_local_store_path(store, command.path)
+        resolved = await resolve_local_store_path(store, command.path)
 
     if not resolved.is_file():
         raise SystemExit(f"{command.path} is not a regular file")
@@ -310,7 +285,7 @@ async def run_cat(command: Cat) -> None:
 async def run_ls(command: Ls) -> None:
     """The body of :meth:`pynix.store.Ls.run`."""
     async with store_session(command.store) as (_nix, store):
-        resolved = await _resolve_local_store_path(store, command.path)
+        resolved = await resolve_local_store_path(store, command.path)
 
     if resolved.is_dir():
         entries = sorted(resolved.iterdir(), key=lambda path: path.name)
