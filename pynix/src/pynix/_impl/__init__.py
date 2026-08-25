@@ -37,6 +37,7 @@ if typing.TYPE_CHECKING:
     from pynix._impl import (
         build as build,
         config as config,
+        copy as copy,
         derivation as derivation,
         develop as develop,
         eval as eval,
@@ -59,6 +60,7 @@ _SUBMODULES: typing.Final[frozenset[str]] = frozenset(
     {
         "build",
         "config",
+        "copy",
         "derivation",
         "develop",
         "eval",
