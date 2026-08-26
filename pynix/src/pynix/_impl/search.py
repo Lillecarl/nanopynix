@@ -28,6 +28,7 @@ descriptions still evaluates nothing.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -39,6 +40,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import anyio
 import structlog
 from rich.console import Console
 
@@ -271,6 +273,7 @@ async def run_search(command: Search) -> None:
         cached = await _build_index(command, target, ask, cached)
         save_cache(path, target, cached)
 
+    cached = await _ensure_binaries_index(command, path, target, cached)
     found = _read(command, target, ask, cached)
     if _use_tui(command):
         # The interface draws the whole terminal, and the resolver of the
@@ -292,6 +295,60 @@ async def run_search(command: Search) -> None:
 
     if command.query is not None:
         _print(command, found, command.query)
+
+
+async def _ensure_binaries_index(
+    command: Search,
+    path: Path,
+    target: EvaluationTarget,
+    cached: Cached,
+) -> Cached:
+    """Put the binaries index back in the store when the collector took it.
+
+    **`programs_db` is a store path that nothing roots.** The walk of nixpkgs
+    goes to `~/.cache/pynix/packages/` and survives anything; this one names
+    `/nix/store/...` and SQLite opens it directly, so a `nix store gc` between
+    two searches deletes it while the cache still says it is there.
+
+    Not being rooted does not mean it cannot be guaranteed. The path came from
+    `builtins.fetchTarball` of the channel, which is a fixed-output fetch: the
+    same URL gives the same store path, and Nix serves it from its own tarball
+    cache when it has one. So this asks the daemon for it again rather than
+    answering with less, and `add_temp_root` then holds it against a collector
+    that runs while the search reads it.
+
+    The cost falls on the miss alone. A path that is still there costs one
+    `exists` and one `add_temp_root`, and no evaluator opens.
+    """
+    if cached.programs_db is None or command.update_index:
+        return cached
+    # `anyio.Path` and not `pathlib.Path`: this is an async function, and a
+    # `stat` on a store that is a network mount can block the loop.
+    if await anyio.Path(cached.programs_db).exists():
+        return cached
+
+    error_console.print(
+        f"pynix: the binaries index at {cached.programs_db} is gone from the store, "
+        "so the channel it came from is being fetched again.",
+    )
+    try:
+        async with eval_session(command.store) as (_nix, store, session):
+            index = await program_index_for(session, Path(cached.pkgs_path or ""), _system(command), command.channel)
+            # The read happens after this block, so the root has to outlive
+            # the session. `add_temp_root` lasts as long as the process holds
+            # the store, which is the whole command.
+            with contextlib.suppress(NixError):
+                await store.add_temp_root(str(index.path))
+            cached.programs_db = str(index.path)
+            cached.origin = index.origin
+    except (OSError, NixError) as exc:
+        error_console.print(
+            f"pynix: fetching it again failed ({exc}), so a search of program names finds nothing.",
+        )
+        return cached
+
+    save_cache(path, target, cached)
+    return cached
 
 
 def _binaries(command: Search, cached: Cached) -> Mapping[str, list[str]]:

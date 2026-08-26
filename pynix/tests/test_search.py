@@ -22,6 +22,7 @@ from pynix._option_values import EvaluatorUnavailableError, OptionValues, Render
 from pynix._options import OptionRecord
 from pynix._programs import ProgramIndex
 from pynix.search import Search
+from pynix.target import EvaluationTarget
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Sequence
@@ -1115,6 +1116,19 @@ async def test_the_default_on_a_target_with_no_package_set_still_searches_option
 # ── A cache that names a store path which the store no longer has ────
 
 
+def _stderr(capsys: pytest.CaptureFixture[str]) -> str:
+    """Everything on stderr, as one line.
+
+    `error_console` is a rich `Console`, so it wraps to the terminal width and
+    a phrase of two words can arrive with a newline inside it. A test that
+    reads the text must not depend on how wide the terminal was.
+    """
+    return " ".join(capsys.readouterr().err.split())
+
+
+_TARGET = EvaluationTarget.from_command(parse(["search", "--file", str(_SYSTEM_NIX), "--no-tui"]))
+
+
 def _search_command(*extra: str) -> Search:
     command = parse(["search", "--file", str(_SYSTEM_NIX), "--no-tui", *extra])
     if not isinstance(command, Search):
@@ -1140,7 +1154,7 @@ def test_a_vanished_binaries_index_does_not_end_the_command(
     binaries = search_module._binaries(_search_command(), cached)
 
     assert binaries == {}
-    printed = capsys.readouterr().err
+    printed = _stderr(capsys)
     assert "--update-index" in printed, "the reader has to learn how to get it back"
 
 
@@ -1154,13 +1168,13 @@ def test_a_binaries_index_that_is_not_a_database_does_not_end_the_command(
     cached = search_module.Cached(programs_db=str(rubbish))
 
     assert search_module._binaries(_search_command(), cached) == {}
-    assert "--update-index" in capsys.readouterr().err
+    assert "--update-index" in _stderr(capsys)
 
 
 def test_no_binaries_index_is_silent(capsys: pytest.CaptureFixture[str]) -> None:
     """A cache that never held one is complete, so it says nothing."""
     assert search_module._binaries(_search_command(), search_module.Cached()) == {}
-    assert capsys.readouterr().err == ""
+    assert _stderr(capsys) == ""
 
 
 def test_a_readable_index_still_answers(tmp_path: Path) -> None:
@@ -1175,3 +1189,59 @@ def test_a_readable_index_still_answers(tmp_path: Path) -> None:
     cached = search_module.Cached(programs_db=str(database))
 
     assert search_module._binaries(_search_command(), cached) == {"ripgrep": ["rg"]}
+
+
+async def test_a_present_index_opens_no_evaluator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The miss pays for the fetch, and the hit pays one `exists`."""
+    database = tmp_path / "programs.sqlite"
+    database.write_text("")
+    cached = search_module.Cached(programs_db=str(database))
+
+    def _no_session(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("a path that is there must not open an evaluator")
+
+    monkeypatch.setattr(search_module, "eval_session", _no_session)
+
+    result = await search_module._ensure_binaries_index(_search_command(), tmp_path / "cache.json", _TARGET, cached)
+
+    assert result.programs_db == str(database)
+
+
+async def test_no_index_opens_no_evaluator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cache that never held one has nothing to put back."""
+
+    def _no_session(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("nothing to fetch")
+
+    monkeypatch.setattr(search_module, "eval_session", _no_session)
+
+    result = await search_module._ensure_binaries_index(
+        _search_command(), tmp_path / "cache.json", _TARGET, search_module.Cached()
+    )
+
+    assert result.programs_db is None
+
+
+async def test_a_failed_refetch_leaves_the_search_running(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A machine with no network still answers with every package it walked."""
+    cached = search_module.Cached(programs_db=str(tmp_path / "gone" / "programs.sqlite"), pkgs_path="/nix/store/x")
+
+    def _fails(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise OSError("no network")
+
+    monkeypatch.setattr(search_module, "eval_session", _fails)
+
+    result = await search_module._ensure_binaries_index(_search_command(), tmp_path / "cache.json", _TARGET, cached)
+
+    assert result is cached, "it must not lose the walk"
+    assert "finds nothing" in _stderr(capsys)
