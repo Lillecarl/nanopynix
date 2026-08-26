@@ -1110,3 +1110,68 @@ async def test_the_default_on_a_target_with_no_package_set_still_searches_option
     await cmd.run()
     rows = _results(capsys.readouterr().out)
     assert {row["kind"] for row in rows} == {"option"}
+
+
+# ── A cache that names a store path which the store no longer has ────
+
+
+def _search_command(*extra: str) -> Search:
+    command = parse(["search", "--file", str(_SYSTEM_NIX), "--no-tui", *extra])
+    if not isinstance(command, Search):
+        raise TypeError("expected the parser to build a Search command")
+    return command
+
+
+def test_a_vanished_binaries_index_does_not_end_the_command(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`programs_db` is a store path, and nothing roots it.
+
+    The walk of nixpkgs lives under `~/.cache/pynix/packages/` and survives
+    anything. This one names `/nix/store/...`, so a `nix store gc` between two
+    searches deletes it while the cache still says it is there. SQLite then
+    raised `unable to open database file` out of `_read`, with no handler
+    above it, and a stale cache crashed the whole command.
+    """
+    gone = tmp_path / "gone" / "programs.sqlite"
+    cached = search_module.Cached(programs_db=str(gone))
+
+    binaries = search_module._binaries(_search_command(), cached)
+
+    assert binaries == {}
+    printed = capsys.readouterr().err
+    assert "--update-index" in printed, "the reader has to learn how to get it back"
+
+
+def test_a_binaries_index_that_is_not_a_database_does_not_end_the_command(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A file that exists and is not SQLite fails at the query and not the open."""
+    rubbish = tmp_path / "programs.sqlite"
+    rubbish.write_text("this is not a database")
+    cached = search_module.Cached(programs_db=str(rubbish))
+
+    assert search_module._binaries(_search_command(), cached) == {}
+    assert "--update-index" in capsys.readouterr().err
+
+
+def test_no_binaries_index_is_silent(capsys: pytest.CaptureFixture[str]) -> None:
+    """A cache that never held one is complete, so it says nothing."""
+    assert search_module._binaries(_search_command(), search_module.Cached()) == {}
+    assert capsys.readouterr().err == ""
+
+
+def test_a_readable_index_still_answers(tmp_path: Path) -> None:
+    """The degradation must not swallow the working case."""
+    database = tmp_path / "programs.sqlite"
+    with contextlib.closing(sqlite3.connect(database)) as connection:
+        connection.execute("create table Programs (package text, name text, system text)")
+        connection.execute(
+            "insert into Programs values ('ripgrep', 'rg', ?)", (search_module._system(_search_command()),)
+        )
+        connection.commit()
+    cached = search_module.Cached(programs_db=str(database))
+
+    assert search_module._binaries(_search_command(), cached) == {"ripgrep": ["rg"]}
