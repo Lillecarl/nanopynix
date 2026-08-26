@@ -32,6 +32,7 @@ import hashlib
 import json
 import os
 import platform
+import sqlite3
 from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
@@ -293,16 +294,43 @@ async def run_search(command: Search) -> None:
         _print(command, found, command.query)
 
 
+def _binaries(command: Search, cached: Cached) -> Mapping[str, list[str]]:
+    """The binaries index of this cache, or nothing when it cannot be read.
+
+    **`programs_db` is a store path, and the cache holds no root for it.** The
+    walk of nixpkgs lives in `~/.cache/pynix/packages/` and survives anything,
+    but this one names `/nix/store/...` directly, so a `nix store gc` between
+    two searches deletes it. The cache still said it was there, and SQLite
+    then raised `unable to open database file` out of `_read` with no handler
+    above it: a stale cache crashed the whole command.
+
+    Losing the index is not losing the answer. `_missing` says why a cache
+    with the walk and no binaries is complete: the binaries only add "which
+    package installs this program", and asking again downloads the channel on
+    every search. So this degrades, reports on stderr, and names the flag that
+    brings the index back.
+    """
+    if cached.programs_db is None:
+        return {}
+    path = Path(cached.programs_db)
+    index = ProgramIndex(path=path, system=_system(command), release="", revision="")
+    try:
+        return index.binaries_by_package()
+    except sqlite3.Error as exc:
+        error_console.print(
+            f"pynix: the binaries index at {path} is gone or unreadable ({exc}), "
+            "so a search of program names finds nothing. Pass --update-index to build it again.",
+        )
+        return {}
+
+
 def _read(command: Search, target: EvaluationTarget, ask: Wanted, cached: Cached) -> Found:
     """Turn the cache into the records that a search ranks."""
     options = cached.options or [] if ask.options else []
     packages: list[SearchablePackage] = []
     if ask.packages and cached.pkgs_path is not None:
         records = load_packages(package_cache_path(cached.pkgs_path)) or []
-        binaries: Mapping[str, list[str]] = {}
-        if cached.programs_db is not None:
-            index = ProgramIndex(path=Path(cached.programs_db), system=_system(command), release="", revision="")
-            binaries = index.binaries_by_package()
+        binaries = _binaries(command, cached)
         packages = join(records, binaries)
     subject = _target_description(target)
     if cached.origin and ask.packages:
