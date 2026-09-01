@@ -71,12 +71,11 @@ Nix computes a build environment in six steps, in `src/nix/develop.cc`, and
 about how a derivation is written and how its output paths are filled, so that
 part lives in the C++ bindings with the rest of the version handling.
 
-`get-env.sh` is Nix's own script, vendored at `pynix/src/pynix/get-env.sh`
-under LGPL-2.1-or-later, with a header that names its origin. That header is
-the only change, and it is why `pynix` builds a different `-env` derivation
-from `nix`. The environment that the two produce is the same, except for
-`LINENO` (the header moves the dump down the file) and the `-frandom-seed=` in
-`NIX_CFLAGS_COMPILE` (stdenv derives it from the output path).
+`get-env.sh` is Nix's own `src/nix/get-env.sh`. Nix compiles it into the
+`nix` binary and no library carries it, so the bindings carry it
+(LGPL-2.1-or-later). The Nix build copies it from the Nix source of the
+version it links, so the `-env` derivation that `pynix` builds is the same one
+that `nix` builds.
 
 The original derivation is not changed. The rewrite writes a second one.
 

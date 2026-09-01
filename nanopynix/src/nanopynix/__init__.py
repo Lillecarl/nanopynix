@@ -129,6 +129,7 @@ if typing.TYPE_CHECKING:
         WorkerSignaledError,
         WrongNixTypeError,
     )
+    from nanopynix.get_env import get_env_sh_path as get_env_sh_path
     from nanopynix.libstore import init_libstore as init_libstore
     from nanopynix.logging import LogCapture, LogCollector
     from nanopynix.models import (
@@ -331,6 +332,7 @@ _NAME_TO_MODULE: typing.Final[dict[str, str]] = {
     "from_yaml11": "nanopynix.primops",
     "from_yaml11_stream": "nanopynix.primops",
     "from_yaml_stream": "nanopynix.primops",
+    "get_env_sh_path": "nanopynix.get_env",
     "get_flake": "nanopynix_bindings.flake",
     "get_verbosity": "nanopynix_bindings.util",
     "init_libexpr": "nanopynix_bindings.expr",
@@ -542,6 +544,7 @@ __all__ = [
     "from_yaml11",
     "from_yaml11_stream",
     "from_yaml_stream",
+    "get_env_sh_path",
     "get_flake",
     "get_verbosity",
     "init_libexpr",

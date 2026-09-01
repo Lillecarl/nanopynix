@@ -276,8 +276,24 @@ buildPythonPackage (
     # `-o <file>` rather than `-O <dir>`: stubgen infers the output name from
     # the module's `__file__`, and a submodule of an extension has none. It
     # says so and exits rather than guessing, which is how this was found.
-    postInstall = ''
-      _site="$out/${python.sitePackages}"
+    postInstall =
+      let
+        nixStore = nix-store;
+      in
+      ''
+        _site="$out/${python.sitePackages}"
+        # ``get-env.sh`` is Nix's own ``src/nix/get-env.sh``, carried here because
+        # Nix compiles it into the ``nix`` binary as a file-static string and no
+        # library carries it. The build copies it from the Nix source of the
+        # version it links, so the bytes always follow the Nix it links and the
+        # derivation hash matches the one that ``nix print-dev-env`` builds.
+        # ``nix-store.src`` names that source because the store is one of the
+        # inputs that already reaches this derivation.
+        #
+        # `-f` is deliberate: a missing source must fail the build, because the
+        # installed package then ships no script at all. There is no checked-in
+        # fallback, and every build is a Nix build.
+        cp -f "${nixStore.src}/src/nix/get-env.sh" "$_site/nanopynix_bindings/get-env.sh"
       for mod in errors signals util store expr fetchers flake; do
         _pat=""
         if [ -f "src/$mod.pat" ]; then
