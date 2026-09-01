@@ -31,15 +31,8 @@ APACHE = "Apache-2.0"
 # The one exception, and the reason it is one. Read `AGENTS.md`.
 LGPL = "LGPL-2.1-or-later"
 LGPL_PROJECT = "nanopynix-bindings"
-# And one project that states both, because it ships both. `pynix` vendors
-# `src/pynix/get-env.sh`, which is Nix's own script under the LGPL: Nix
-# compiles it into the `nix` binary as a file-static string, so it is in no
-# library and a consumer has to carry a copy. The two do not combine -- the
-# script is run and not linked -- so this is an aggregation and not a work
-# under both.
-EXPECTED = {
+EXPECTED: dict[str, str] = {
     LGPL_PROJECT: LGPL,
-    "pynix": f"{APACHE} AND {LGPL}",
 }
 
 

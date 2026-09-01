@@ -283,3 +283,15 @@ and `nanopynix_bindings.fetchers.Input` is the C++ object.
 
 .. autofunction:: nanopynix_bindings.fetchers.input_from_attrs
 ```
+
+## The environment dumper script
+
+Nix embeds `get-env.sh` into the `nix` binary, and no library carries it.
+The bindings ship the file because they are the distribution that links
+libnix. `get_env_sh_path` returns the path to the installed copy, which is
+what `pynix print-dev-env` reads when it rewrites a derivation to dump its
+own build environment.
+
+```{eval-rst}
+.. autofunction:: nanopynix.get_env_sh_path
+```

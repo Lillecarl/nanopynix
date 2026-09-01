@@ -37,20 +37,20 @@ if TYPE_CHECKING:
 
     from nanopynix_testing.nix_environment import NixTestEnvironment
 
-#: A store path, with the hash reduced to a placeholder. pynix and nix build a
-#: *different* ``-env`` derivation, because pynix's vendored ``get-env.sh``
-#: carries a provenance header, so every path derived from that derivation
-#: differs by its hash alone.
+#: A store path, with the hash reduced to a placeholder. The ``-env``
+#: derivation is content-addressed over ``get-env.sh``, so any difference in
+#: that script changes every path. ``nanopynix-bindings`` ships the same
+#: ``get-env.sh`` that Nix embeds, so the two derivations agree.
 _STORE_PATH = re.compile(r"/nix/store/[a-z0-9]{32}-")
 
-#: The two variables that cannot agree, and why. Both follow from the header on
-#: the vendored script, which is a deliberate choice and not a defect:
+#: Variables that still differ between pynix and the oracle in an otherwise
+#: identical environment. Kept for the case a future Nix changes the script
+#: between versions:
 #:
-#: - ``LINENO`` is the line of ``get-env.sh`` that dumps the environment, and
-#:   the header moves it down the file.
+#: - ``LINENO`` is the line of ``get-env.sh`` that dumps the environment.
 #: - ``NIX_CFLAGS_COMPILE`` carries ``-frandom-seed=``, which stdenv derives
-#:   from the output path, and the output path follows the derivation.
-_EXPECTED_DIFFERENCES = frozenset({"LINENO", "NIX_CFLAGS_COMPILE"})
+#:   from the output path.
+_EXPECTED_DIFFERENCES: frozenset[str] = frozenset({"LINENO", "NIX_CFLAGS_COMPILE"})
 
 #: The variables that name the temporary directory of one build.
 #:

@@ -538,14 +538,13 @@ The other direction needs no argument. Section 6 of the LGPL exists for a work
 that uses the library, and an Apache-2.0 work that imports the bindings is
 that work.
 
-**`pynix` states both licences, because it ships both.**
-`pynix/src/pynix/get-env.sh` is Nix's own script, vendored under
-LGPL-2.1-or-later, because Nix compiles it into the `nix` binary as a
-file-static string and a consumer of the libraries has to carry a copy. Its
-`license` is `Apache-2.0 AND LGPL-2.1-or-later`, and it carries both licence
-files. `AND`, and not `OR`: a recipient gets each file under the licence that
-file names. The two do not combine, because `pynix` runs that script rather
-than links it.
+**`nanopynix-bindings` also ships `get-env.sh`.** `src/nix/get-env.sh` is Nix's
+own script, and Nix compiles it into the `nix` binary as a file-static string.
+It lives in no library, so a consumer of the libraries must carry it. The
+bindings carry it, because they are the LGPL project. The Nix build copies it
+from the Nix source of the version it links, so the bytes follow that Nix and
+no copy sits in the tree. `nanopynix` re-exports the path, so `pynix` reads it
+without importing a private implementation module of the bindings.
 
 `tests/meta/test_licensing.py` holds each part of this that a machine can
 check: every project states a licence, the bindings state the LGPL one, every
