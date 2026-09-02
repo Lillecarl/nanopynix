@@ -195,6 +195,12 @@ let
   # patch's own commentary) found via ThreadSanitizer (see `sanitizers` above).
   # thread_local gives each evaluator OS thread its own instance, fixing the
   # race without any behavior change for single-threaded use.
+  #
+  # **2.34 and 2.35 only, because 2.36 corrects the defect.** Upstream made
+  # `emptyBindings` a `const constinit` object, and it guards the write in
+  # `ExprAttrs::eval` with `if (bindings.bindings != &Bindings::emptyBindings)`.
+  # No thread writes the shared instance there, so the patch has nothing to
+  # correct and does not apply.
   emptyBindingsPatch = ./nix/patches/nix-thread-local-empty-bindings.patch;
 
   # The base environment of an evaluator holds one slot for each name that
@@ -223,10 +229,12 @@ let
   # and never meets this; nanopynix gives each evaluator its own thread, so it
   # does. ThreadSanitizer found it -- see issue #90, and the patch header.
   #
-  # One file, since 2.31 left the matrix. That version needed a second copy of
-  # this patch: `describe` was byte-identical everywhere, and `emitTreeAttrs`
-  # was not, because 2.31 wrote the call on one line and took no `state.mem`.
-  gmtimePatch = ./nix/patches/nix-gmtime-not-thread-safe.patch;
+  # Two files for one change, because `emitTreeAttrs` differs. `describe` is
+  # byte-identical on every version. 2.36 gives `attrs.alloc` a second
+  # argument, the position of the call, so the line that the patch replaces is
+  # not the same line. The 2.36 file covers git as well.
+  gmtimePatch234 = ./nix/patches/nix-2.34-gmtime-not-thread-safe.patch;
+  gmtimePatch236 = ./nix/patches/nix-2.36-gmtime-not-thread-safe.patch;
 
   # `EvalState::printStatistics` writes its report to stderr, or to the file
   # that `NIX_SHOW_STATS_PATH` names. nanopynix embeds the evaluator, so it can
@@ -235,41 +243,41 @@ let
   # three call-count maps concurrent. The patch header gives the reason for
   # each part, and the upstream defect that the third part corrects.
   #
-  # Two files for one change, because the line numbers differ. The 2.35 file
-  # covers git as well: `lib.versions.majorMinor` reads git's
-  # "2.35pre20260619_f8bb823a" as "2.35", and the patch applies there with an
-  # offset and no fuzz.
+  # One file for each version, because the context differs. The three files
+  # add and remove the same lines, and only the lines around them move: 2.36
+  # writes `noPos` where 2.35 writes `pos` at two call sites that a hunk of
+  # this patch touches. The 2.36 file covers git as well.
   countCallsPatch234 = ./nix/patches/nix-2.34-count-calls.patch;
   countCallsPatch235 = ./nix/patches/nix-2.35-count-calls.patch;
+  countCallsPatch236 = ./nix/patches/nix-2.36-count-calls.patch;
 
   # Which patches to apply to a given nix version's modular component set,
   # keyed by that version's own major.minor (e.g. "2.34"), with `default`
   # as the fallback for anything without its own entry (git's rolling
   # pre-release version string, any future point release, ...).
   nixPatches = {
-    # A version with no entry of its own. The countCalls patch is the 2.35
-    # file, which is the newest one. A future version whose source moved fails
-    # here, at the patch, and that is the failure to want: the bindings gate
-    # the statistics on the version number, so a silent absence would instead
-    # break the build of the bindings.
+    # A version with no entry of its own, and git is that version today:
+    # `lib.versions.majorMinor` reads "2.36pre20260804_d8c24e61" as "2.36".
+    # So this list is the newest set, and it holds no patch that upstream
+    # already carries. A future version whose source moved fails here, at the
+    # patch, and that is the failure to want: the bindings gate the statistics
+    # on the version number, so a silent absence would instead break the build
+    # of the bindings.
     default = [
-      emptyBindingsPatch
       baseEnvSizePatch
-      gmtimePatch
-      countCallsPatch235
+      gmtimePatch236
+      countCallsPatch236
     ];
     "2.34" = [
       emptyBindingsPatch
       baseEnvSizePatch
-      gmtimePatch
+      gmtimePatch234
       countCallsPatch234
     ];
-    # git resolves to this entry too, because its version string reads as
-    # "2.35". The countCalls patch is the 2.35 file for that reason.
     "2.35" = [
       emptyBindingsPatch
       baseEnvSizePatch
-      gmtimePatch
+      gmtimePatch234
       countCallsPatch235
     ];
   };
