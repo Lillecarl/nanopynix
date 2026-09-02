@@ -33,25 +33,30 @@ both places already.
 This is nanopynix issue #90. The defect belongs to Nix, and this patch is the
 local repair until an upstream release carries one.
 
+This file applies to 2.36 and to git. `nix-2.34-gmtime-not-thread-safe.patch`
+is the same change for 2.34 and for 2.35. Only the call site of `attrs.alloc`
+in fetchTree.cc differs: 2.36 gives that function a second argument, the
+position of the call.
+
 diff -ruN a/src/libexpr/primops/fetchTree.cc b/src/libexpr/primops/fetchTree.cc
---- a/src/libexpr/primops/fetchTree.cc	2026-08-05 23:08:27.288122283 +0200
-+++ b/src/libexpr/primops/fetchTree.cc	2026-08-05 23:08:45.387292366 +0200
-@@ -163,8 +163,11 @@
+--- a/src/libexpr/primops/fetchTree.cc	2026-09-02 10:15:37.988231445 +0200
++++ b/src/libexpr/primops/fetchTree.cc	2026-09-02 10:15:46.695591603 +0200
+@@ -167,8 +167,11 @@
  
      if (auto lastModified = input.getLastModified()) {
-         attrs.alloc("lastModified").mkInt(*lastModified);
+         attrs.alloc("lastModified", callPos).mkInt(*lastModified);
 +        // See the comment in libflake/lockfile.cc's describe(): gmtime shares
 +        // one static buffer between every thread, and gmtime_r does not.
 +        struct tm tmBuf;
-         attrs.alloc("lastModifiedDate")
+         attrs.alloc("lastModifiedDate", callPos)
 -            .mkString(fmt("%s", std::put_time(std::gmtime(&*lastModified), "%Y%m%d%H%M%S")), state.mem);
 +            .mkString(fmt("%s", std::put_time(::gmtime_r(&*lastModified, &tmBuf), "%Y%m%d%H%M%S")), state.mem);
      }
  
      v.mkAttrs(attrs);
 diff -ruN a/src/libflake/lockfile.cc b/src/libflake/lockfile.cc
---- a/src/libflake/lockfile.cc	2026-08-05 23:08:27.286122293 +0200
-+++ b/src/libflake/lockfile.cc	2026-08-05 23:08:45.386290171 +0200
+--- a/src/libflake/lockfile.cc	2026-09-02 10:15:37.996489564 +0200
++++ b/src/libflake/lockfile.cc	2026-09-02 10:15:38.347194627 +0200
 @@ -349,8 +349,14 @@
  {
      auto s = fmt("'%s'", flakeRef.to_string());

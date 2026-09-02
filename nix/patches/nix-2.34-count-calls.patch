@@ -29,9 +29,9 @@ One upstream defect goes with them. `printStatistics` wrote
 document, so every attribute count was built and then discarded. The `&` is
 here.
 
-This file applies to 2.34. `nix-2.35-count-calls.patch` is the same change for
-2.35 and for git, where only the line numbers differ. 2.31 gets neither: see
-the `nixPatches` comment in `default.nix`.
+This file applies to 2.34 alone. `nix-2.35-count-calls.patch` and
+`nix-2.36-count-calls.patch` are the same change for the other two versions,
+where the context differs.
 
 --- a/src/libexpr/eval.cc	1970-01-01 01:00:01.000000000 +0100
 +++ b/src/libexpr/eval.cc	2026-08-12 08:33:25.977623749 +0200
