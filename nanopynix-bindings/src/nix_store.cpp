@@ -2,6 +2,7 @@
 
 #include "nanopynix_modules.hh"
 #include "nix_ref_caster.hh"
+#include "nix_store_compat.hh"
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/optional.h>
@@ -757,7 +758,7 @@ static nb::list build_derived_paths_with_results(
     std::vector<nix::KeyedBuildResult> results;
     {
         nb::gil_scoped_release release;
-        results = s.buildPathsWithResults(paths, buildMode, evalStore);
+        results = nanopynix::nix_compat::build_paths_with_results(s, paths, buildMode, evalStore);
     }
     nb::list out;
     for (auto &kbr : results) out.append(nanopynix::build_result::from_kbr(kbr, s));
@@ -793,6 +794,25 @@ static void copy_closure(
         checkSigs ? nix::CheckSigs : nix::NoCheckSigs,
         substitute ? nix::Substitute : nix::NoSubstitute);
 }
+
+// The two input collections of a derivation, under one name for each.
+//
+// **2.36 groups them.** Up to 2.35 a `Derivation` carries `inputSrcs` and
+// `inputDrvs` directly. 2.36 makes `Derivation` a template over its inputs
+// parameter and moves both fields into `inputs`, a `derivation::FullInputs`
+// with the members `srcs` and `drvs`. Nothing else about either collection
+// changes, so one accessor for each keeps every call site on one spelling.
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_36
+static inline auto & drv_input_srcs(nix::Derivation & d) { return d.inputSrcs; }
+static inline const auto & drv_input_srcs(const nix::Derivation & d) { return d.inputSrcs; }
+static inline auto & drv_input_drvs(nix::Derivation & d) { return d.inputDrvs; }
+static inline const auto & drv_input_drvs(const nix::Derivation & d) { return d.inputDrvs; }
+#else
+static inline auto & drv_input_srcs(nix::Derivation & d) { return d.inputs.srcs; }
+static inline const auto & drv_input_srcs(const nix::Derivation & d) { return d.inputs.srcs; }
+static inline auto & drv_input_drvs(nix::Derivation & d) { return d.inputs.drvs; }
+static inline const auto & drv_input_drvs(const nix::Derivation & d) { return d.inputs.drvs; }
+#endif
 
 // One node of `Derivation::inputDrvs`, which is a `DerivedPathMap` -- a *tree*
 // of `{V value; Map childMap;}`, nesting once per level of dynamic derivation.
@@ -846,7 +866,7 @@ static nb::dict derived_path_node_to_dict(const Node &node) {
 // registered a type that no value has. The element type also differs across
 // the supported Nix versions, which is why `derived_path_node_to_dict` below
 // is a template.
-using DrvInputMap = std::decay_t<decltype(std::declval<const nix::Derivation &>().inputDrvs.map)>;
+using DrvInputMap = std::decay_t<decltype(drv_input_drvs(std::declval<const nix::Derivation &>()).map)>;
 using DrvInputNode = DrvInputMap::mapped_type;
 
 static void bind_derivation_outputs(nb::module_ &m) {
@@ -970,14 +990,14 @@ static void bind_derivation(nb::module_ &m) {
         .def_prop_ro("input_srcs",
                      [](const PyDerivation &d) {
                          nb::list srcs;
-                         for (auto &p : d.drv.inputSrcs)
+                         for (auto &p : drv_input_srcs(d.drv))
                              srcs.append(d.render(p));
                          return srcs;
                      })
         .def_prop_ro("input_drvs",
                      [](const PyDerivation &d) {
                          nb::dict drvs;
-                         for (auto &[path, node] : d.drv.inputDrvs.map)
+                         for (auto &[path, node] : drv_input_drvs(d.drv).map)
                              drvs[d.render(path).c_str()] = nb::cast(node);
                          return drvs;
                      })
@@ -1050,12 +1070,12 @@ static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
 
     // input_srcs: set<StorePath>
     nb::list input_srcs;
-    for (auto &p : drv.inputSrcs) input_srcs.append(s.printStorePath(p));
+    for (auto &p : drv_input_srcs(drv)) input_srcs.append(s.printStorePath(p));
     d["input_srcs"] = input_srcs;
 
     // input_drvs: map<drvPath, DerivationOutputs>
     nb::dict input_drvs;
-    for (auto &[path, node] : drv.inputDrvs.map)
+    for (auto &[path, node] : drv_input_drvs(drv).map)
         input_drvs[s.printStorePath(path).c_str()] = derived_path_node_to_dict(node);
     d["input_drvs"] = input_drvs;
 
@@ -1153,7 +1173,7 @@ static nix::StorePath write_dev_shell_derivation(
 
         drv.name += "-env";
         drv.env.emplace("name", drv.name);
-        drv.inputSrcs.insert(script_path);
+        drv_input_srcs(drv).insert(script_path);
 
         // Only the two addressed kinds become deferred. CAFloating, Deferred
         // and Impure already have no path to invalidate.
@@ -1170,7 +1190,12 @@ static nix::StorePath write_dev_shell_derivation(
                 [&](const auto &) {},
             }, output.raw);
         }
+        // 2.36 makes this a free function in `nix::derivation`.
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_36
         drv.fillInOutputPaths(s);
+#else
+        nix::derivation::fillInOutputPaths(drv, s);
+#endif
         result.emplace(s.writeDerivation(drv));
     }
     return *result;
@@ -1369,7 +1394,7 @@ static void bind_store(nb::module_ &m) {
             },
             nb::call_guard<nb::gil_scoped_release>(),
             "path"_a)
-        .def("ensure_path", [](nix::Store &s, const nix::StorePath &p) { s.ensurePath(p); },
+        .def("ensure_path", [](nix::Store &s, const nix::StorePath &p) { nanopynix::nix_compat::ensure_path(s, p); },
              nb::call_guard<nb::gil_scoped_release>(), "path"_a)
         .def("optimise_store", [](nix::Store &s) { s.optimiseStore(); },
              nb::call_guard<nb::gil_scoped_release>())

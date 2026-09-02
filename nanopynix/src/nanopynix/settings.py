@@ -182,6 +182,7 @@ NIX_PLATFORM_KEY = "nix_platform"
 
 NIX_2_34 = "2.34"
 NIX_2_35 = "2.35"
+NIX_2_36 = "2.36"
 
 
 def since(version: str) -> Any:
@@ -471,6 +472,7 @@ class NixGlobalSettings(NixConfigModel):
     auto_optimise_store: bool | None = None
     build_dir: str | None = None
     build_hook: str | None = None
+    build_hook_kill_timeout: int | None = since(NIX_2_36)
     build_poll_interval: int | None = None
     build_users_group: str | None = None
     builders: list[str] | None = None

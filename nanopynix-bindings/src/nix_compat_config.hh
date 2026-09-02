@@ -14,3 +14,4 @@
 // constant that no `#if` reads is a version this build still appears to
 // support.
 #define NANOPYNIX_NIX_2_35 2035
+#define NANOPYNIX_NIX_2_36 2036

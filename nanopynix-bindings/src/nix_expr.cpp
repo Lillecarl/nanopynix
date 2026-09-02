@@ -1,6 +1,7 @@
 #include <nanobind/nanobind.h>
 
 #include "nanopynix_modules.hh"
+#include "nix_store_compat.hh"
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/optional.h>
@@ -119,6 +120,28 @@ void setCallingThreadName(const char *name) {
 #include <nlohmann/json.hpp>
 
 #include <nanopynix/nix_compat_config.hh>
+
+// The second parameter of a primop.
+//
+// **2.36 wraps the position in a `CallSite`.** `PrimOpFun` took a `PosIdx` up
+// to 2.35, and it takes a `nix::CallSite` now -- a struct that holds one
+// `PosIdx` and says in its own comment that the position is already printed.
+// Every primop of this file ignores the parameter, so the alias is all that
+// the change costs here.
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_36
+using PrimOpCallSite = nix::PosIdx;
+#else
+using PrimOpCallSite = nix::CallSite;
+#endif
+
+/// The position of the call, for a primop that reports an error at it.
+static inline nix::PosIdx primop_pos(const PrimOpCallSite site) {
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_36
+    return site;
+#else
+    return site.pos;
+#endif
+}
 
 #include "build_result_util.hh"
 #include "nanopynix_errors.hh"
@@ -590,7 +613,7 @@ nb::dict PyValue::build(
     std::vector<nix::KeyedBuildResult> results;
     try {
         nb::gil_scoped_release release;
-        results = store->buildPathsWithResults(paths, build_mode, eval_store);
+        results = nanopynix::nix_compat::build_paths_with_results(*store, paths, build_mode, eval_store);
     } catch (nix::Error &e) {
         nix::logger->logEI(nix::lvlError, e.info());
         e.addTrace({}, "while building evaluated derivation");
@@ -1246,8 +1269,8 @@ static std::vector<std::unique_ptr<nix::PrimOp>> &anon_primops() {
 // from the callable branch in python_to_value.
 static void py_primop_bridge(
     const std::string &name, int arity,
-    nix::EvalState &state, const nix::PosIdx,
-    nix::Value **args, nix::Value &ret);
+    nix::EvalState &state, const PrimOpCallSite,
+    nix::Value *const *args, nix::Value &ret);
 
 // Holder for a registered Python primop callback (forward-declared for
 // the callable branch in python_to_value).
@@ -1375,8 +1398,8 @@ static void python_to_value(
             reg[anon_name] = PyPrimOpCallback{std::move(obj), arity, ""};
 
             auto impl = [anon_name, arity](
-                nix::EvalState &st, const nix::PosIdx pos,
-                nix::Value **args, nix::Value &ret) {
+                nix::EvalState &st, const PrimOpCallSite pos,
+                nix::Value *const *args, nix::Value &ret) {
                 py_primop_bridge(anon_name, arity, st, pos, args, ret);
             };
 
@@ -1412,8 +1435,8 @@ PyValue PyEvalState::value_from_python(nb::object obj) {
 // C++ primop implementation that bridges to Python.
 static void py_primop_bridge(
     const std::string &name, int arity,
-    nix::EvalState &state, const nix::PosIdx,
-    nix::Value **args, nix::Value &ret)
+    nix::EvalState &state, const PrimOpCallSite,
+    nix::Value *const *args, nix::Value &ret)
 {
     auto &reg = py_primop_registry();
     auto it = reg.find(name);
@@ -1512,12 +1535,13 @@ static void py_primop_bridge(
 // **This is a builtin that upstream Nix does not have.** An expression that
 // calls it evaluates here and fails under `nix eval`. That divergence is
 // deliberate and it is the reason the name is not something vaguer.
-static void sleep_primop(nix::EvalState &state, const nix::PosIdx pos, nix::Value **args, nix::Value &ret)
+static void sleep_primop(nix::EvalState &state, const PrimOpCallSite pos, nix::Value *const *args, nix::Value &ret)
 {
-    const auto seconds = state.forceFloat(*args[0], pos, "while evaluating the argument of builtins.sleep");
+    const auto call_pos = primop_pos(pos);
+    const auto seconds = state.forceFloat(*args[0], call_pos, "while evaluating the argument of builtins.sleep");
     if (seconds < 0) {
         state.error<nix::EvalError>("builtins.sleep takes a number of seconds that is not negative, got %f", seconds)
-            .atPos(pos)
+            .atPos(call_pos)
             .debugThrow();
     }
     // No `checkInterrupt()`, and no loop that could poll one. See above.
@@ -1553,8 +1577,8 @@ static void register_primop(
     auto &registered = it->second;
 
     // Create the C++ PrimOp
-    auto impl = [name, arity](nix::EvalState &state, const nix::PosIdx pos,
-                               nix::Value **args, nix::Value &ret) {
+    auto impl = [name, arity](nix::EvalState &state, const PrimOpCallSite pos,
+                               nix::Value *const *args, nix::Value &ret) {
         py_primop_bridge(name, arity, state, pos, args, ret);
     };
 

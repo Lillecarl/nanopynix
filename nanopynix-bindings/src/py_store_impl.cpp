@@ -22,6 +22,10 @@
 #include <nix/util/hash.hh>
 #include <nix/util/memory-source-accessor.hh>
 #include <nix/util/callback.hh>
+#include <nix/store/build-result.hh>
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+#  include <nix/store/derivation/aterm.hh>
+#endif
 
 namespace nb = nanobind;
 
@@ -251,9 +255,20 @@ nix::StorePath PyStoreImpl::addToStoreFromDump(
     unsupported("addToStoreFromDump");
 }
 
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_36
 void PyStoreImpl::registerDrvOutput(const nix::Realisation & output) {
     if (underlying) { underlying->registerDrvOutput(output); return; }
 }
+#else
+// 2.36 splits the checked entry point from the one that writes. The checked
+// one keeps its own default, which calls this, so this is the whole override.
+void PyStoreImpl::registerDrvOutputUnchecked(const nix::Realisation & output) {
+    // `registerDrvOutputUnchecked` is `protected` on another store, so this
+    // takes the public entry point. `NoCheckSigs` is what makes the two the
+    // same call: the checked one verifies and then calls the unchecked one.
+    if (underlying) { underlying->registerDrvOutput(output, nix::NoCheckSigs); return; }
+}
+#endif
 
 nix::ref<nix::SourceAccessor> PyStoreImpl::getFSAccessor(bool requireValidPath) {
     if (underlying) return underlying->getFSAccessor(requireValidPath);
@@ -369,7 +384,10 @@ void PyStoreImpl::addTempRoot(const nix::StorePath & path) {
     nix::Store::addTempRoot(path);
 }
 
-void PyStoreImpl::ensurePath(const nix::StorePath & path) {
+// The body that both versions share. `ensurePath` is a method of `nix::Store`
+// up to 2.35 and a method of `nix::Builder` from 2.36, and only the object
+// that carries it changes.
+void PyStoreImpl::ensure_path_dispatch(const nix::StorePath & path) {
     {
         nb::gil_scoped_acquire gil;
         if (methods.ensure_path) {
@@ -377,9 +395,75 @@ void PyStoreImpl::ensurePath(const nix::StorePath & path) {
             return;
         }
     }
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_36
     if (underlying) { underlying->ensurePath(path); return; }
     nix::Store::ensurePath(path);
+#else
+    if (underlying) { underlying->getBuilder()->ensurePath(path); return; }
+    // `Store::getBuilder` returns a `LocalBuilder` over this store, which is
+    // what `Store::ensurePath` reached up to 2.35. Same fallback, new door.
+    nix::Store::getBuilder()->ensurePath(path);
+#endif
 }
+
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_36
+void PyStoreImpl::ensurePath(const nix::StorePath & path) {
+    ensure_path_dispatch(path);
+}
+#else
+namespace {
+
+/// The `nix::Builder` of a `PyStoreImpl`.
+///
+/// It exists for one method. `ensurePath` moved from `nix::Store` to
+/// `nix::Builder` in 2.36, and a Python store that implements `ensure_path`
+/// must keep getting that call. Every other method goes to the builder that
+/// `nix::Store::getBuilder` builds, which is the one this store would have
+/// had with no override at all.
+struct PyBuilder : nix::Builder
+{
+    // **A raw reference, and the delegate is what keeps it valid.**
+    // `nix::Store::getBuilder` builds a `LocalBuilder` that holds a
+    // `ref<Store>` to this store, so the store outlives that object, and this
+    // object holds that object.
+    PyStoreImpl & store;
+    nix::ref<nix::Builder> delegate;
+
+    PyBuilder(PyStoreImpl & store, nix::ref<nix::Builder> delegate)
+        : store(store), delegate(std::move(delegate)) {}
+
+    // `nix::Builder` declares this to give each implementation a key function,
+    // so that a vtable is not weak and `dynamic_cast` works between shared
+    // objects on Darwin. An inline body is enough here, and only here: this
+    // class is in an anonymous namespace, so its vtable never leaves this
+    // translation unit and no other object can cast to it.
+    void anchor() override {}
+
+    void buildPaths(const std::vector<nix::DerivedPath> & reqs, nix::BuildMode buildMode) override {
+        delegate->buildPaths(reqs, buildMode);
+    }
+
+    std::vector<nix::KeyedBuildResult>
+    buildPathsWithResults(const std::vector<nix::DerivedPath> & reqs, nix::BuildMode buildMode) override {
+        return delegate->buildPathsWithResults(reqs, buildMode);
+    }
+
+    nix::BuildResult buildDerivation(
+        const nix::StorePath & drvPath, const nix::BasicDerivation & drv, nix::BuildMode buildMode) override {
+        return delegate->buildDerivation(drvPath, drv, buildMode);
+    }
+
+    void ensurePath(const nix::StorePath & path) override { store.ensure_path_dispatch(path); }
+
+    void repairPath(const nix::StorePath & path) override { delegate->repairPath(path); }
+};
+
+} // namespace
+
+nix::ref<nix::Builder> PyStoreImpl::getBuilder(std::shared_ptr<nix::Store> evalStore) {
+    return nix::make_ref<PyBuilder>(*this, nix::Store::getBuilder(std::move(evalStore)));
+}
+#endif
 
 void PyStoreImpl::optimiseStore() {
     {
@@ -509,7 +593,13 @@ nix::Derivation PyStoreImpl::readDerivation(const nix::StorePath & drvPath) {
         try {
             if (aterm->empty())
                 throw nix::FormatError("derivation is empty (the store returned no ATerm text)");
+            // 2.36 moves the reader to `nix::derivation::parse`, in
+            // `nix/store/derivation/aterm.hh`. Same arguments, new namespace.
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_36
             return nix::parseDerivation(config, std::move(*aterm), nix::Derivation::nameFromPath(drvPath));
+#else
+            return nix::derivation::parse(config, std::move(*aterm), nix::Derivation::nameFromPath(drvPath));
+#endif
         } catch (nix::FormatError & e) {
             throw nix::Error("error parsing derivation '%s': %s", printStorePath(drvPath), e.msg());
         }
