@@ -337,6 +337,44 @@ async def test_deep_conversion_of_a_derivation_terminates(inproc_session: Inproc
         assert result.endswith("-deep-cyclic"), result
 
 
+# The same race that `_ASAN_CANNOT_UNWIND` below names, in the one test of this
+# family that used to win it under ASAN.
+#
+# Nix walks the cycle in `printValueAsJSON` (`value-to-json.cc`), and the
+# `max-call-depth` guard stops that walk before the C stack runs out. ASAN
+# gives each frame redzones and stops the compiler reusing stack slots, so the
+# same walk needs more than the 60 MiB that `nix::initNix()` asks for. 2.36
+# grew the frame enough to cross the line: 2.34 and 2.35 still pass under ASAN.
+#
+# Measured with `ciSteps.git-asan`, on the cyclic value this test builds:
+#
+#   - 2.36 with no sanitizer, `max-call-depth` 500 and 10000: both raise
+#     `max-call-depth`, and the message is the same 430 bytes.
+#   - 2.36 under ASAN, `max-call-depth` 500 and 10000: both die with
+#     `AddressSanitizer: stack-overflow ../value-to-json.cc:53 in operator()`.
+#
+# The setting reaches the evaluator (it reports 500 back), and it changes
+# neither outcome, so the depth of the walk is a property of the value and the
+# only variable is the size of a frame.
+#
+# **More stack does not help, and the sweep below is the same one that
+# `_ASAN_CANNOT_UNWIND` reports.** With `NIX_EVALUATOR_STACK_SIZE` raised
+# under ASAN, on this same value:
+#
+#   - 60 MiB: `stack-overflow ../value-to-json.cc:53`.
+#   - 200 MiB and 400 MiB: no overflow, and then
+#     `ASan is ignoring requested __asan_handle_no_return`.
+#
+# So this test joins the family for the family's own reason: ASAN cannot
+# unwind the `max-call-depth` exception. 2.36 only changed which of the two
+# failures arrives first. The bound stays version-specific because 2.34 and
+# 2.35 still pass, where their frames leave room. Issue #293 holds the
+# measurement.
+@pytest.mark.nix_known_issue(
+    exclude=("2.36",),
+    sanitizer="asan",
+    reason="ASAN cannot unwind max-call-depth, and 2.36 frames overflow the stack first (#293)",
+)
 async def test_deep_conversion_of_a_true_cycle_raises_instead_of_crashing(
     inproc_session: InprocSessionFactory,
 ) -> None:
