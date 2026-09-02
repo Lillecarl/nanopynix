@@ -175,6 +175,22 @@ DENYLIST: dict[str, str] = {
         "drives the worker to Nix's recursion limit. See the entry above. The worker dies rather "
         "than answering, and a peer that shares the worker gets the same dead connection."
     ),
+    # The third test of the same module with the same blast radius, and the
+    # soak found it on `test-asan-git` in CI run 33625063861. It walks a cyclic
+    # value, so the walk is as deep as the evaluator permits. Under ASAN on
+    # 2.36 the frames overflow the stack before `max-call-depth` raises, and
+    # `AddressSanitizer: SEGV ../value-to-json.cc:53` ends the process with 65
+    # peers still in their lanes.
+    #
+    # `nix_known_issue` marks it, and that mark is not enough here.
+    # `_another_platform_only` says why: this scanner reads the source marks
+    # before a runtime exists, so `nix_known_issue` never reaches the roster.
+    # The rule of the two entries above applies unchanged -- a test whose
+    # failure mode is a dead process cannot share a lane on any build.
+    "nanopynix/tests/test_scalar_accessor_semantics.py::test_deep_conversion_of_a_true_cycle_raises_instead_of_crashing": (
+        "walks a cyclic value to the depth the evaluator permits. Under ASAN on 2.36 the stack "
+        "overflows in value-to-json.cc and the process dies, which ends every peer lane too."
+    ),
     # This one counts the values of its own evaluator, and the evaluator is
     # its own, so a peer never adds to the count. What a peer takes away is an
     # idle event loop.
