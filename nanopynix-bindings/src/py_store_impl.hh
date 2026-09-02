@@ -5,14 +5,18 @@
 
 #include <nanobind/nanobind.h>
 
+// **Before the Nix headers**, because the `#if` below reads a name it declares.
+#include <nanopynix/nix_compat_config.hh>
+
 #include <nix/store/derivations.hh>
 #include <nix/store/store-api.hh>
 #include <nix/store/store-registration.hh>
 #include <nix/store/path.hh>
 #include <nix/util/ref.hh>
 #include <nix/util/source-accessor.hh>
-
-#include <nanopynix/nix_compat_config.hh>
+#if NANOPYNIX_NIX_VERSION_NUMBER >= NANOPYNIX_NIX_2_36
+#  include <nix/store/build.hh>
+#endif
 
 namespace nb = nanobind;
 
@@ -177,7 +181,15 @@ struct PyStoreImpl : public nix::Store {
         const nix::StorePathSet & references,
         nix::RepairFlag repair) override;
 
+    // 2.36 splits this in two. The pure virtual is
+    // `registerDrvOutputUnchecked`, and it is `protected`. `registerDrvOutput`
+    // stays public and virtual, takes a `CheckSigsFlag`, and its own body
+    // calls the unchecked one. So this override still gets every call.
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_36
     void registerDrvOutput(const nix::Realisation & output) override;
+#else
+    void registerDrvOutputUnchecked(const nix::Realisation & output) override;
+#endif
 
     nix::ref<nix::SourceAccessor> getFSAccessor(bool requireValidPath = true) override;
     std::shared_ptr<nix::SourceAccessor> getFSAccessor(const nix::StorePath & path, bool requireValidPath = true) override;
@@ -193,7 +205,16 @@ struct PyStoreImpl : public nix::Store {
     nix::StorePathSet queryAllValidPaths() override;
     nix::StorePathSet querySubstitutablePaths(const nix::StorePathSet & paths) override;
     void addTempRoot(const nix::StorePath & path) override;
+    // **`ensurePath` belongs to `nix::Builder` from 2.36, not to `nix::Store`.**
+    // `getBuilder` below returns a `PyBuilder`, which keeps the dispatch to
+    // Python that this override gave. `ensure_path_dispatch` holds the body
+    // that both versions share.
+#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_36
     void ensurePath(const nix::StorePath & path) override;
+#else
+    nix::ref<nix::Builder> getBuilder(std::shared_ptr<nix::Store> evalStore = nullptr) override;
+#endif
+    void ensure_path_dispatch(const nix::StorePath & path);
     void optimiseStore() override;
     bool verifyStore(bool checkContents, nix::RepairFlag repair) override;
 
