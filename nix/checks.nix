@@ -30,9 +30,7 @@
   pyright,
   shellcheck,
   pythonSet,
-  nixos,
   pynix,
-  pynixd,
   bashInteractive,
   fish,
   zsh,
@@ -69,17 +67,6 @@ let
       ../libpynix
       ../greeter-proto
       ../grpclib-transports
-      # The whole tree, and not the one subproject that `checks.nix-daemon-protocol`
-      # reads. `ruff.toml` stopped excluding `pynixd`, so `check-lint` and
-      # `check-format` report on it, and a gate that reads less than a
-      # developer's own `ruff check .` gives two answers to one question.
-      #
-      # An edit to any part of pynixd rebuilds all of them. Issue #131 took
-      # 320 KiB of that back: `todo/`, `research/`, `ai/` and the rest of the
-      # agent-workflow trees left the repository. The open work in them is
-      # issues #133 to #137, and the reference material moved to
-      # `pynixd/docs/notes/`.
-      ../pynixd
       ../pynix
       # The language server, which issue #107 moved out of `../pynix`. Without
       # it `check-lint`, `check-format` and `check-types` read a smaller tree
@@ -213,31 +200,14 @@ let
     libpynix = [ "test" ];
   };
 
-  # And a seventh. `nix-daemon-protocol` is the wire package under `pynixd/`,
-  # and its suite is the pure half of what pynixd tests: no daemon, no Nix
-  # binary and no SSH, so it is the suite of that project that a sandbox can
-  # run. A venv holding this project alone is what proves the package stands
-  # up without pynixd, which is the reason it is a separate distribution.
-  protocolEnv = pythonSet.mkVirtualEnv "nix-daemon-protocol-test-env" {
-    nix-daemon-protocol = [ "test" ];
-  };
-
-  # And an eighth, for pynixd itself. Only its unit suite runs here. The
-  # functional suite drives a real `nix`, a real daemon and a real SSH
-  # session, and a build sandbox offers none of the three, so a gate that ran
-  # it would report the sandbox rather than the code.
-  pynixdEnv = pythonSet.mkVirtualEnv "pynixd-test-env" {
-    pynixd = [ "test" ];
-  };
-
-  # And a ninth. `pynix` and nothing else, which is what the `pynix-isolated`
+  # And a seventh. `pynix` and nothing else, which is what the `pynix-isolated`
   # gate below asks a question of. The dev shell carries the language server
   # on purpose, so no environment that a person works in can answer it.
   pynixOnlyEnv = pythonSet.mkVirtualEnv "pynix-only-env" {
     pynix = [ ];
   };
 
-  # And a tenth, for the completion suite of `pynix`. `test-support` carries
+  # And an eighth, for the completion suite of `pynix`. `test-support` carries
   # `shell_pty`, which drives a shell on a pty, and its `test` extra carries
   # pytest. **`pynix` is deliberately not in it**: that suite completes against
   # the *installed* application, which the gate names by its store path, and a
@@ -251,44 +221,6 @@ let
   completionsEnv = pythonSet.mkVirtualEnv "pynix-completions-test-env" {
     test-support = [ "test" ];
     libpynix = [ ];
-  };
-
-  # A minimum NixOS configuration, so that the module of pynixd is evaluated.
-  # `nixos` needs a boot loader, a root filesystem and a state version before
-  # it evaluates anything at all, and none of the three says anything about
-  # pynixd.
-  evalModule =
-    settings:
-    (nixos {
-      # `settings` goes in `imports`, and is not merged with `//`. The
-      # operator replaces a whole key, so `{ services.pynixd.package = ...; }
-      # // { services.pynixd.enable = true; }` loses the package.
-      imports = [
-        ../pynixd/nix/nixos
-        settings
-      ];
-      boot.loader.grub.enable = false;
-      fileSystems."/" = {
-        device = "/dev/null";
-        fsType = "ext4";
-      };
-      system.stateVersion = "25.05";
-      services.pynixd.package = pynixd;
-    }).config;
-
-  enabled = evalModule { services.pynixd.enable = true; };
-  disabled = evalModule { };
-
-  # The module with one setting overridden, so the gate can see that the
-  # defaults are defaults. `settingsDefaults` in `pynixd/nix/common.nix` is
-  # wrapped in `mkDefault`; without that wrapper these are values, and a user
-  # who sets `unix_path` gets an evaluation conflict rather than an override.
-  # The wrapper is one `lib.mapAttrsRecursive` and is the easiest thing to
-  # lose when that block moves between files, which is why it is checked here
-  # and not only read.
-  overridden = evalModule {
-    services.pynixd.enable = true;
-    services.pynixd.settings.unix_path = "/run/pynixd/custom.sock";
   };
 
   mkCheck =
@@ -345,28 +277,6 @@ in
     grpclibEnv
   ] "python -m pytest -p no:cacheprovider grpclib-transports/tests";
 
-  # The wire protocol package that arrived with pynixd, gated for the same
-  # reason as the gate above it: nothing else runs this suite. `testpaths` in
-  # the repository `pytest.ini` names no directory of `pynixd/`, and the
-  # packaged runner reads that file.
-  #
-  # `tests`, spelled out, for the same reason as the gate above it: an
-  # explicit argument replaces `testpaths`, and the project also carries a
-  # `benchmarks` directory that measures rather than gates.
-  nix-daemon-protocol = mkCheck "nix-daemon-protocol" [
-    protocolEnv
-  ] "python -m pytest -p no:cacheprovider pynixd/nix-daemon-protocol/tests";
-
-  # The unit suite of pynixd, and only the unit suite. See `pynixdEnv` for why
-  # the functional half stays out.
-  #
-  # The directory of the project, and not `pynixd/tests/unit`, would collect
-  # the functional suite through `testpaths`, so the argument is the directory
-  # that this gate runs.
-  pynixd = mkCheck "pynixd" [
-    pynixdEnv
-  ] "cd pynixd && python -m pytest -p no:cacheprovider tests/unit";
-
   # **`pynix` alone, and the language server must not arrive with it.** Issue
   # #107 split `pynix-lsp` out to take `pygls`, `lsprotocol` and `jsonschema`
   # off the start-up of `pynix build`: 349 of the 966 modules that `import
@@ -419,35 +329,6 @@ in
         EOF
         touch "$out"
       '';
-
-  # The NixOS module of pynixd, evaluated. It is the only module this
-  # repository ships, and `flake.nix` exposes it as `nixosModules.pynixd`.
-  # Nothing else reads it, so without this gate a rename of an option or a
-  # type error would first be seen by a person rebuilding their system.
-  #
-  # The second half is a regression test. `environment.systemPackages` used to
-  # sit in a second element of a `mkMerge`, outside the `mkIf cfg.enable`, so
-  # importing the module installed pynixd whether or not the service was
-  # enabled. A module that does something when it is disabled cannot be
-  # imported and left alone.
-  nixos-module =
-    let
-      unit = enabled.systemd.services.pynixd.serviceConfig;
-      installedWhenEnabled = builtins.elem pynixd enabled.environment.systemPackages;
-      installedWhenDisabled = builtins.elem pynixd disabled.environment.systemPackages;
-    in
-    assert unit.ExecStart == "${lib.getExe pynixd} daemon";
-    assert enabled.environment.etc."pynixd/pynixd.json".source != null;
-    assert installedWhenEnabled;
-    assert !installedWhenDisabled;
-    # The defaults are defaults: an override wins, and the settings it did not
-    # name survive. See `overridden` above for why this is worth a gate.
-    assert enabled.services.pynixd.settings.unix_path == "/run/pynixd/pynixd.sock";
-    assert overridden.services.pynixd.settings.unix_path == "/run/pynixd/custom.sock";
-    assert overridden.services.pynixd.settings.ssh_port == null;
-    runCommand "nanopynix-check-nixos-module" { } ''
-      echo "services.pynixd evaluates, overrides cleanly, and installs nothing while disabled" > "$out"
-    '';
 
   # The plugin every other suite in this repository reports through, gated for
   # the first time. See this file's header.

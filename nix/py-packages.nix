@@ -113,7 +113,7 @@ let
         filter = path: _type: lib.any (entry: isUnder prefix entry path) kept;
       };
       # A store name holds no `/`, and `dir` may be nested -- see `dirOf`
-      # below and the `nix-daemon-protocol` entry that needs it.
+      # below.
       name = "${lib.replaceStrings [ "/" ] [ "-" ] dir}-source";
     };
 
@@ -281,22 +281,6 @@ let
       };
     };
 
-    # The two projects that arrived with pynixd. Neither one reaches
-    # `nanopynix-bindings`, so neither takes `nixLinked`: each really is the
-    # same package whatever Nix is linked, and a suffix would build it once
-    # for each version of the matrix for nothing. `grpclib-transports` and
-    # `pytest-agent` are here for the same reason.
-    pynixd = _pySelf: rendered: {
-      meta = rendered.meta // {
-        platforms = lib.platforms.unix;
-      };
-    };
-    nix-daemon-protocol = _pySelf: rendered: {
-      meta = rendered.meta // {
-        platforms = lib.platforms.unix;
-      };
-    };
-
     test-support = _pySelf: rendered: {
       meta = rendered.meta // {
         platforms = lib.platforms.unix;
@@ -373,20 +357,6 @@ let
     # test runner's venv: it auto-activates on import and would start writing
     # `.pytest-agent/` run directories from CI.
     pytest-agent = { };
-    # The Nix daemon protocol proxy, and the protocol package under it. Both
-    # arrived by the merge that made this repository the nixidae monorepo,
-    # and issue #131 holds the rest of that work.
-    pynixd = { };
-    # **`dir`, because the attribute name is the distribution name.** Every
-    # other project here is a directory at the root, so the two agree and the
-    # key serves as both. This one is a project inside another project, and
-    # `pynixd/pyproject.toml` names it `nix-daemon-protocol` -- so the key
-    # has to stay that, and the path has to be said separately. A key of
-    # `pynixd/nix-daemon-protocol` would find the source and would then be a
-    # distribution nothing can depend on by name.
-    nix-daemon-protocol = {
-      dir = "pynixd/nix-daemon-protocol";
-    };
   };
 
   # Where a project's source is, relative to the repository. The attribute

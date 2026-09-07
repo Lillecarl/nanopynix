@@ -35,25 +35,8 @@ from tests.support.suite_roots import REPO_ROOT, SUITE_ROOTS, check_roster, is_s
 # gives it its own per-file ignores, because the ban on the raw `asyncio`
 # primitives is right for nanopynix and wrong for a library whose subject is
 # `asyncio.Protocol` callbacks.
-# `pynixd` is here for a different reason, and a temporary one. It arrived by
-# a merge of two histories that changed no file, so its suite still runs under
-# its own conventions and no scanner of this repository should read it yet.
-# Issue #131 is the work that integrates it, and that work removes this entry
-# and adds `pynixd/tests` to the roster.
 EXEMPT_INIS = {
     "grpclib-transports/pytest.ini",
-    # `checks.pynixd` runs the unit half of this suite the way CI runs it, and
-    # the functional half needs a Nix binary, a daemon and SSH, so no gate
-    # runs it. The ini stays exempt for the reason above and not for want of a
-    # gate: a scanner of this repository must not hold that suite to a
-    # nanopynix rule until #131 gives pynixd these conventions.
-    "pynixd/pytest.ini",
-    # The wire protocol package under `pynixd/`. It has a gate of its own now,
-    # `checks.nix-daemon-protocol`, so its suite runs the way CI runs it. It
-    # stays out of the roster because no scanner of this repository should
-    # read a suite of pynixd until issue #131 gives pynixd the conventions of
-    # this repository.
-    "pynixd/nix-daemon-protocol/pytest.ini",
 }
 
 

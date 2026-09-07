@@ -62,7 +62,7 @@ reach, in the `static-checks` job. Each one is a derivation in
 `nix/checks.nix`, and each is a package. Build them to run a gate the way CI
 runs it, in a sandbox and not in the dev shell:
 
-- nix build --file . --no-link --keep-going checks.lint checks.lint-strict checks.format checks.types checks.shell checks.grpclib-transports checks.pytest-agent checks.test-support checks.nanopynix-helpers checks.libpynix checks.nix-daemon-protocol checks.pynixd checks.nixos-module checks.pynix-isolated checks.completions
+- nix build --file . --no-link --keep-going checks.lint checks.lint-strict checks.format checks.types checks.shell checks.grpclib-transports checks.pytest-agent checks.test-support checks.nanopynix-helpers checks.libpynix checks.pynix-isolated checks.completions
 
 Do not use `nix flake check` for this. That command evaluates every package,
 and `packages.shell` cannot evaluate in a pure flake evaluation.
@@ -246,55 +246,6 @@ owns it. Edit `pytest-agent/SKILL.md`, and never the link.
 - `agent_notes` and `from pytest_agent import note` get a value out of a test,
   and also out of the code under test. Use them instead of a separate
   `python -c` command.
-
-# pynixd
-
-`pynixd/` is a subproject of this repository, and not a third-party
-dependency. It is a Nix daemon protocol proxy and a distributed build cache,
-in pure Python over AsyncSSH. It sits between a Nix client and a set of remote
-builders, and it caches queries, removes duplicate builds and schedules across
-backends. `pynixd/nix-daemon-protocol/` is the wire package under it, and it
-is a separate distribution because it holds the codecs alone and depends on no
-part of pynixd.
-
-**It implements in Python what nanopynix binds from C++.** `pynixd/wire.py`,
-`nar.py`, `drv_parser.py` and `store/daemon.py` answer questions that
-`nanopynix-bindings` answers through libnixstore. That is the reason the two
-trees are in one repository, and it is not a fault to correct: this suite
-already speaks the real protocol to a real `nix-daemon` through
-`--nix-test-backends local,daemon`, so a Python implementation of the other
-end is a differential test of both. Issue #131 holds the work that integrates
-the project, and it names what is decided and what is not.
-
-**It arrived by a merge of two histories that changed no file**, so it still
-carries its own conventions. Four gates of this repository excluded it, and
-two of the four take it now: `check-lint` and `check-format`. `ruff-strict`
-and pyright still exclude it, and each exclusion names its reason and points
-at #131.
-
-**Read `pynixd/AGENTS.md` before you change anything under `pynixd/`.** That
-file is the source of truth for that project, and this file does not replace
-it. Its three-tier execution pattern, its build queue and its rule of one
-pytest process at a time are all in there.
-
-**The work of pynixd is tracked in issues, like the rest of this repository.**
-It arrived with 54 files of agent-workflow notes -- `todo/`, `research/`,
-`ai/`, `progress.md`, `recurring.md`, `REASONIX.md`, `opencode.json` and the
-rest. Issue #131 read them: the finished ones are gone, the open ones are
-issues #133 to #137, and the reference material on how Nix behaves is at
-`pynixd/docs/notes/`. Do not start a second such tree. Put a task in an issue,
-and put a finding about Nix in `docs/notes/`.
-
-**The NixOS module lives at `pynixd/nix/nixos/`, and `flake.nix` exposes it
-as `nixosModules.pynixd`.** It is the one NixOS module this repository ships.
-The wrapper in `flake.nix` sets `services.pynixd.package`; the module file
-states no default, because the default it had read `pynixd/default.nix` and
-that project's own `flake.lock`, which built a second pynixd pinned apart from
-the one this repository tests. `checks.nixos-module` evaluates it.
-
-**Lix is not supported.** The project supported it, through `LIX_BIN` and the
-`--client-bin`, `--local-bin` and `--builder-bin` options. Every one of those
-is gone. Do not add a branch for a second implementation of Nix.
 
 # libpynix
 

@@ -33,22 +33,6 @@ rootdir:
 | `pynix/completions/tests/` | the shell completions of the installed `pynix` | one line a user can type |
 | `test-support/tests/` | the tests of the generic helpers | one helper behaviour |
 
-`pynixd/` is the fourth project with a suite, and it keeps the conventions
-of the repository it came from until issue #131 changes them:
-
-| directory | holds | scope of one test |
-|---|---|---|
-| `pynixd/tests/unit/` | the pure logic of the daemon proxy | one function or one model |
-| `pynixd/tests/functional/` | the proxy against a real `nix` client | one operation, end to end |
-| `pynixd/tests/_conftest/` | the fixtures, hooks and helpers of that suite. **No tests.** | — |
-| `pynixd/nix-daemon-protocol/tests/` | the wire codecs, with no daemon | one message on the wire |
-
-**Read `pynixd/AGENTS.md` before you write a test there.** That file holds the
-rules of that project, and this file does not replace it. Two of its rules
-have no equivalent here: one pytest process at a time, because the functional
-tests share `/tmp/pynixd-stores` and a session server, and a store path under
-that prefix and no other.
-
 **`pynix/completions/tests/` is the one suite that the repository run does not
 reach, and that is deliberate.** It is not in `testpaths`, and it carries its
 own `pytest.ini`. Every test there spawns fish, bash and zsh on a pty and
@@ -63,17 +47,6 @@ too:
 `test_support.shell_pty` drives the shell. `completion-spike` drives the same
 three, so the driver is in the project that names no Nix concept, by the rule
 below.
-
-**Two of those suites have a gate**: `checks.nix-daemon-protocol` and
-`checks.pynixd`. Neither needs a daemon, a Nix binary or SSH, so a build
-sandbox can run both. `pynixd/tests/unit/` holds one group that does need a
-Nix binary, the live probes of `test_drv_parser.py`, and that group skips
-when `nix` is not on PATH.
-
-**`pynixd/tests/functional/` has no gate, and it needs all three.** It runs on
-a developer's machine and nowhere else yet. Run it from any directory: issue
-#131 anchored `TEST_NIX` on a file, and
-`tests/meta/test_pynixd_suite_is_relocatable.py` keeps it that way.
 
 And the two projects that hold the shared test layer, and no test of the
 library at all:

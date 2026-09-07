@@ -109,36 +109,9 @@
         nonEditable = eachDefNix.${system}.nonEditableShell;
         non-editable = eachDefNix.${system}.nonEditableShell;
       });
-      # The service modules this repository ships, and the answer issue #131
-      # asked for. Not per-system: a module is evaluated by the configuration
-      # that imports it, which knows its own system.
-      #
-      # Each wrapper is what sets `services.pynixd.package`. The module files
-      # themselves state no default: the option used to read
-      # `pynixd/default.nix` and that project's own `flake.lock`, which built a
-      # second pynixd, pinned apart from the one this repository tests.
-      #
-      # Both platforms take their option block from `pynixd/nix/common.nix`, so
-      # the two cannot drift.
-      #
-      # `checks.nixos-module` evaluates the NixOS module, so a rename or a type
-      # error fails a gate rather than a rebuild on someone's machine. The
-      # darwin module has no such gate; `pynixd/nix/darwin/default.nix` states
-      # why in its header.
-      nixosModules.pynixd =
-        { pkgs, lib, ... }:
-        {
-          imports = [ ./pynixd/nix/nixos ];
-          services.pynixd.package = lib.mkDefault eachDefNix.${pkgs.stdenv.hostPlatform.system}.pynixd;
-        };
-      nixosModules.default = inputs.self.nixosModules.pynixd;
-      darwinModules.pynixd =
-        { pkgs, lib, ... }:
-        {
-          imports = [ ./pynixd/nix/darwin ];
-          services.pynixd.package = lib.mkDefault eachDefNix.${pkgs.stdenv.hostPlatform.system}.pynixd;
-        };
-      darwinModules.default = inputs.self.darwinModules.pynixd;
+      # This repository ships no service module. The two it had wrapped the
+      # NixOS and darwin modules of `pynixd/`, which now lives in its own
+      # repository again and carries them.
       legacyPackages = forAllSystems (system: inputs.nixpkgs.legacyPackages.${system});
       lib = inputs.nixpkgs.lib;
     };
