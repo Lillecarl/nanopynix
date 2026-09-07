@@ -701,14 +701,14 @@ let
 
     # The version matrices of the scheduled workflow.
     #
-    # **This embeds the answer rather than computing it at run time.** The
-    # scheduled workflow runs `nix flake update` before it tests anything, so
-    # the set of Nix versions is not knowable when the workflow is rendered: a
-    # bumped nixpkgs can add or drop one. That used to mean five `nix eval`
-    # calls in the step, each with a regular expression that repeated
-    # `ci/variants.nix` in a second language. It does not have to: this script
-    # is itself built from the updated flake, so `ciVersionMatrix` here is
-    # already the updated answer and the step is one `echo` for each group.
+    # **This embeds the answer rather than computing it at run time.** The set
+    # of Nix versions is not knowable when the workflow is rendered: a nixpkgs
+    # that arrives between renders can add or drop one. That used to mean five
+    # `nix eval` calls in the step, each with a regular expression that
+    # repeated `ci/variants.nix` in a second language. It does not have to:
+    # this script is itself built from the tree under test, so
+    # `ciVersionMatrix` here is already the current answer and the step is one
+    # `echo` for each group.
     version-matrix = mkStep {
       name = "ci-version-matrix";
       text = ''

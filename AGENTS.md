@@ -64,16 +64,15 @@ runs it, in a sandbox and not in the dev shell:
 
 - nix build --file . --no-link --keep-going checks.lint checks.lint-strict checks.format checks.types checks.shell checks.grpclib-transports checks.pytest-agent checks.test-support checks.nanopynix-helpers checks.libpynix checks.pynix-isolated checks.completions
 
-Do not use `nix flake check` for this. That command evaluates every package,
-and `packages.shell` cannot evaluate in a pure flake evaluation.
+**This repository is not a flake, so `--file .` is the only way in.** There is
+no `flake.nix` and no `flake.lock`. `nix/sources.nix` asks the nixidae
+umbrella where every dependency lives, and `default.nix` takes that set as
+`sources`. Every attribute is reachable by path, at any depth, so nothing
+needs a flat name.
 
-**Build with `--file .` and an attribute path, and not with `.#`.** Every
-attribute of `default.nix` is reachable that way, at any depth, so a nested
-attribute needs no flat name in `flake.packages`. `flake.packages` holds the
-finished products only. `FLAKE_COMPATISH_DISABLE_OVERRIDES=1` makes a
-`--file .` evaluation agree with a flake evaluation: it stops `nix/compat.nix`
-overriding `self` with the local checkout, and reads the lockfile instead.
-Every CI workflow sets it, so CI and a local run build the same derivation.
+The umbrella owns the pins. A dependency moves when `nix/sources.lock` in
+nixidae moves, and not before, so CI and a local run build the same
+derivation with nothing to set.
 
 - nix build --file . pkgs.nixVersions.nix_2_34.src --no-link --print-out-paths # Download the source code of a Nix package and print the path to it.
 

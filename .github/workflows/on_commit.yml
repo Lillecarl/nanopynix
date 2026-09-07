@@ -13,8 +13,6 @@ name: On commit
         description: Comma-separated job IDs to run; leave empty for the full matrix
         required: false
         type: string
-env:
-  FLAKE_COMPATISH_DISABLE_OVERRIDES: '1'
 jobs:
   commit-subjects:
     runs-on: ubuntu-24.04

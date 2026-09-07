@@ -37,7 +37,7 @@ let
     nogc
     ;
 
-  # The `outputs` of the `update-lockfile` job, one for each group above.
+  # The `outputs` of the `version-matrix` job, one for each group above.
   versionMatrixOutputs = builtins.listToAttrs (
     map (group: {
       name = "${group}_versions";
@@ -188,12 +188,8 @@ let
     docsDeployPollMs = 15 * 60 * 1000;
     # An upload to Codecov of one XML file.
     codecov = 10;
-    # `nix flake update`, which fetches every input.
-    flakeUpdate = 20;
-    # One `echo` for each group, behind the evaluation of the updated flake.
+    # One `echo` for each group, behind one evaluation of the tree.
     versionMatrix = 20;
-    # One commit and one push, by an action.
-    autoCommit = 10;
     # **The whole wheel closure, from cold.** This build is not the ordinary
     # `nix build` of a Nix version: `nix/cxx-stdenv.nix` gives the closure its
     # own compiler wrapper, so cachix holds none of it until this job has run
@@ -293,11 +289,9 @@ let
   mkTestSetup =
     {
       ref ? null,
-      lockArtifact ? null,
       experimentalFeatures ? null,
     }:
     [ (steps.checkout { inherit ref; }) ]
-    ++ lib.optional (lockArtifact != null) (steps.downloadArtifact { artifactName = lockArtifact; })
     ++ [
       (steps.installNix (
         lib.optionalAttrs (experimentalFeatures != null) { inherit experimentalFeatures; }
@@ -385,14 +379,13 @@ let
       version,
       backend,
       ref ? null,
-      lockArtifact ? null,
       needs ? [ ],
     }:
     mkJob (
       lib.optionalAttrs (needs != [ ]) { inherit needs; }
       // {
         env = testJobEnv { inherit version backend; };
-        steps = mkTestSetup { inherit ref lockArtifact; } ++ [
+        steps = mkTestSetup { inherit ref; } ++ [
           (mkBuildStep {
             name = "Build the CI step package for Nix ${version}";
             cap = caps.build;
@@ -508,7 +501,6 @@ let
       version,
       backend,
       ref ? null,
-      lockArtifact ? null,
       needs ? [ ],
     }:
     mkJob (
@@ -559,7 +551,7 @@ let
         };
         steps =
           mkTestSetup {
-            inherit ref lockArtifact;
+            inherit ref;
             experimentalFeatures = suiteExperimentalFeatures;
           }
           ++ [
@@ -594,7 +586,6 @@ let
     {
       version,
       ref ? null,
-      lockArtifact ? null,
       needs ? [ ],
     }:
     let
@@ -604,7 +595,7 @@ let
       lib.optionalAttrs (needs != [ ]) { inherit needs; }
       // {
         env = testJobEnv { inherit version; };
-        steps = mkTestSetup { inherit ref lockArtifact; } ++ [
+        steps = mkTestSetup { inherit ref; } ++ [
           (mkBuildStep {
             name = "Build the TSAN CI step package (${bareVersion})";
             cap = caps.tsanBuild;
@@ -645,7 +636,6 @@ let
     {
       version,
       ref ? null,
-      lockArtifact ? null,
       needs ? [ ],
     }:
     let
@@ -655,7 +645,7 @@ let
       lib.optionalAttrs (needs != [ ]) { inherit needs; }
       // {
         env = testJobEnv { inherit version; };
-        steps = mkTestSetup { inherit ref lockArtifact; } ++ [
+        steps = mkTestSetup { inherit ref; } ++ [
           (mkBuildStep {
             name = "Build the UBSAN CI step package (${bareVersion})";
             cap = caps.ubsanBuild;
@@ -706,7 +696,6 @@ let
     {
       version,
       ref ? null,
-      lockArtifact ? null,
       needs ? [ ],
     }:
     let
@@ -716,7 +705,7 @@ let
       lib.optionalAttrs (needs != [ ]) { inherit needs; }
       // {
         env = testJobEnv { inherit version; };
-        steps = mkTestSetup { inherit ref lockArtifact; } ++ [
+        steps = mkTestSetup { inherit ref; } ++ [
           (mkBuildStep {
             name = "Build the no-collector CI step package (${bareVersion})";
             # The plain cap, not a sanitizer one. `-Dgc=disabled` rebuilds
@@ -763,7 +752,6 @@ let
     {
       version,
       ref ? null,
-      lockArtifact ? null,
       needs ? [ ],
     }:
     let
@@ -773,7 +761,7 @@ let
       lib.optionalAttrs (needs != [ ]) { inherit needs; }
       // {
         env = testJobEnv { inherit version; };
-        steps = mkTestSetup { inherit ref lockArtifact; } ++ [
+        steps = mkTestSetup { inherit ref; } ++ [
           (mkBuildStep {
             name = "Build the ASAN CI step package (${bareVersion})";
             cap = caps.asanBuild;
@@ -812,7 +800,6 @@ let
   mkStaticChecksJob =
     {
       ref ? null,
-      lockArtifact ? null,
       needs ? [ ],
     }:
     mkJob (
@@ -821,7 +808,6 @@ let
         steps = [
           (steps.checkout { inherit ref; })
         ]
-        ++ lib.optional (lockArtifact != null) (steps.downloadArtifact { artifactName = lockArtifact; })
         ++ [
           (steps.installNix { })
           (steps.cachix { })
@@ -861,7 +847,6 @@ let
       # the wheel's own architecture. That is what the native runner gives.
       smoke ? true,
       ref ? null,
-      lockArtifact ? null,
       needs ? [ ],
     }:
     mkJob (
@@ -874,7 +859,6 @@ let
         steps = [
           (steps.checkout { inherit ref; })
         ]
-        ++ lib.optional (lockArtifact != null) (steps.downloadArtifact { artifactName = lockArtifact; })
         ++ [
           (steps.installNix { })
           (steps.cachix { })
@@ -962,7 +946,10 @@ let
   # `scripts/last-green.sh` is read by `check-shell` like every other script
   # there, so the body still meets a gate without a minute of installer.
   mkLastGreenJob =
-    { gates, branch ? "last-green" }:
+    {
+      gates,
+      branch ? "last-green",
+    }:
     mkJob {
       needs = gates;
       permissions = {
@@ -979,15 +966,18 @@ let
           # afford, because it is silent and it looks like nothing happening.
           fetchDepth = 0;
         })
-        (withCond "\${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}" {
-          name = "Move the last-green branch";
-          timeout-minutes = caps.lastGreen;
-          env = {
-            LAST_GREEN_BRANCH = branch;
-            LAST_GREEN_COMMIT = "\${{ github.sha }}";
-          };
-          run = "./scripts/last-green.sh";
-        })
+        (withCond
+          "\${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}"
+          {
+            name = "Move the last-green branch";
+            timeout-minutes = caps.lastGreen;
+            env = {
+              LAST_GREEN_BRANCH = branch;
+              LAST_GREEN_COMMIT = "\${{ github.sha }}";
+            };
+            run = "./scripts/last-green.sh";
+          }
+        )
       ];
     };
 
@@ -995,37 +985,35 @@ let
     {
       needs ? [ ],
       ref ? null,
-      lockArtifact ? null,
     }:
     mkJob (
       lib.optionalAttrs (needs != [ ]) { inherit needs; }
       // {
-      steps = [
-        (steps.checkout { inherit ref; })
-      ]
-      ++ lib.optional (lockArtifact != null) (steps.downloadArtifact { artifactName = lockArtifact; })
-      ++ [
-        (steps.installNix { })
-        (steps.cachix { })
-        {
-          name = "Build documentation";
-          timeout-minutes = caps.docsBuild;
-          run = "nix build --file . nanopynix-docs --out-link result --print-build-logs --print-out-paths";
-        }
-        (steps.verifyClosure { name = "Verify docs closure"; })
-        (mkNixRunStep {
-          name = "Prepare Pages artifact";
-          attr = "prepare-pages";
-          cap = caps.docsPrepare;
-        })
-        {
-          uses = "actions/upload-pages-artifact@main";
-          timeout-minutes = caps.docsUpload;
-          "with" = {
-            path = "public";
-          };
-        }
-      ];
+        steps = [
+          (steps.checkout { inherit ref; })
+        ]
+        ++ [
+          (steps.installNix { })
+          (steps.cachix { })
+          {
+            name = "Build documentation";
+            timeout-minutes = caps.docsBuild;
+            run = "nix build --file . nanopynix-docs --out-link result --print-build-logs --print-out-paths";
+          }
+          (steps.verifyClosure { name = "Verify docs closure"; })
+          (mkNixRunStep {
+            name = "Prepare Pages artifact";
+            attr = "prepare-pages";
+            cap = caps.docsPrepare;
+          })
+          {
+            uses = "actions/upload-pages-artifact@main";
+            timeout-minutes = caps.docsUpload;
+            "with" = {
+              path = "public";
+            };
+          }
+        ];
       }
     );
 
@@ -1035,7 +1023,10 @@ let
   # the run then holds the reason a deploy did not happen, rather than only
   # the dependency graph. Issue #132.
   mkDocsDeployJob =
-    { needs, gates ? [ ] }:
+    {
+      needs,
+      gates ? [ ],
+    }:
     mkJob {
       needs = if gates == [ ] then needs else lib.toList needs ++ gates;
       permissions = {
@@ -1072,15 +1063,18 @@ let
         # `skipped` counts as a failure to pass. A dispatch that selects a
         # few jobs leaves the rest skipped, and a deploy then rests on jobs
         # that never ran.
-        (withCond "\${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}" {
-          name = "Deploy to GitHub Pages";
-          id = "deployment";
-          timeout-minutes = caps.docsDeploy;
-          uses = "actions/deploy-pages@main";
-          "with" = {
-            timeout = caps.docsDeployPollMs;
-          };
-        })
+        (withCond
+          "\${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'skipped') }}"
+          {
+            name = "Deploy to GitHub Pages";
+            id = "deployment";
+            timeout-minutes = caps.docsDeploy;
+            uses = "actions/deploy-pages@main";
+            "with" = {
+              timeout = caps.docsDeployPollMs;
+            };
+          }
+        )
       ];
     };
 in
@@ -1113,26 +1107,14 @@ in
     mkLastGreenJob
     ;
 
-  # **Every workflow sets this, and every workflow needs it.**
-  # `nix/compat.nix` normally overrides `self` with the local checkout, which
-  # is right on a laptop and wrong on a runner: CI must evaluate the tree the
-  # way the flake evaluator would, from the lockfile and through a store copy.
-  # With this set, `nix build --file . <attrpath>` and `nix build .#<name>`
-  # agree, which is what lets every step name a plain attribute path.
-  workflowEnv = {
-    FLAKE_COMPATISH_DISABLE_OVERRIDES = "1";
-  };
-
   # Why these expand statically here, and through a GHA matrix in
   # `on_schedule.nix`, for the same jobs.
   #
   # The names come from `ciVersionMatrix`, which `default.nix` computes and
-  # this file reads at *render* time. The scheduled workflow runs `nix flake
-  # update` before it tests anything, so its version list is not knowable
-  # until the run is under way -- a bumped nixpkgs can add or drop a Nix
-  # version, and a statically rendered list would silently never test the new
-  # one. That is the whole of the difference, and it is why the scheduled side
-  # computes the list in a step and feeds it to `strategy.matrix`.
+  # this file reads at *render* time. The scheduled workflow computes its list
+  # in a step instead, so a nixpkgs that arrives between renders can add or
+  # drop a Nix version and the schedule still tests it. That is the whole of
+  # the difference.
   #
   # The per-commit side cannot use a matrix in exchange: the `jobs` dispatch
   # input selects by exact job name, and a matrix collapses eight jobs into
@@ -1158,7 +1140,6 @@ in
   mkStaticTestJobs =
     {
       ref ? null,
-      lockArtifact ? null,
       needs ? [ ],
     }:
     builtins.listToAttrs (
@@ -1171,7 +1152,6 @@ in
               version
               backend
               ref
-              lockArtifact
               needs
               ;
           };
@@ -1182,7 +1162,6 @@ in
   mkStaticUbsanTestJobs =
     {
       ref ? null,
-      lockArtifact ? null,
       needs ? [ ],
     }:
     builtins.listToAttrs (
@@ -1192,7 +1171,6 @@ in
           inherit
             version
             ref
-            lockArtifact
             needs
             ;
         };
@@ -1202,7 +1180,6 @@ in
   mkStaticNoGCTestJobs =
     {
       ref ? null,
-      lockArtifact ? null,
       needs ? [ ],
     }:
     builtins.listToAttrs (
@@ -1212,7 +1189,6 @@ in
           inherit
             version
             ref
-            lockArtifact
             needs
             ;
         };
@@ -1222,7 +1198,6 @@ in
   mkStaticAsanTestJobs =
     {
       ref ? null,
-      lockArtifact ? null,
       needs ? [ ],
     }:
     builtins.listToAttrs (
@@ -1232,7 +1207,6 @@ in
           inherit
             version
             ref
-            lockArtifact
             needs
             ;
         };
@@ -1242,7 +1216,6 @@ in
   mkStaticTsanTestJobs =
     {
       ref ? null,
-      lockArtifact ? null,
       needs ? [ ],
     }:
     builtins.listToAttrs (
@@ -1252,7 +1225,6 @@ in
           inherit
             version
             ref
-            lockArtifact
             needs
             ;
         };

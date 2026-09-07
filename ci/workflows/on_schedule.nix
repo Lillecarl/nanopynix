@@ -13,8 +13,8 @@ let
   # why this workflow needs it too: each one builds the whole closure, so a run
   # to test one of them must not start the entire nightly.
   #
-  # `update-lockfile` never takes this condition. Every job below needs it for
-  # the flake it tests and for the version matrix it reads.
+  # `version-matrix` never takes this condition. Every job below reads the
+  # version list it computes.
   dispatchable = builtins.mapAttrs (
     name: job:
     withCond "github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',${name},')" job
@@ -30,10 +30,9 @@ let
   # job under test does not have. That is how the wheel jobs arrived: neither
   # one can run before it reaches `develop`, and each one costs hours.
   branch = "\${{ github.ref_name }}";
-  lockArtifact = "flake-lock";
-  updateJob = "update-lockfile";
+  matrixJob = "version-matrix";
 
-  versionExpression = output: "\${{ fromJson(needs.${updateJob}.outputs.${output}) }}";
+  versionExpression = output: "\${{ fromJson(needs.${matrixJob}.outputs.${output}) }}";
 
   # One job per kind, each expanded across Nix versions via a real GHA
   # matrix -- there's no longer an install-mode axis to fan out over (see
@@ -41,8 +40,7 @@ let
   allTestJobs = {
     static-checks = workflow.mkStaticChecksJob {
       ref = branch;
-      inherit lockArtifact;
-      needs = [ updateJob ];
+      needs = [ matrixJob ];
     };
 
     test-regular =
@@ -50,8 +48,7 @@ let
         version = "\${{ matrix.version }}";
         backend = "\${{ matrix.backend }}";
         ref = branch;
-        inherit lockArtifact;
-        needs = [ updateJob ];
+        needs = [ matrixJob ];
       }
       // {
         strategy = {
@@ -67,8 +64,7 @@ let
       workflow.mkUbsanTestJob {
         version = "\${{ matrix.version }}";
         ref = branch;
-        inherit lockArtifact;
-        needs = [ updateJob ];
+        needs = [ matrixJob ];
       }
       // {
         strategy = {
@@ -83,8 +79,7 @@ let
       workflow.mkTsanTestJob {
         version = "\${{ matrix.version }}";
         ref = branch;
-        inherit lockArtifact;
-        needs = [ updateJob ];
+        needs = [ matrixJob ];
       }
       // {
         strategy = {
@@ -100,16 +95,14 @@ let
     # for; `test-asan` is scheduled only, because it has none.
     # `ci/workflows/lib.nix` carries both halves of that reasoning.
     #
-    # It stays here beside `test-asan` even so, and not only for symmetry: the
-    # scheduled run tests a freshly updated flake, and it is what tells a red
-    # `test-asan` apart from an evaluator that does not work without the
-    # collector at all.
+    # It stays here beside `test-asan` even so, and not only for symmetry: a
+    # scheduled run is what tells a red `test-asan` apart from an evaluator
+    # that does not work without the collector at all.
     test-nogc =
       workflow.mkNoGCTestJob {
         version = "\${{ matrix.version }}";
         ref = branch;
-        inherit lockArtifact;
-        needs = [ updateJob ];
+        needs = [ matrixJob ];
       }
       // {
         strategy = {
@@ -124,8 +117,7 @@ let
       workflow.mkAsanTestJob {
         version = "\${{ matrix.version }}";
         ref = branch;
-        inherit lockArtifact;
-        needs = [ updateJob ];
+        needs = [ matrixJob ];
       }
       // {
         strategy = {
@@ -140,7 +132,6 @@ let
 in
 workflow.evalWorkflow {
   name = "On schedule";
-  env = workflow.workflowEnv;
   on = {
     schedule = [ { cron = "17 3 * * *"; } ];
     workflow_dispatch = {
@@ -155,7 +146,7 @@ workflow.evalWorkflow {
     };
   };
   jobs = {
-    update-lockfile = mkJob {
+    version-matrix = mkJob {
       # One output for each variant suffix, plus the regular matrix.
       # `ci/workflows/lib.nix` builds both this and the step that fills it
       # from one list, so a new variant reaches the scheduled workflow without
@@ -165,14 +156,9 @@ workflow.evalWorkflow {
         (steps.checkout { ref = branch; })
         (steps.installNix { })
         (steps.cachix { })
-        {
-          name = "Update flake inputs";
-          timeout-minutes = caps.flakeUpdate;
-          run = "nix flake update";
-        }
-        # **This runs after `nix flake update`, and that is the whole point.**
-        # The script is built from the updated flake, so the version list it
-        # writes is the updated one. `ci/steps.nix` says why that replaced five
+        # The version list is computed here rather than rendered, so a nixpkgs
+        # that arrives between renders can add or drop a Nix version and this
+        # run still tests it. `ci/steps.nix` says why one script replaced five
         # `nix eval` calls that each repeated the variant suffixes as a regular
         # expression.
         (
@@ -185,12 +171,6 @@ workflow.evalWorkflow {
             id = "versions";
           }
         )
-        (steps.uploadArtifact {
-          name = null;
-          artifactName = lockArtifact;
-          path = "flake.lock";
-          cond = null;
-        })
       ];
     };
   }
@@ -203,13 +183,13 @@ workflow.evalWorkflow {
       # holds none of it until this job has run. `ci/workflows/lib.nix` gives the
       # measurement behind the cap.
       #
-      # A scheduled run also tests a freshly updated flake, which is what this
-      # job most needs: three of the four defects of issue #120 came from the
-      # toolchain under it, and a bumped nixpkgs is how the next one arrives.
+      # A scheduled run is also where a toolchain change first shows: three of
+      # the four defects of issue #120 came from the toolchain under this job,
+      # and a bumped nixpkgs is how the next one arrives. The bump itself is
+      # the umbrella's now -- nixidae owns nix/sources.lock.
       wheel-x86_64 = workflow.mkWheelJob {
         ref = branch;
-        inherit lockArtifact;
-        needs = [ updateJob ];
+        needs = [ matrixJob ];
       };
 
       # **A native arm64 runner, and never emulation.** GitHub supplies
@@ -224,32 +204,14 @@ workflow.evalWorkflow {
       wheel-aarch64 = workflow.mkWheelJob {
         runner = "ubuntu-24.04-arm";
         ref = branch;
-        inherit lockArtifact;
-        needs = [ updateJob ];
+        needs = [ matrixJob ];
       };
 
       docs-build = workflow.mkDocsBuildJob {
         needs = builtins.attrNames allTestJobs;
         ref = branch;
-        inherit lockArtifact;
       };
       docs-deploy = workflow.mkDocsDeployJob { needs = "docs-build"; };
-      update-lockfile-commit = mkJob {
-        needs = "docs-deploy";
-        permissions = {
-          contents = "write";
-        };
-        steps = [
-          (steps.checkout { ref = branch; })
-          (steps.downloadArtifact { artifactName = lockArtifact; })
-          (withTimeout caps.autoCommit {
-            uses = "step-security/git-auto-commit-action@main";
-            "with" = {
-              commit_message = "nix flake update";
-            };
-          })
-        ];
-      };
     }
   );
 }

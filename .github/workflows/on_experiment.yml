@@ -27,8 +27,6 @@ name: Experiment
         - ubuntu-24.04-arm
         required: false
         type: choice
-env:
-  FLAKE_COMPATISH_DISABLE_OVERRIDES: '1'
 jobs:
   experiment:
     runs-on: ${{ inputs.runner }}

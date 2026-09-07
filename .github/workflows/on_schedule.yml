@@ -12,8 +12,6 @@ name: On schedule
         description: Comma-separated job IDs to run; leave empty for the full matrix
         required: false
         type: string
-env:
-  FLAKE_COMPATISH_DISABLE_OVERRIDES: '1'
 jobs:
   docs-build:
     runs-on: ubuntu-24.04
@@ -26,15 +24,11 @@ jobs:
     - test-ubsan
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',docs-build,')
-    timeout-minutes: 135
+    timeout-minutes: 125
     steps:
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
-      timeout-minutes: 10
-    - uses: actions/download-artifact@main
-      with:
-        name: flake-lock
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
       with:
@@ -94,18 +88,14 @@ jobs:
   static-checks:
     runs-on: ubuntu-24.04
     needs:
-    - update-lockfile
+    - version-matrix
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',static-checks,')
-    timeout-minutes: 85
+    timeout-minutes: 75
     steps:
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
-      timeout-minutes: 10
-    - uses: actions/download-artifact@main
-      with:
-        name: flake-lock
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
       with:
@@ -129,24 +119,20 @@ jobs:
   test-asan:
     runs-on: ubuntu-24.04
     needs:
-    - update-lockfile
+    - version-matrix
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-asan,')
     strategy:
       fail-fast: false
       matrix:
-        version: ${{ fromJson(needs.update-lockfile.outputs.asan_versions) }}
+        version: ${{ fromJson(needs.version-matrix.outputs.asan_versions) }}
     env:
       CI_STEP: ciSteps.${{ matrix.version }}
-    timeout-minutes: 225
+    timeout-minutes: 215
     steps:
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
-      timeout-minutes: 10
-    - uses: actions/download-artifact@main
-      with:
-        name: flake-lock
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
       with:
@@ -181,24 +167,20 @@ jobs:
   test-nogc:
     runs-on: ubuntu-24.04
     needs:
-    - update-lockfile
+    - version-matrix
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-nogc,')
     strategy:
       fail-fast: false
       matrix:
-        version: ${{ fromJson(needs.update-lockfile.outputs.nogc_versions) }}
+        version: ${{ fromJson(needs.version-matrix.outputs.nogc_versions) }}
     env:
       CI_STEP: ciSteps.${{ matrix.version }}
-    timeout-minutes: 150
+    timeout-minutes: 140
     steps:
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
-      timeout-minutes: 10
-    - uses: actions/download-artifact@main
-      with:
-        name: flake-lock
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
       with:
@@ -226,7 +208,7 @@ jobs:
   test-regular:
     runs-on: ubuntu-24.04
     needs:
-    - update-lockfile
+    - version-matrix
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-regular,')
     strategy:
@@ -235,19 +217,15 @@ jobs:
         backend:
         - daemon
         - local
-        version: ${{ fromJson(needs.update-lockfile.outputs.regular_versions) }}
+        version: ${{ fromJson(needs.version-matrix.outputs.regular_versions) }}
     env:
       BACKEND: ${{ matrix.backend }}
       CI_STEP: ciSteps.${{ matrix.version }}
-    timeout-minutes: 245
+    timeout-minutes: 235
     steps:
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
-      timeout-minutes: 10
-    - uses: actions/download-artifact@main
-      with:
-        name: flake-lock
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
       with:
@@ -321,24 +299,20 @@ jobs:
   test-tsan:
     runs-on: ubuntu-24.04
     needs:
-    - update-lockfile
+    - version-matrix
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan,')
     strategy:
       fail-fast: false
       matrix:
-        version: ${{ fromJson(needs.update-lockfile.outputs.tsan_versions) }}
+        version: ${{ fromJson(needs.version-matrix.outputs.tsan_versions) }}
     env:
       CI_STEP: ciSteps.${{ matrix.version }}
-    timeout-minutes: 180
+    timeout-minutes: 170
     steps:
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
-      timeout-minutes: 10
-    - uses: actions/download-artifact@main
-      with:
-        name: flake-lock
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
       with:
@@ -376,24 +350,20 @@ jobs:
   test-ubsan:
     runs-on: ubuntu-24.04
     needs:
-    - update-lockfile
+    - version-matrix
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-ubsan,')
     strategy:
       fail-fast: false
       matrix:
-        version: ${{ fromJson(needs.update-lockfile.outputs.ubsan_versions) }}
+        version: ${{ fromJson(needs.version-matrix.outputs.ubsan_versions) }}
     env:
       CI_STEP: ciSteps.${{ matrix.version }}
-    timeout-minutes: 195
+    timeout-minutes: 185
     steps:
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
-      timeout-minutes: 10
-    - uses: actions/download-artifact@main
-      with:
-        name: flake-lock
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
       with:
@@ -425,7 +395,7 @@ jobs:
         name: ubsan-report-${{ matrix.version }}
         path: ${{ github.workspace }}/ubsan-output-${{ matrix.version }}.log
       timeout-minutes: 15
-  update-lockfile:
+  version-matrix:
     runs-on: ubuntu-24.04
     outputs:
       asan_versions: ${{ steps.versions.outputs.asan_versions }}
@@ -433,7 +403,7 @@ jobs:
       regular_versions: ${{ steps.versions.outputs.regular_versions }}
       tsan_versions: ${{ steps.versions.outputs.tsan_versions }}
       ubsan_versions: ${{ steps.versions.outputs.ubsan_versions }}
-    timeout-minutes: 110
+    timeout-minutes: 75
     steps:
     - uses: actions/checkout@main
       with:
@@ -450,56 +420,23 @@ jobs:
         authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
         useDaemon: false
       timeout-minutes: 15
-    - name: Update flake inputs
-      run: nix flake update
-      timeout-minutes: 20
     - name: Compute Nix version matrices
       id: versions
       run: nix run --file . ciSteps.version-matrix
       timeout-minutes: 20
-    - uses: actions/upload-artifact@main
-      with:
-        name: flake-lock
-        path: flake.lock
-      timeout-minutes: 15
-  update-lockfile-commit:
-    runs-on: ubuntu-24.04
-    needs: docs-deploy
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',update-lockfile-commit,')
-    permissions:
-      contents: write
-    timeout-minutes: 45
-    steps:
-    - uses: actions/checkout@main
-      with:
-        ref: ${{ github.ref_name }}
-      timeout-minutes: 10
-    - uses: actions/download-artifact@main
-      with:
-        name: flake-lock
-      timeout-minutes: 10
-    - uses: step-security/git-auto-commit-action@main
-      with:
-        commit_message: nix flake update
-      timeout-minutes: 10
   wheel-aarch64:
     runs-on: ubuntu-24.04-arm
     needs:
-    - update-lockfile
+    - version-matrix
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',wheel-aarch64,')
     env:
       WHEEL_SMOKE_RUNTIME: docker
-    timeout-minutes: 215
+    timeout-minutes: 205
     steps:
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
-      timeout-minutes: 10
-    - uses: actions/download-artifact@main
-      with:
-        name: flake-lock
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
       with:
@@ -524,20 +461,16 @@ jobs:
   wheel-x86_64:
     runs-on: ubuntu-24.04
     needs:
-    - update-lockfile
+    - version-matrix
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',wheel-x86_64,')
     env:
       WHEEL_SMOKE_RUNTIME: docker
-    timeout-minutes: 215
+    timeout-minutes: 205
     steps:
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
-      timeout-minutes: 10
-    - uses: actions/download-artifact@main
-      with:
-        name: flake-lock
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
       with:

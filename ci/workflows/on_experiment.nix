@@ -36,7 +36,6 @@ let
 in
 workflow.evalWorkflow {
   name = "Experiment";
-  env = workflow.workflowEnv;
   on = {
     workflow_dispatch = {
       inputs = {
