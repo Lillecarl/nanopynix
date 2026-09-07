@@ -25,8 +25,10 @@ let
   default = import ../../../../. { };
   inherit (default) pkgs;
 
-  flake = import ../../../../nix/compat.nix;
-  easykubenixSrc = flake.inputs.easykubenix;
+  # The umbrella owns every source, and this repository re-exports the set it
+  # was given. So this is the easykubenix the rest of the collection builds
+  # against, whether that is a working copy or the revision in the lock.
+  easykubenixSrc = default.sources.easykubenix;
 
   testModules = [
     ./modules/demo.nix

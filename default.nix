@@ -1,57 +1,20 @@
-let
-  flake = (import ./nix/compat.nix);
-
-  # nixidae is the umbrella that holds this repository, and it owns the
-  # inputs. Inside it, that is the checkout one directory up. Outside it, it
-  # is fetched, and this working copy is put in place of the submodule that
-  # came down with it. Either way the answer is the same one, so a build here
-  # and a build from the umbrella agree.
-  #
-  # git+https and not github:, because a GitHub tarball carries no submodule
-  # and the siblings are exactly what this is for.
-  #
-  # `..` from a store path leaves the store root, and Nix refuses that rather
-  # than answering false: "'nix' is too short to be a valid store path". So
-  # ask only when this checkout is not itself in the store.
-  inUmbrella =
-    builtins.substring 0 11 (toString ./.) != "/nix/store/"
-    && builtins.pathExists ../nix/wire.nix;
-
-  umbrella =
-    if inUmbrella then
-      import ../nix/wire.nix
-    else
-      import (
-        (builtins.fetchTree (builtins.parseFlakeRef "git+https://github.com/nixidae/nixidae?submodules=1"))
-        .outPath
-        + "/nix/wire.nix"
-      );
-
-  # CI sets this to make a `--file .` build agree with a flake evaluation. It
-  # turns off the overrides the umbrella works through, so going out to fetch
-  # one would cost a clone and change nothing.
-  overridesDisabled =
-    let
-      value = builtins.getEnv "FLAKE_COMPATISH_DISABLE_OVERRIDES";
-    in
-    value != "" && value != "0";
-in
 {
-  inputs ?
-    if overridesDisabled then
-      flake.inputs
-    else
-      umbrella {
-        project = "nanopynix";
-        source = ./.;
-      },
+  # Where every dependency lives, as directories. nix/sources.nix says how
+  # this repository finds the umbrella that owns them.
+  sources ? import ./nix/sources.nix,
   system ? builtins.currentSystem,
-  pkgs ? inputs.nixpkgs.legacyPackages.${system},
+  # allowUnfree, because the umbrella asks for it too. Without it a build
+  # started here and a build started from the umbrella would use two
+  # different package sets.
+  pkgs ? import sources.nixpkgs {
+    inherit system;
+    config.allowUnfree = true;
+  },
 }:
 let
   inherit (pkgs) lib;
 
-  pyproject-nix = import "${inputs.pyproject-nix}" { inherit lib; };
+  pyproject-nix = import sources.pyproject-nix { inherit lib; };
 
   # Every Python package this repo needs that does *not* depend on
   # nanopynix-bindings, added to the interpreter's own package set.
@@ -135,7 +98,7 @@ let
         # bindings package, not pkgs.tree-sitter (the CLI derivation, whose
         # passthru has `buildGrammar`).
         treeSitterCli = pkgs.tree-sitter;
-        treeSitterNixSrc = inputs.tree-sitter-nix-numtide;
+        treeSitterNixSrc = sources.tree-sitter-nix-numtide;
       };
     };
   };
@@ -567,7 +530,7 @@ let
               nanopynix = final.pythonSet.nanopynix // {
                 test = final.callPackage ./nanopynix/tests.nix {
                   inherit (final.nanopynix) version;
-                  inherit (inputs) nixpkgs;
+                  inherit (sources) nixpkgs;
                   inherit sanitizer sanitizerRuntime;
                   inherit (final) pythonSet;
                   # The one list that the dev shell also takes, so a tool the
@@ -1032,7 +995,7 @@ lib.throwIf (unlistedVariants != [ ])
       ;
 
     inherit
-      flake
+      sources
       pkgs
       nanopynixVersions
       nanopynixForWheel
