@@ -70,9 +70,41 @@ def _yaml12_loader() -> type[Any]:
     return Loader
 
 
+# A float a YAML 1.2 reader resolves and a YAML 1.1 reader does not.
+#
+# 1.1's float production requires a decimal point before the exponent, and
+# requires the exponent to carry a sign. So `1.5e+06` is a float in both, while
+# `1e+06`, `1e6` and `1.5e6` are floats in 1.2 and plain strings in 1.1.
+#
+# That gap is not academic. Helm renders a chart value through Go's `%v` on a
+# float64, which goes to scientific notation from 1e6 upwards, so a chart with
+# `priorityClass.value: 1000000` -- topolvm, and most charts that set one --
+# emits `value: 1e+06`. Read as 1.1 that is the string "1e+06", and the API
+# server refuses it: ".value: expected numeric (int or float), got string".
+_YAML12_ONLY_FLOAT = re.compile(
+    r"^[-+]?(?:[0-9][0-9_]*(?:\.[0-9_]*)?|\.[0-9_]+)[eE][-+]?[0-9]+$",
+)
+
+
 def _yaml11_loader() -> type[Any]:
     class Loader(yaml.CSafeLoader):  # type: ignore[reportUnknownBaseType] -- PyYAML stubs may be incomplete
         pass
+
+    # Helm's dialect, which is what this parser is for, and which is neither
+    # version cleanly: 1.1 for integers, because `defaultMode: 0644` means 420
+    # and 1.2 would read it as 644, and 1.2 for floats, because of the
+    # exponent above.
+    #
+    # Appending is what makes this narrow. PyYAML tries a first character's
+    # resolvers in order and takes the first match, so every scalar 1.1
+    # already resolves -- every octal integer, every 1.1 float -- is decided
+    # before this is reached. The only scalars whose type changes are ones 1.1
+    # called strings and no producer here means as strings.
+    Loader.add_implicit_resolver(  # type: ignore[reportUnknownMemberType] -- yaml.Loader methods may not have complete stubs
+        "tag:yaml.org,2002:float",
+        _YAML12_ONLY_FLOAT,
+        list("-+0123456789."),
+    )
 
     # YAML 1.1's core schema resolves a bare, unquoted `=` scalar to the
     # special "value" type (historically a mapping's "default key" marker),
@@ -200,6 +232,33 @@ def _represent_str(dumper: _BlockStyleDumper, data: str) -> yaml.Node:
 
 
 _BlockStyleDumper.add_representer(str, _represent_str)
+
+# Quote a string that any reader would take back as a number.
+#
+# PyYAML decides whether a scalar may be written plain by resolving the text
+# it is about to emit and checking that the answer is still the tag it holds.
+# The dumper's resolvers are YAML 1.1's, so `0644` is quoted -- 1.1 reads it as
+# octal -- and `1e+06` is not, because 1.1 reads that as a string. A YAML 1.2
+# reader does not, and the value comes back a float. Writing a string in a form
+# that changes its type on the next parse is not a round trip.
+#
+# So the dumper is told about 1.2's numbers as well, and the check becomes the
+# union of the two: text either version would read as a number is quoted. This
+# only ever adds quotes. A real float still goes out plain, because PyYAML's
+# own float representer writes `1.0e+30` rather than `1e+30`, which both
+# versions resolve.
+for _tag, _pattern in (
+    ("tag:yaml.org,2002:float", _YAML12_ONLY_FLOAT),
+    # 1.2 integers 1.1 does not resolve: `0o17` is octal in 1.2 and a string
+    # in 1.1, and 1.1 reads a leading-zero `017` as octal while 1.2 reads it
+    # as decimal 17 -- either way the text means a number to somebody.
+    ("tag:yaml.org,2002:int", re.compile(r"^[-+]?0o[0-7_]+$")),
+):
+    _BlockStyleDumper.add_implicit_resolver(  # type: ignore[reportUnknownMemberType] -- yaml.Dumper methods may not have complete stubs
+        _tag,
+        _pattern,
+        list("-+0123456789."),
+    )
 
 
 def to_yaml(value: JsonValue) -> str:

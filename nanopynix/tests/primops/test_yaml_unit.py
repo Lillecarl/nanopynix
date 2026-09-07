@@ -74,3 +74,97 @@ def test_parse_error_message_uses_the_problem_without_a_mark() -> None:
         problem_mark = None
 
     assert _parse_error_message(_FakeYamlError()) == "mock problem"
+
+
+# -- what Helm emits, and what has to come back out ------------------------
+#
+# `fromYAML11` reads Helm's output, and Helm's output is neither version
+# cleanly: 1.1 integers, so that `defaultMode: 0644` means 420, and 1.2
+# floats, because Go's `%v` on a float64 goes to scientific notation from 1e6
+# upwards. The two below are one round trip and both halves used to break it.
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # The shape topolvm's priorityClass produces. 1.1's float production
+        # requires a decimal point before the exponent, so this used to parse
+        # as the string "1e+06" and the API server refused the PriorityClass:
+        # ".value: expected numeric (int or float), got string".
+        ("1e+06", 1000000.0),
+        ("1e6", 1000000.0),
+        # 1.1 also requires a sign in the exponent.
+        ("1.5e6", 1500000.0),
+        ("-2e3", -2000.0),
+        (".5e1", 5.0),
+    ],
+)
+def test_from_yaml11_reads_a_float_the_way_helm_writes_one(text: str, expected: float) -> None:
+    assert from_yaml11(f"value: {text}") == {"value": expected}
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # Octal is the whole reason this parser is 1.1 rather than 1.2, and
+        # widening the float production must not have touched it.
+        ("0644", 420),
+        ("017", 15),
+        # A 1.1 float stays one, decided before the added resolver is reached.
+        ("1.5e+06", 1500000.0),
+        ("1.5", 1.5),
+        # And a scalar neither version calls a number stays a string.
+        ("1e", "1e"),
+        ("abc", "abc"),
+        ("1.2.3", "1.2.3"),
+    ],
+)
+def test_from_yaml11_still_resolves_what_it_always_did(text: str, expected: object) -> None:
+    assert from_yaml11(f"value: {text}") == {"value": expected}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Written plain, a YAML 1.2 reader takes this back as a float. The
+        # dumper's own resolvers are 1.1's, which call it a string, so it used
+        # to go out unquoted and change type on the next parse.
+        "1e+06",
+        "1e6",
+        "1.5e6",
+        # 1.1 already quoted these; they are here so a later change cannot
+        # quietly stop.
+        "0644",
+        "1.5",
+        "1000",
+        "true",
+        # 1.2 octal, which 1.1 calls a string.
+        "0o17",
+    ],
+)
+def test_to_yaml_quotes_a_string_some_reader_would_call_a_number(text: str) -> None:
+    assert to_yaml({"value": text}) == f"value: '{text}'\n"
+
+
+@pytest.mark.parametrize(
+    ("value", "rendered"),
+    [
+        # A real number still goes out plain. PyYAML writes `1.0e+30` rather
+        # than `1e+30`, which both versions resolve as a float, so nothing
+        # here starts quoting numbers.
+        (1000000.0, "1000000.0"),
+        (1e30, "1.0e+30"),
+        (420, "420"),
+        (1.5, "1.5"),
+        (True, "true"),
+    ],
+)
+def test_to_yaml_leaves_a_number_unquoted(value: object, rendered: str) -> None:
+    assert to_yaml({"value": value}) == f"value: {rendered}\n"
+
+
+def test_a_helm_float_survives_the_round_trip() -> None:
+    """Read what Helm wrote, write it again, read it again."""
+    once = from_yaml11("value: 1e+06")
+
+    assert from_yaml11(to_yaml(once)) == once == {"value": 1000000.0}
