@@ -16,9 +16,14 @@ let
   # so CI names `ciSteps.nix_2_34-tsan` directly and this file reads the same
   # attributes CI builds. The marker is gone with it.
   repo = import ../../. { };
-  inherit (repo) lib ciVersionMatrix;
+  inherit (repo) lib ciVersionMatrix sources;
 
-  ghalib = import ../../ghanix { inherit lib; };
+  # ghanix is its own repository now, pinned by the umbrella like any other
+  # source. It used to be `../../ghanix`, a directory here, and it moved
+  # because nixkube wants it and has no nanopynix dependency to reach it
+  # through. Nothing about the import changed but the path: it still takes
+  # `lib` and nothing else.
+  ghalib = import sources.ghanix { inherit lib; };
   inherit (ghalib)
     steps
     withCond
@@ -63,8 +68,8 @@ let
     "local"
   ];
 
-  # A cap for each step that this file writes, in minutes. `ghanix/steps.nix`
-  # carries the caps of the steps that it builds.
+  # A cap for each step that this file writes, in minutes. ghanix's
+  # `steps.nix` carries the caps of the steps that it builds.
   #
   # **The cap belongs to the step, and not to the job.** A cap exists for the
   # case that is not a slow step but a stopped one -- twice a daemon job has
