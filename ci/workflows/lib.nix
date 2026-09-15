@@ -28,8 +28,33 @@ let
     steps
     withCond
     withTimeout
-    evalWorkflow
     ;
+
+  # Every workflow of this repository, with the environment every job needs.
+  #
+  # It wraps ghanix's `evalWorkflow` rather than writing `env` in each
+  # `on_*.nix`, so a workflow added later cannot be the one that forgets it.
+  # A workflow that sets its own `env` wins, because it is written after the
+  # default in the `//`.
+  #
+  # **UMBRELLA_GIT makes the umbrella fetch each source over the git
+  # protocol, instead of through api.github.com.** Anonymous api.github.com
+  # allows 60 calls an hour per IP, GitHub's runners share a NAT pool, and
+  # every source a job resolves is one call. Issue #301.
+  #
+  # The token this repository installs raises that to 1000 an hour per
+  # repository. This removes the dependency instead: a `git+https://`
+  # reference spends nothing from either budget.
+  #
+  # Measured with a deliberately wrong token, which answers 401 if a request
+  # carried it. On an empty store with an empty `~/.cache/nix`,
+  # `github:NixOS/nixpkgs/<rev>?narHash=<hash>` answers 401 -- it asks the
+  # API first, and it does so even when the store path the narHash names is
+  # already valid. The same revision over git answers with the path. The
+  # store path is the same one either way.
+  evalWorkflow =
+    workflow:
+    ghalib.evalWorkflow ({ env = { UMBRELLA_GIT = "1"; }; } // workflow);
 
   # `default.nix` groups the version names, so this file no longer repeats the
   # variant suffixes as a second list, and `on_schedule.nix` no longer writes
