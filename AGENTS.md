@@ -64,11 +64,15 @@ runs it, in a sandbox and not in the dev shell:
 
 - nix build --file . --no-link --keep-going checks.lint checks.lint-strict checks.format checks.types checks.shell checks.grpclib-transports checks.pytest-agent checks.test-support checks.nanopynix-helpers checks.libpynix checks.pynix-isolated checks.completions
 
-**This repository is not a flake, so `--file .` is the only way in.** There is
-no `flake.nix` and no `flake.lock`. `nix/sources.nix` asks the nixidae
-umbrella where every dependency lives, and `default.nix` takes that set as
-`sources`. Every attribute is reachable by path, at any depth, so nothing
-needs a flat name.
+**This repository does not build as a flake, so `--file .` is the only way
+in.** `nix/sources.nix` asks the nixidae umbrella where every dependency
+lives, and `default.nix` takes that set as `sources`. Every attribute is
+reachable by path, at any depth, so nothing needs a flat name.
+
+`flake.nix` is committed, and it is a surface and not a build. It names what a
+flake consumer gets and calls `default.nix`, so a change to how anything is
+built happens there. No `flake.lock` is committed and no gate evaluates the
+flake; issue #300 holds both.
 
 The umbrella owns the pins. A dependency moves when `nix/sources.lock` in
 nixidae moves, and not before, so CI and a local run build the same
