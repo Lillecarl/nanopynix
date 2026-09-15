@@ -55,8 +55,24 @@ let
   #
   # The git reference resolves the same head over the git protocol, which
   # that limit does not count.
+  # UMBRELLA_REV pins it, and that is what makes two jobs of one CI run agree.
+  #
+  # Without it this reference is unlocked, so it resolves the head of the
+  # default branch again in every job. `umbrella land` pushes the working
+  # copies, which starts the run, and the umbrella lock commit follows
+  # seconds later, so a run straddles the push and its jobs read two
+  # revisions. Measured in nixkube run 35026926963: seven seconds between the
+  # first job starting and the commit, two `cacheEnv` paths, and a job that
+  # asked for one nothing had built. Issue #301.
+  #
+  # `ci/workflows/lib.nix` resolves the head once per run and gives every job
+  # the answer.
+  umbrellaRev = builtins.getEnv "UMBRELLA_REV";
+
   umbrellaRef =
-    if builtins.getEnv "UMBRELLA_GIT" != "" then
+    if umbrellaRev != "" then
+      "git+https://github.com/nixidae/nixidae?rev=${umbrellaRev}&shallow=1"
+    else if builtins.getEnv "UMBRELLA_GIT" != "" then
       "git+https://github.com/nixidae/nixidae?shallow=1"
     else
       "github:nixidae/nixidae";

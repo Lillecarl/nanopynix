@@ -24,8 +24,11 @@ jobs:
     - test-regular
     - test-tsan
     - test-ubsan
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',docs-build,')
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 125
     steps:
     - uses: actions/checkout@main
@@ -60,7 +63,9 @@ jobs:
       timeout-minutes: 15
   docs-deploy:
     runs-on: ubuntu-24.04
-    needs: docs-build
+    needs:
+    - docs-build
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',docs-deploy,')
     permissions:
@@ -69,6 +74,8 @@ jobs:
     concurrency:
       cancel-in-progress: false
       group: pages
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 37
     steps:
     - name: Report what the gating jobs did
@@ -92,8 +99,11 @@ jobs:
     runs-on: ubuntu-24.04
     needs:
     - version-matrix
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',static-checks,')
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 75
     steps:
     - uses: actions/checkout@main
@@ -124,6 +134,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs:
     - version-matrix
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-asan,')
     strategy:
@@ -132,6 +143,7 @@ jobs:
         version: ${{ fromJson(needs.version-matrix.outputs.asan_versions) }}
     env:
       CI_STEP: ciSteps.${{ matrix.version }}
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 215
     steps:
     - uses: actions/checkout@main
@@ -173,6 +185,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs:
     - version-matrix
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-nogc,')
     strategy:
@@ -181,6 +194,7 @@ jobs:
         version: ${{ fromJson(needs.version-matrix.outputs.nogc_versions) }}
     env:
       CI_STEP: ciSteps.${{ matrix.version }}
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 140
     steps:
     - uses: actions/checkout@main
@@ -215,6 +229,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs:
     - version-matrix
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-regular,')
     strategy:
@@ -227,6 +242,7 @@ jobs:
     env:
       BACKEND: ${{ matrix.backend }}
       CI_STEP: ciSteps.${{ matrix.version }}
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 235
     steps:
     - uses: actions/checkout@main
@@ -307,6 +323,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs:
     - version-matrix
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan,')
     strategy:
@@ -315,6 +332,7 @@ jobs:
         version: ${{ fromJson(needs.version-matrix.outputs.tsan_versions) }}
     env:
       CI_STEP: ciSteps.${{ matrix.version }}
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 170
     steps:
     - uses: actions/checkout@main
@@ -359,6 +377,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs:
     - version-matrix
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-ubsan,')
     strategy:
@@ -367,6 +386,7 @@ jobs:
         version: ${{ fromJson(needs.version-matrix.outputs.ubsan_versions) }}
     env:
       CI_STEP: ciSteps.${{ matrix.version }}
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 185
     steps:
     - uses: actions/checkout@main
@@ -404,8 +424,22 @@ jobs:
         name: ubsan-report-${{ matrix.version }}
         path: ${{ github.workspace }}/ubsan-output-${{ matrix.version }}.log
       timeout-minutes: 15
+  umbrella-rev:
+    runs-on: ubuntu-24.04
+    outputs:
+      rev: ${{ steps.resolve.outputs.rev }}
+    timeout-minutes: 5
+    steps:
+    - name: Resolve the umbrella revision
+      id: resolve
+      run: git ls-remote https://github.com/nixidae/nixidae main | cut -f1 | sed 's/^/rev=/'
+        >> "$GITHUB_OUTPUT"
   version-matrix:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     outputs:
       asan_versions: ${{ steps.versions.outputs.asan_versions }}
       nogc_versions: ${{ steps.versions.outputs.nogc_versions }}
@@ -438,9 +472,11 @@ jobs:
     runs-on: ubuntu-24.04-arm
     needs:
     - version-matrix
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',wheel-aarch64,')
     env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
       WHEEL_SMOKE_RUNTIME: docker
     timeout-minutes: 205
     steps:
@@ -473,9 +509,11 @@ jobs:
     runs-on: ubuntu-24.04
     needs:
     - version-matrix
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',wheel-x86_64,')
     env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
       WHEEL_SMOKE_RUNTIME: docker
     timeout-minutes: 205
     steps:

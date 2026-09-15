@@ -32,9 +32,13 @@ env:
 jobs:
   experiment:
     runs-on: ${{ inputs.runner }}
+    needs:
+    - umbrella-rev
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(inputs.matrix) }}
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 160
     steps:
     - uses: actions/checkout@main
@@ -78,3 +82,13 @@ jobs:
           /tmp/core.*
           .pytest-agent/
       timeout-minutes: 15
+  umbrella-rev:
+    runs-on: ubuntu-24.04
+    outputs:
+      rev: ${{ steps.resolve.outputs.rev }}
+    timeout-minutes: 5
+    steps:
+    - name: Resolve the umbrella revision
+      id: resolve
+      run: git ls-remote https://github.com/nixidae/nixidae main | cut -f1 | sed 's/^/rev=/'
+        >> "$GITHUB_OUTPUT"

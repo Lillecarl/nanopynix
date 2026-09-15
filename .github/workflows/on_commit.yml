@@ -18,7 +18,11 @@ env:
 jobs:
   docs-build:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.ref == 'refs/heads/develop'
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 125
     steps:
     - uses: actions/checkout@main
@@ -72,6 +76,7 @@ jobs:
     - test-ubsan-git
     - test-ubsan-nix_2_34
     - test-ubsan-nix_2_35
+    - umbrella-rev
     if: github.ref == 'refs/heads/develop' && !cancelled()
     permissions:
       id-token: write
@@ -79,6 +84,8 @@ jobs:
     concurrency:
       cancel-in-progress: false
       group: pages
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 37
     steps:
     - name: Report what the gating jobs did
@@ -120,9 +127,12 @@ jobs:
     - test-ubsan-git
     - test-ubsan-nix_2_34
     - test-ubsan-nix_2_35
+    - umbrella-rev
     if: github.ref == 'refs/heads/develop' && !cancelled()
     permissions:
       contents: write
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 30
     steps:
     - uses: actions/checkout@main
@@ -139,8 +149,12 @@ jobs:
       timeout-minutes: 5
   static-checks:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',static-checks,')
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 75
     steps:
     - uses: actions/checkout@main
@@ -167,10 +181,13 @@ jobs:
       timeout-minutes: 20
   test-asan-git:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-asan-git,')
     env:
       CI_STEP: ciSteps.git-asan
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 215
     steps:
     - uses: actions/checkout@main
@@ -208,10 +225,13 @@ jobs:
       timeout-minutes: 15
   test-asan-nix_2_34:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-asan-nix_2_34,')
     env:
       CI_STEP: ciSteps.nix_2_34-asan
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 215
     steps:
     - uses: actions/checkout@main
@@ -249,10 +269,13 @@ jobs:
       timeout-minutes: 15
   test-asan-nix_2_35:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-asan-nix_2_35,')
     env:
       CI_STEP: ciSteps.nix_2_35-asan
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 215
     steps:
     - uses: actions/checkout@main
@@ -290,11 +313,14 @@ jobs:
       timeout-minutes: 15
   test-daemon-git:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-git,')
     env:
       BACKEND: daemon
       CI_STEP: ciSteps.git
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 235
     steps:
     - uses: actions/checkout@main
@@ -369,11 +395,14 @@ jobs:
       timeout-minutes: 15
   test-daemon-nix_2_34:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-nix_2_34,')
     env:
       BACKEND: daemon
       CI_STEP: ciSteps.nix_2_34
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 235
     steps:
     - uses: actions/checkout@main
@@ -448,11 +477,14 @@ jobs:
       timeout-minutes: 15
   test-daemon-nix_2_35:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-daemon-nix_2_35,')
     env:
       BACKEND: daemon
       CI_STEP: ciSteps.nix_2_35
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 235
     steps:
     - uses: actions/checkout@main
@@ -527,12 +559,15 @@ jobs:
       timeout-minutes: 15
   test-darwin-nix_2_34:
     runs-on: macos-latest
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-darwin-nix_2_34,')
     env:
       BACKEND: local
       CI_STEP: ciSteps.nix_2_34
       NANOPYNIX_RPC_TIMEOUT: '90'
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 190
     steps:
     - uses: actions/checkout@main
@@ -575,11 +610,14 @@ jobs:
     continue-on-error: true
   test-local-git:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-git,')
     env:
       BACKEND: local
       CI_STEP: ciSteps.git
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 235
     steps:
     - uses: actions/checkout@main
@@ -654,11 +692,14 @@ jobs:
       timeout-minutes: 15
   test-local-nix_2_34:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-nix_2_34,')
     env:
       BACKEND: local
       CI_STEP: ciSteps.nix_2_34
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 235
     steps:
     - uses: actions/checkout@main
@@ -733,11 +774,14 @@ jobs:
       timeout-minutes: 15
   test-local-nix_2_35:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-local-nix_2_35,')
     env:
       BACKEND: local
       CI_STEP: ciSteps.nix_2_35
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 235
     steps:
     - uses: actions/checkout@main
@@ -812,10 +856,13 @@ jobs:
       timeout-minutes: 15
   test-nogc-git:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-nogc-git,')
     env:
       CI_STEP: ciSteps.git-nogc
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 140
     steps:
     - uses: actions/checkout@main
@@ -846,10 +893,13 @@ jobs:
       timeout-minutes: 15
   test-nogc-nix_2_34:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-nogc-nix_2_34,')
     env:
       CI_STEP: ciSteps.nix_2_34-nogc
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 140
     steps:
     - uses: actions/checkout@main
@@ -880,10 +930,13 @@ jobs:
       timeout-minutes: 15
   test-nogc-nix_2_35:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-nogc-nix_2_35,')
     env:
       CI_STEP: ciSteps.nix_2_35-nogc
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 140
     steps:
     - uses: actions/checkout@main
@@ -914,10 +967,13 @@ jobs:
       timeout-minutes: 15
   test-tsan-git:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan-git,')
     env:
       CI_STEP: ciSteps.git-tsan
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 170
     steps:
     - uses: actions/checkout@main
@@ -958,10 +1014,13 @@ jobs:
       timeout-minutes: 15
   test-tsan-nix_2_34:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan-nix_2_34,')
     env:
       CI_STEP: ciSteps.nix_2_34-tsan
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 170
     steps:
     - uses: actions/checkout@main
@@ -1002,10 +1061,13 @@ jobs:
       timeout-minutes: 15
   test-tsan-nix_2_35:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-tsan-nix_2_35,')
     env:
       CI_STEP: ciSteps.nix_2_35-tsan
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 170
     steps:
     - uses: actions/checkout@main
@@ -1046,10 +1108,13 @@ jobs:
       timeout-minutes: 15
   test-ubsan-git:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-ubsan-git,')
     env:
       CI_STEP: ciSteps.git-ubsan
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 185
     steps:
     - uses: actions/checkout@main
@@ -1087,10 +1152,13 @@ jobs:
       timeout-minutes: 15
   test-ubsan-nix_2_34:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-ubsan-nix_2_34,')
     env:
       CI_STEP: ciSteps.nix_2_34-ubsan
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 185
     steps:
     - uses: actions/checkout@main
@@ -1128,10 +1196,13 @@ jobs:
       timeout-minutes: 15
   test-ubsan-nix_2_35:
     runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
     if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
       inputs.jobs), ',test-ubsan-nix_2_35,')
     env:
       CI_STEP: ciSteps.nix_2_35-ubsan
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     timeout-minutes: 185
     steps:
     - uses: actions/checkout@main
@@ -1167,3 +1238,13 @@ jobs:
         name: ubsan-report-nix_2_35
         path: ${{ github.workspace }}/ubsan-output-nix_2_35.log
       timeout-minutes: 15
+  umbrella-rev:
+    runs-on: ubuntu-24.04
+    outputs:
+      rev: ${{ steps.resolve.outputs.rev }}
+    timeout-minutes: 5
+    steps:
+    - name: Resolve the umbrella revision
+      id: resolve
+      run: git ls-remote https://github.com/nixidae/nixidae main | cut -f1 | sed 's/^/rev=/'
+        >> "$GITHUB_OUTPUT"

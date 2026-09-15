@@ -52,9 +52,87 @@ let
   # API first, and it does so even when the store path the narHash names is
   # already valid. The same revision over git answers with the path. The
   # store path is the same one either way.
+  # The job that resolves the umbrella once, for the whole run.
+  #
+  # **Every other job reads the answer, so no two jobs can disagree.**
+  # `nix/sources.nix` fetches the umbrella unlocked when nothing pins it, so
+  # it resolves the head of the default branch again in each job. `umbrella
+  # land` pushes the working copies, which starts the run, and the umbrella
+  # lock commit follows seconds later, so a run straddles the push and its
+  # jobs read two different revisions.
+  #
+  # Measured, nixkube run 35026926963: `build-amd64` started at 21:40:23 UTC
+  # and pushed `fc7rz74f...-cacheEnv`; the lock commit landed at 21:40:30;
+  # `build-manifests` started at 21:43:07 and asked for
+  # `zsn1x27a...-cacheEnv`, which nothing had built. Issue #301 records the
+  # same failure twice before that, once with a six second margin.
+  #
+  # `git ls-remote` and not Nix: the runner has git, the answer is one line,
+  # and this job must be the cheapest in the run because every other job
+  # waits for it.
+  umbrellaRevJob = "umbrella-rev";
+
+  mkUmbrellaRevJob = {
+    runs-on = "ubuntu-24.04";
+    timeout-minutes = 5;
+    outputs.rev = "\${{ steps.resolve.outputs.rev }}";
+    steps = [
+      {
+        id = "resolve";
+        name = "Resolve the umbrella revision";
+        run = "git ls-remote https://github.com/nixidae/nixidae main | cut -f1 | sed 's/^/rev=/' >> \"$GITHUB_OUTPUT\"";
+      }
+    ];
+  };
+
+  # Every workflow of this repository, with the environment every job needs
+  # and the umbrella revision every job shares.
+  #
+  # It wraps ghanix's `evalWorkflow` rather than writing `env` and `needs` in
+  # each `on_*.nix`, so a workflow or a job added later cannot be the one that
+  # forgets either. A workflow that sets its own `env` wins, and so does a job.
+  #
+  # **UMBRELLA_GIT makes the umbrella fetch each source over the git
+  # protocol, instead of through api.github.com.** Anonymous api.github.com
+  # allows 60 calls an hour per IP, GitHub's runners share a NAT pool, and
+  # every source a job resolves is one call. Issue #301.
+  #
+  # The token this repository installs raises that to 1000 an hour per
+  # repository. This removes the dependency instead: a `git+https://`
+  # reference spends nothing from either budget.
+  #
+  # Measured with a deliberately wrong token, which answers 401 if a request
+  # carried it. On an empty store with an empty `~/.cache/nix`,
+  # `github:NixOS/nixpkgs/<rev>?narHash=<hash>` answers 401 -- it asks the
+  # API first, and it does so even when the store path the narHash names is
+  # already valid. The same revision over git answers with the path. The
+  # store path is the same one either way.
   evalWorkflow =
     workflow:
-    ghalib.evalWorkflow ({ env = { UMBRELLA_GIT = "1"; }; } // workflow);
+    let
+      # `needs` is a string, a list or absent, and it has to stay whichever
+      # it was plus one name.
+      asList = n: if n == null then [ ] else if builtins.isList n then n else [ n ];
+
+      pin =
+        name: job:
+        job
+        // {
+          needs = asList (job.needs or null) ++ [ umbrellaRevJob ];
+          env = {
+            UMBRELLA_REV = "\${{ needs.${umbrellaRevJob}.outputs.rev }}";
+          } // (if job.env or null == null then { } else job.env);
+        };
+    in
+    ghalib.evalWorkflow (
+      { env = { UMBRELLA_GIT = "1"; }; }
+      // workflow
+      // {
+        jobs = builtins.mapAttrs pin workflow.jobs // {
+          ${umbrellaRevJob} = mkUmbrellaRevJob;
+        };
+      }
+    );
 
   # `default.nix` groups the version names, so this file no longer repeats the
   # variant suffixes as a second list, and `on_schedule.nix` no longer writes
