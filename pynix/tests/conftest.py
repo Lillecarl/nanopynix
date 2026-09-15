@@ -331,8 +331,16 @@ class PynixStoreScenario:
         return output
 
     async def build_flake_hello(self, *, test_name: str = "unknown") -> str:
-        system = await self.get_current_system(test_name=f"{test_name}:current-system")
-        flake_ref = f"{self.repo_root}#legacyPackages.{system}.hello"
+        # **The pinned nixpkgs, and not this repository.** The subject is
+        # `pynix build --flake`, and the reference named `repo_root` only
+        # because the old flake re-exported every nixpkgs attribute as
+        # `legacyPackages`. The curated surface dropped that, so the reference
+        # asked for an attribute no output holds. It also asked a read-only
+        # store path to lock a flake that has two inputs and no committed
+        # lock, which failed before the attribute was ever looked up. nixpkgs
+        # has no input to lock, `base_attr_search` finds `hello` under its
+        # `legacyPackages`, and the path is realised already.
+        flake_ref = f"{self.nixpkgs_path}#hello"
         data = await self.run_pynix_json(
             [
                 "build",
