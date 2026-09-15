@@ -44,3 +44,16 @@ soak-*.json
 # workspaces and never offers one, so `jj st` stays silent, and only a `git
 # add` sees it. One workspace holds a whole second checkout.
 .workspaces/
+
+# `flake.nix` is a surface and not a build, and commit 39cc78a1 removed the
+# lock it used to carry. A `nix flake` command run in this directory writes
+# the file back, because Nix writes a lock beside the flake it locks. Nothing
+# reads the result: a `github:` or `git+` flake reference reads committed
+# files only, so the file in the working copy is inert.
+#
+# It was not ignored, so jj tracked it on sight and every `jj diff` showed it
+# as a new file. That made it look like it was written again on every
+# command, and it made `umbrella land` carry it into a commit unless somebody
+# moved it aside first. Issue #300 decides whether a lock gets committed on
+# purpose; until then a generated one stays out of the way.
+/flake.lock
