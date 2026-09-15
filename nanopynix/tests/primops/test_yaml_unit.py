@@ -9,6 +9,8 @@ that upstream primop-registration issue.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 import yaml
 from yaml.representer import RepresenterError
@@ -21,6 +23,9 @@ from nanopynix.primops.yaml import (
     from_yaml_stream,
     to_yaml,
 )
+
+if TYPE_CHECKING:
+    from nanopynix.models import JsonValue
 
 
 def test_from_yaml_parses_hex_integers_as_yaml12() -> None:
@@ -159,7 +164,7 @@ def test_to_yaml_quotes_a_string_some_reader_would_call_a_number(text: str) -> N
         (True, "true"),
     ],
 )
-def test_to_yaml_leaves_a_number_unquoted(value: object, rendered: str) -> None:
+def test_to_yaml_leaves_a_number_unquoted(value: JsonValue, rendered: str) -> None:
     assert to_yaml({"value": value}) == f"value: {rendered}\n"
 
 
