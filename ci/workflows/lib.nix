@@ -246,21 +246,17 @@ let
   # case: `cachix/cachix-action` pushes the paths that the job built after the
   # last step ends, and no step cap reaches it.
   jobSlack = 15;
+
+  # The sum itself is ghanix's now -- `ghanix.deriveTimeout`. It has to be:
+  # a job can ask ghanix for steps of its own, and a sum taken here, before
+  # the schema is evaluated, would come out short by exactly those steps.
   mkJob =
     job:
-    let
-      capOf =
-        step:
-        step.timeout-minutes or (throw ''
-          ci/workflows: this step declares no timeout-minutes, so the cap of
-          its job cannot be derived. Give it one from the `caps` table in
-          ci/workflows/lib.nix, with `withTimeout`. The step was:
-          ${builtins.toJSON step}
-        '');
-    in
-    job
-    // {
-      timeout-minutes = lib.foldl' (total: step: total + capOf step) jobSlack job.steps;
+    lib.recursiveUpdate job {
+      ghanix.deriveTimeout = {
+        enable = true;
+        slack = jobSlack;
+      };
     };
 
   # A single cachix/install-nix-action (multi-user) install suffices for every
