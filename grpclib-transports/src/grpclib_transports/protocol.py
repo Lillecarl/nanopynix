@@ -22,6 +22,7 @@ from grpclib.encoding.proto import ProtoCodec
 from grpclib.events import _DispatchServerEvents  # pyright: ignore[reportPrivateUsage] -- grpclib internal API
 from grpclib.protocol import H2Protocol
 from grpclib.server import Handler as ServerHandler
+from h2 import __version__ as h2_version
 from h2.config import H2Configuration
 from h2.connection import H2Connection
 from h2.errors import ErrorCodes
@@ -110,6 +111,14 @@ def _env_size(name: str, default: int) -> int:
 
 _h2_fast_receive_patch_installed = False
 
+#: The private methods of `H2Connection` that `_receive_frame_without_trace_repr`
+#: calls. `install_h2_fast_receive_patch` refuses to patch without them.
+_H2_PRIVATE_MEMBERS = (
+    "_prepare_for_sending",
+    "_stream_is_closed_by_end",
+    "_stream_is_closed_by_reset",
+)
+
 
 # A verbatim copy of `h2.connection.H2Connection._receive_frame` with the
 # trace-logging frame reprs removed -- those reprs are formatted on every
@@ -166,6 +175,18 @@ def install_h2_fast_receive_patch() -> None:
     params = tuple(inspect.signature(H2Connection._receive_frame).parameters)  # pyright: ignore[reportPrivateUsage] -- h2 private member, no public equivalent
     if params != ("self", "frame"):
         raise RuntimeError(f"Unsupported h2 H2Connection._receive_frame signature: {params!r}")
+    # The copy above reads three more private methods, and the signature says
+    # nothing about any of them. A release that renames one gives an
+    # `AttributeError` from inside the frame pump of a live connection, which
+    # arrives as `WorkerDiedError: Protocol error` and names neither h2 nor
+    # this patch. Refuse at import instead, and name the member.
+    #
+    # `_frame_dispatch_table` is absent here on purpose: `H2Connection` sets it
+    # in `__init__`, so the class does not carry it and only an instance can
+    # answer for it. Issue #299 has one CI job where an instance did not.
+    missing = [name for name in _H2_PRIVATE_MEMBERS if not hasattr(H2Connection, name)]
+    if missing:
+        raise RuntimeError(f"h2 {h2_version} H2Connection is missing the private members this patch reads: {missing}")
     H2Connection._receive_frame = _receive_frame_without_trace_repr  # pyright: ignore[reportPrivateUsage] -- h2 private member, no public equivalent
     _h2_fast_receive_patch_installed = True
 
