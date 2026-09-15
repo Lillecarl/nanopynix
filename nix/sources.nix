@@ -55,6 +55,7 @@ let
   #
   # The git reference resolves the same head over the git protocol, which
   # that limit does not count.
+  #
   # UMBRELLA_REV pins it, and that is what makes two jobs of one CI run agree.
   #
   # Without it this reference is unlocked, so it resolves the head of the
@@ -69,9 +70,45 @@ let
   # the answer.
   umbrellaRev = builtins.getEnv "UMBRELLA_REV";
 
+  # The umbrella revision this checkout was written against, when it records
+  # one.
+  #
+  # **A file, and not a git ref, because only a file survives every way this
+  # expression is read.** A tree that Nix fetched carries no `.git` and no
+  # revision marker, so an expression inside it cannot learn its own revision
+  # or its own url. Measured: `builtins.readDir` of a fetched tree lists the
+  # source files and nothing else. A consumer that took this repository as
+  # `github:Lillecarl/nanopynix`, a release tarball, or a pull request from a
+  # fork could not resolve a pin held in a ref. GitHub copies `refs/heads`
+  # and tags to a fork, and not a custom ref namespace. A file is in the
+  # tree, so every one of those reads it.
+  #
+  # It is also the only mechanism that works under `--pure-eval`, where
+  # `builtins.getEnv` answers "". That is what lets a flake consumer resolve
+  # a pinned umbrella rather than the moving head of a branch.
+  #
+  # **It names the umbrella this commit was written against, and not the one
+  # that locks this commit.** Those cannot be the same. The umbrella lock
+  # holds this commit's hash, so a commit that held the lock's hash would
+  # need a hash that contains itself. The earlier revision is the useful one
+  # anyway: a build of this checkout overrides this repository with the
+  # checkout, so the umbrella supplies every *other* source, and the revision
+  # the work was done against is the one that supplied them.
+  #
+  # `builtins.match` rather than a trim helper, because it also rejects a
+  # file that holds anything but a hash.
+  pinMatch =
+    if builtins.pathExists ./umbrella.rev then
+      builtins.match "[ \n\t]*([0-9a-f]{40})[ \n\t]*" (builtins.readFile ./umbrella.rev)
+    else
+      null;
+  pinned = if pinMatch == null then "" else builtins.head pinMatch;
+
   umbrellaRef =
     if umbrellaRev != "" then
       "git+https://github.com/nixidae/nixidae?rev=${umbrellaRev}&shallow=1"
+    else if pinned != "" then
+      "git+https://github.com/nixidae/nixidae?rev=${pinned}&shallow=1"
     else if builtins.getEnv "UMBRELLA_GIT" != "" then
       "git+https://github.com/nixidae/nixidae?shallow=1"
     else
