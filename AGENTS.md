@@ -108,9 +108,8 @@ cannot do:
 - **A gate reads a script.** `writeShellApplication` runs `shellcheck` over
   what it builds. `check-shell` reads `scripts/*.sh`, and a bash string inside
   a Nix file is not a script to any tool.
-- **A script runs here, and against one Nix version.** These are the commands
+- **A script runs here, and against one Nix version.** This is the command
   that CI runs:
-  - `nix run --file . ciSteps.commit-subjects`
   - `nix build --file . ciSteps.nix_2_34 --out-link result`, and then
     `BACKEND=local ./result/bin/nanopynix-ci soak`
 - **`runtimeInputs` names each tool.** A step that declares `jq`, `git` and

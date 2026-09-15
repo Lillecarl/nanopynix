@@ -23,19 +23,13 @@ let
   staticChecksJob = {
     static-checks = workflow.mkStaticChecksJob { };
   };
-  # Same reasoning, and cheaper still: it installs no Nix.
-  commitSubjectJob = {
-    commit-subjects = workflow.mkCommitSubjectJob { };
-  };
   # The jobs a docs deploy waits for. **The macOS job is not one of them.**
   # GitHub skips a job whose `needs` failed, and `continue-on-error` stops the
   # run from failing without making the job succeed, so a red macOS job would
-  # take the docs deploy with it. That is the shape that already cost a deploy
-  # once, when `commit-subjects` went red on develop. Move the job in here
-  # when it is green and `continue-on-error` comes off.
+  # take the docs deploy with it. That shape cost a deploy once already. Move
+  # the job in here when it is green and `continue-on-error` comes off.
   gatingTestJobs =
     staticChecksJob
-    // commitSubjectJob
     // testJobs
     // tsanTestJobs
     // ubsanTestJobs

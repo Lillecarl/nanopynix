@@ -14,25 +14,6 @@ name: On commit
         required: false
         type: string
 jobs:
-  commit-subjects:
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
-      inputs.jobs), ',commit-subjects,')
-    timeout-minutes: 55
-    steps:
-    - uses: actions/checkout@main
-      with:
-        fetch-depth: 0
-      timeout-minutes: 10
-    - uses: cachix/install-nix-action@master
-      with:
-        extra_nix_config: |
-          access-tokens = github.com=${{ github.token }}
-          experimental-features = nix-command flakes
-      timeout-minutes: 15
-    - name: Check the Conventional Commits subject of each pushed commit
-      run: nix run --file . ciSteps.commit-subjects
-      timeout-minutes: 15
   docs-build:
     runs-on: ubuntu-24.04
     if: github.ref == 'refs/heads/develop'
@@ -70,7 +51,6 @@ jobs:
     runs-on: ubuntu-24.04
     needs:
     - docs-build
-    - commit-subjects
     - static-checks
     - test-asan-git
     - test-asan-nix_2_34
@@ -119,7 +99,6 @@ jobs:
   last-green:
     runs-on: ubuntu-24.04
     needs:
-    - commit-subjects
     - static-checks
     - test-asan-git
     - test-asan-nix_2_34

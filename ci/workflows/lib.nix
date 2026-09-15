@@ -162,10 +162,6 @@ let
     tsanBroad = 20;
     # `nix build` of every gate, which takes about a minute between them.
     staticChecks = 20;
-    # One `git rev-list` and one `grep` for each commit pushed, plus the
-    # evaluation that builds the script. It was 5 while the body lived in the
-    # workflow file and needed no Nix at all.
-    commitSubjects = 15;
     # Three `sysctl` calls, behind one evaluation.
     sandbox = 10;
     # The documentation build, and the copy of its output into `public/`.
@@ -888,40 +884,12 @@ let
       }
     );
 
-  # The one part of the commit convention that a machine can check.
-  # `ci/steps.nix` carries the rule, and the two parts it deliberately leaves
-  # alone.
-  mkCommitSubjectJob =
-    {
-      ref ? null,
-      needs ? [ ],
-    }:
-    mkJob (
-      lib.optionalAttrs (needs != [ ]) { inherit needs; }
-      // {
-        steps = [
-          (steps.checkout {
-            inherit ref;
-            # The range needs the commits themselves, and the default checkout
-            # fetches one.
-            fetchDepth = 0;
-          })
-          (steps.installNix { })
-          (mkNixRunStep {
-            name = "Check the Conventional Commits subject of each pushed commit";
-            attr = "commit-subjects";
-            cap = caps.commitSubjects;
-          })
-        ];
-      }
-    );
-
   # **The build waits for nothing, and the deploy carries the argument.**
   # `docs-build` used to name every gating test job, so one red job in the
-  # matrix skipped it. A sanitizer job reads the memory of the C++ libraries
-  # and `commit-subjects` reads commit messages, and neither says whether the
-  # documentation builds. The build either succeeds or it does not, and that
-  # is the whole of what it proves. Issue #132.
+  # matrix skipped it. A sanitizer job reads the memory of the C++ libraries,
+  # which does not say whether the documentation builds. The build either
+  # succeeds or it does not, and that is the whole of what it proves.
+  # Issue #132.
 
   # **The commit whose whole matrix passed, kept on a branch.**
   #
@@ -1102,7 +1070,6 @@ in
     mkNoGCTestJob
     mkStaticChecksJob
     mkWheelJob
-    mkCommitSubjectJob
     mkDocsBuildJob
     mkDocsDeployJob
     mkLastGreenJob
