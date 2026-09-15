@@ -481,14 +481,29 @@ async def pump(
 ) -> None:
     """Read from a byte stream and feed data into an H2 protocol.
 
-    Blocks in a loop calling ``reader.read()``.  On EOF or error, calls
-    ``protocol.connection_lost()``.
+    Blocks in a loop calling ``reader.read()``.  Stops on EOF, on error, or
+    once the connection closes.  Calls ``protocol.connection_lost()`` on the
+    way out.
+
+    **It stops at a closed connection, and that is not an optimisation.**
+    `grpclib.protocol.Connection.close` deletes
+    `self._connection._frame_dispatch_table` to break the one reference cycle
+    an `H2Connection` holds. Under asyncio a transport delivers nothing after
+    close, so upstream may do that safely. This loop reads a pipe and calls
+    `data_received` by hand, so bytes already in flight arrive after the close
+    and reach `H2Connection.receive_data` on a connection that has no dispatch
+    table left. nanopynix issue #299: deterministic on a CI runner, where the
+    ordering always puts those bytes after the close, and absent on a fast
+    workstation over 24 runs.
     """
     exc: BaseException | None = None
     try:
         while True:
             data = await reader.read(tuning.read_chunk_size)
             if not data:
+                break
+            connection = getattr(protocol, "connection", None)
+            if connection is not None and connection.is_closing():
                 break
             protocol.data_received(data)
     except (ConnectionError, OSError) as e:

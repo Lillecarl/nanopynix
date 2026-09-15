@@ -83,3 +83,71 @@ def test_a_renamed_member_refuses_instead_of_patching(monkeypatch: pytest.Monkey
 
     with pytest.raises(RuntimeError, match="_gone_upstream"):
         protocol.install_h2_fast_receive_patch()
+
+
+class _Reader:
+    """Hands out one chunk per ``read``, then EOF."""
+
+    def __init__(self, *chunks: bytes) -> None:
+        self._chunks = list(chunks)
+
+    async def read(self, _size: int) -> bytes:
+        return self._chunks.pop(0) if self._chunks else b""
+
+
+class _ClosedConnection:
+    def is_closing(self) -> bool:
+        return True
+
+
+class _OpenConnection:
+    def is_closing(self) -> bool:
+        return False
+
+
+class _RecordingProtocol:
+    def __init__(self, connection: object) -> None:
+        self.connection = connection
+        self.fed: list[bytes] = []
+        self.lost_with: BaseException | str | None = "not called"
+
+    def data_received(self, data: bytes) -> None:
+        self.fed.append(data)
+
+    def connection_lost(self, exc: BaseException | None) -> None:
+        self.lost_with = exc
+
+
+async def test_the_pump_stops_once_the_connection_is_closing() -> None:
+    """Issue #299. `grpclib.protocol.Connection.close` deletes the
+    `_frame_dispatch_table` of its `H2Connection`, so a frame delivered after
+    the close reaches a connection that cannot dispatch it. Under asyncio a
+    closed transport delivers nothing; this pump has to impose that itself."""
+    fake = _RecordingProtocol(_ClosedConnection())
+
+    await protocol.pump(fake, _Reader(b"late bytes"))  # pyright: ignore[reportArgumentType] -- a double, and `pump` takes only these three members
+
+    assert fake.fed == []
+    assert fake.lost_with is None
+
+
+async def test_the_pump_feeds_an_open_connection() -> None:
+    """The control. Without it the test above passes on a pump that feeds
+    nothing at all."""
+    fake = _RecordingProtocol(_OpenConnection())
+
+    await protocol.pump(fake, _Reader(b"one", b"two"))  # pyright: ignore[reportArgumentType] -- a double, and `pump` takes only these three members
+
+    assert fake.fed == [b"one", b"two"]
+    assert fake.lost_with is None
+
+
+async def test_the_pump_feeds_a_protocol_with_no_connection_yet() -> None:
+    """`H2Protocol.connection` is an annotation until `connection_made` runs,
+    so the guard must not read a closed connection into its absence."""
+    fake = _RecordingProtocol(_OpenConnection())
+    del fake.connection
+
+    await protocol.pump(fake, _Reader(b"early"))  # pyright: ignore[reportArgumentType] -- a double, and `pump` takes only these three members
+
+    assert fake.fed == [b"early"]
