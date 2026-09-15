@@ -21,6 +21,7 @@ from nanopynix.settings import (
     NixSettingsEnv,
     NixStoreDefaults,
     PrefixedEnvSettingsSource,
+    _nix_version_at_least,  # pyright: ignore[reportPrivateUsage] -- the version gate has no public surface, and a `git` worker is the case it got wrong
     check_all_settings_model_drift,
     check_settings_model_drift,
     merge_defaults,
@@ -170,6 +171,24 @@ def test_settings_drift_reports_missing_and_extra() -> None:
     assert "new-from-nix" in drift.missing
     assert "show-trace" in drift.extra
     assert not drift.ok
+
+
+@pytest.mark.parametrize(
+    ("version", "minimum", "expected"),
+    [
+        # The version a `git` job runs. Every digit after `35` belongs to the
+        # date, to the commit hash or to the `+4`, and none of them raises the
+        # minor number.
+        ("2.35pre20260619_f8bb823a+4", "2.36", False),
+        ("2.35pre20260619_f8bb823a+4", "2.35", True),
+        ("2.35pre20260619_f8bb823a+4", "2.34", True),
+        ("2.34.8", "2.36", False),
+        ("2.36.0", "2.36", True),
+        ("2.36", "2.36", True),
+    ],
+)
+def test_a_development_version_does_not_read_as_a_later_release(version: str, minimum: str, expected: bool) -> None:
+    assert _nix_version_at_least(version, minimum) is expected
 
 
 def test_eval_settings_accepts_nix_aliases() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import itertools
 import json
 import os
 import sys
@@ -156,9 +157,16 @@ def _not_live_message(offenders: Sequence[str], target: str) -> str:
 
 
 def _nix_version_tuple(version: str) -> tuple[int, ...]:
+    # **Leading digits only, because a development build carries digits after
+    # the number.** Collecting every digit of a component reads
+    # `2.35pre20260619_f8bb823a+4` as `(2, 352026061988234)`: the date, the
+    # digits of the commit hash and the `+4` all join the minor number. That
+    # value is above every real one, so `since("2.36")` counted as satisfied
+    # on a 2.35 worker, the model declared `build-hook-kill-timeout` that Nix
+    # had not registered, and both drift tests failed in each `git` job.
     parsed: list[int] = []
     for part in version.split("."):
-        digits = "".join(character for character in part if character.isdigit())
+        digits = "".join(itertools.takewhile(str.isdigit, part))
         if not digits:
             break
         parsed.append(int(digits))
