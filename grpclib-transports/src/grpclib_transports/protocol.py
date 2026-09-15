@@ -119,6 +119,23 @@ _H2_PRIVATE_MEMBERS = (
     "_stream_is_closed_by_reset",
 )
 
+#: Set on a connection whose `H2Connection.__init__` returned. Issue #299 finds
+#: a connection carrying all 17 attributes that `__init__` assigns before
+#: `_frame_dispatch_table` and not that one, which is its last statement. Two
+#: readings fit: the object left `__init__` early, or it lost that one
+#: attribute afterwards. This mark tells them apart, and nothing else can:
+#: `_frame_dispatch_table` is the only evidence either way and it is the thing
+#: that is missing.
+_H2_INIT_COMPLETE = "_grpclib_transports_init_complete"
+
+
+def _mark_init_complete(original: Any) -> Any:
+    def marked_init(self: H2Connection, *args: Any, **kwargs: Any) -> None:
+        original(self, *args, **kwargs)
+        setattr(self, _H2_INIT_COMPLETE, True)
+
+    return marked_init
+
 
 # A copy of `h2.connection.H2Connection._receive_frame` with the trace-logging
 # frame reprs removed -- those reprs are formatted on every frame, whether or
@@ -153,6 +170,7 @@ def _receive_frame_without_trace_repr(  # pyright: ignore[reportPrivateUsage] --
     if dispatch is None:
         raise RuntimeError(
             f"h2 {h2_version}: {type(self).__name__} has no _frame_dispatch_table. "
+            f"init_complete={getattr(self, _H2_INIT_COMPLETE, False)} "
             f"mro={[cls.__name__ for cls in type(self).__mro__]} attributes={sorted(vars(self))}"
         )
     try:
@@ -208,6 +226,7 @@ def install_h2_fast_receive_patch() -> None:
     if missing:
         raise RuntimeError(f"h2 {h2_version} H2Connection is missing the private members this patch reads: {missing}")
     H2Connection._receive_frame = _receive_frame_without_trace_repr  # pyright: ignore[reportPrivateUsage] -- h2 private member, no public equivalent
+    H2Connection.__init__ = _mark_init_complete(H2Connection.__init__)
     _h2_fast_receive_patch_installed = True
 
 

@@ -65,6 +65,16 @@ def test_a_connection_without_the_table_says_what_it_is() -> None:
 
     assert "H2Connection" in str(raised.value)
     assert "incoming_buffer" in str(raised.value)
+    # The discriminator of issue #299: this instance really did finish
+    # `__init__`, so the report says so and the missing table was removed
+    # afterwards. A connection that never finished reports `init_complete=False`.
+    assert "init_complete=True" in str(raised.value)
+
+
+def test_a_finished_connection_carries_the_init_mark() -> None:
+    """Without the mark, `init_complete` reads False for every connection and
+    the report cannot tell a partial object from a stripped one."""
+    assert getattr(H2Connection(), protocol._H2_INIT_COMPLETE, False) is True  # pyright: ignore[reportPrivateUsage] -- the module under test
 
 
 def test_a_renamed_member_refuses_instead_of_patching(monkeypatch: pytest.MonkeyPatch) -> None:
