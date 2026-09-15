@@ -25,6 +25,7 @@
 #include <nanopynix/nix_compat_config.hh>
 
 #include "attrs_util.hh"
+#include "nix_fetchers_compat.hh"
 #include "settings_util.hh"
 
 #include "py_value.hh"
@@ -159,7 +160,8 @@ static PyFlakeRef parse_flake_ref(const std::string &url,
         // called `path:/w` here, and `lock_flake` disagreed with `eval_flake`
         // about the same string. A relative path did not parse at all -- the
         // `else` branch of that function rejects one.
-        ref.emplace(nix::parseFlakeRef(*settings, url, std::filesystem::current_path()));
+        ref.emplace(nanopynix::nix_compat::parse_flake_ref(
+            *settings, url, std::filesystem::current_path()));
     }
     return PyFlakeRef(std::move(settings), std::move(*ref));
 }
@@ -172,10 +174,16 @@ static PyFlakeRef parse_flake_ref(const std::string &url,
 /// three versions agree: the evaluator owns the fetch scope, and a setting
 /// baked into a parsed reference applies to the parse alone.
 ///
+/// A newer Nix dropped the settings parameter of `FlakeRef::fromAttrs`, so
+/// there the round trip through the attributes binds nothing and the evaluator
+/// decides on its own. The call stays, because it also normalises the
+/// reference, and because the floor still carries the older shape.
+///
 /// `es.fetchSettings` outlives `es.state`, which Nix requires of it, so the
 /// result is valid for as long as the evaluator is.
 static nix::FlakeRef bind_to_evaluator(PyEvalState &es, const PyFlakeRef &flakeRef) {
-    return nix::FlakeRef::fromAttrs(es.fetchSettings, flakeRef.ref.toAttrs());
+    return nanopynix::nix_compat::flake_ref_from_attrs(
+        es.fetchSettings, flakeRef.ref.toAttrs());
 }
 
 static PyLockedFlake lock_flake(
@@ -307,7 +315,7 @@ static PyFlakeRef get_flake(PyEvalState &es, PyFlakeRef &flakeRef,
     // self-contained. Every `PyFlakeRef` owns what its `Input` points at, and
     // no caller has to know which evaluator resolved it.
     return PyFlakeRef(flakeRef.settings,
-                      nix::FlakeRef::fromAttrs(*flakeRef.settings, resolved));
+                      nanopynix::nix_compat::flake_ref_from_attrs(*flakeRef.settings, resolved));
 }
 
 static PyValue call_flake(PyEvalState &es, PyLockedFlake &lf) {
@@ -333,7 +341,7 @@ static PyValue eval_flake(PyEvalState &es, const std::string &ref,
     nix::Value *v;
     {
         nb::gil_scoped_release release;
-        auto flakeRef = nix::parseFlakeRef(
+        auto flakeRef = nanopynix::nix_compat::parse_flake_ref(
             es.fetchSettings, ref, std::filesystem::current_path());
         auto lockedFlake = nix::flake::lockFlake(
             flakeSettings, *es.state, flakeRef, lockFlags);

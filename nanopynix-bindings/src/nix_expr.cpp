@@ -146,6 +146,7 @@ static inline nix::PosIdx primop_pos(const PrimOpCallSite site) {
 #include "build_result_util.hh"
 #include "nanopynix_errors.hh"
 #include "nix_error_info.hh"
+#include "nix_fetchers_compat.hh"
 #include "py_value.hh"
 
 namespace nb = nanobind;
@@ -676,7 +677,10 @@ static nix::SourcePath lookup_file_arg(nix::EvalState &state, std::string_view s
     if (nix::hasPrefix(s, "flake:")) {
         nix::experimentalFeatureSettings.require(nix::Xp::Flakes);
         auto flakeRef =
-            nix::parseFlakeRef(state.fetchSettings, std::string(s.substr(6)), {}, true, false);
+            // `std::nullopt` and not `{}`: the wrapper deduces each argument,
+            // and a braced-init-list deduces nothing.
+            nanopynix::nix_compat::parse_flake_ref(
+                state.fetchSettings, std::string(s.substr(6)), std::nullopt, true, false);
         auto [accessor, lockedRef] = flakeRef.resolve(state.fetchSettings, *state.store)
                                          .lazyFetch(state.fetchSettings, *state.store);
         auto storePath = nix::fetchToStore(

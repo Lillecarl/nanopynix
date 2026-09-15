@@ -26,6 +26,7 @@
 #include <nanopynix/nix_compat_config.hh>
 
 #include "attrs_util.hh"
+#include "nix_fetchers_compat.hh"
 #include "settings_util.hh"
 
 namespace nb = nanobind;
@@ -78,7 +79,7 @@ static PyInput input_from_url(const std::string &url) {
     std::optional<nix::fetchers::Input> input;
     {
         nb::gil_scoped_release release;
-        input.emplace(nix::fetchers::Input::fromURL(*settings, url));
+        input.emplace(nanopynix::nix_compat::input_from_url(*settings, url));
     }
     return PyInput(std::move(settings), std::move(*input));
 }
@@ -91,7 +92,7 @@ static PyInput input_from_attrs(const std::map<std::string, std::string> &attrs)
     std::optional<nix::fetchers::Input> input;
     {
         nb::gil_scoped_release release;
-        input.emplace(nix::fetchers::Input::fromAttrs(*settings, std::move(a)));
+        input.emplace(nanopynix::nix_compat::input_from_attrs(*settings, std::move(a)));
     }
     return PyInput(std::move(settings), std::move(*input));
 }
@@ -248,8 +249,8 @@ static nb::dict registry_add(
         // passes and as the Nix command line uses. That file gives the whole
         // reason a base directory is not optional.
         auto base = std::filesystem::current_path();
-        auto fromRef = nix::parseFlakeRef(settings, from_url, base);
-        auto toRef = nix::parseFlakeRef(settings, to_url, base);
+        auto fromRef = nanopynix::nix_compat::parse_flake_ref(settings, from_url, base);
+        auto toRef = nanopynix::nix_compat::parse_flake_ref(settings, to_url, base);
         auto registry = read_registry_at(settings, file);
         nix::fetchers::Attrs extraAttrs;
         if (toRef.subdir != "")
@@ -284,7 +285,8 @@ static nb::dict registry_remove(
     size_t removed = 0;
     {
         nb::gil_scoped_release release;
-        auto ref = nix::parseFlakeRef(settings, from_url, std::filesystem::current_path());
+        auto ref = nanopynix::nix_compat::parse_flake_ref(
+            settings, from_url, std::filesystem::current_path());
         auto registry = read_registry_at(settings, file);
         auto before = registry->entries.size();
         registry->remove(ref.input);
@@ -326,8 +328,9 @@ static nb::dict registry_pin(
     {
         nb::gil_scoped_release release;
         auto base = std::filesystem::current_path();
-        auto ref = nix::parseFlakeRef(settings, url, base);
-        auto lockedRef = nix::parseFlakeRef(settings, locked_url.empty() ? url : locked_url, base);
+        auto ref = nanopynix::nix_compat::parse_flake_ref(settings, url, base);
+        auto lockedRef = nanopynix::nix_compat::parse_flake_ref(
+            settings, locked_url.empty() ? url : locked_url, base);
         auto resolvedInput = lockedRef.resolve(settings, store).input;
         auto resolved = resolvedInput.getAccessor(settings, store).second;
         isLocked = resolved.isLocked(settings);
