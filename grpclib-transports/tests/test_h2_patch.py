@@ -15,6 +15,7 @@ import inspect
 import pytest
 from grpclib_transports import protocol
 from h2.connection import H2Connection
+from hyperframe.frame import PingFrame
 
 _MEMBERS: tuple[str, ...] = protocol._H2_PRIVATE_MEMBERS  # pyright: ignore[reportPrivateUsage] -- the module under test
 _COPY_SOURCE = inspect.getsource(protocol._receive_frame_without_trace_repr)  # pyright: ignore[reportPrivateUsage] -- the function under test
@@ -45,6 +46,25 @@ def test_the_patch_reads_no_class_member_the_tuple_leaves_out() -> None:
     }
 
     assert read - {"_frame_dispatch_table"} == set(_MEMBERS)
+
+
+def test_a_connection_without_the_table_says_what_it_is() -> None:
+    """The one place the copy departs from h2, and issue #299 is why.
+
+    A bare ``AttributeError`` here reaches the caller as ``WorkerDiedError:
+    Protocol error``, which names no object. The replacement names the class,
+    its bases and the attributes the instance does carry.
+    """
+    conn = H2Connection()
+    del conn._frame_dispatch_table  # pyright: ignore[reportPrivateUsage] -- reproducing the shape issue #299 reports
+
+    # The patched method directly, because `receive_data` reaches it only once
+    # a whole frame has arrived, and the shape under test is the lookup.
+    with pytest.raises(RuntimeError, match="has no _frame_dispatch_table") as raised:
+        conn._receive_frame(PingFrame(0))  # pyright: ignore[reportPrivateUsage] -- the patched method is the subject
+
+    assert "H2Connection" in str(raised.value)
+    assert "incoming_buffer" in str(raised.value)
 
 
 def test_a_renamed_member_refuses_instead_of_patching(monkeypatch: pytest.MonkeyPatch) -> None:

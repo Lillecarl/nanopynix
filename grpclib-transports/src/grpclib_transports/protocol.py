@@ -120,10 +120,12 @@ _H2_PRIVATE_MEMBERS = (
 )
 
 
-# A verbatim copy of `h2.connection.H2Connection._receive_frame` with the
-# trace-logging frame reprs removed -- those reprs are formatted on every
-# frame, whether or not trace logging is enabled, and they dominated the
-# profile of a saturated stdio transport.
+# A copy of `h2.connection.H2Connection._receive_frame` with the trace-logging
+# frame reprs removed -- those reprs are formatted on every frame, whether or
+# not trace logging is enabled, and they dominated the profile of a saturated
+# stdio transport.
+#
+# It departs from h2 in one place, and the dispatch lookup below says why.
 #
 # Being a copy of a private method, every line that touches `self` touches an
 # h2 private member, and h2 exposes no public equivalent for any of them. Each
@@ -135,8 +137,26 @@ def _receive_frame_without_trace_repr(  # pyright: ignore[reportPrivateUsage] --
     self: H2Connection,
     frame: Any,
 ) -> list[Any]:
+    # **The lookup is outside the `try`, and it reports what it found.**
+    # `H2Connection` builds this table in `__init__`, so the class cannot
+    # answer for it and `install_h2_fast_receive_patch` cannot check it. One CI
+    # job reads it off an instance that does not have it, twice out of two
+    # runs, and it reproduces on no machine here -- see nanopynix issue #299.
+    # The bare `AttributeError` reaches the caller as `WorkerDiedError:
+    # Protocol error` and says nothing about the object, so the next
+    # occurrence says what the object really is instead.
+    #
+    # `getattr` and not `except AttributeError` around the call: a handler in
+    # the table raises `AttributeError` of its own, and catching here would
+    # rewrite that one as this failure.
+    dispatch: Any = getattr(self, "_frame_dispatch_table", None)
+    if dispatch is None:
+        raise RuntimeError(
+            f"h2 {h2_version}: {type(self).__name__} has no _frame_dispatch_table. "
+            f"mro={[cls.__name__ for cls in type(self).__mro__]} attributes={sorted(vars(self))}"
+        )
     try:
-        frames, events = self._frame_dispatch_table[frame.__class__](frame)  # pyright: ignore[reportPrivateUsage,reportUnknownMemberType,reportUnknownVariableType,reportUnknownArgumentType] -- h2 ships no annotations for this private member
+        frames, events = dispatch[frame.__class__](frame)  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType,reportUnknownArgumentType] -- h2 ships no annotations for this private member
     except StreamClosedError as e:
         if self._stream_is_closed_by_reset(e.stream_id):  # pyright: ignore[reportPrivateUsage] -- h2 private member, no public equivalent
             f = RstStreamFrame(e.stream_id)
