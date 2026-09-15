@@ -77,6 +77,7 @@ async def _fixed_output_derivations_in_closure(store: Store, root_drv_path: str)
     return fixed_output
 
 
+@LINUX_CHROOT_BUILD
 async def test_build_file_derivation(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,
@@ -113,6 +114,7 @@ async def test_build_file_derivation(
     assert await AnyioPath(shared_nix_environment.physical_path(out_path)).read_text() == "built-from-file\n"
 
 
+@LINUX_CHROOT_BUILD
 async def test_build_file_derivation_attr(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,
@@ -161,6 +163,7 @@ async def test_build_file_derivation_attr(
     assert await AnyioPath(shared_nix_environment.physical_path(out_path)).read_text() == "built-from-attr\n"
 
 
+@LINUX_CHROOT_BUILD
 async def test_build_file_auto_calls_defaulted_lambda_before_attr(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,
@@ -335,6 +338,7 @@ async def test_build_keeps_the_message_of_nix_for_any_other_value(
         await cmd.run()
 
 
+@LINUX_CHROOT_BUILD
 async def test_build_flake_derivation(
     shared_nix_environment: NixTestEnvironment,
     capsys: pytest.CaptureFixture[str],
@@ -452,6 +456,7 @@ async def test_build_propagates_a_non_fod_build_failure(
     assert capsys.readouterr().out == ""
 
 
+@LINUX_CHROOT_BUILD
 async def test_build_with_separate_eval_store(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,

@@ -21,6 +21,7 @@ from anyio import Path as AnyioPath, run_process
 from nanopynix.models import LockedNode
 from nanopynix.protocols import AsyncLockedFlake
 from nanopynix_testing.nix_environment import with_nixpkgs
+from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
 from pynix import parse
 from pynix._dev_env import BuildEnvironment, make_rc_script, quote
 from pynix._impl.develop import (  # pyright: ignore[reportPrivateUsage] -- the ref-selection decision is unit-tested directly; the end-to-end path builds bashInteractive
@@ -307,6 +308,7 @@ async def test_a_nixpkgs_input_that_is_not_a_flake_falls_back() -> None:
 # --- the oracle -----------------------------------------------------------
 
 
+@LINUX_CHROOT_BUILD
 async def test_print_dev_env_json_matches_nix(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,
@@ -326,6 +328,7 @@ async def test_print_dev_env_json_matches_nix(
     assert mine["variables"]["PYNIX_MARKER"]["value"] == "a marker with 'quotes' and $dollars"
 
 
+@LINUX_CHROOT_BUILD
 async def test_print_dev_env_json_matches_nix_for_structured_attrs(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,
@@ -348,6 +351,7 @@ async def test_print_dev_env_json_matches_nix_for_structured_attrs(
 # --- the script, and what it restores --------------------------------------
 
 
+@LINUX_CHROOT_BUILD
 async def test_print_dev_env_prints_bash_that_restores_the_environment(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,
@@ -377,6 +381,7 @@ async def test_print_dev_env_prints_bash_that_restores_the_environment(
     assert "declare -a " in script
 
 
+@LINUX_CHROOT_BUILD
 async def test_the_original_derivation_is_untouched(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,

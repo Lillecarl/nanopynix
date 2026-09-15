@@ -161,6 +161,7 @@ async def test_scenario_builds_flake_hello(pynix_store_scenario: PynixStoreScena
 
 
 @pytest.mark.dependency(name="scenario:build-hello-unfree", depends=["scenario:build-nixpkgs-hello"])
+@LINUX_CHROOT_BUILD
 async def test_scenario_builds_hello_unfree_locally(
     pynix_store_scenario: PynixStoreScenario,
     request: pytest.FixtureRequest,
