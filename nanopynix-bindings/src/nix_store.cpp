@@ -33,6 +33,14 @@
 #include <nix/store/daemon.hh>
 #include <nix/store/path-info.hh>
 #include <nix/store/derivations.hh>
+// The recovery half of `drv_input_srcs` below, on a Nix that keeps the inputs
+// of a derivation as one flat set. The header arrived with that change, so its
+// presence is the test. See the comment on the accessors for why this file
+// tests for a header and for a field, and never for a version.
+#if __has_include(<nix/store/derivation/full-inputs.hh>)
+#  include <nix/store/derivation/full-inputs.hh>
+#  define NANOPYNIX_HAS_FULL_INPUTS 1
+#endif
 #include <nix/store/remote-store.hh>
 #include <nix/store/content-address.hh>
 #include <nix/store/store-reference.hh>
@@ -797,22 +805,69 @@ static void copy_closure(
 
 // The two input collections of a derivation, under one name for each.
 //
-// **2.36 groups them.** Up to 2.35 a `Derivation` carries `inputSrcs` and
-// `inputDrvs` directly. 2.36 makes `Derivation` a template over its inputs
-// parameter and moves both fields into `inputs`, a `derivation::FullInputs`
-// with the members `srcs` and `drvs`. Nothing else about either collection
-// changes, so one accessor for each keeps every call site on one spelling.
-#if NANOPYNIX_NIX_VERSION_NUMBER < NANOPYNIX_NIX_2_36
-static inline auto & drv_input_srcs(nix::Derivation & d) { return d.inputSrcs; }
-static inline const auto & drv_input_srcs(const nix::Derivation & d) { return d.inputSrcs; }
-static inline auto & drv_input_drvs(nix::Derivation & d) { return d.inputDrvs; }
-static inline const auto & drv_input_drvs(const nix::Derivation & d) { return d.inputDrvs; }
+// **A derivation holds its inputs in three shapes, and two of them report the
+// same version.** Up to 2.35 a `Derivation` carries `inputSrcs` and
+// `inputDrvs` directly. Then `Derivation` became a template over its inputs
+// parameter, and both fields moved into `inputs`, a `derivation::FullInputs`
+// with the members `srcs` and `drvs`. Then upstream `7f797483f` made `inputs`
+// a flat `std::set<SingleDerivedPath>`, and left `FullInputs` to the on-disk
+// formats alone.
+//
+// **The test is of the field, and never of the version.** The `git` lane of CI
+// builds an unpinned Nix on purpose, to find a break like this early. Every
+// git revision since 2.35 reports `2.36pre<date>_<rev>`, and both upstream
+// changes landed inside that one number, so `NANOPYNIX_NIX_VERSION_NUMBER`
+// cannot tell the second shape from the third.
+//
+// **There is no mutable accessor, and that is deliberate.** The third shape
+// has no `srcs` member to give a reference to, so a read rebuilds one with
+// `FullInputs::fromSet`. The result is a temporary. `drv_input_srcs(drv)
+// .insert(p)` would then compile and change nothing, which is the worst way to
+// lose an input. `drv_add_input_src` below is the one mutation this file
+// needs, and on that shape it writes the flat set directly.
+template<typename D>
+concept HasSeparateInputFields = requires(const D &d) { d.inputSrcs; d.inputDrvs; };
+
+template<typename D>
+concept HasGroupedInputs = requires(const D &d) { d.inputs.srcs; d.inputs.drvs; };
+
+// `D` is a template parameter so that `if constexpr` discards the branches
+// that do not apply. A plain function over `nix::Derivation` still name-checks
+// every branch, and `d.inputSrcs` is then a hard error on a Nix that has no
+// such field.
+//
+// The parentheses around each member keep the accessor a reference: `return
+// (d.inputSrcs);` deduces `const StorePathSet &`. The recovery branch has no
+// parentheses, so it deduces a value and nothing points into the temporary.
+template<typename D>
+static decltype(auto) drv_input_srcs(const D &d) {
+    if constexpr (HasSeparateInputFields<D>) return (d.inputSrcs);
+    else if constexpr (HasGroupedInputs<D>) return (d.inputs.srcs);
+#ifdef NANOPYNIX_HAS_FULL_INPUTS
+    else return nix::derivation::FullInputs::fromSet(d.inputs).srcs;
 #else
-static inline auto & drv_input_srcs(nix::Derivation & d) { return d.inputs.srcs; }
-static inline const auto & drv_input_srcs(const nix::Derivation & d) { return d.inputs.srcs; }
-static inline auto & drv_input_drvs(nix::Derivation & d) { return d.inputs.drvs; }
-static inline const auto & drv_input_drvs(const nix::Derivation & d) { return d.inputs.drvs; }
+    else static_assert(sizeof(D) == 0, "nix::Derivation holds its inputs in an unknown shape");
 #endif
+}
+
+template<typename D>
+static decltype(auto) drv_input_drvs(const D &d) {
+    if constexpr (HasSeparateInputFields<D>) return (d.inputDrvs);
+    else if constexpr (HasGroupedInputs<D>) return (d.inputs.drvs);
+#ifdef NANOPYNIX_HAS_FULL_INPUTS
+    else return nix::derivation::FullInputs::fromSet(d.inputs).drvs;
+#else
+    else static_assert(sizeof(D) == 0, "nix::Derivation holds its inputs in an unknown shape");
+#endif
+}
+
+/// Add one source path to the inputs of `d`.
+template<typename D>
+static void drv_add_input_src(D &d, nix::StorePath path) {
+    if constexpr (HasSeparateInputFields<D>) d.inputSrcs.insert(std::move(path));
+    else if constexpr (HasGroupedInputs<D>) d.inputs.srcs.insert(std::move(path));
+    else d.inputs.insert(nix::SingleDerivedPath{nix::SingleDerivedPath::Opaque{std::move(path)}});
+}
 
 // One node of `Derivation::inputDrvs`, which is a `DerivedPathMap` -- a *tree*
 // of `{V value; Map childMap;}`, nesting once per level of dynamic derivation.
@@ -997,7 +1052,12 @@ static void bind_derivation(nb::module_ &m) {
         .def_prop_ro("input_drvs",
                      [](const PyDerivation &d) {
                          nb::dict drvs;
-                         for (auto &[path, node] : drv_input_drvs(d.drv).map)
+                         // Bound to a name first. On the flat shape the
+                         // accessor gives a value, so `...(d.drv).map` inside
+                         // the loop header asks the reader to know which
+                         // temporaries a range-`for` keeps alive.
+                         auto &&inputs = drv_input_drvs(d.drv);
+                         for (auto &[path, node] : inputs.map)
                              drvs[d.render(path).c_str()] = nb::cast(node);
                          return drvs;
                      })
@@ -1075,7 +1135,8 @@ static nb::dict read_derivation(nix::Store &s, const nix::StorePath &drvPath) {
 
     // input_drvs: map<drvPath, DerivationOutputs>
     nb::dict input_drvs;
-    for (auto &[path, node] : drv_input_drvs(drv).map)
+    auto &&input_drv_map = drv_input_drvs(drv);
+    for (auto &[path, node] : input_drv_map.map)
         input_drvs[s.printStorePath(path).c_str()] = derived_path_node_to_dict(node);
     d["input_drvs"] = input_drvs;
 
@@ -1173,7 +1234,7 @@ static nix::StorePath write_dev_shell_derivation(
 
         drv.name += "-env";
         drv.env.emplace("name", drv.name);
-        drv_input_srcs(drv).insert(script_path);
+        drv_add_input_src(drv, script_path);
 
         // Only the two addressed kinds become deferred. CAFloating, Deferred
         // and Impure already have no path to invalidate.
