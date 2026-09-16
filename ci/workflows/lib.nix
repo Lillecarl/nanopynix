@@ -67,9 +67,16 @@ let
   # `zsn1x27a...-cacheEnv`, which nothing had built. Issue #301 records the
   # same failure twice before that, once with a six second margin.
   #
-  # `git ls-remote` and not Nix: the runner has git, the answer is one line,
-  # and this job must be the cheapest in the run because every other job
-  # waits for it.
+  # **It resolves the umbrella that locks this commit, not the head of the
+  # umbrella default branch.** The head is a moving answer: it is whatever
+  # landed most recently, which for a branch nobody landed is not related to
+  # this commit at all. `ci/walkback.sh` reads
+  # `refs/umbrella/nanopynix/<revision>` from the umbrella remote instead,
+  # walking HEAD backwards to the nearest revision the umbrella has locked.
+  #
+  # git and not Nix: the runner has git, and this job must be the cheapest in
+  # the run because every other job waits for it. One `git ls-remote` and one
+  # `git rev-list`.
   umbrellaRevJob = "umbrella-rev";
 
   mkUmbrellaRevJob = {
@@ -78,9 +85,19 @@ let
     outputs.rev = "\${{ steps.resolve.outputs.rev }}";
     steps = [
       {
+        uses = "actions/checkout@v4";
+        # walkback walks HEAD backwards until it reaches a commit the
+        # umbrella has locked. A branch nobody landed needs its branch
+        # point, so the checkout has to reach that far back.
+        "with".fetch-depth = 100;
+      }
+      {
         id = "resolve";
         name = "Resolve the umbrella revision";
-        run = "git ls-remote https://github.com/nixidae/nixidae main | cut -f1 | sed 's/^/rev=/' >> \"$GITHUB_OUTPUT\"";
+        run = ''
+          rev=$(ci/walkback.sh https://github.com/nixidae/nixidae nanopynix)
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
+        '';
       }
     ];
   };
