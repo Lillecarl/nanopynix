@@ -1249,6 +1249,5 @@ jobs:
         fetch-depth: 100
     - name: Resolve the umbrella revision
       id: resolve
-      run: |
-        rev=$(ci/walkback.sh https://github.com/nixidae/nixidae nanopynix)
-        echo "rev=$rev" >> "$GITHUB_OUTPUT"
+      run: ci/walkback.sh https://github.com/nixidae/nixidae nanopynix | sed 's/^/rev=/'
+        >> "$GITHUB_OUTPUT"
