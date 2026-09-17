@@ -1,7 +1,16 @@
+# kr8s, from the umbrella's fork rather than from upstream.
+#
+# The fork carries changes meant for upstreaming and nothing else -- see
+# nixidae's nix/sources.nix and easykubenix issue #29. The first is
+# server-side apply, which upstream has no form for at all, so `ekn` had to
+# build the request out of `call_api` by hand.
+#
+# `develop` sits on upstream `main`, which is 25 commits past the v0.20.15
+# this used to pin. Same version line.
 {
   lib,
   buildPythonPackage,
-  fetchFromGitHub,
+  src,
   # dependencies
   cachetools,
   cryptography,
@@ -18,17 +27,12 @@
   hatchling,
   hatch-vcs,
 }:
-buildPythonPackage rec {
+buildPythonPackage {
   pname = "kr8s";
-  version = "0.20.15";
+  version = "0.20.16.dev25";
   pyproject = true;
 
-  src = fetchFromGitHub {
-    owner = "kr8s-org";
-    repo = "kr8s";
-    tag = "v${version}";
-    hash = "sha256-98ImCNHNjmwKKQAGitvlpwCC+efcCKsbHbF2vcLIXE0=";
-  };
+  inherit src;
 
   build-system = [
     hatchling

@@ -83,7 +83,7 @@ let
       betterproto2 = pySelf.callPackage ./nix/betterproto2.nix { };
       betterproto2-compiler = pySelf.callPackage ./nix/betterproto2-compiler.nix { };
 
-      kr8s = pySelf.callPackage ./nix/kr8s.nix { };
+      kr8s = pySelf.callPackage ./nix/kr8s.nix { src = sources.kr8s; };
 
       tree-sitter-nix = pySelf.callPackage ./nix/tree-sitter-nix.nix {
         # This set, and not `python.pkgs`, which is the set from before
