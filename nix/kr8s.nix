@@ -6,8 +6,8 @@
 # build the request out of `call_api` by hand. Read `git log main..develop`
 # for the rest.
 #
-# `develop` sits 5 commits past upstream `main`, which is 25 commits past
-# the v0.20.15 this used to pin. Same version line.
+# `develop` sits past upstream `main`, which is itself past the v0.20.15
+# this used to pin. Same version line, no release between them.
 {
   lib,
   buildPythonPackage,
@@ -30,7 +30,22 @@
 }:
 buildPythonPackage {
   pname = "kr8s";
-  version = "0.20.16.dev30";
+  # There is no version to read from `pyproject.toml`: kr8s sets
+  # `[tool.hatch.version] source = "vcs"`, so hatch-vcs derives it from a git
+  # tag, and the source the umbrella fetches is a tarball with no git history.
+  # This attribute is the version -- nixpkgs hands it to hatch-vcs as the
+  # pretend version, so it becomes `kr8s.__version__`.
+  #
+  # **It must be PEP 440.** nixpkgs' own `-unstable-<date>` convention is not,
+  # and hatchling refuses it:
+  #
+  #   packaging.version.InvalidVersion: Error getting the version from source
+  #   `vcs`: Invalid version: '0.20.15-unstable-2026-09-17'
+  #
+  # So: a dated dev release of the next version. A commit count went stale in
+  # silence -- this said `dev25` while `develop` was already two commits past
+  # it -- and a date says the same thing without claiming to be exact.
+  version = "0.20.16.dev20260917";
   pyproject = true;
 
   inherit src;
