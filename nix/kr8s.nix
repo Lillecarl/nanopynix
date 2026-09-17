@@ -1,12 +1,13 @@
 # kr8s, from the umbrella's fork rather than from upstream.
 #
 # The fork carries changes meant for upstreaming and nothing else -- see
-# nixidae's nix/sources.nix and easykubenix issue #29. The first is
+# nixidae's nix/sources.nix and easykubenix issue #29. The largest is
 # server-side apply, which upstream has no form for at all, so `ekn` had to
-# build the request out of `call_api` by hand.
+# build the request out of `call_api` by hand. Read `git log main..develop`
+# for the rest.
 #
-# `develop` sits on upstream `main`, which is 25 commits past the v0.20.15
-# this used to pin. Same version line.
+# `develop` sits 5 commits past upstream `main`, which is 25 commits past
+# the v0.20.15 this used to pin. Same version line.
 {
   lib,
   buildPythonPackage,
@@ -29,7 +30,7 @@
 }:
 buildPythonPackage {
   pname = "kr8s";
-  version = "0.20.16.dev25";
+  version = "0.20.16.dev30";
   pyproject = true;
 
   inherit src;
