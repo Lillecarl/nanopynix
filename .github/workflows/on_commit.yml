@@ -23,8 +23,16 @@ jobs:
     if: github.ref == 'refs/heads/develop'
     env:
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 125
+    timeout-minutes: 135
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -155,8 +163,16 @@ jobs:
       inputs.jobs), ',static-checks,')
     env:
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 75
+    timeout-minutes: 85
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -188,8 +204,16 @@ jobs:
     env:
       CI_STEP: ciSteps.git-asan
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 215
+    timeout-minutes: 225
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -232,8 +256,16 @@ jobs:
     env:
       CI_STEP: ciSteps.nix_2_34-asan
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 215
+    timeout-minutes: 225
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -276,8 +308,16 @@ jobs:
     env:
       CI_STEP: ciSteps.nix_2_35-asan
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 215
+    timeout-minutes: 225
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -321,8 +361,16 @@ jobs:
       BACKEND: daemon
       CI_STEP: ciSteps.git
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 235
+    timeout-minutes: 245
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -403,8 +451,16 @@ jobs:
       BACKEND: daemon
       CI_STEP: ciSteps.nix_2_34
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 235
+    timeout-minutes: 245
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -485,8 +541,16 @@ jobs:
       BACKEND: daemon
       CI_STEP: ciSteps.nix_2_35
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 235
+    timeout-minutes: 245
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -568,8 +632,16 @@ jobs:
       CI_STEP: ciSteps.nix_2_34
       NANOPYNIX_RPC_TIMEOUT: '90'
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 190
+    timeout-minutes: 200
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -618,8 +690,16 @@ jobs:
       BACKEND: local
       CI_STEP: ciSteps.git
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 235
+    timeout-minutes: 245
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -700,8 +780,16 @@ jobs:
       BACKEND: local
       CI_STEP: ciSteps.nix_2_34
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 235
+    timeout-minutes: 245
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -782,8 +870,16 @@ jobs:
       BACKEND: local
       CI_STEP: ciSteps.nix_2_35
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 235
+    timeout-minutes: 245
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -863,8 +959,16 @@ jobs:
     env:
       CI_STEP: ciSteps.git-nogc
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 140
+    timeout-minutes: 150
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -900,8 +1004,16 @@ jobs:
     env:
       CI_STEP: ciSteps.nix_2_34-nogc
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 140
+    timeout-minutes: 150
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -937,8 +1049,16 @@ jobs:
     env:
       CI_STEP: ciSteps.nix_2_35-nogc
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 140
+    timeout-minutes: 150
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -974,8 +1094,16 @@ jobs:
     env:
       CI_STEP: ciSteps.git-tsan
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 170
+    timeout-minutes: 180
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -1021,8 +1149,16 @@ jobs:
     env:
       CI_STEP: ciSteps.nix_2_34-tsan
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 170
+    timeout-minutes: 180
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -1068,8 +1204,16 @@ jobs:
     env:
       CI_STEP: ciSteps.nix_2_35-tsan
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 170
+    timeout-minutes: 180
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -1115,8 +1259,16 @@ jobs:
     env:
       CI_STEP: ciSteps.git-ubsan
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 185
+    timeout-minutes: 195
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -1159,8 +1311,16 @@ jobs:
     env:
       CI_STEP: ciSteps.nix_2_34-ubsan
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 185
+    timeout-minutes: 195
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master
@@ -1203,8 +1363,16 @@ jobs:
     env:
       CI_STEP: ciSteps.nix_2_35-ubsan
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 185
+    timeout-minutes: 195
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
     - uses: cachix/install-nix-action@master

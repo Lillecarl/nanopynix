@@ -29,8 +29,16 @@ jobs:
       inputs.jobs), ',docs-build,')
     env:
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 125
+    timeout-minutes: 135
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
@@ -104,8 +112,16 @@ jobs:
       inputs.jobs), ',static-checks,')
     env:
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 75
+    timeout-minutes: 85
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
@@ -144,8 +160,16 @@ jobs:
     env:
       CI_STEP: ciSteps.${{ matrix.version }}
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 215
+    timeout-minutes: 225
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
@@ -195,8 +219,16 @@ jobs:
     env:
       CI_STEP: ciSteps.${{ matrix.version }}
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 140
+    timeout-minutes: 150
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
@@ -243,8 +275,16 @@ jobs:
       BACKEND: ${{ matrix.backend }}
       CI_STEP: ciSteps.${{ matrix.version }}
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 235
+    timeout-minutes: 245
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
@@ -333,8 +373,16 @@ jobs:
     env:
       CI_STEP: ciSteps.${{ matrix.version }}
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 170
+    timeout-minutes: 180
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
@@ -387,8 +435,16 @@ jobs:
     env:
       CI_STEP: ciSteps.${{ matrix.version }}
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    timeout-minutes: 185
+    timeout-minutes: 195
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
@@ -449,8 +505,16 @@ jobs:
       regular_versions: ${{ steps.versions.outputs.regular_versions }}
       tsan_versions: ${{ steps.versions.outputs.tsan_versions }}
       ubsan_versions: ${{ steps.versions.outputs.ubsan_versions }}
-    timeout-minutes: 75
+    timeout-minutes: 85
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
@@ -481,8 +545,16 @@ jobs:
     env:
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
       WHEEL_SMOKE_RUNTIME: docker
-    timeout-minutes: 205
+    timeout-minutes: 215
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}
@@ -518,8 +590,16 @@ jobs:
     env:
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
       WHEEL_SMOKE_RUNTIME: docker
-    timeout-minutes: 205
+    timeout-minutes: 215
     steps:
+    - name: Make room on the runner
+      run: |
+        df -h /
+        sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
+        docker system prune --all --force
+        docker builder prune --all --force
+        df -h /
+      timeout-minutes: 10
     - uses: actions/checkout@main
       with:
         ref: ${{ github.ref_name }}

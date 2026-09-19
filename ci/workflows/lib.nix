@@ -82,6 +82,12 @@ let
   mkUmbrellaRevJob = {
     runs-on = "ubuntu-24.04";
     timeout-minutes = 5;
+    # This job clones a repository and reads a revision out of it. It builds
+    # nothing, so it needs none of the space, and the step is not free: it
+    # deletes tens of gigabytes and prunes every Docker image, which is
+    # minutes. The cap below is five, and it was set for a job that took
+    # seconds.
+    ghanix.freeDiskSpace.enable = false;
     outputs.rev = "\${{ steps.resolve.outputs.rev }}";
     steps = [
       {
@@ -1038,6 +1044,8 @@ let
     }:
     mkJob {
       needs = gates;
+      # No Nix, so nothing to make room for. See the paragraph above.
+      ghanix.freeDiskSpace.enable = false;
       permissions = {
         contents = "write";
       };
@@ -1115,6 +1123,9 @@ let
     }:
     mkJob {
       needs = if gates == [ ] then needs else lib.toList needs ++ gates;
+      # It deploys an artifact another job built, and installs no Nix, so it
+      # has nothing to make room for.
+      ghanix.freeDiskSpace.enable = false;
       permissions = {
         pages = "write";
         id-token = "write";
