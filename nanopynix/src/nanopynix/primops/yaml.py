@@ -272,7 +272,7 @@ def _represent_str(dumper: _BlockStyleDumper, data: str) -> yaml.Node:
 
 _BlockStyleDumper.add_representer(str, _represent_str)
 
-# Quote a string that any reader would take back as a number.
+# Quote a string that any reader would take back as something else.
 #
 # PyYAML decides whether a scalar may be written plain by resolving the text
 # it is about to emit and checking that the answer is still the tag it holds.
@@ -281,11 +281,16 @@ _BlockStyleDumper.add_representer(str, _represent_str)
 # reader does not, and the value comes back a float. Writing a string in a form
 # that changes its type on the next parse is not a round trip.
 #
-# So the dumper is told about 1.2's numbers as well, and the check becomes the
-# union of the two: text either version would read as a number is quoted. This
-# only ever adds quotes. A real float still goes out plain, because PyYAML's
-# own float representer writes `1.0e+30` rather than `1e+30`, which both
-# versions resolve.
+# So the dumper is told about the other readers' scalars as well, and the check
+# becomes the union: text somebody would read as a number or a boolean is
+# quoted. This only ever adds quotes. A real float still goes out plain,
+# because PyYAML's own float representer writes `1.0e+30` rather than `1e+30`,
+# which every version resolves.
+#
+# **The reader that matters is go-yaml.** It is what the API server decodes
+# with, so it reads this dumper's output, and it resolves four things YAML 1.1
+# calls strings. A manifest that carries the string "n" and writes it plain
+# reaches the cluster as false.
 for _tag, _pattern in (
     ("tag:yaml.org,2002:float", _YAML12_ONLY_FLOAT),
     # 1.2 integers 1.1 does not resolve: 1.1 reads a leading-zero `017` as
@@ -293,12 +298,26 @@ for _tag, _pattern in (
     # where 1.1's production has no alternative for the prefix -- either way
     # the text means a number to somebody.
     ("tag:yaml.org,2002:int", _YAML12_ONLY_INT),
+    # go-yaml's integers that 1.1 leaves as strings. `08` is not octal, so 1.1
+    # gives up and go-yaml reads decimal 8. And 1.1's hex and octal
+    # productions are lowercase only, where go-yaml takes either case.
+    ("tag:yaml.org,2002:int", re.compile(r"^[-+]?0[0-9_]+$")),
+    ("tag:yaml.org,2002:int", re.compile(r"^[-+]?0[xX][0-9a-fA-F_]+$")),
+    ("tag:yaml.org,2002:int", re.compile(r"^[-+]?0[oO][0-7_]+$")),
 ):
     _BlockStyleDumper.add_implicit_resolver(  # type: ignore[reportUnknownMemberType] -- yaml.Dumper methods may not have complete stubs
         _tag,
         _pattern,
         list("-+0123456789."),
     )
+
+# go-yaml's one-letter booleans. PyYAML's 1.1 resolver deliberately leaves
+# these alone, so the string "n" went out plain and came back false.
+_BlockStyleDumper.add_implicit_resolver(  # type: ignore[reportUnknownMemberType] -- yaml.Dumper methods may not have complete stubs
+    "tag:yaml.org,2002:bool",
+    re.compile(r"^[yYnN]$"),
+    list("yYnN"),
+)
 
 
 def to_yaml(value: JsonValue) -> str:

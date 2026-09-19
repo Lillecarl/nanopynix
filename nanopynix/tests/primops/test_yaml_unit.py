@@ -170,6 +170,49 @@ def test_to_yaml_quotes_a_string_some_reader_would_call_a_number(text: str) -> N
 
 
 @pytest.mark.parametrize(
+    "text",
+    [
+        # go-yaml's one-letter booleans. PyYAML's 1.1 resolver leaves these
+        # alone, so each went out plain and the API server read it back as a
+        # boolean.
+        "y",
+        "n",
+        "Y",
+        "N",
+        # A leading zero with a digit 1.1's octal production refuses. 1.1
+        # gives up and calls it a string; go-yaml reads decimal.
+        "08",
+        "-0892864",
+        # 1.1's hex and octal productions are lowercase only.
+        "0X1f",
+        "0O17",
+    ],
+)
+def test_to_yaml_quotes_a_string_go_yaml_would_call_something_else(text: str) -> None:
+    """The reader of this output is go-yaml, so its scalars decide the quoting.
+
+    A manifest that carries the string "n" and writes it plain reaches the
+    cluster as false.
+    """
+    assert to_yaml({"value": text}) == f"value: '{text}'\n"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "yellow",
+        "Nx",
+        "x",
+        "name",
+        "0x",
+    ],
+)
+def test_to_yaml_leaves_an_ordinary_string_plain(text: str) -> None:
+    """Widening the quoting must not quote every string that starts with a y."""
+    assert to_yaml({"value": text}) == f"value: {text}\n"
+
+
+@pytest.mark.parametrize(
     ("value", "rendered"),
     [
         # A real number still goes out plain. PyYAML writes `1.0e+30` rather
