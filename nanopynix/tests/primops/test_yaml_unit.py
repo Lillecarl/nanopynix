@@ -424,6 +424,13 @@ def test_from_go_like_yaml_stream_reports_a_parse_error() -> None:
         ("0644", "420"),
         ("1.5", "1.5"),
         ("1.0", "1"),
+        # A key is named from the float64, and a value is written by Go's
+        # JSON encoder. Only the second turns this into 1000000.
+        ("1e+06", "1e+06"),
+        # `-0` is an integer to go-yaml and `-0.0` is a float, and only a key
+        # can tell: both are the value 0.
+        ("-0.0", "-0"),
+        ("-0", "0"),
         # The shortest text that reads back as the same float32, and not as
         # the same float64: `3.14159265358979` loses its tail.
         ("3.14159265358979", "3.1415927"),

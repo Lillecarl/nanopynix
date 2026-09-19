@@ -247,8 +247,8 @@ def _go_base(digits: str) -> tuple[int, str]:
         base = _GO_BASE_PREFIX.get(digits[1].lower())
         if base is not None:
             return (base, digits[2:])
-    # A bare leading zero is octal. `0` alone leaves no digit and is a syntax
-    # error, so the float attempt answers it instead.
+    # A bare leading zero is octal, and it is also the prefix. `0` alone
+    # therefore leaves no digit at all.
     return (8, digits[1:])
 
 
@@ -262,10 +262,19 @@ def _go_parse_int(plain: str) -> int | None:
     negative = digits.startswith("-")
     if digits[:1] in ("+", "-"):
         digits = digits[1:]
+    signless = digits
     base, digits = _go_base(digits)
-    if not _GO_DIGITS[base].fullmatch(digits):
+    if digits == "" and signless.startswith("0"):
+        # `0` and `-0`. `ParseUint` runs its digit loop over the empty text
+        # and returns zero with no error, so these are integers and not the
+        # floats the attempt below would give. A value cannot tell the
+        # difference; a key can, and go-yaml names an integer key `0` where
+        # it names a float key `-0`.
+        value = 0
+    elif not _GO_DIGITS[base].fullmatch(digits):
         return None
-    value = int(digits, base)
+    else:
+        value = int(digits, base)
     if negative:
         value = -value
     if _INT64_MIN <= value <= _INT64_MAX:
@@ -306,6 +315,26 @@ def _go_number(value: float) -> int | float:
     return value
 
 
+def _go_json_numbers(value: Any) -> Any:
+    """Apply `_go_number` to every value, and to no key.
+
+    Go answers a scalar in three stages, and only the last one sees a value
+    as a number. go-yaml gives a float64, `sigs.k8s.io/yaml` names each key
+    from that float64, and `encoding/json` writes what is left. So `1e+06`
+    is the integer 1000000 as a value and the name `1e+06` as a key.
+
+    Converting in the scalar constructor collapses the two, and the fuzzer
+    reports it: a document keyed `1e+06` came out keyed `1000000`.
+    """
+    if isinstance(value, dict):
+        return {key: _go_json_numbers(item) for key, item in value.items()}  # pyright: ignore[reportUnknownVariableType] -- the tree is Any by construction
+    if isinstance(value, list):
+        return [_go_json_numbers(item) for item in value]  # pyright: ignore[reportUnknownVariableType] -- the tree is Any by construction
+    if isinstance(value, float):
+        return _go_number(value)
+    return value
+
+
 def _go_resolve(text: str) -> tuple[str, Any]:
     """`resolve()` in `go.yaml.in/yaml/v2/resolve.go`, for an untyped target."""
     # go-yaml decides a merge in `decode.go`, in `isMerge`, and not here: it
@@ -324,7 +353,7 @@ def _go_resolve(text: str) -> tuple[str, Any]:
         if hint == ".":
             value = _go_parse_float(text, _GO_DOT_FLOAT)
             if value is not None:
-                return (_FLOAT_TAG, _go_number(value))
+                return (_FLOAT_TAG, value)
         elif hint in ("D", "S"):
             # go-yaml tries a timestamp first here, and this port leaves that
             # out. `decode.go` sets the original string into an `interface{}`
@@ -337,7 +366,7 @@ def _go_resolve(text: str) -> tuple[str, Any]:
                 return (_INT_TAG, number)
             value = _go_parse_float(plain, _GO_STYLE_FLOAT)
             if value is not None:
-                return (_FLOAT_TAG, _go_number(value))
+                return (_FLOAT_TAG, value)
             # The `0b` fallback of `resolve.go` follows here. `ParseInt` with
             # base 0 already reads that prefix, so the fallback answers
             # nothing, and this port leaves it out.
@@ -398,7 +427,14 @@ def _construct_go_map(loader: Any, node: Any) -> Any:
     # out first so a value inside it can refer to it.
     data: dict[str, Any] = {}
     yield data
-    data.update((_go_json_key(key), value) for key, value in loader.construct_mapping(node).items())
+    loader.flatten_mapping(node)
+    # Each key is named before it goes in, and not after. Go holds a map of
+    # untyped keys, where float64(-0.0) and int(0) are two keys; Python's dict
+    # calls them one, because `-0.0 == 0` and the hashes agree. Naming first
+    # moves the collision onto the name, which is where Go has it.
+    for key_node, value_node in node.value:
+        key = _go_json_key(loader.construct_object(key_node, deep=True))
+        data[key] = loader.construct_object(value_node, deep=False)
 
 
 def _go_like_loader() -> type[Any]:
@@ -479,7 +515,7 @@ def from_go_like_yaml(source: str) -> JsonValue:
 
     try:
         return _single_document(
-            yaml.load_all(source, Loader=_go_like_loader()),
+            (_go_json_numbers(document) for document in yaml.load_all(source, Loader=_go_like_loader())),
             "fromGoLikeYAML",
             "fromGoLikeYAMLStream",
         )
@@ -492,7 +528,7 @@ def from_go_like_yaml_stream(source: str) -> list[JsonValue]:
 
     try:
         return _validate_documents(
-            yaml.load_all(source, Loader=_go_like_loader()),
+            (_go_json_numbers(document) for document in yaml.load_all(source, Loader=_go_like_loader())),
             "fromGoLikeYAMLStream",
         )
     except yaml.YAMLError as exc:
