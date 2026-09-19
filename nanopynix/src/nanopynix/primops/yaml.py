@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 import re
+import struct
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, cast
 
@@ -179,6 +180,7 @@ _INT_TAG = "tag:yaml.org,2002:int"
 _FLOAT_TAG = "tag:yaml.org,2002:float"
 _NULL_TAG = "tag:yaml.org,2002:null"
 _MERGE_TAG = "tag:yaml.org,2002:merge"
+_MAP_TAG = "tag:yaml.org,2002:map"
 
 # `resolveTable` in `resolve.go`. go-yaml reads the first character of a plain
 # scalar and stops at once when that character is absent from this table. So
@@ -353,6 +355,52 @@ def _construct_go_scalar(loader: Any, node: Any) -> Any:
     return value
 
 
+def _go_float32_text(value: float) -> str:
+    """`strconv.FormatFloat(value, 'g', -1, 32)`.
+
+    It is the shortest text that reads back as the same **float32**, which is
+    what go-yaml's own writer gives a float. A value a float32 cannot hold
+    becomes an infinity there, and `sigs.k8s.io/yaml` spells that `.inf`.
+    """
+    try:
+        packed = struct.pack("<f", value)
+    except OverflowError:
+        return "-.inf" if value < 0 else ".inf"
+    # A NaN reaches no key: `_construct_go_scalar` refuses the scalar first.
+    narrowed: float = struct.unpack("<f", packed)[0]
+    for digits in range(1, 18):
+        text = f"{narrowed:.{digits}g}"
+        if struct.unpack("<f", struct.pack("<f", float(text)))[0] == narrowed:
+            return text
+    return repr(narrowed)
+
+
+def _go_json_key(key: Any) -> str:
+    """`convertToJSONableObject` in `sigs.k8s.io/yaml`.
+
+    JSON holds no key but a string, so the step that turns the YAML into JSON
+    names every other key. go-yaml has nothing to say here: it gives a map
+    whose keys carry whatever type it resolved, and `on: 1` gives a boolean.
+    """
+    if isinstance(key, str):
+        return key
+    if isinstance(key, bool):
+        return "true" if key else "false"
+    if isinstance(key, int):
+        return str(key)
+    if isinstance(key, float):
+        return _go_float32_text(key)
+    raise ValueError(f"unsupported map key of type {type(key).__name__}: {key!r}")
+
+
+def _construct_go_map(loader: Any, node: Any) -> Any:
+    # A generator, like PyYAML's own `construct_yaml_map`: the empty dict goes
+    # out first so a value inside it can refer to it.
+    data: dict[str, Any] = {}
+    yield data
+    data.update((_go_json_key(key), value) for key, value in loader.construct_mapping(node).items())
+
+
 def _go_like_loader() -> type[Any]:
     """A loader that answers like go-yaml v2, and not like a YAML version.
 
@@ -381,6 +429,7 @@ def _go_like_loader() -> type[Any]:
     # needs Go's value, so `_go_resolve` answers again.
     for tag in (_BOOL_TAG, _INT_TAG, _FLOAT_TAG, _MERGE_TAG):
         Loader.add_constructor(tag, _construct_go_scalar)  # type: ignore[reportUnknownMemberType] -- yaml.Loader methods may not have complete stubs
+    Loader.add_constructor(_MAP_TAG, _construct_go_map)  # type: ignore[reportUnknownMemberType] -- yaml.Loader methods may not have complete stubs
     return Loader
 
 

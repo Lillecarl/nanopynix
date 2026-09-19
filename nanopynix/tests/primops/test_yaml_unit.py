@@ -412,6 +412,39 @@ def test_from_go_like_yaml_stream_reports_a_parse_error() -> None:
         from_go_like_yaml_stream("key: [unterminated")
 
 
+# What `ekn-yaml2json` writes for each mapping key. Same measurement as the
+# scalar table, and a different rule behind it: `convertToJSONableObject` in
+# `sigs.k8s.io/yaml` names the key, because JSON holds no other kind.
+@pytest.mark.parametrize(
+    ("text", "name"),
+    [
+        ("on", "true"),
+        ("No", "false"),
+        ("1", "1"),
+        ("0644", "420"),
+        ("1.5", "1.5"),
+        ("1.0", "1"),
+        # The shortest text that reads back as the same float32, and not as
+        # the same float64: `3.14159265358979` loses its tail.
+        ("3.14159265358979", "3.1415927"),
+        ("1e-7", "1e-07"),
+        ("1.5e30", "1.5e+30"),
+        # Larger than a float32 holds, so Go's conversion gives an infinity.
+        ("1e40", ".inf"),
+        ("1e-50", "0"),
+        ('"1"', "1"),
+    ],
+)
+def test_a_mapping_key_takes_the_name_kubernetes_gives_it(text: str, name: str) -> None:
+    assert from_go_like_yaml(f"{text}: a") == {name: "a"}
+
+
+def test_a_null_key_has_no_name() -> None:
+    """`sigs.k8s.io/yaml` refuses this one too, in the same words."""
+    with pytest.raises(ValueError, match="unsupported map key of type NoneType"):
+        from_go_like_yaml("~: a")
+
+
 def test_the_date_that_stops_the_deprecated_reader_is_read_here() -> None:
     """The class of #307 that breaks a chart today.
 
