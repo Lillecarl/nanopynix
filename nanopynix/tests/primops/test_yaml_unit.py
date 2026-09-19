@@ -454,6 +454,52 @@ def test_a_mapping_key_takes_the_name_kubernetes_gives_it(text: str, name: str) 
     assert from_go_like_yaml(f"{text}: a") == {name: "a"}
 
 
+# A string the dumper must not write plain. Each one is a scalar some reader
+# takes back as a number, a boolean or a null, so writing it plain is a type
+# change on the next parse -- and go-yaml is what parses `manifestYAMLFile`
+# after GitOps commits it.
+@pytest.mark.parametrize(
+    "text",
+    [
+        "y",
+        "n",
+        "Y",
+        "N",
+        "08",
+        "-0892864",
+        "0X1f",
+        "0O17",
+        "0o755",
+        "0644",
+        "1e+06",
+        "1:30",
+        "yes",
+        "true",
+        "on",
+        "2023-01-01",
+        # The two the fuzzer found at seed 0. go-yaml removes an underscore
+        # before it reads a number, and no hand-written pattern had that.
+        "+_803.e+048",
+        "-_9.e-515",
+        ".inf",
+        "~",
+        "",
+        "<<",
+        "0b101",
+        "75.",
+        "8080",
+    ],
+)
+def test_a_string_survives_the_write_and_the_read(text: str) -> None:
+    assert from_go_like_yaml(to_yaml({"v": text})) == {"v": text}
+
+
+@pytest.mark.parametrize("text", ["yellow", "x", "Nx", "ne", "v1", "1.2.3"])
+def test_an_ordinary_string_still_goes_out_plain(text: str) -> None:
+    """The rule only ever adds quotes, and it adds none of these."""
+    assert to_yaml({"v": text}) == f"v: {text}\n"
+
+
 def test_a_null_key_has_no_name() -> None:
     """`sigs.k8s.io/yaml` refuses this one too, in the same words."""
     with pytest.raises(ValueError, match="unsupported map key of type NoneType"):
