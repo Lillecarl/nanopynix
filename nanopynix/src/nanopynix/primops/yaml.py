@@ -10,8 +10,10 @@
 
 from __future__ import annotations
 
+import math
 import re
-from typing import TYPE_CHECKING, Any
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 from pydantic import TypeAdapter, ValidationError
@@ -171,6 +173,217 @@ def _construct_yaml12_int(loader: Any, node: Any) -> int:
     return sign * int(unsigned, 10)
 
 
+_STR_TAG = "tag:yaml.org,2002:str"
+_BOOL_TAG = "tag:yaml.org,2002:bool"
+_INT_TAG = "tag:yaml.org,2002:int"
+_FLOAT_TAG = "tag:yaml.org,2002:float"
+_NULL_TAG = "tag:yaml.org,2002:null"
+_MERGE_TAG = "tag:yaml.org,2002:merge"
+
+# `resolveTable` in `resolve.go`. go-yaml reads the first character of a plain
+# scalar and stops at once when that character is absent from this table. So
+# `=`, `_1` and `yellow` are strings before any pattern runs.
+_GO_HINT: dict[str, str] = {
+    **dict.fromkeys("+-", "S"),
+    **dict.fromkeys("0123456789", "D"),
+    **dict.fromkeys("yYnNtTfFoO~", "M"),
+    ".": ".",
+}
+
+# `resolveMapList` in `resolve.go`. These spellings and no others: `YeS` is a
+# string, and so is `Y_ES`.
+_GO_SCALAR_MAP: dict[str, tuple[str, Any]] = {}
+for _go_value, _go_tag, _go_spellings in (
+    (True, _BOOL_TAG, ("y", "Y", "yes", "Yes", "YES")),
+    (True, _BOOL_TAG, ("true", "True", "TRUE")),
+    (True, _BOOL_TAG, ("on", "On", "ON")),
+    (False, _BOOL_TAG, ("n", "N", "no", "No", "NO")),
+    (False, _BOOL_TAG, ("false", "False", "FALSE")),
+    (False, _BOOL_TAG, ("off", "Off", "OFF")),
+    (None, _NULL_TAG, ("", "~", "null", "Null", "NULL")),
+    (math.nan, _FLOAT_TAG, (".nan", ".NaN", ".NAN")),
+    (math.inf, _FLOAT_TAG, (".inf", ".Inf", ".INF", "+.inf", "+.Inf", "+.INF")),
+    (-math.inf, _FLOAT_TAG, ("-.inf", "-.Inf", "-.INF")),
+    # `resolveMapList` also holds `<<`, and `resolve()` can never reach it:
+    # `resolveTable` has no `<`, so the hint is zero and the scalar is a
+    # string. See `_go_resolve`, which answers `<<` before the hint.
+):
+    for _go_spelling in _go_spellings:
+        _GO_SCALAR_MAP[_go_spelling] = (_go_tag, _go_value)
+
+# `yamlStyleFloat` in `resolve.go`. It gates the float attempt for a scalar
+# that starts with a digit or with a sign. go-yaml removes the underscores
+# before it applies this pattern, so the pattern has none.
+_GO_STYLE_FLOAT = re.compile(r"[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?")
+
+# The `.` branch of `resolve.go` gives the text to `strconv.ParseFloat` with
+# the underscores still in it, and Go's own literal syntax permits one between
+# two digits. So `.5_0` is 0.5 and `.5e` is a string.
+_GO_DOT_FLOAT = re.compile(r"\.[0-9](?:_?[0-9])*(?:[eE][-+]?[0-9](?:_?[0-9])*)?")
+
+_GO_DIGITS = {
+    2: re.compile(r"[01]+"),
+    8: re.compile(r"[0-7]+"),
+    10: re.compile(r"[0-9]+"),
+    16: re.compile(r"[0-9a-fA-F]+"),
+}
+_INT64_MIN = -(2**63)
+_INT64_MAX = 2**63 - 1
+_UINT64_MAX = 2**64 - 1
+
+_GO_BASE_PREFIX = {"b": 2, "o": 8, "x": 16}
+# The shortest text a base prefix can be part of: the zero, the letter and one
+# digit. Go's `strconv` takes the same bound, so `0x` is not a hexadecimal.
+_GO_PREFIXED_MINIMUM = 3
+
+
+def _go_base(digits: str) -> tuple[int, str]:
+    """The base that `strconv.ParseInt(text, 0, 64)` reads, and the digits."""
+    if not digits.startswith("0"):
+        return (10, digits)
+    if len(digits) >= _GO_PREFIXED_MINIMUM:
+        base = _GO_BASE_PREFIX.get(digits[1].lower())
+        if base is not None:
+            return (base, digits[2:])
+    # A bare leading zero is octal. `0` alone leaves no digit and is a syntax
+    # error, so the float attempt answers it instead.
+    return (8, digits[1:])
+
+
+def _go_parse_int(plain: str) -> int | None:
+    """`strconv.ParseInt(plain, 0, 64)`, and `ParseUint` after it."""
+    # Python's `int` accepts a Unicode digit and surrounding space. Go rejects
+    # both, so every part below matches ASCII only.
+    if not plain.isascii():
+        return None
+    digits = plain
+    negative = digits.startswith("-")
+    if digits[:1] in ("+", "-"):
+        digits = digits[1:]
+    base, digits = _go_base(digits)
+    if not _GO_DIGITS[base].fullmatch(digits):
+        return None
+    value = int(digits, base)
+    if negative:
+        value = -value
+    if _INT64_MIN <= value <= _INT64_MAX:
+        return value
+    # ParseInt reported a range error. go-yaml then calls ParseUint on the
+    # same text, and ParseUint permits no sign at all.
+    if plain[:1] not in ("+", "-") and value <= _UINT64_MAX:
+        return value
+    return None
+
+
+def _go_parse_float(text: str, pattern: re.Pattern[str]) -> float | None:
+    """`strconv.ParseFloat(text, 64)`, behind the pattern of its own branch."""
+    if not text.isascii() or not pattern.fullmatch(text):
+        return None
+    value = float(text)
+    # ParseFloat reports a range error for a value it cannot hold, and go-yaml
+    # leaves that scalar a string. Python returns an infinity instead, so
+    # `75.e993` needs this line to stay the string it is in Kubernetes.
+    if not math.isfinite(value):
+        return None
+    return value
+
+
+# `int | float` and not `float`: beartype checks the annotation at run time,
+# and an int is not an instance of float there.
+def _go_number(value: float) -> int | float:
+    """A float64 as Go's JSON encoder writes it.
+
+    `encoding/json` writes an integral float64 with no decimal point below
+    1e21, so the number reaches Nix as an integer. `repr` gives the same
+    shortest decimal that Go gives, and `Decimal` then keeps the digits that
+    `int()` of the float drops: Go writes float64(2**64) as
+    18446744073709552000.
+    """
+    if value.is_integer() and abs(value) < _GO_PLAIN_FLOAT_LIMIT:
+        return int(Decimal(repr(value)))
+    return value
+
+
+def _go_resolve(text: str) -> tuple[str, Any]:
+    """`resolve()` in `go.yaml.in/yaml/v2/resolve.go`, for an untyped target."""
+    # go-yaml decides a merge in `decode.go`, in `isMerge`, and not here: it
+    # asks whether a plain key is the text `<<`. PyYAML decides it from the
+    # tag instead, so the tag has to say merge. The constructor gives the
+    # string back, which is what `<<` in value position is to both readers.
+    if text == "<<":
+        return (_MERGE_TAG, "<<")
+    hint = "N" if text == "" else _GO_HINT.get(text[0], "")
+    if hint:
+        item = _GO_SCALAR_MAP.get(text)
+        if item is not None:
+            return item
+        # Base 60 is absent on purpose. go-yaml reads `1:30` as a string, and
+        # YAML 1.2 dropped the notation.
+        if hint == ".":
+            value = _go_parse_float(text, _GO_DOT_FLOAT)
+            if value is not None:
+                return (_FLOAT_TAG, _go_number(value))
+        elif hint in ("D", "S"):
+            # go-yaml tries a timestamp first here, and this port leaves that
+            # out. `decode.go` sets the original string into an `interface{}`
+            # for a timestamp, and no scalar that `parseTimestamp` accepts
+            # resolves to anything but a string anyway. The branch cannot
+            # change an answer. Do not add it back.
+            plain = text.replace("_", "")
+            number = _go_parse_int(plain)
+            if number is not None:
+                return (_INT_TAG, number)
+            value = _go_parse_float(plain, _GO_STYLE_FLOAT)
+            if value is not None:
+                return (_FLOAT_TAG, _go_number(value))
+            # The `0b` fallback of `resolve.go` follows here. `ParseInt` with
+            # base 0 already reads that prefix, so the fallback answers
+            # nothing, and this port leaves it out.
+    return (_STR_TAG, text)
+
+
+def _construct_go_scalar(loader: Any, node: Any) -> Any:
+    text: str = loader.construct_scalar(node)
+    _tag, value = _go_resolve(text)
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError(
+            f"YAML scalar {text!r} reads as {value}, and JSON holds no such number. "
+            "Quote the scalar to keep it a string.",
+        )
+    return value
+
+
+def _go_like_loader() -> type[Any]:
+    """A loader that answers like go-yaml v2, and not like a YAML version.
+
+    `sigs.k8s.io/yaml` reads with go-yaml v2, so the Kubernetes API server
+    decodes with it and Helm renders through it. That dialect is neither YAML
+    1.1 nor YAML 1.2: it reads `0644` as 420, which is 1.1, and `1e+06` as a
+    number, which is 1.2.
+
+    The loader replaces PyYAML's resolution of a plain scalar rather than
+    adding patterns to it. One function answers the question, and that
+    function is a port of one function of Go. Issue #307 reports what a
+    description written from memory costs.
+    """
+
+    class Loader(yaml.CSafeLoader):  # type: ignore[reportUnknownBaseType] -- PyYAML stubs may be incomplete
+        def resolve(self, kind: Any, value: Any, implicit: Any) -> str:
+            # A plain scalar is the only scalar go-yaml resolves. A quoted one
+            # is a string, and PyYAML gives the answer go-yaml gives for a
+            # sequence and for a mapping.
+            if kind is yaml.ScalarNode and implicit[0]:
+                return _go_resolve(value)[0]
+            return cast("str", super().resolve(kind, value, implicit))  # type: ignore[reportUnknownMemberType] -- PyYAML stubs may be incomplete
+
+    # `str` and `null` keep PyYAML's constructors: the first returns the text
+    # and the second returns None, whatever the spelling. Every other tag
+    # needs Go's value, so `_go_resolve` answers again.
+    for tag in (_BOOL_TAG, _INT_TAG, _FLOAT_TAG, _MERGE_TAG):
+        Loader.add_constructor(tag, _construct_go_scalar)  # type: ignore[reportUnknownMemberType] -- yaml.Loader methods may not have complete stubs
+    return Loader
+
+
 def _validate_document(value: Any, builtin: str) -> JsonValue:
     try:
         result: JsonValue = _JsonValue.validate_python(value)  # type: ignore[reportUnknownVariableType] -- TypeAdapter returns Any
@@ -212,8 +425,39 @@ def from_yaml(source: str) -> JsonValue:
         raise ValueError(f"fromYAML: failed to parse YAML 1.2 document: {_parse_error_message(exc)}") from exc
 
 
+def from_go_like_yaml(source: str) -> JsonValue:
+    """Parse one YAML document the way go-yaml v2 reads it."""
+
+    try:
+        return _single_document(
+            yaml.load_all(source, Loader=_go_like_loader()),
+            "fromGoLikeYAML",
+            "fromGoLikeYAMLStream",
+        )
+    except yaml.YAMLError as exc:
+        raise ValueError(f"fromGoLikeYAML: failed to parse YAML document: {_parse_error_message(exc)}") from exc
+
+
+def from_go_like_yaml_stream(source: str) -> list[JsonValue]:
+    """Parse a YAML document stream the way go-yaml v2 reads it."""
+
+    try:
+        return _validate_documents(
+            yaml.load_all(source, Loader=_go_like_loader()),
+            "fromGoLikeYAMLStream",
+        )
+    except yaml.YAMLError as exc:
+        raise ValueError(f"fromGoLikeYAMLStream: failed to parse YAML stream: {_parse_error_message(exc)}") from exc
+
+
 def from_yaml11(source: str) -> JsonValue:
-    """Parse legacy YAML 1.1 input into JSON-like Python values."""
+    """Parse legacy YAML 1.1 input into JSON-like Python values.
+
+    .. deprecated::
+       Use `from_go_like_yaml`. This loader describes go-yaml v2 with YAML
+       1.1's tables and two additions, and issue #307 lists six classes of
+       scalar where the description is wrong.
+    """
 
     try:
         return _single_document(
@@ -235,7 +479,11 @@ def from_yaml_stream(source: str) -> list[JsonValue]:
 
 
 def from_yaml11_stream(source: str) -> list[JsonValue]:
-    """Parse a legacy YAML 1.1 document stream into JSON-like Python values."""
+    """Parse a legacy YAML 1.1 document stream into JSON-like Python values.
+
+    .. deprecated::
+       Use `from_go_like_yaml_stream`. See `from_yaml11`.
+    """
 
     try:
         return _validate_documents(
@@ -355,10 +603,24 @@ def yaml_primops() -> list[PrimOpSpec]:
             import_path="nanopynix.primops:from_yaml",
         ),
         PrimOpSpec(
+            name="fromGoLikeYAML",
+            arity=1,
+            args=["source"],
+            doc="Parse a YAML string the way go-yaml v2 reads it into a Nix value.",
+            import_path="nanopynix.primops:from_go_like_yaml",
+        ),
+        PrimOpSpec(
+            name="fromGoLikeYAMLStream",
+            arity=1,
+            args=["source"],
+            doc="Parse a YAML document stream the way go-yaml v2 reads it into a Nix list.",
+            import_path="nanopynix.primops:from_go_like_yaml_stream",
+        ),
+        PrimOpSpec(
             name="fromYAML11",
             arity=1,
             args=["source"],
-            doc="Parse a YAML 1.1 string into a Nix value.",
+            doc="Deprecated; use fromGoLikeYAML. Parse a YAML 1.1 string into a Nix value.",
             import_path="nanopynix.primops:from_yaml11",
         ),
         PrimOpSpec(
@@ -372,7 +634,7 @@ def yaml_primops() -> list[PrimOpSpec]:
             name="fromYAML11Stream",
             arity=1,
             args=["source"],
-            doc="Parse a YAML 1.1 document stream into a Nix list.",
+            doc="Deprecated; use fromGoLikeYAMLStream. Parse a YAML 1.1 document stream into a Nix list.",
             import_path="nanopynix.primops:from_yaml11_stream",
         ),
         PrimOpSpec(

@@ -717,6 +717,33 @@ async def test_worker_yaml_primops_parse_yaml11_modes(rpc_session: RpcSessionFac
 
 
 @requires_dynamic_primops
+async def test_worker_yaml_primops_parse_go_like(rpc_session: RpcSessionFactory):
+    """fromGoLikeYAML reads what the Kubernetes API server reads.
+
+    `n` is the class that breaks a chart: YAML 1.1 leaves the bare letter a
+    string, go-yaml reads false, and the cluster gets the boolean.
+    """
+    async with (
+        rpc_session(primops=yaml_primops()) as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        parsed = await eval.string('builtins.fromGoLikeYAML "mode: 0444\\nenabled: n\\ndate: 2023-01-01\\n"')
+        assert await parsed.to_python() == {"mode": 292, "enabled": False, "date": "2023-01-01"}
+
+
+@requires_dynamic_primops
+async def test_worker_yaml_primops_parse_go_like_stream(rpc_session: RpcSessionFactory):
+    async with (
+        rpc_session(primops=yaml_primops()) as session,
+        session.store() as store,
+        session.eval(store) as eval,
+    ):
+        parsed = await eval.string('builtins.fromGoLikeYAMLStream "a: y\\n---\\nb: 1e+06\\n"')
+        assert await parsed.to_python() == [{"a": True}, {"b": 1000000}]
+
+
+@requires_dynamic_primops
 async def test_worker_from_yaml_root_list_is_single_document(rpc_session: RpcSessionFactory):
     """A root list is still one YAML document, not a document stream."""
     async with (

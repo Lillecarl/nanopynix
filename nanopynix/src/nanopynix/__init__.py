@@ -159,7 +159,16 @@ if typing.TYPE_CHECKING:
         enter_overlay_namespace as enter_overlay_namespace,
         probe_namespace_support as probe_namespace_support,
     )
-    from nanopynix.primops import from_yaml, from_yaml11, from_yaml11_stream, from_yaml_stream, to_yaml, yaml_primops
+    from nanopynix.primops import (
+        from_go_like_yaml,
+        from_go_like_yaml_stream,
+        from_yaml,
+        from_yaml11,
+        from_yaml11_stream,
+        from_yaml_stream,
+        to_yaml,
+        yaml_primops,
+    )
     from nanopynix.protocols import (
         AsyncEvalSession,
         AsyncLockedFlake,
@@ -328,6 +337,8 @@ _NAME_TO_MODULE: typing.Final[dict[str, str]] = {
     "enter_overlay_namespace": "nanopynix.namespace",
     "eval_counters_enabled": "nanopynix_bindings.expr",
     "eval_file": "nanopynix_bindings.expr",
+    "from_go_like_yaml": "nanopynix.primops",
+    "from_go_like_yaml_stream": "nanopynix.primops",
     "from_yaml": "nanopynix.primops",
     "from_yaml11": "nanopynix.primops",
     "from_yaml11_stream": "nanopynix.primops",
@@ -540,6 +551,8 @@ __all__ = [
     "enter_overlay_namespace",
     "eval_counters_enabled",
     "eval_file",
+    "from_go_like_yaml",
+    "from_go_like_yaml_stream",
     "from_yaml",
     "from_yaml11",
     "from_yaml11_stream",

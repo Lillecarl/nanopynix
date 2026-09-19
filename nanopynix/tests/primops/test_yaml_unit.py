@@ -17,6 +17,8 @@ from yaml.representer import RepresenterError
 
 from nanopynix.primops.yaml import (
     _parse_error_message,  # pyright: ignore[reportPrivateUsage] -- test reaches into the private helper for direct unit coverage of its fallback branches
+    from_go_like_yaml,
+    from_go_like_yaml_stream,
     from_yaml,
     from_yaml11,
     from_yaml11_stream,
@@ -249,3 +251,174 @@ def test_a_float_this_reader_turns_into_an_integer_still_round_trips() -> None:
     assert written == "value: 1000000.0\n"
     assert from_yaml11(written) == {"value": 1000000}
     assert from_yaml11(to_yaml(from_yaml11(written))) == {"value": 1000000}
+
+
+# What go-yaml v2 gives for each scalar, measured and not reasoned about.
+#
+# The measurement is `ekn-yaml2json` in easykubenix, which reads through
+# `sigs.k8s.io/yaml` v1.6.0 and so through `go.yaml.in/yaml/v2`. That is the
+# parser the Kubernetes API server decodes with. nanopynix depends on no Go
+# program at test time, so the answers live here. Re-measure with:
+#
+#     printf 'x: <scalar>\n' | ekn-yaml2json --shape list
+#
+# The type matters as much as the value, so the test compares both.
+_GO_LIKE_SCALARS: list[tuple[str, object]] = [
+    # Integers YAML 1.1 reads and YAML 1.2 does not.
+    ("0644", 420),
+    ("+0644", 420),
+    ("0_0", 0),
+    ("00", 0),
+    ("0", 0),
+    ("-0", 0),
+    # YAML 1.2's octal, and both cases of every prefix.
+    ("0o755", 493),
+    ("0O17", 15),
+    ("0X1f", 31),
+    ("-0X_5", -5),
+    ("0x_1f", 31),
+    ("0b101", 5),
+    ("0b1_01", 5),
+    ("1_000", 1000),
+    ("1__0", 10),
+    ("1_", 1),
+    # A leading zero that is not octal. YAML 1.1 gives up and calls these
+    # strings; go-yaml falls through to the float attempt and reads a number.
+    ("08", 8),
+    ("-0892864", -892864),
+    # Helm writes a chart value through Go's `%v`, which reaches scientific
+    # notation from 1e6. Go's JSON writes that float64 back with no decimal
+    # point, so the number reaches Nix as an integer.
+    ("1e+06", 1000000),
+    ("1.0", 1),
+    ("75.", 75),
+    (".5e3", 500),
+    # Floats.
+    ("1.5", 1.5),
+    (".5", 0.5),
+    (".5_0", 0.5),
+    ("-.5", -0.5),
+    ("1_000.5", 1000.5),
+    ("1.2e+3_0", 1.2e30),
+    ("1e21", 1e21),
+    ("123456789012345678901234567890", 1.2345678901234568e29),
+    # The edges of int64 and uint64. Past them go-yaml reads a float64, and
+    # Go's JSON writes the shortest decimal of that float64.
+    ("9007199254740993", 9007199254740993),
+    ("9223372036854775807", 9223372036854775807),
+    ("9223372036854775808", 9223372036854775808),
+    ("18446744073709551615", 18446744073709551615),
+    ("18446744073709551616", 18446744073709552000),
+    ("-9223372036854775809", -9223372036854776000),
+    # Booleans. YAML 1.1 leaves a bare `y` alone; go-yaml does not.
+    ("y", True),
+    ("Y", True),
+    ("yes", True),
+    ("on", True),
+    ("TRUE", True),
+    ("n", False),
+    ("N", False),
+    ("No", False),
+    ("off", False),
+    ("'No'", "No"),
+    # Nulls.
+    ("~", None),
+    ("null", None),
+    ("", None),
+    # Base 60. YAML 1.1 reads `1:30` as 90; go-yaml reads a string.
+    ("1:30", "1:30"),
+    ("12:34:56", "12:34:56"),
+    # A timestamp. go-yaml resolves one and then puts the original text into
+    # an untyped value, so nothing but the string reaches JSON.
+    ("2023-01-01", "2023-01-01"),
+    ("2023-01-01T10:00:00Z", "2023-01-01T10:00:00Z"),
+    ("2023-1-2", "2023-1-2"),
+    ("2023-01-02 15:04:05", "2023-01-02 15:04:05"),
+    # A number too large for a float64. Go reports a range error and keeps
+    # the string; Python's `float()` returns an infinity instead.
+    ("75.e993", "75.e993"),
+    ("1e400", "1e400"),
+    # Strings. The first character decides: go-yaml consults no table for a
+    # scalar that starts outside its hint set.
+    ("=", "="),
+    ("_1", "_1"),
+    ("yellow", "yellow"),
+    ("ne", "ne"),
+    ("v1", "v1"),
+    ("1.2.3", "1.2.3"),
+    ("٣", "٣"),
+    ("+", "+"),
+    (".", "."),
+    ("0x", "0x"),
+    ("0X", "0X"),
+    ("0o8", "0o8"),
+    ("1e", "1e"),
+    (".inf5", ".inf5"),
+    (".5e", ".5e"),
+    ("<<", "<<"),
+    ('"8080"', "8080"),
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), _GO_LIKE_SCALARS)
+def test_a_scalar_reads_the_way_go_yaml_reads_it(text: str, expected: object) -> None:
+    document = from_go_like_yaml(f"x: {text}")
+
+    assert isinstance(document, dict)
+    assert document == {"x": expected}
+    assert type(document["x"]) is type(expected)
+
+
+def test_a_quoted_scalar_stays_a_string() -> None:
+    """go-yaml resolves a plain scalar only."""
+    assert from_go_like_yaml("a: \"0644\"\nb: 'y'\n") == {"a": "0644", "b": "y"}
+
+
+@pytest.mark.parametrize("text", [".inf", "-.inf", ".nan", "+.INF"])
+def test_a_scalar_with_no_json_number_is_refused(text: str) -> None:
+    """go-yaml reads these as an infinity or a NaN, and JSON holds neither.
+
+    The Go path fails too: `ekn-yaml2json` exits with
+    `json: unsupported value: +Inf`. Silence is the worse answer, because
+    pydantic writes an infinity out as null.
+    """
+    with pytest.raises(ValueError, match="JSON holds no such number"):
+        from_go_like_yaml(f"x: {text}")
+
+
+def test_a_merge_key_merges() -> None:
+    assert from_go_like_yaml("base: &b {a: 1}\nuse:\n  <<: *b\n  b: 2\n") == {
+        "base": {"a": 1},
+        "use": {"a": 1, "b": 2},
+    }
+
+
+def test_from_go_like_yaml_reads_a_stream() -> None:
+    assert from_go_like_yaml_stream("a: y\n---\nb: 0644\n") == [{"a": True}, {"b": 420}]
+
+
+def test_from_go_like_yaml_needs_exactly_one_document() -> None:
+    with pytest.raises(ValueError, match="use fromGoLikeYAMLStream"):
+        from_go_like_yaml("a: 1\n---\nb: 2\n")
+
+
+def test_from_go_like_yaml_reports_a_parse_error() -> None:
+    with pytest.raises(ValueError, match="fromGoLikeYAML: failed to parse YAML document"):
+        from_go_like_yaml("key: [unterminated")
+
+
+def test_from_go_like_yaml_stream_reports_a_parse_error() -> None:
+    with pytest.raises(ValueError, match="fromGoLikeYAMLStream: failed to parse YAML stream"):
+        from_go_like_yaml_stream("key: [unterminated")
+
+
+def test_the_date_that_stops_the_deprecated_reader_is_read_here() -> None:
+    """The class of #307 that breaks a chart today.
+
+    `fromYAML11` gives a `datetime.date`, which JsonValue cannot hold, and
+    the whole document fails.
+    """
+    with pytest.raises(ValueError, match="not JSON-compatible"):
+        from_yaml11("x: 2023-01-01")
+
+    assert from_go_like_yaml("x: 2023-01-01") == {"x": "2023-01-01"}
