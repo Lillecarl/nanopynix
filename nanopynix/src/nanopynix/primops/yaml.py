@@ -85,15 +85,23 @@ _YAML12_ONLY_FLOAT = re.compile(
     r"^[-+]?(?:[0-9][0-9_]*(?:\.[0-9_]*)?|\.[0-9_]+)[eE][-+]?[0-9]+$",
 )
 
+# YAML 1.2's octal form, which 1.1's integer production has no alternative for.
+#
+# go-yaml reads `0o755` as 493. `_BlockStyleDumper` below already knows this:
+# it registers the same pattern, so a string that reads "0o17" goes out quoted
+# and does not come back as a number. The reader is the half that missed it.
+_YAML12_ONLY_INT = re.compile(r"^[-+]?0o[0-7_]+$")
+
 
 def _yaml11_loader() -> type[Any]:
     class Loader(yaml.CSafeLoader):  # type: ignore[reportUnknownBaseType] -- PyYAML stubs may be incomplete
         pass
 
     # Helm's dialect, which is what this parser is for, and which is neither
-    # version cleanly: 1.1 for integers, because `defaultMode: 0644` means 420
-    # and 1.2 would read it as 644, and 1.2 for floats, because of the
-    # exponent above.
+    # version cleanly. It keeps 1.1's integers, because `defaultMode: 0644`
+    # means 420 and 1.2 reads the same text as 644. It adds 1.2's floats,
+    # because of the exponent above, and 1.2's octal, because go-yaml resolves
+    # both and this loader is a description of go-yaml.
     #
     # Appending is what makes this narrow. PyYAML tries a first character's
     # resolvers in order and takes the first match, so every scalar 1.1
@@ -104,6 +112,14 @@ def _yaml11_loader() -> type[Any]:
         "tag:yaml.org,2002:float",
         _YAML12_ONLY_FLOAT,
         list("-+0123456789."),
+    )
+    # The constructor needs no change. PyYAML's 1.1 `construct_yaml_int` gives
+    # a leading-zero integer to `int(text, 8)`, and Python accepts the `0o`
+    # prefix when it matches the base.
+    Loader.add_implicit_resolver(  # type: ignore[reportUnknownMemberType] -- yaml.Loader methods may not have complete stubs
+        "tag:yaml.org,2002:int",
+        _YAML12_ONLY_INT,
+        list("-+0"),
     )
 
     # YAML 1.1's core schema resolves a bare, unquoted `=` scalar to the
@@ -249,10 +265,11 @@ _BlockStyleDumper.add_representer(str, _represent_str)
 # versions resolve.
 for _tag, _pattern in (
     ("tag:yaml.org,2002:float", _YAML12_ONLY_FLOAT),
-    # 1.2 integers 1.1 does not resolve: `0o17` is octal in 1.2 and a string
-    # in 1.1, and 1.1 reads a leading-zero `017` as octal while 1.2 reads it
-    # as decimal 17 -- either way the text means a number to somebody.
-    ("tag:yaml.org,2002:int", re.compile(r"^[-+]?0o[0-7_]+$")),
+    # 1.2 integers 1.1 does not resolve: 1.1 reads a leading-zero `017` as
+    # octal while 1.2 reads it as decimal 17, and 1.2 reads `0o17` as octal
+    # where 1.1's production has no alternative for the prefix -- either way
+    # the text means a number to somebody.
+    ("tag:yaml.org,2002:int", _YAML12_ONLY_INT),
 ):
     _BlockStyleDumper.add_implicit_resolver(  # type: ignore[reportUnknownMemberType] -- yaml.Dumper methods may not have complete stubs
         _tag,

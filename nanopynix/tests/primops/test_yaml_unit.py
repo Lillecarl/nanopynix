@@ -115,6 +115,11 @@ def test_from_yaml11_reads_a_float_the_way_helm_writes_one(text: str, expected: 
         # widening the float production must not have touched it.
         ("0644", 420),
         ("017", 15),
+        # 1.2's octal form. 1.1's integer production has no alternative for
+        # the prefix, so this resolved as the string "0o755" until the 1.2
+        # resolver joined the float one. go-yaml reads 493.
+        ("0o755", 493),
+        ("-0o17", -15),
         # A 1.1 float stays one, decided before the added resolver is reached.
         ("1.5e+06", 1500000.0),
         ("1.5", 1.5),
