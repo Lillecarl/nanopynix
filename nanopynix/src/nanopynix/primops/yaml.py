@@ -233,6 +233,12 @@ _INT64_MIN = -(2**63)
 _INT64_MAX = 2**63 - 1
 _UINT64_MAX = 2**64 - 1
 
+# A float32 needs at most 9 significant digits to read back as itself.
+_GO_FLOAT32_DIGITS = 9
+# The window where Go's `'g'` writes a plain decimal: `-4 <= exponent < 6`.
+_GO_G_PLAIN_MINIMUM = -4
+_GO_G_PLAIN_LIMIT = 6
+
 _GO_BASE_PREFIX = {"b": 2, "o": 8, "x": 16}
 # The shortest text a base prefix can be part of: the zero, the letter and one
 # digit. Go's `strconv` takes the same bound, so `0x` is not a hexadecimal.
@@ -397,11 +403,21 @@ def _go_float32_text(value: float) -> str:
         return "-.inf" if value < 0 else ".inf"
     # A NaN reaches no key: `_construct_go_scalar` refuses the scalar first.
     narrowed: float = struct.unpack("<f", packed)[0]
-    for digits in range(1, 18):
-        text = f"{narrowed:.{digits}g}"
-        if struct.unpack("<f", struct.pack("<f", float(text)))[0] == narrowed:
-            return text
-    return repr(narrowed)
+    digits = _GO_FLOAT32_DIGITS
+    for count in range(1, _GO_FLOAT32_DIGITS):
+        if struct.unpack("<f", struct.pack("<f", float(f"{narrowed:.{count - 1}e}")))[0] == narrowed:
+            digits = count
+            break
+    exponent = int(f"{narrowed:.{digits - 1}e}".split("e")[1])
+    # **Go decides the form with precision 6, and not with the digit count.**
+    # `ftoa.go` says so where it formats: "if precision was the shortest
+    # possible, use precision 6 for this decision". Python's `%g` uses the
+    # precision it is given, so `.1g` of -2000 is `-2e+03` where Go gives
+    # `-2000`. The fuzzer reports it as a key that changed name.
+    if _GO_G_PLAIN_MINIMUM <= exponent < _GO_G_PLAIN_LIMIT:
+        return f"{narrowed:.{max(digits - 1 - exponent, 0)}f}"
+    mantissa = f"{narrowed:.{digits - 1}e}".split("e")[0]
+    return f"{mantissa}e{'+' if exponent >= 0 else '-'}{abs(exponent):02d}"
 
 
 def _go_json_key(key: Any) -> str:

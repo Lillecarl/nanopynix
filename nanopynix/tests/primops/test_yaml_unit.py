@@ -436,6 +436,14 @@ def test_from_go_like_yaml_stream_reports_a_parse_error() -> None:
         ("3.14159265358979", "3.1415927"),
         ("1e-7", "1e-07"),
         ("1.5e30", "1.5e+30"),
+        # Go picks the plain form for -4 <= exponent < 6, and it decides that
+        # with precision 6 and not with the digit count. Python's `%g` uses
+        # the precision it is given, so `.1g` of -2000 is `-2e+03`.
+        ("-2e+03", "-2000"),
+        ("4.5e+05", "450000"),
+        ("4.6602e+05", "466020"),
+        ("2.0855e+07", "2.0855e+07"),
+        ("4.497e+18", "4.497e+18"),
         # Larger than a float32 holds, so Go's conversion gives an infinity.
         ("1e40", ".inf"),
         ("1e-50", "0"),
