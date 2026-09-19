@@ -31,6 +31,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -170,6 +171,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -210,6 +212,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -261,6 +264,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -312,6 +316,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -364,6 +369,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -453,6 +459,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -542,6 +549,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -632,6 +640,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -689,6 +698,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -778,6 +788,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -867,6 +878,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -955,6 +967,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -999,6 +1012,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -1043,6 +1057,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -1087,6 +1102,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -1141,6 +1157,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -1195,6 +1212,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -1249,6 +1267,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -1300,6 +1319,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
@@ -1351,6 +1371,7 @@ jobs:
         /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google
         /usr/lib/firefox; docker system prune --all --force; docker builder prune
         --all --force; df -h /
+      if: runner.os == 'Linux'
       timeout-minutes: 10
     - uses: actions/checkout@main
       timeout-minutes: 10
