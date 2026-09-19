@@ -96,16 +96,26 @@ def test_parse_error_message_uses_the_problem_without_a_mark() -> None:
         # requires a decimal point before the exponent, so this used to parse
         # as the string "1e+06" and the API server refused the PriorityClass:
         # ".value: expected numeric (int or float), got string".
-        ("1e+06", 1000000.0),
-        ("1e6", 1000000.0),
+        #
+        # The results are integers, not floats, because go-yaml's are. Go
+        # reads a float64 and `encoding/json` writes an integral float64 with
+        # no decimal point, so the number reaches Nix as an integer.
+        ("1e+06", 1000000),
+        ("1e6", 1000000),
         # 1.1 also requires a sign in the exponent.
-        ("1.5e6", 1500000.0),
-        ("-2e3", -2000.0),
-        (".5e1", 5.0),
+        ("1.5e6", 1500000),
+        ("-2e3", -2000),
+        (".5e1", 5),
+        # Above 1e21 Go changes to the exponent form, and the number stays a
+        # float on both sides.
+        ("1e30", 1e30),
     ],
 )
 def test_from_yaml11_reads_a_float_the_way_helm_writes_one(text: str, expected: float) -> None:
-    assert from_yaml11(f"value: {text}") == {"value": expected}
+    parsed = from_yaml11(f"value: {text}")
+
+    assert parsed == {"value": expected}
+    assert isinstance(parsed["value"], type(expected))  # type: ignore[reportIndexIssue] -- JsonValue is a union, and this document is a mapping
 
 
 @pytest.mark.parametrize(
@@ -121,8 +131,11 @@ def test_from_yaml11_reads_a_float_the_way_helm_writes_one(text: str, expected: 
         ("0o755", 493),
         ("-0o17", -15),
         # A 1.1 float stays one, decided before the added resolver is reached.
-        ("1.5e+06", 1500000.0),
+        # The value is an integer for the same reason as above: go-yaml writes
+        # an integral float64 without a decimal point.
+        ("1.5e+06", 1500000),
         ("1.5", 1.5),
+        ("2.0", 2),
         # And a scalar neither version calls a number stays a string.
         ("1e", "1e"),
         ("abc", "abc"),
@@ -177,4 +190,19 @@ def test_a_helm_float_survives_the_round_trip() -> None:
     """Read what Helm wrote, write it again, read it again."""
     once = from_yaml11("value: 1e+06")
 
-    assert from_yaml11(to_yaml(once)) == once == {"value": 1000000.0}
+    assert from_yaml11(to_yaml(once)) == once == {"value": 1000000}
+
+
+def test_a_float_this_reader_turns_into_an_integer_still_round_trips() -> None:
+    """A float given to the dumper comes back as the integer it equals.
+
+    The dumper writes 1000000.0 with the decimal point, because it holds a
+    Python float. The reader gives that text back as an integer, because
+    go-yaml's JSON does. The value is the same and the type is not, so the
+    second read is the fixed point and not the first.
+    """
+    written = to_yaml({"value": 1000000.0})
+
+    assert written == "value: 1000000.0\n"
+    assert from_yaml11(written) == {"value": 1000000}
+    assert from_yaml11(to_yaml(from_yaml11(written))) == {"value": 1000000}

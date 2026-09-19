@@ -92,6 +92,28 @@ _YAML12_ONLY_FLOAT = re.compile(
 # and does not come back as a number. The reader is the half that missed it.
 _YAML12_ONLY_INT = re.compile(r"^[-+]?0o[0-7_]+$")
 
+# Where Go's JSON encoder changes from the plain form to the exponent form.
+#
+# go-yaml reads `1e+06` as a float64, and then Go writes that float64 as
+# `1000000`, because `encoding/json` prints an integral float64 with no
+# decimal point below 1e21. The number reaches Nix as an integer. This reader
+# gives a Python float, which reaches Nix as a float and goes back out as
+# `1000000.0` -- into a field the API server types as int32.
+#
+# Kubernetes makes the same conversion for the same reason:
+# `k8s.io/apimachinery/pkg/util/json` turns an integral JSON number into an
+# int64 before anything decodes it.
+_GO_PLAIN_FLOAT_LIMIT = 1e21
+
+
+# `int | float` and not `float`: beartype checks the annotation at run time,
+# and an int is not an instance of float there.
+def _construct_yaml11_float(loader: Any, node: Any) -> int | float:
+    value: float = yaml.CSafeLoader.construct_yaml_float(loader, node)  # type: ignore[reportUnknownMemberType] -- PyYAML stubs may be incomplete
+    if value.is_integer() and abs(value) < _GO_PLAIN_FLOAT_LIMIT:
+        return int(value)
+    return value
+
 
 def _yaml11_loader() -> type[Any]:
     class Loader(yaml.CSafeLoader):  # type: ignore[reportUnknownBaseType] -- PyYAML stubs may be incomplete
@@ -121,6 +143,7 @@ def _yaml11_loader() -> type[Any]:
         _YAML12_ONLY_INT,
         list("-+0"),
     )
+    Loader.add_constructor("tag:yaml.org,2002:float", _construct_yaml11_float)
 
     # YAML 1.1's core schema resolves a bare, unquoted `=` scalar to the
     # special "value" type (historically a mapping's "default key" marker),
