@@ -45,7 +45,7 @@ buildPythonPackage {
   # So: a dated dev release of the next version. A commit count went stale in
   # silence -- this said `dev25` while `develop` was already two commits past
   # it -- and a date says the same thing without claiming to be exact.
-  version = "0.20.16.dev20260917";
+  version = "0.20.16.dev20260922";
   pyproject = true;
 
   inherit src;
