@@ -22,6 +22,7 @@ import nanopynix
 from nanopynix.settings import field_key
 from pynix import parse
 from pynix._impl.build import (
+    _add_sandbox_paths,  # pyright: ignore[reportPrivateUsage] -- the merge under test is inside this function
     _resolve_namespaced,  # pyright: ignore[reportPrivateUsage] -- the refusal under test is inside this function
 )
 from pynix._impl.settings import (
@@ -146,6 +147,38 @@ def test_a_configured_flag_that_is_true_can_still_be_turned_off(
 
     assert build_command().print_build_logs is True  # type: ignore[attr-defined] -- see above
     assert build_command("--no-print-build-logs").print_build_logs is False  # type: ignore[attr-defined] -- see above
+
+
+def test_every_sandbox_path_is_kept() -> None:
+    """``--sandbox-path`` is repeatable, so a second one adds to the first."""
+    command = build_command("--namespaced", "--sandbox-path", "/a=/x", "--sandbox-path", "/b=/y")
+
+    assert command.sandbox_path == ["/a=/x", "/b=/y"]  # type: ignore[attr-defined] -- see above
+
+
+@pytest.mark.anyio
+async def test_a_sandbox_path_adds_to_what_nix_conf_set() -> None:
+    """Replacing the list took ``/bin/sh`` out of every such build."""
+
+    class Session:
+        written: nanopynix.NixGlobalSettings | None = None
+
+        async def settings(self) -> dict[str, str]:
+            return {"sandbox-paths": "/bin/sh=/nix/store/b-busybox/bin/busybox /run/binfmt"}
+
+        async def set_settings(self, settings: nanopynix.NixGlobalSettings) -> dict[str, str]:
+            self.written = settings
+            return {}
+
+    session = Session()
+    await _add_sandbox_paths(session, ["/ccache=/home/me/cc", "/run/binfmt"])
+
+    assert session.written is not None
+    assert session.written.sandbox_paths == [
+        "/bin/sh=/nix/store/b-busybox/bin/busybox",
+        "/run/binfmt",
+        "/ccache=/home/me/cc",
+    ]
 
 
 def test_a_configured_store_does_not_refuse_a_namespaced_build(

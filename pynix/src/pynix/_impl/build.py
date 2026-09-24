@@ -200,6 +200,20 @@ def _print_diff(path: Path, before: str, after: str) -> None:
     )
 
 
+async def _add_sandbox_paths(nix: Any, paths: list[str]) -> None:
+    """Add *paths* to the worker's ``sandbox-paths``, after what nix.conf set.
+
+    Added, never replacing: nix.conf carries ``/bin/sh=<busybox>`` there,
+    and a build with any ``--sandbox-path`` had no ``/bin/sh``. Measured: a
+    kernel's Kconfig runs ``sh`` for every ``$(shell)`` and failed on it.
+    Written before a store opens, because a store reads its settings once.
+    """
+    configured = (await nix.settings()).get("sandbox-paths", "").split()
+    await nix.set_settings(
+        nanopynix.NixGlobalSettings(sandbox_paths=[*configured, *(p for p in paths if p not in configured)])
+    )
+
+
 async def run_build(command: Build) -> None:
     """The body of :meth:`pynix.build.Build.run`."""
     target = EvaluationTarget.from_command(command)
@@ -218,8 +232,6 @@ async def run_build(command: Build) -> None:
         substituters=command.substituters,
         trusted_public_keys=command.trusted_public_keys,
     )
-    if command.sandbox_path:
-        settings = settings.model_copy(update={"sandbox_paths": list(command.sandbox_path)})
 
     async with AsyncExitStack() as stack:
         namespace = await stack.enter_async_context(_overlay_namespace(namespaced, command.overlay_dir))
@@ -236,6 +248,8 @@ async def run_build(command: Build) -> None:
                 **namespace_kwargs,
             )
         )
+        if command.sandbox_path:
+            await _add_sandbox_paths(nix, command.sandbox_path)
         # None, not "auto", when namespaced: the session already defaults
         # to its overlay store, and naming "auto" here would open a
         # different store instead.
