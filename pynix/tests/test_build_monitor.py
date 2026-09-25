@@ -124,6 +124,48 @@ def test_an_error_naming_a_derivation_fails_its_build() -> None:
     assert lines[-1].endswith("⚠ Exited after 1 build failures at 12:00:00 after 4s")
 
 
+def test_a_failed_build_is_read_from_the_summary_when_nix_logs_no_error() -> None:
+    """The order a real failing build sends, measured: no ``error`` event at all."""
+    state = MonitorState(started=0.0)
+    feed(
+        state,
+        [
+            (0.0, start(BUILDS_ID, ActivityType.BUILDS)),
+            (0.0, result(BUILDS_ID, ResultType.PROGRESS, [0, 1, 0, 0])),
+            (0.0, start(FAIL_ID, ActivityType.BUILD, "", [OTHER_DRV, "", 1, 1])),
+            (0.0, result(BUILDS_ID, ResultType.PROGRESS, [0, 1, 1, 0])),
+            (2.0, result(BUILDS_ID, ResultType.PROGRESS, [0, 1, 0, 1])),
+            (2.0, stop(FAIL_ID)),
+            (2.0, stop(BUILDS_ID)),
+        ],
+    )
+
+    lines = render(state, 2.5, width=100, height=30, finished_at="12:00:00").plain.splitlines()
+
+    assert lines[1] == "┃ ⚠ broken-1.0 failed after ⏱ 2s"
+    assert lines[-1].startswith("┗━ ∑ ⏵ 0 │ ✔ 0 │ ⏸ 0 │ ")
+    assert lines[-1].endswith("⚠ Exited after 1 build failures at 12:00:00 after 2s")
+
+
+def test_a_success_after_a_failure_stays_a_success() -> None:
+    state = MonitorState(started=0.0)
+    feed(
+        state,
+        [
+            (0.0, start(BUILDS_ID, ActivityType.BUILDS)),
+            (0.0, start(FAIL_ID, ActivityType.BUILD, "", [OTHER_DRV, "", 1, 1])),
+            (0.0, start(BUILD_ID, ActivityType.BUILD, "", [DRV, "", 1, 1])),
+            (1.0, result(BUILDS_ID, ResultType.PROGRESS, [0, 2, 1, 1])),
+            (1.0, stop(FAIL_ID)),
+            (2.0, result(BUILDS_ID, ResultType.PROGRESS, [1, 2, 0, 1])),
+            (2.0, stop(BUILD_ID)),
+        ],
+    )
+
+    assert state.builds[FAIL_ID].failed
+    assert not state.builds[BUILD_ID].failed
+
+
 def test_build_log_lines_print_only_when_asked() -> None:
     quiet = MonitorState(started=0.0)
     loud = MonitorState(started=0.0, print_build_logs=True)

@@ -140,6 +140,12 @@ async def forward_nix_logs(
                 tg.start_soon(_redraw, live, state)
             try:
                 yield
+            except Exception as exc:
+                # The monitor's last frame counts it. The caller prints it,
+                # after that frame, where nom prints its errors too.
+                if live is not None:
+                    state.note_error(str(exc))
+                raise
             finally:
                 # Shielded: the drain must run to completion even if the
                 # caller's block was cancelled, matching the original

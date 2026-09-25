@@ -173,7 +173,7 @@ class MonitorState:
             case "result":
                 return self._result(event.args)
             case "error":
-                return self._error(event.message_without_ansi or "", event.message or "")
+                return [self.note_error(event.message or "")]
             case "msg" | "warn":
                 message = event.message
                 return [] if message is None else [Text.from_ansi(message)]
@@ -201,6 +201,13 @@ class MonitorState:
     def _stop(self, activity_id: int, now: float) -> None:
         if (build := self.builds.get(activity_id)) is not None and build.end is None:
             build.end = now
+            # Nix logs no error for the build a caller asked for; it returns
+            # the failure instead. What it does log is the summary's failed
+            # count, just before this stop: the worker's single thread counts
+            # the failure and then drops the goal's activity, with nothing
+            # between. So an unclaimed failure belongs to the build that stops.
+            if self._unclaimed_failures() > 0:
+                build.failed = True
         elif (transfer := self.transfers.get(activity_id)) is not None and transfer.end is None:
             transfer.end = now
         elif (summary := self.summaries.get(activity_id)) is not None:
@@ -223,13 +230,19 @@ class MonitorState:
                 transfer.done_bytes, transfer.expected_bytes = int(fields[0]), int(fields[1])
         return []
 
-    def _error(self, plain: str, raw: str) -> list[Text]:
+    def note_error(self, message: str) -> Text:
+        """Count an error from Nix, fail each build it names, and return it to print."""
         self.errors += 1
-        named = set(_DRV_PATH.findall(plain))
+        text = Text.from_ansi(message)
+        named = set(_DRV_PATH.findall(text.plain))
         for build in self.builds.values():
             if build.drv in named:
                 build.failed = True
-        return [Text.from_ansi(raw)]
+        return text
+
+    def _unclaimed_failures(self) -> int:
+        reported = sum(s.failed for s in self.summaries.values() if s.activity_type == ActivityType.BUILDS)
+        return reported - sum(b.failed for b in self.builds.values())
 
     def totals(self) -> Totals:
         builds = self.builds.values()

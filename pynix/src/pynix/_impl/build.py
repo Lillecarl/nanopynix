@@ -38,6 +38,7 @@ if TYPE_CHECKING or BEARTYPING:
     # The protocol, and not one engine's class, for the reason
     # `nanopynix_helpers.build` gives. Issue #232.
     from nanopynix.protocols import AsyncValue as ValueProxy
+    from pynix._impl.settings import PynixNixSettings
 from pynix.target import (
     EvaluationTarget,
     EvaluationTargetError,
@@ -233,6 +234,23 @@ async def run_build(command: Build) -> None:
         trusted_public_keys=command.trusted_public_keys,
     )
 
+    # Outside the session, so the error passes through its log forwarding:
+    # --nom counts it in the last frame, and the message prints after that.
+    try:
+        outputs, updates = await _build_in_session(command, target, namespaced=namespaced, settings=settings)
+    except BuildTargetError as exc:
+        report_and_exit(exc)
+
+    print_json({"outputs": outputs, "updatedFods": updates, "dryRun": command.dry_run})
+
+
+async def _build_in_session(
+    command: Build,
+    target: EvaluationTarget,
+    *,
+    namespaced: bool,
+    settings: PynixNixSettings,
+) -> tuple[dict[str, str], int]:
     async with AsyncExitStack() as stack:
         namespace = await stack.enter_async_context(_overlay_namespace(namespaced, command.overlay_dir))
         # Passed only when there is one, which is the convention
@@ -257,45 +275,41 @@ async def run_build(command: Build) -> None:
         # different store instead.
         store_uri = None if namespaced else command.store
         promote = namespaced and command.copy_back
-        try:
-            if command.eval_store is None:
-                async with nix.store(store_uri) as store:
-                    async with nix.eval(store) as session:
-                        logger.info("pynix build evaluating target")
-                        outputs, updates = await _build_target(
-                            target,
-                            session,
-                            nix=nix,
-                            evaluation_store=store,
-                            update_fod=command.update_fod,
-                            dry_run=command.dry_run,
-                        )
-                    logger.info("pynix build finished")
-                    if promote:
-                        await _promote_to_host_store(nix, store, outputs)
-            else:
-                async with (
-                    nix.store(command.eval_store) as eval_store,
-                    nix.store(store_uri) as build_store,
-                ):
-                    async with nix.eval(eval_store) as session:
-                        logger.info("pynix build evaluating target")
-                        outputs, updates = await _build_target(
-                            target,
-                            session,
-                            nix=nix,
-                            evaluation_store=eval_store,
-                            build_store=build_store,
-                            update_fod=command.update_fod,
-                            dry_run=command.dry_run,
-                        )
-                    logger.info("pynix build finished")
-                    if promote:
-                        await _promote_to_host_store(nix, build_store, outputs)
-        except BuildTargetError as exc:
-            report_and_exit(exc)
-
-    print_json({"outputs": outputs, "updatedFods": updates, "dryRun": command.dry_run})
+        if command.eval_store is None:
+            async with nix.store(store_uri) as store:
+                async with nix.eval(store) as session:
+                    logger.info("pynix build evaluating target")
+                    outputs, updates = await _build_target(
+                        target,
+                        session,
+                        nix=nix,
+                        evaluation_store=store,
+                        update_fod=command.update_fod,
+                        dry_run=command.dry_run,
+                    )
+                logger.info("pynix build finished")
+                if promote:
+                    await _promote_to_host_store(nix, store, outputs)
+        else:
+            async with (
+                nix.store(command.eval_store) as eval_store,
+                nix.store(store_uri) as build_store,
+            ):
+                async with nix.eval(eval_store) as session:
+                    logger.info("pynix build evaluating target")
+                    outputs, updates = await _build_target(
+                        target,
+                        session,
+                        nix=nix,
+                        evaluation_store=eval_store,
+                        build_store=build_store,
+                        update_fod=command.update_fod,
+                        dry_run=command.dry_run,
+                    )
+                logger.info("pynix build finished")
+                if promote:
+                    await _promote_to_host_store(nix, build_store, outputs)
+    return outputs, updates
 
 
 def _resolve_namespaced(command: Build) -> bool:

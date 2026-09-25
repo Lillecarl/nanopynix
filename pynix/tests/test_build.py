@@ -143,6 +143,35 @@ derivation {{
 
 
 @LINUX_CHROOT_BUILD
+async def test_build_nom_marks_a_failed_build(
+    shared_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Nix logs no error for the build a caller asked for, and --nom still shows it failed."""
+    nix_file = tmp_path / "nom-fail.nix"
+    nix_file.write_text(
+        f"""
+derivation {{
+  name = "pynix-nom-fails";
+  system = builtins.currentSystem;
+  builder = "/bin/sh";
+  args = [ "-c" "echo {tmp_path.name}; exit 1" ];
+}}
+"""
+    )
+    cmd = parse(["build", "--nom", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
+
+    # `main` prints the error after the command returns, so after the last frame.
+    with pytest.raises(nanopynix.NixError, match="Cannot build"):
+        await cmd.run()
+
+    err = capsys.readouterr().err
+    assert "┃ ⚠ pynix-nom-fails failed after" in err, err
+    assert "⚠ Exited after 1 build failures at" in err, err
+
+
+@LINUX_CHROOT_BUILD
 async def test_build_file_derivation_attr(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,
