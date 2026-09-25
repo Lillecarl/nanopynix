@@ -157,6 +157,10 @@ async def forward_nix_logs(
                 if live is not None:
                     live.update(_monitor_view(live, state, finished_at=time.strftime("%H:%M:%S")), refresh=True)
                     live.stop()
+                    # rich ends the last frame with a newline on a terminal
+                    # only; without one, the caller's error ran on after it.
+                    if not live.console.is_terminal:
+                        live.console.line()
     except* BaseException as eg:
         # anyio task groups always wrap exceptions in a group, even a lone
         # one raised by the yielded body itself -- unwrap the common single

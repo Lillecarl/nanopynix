@@ -310,3 +310,23 @@ def test_a_local_copy_is_neither_a_download_nor_an_upload() -> None:
 def test_nothing_to_show_is_a_bare_timer() -> None:
     lines = render(MonitorState(started=0.0), 2.0, width=80, height=None).plain.splitlines()
     assert lines == ["┏━━━ ", "┗━ ∑ ⏱ 2s"]
+
+
+def test_a_shared_input_is_drawn_once_under_its_deepest_parent() -> None:
+    """``core`` is an input of ``app`` and of ``ui``; nom draws it under ``ui`` only."""
+    app, ui, core = (f"/nix/store/{c * 32}-{n}.drv" for c, n in (("7", "app"), ("8", "ui"), ("9", "core")))
+    graph = plan(
+        children={ROOT: (app,), app: (core, ui), ui: (core,), core: ()},
+        builds={ROOT, app, ui, core},
+        downloads={},
+    )
+
+    lines = render(MonitorState(started=0.0, plan=graph), 0.5, width=100, height=30).plain.splitlines()
+
+    assert lines[:5] == [
+        "┏━ Dependency Graph:",
+        "┃       ┌─ ⏸ core",
+        "┃    ┌─ ⏸ ui",
+        "┃ ┌─ ⏸ app",
+        "┃ ⏸ root",
+    ]

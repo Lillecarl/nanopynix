@@ -187,6 +187,39 @@ _IN_FLIGHT: Final = frozenset({NodeStatus.FAILED, NodeStatus.BUILDING, NodeStatu
 _PLANNED: Final = frozenset({NodeStatus.PLANNED_BUILD, NodeStatus.PLANNED_DOWNLOAD})
 
 
+def _lowermost_tree(roots: list[str], edges: dict[str, tuple[str, ...]]) -> dict[str, list[str]]:
+    """The DAG under ``roots`` as a tree, each node under its deepest parent.
+
+    Depth is the longest path from a root, so a parent always comes before
+    its children in depth order and the owner is known when a child is placed.
+    """
+    parents: dict[str, list[str]] = {root: [] for root in roots}
+    stack = list(roots)
+    while stack:
+        node = stack.pop()
+        for child in edges.get(node, ()):
+            if child not in parents:
+                parents[child] = []
+                stack.append(child)
+            parents[child].append(node)
+    # Kahn's order over the reachable nodes; a cycle cannot occur in a plan.
+    waiting = {node: len(ps) for node, ps in parents.items()}
+    ready = [node for node, count in waiting.items() if count == 0]
+    depth: dict[str, int] = dict.fromkeys(ready, 0)
+    tree: dict[str, list[str]] = {node: [] for node in parents}
+    while ready:
+        node = ready.pop()
+        if parents[node]:
+            owner = max(parents[node], key=lambda p: depth[p])
+            depth[node] = depth[owner] + 1
+            tree[owner].append(node)
+        for child in edges.get(node, ()):
+            waiting[child] -= 1
+            if waiting[child] == 0:
+                ready.append(child)
+    return tree
+
+
 @dataclass
 class MonitorState:
     """What the monitor knows. ``apply`` and ``plan`` are the only writers."""
@@ -235,6 +268,10 @@ class MonitorState:
     def forest(self) -> tuple[list[str], dict[str, list[str]]]:
         """The roots, and each node's children, with every node under one parent only.
 
+        A node that several nodes need goes under the deepest of them, as nom
+        puts it "only for the lowermost dependency", so it draws once and the
+        chain above it stays whole.
+
         The plan's roots come first. A build or a copy the plan does not name
         is a root of its own, which is the whole display when there is no
         plan. A download the plan names but no node owns is only counted, as
@@ -242,19 +279,10 @@ class MonitorState:
         """
         plan = self.plan
         roots = list(plan.roots) if plan is not None else []
-        edges = plan.children if plan is not None else {}
-        seen: set[str] = set()
-        tree: dict[str, list[str]] = {}
-        stack = list(reversed(roots))
-        while stack:
-            node = stack.pop()
-            if node in seen:
-                continue
-            seen.add(node)
-            kids = [c for c in edges.get(node, ()) if c not in seen]
+        tree = _lowermost_tree(roots, plan.children if plan is not None else {})
+        for kids in tree.values():
             kids.sort(key=lambda c: (self.node_status(c).value, store_path_name(c)))
-            tree[node] = kids
-            stack.extend(reversed(kids))
+        seen = set(tree)
         owned = {p for node in seen for p in (plan.outputs.get(node, ()) if plan is not None else ())}
         planned_downloads = plan.downloads if plan is not None else frozenset[str]()
         for build in self.builds.values():
