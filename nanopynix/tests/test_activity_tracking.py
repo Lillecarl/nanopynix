@@ -82,6 +82,15 @@ async def test_a_tracked_build_starts_and_stops(factory: Any) -> None:
     # worker counts the finished goal before it drops the expectation.
     assert progress[-1][0] == 1, f"the last summary update is {progress[-1]}, so the totals stay stale"
 
+    # Nix sends both summaries on every update, changed or not; the gate
+    # forwards a change only.
+    both = summaries | {args[0] for args in _starts(events, ActivityType.COPY_PATHS)}
+    last: dict[int, list[Any]] = {}
+    for e in events:
+        if e.action == "result" and e.args[1] == RES_PROGRESS and e.args[0] in both:
+            assert last.get(e.args[0]) != e.args[2], f"summary {e.args[0]} repeated {e.args[2]}"
+            last[e.args[0]] = e.args[2]
+
 
 @LINUX_CHROOT_BUILD
 async def test_an_untracked_build_forwards_no_stop(factory: Any) -> None:

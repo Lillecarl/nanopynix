@@ -24,6 +24,7 @@
 #include "nix_error_info.hh"
 #include "nix_compat.hh"
 
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -214,7 +215,7 @@ public:
     bool start(nix::ActivityId id, nix::ActivityType type) {
         if (!enabled() || !wanted(type)) return false;
         std::lock_guard lock(_mutex);
-        _tracked[id] = {type, {}};
+        _tracked[id] = {type, {}, std::nullopt};
         return true;
     }
 
@@ -226,19 +227,29 @@ public:
 
     /// Whether a result on `id` goes up. `resProgress` on a copy comes once per
     /// NAR chunk; a monitor redraws a few times a second, so one per interval
-    /// is all it can show, and the stop says the copy finished. The summaries
-    /// are not limited: they move once per build, and a dropped last update
-    /// leaves the totals wrong.
-    bool result(nix::ActivityId id, nix::ResultType type) {
+    /// is all it can show, and the stop says the copy finished. A summary is
+    /// never limited by time, because a dropped last update leaves the totals
+    /// wrong. It goes up only when its numbers change: every progress update
+    /// of the worker sends both summaries, changed or not.
+    bool result(nix::ActivityId id, nix::ResultType type, nanopynix::nix_compat::LoggerFields fields) {
         if (!enabled()) return false;
         if (type != nix::resSetPhase && type != nix::resProgress && type != nix::resSetExpected) return false;
         std::lock_guard lock(_mutex);
         auto it = _tracked.find(id);
         if (it == _tracked.end()) return false;
-        if (type != nix::resProgress || it->second.type != nix::actCopyPath) return true;
-        auto now = std::chrono::steady_clock::now();
-        if (now - it->second.last_progress < progress_interval) return false;
-        it->second.last_progress = now;
+        if (type != nix::resProgress) return true;
+        auto & tracked = it->second;
+        if (tracked.type == nix::actCopyPath) {
+            auto now = std::chrono::steady_clock::now();
+            if (now - tracked.last_progress < progress_interval) return false;
+            tracked.last_progress = now;
+            return true;
+        }
+        std::array<uint64_t, 4> counts{};
+        for (size_t i = 0; i < counts.size() && i < fields.size(); ++i)
+            counts[i] = nanopynix::nix_compat::field_int(fields[i]).value_or(0);
+        if (tracked.last_counts && *tracked.last_counts == counts) return false;
+        tracked.last_counts = counts;
         return true;
     }
 
@@ -246,6 +257,7 @@ private:
     struct Tracked {
         nix::ActivityType type;
         std::chrono::steady_clock::time_point last_progress;
+        std::optional<std::array<uint64_t, 4>> last_counts;
     };
     static constexpr auto progress_interval = std::chrono::milliseconds(100);
     std::atomic<bool> _enabled{false};
@@ -479,7 +491,7 @@ public:
         // `printBuildLogs`, so the detached path delegates rather than drops.
         if (!attached()) { _fallback->result(id, type, fields); return; }
         if (type != nix::resBuildLogLine && type != nix::resPostBuildLogLine
-            && !activity_tracker.result(id, type)) return;
+            && !activity_tracker.result(id, type, fields)) return;
         guarded([&] {
             nb::gil_scoped_acquire gil;
             if (_cb.is_none()) return;
