@@ -52,6 +52,10 @@ failure carries a trace.
    :members:
    :undoc-members:
 
+.. autoclass:: nanopynix.ActivityType
+   :members:
+   :undoc-members:
+
 .. autoclass:: nanopynix.GcRoot
    :members:
 

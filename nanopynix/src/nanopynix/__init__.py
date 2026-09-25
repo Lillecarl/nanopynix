@@ -133,6 +133,7 @@ if typing.TYPE_CHECKING:
     from nanopynix.libstore import init_libstore as init_libstore
     from nanopynix.logging import LogCapture, LogCollector
     from nanopynix.models import (
+        ActivityType,
         BuildResult,
         Derivation,
         DerivationOutput,
@@ -224,6 +225,7 @@ if typing.TYPE_CHECKING:
 #: in both directions, so a name cannot be dropped from one and kept in the
 #: other.
 _NAME_TO_MODULE: typing.Final[dict[str, str]] = {
+    "ActivityType": "nanopynix.models",
     "AsyncEvalSession": "nanopynix.protocols",
     "AsyncLockedFlake": "nanopynix.protocols",
     "AsyncReplSession": "nanopynix.protocols",
@@ -441,6 +443,7 @@ __all__ = [
     "DEFAULT_EXPERIMENTAL_FEATURES",
     "DISPATCHABLE_METHODS",
     "STORE_EXEC_TOOL",
+    "ActivityType",
     "AsyncEvalSession",
     "AsyncLockedFlake",
     "AsyncReplSession",

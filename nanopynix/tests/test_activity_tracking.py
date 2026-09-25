@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from nanopynix import ActivityType, ResultType
 from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
 from test_support.notes import note
 
@@ -14,9 +15,9 @@ if TYPE_CHECKING:
     from nanopynix.models import LogEvent
     from nanopynix_testing.nix_environment import InprocSessionFactory, RpcSessionFactory
 
-ACT_BUILDS = 104
-ACT_BUILD = 105
-RES_PROGRESS = 105
+ACT_BUILDS = ActivityType.BUILDS
+ACT_BUILD = ActivityType.BUILD
+RES_PROGRESS = ResultType.PROGRESS
 
 
 def _expr(nonce: str) -> str:

@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from nanopynix_proto.nix.common import (
+    ActivityType as ActivityType,
     AttrsValue as AttrsValue,
     # Types with extension subclasses — imported as private for subclassing
     BuildResult as BuildResult,
