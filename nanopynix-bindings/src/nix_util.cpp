@@ -26,6 +26,9 @@
 
 #include <atomic>
 #include <cctype>
+#include <chrono>
+#include <mutex>
+#include <unordered_map>
 #include <cstdlib>
 #include <limits>
 #include <map>
@@ -175,6 +178,84 @@ static std::atomic<int> default_verbosity{(int) nix::lvlInfo};
 // the thread's first log call or first `set_verbosity`.
 static thread_local nix::Verbosity thread_verbosity =
     (nix::Verbosity) default_verbosity.load(std::memory_order_relaxed);
+
+// The activities a build monitor reads, kept apart from the drops below.
+//
+// Off, the logger forwards what `SimpleLogger` prints and nothing more. On, it
+// also forwards the starts of these types, whatever their level or text, and
+// the stops, phases and progress of the activities it forwarded. Everything
+// else stays behind the GIL: a closure has one `actQueryPathInfo` and one
+// `actFileTransfer` per path, and no monitor reads them.
+//
+// Process-wide and not per thread: a daemon store's activities arrive on the
+// calling thread, but a substituter's arrive on a thread Nix started itself.
+class ActivityTracker {
+public:
+    static bool wanted(nix::ActivityType type) {
+        switch (type) {
+        case nix::actCopyPath:
+        case nix::actCopyPaths:
+        case nix::actBuilds:
+        case nix::actBuild:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    bool enabled() const { return _enabled.load(std::memory_order_relaxed); }
+
+    void set_enabled(bool on) {
+        std::lock_guard lock(_mutex);
+        _enabled.store(on, std::memory_order_relaxed);
+        if (!on) _tracked.clear();
+    }
+
+    bool start(nix::ActivityId id, nix::ActivityType type) {
+        if (!enabled() || !wanted(type)) return false;
+        std::lock_guard lock(_mutex);
+        _tracked[id] = {type, {}};
+        return true;
+    }
+
+    bool stop(nix::ActivityId id) {
+        if (!enabled()) return false;
+        std::lock_guard lock(_mutex);
+        return _tracked.erase(id) > 0;
+    }
+
+    /// Whether a result on `id` goes up. `resProgress` on a copy comes once per
+    /// NAR chunk; a monitor redraws a few times a second, so one per interval
+    /// is all it can show, and the stop says the copy finished. The summaries
+    /// are not limited: they move once per build, and a dropped last update
+    /// leaves the totals wrong.
+    bool result(nix::ActivityId id, nix::ResultType type) {
+        if (!enabled()) return false;
+        if (type != nix::resSetPhase && type != nix::resProgress && type != nix::resSetExpected) return false;
+        std::lock_guard lock(_mutex);
+        auto it = _tracked.find(id);
+        if (it == _tracked.end()) return false;
+        if (type != nix::resProgress || it->second.type != nix::actCopyPath) return true;
+        auto now = std::chrono::steady_clock::now();
+        if (now - it->second.last_progress < progress_interval) return false;
+        it->second.last_progress = now;
+        return true;
+    }
+
+private:
+    struct Tracked {
+        nix::ActivityType type;
+        std::chrono::steady_clock::time_point last_progress;
+    };
+    static constexpr auto progress_interval = std::chrono::milliseconds(100);
+    std::atomic<bool> _enabled{false};
+    std::mutex _mutex;
+    std::unordered_map<nix::ActivityId, Tracked> _tracked;
+};
+
+// Leaked, like `PyLogger` below: the curl thread calls `stopActivity` from an
+// `Activity` destructor after static destruction may have begun.
+static ActivityTracker & activity_tracker = *new ActivityTracker;
 
 // **One `Logger` for the life of the process, and it is never freed.**
 //
@@ -342,7 +423,8 @@ public:
         // empty message and no fields, one per derivation/path processed.
         // Even Nix's own CLI renders nothing for these; there is nothing
         // here for any consumer of this callback to use either.
-        if (lvl > thread_verbosity || s.empty()) return;
+        bool tracked = attached() && activity_tracker.start(id, type);
+        if (!tracked && (lvl > thread_verbosity || s.empty())) return;
         if (!attached()) { _fallback->startActivity(id, lvl, type, s, fields, parent); return; }
         guarded([&] {
             nb::gil_scoped_acquire gil;
@@ -366,7 +448,14 @@ public:
         // No fallback delegation either: `nix::Logger::stopActivity` is an
         // empty default and `SimpleLogger` does not override it, so a
         // delegated call would do exactly this.
-        (void) id;
+        //
+        // The exception is an activity that `ActivityTracker` forwarded.
+        if (!attached() || !activity_tracker.stop(id)) return;
+        guarded([&] {
+            nb::gil_scoped_acquire gil;
+            if (_cb.is_none()) return;
+            _cb(nb::int_(logger_request_id), "stop", id);
+        });
     }
 
     // 2.36 gives `result` a second overload, which takes an `nlohmann::json`.
@@ -389,7 +478,8 @@ public:
         // `SimpleLogger::result` does read `resBuildLogLine`, under
         // `printBuildLogs`, so the detached path delegates rather than drops.
         if (!attached()) { _fallback->result(id, type, fields); return; }
-        if (type != nix::resBuildLogLine && type != nix::resPostBuildLogLine) return;
+        if (type != nix::resBuildLogLine && type != nix::resPostBuildLogLine
+            && !activity_tracker.result(id, type)) return;
         guarded([&] {
             nb::gil_scoped_acquire gil;
             if (_cb.is_none()) return;
@@ -625,6 +715,14 @@ void nanopynix_bind_util(nb::module_ &m) {
           "Separate from set_verbosity, so that restoring one thread's level "
           "after an operation cannot undo a change meant for the whole "
           "process.");
+    m.def("set_activity_tracking", [](bool on) { activity_tracker.set_enabled(on); }, "on"_a,
+          "Forward what a build monitor needs: the start and stop of every "
+          "build, copy and their two summary activities, with their phase, "
+          "progress and expected results.\n\n"
+          "Process-wide. The byte progress of a copy is limited to one event "
+          "every 100 ms. Other activities stay filtered before the GIL.");
+    m.def("get_activity_tracking", []() { return activity_tracker.enabled(); },
+          "Whether set_activity_tracking is on.");
     m.def("get_log_ceiling", &get_log_ceiling,
           "Return the level that Nix itself filters at.\n\n"
           "This is pinned at import and never changes. Nix therefore hands "

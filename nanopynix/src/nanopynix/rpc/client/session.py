@@ -121,6 +121,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         worker_oom_score_adj: int | None = None,
         runtime_settings: NanopynixSettings | None = None,
         namespace: OverlayNamespace | None = None,
+        activity_tracking: bool = False,
     ) -> None:
         set_manager_title()
         if nix_conf is not None:
@@ -175,6 +176,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
             settings=worker_settings,
             experimental_features=list(nix_settings.experimental_features or []),
             verbosity=normalize_log_level(verbosity) if verbosity is not None else None,
+            activity_tracking=activity_tracking,
             nix_path=normalize_nix_path(nix_path),
             primops=to_primop_specs(primops),
             primop_callables=dict(primop_callables) if primop_callables is not None else None,

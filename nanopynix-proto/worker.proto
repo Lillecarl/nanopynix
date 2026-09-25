@@ -43,6 +43,8 @@ message InitRequest {
   // Only names Nix reads after `initLibStore` can travel here, and the client
   // refuses the rest -- see nanopynix._env.
   map<string, string> env = 12;
+  // The bindings' `set_activity_tracking`: forward what a build monitor reads.
+  bool activity_tracking = 13;
 }
 
 message InitResponse {

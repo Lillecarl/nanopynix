@@ -243,6 +243,12 @@ def _print_store_paths(
     return [_print_store_path(raw_store, path) for path in raw_paths]
 
 
+def _detach_logger() -> None:
+    # Tracking is process-wide, so a session that turned it on turns it off.
+    nanopynix_util.set_activity_tracking(False)
+    nanopynix_util.remove_logger()
+
+
 def _run_with_log_context[T](operation_id: int, verbosity: int, func: Callable[..., T], args: tuple[object, ...]) -> T:
     """Run one Nix call on the Nix thread, in this operation's log context.
 
@@ -302,7 +308,9 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         primops: Sequence[PrimOpSpec | Mapping[str, Any]] | None = None,
         store_uri: StoreConfig | str = DEFAULT_STORE_URI,
         store_workers: int = 4,
+        activity_tracking: bool = False,
     ) -> None:
+        self._activity_tracking = activity_tracking
         if nix_conf is not None:
             if not isinstance(nix_conf, Path):  # type: ignore[reportUnnecessaryIsInstance] -- runtime guard for untyped callers
                 raise TypeError("nix_conf must be a pathlib.Path or None")
@@ -404,6 +412,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
             self._apply_environment()
             self._verbosity_before = nanopynix_util.get_default_verbosity()
             nanopynix_util.install_logger(self._collector.callback)
+            nanopynix_util.set_activity_tracking(self._activity_tracking)
             logger_installed = True
             await executor.run(self._init_nix)
             # Take the level now that `_init_nix` has published it. A session
@@ -418,7 +427,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         except BaseException:
             try:
                 if logger_installed:
-                    await executor.run(nanopynix_util.remove_logger)
+                    await executor.run(_detach_logger)
             finally:
                 try:
                     executor.shutdown(wait=True)
@@ -542,7 +551,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
             if task is not None:
                 await close_resource(self._collector.aclose())
                 await close_resource(task)
-            await close_resource(executor.run_closing(nanopynix_util.remove_logger))
+            await close_resource(executor.run_closing(_detach_logger))
         finally:
             try:
                 executor.shutdown(wait=True)

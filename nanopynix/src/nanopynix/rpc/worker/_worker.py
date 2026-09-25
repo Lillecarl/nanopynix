@@ -232,6 +232,7 @@ class WorkerServiceHandler(WorkerServiceBase):
             int(message.verbosity) if message.verbosity is not None else self._state.runtime.get_default_verbosity()
         )
         self._state.nix_path = list(message.nix_path)
+        nanopynix_util.set_activity_tracking(message.activity_tracking)
 
         primops_raw = [
             {

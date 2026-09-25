@@ -201,8 +201,10 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
         worker_preload: Sequence[str] = DEFAULT_WORKER_PRELOAD,
         worker_start: Literal["auto", "forkserver", "spawn", "stdio"] = "auto",
         namespace: OverlayNamespace | None = None,
+        activity_tracking: bool = False,
     ) -> None:
         self._store_uri = store_uri
+        self._activity_tracking = activity_tracking
         self._nix_conf = nix_conf
         self._load_config = load_config
         # Already validated by the Session that built this client. Validated
@@ -322,6 +324,7 @@ class WorkerClient:  # pyright: ignore[reportUnusedClass] -- imported by the pub
                 primops=proto_primops,
                 verbosity=self._verbosity,
                 nix_path=self._nix_path,
+                activity_tracking=self._activity_tracking,
             ),
             timeout=self.rpc_timeout,
         )
