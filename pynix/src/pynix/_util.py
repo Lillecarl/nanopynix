@@ -107,15 +107,16 @@ async def forward_nix_logs(
     *,
     print_build_logs: bool = False,
     log_file: TextIO | None = None,
-    monitor: bool = False,
+    monitor: MonitorState | None = None,
 ) -> AsyncGenerator[None]:
     """Print the session's logs while the block runs.
 
-    With ``monitor``, draw nom's status at the bottom of stderr instead, and
-    print the log above it. The session must have activity tracking on.
+    With ``monitor``, fold them into it and draw nom's status at the bottom
+    of stderr instead, with the log above it. The caller keeps the state, so
+    it can hand the monitor a plan. The session must have activity tracking on.
     """
     old_config = structlog.get_config()
-    live = _start_monitor() if monitor else None
+    live = _start_monitor() if monitor is not None else None
     # After the monitor starts: `Live` swaps `sys.stderr` for a proxy that
     # prints above it, and structlog binds whatever `sys.stderr` is now.
     if log_file is None:
@@ -123,7 +124,7 @@ async def forward_nix_logs(
     else:
         configure_logging(file=log_file)
     activity = _LogActivity()
-    state = MonitorState(started=time.monotonic(), print_build_logs=print_build_logs)
+    state = monitor if monitor is not None else MonitorState(started=time.monotonic())
     try:
         async with anyio.create_task_group() as tg:
             if live is None:
@@ -176,7 +177,7 @@ async def nix_session(  # noqa: PLR0913 -- keyword-only, one per session option;
     verbosity: nanopynix.LogLevelInput | None = None,
     print_build_logs: bool = False,
     namespace: nanopynix.OverlayNamespace | None = None,
-    monitor: bool = False,
+    monitor: MonitorState | None = None,
 ) -> AsyncGenerator[AsyncSession[Any, Any, Any]]:
     """Open a Nix session and forward its logs for the duration of the block.
 
@@ -187,9 +188,9 @@ async def nix_session(  # noqa: PLR0913 -- keyword-only, one per session option;
     """
     kwargs: dict[str, Any] = {}
     forward_kwargs: dict[str, Any] = {}
-    if monitor:
+    if monitor is not None:
         kwargs["activity_tracking"] = True
-        forward_kwargs["monitor"] = True
+        forward_kwargs["monitor"] = monitor
     if settings is not None:
         kwargs["settings"] = settings
     if experimental_features is not None:

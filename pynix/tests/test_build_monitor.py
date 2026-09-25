@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from nanopynix import ActivityType, LogEvent, ResultType
-from pynix._build_monitor import MonitorState, format_bytes, format_duration, render, store_path_name
+from pynix._build_monitor import BuildPlan, MonitorState, format_bytes, format_duration, render, store_path_name
 
 DRV = "/nix/store/zrrcdd2k8m57ciadr6rkm56vww6pbjhw-hello-2.12.drv"
 OTHER_DRV = "/nix/store/6lf31wv62nchj9347w6p1nkcrywb4k20-broken-1.0.drv"
@@ -73,10 +73,11 @@ def test_a_running_build_and_download_are_drawn_with_totals() -> None:
 
     lines = render(state, 12.0, width=100, height=30).plain.splitlines()
 
-    assert lines[0] == "┏━ Activity:"
-    assert lines[1] == "┃ ⏵ hello-2.12 (buildPhase) ⏱ 10s"
-    assert lines[2].startswith("┃ ↓ ⏵ glibc-2.40 ⏱ 11s 10.0MiB/40.0MiB")
-    assert lines[2].endswith(" 25.0%")
+    # No plan, so each build and copy is a root; nom draws the first at the bottom.
+    assert lines[0] == "┏━ Dependency Graph with 2 roots:"
+    assert lines[1].startswith("┃ ↓ ⏵ glibc-2.40 ⏱ 11s 10.0MiB/40.0MiB")
+    assert lines[1].endswith(" 25.0%")
+    assert lines[2] == "┃ ⏵ hello-2.12 (buildPhase) ⏱ 10s"
     assert lines[3] == "┣━━━ Builds          │ Downloads"
     assert lines[4] == "┗━ ∑ ⏵ 1 │ ✔ 0 │ ⏸ 2 │ ↓ 1 │ ↓ 0 │ ⏸ 1 │ ⏱ 12s"
     assert lines[3].index("│") == lines[4].index("│", 16), "a header must span its three columns exactly"
@@ -99,8 +100,8 @@ def test_finished_work_turns_green_and_the_summary_plans_nothing() -> None:
 
     lines = render(state, 6.2, width=100, height=30, finished_at="12:00:00").plain.splitlines()
 
-    assert lines[1] == "┃ ✔ hello-2.12 ⏱ 4s"
-    assert lines[2] == "┃ ↓ ✔ glibc-2.40 40.0MiB ⏱ 3s"
+    assert lines[1] == "┃ ↓ ✔ glibc-2.40 40.0MiB ⏱ 3s"
+    assert lines[2] == "┃ ✔ hello-2.12 ⏱ 4s"
     assert lines[-1].startswith("┗━ ∑ ⏵ 0 │ ✔ 1 │ ⏸ 0 │ ↓ 0 │ ↓ 1 │ ⏸ 0 │ ")
     assert lines[-1].endswith("Finished at 12:00:00 after 6s")
 
@@ -179,7 +180,22 @@ def test_activity_text_prints_above_the_monitor() -> None:
     assert printed == [f"copying path '{GLIBC}'", f"building '{DRV}'"]
 
 
-def test_the_list_keeps_to_a_third_of_the_terminal() -> None:
+def test_finished_work_keeps_to_a_third_of_the_terminal() -> None:
+    state = MonitorState(started=0.0)
+    feed(
+        state,
+        [(0.0, start(10 + i, ActivityType.BUILD, "", [f"/nix/store/{'a' * 32}-p{i}.drv", "", 1, 1])) for i in range(20)]
+        + [(1.0, stop(10 + i)) for i in range(20)],
+    )
+
+    lines = render(state, 1.5, width=100, height=15).plain.splitlines()
+
+    assert sum(line.startswith("┃ ✔") for line in lines) == 5
+    assert lines[0] == "┏━ Dependency Graph showing 5 of 20 roots:"
+
+
+def test_every_running_build_is_drawn_past_the_limit() -> None:
+    """nom never hides work in flight to save a line."""
     state = MonitorState(started=0.0)
     feed(
         state,
@@ -191,7 +207,98 @@ def test_the_list_keeps_to_a_third_of_the_terminal() -> None:
 
     lines = render(state, 0.5, width=100, height=15).plain.splitlines()
 
-    assert sum(line.startswith("┃ ⏵") for line in lines) == 5
+    assert sum(line.startswith("┃ ⏵") for line in lines) == 20
+
+
+def plan(*, children: dict[str, tuple[str, ...]], builds: set[str], downloads: dict[str, str]) -> BuildPlan:
+    """A plan rooted at ``ROOT``; ``downloads`` maps a node to its one output path."""
+    outputs = {node: frozenset({f"{node.removesuffix('.drv')}-out"}) for node in children}
+    outputs |= {node: frozenset({path}) for node, path in downloads.items()}
+    return BuildPlan(
+        roots=(ROOT,),
+        children=children,
+        outputs=outputs,
+        builds=frozenset(builds),
+        downloads=frozenset(downloads.values()),
+    )
+
+
+ROOT = "/nix/store/00000000000000000000000000000000-root.drv"
+MID = "/nix/store/11111111111111111111111111111111-mid.drv"
+LEFT = "/nix/store/22222222222222222222222222222222-left.drv"
+RIGHT = "/nix/store/33333333333333333333333333333333-right.drv"
+DEP = "/nix/store/44444444444444444444444444444444-dep.drv"
+DEP_OUT = "/nix/store/55555555555555555555555555555555-dep"
+
+GRAPH = plan(
+    children={ROOT: (MID,), MID: (LEFT, RIGHT, DEP), LEFT: (), RIGHT: ()},
+    builds={ROOT, MID, LEFT, RIGHT},
+    downloads={DEP: DEP_OUT},
+)
+
+
+def test_the_graph_is_drawn_upside_down_as_nom_draws_it() -> None:
+    """The root at the bottom, its inputs above it, the last input under ``┌─``.
+
+    Inputs sort by state, work in flight first, so reversed it is the nearest
+    to its parent and finished work drifts to the top.
+    """
+    state = MonitorState(started=0.0, plan=GRAPH)
+    feed(
+        state,
+        [
+            (0.0, start(COPY_ID, ActivityType.COPY_PATH, "", [DEP_OUT, CACHE, "local"])),
+            (1.0, stop(COPY_ID)),
+            (1.0, start(BUILD_ID, ActivityType.BUILD, "", [LEFT, "", 1, 1])),
+        ],
+    )
+
+    lines = render(state, 3.0, width=100, height=30).plain.splitlines()
+
+    assert lines[:6] == [
+        "┏━ Dependency Graph:",
+        "┃    ┌─ ↓ ✔ dep",
+        "┃    ├─ ⏸ right",
+        "┃    ├─ ⏵ left ⏱ 2s",
+        "┃ ┌─ ⏸ mid",
+        "┃ ⏸ root",
+    ]
+    # The plan, not Nix's summary: three builds and no download still to do.
+    assert lines[-1] == "┗━ ∑ ⏵ 1 │ ✔ 0 │ ⏸ 3 │ ↓ 0 │ ↓ 1 │ ⏸ 0 │ ⏱ 3s"
+
+
+def test_a_pruned_input_is_summarised_on_its_planned_parent() -> None:
+    """With room for two lines, the running build and its ancestors win."""
+    state = MonitorState(started=0.0, plan=GRAPH)
+    feed(state, [(0.0, start(BUILD_ID, ActivityType.BUILD, "", [MID, "", 1, 1]))])
+
+    lines = render(state, 0.5, width=100, height=6).plain.splitlines()
+
+    assert lines[:4] == [
+        "┏━ Dependency Graph:",
+        "┃ ┌─ ⏵ mid",
+        "┃ ⏸ root",
+        "┣━━━ Builds          │ Downloads",
+    ]
+
+
+def test_a_planned_leaf_says_what_it_waits_for() -> None:
+    state = MonitorState(started=0.0, plan=GRAPH)
+
+    lines = render(state, 0.5, width=100, height=6).plain.splitlines()
+
+    assert lines[1] == "┃ ┌─ ⏸ mid waiting for 2 ⏸ 1 ↓ ⏸"
+
+
+def test_a_download_the_plan_names_but_no_node_owns_is_only_counted() -> None:
+    orphan = "/nix/store/66666666666666666666666666666666-runtime-dep"
+    state = MonitorState(started=0.0, plan=BuildPlan((ROOT,), {ROOT: ()}, {}, frozenset({ROOT}), frozenset({orphan})))
+    feed(state, [(0.0, start(COPY_ID, ActivityType.COPY_PATH, "", [orphan, CACHE, "local"]))])
+
+    lines = render(state, 0.5, width=100, height=30).plain.splitlines()
+
+    assert "runtime-dep" not in "\n".join(lines)
+    assert lines[-1].startswith("┗━ ∑ ⏵ 0 │ ✔ 0 │ ⏸ 1 │ ↓ 1 │")
 
 
 def test_a_local_copy_is_neither_a_download_nor_an_upload() -> None:

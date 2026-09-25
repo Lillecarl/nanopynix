@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Final
 
 from rich.text import Text
@@ -151,16 +152,122 @@ class Totals:
     uploads_done: int
 
 
+@dataclass(frozen=True)
+class BuildPlan:
+    """What a build will do, and how its derivations depend on each other.
+
+    ``children`` holds, for each node, the inputs that are nodes too: a
+    derivation to build, or one whose outputs will be downloaded. ``outputs``
+    maps a node to its output paths, which is how a download finds its node.
+    """
+
+    roots: tuple[str, ...]
+    children: dict[str, tuple[str, ...]]
+    outputs: dict[str, frozenset[str]]
+    builds: frozenset[str]
+    downloads: frozenset[str]
+
+
+class NodeStatus(Enum):
+    """A node's state, in the order nom gives room to it: work in flight first."""
+
+    FAILED = 0
+    BUILDING = 1
+    DOWNLOADING = 2
+    UPLOADING = 3
+    PLANNED_BUILD = 4
+    PLANNED_DOWNLOAD = 5
+    BUILT = 6
+    DOWNLOADED = 7
+    UPLOADED = 8
+    NONE = 9
+
+
+_IN_FLIGHT: Final = frozenset({NodeStatus.FAILED, NodeStatus.BUILDING, NodeStatus.DOWNLOADING, NodeStatus.UPLOADING})
+_PLANNED: Final = frozenset({NodeStatus.PLANNED_BUILD, NodeStatus.PLANNED_DOWNLOAD})
+
+
 @dataclass
 class MonitorState:
-    """What the monitor knows. ``apply`` is the only writer."""
+    """What the monitor knows. ``apply`` and ``plan`` are the only writers."""
 
     started: float
     print_build_logs: bool = False
+    plan: BuildPlan | None = None
     builds: dict[int, Build] = field(default_factory=dict[int, Build])
     transfers: dict[int, Transfer] = field(default_factory=dict[int, Transfer])
     summaries: dict[int, Summary] = field(default_factory=dict[int, Summary])
     errors: int = 0
+    _build_of_drv: dict[str, Build] = field(default_factory=dict[str, Build], init=False, repr=False)
+    _transfer_of_path: dict[str, Transfer] = field(default_factory=dict[str, Transfer], init=False, repr=False)
+
+    def node_status(self, node: str) -> NodeStatus:
+        """What ``node``, a derivation or an unplanned path, is doing now."""
+        if (build := self._build_of_drv.get(node)) is not None:
+            if build.failed:
+                return NodeStatus.FAILED
+            return NodeStatus.BUILDING if build.end is None else NodeStatus.BUILT
+        transfers = self.transfers_of(node)
+        running = [t for t in transfers if t.end is None]
+        plan = self.plan
+        status = NodeStatus.NONE
+        if running:
+            status = NodeStatus.UPLOADING if running[0].upload else NodeStatus.DOWNLOADING
+        elif plan is not None and node in plan.builds:
+            status = NodeStatus.PLANNED_BUILD
+        elif transfers:
+            status = NodeStatus.UPLOADED if transfers[0].upload else NodeStatus.DOWNLOADED
+        elif plan is not None and plan.outputs.get(node, frozenset[str]()) & plan.downloads:
+            status = NodeStatus.PLANNED_DOWNLOAD
+        return status
+
+    def build_of(self, node: str) -> Build | None:
+        """The last build of ``node``, if one started."""
+        return self._build_of_drv.get(node)
+
+    def transfers_of(self, node: str) -> list[Transfer]:
+        """The copies of ``node``'s outputs that started."""
+        paths: frozenset[str] | None = self.plan.outputs.get(node) if self.plan is not None else None
+        if paths is None:
+            paths = frozenset[str]() if node.endswith(".drv") else frozenset({node})
+        return [t for p in sorted(paths) if (t := self._transfer_of_path.get(p)) is not None]
+
+    def forest(self) -> tuple[list[str], dict[str, list[str]]]:
+        """The roots, and each node's children, with every node under one parent only.
+
+        The plan's roots come first. A build or a copy the plan does not name
+        is a root of its own, which is the whole display when there is no
+        plan. A download the plan names but no node owns is only counted, as
+        nom does with a path whose derivation it never saw.
+        """
+        plan = self.plan
+        roots = list(plan.roots) if plan is not None else []
+        edges = plan.children if plan is not None else {}
+        seen: set[str] = set()
+        tree: dict[str, list[str]] = {}
+        stack = list(reversed(roots))
+        while stack:
+            node = stack.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            kids = [c for c in edges.get(node, ()) if c not in seen]
+            kids.sort(key=lambda c: (self.node_status(c).value, store_path_name(c)))
+            tree[node] = kids
+            stack.extend(reversed(kids))
+        owned = {p for node in seen for p in (plan.outputs.get(node, ()) if plan is not None else ())}
+        planned_downloads = plan.downloads if plan is not None else frozenset[str]()
+        for build in self.builds.values():
+            if build.drv not in seen:
+                seen.add(build.drv)
+                roots.append(build.drv)
+                tree[build.drv] = []
+        for transfer in self.transfers.values():
+            if transfer.path not in owned and transfer.path not in planned_downloads and transfer.path not in seen:
+                seen.add(transfer.path)
+                roots.append(transfer.path)
+                tree[transfer.path] = []
+        return roots, tree
 
     def apply(self, event: LogEvent, now: float) -> list[Text]:
         """Fold one event in, and return the lines to print above the monitor."""
@@ -184,13 +291,19 @@ class MonitorState:
         activity_id, level, raw_type, text, fields = args[0], args[1], args[2], args[3], args[4]
         match raw_type:
             case ActivityType.BUILD:
-                self.builds[activity_id] = Build(drv=fields[0], host=fields[1] if len(fields) > 1 else "", start=now)
+                build = Build(drv=fields[0], host=fields[1] if len(fields) > 1 else "", start=now)
+                self.builds[activity_id] = build
+                self._build_of_drv[build.drv] = build
             case ActivityType.COPY_PATH:
                 path, source, destination = fields[0], fields[1], fields[2]
+                transfer = None
                 if not is_local_store(source):
-                    self.transfers[activity_id] = Transfer(path, source, upload=False, start=now)
+                    transfer = Transfer(path, source, upload=False, start=now)
                 elif not is_local_store(destination):
-                    self.transfers[activity_id] = Transfer(path, destination, upload=True, start=now)
+                    transfer = Transfer(path, destination, upload=True, start=now)
+                if transfer is not None:
+                    self.transfers[activity_id] = transfer
+                    self._transfer_of_path[path] = transfer
             case ActivityType.BUILDS | ActivityType.COPY_PATHS:
                 self.summaries[activity_id] = Summary(ActivityType(raw_type))
             case _:
@@ -251,16 +364,24 @@ class MonitorState:
         uploads = [t for t in transfers if t.upload]
         running_downloads = sum(t.end is None for t in downloads)
         done_downloads = sum(t.end is not None for t in downloads)
+        # The plan when there is one: Nix's summary overstates what it plans
+        # for as long as a finished goal is still counted as expected.
+        plan = self.plan
+        if plan is not None:
+            builds_planned = sum(d not in self._build_of_drv for d in plan.builds)
+            downloads_planned = sum(p not in self._transfer_of_path for p in plan.downloads)
+        else:
+            summaries = self.summaries.values()
+            builds_planned = sum(s.planned for s in summaries if s.activity_type == ActivityType.BUILDS)
+            downloads_planned = sum(s.planned for s in summaries if s.activity_type == ActivityType.COPY_PATHS)
         return Totals(
             builds_running=sum(b.end is None and not b.failed for b in builds),
             builds_done=sum(b.end is not None and not b.failed for b in builds),
-            builds_planned=sum(s.planned for s in self.summaries.values() if s.activity_type == ActivityType.BUILDS),
+            builds_planned=builds_planned,
             builds_failed=sum(b.failed for b in builds),
             downloads_running=running_downloads,
             downloads_done=done_downloads,
-            downloads_planned=sum(
-                s.planned for s in self.summaries.values() if s.activity_type == ActivityType.COPY_PATHS
-            ),
+            downloads_planned=downloads_planned,
             uploads_running=sum(t.end is None for t in uploads),
             uploads_done=sum(t.end is not None for t in uploads),
         )
@@ -348,41 +469,177 @@ def _build_line(build: Build, now: float) -> Text:
     return line
 
 
-def _transfer_line(transfer: Transfer, now: float, width: int) -> Text:
-    arrow = UP if transfer.upload else DOWN
-    if transfer.end is not None:
-        line = Text(f"{arrow} {DONE} {transfer.name}", style="green")
-        size = f" {format_bytes(transfer.expected_bytes)}" if transfer.expected_bytes else ""
-        line.append(f"{size}{_timer(transfer.end - transfer.start)}", style="bright_black")
-        return line
-    line = Text(f"{arrow} {RUNNING} {transfer.name}", style="bold yellow")
-    line.append(_timer(now - transfer.start))
-    if transfer.expected_bytes:
-        part = min(transfer.done_bytes / transfer.expected_bytes, 1.0)
-        line.append(f" {format_bytes(transfer.done_bytes)}/{format_bytes(transfer.expected_bytes)}")
-        left = max(60, line.cell_len + 1)
+def _transfers_line(name: str, transfers: list[Transfer], now: float) -> tuple[Text, float | None]:
+    """A node's copies as one line, and the fraction done while they run.
+
+    The bar goes on the right, where ``_with_bars`` puts it after every line is
+    known, because nom aligns the bars of all rows.
+    """
+    arrow = UP if transfers[0].upload else DOWN
+    start = min(t.start for t in transfers)
+    expected = sum(t.expected_bytes for t in transfers)
+    if all(t.end is not None for t in transfers):
+        line = Text(f"{arrow} {DONE} {name}", style="green")
+        size = f" {format_bytes(expected)}" if expected else ""
+        end = max(t.end or start for t in transfers)
+        line.append(f"{size}{_timer(end - start)}", style="bright_black")
+        return line, None
+    running = [t for t in transfers if t.end is None]
+    line = Text(f"{arrow} {RUNNING} {name}", style="bold yellow")
+    line.append(_timer(now - start))
+    expected = sum(t.expected_bytes for t in running)
+    if not expected:
+        return line, None
+    done = sum(t.done_bytes for t in running)
+    line.append(f" {format_bytes(done)}/{format_bytes(expected)}")
+    return line, min(done / expected, 1.0)
+
+
+def _node_line(state: MonitorState, node: str, now: float) -> tuple[Text, float | None]:
+    status = state.node_status(node)
+    name = store_path_name(node)
+    build = state.build_of(node)
+    if build is not None:
+        return _build_line(build, now), None
+    match status:
+        case NodeStatus.PLANNED_BUILD:
+            return Text(f"{TODO} {name}", style="blue"), None
+        case NodeStatus.PLANNED_DOWNLOAD:
+            return Text(f"{DOWN} {TODO} {name}", style="blue"), None
+        case _:
+            transfers = state.transfers_of(node)
+            if transfers:
+                return _transfers_line(name, transfers, now)
+            return Text(name), None
+
+
+def _hidden_summary(state: MonitorState, hidden: list[str]) -> Text:
+    """nom's ``waiting for`` counts, over the inputs the tree has no room for."""
+    counts = dict.fromkeys(NodeStatus, 0)
+    for node in hidden:
+        counts[state.node_status(node)] += 1
+    parts = [
+        (counts[NodeStatus.FAILED], WARNING, "red"),
+        (counts[NodeStatus.BUILDING], RUNNING, "yellow"),
+        (counts[NodeStatus.PLANNED_BUILD], TODO, "blue"),
+        (counts[NodeStatus.UPLOADING], UP, "yellow"),
+        (counts[NodeStatus.DOWNLOADING], DOWN, "yellow"),
+        (counts[NodeStatus.PLANNED_DOWNLOAD], f"{DOWN} {TODO}", "blue"),
+    ]
+    text = Text()
+    for count, glyph, style in parts:
+        if count:
+            text.append(f" {count} {glyph}", style=style)
+    return Text(" waiting for", style="bright_black") + text if text else text
+
+
+def _descendants(tree: dict[str, list[str]], node: str) -> list[str]:
+    out: list[str] = []
+    stack = list(tree.get(node, ()))
+    while stack:
+        child = stack.pop()
+        out.append(child)
+        stack.extend(tree.get(child, ()))
+    return out
+
+
+def _walk(roots: list[str], tree: dict[str, list[str]]) -> tuple[list[str], dict[str, str]]:
+    """Every node in depth-first order, and each node's parent."""
+    parent: dict[str, str] = {}
+    order: list[str] = []
+    stack = list(reversed(roots))
+    while stack:
+        node = stack.pop()
+        order.append(node)
+        for child in reversed(tree.get(node, [])):
+            parent[child] = node
+            stack.append(child)
+    return order, parent
+
+
+def _keep(state: MonitorState, roots: list[str], tree: dict[str, list[str]], limit: int) -> set[str]:
+    """The nodes to draw: all work in flight, then planned, then finished, while room lasts.
+
+    A node brings its ancestors, so every drawn node hangs from a root. Work
+    in flight is drawn even past ``limit``, as nom draws every running build.
+    """
+    order, parent = _walk(roots, tree)
+    status = {node: state.node_status(node) for node in order}
+    keep: set[str] = set()
+
+    def add(node: str | None) -> None:
+        while node is not None and node not in keep:
+            keep.add(node)
+            node = parent.get(node)
+
+    for node in order:
+        if status[node] in _IN_FLIGHT:
+            add(node)
+    for wanted in (_PLANNED, frozenset(NodeStatus) - _IN_FLIGHT - _PLANNED - {NodeStatus.NONE}):
+        for node in order:
+            if len(keep) >= limit:
+                return keep
+            if status[node] in wanted:
+                add(node)
+    return keep
+
+
+def _tree_lines(
+    state: MonitorState, roots: list[str], tree: dict[str, list[str]], keep: set[str], now: float
+) -> list[tuple[Text, float | None]]:
+    """nom's ``showForest``: the root at the bottom and its inputs above it.
+
+    Built top-down, as nom builds it, then reversed. The last child of a node
+    therefore prints first, under ``┌─``.
+    """
+
+    def show(node: str) -> list[tuple[Text, float | None]]:
+        line, part = _node_line(state, node, now)
+        kept = [c for c in tree.get(node, []) if c in keep]
+        hidden = [d for d in _descendants(tree, node) if d not in keep]
+        if not kept and hidden and state.node_status(node) in _PLANNED:
+            line += _hidden_summary(state, hidden)
+        return [(line, part), *nested([show(c) for c in kept])]
+
+    def nested(children: list[list[tuple[Text, float | None]]]) -> list[tuple[Text, float | None]]:
+        out: list[tuple[Text, float | None]] = []
+        for index, rows in enumerate(children):
+            last = index == len(children) - 1
+            first_prefix, rest_prefix = ("┌─ ", "   ") if last else ("├─ ", "│  ")
+            for row, (line, part) in enumerate(rows):
+                prefix = Text(first_prefix if row == 0 else rest_prefix, style="blue")
+                out.append((prefix + line, part))
+        return out
+
+    lines: list[tuple[Text, float | None]] = []
+    for root in roots:
+        if root in keep:
+            lines += show(root)
+    return lines[::-1]
+
+
+def _with_bars(rows: list[tuple[Text, float | None]], width: int) -> list[Text]:
+    """Put each running copy's bar at one column, as nom's ``with_progress`` does."""
+    left = max([60, *(line.cell_len + 1 for line, part in rows if part is not None)])
+    out: list[Text] = []
+    for line, part in rows:
         bar_length = width - left - 6
-        if bar_length > 0:
-            line.append(" " * (left - line.cell_len))
-            line.append(_bar(bar_length, part))
-            line.append(f"{part * 100:5.1f}%", style="bold")
-    return line
+        if part is None or bar_length <= 0:
+            out.append(line)
+            continue
+        with_bar = line + Text(" " * (left - line.cell_len)) + Text(_bar(bar_length, part))
+        with_bar.append(f"{part * 100:5.1f}%", style="bold")
+        out.append(with_bar)
+    return out
 
 
-def _activity_lines(state: MonitorState, now: float, limit: int, width: int) -> list[Text]:
-    """Failed first, then running, then the most recent finished, up to ``limit``."""
-    builds = list(state.builds.values())
-    transfers = list(state.transfers.values())
-    failed = [b for b in builds if b.failed]
-    running_builds = [b for b in builds if b.end is None and not b.failed]
-    running_transfers = [t for t in transfers if t.end is None]
-    finished_builds = sorted((b for b in builds if b.end is not None and not b.failed), key=lambda b: -(b.end or 0))
-    finished_transfers = sorted((t for t in transfers if t.end is not None), key=lambda t: -(t.end or 0))
-    lines = [_build_line(b, now) for b in failed + running_builds]
-    lines += [_transfer_line(t, now, width) for t in running_transfers]
-    lines += [_build_line(b, now) for b in finished_builds]
-    lines += [_transfer_line(t, now, width) for t in finished_transfers]
-    return lines[:limit]
+def _graph_lines(state: MonitorState, now: float, limit: int, width: int) -> tuple[list[Text], int, int]:
+    """The drawn tree, the roots it draws, and the roots there are."""
+    roots, tree = state.forest()
+    roots = [r for r in roots if state.node_status(r) != NodeStatus.NONE or tree.get(r)]
+    keep = _keep(state, roots, tree, limit)
+    lines = _with_bars(_tree_lines(state, roots, tree, keep, now), width)
+    return lines, sum(r in keep for r in roots), len(roots)
 
 
 def _time_text(state: MonitorState, now: float, finished_at: str | None) -> Text:
@@ -438,12 +695,17 @@ def render(state: MonitorState, now: float, *, width: int, height: int | None, f
     into nom's closing line.
     """
     limit = height // TARGET_RATIO if height is not None else DEFAULT_LIST_LINES
-    activity = _activity_lines(state, now, limit, width - 2)
+    graph, shown_roots, all_roots = _graph_lines(state, now, limit, width - 2)
     table = _table(state, _time_text(state, now, finished_at))
     lines: list[Text] = []
-    if activity:
-        lines.append(Text(f"{UPPER_LEFT}{HORIZONTAL} ") + Text("Activity:", style="bold"))
-        lines += [Text(f"{VERTICAL} ") + line for line in activity]
+    if graph:
+        title = Text("Dependency Graph", style="bold")
+        if all_roots > 1 and shown_roots == all_roots:
+            title.append(f" with {all_roots} roots")
+        elif all_roots > 1:
+            title.append(f" showing {shown_roots} of {all_roots} roots")
+        lines.append(Text(f"{UPPER_LEFT}{HORIZONTAL} ") + title + Text(":"))
+        lines += [Text(f"{VERTICAL} ") + line for line in graph]
         lines.append(Text(LEFT_T) + table[0])
     else:
         lines.append(Text(UPPER_LEFT) + table[0])

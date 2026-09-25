@@ -48,6 +48,8 @@ if TYPE_CHECKING:
 
     import pytest
 
+    from pynix._build_monitor import MonitorState
+
 #: Set by CI to run the faithful path -- every command opens its own worker,
 #: store and evaluator, exactly as the real CLI does. Unset (the local default)
 #: shares them.
@@ -113,7 +115,7 @@ class SharedSessions:
         experimental_features: Sequence[str] | None = None,
         verbosity: nanopynix.LogLevelInput | None = None,
         print_build_logs: bool = False,
-        monitor: bool = False,
+        monitor: MonitorState | None = None,
     ) -> AsyncGenerator[Any]:
         if _nix_is_stubbed():
             async with self._originals["nix_session"](
@@ -129,7 +131,7 @@ class SharedSessions:
         # Log forwarding stays per invocation: tests assert on the logs a
         # single command produced, and log_stream() is a fan-out subscription,
         # so each command gets its own consumer over the shared session.
-        if not monitor:
+        if monitor is None:
             async with pynix_util.forward_nix_logs(session, print_build_logs=print_build_logs):
                 yield session
             return
@@ -138,7 +140,7 @@ class SharedSessions:
         # process-wide gate on around the command instead.
         nanopynix_util.set_activity_tracking(True)
         try:
-            async with pynix_util.forward_nix_logs(session, print_build_logs=print_build_logs, monitor=True):
+            async with pynix_util.forward_nix_logs(session, print_build_logs=print_build_logs, monitor=monitor):
                 yield session
         finally:
             nanopynix_util.set_activity_tracking(False)

@@ -120,15 +120,22 @@ async def test_build_nom_draws_the_build_and_its_totals(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """``--nom`` draws the finished build and the sum row, and stdout stays JSON."""
+    """``--nom`` draws the dependency graph and the sum row, and stdout stays JSON."""
     nix_file = tmp_path / "nom.nix"
     nix_file.write_text(
         f"""
-derivation {{
+let
+  dep = derivation {{
+    name = "pynix-nom-dep";
+    system = builtins.currentSystem;
+    builder = "/bin/sh";
+    args = [ "-c" "echo {tmp_path.name} > $out" ];
+  }};
+in derivation {{
   name = "pynix-nom-test";
   system = builtins.currentSystem;
   builder = "/bin/sh";
-  args = [ "-c" "echo {tmp_path.name} > $out" ];
+  args = [ "-c" "read x < ${{dep}}; echo $x > $out" ];
 }}
 """
     )
@@ -138,8 +145,9 @@ derivation {{
 
     captured = capsys.readouterr()
     assert "pynix-nom-test" in json.loads(captured.out)["outputs"]["out"]
-    assert "┃ ✔ pynix-nom-test" in captured.err
-    assert re.search(r"┗━ ∑ ⏵ 0 │ ✔ 1 │ ⏸ 0 │ .*Finished at \d\d:\d\d:\d\d", captured.err), captured.err
+    # The input above its root, as nom draws the graph.
+    assert re.search(r"┃ ┌─ ✔ pynix-nom-dep.*\n┃ ✔ pynix-nom-test", captured.err), captured.err
+    assert re.search(r"┗━ ∑ ⏵ 0 │ ✔ 2 │ ⏸ 0 │ .*Finished at \d\d:\d\d:\d\d", captured.err), captured.err
 
 
 @LINUX_CHROOT_BUILD

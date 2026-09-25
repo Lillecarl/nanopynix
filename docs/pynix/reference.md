@@ -21,7 +21,7 @@ Build a Nix derivation value
 | `--trusted-public-keys` | `str or None` | Space-separated substituter public keys. (default: `None`) |
 | `--verbosity` | `str or None` | Nix log verbosity: error, warn, notice, info, talkative, chatty, debug, vomit, or 0-7. (default: `None`) |
 | `--print-build-logs` | `bool` | Print build log lines to stderr. (default: `False`) |
-| `--nom` | `bool` | Show the progress as nix-output-monitor does: running and finished builds and downloads, and a row of totals, at the bottom of stderr. (default: `False`) |
+| `--nom` | `bool` | Show the progress as nix-output-monitor does: the dependency graph of the builds and downloads, and a row of totals, at the bottom of stderr. (default: `False`) |
 | `--update-fod` | `bool` | Update plain fixed-output hash literals after a hash mismatch. (default: `False`) |
 | `--dry-run` | `bool` | Show --update-fod changes without writing or rebuilding. (default: `False`) |
 | `--namespaced` | `bool` | Build in a private user namespace, against an overlay store whose lower layer is the host store. Nothing is copied in, the host store does not change, and this process owns the sandbox settings that the daemon otherwise controls. Linux only. (default: `False`) |

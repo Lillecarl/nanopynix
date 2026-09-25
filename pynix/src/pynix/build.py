@@ -51,8 +51,8 @@ class Build(ConfiguredCommand):
     nom: bool = opt(
         False,
         help=(
-            "Show the progress as nix-output-monitor does: running and finished builds and downloads, "
-            "and a row of totals, at the bottom of stderr."
+            "Show the progress as nix-output-monitor does: the dependency graph of the builds and "
+            "downloads, and a row of totals, at the bottom of stderr."
         ),
     )
 

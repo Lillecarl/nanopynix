@@ -12,6 +12,7 @@ import difflib
 import functools
 import shutil
 import tempfile
+import time
 from contextlib import AsyncExitStack, asynccontextmanager
 
 # A real import, not a TYPE_CHECKING one: `libpynix` resolves the annotations
@@ -29,6 +30,7 @@ from nanopynix_helpers.build import FodBuildError, build_with_fod_update
 import nanopynix
 from nanopynix._typechecking import BEARTYPING
 from pynix import _impl
+from pynix._build_monitor import BuildPlan, MonitorState
 from pynix._util import error_console, error_exit, nix_session, print_json, report_and_exit
 from pynix.build import Build
 
@@ -155,12 +157,15 @@ async def _build_target(  # noqa: PLR0913 -- tracked complexity/arg-count debt, 
     build_store: Any = None,
     update_fod: bool,
     dry_run: bool,
+    monitor: MonitorState | None = None,
 ) -> tuple[dict[str, str], int]:
     """Build a target, applying only unambiguous plain-string FOD updates."""
 
     async def _evaluate() -> ValueProxy:
         root = await _evaluate_build_target(target, session)
         logger.info("pynix build target evaluated")
+        if monitor is not None:
+            monitor.plan = await _plan_or_none(evaluation_store, build_store or evaluation_store, root)
         return root
 
     # The local file, and not the raw argument. --update-fod rewrites the hash
@@ -183,6 +188,58 @@ async def _build_target(  # noqa: PLR0913 -- tracked complexity/arg-count debt, 
         )
     except FodBuildError as exc:
         raise BuildTargetError(str(exc)) from exc
+
+
+async def plan_build(evaluation_store: Any, build_store: Any, drv_path: str) -> BuildPlan:
+    """What building ``drv_path`` will do, as the tree nom draws.
+
+    A node is a derivation to build, or one whose outputs will be downloaded.
+    Its children are its inputs that are nodes too. This reads the ``.drv`` of
+    each build, and of each input a build does not build, which is how a
+    download is tied to the derivation that produced it. nom reads the same
+    files as the builds start; reading them first also gives the totals.
+    """
+    missing = await build_store.query_missing([f"{drv_path}^*"])
+    builds = frozenset(str(p) for p in missing.will_build)
+    downloads = frozenset(str(p) for p in missing.will_substitute)
+    derivations: dict[str, Any] = {}
+
+    async def read(path: str) -> Any:
+        if path not in derivations:
+            derivations[path] = await evaluation_store.read_derivation(path)
+        return derivations[path]
+
+    def output_paths(derivation: Any) -> frozenset[str]:
+        return frozenset(o.path for o in derivation.outputs.values() if o.path)
+
+    children: dict[str, tuple[str, ...]] = {}
+    outputs: dict[str, frozenset[str]] = {}
+    for node in (drv_path, *sorted(builds - {drv_path})):
+        derivation = await read(node)
+        outputs[node] = output_paths(derivation)
+        kids: list[str] = []
+        for input_drv in derivation.input_drvs:
+            if input_drv in builds:
+                kids.append(input_drv)
+            elif downloads and (input_outputs := output_paths(await read(input_drv))) & downloads:
+                outputs[input_drv] = input_outputs
+                kids.append(input_drv)
+        children[node] = tuple(kids)
+    return BuildPlan(roots=(drv_path,), children=children, outputs=outputs, builds=builds, downloads=downloads)
+
+
+async def _plan_or_none(evaluation_store: Any, build_store: Any, root: ValueProxy) -> BuildPlan | None:
+    """The plan of ``root``, or None, which leaves the monitor a flat list.
+
+    A missing plan costs the tree and nothing else, so an error here must not
+    stop the build.
+    """
+    try:
+        drv_path = await root.attr("drvPath").as_string()
+        return await plan_build(evaluation_store, build_store, drv_path)
+    except nanopynix.NixError as exc:
+        logger.warning("pynix build could not plan the dependency graph", error=str(exc))
+        return None
 
 
 def _print_diff(path: Path, before: str, after: str) -> None:
@@ -258,8 +315,11 @@ async def _build_in_session(
         # it, and a keyword that is always present makes every such double
         # wrong even for the ordinary build that never wanted a namespace.
         session_kwargs: dict[str, Any] = {} if namespace is None else {"namespace": namespace}
-        if command.nom:
-            session_kwargs["monitor"] = True
+        monitor = (
+            MonitorState(started=time.monotonic(), print_build_logs=command.print_build_logs) if command.nom else None
+        )
+        if monitor is not None:
+            session_kwargs["monitor"] = monitor
         nix = await stack.enter_async_context(
             nix_session(
                 settings=settings,
@@ -286,6 +346,7 @@ async def _build_in_session(
                         evaluation_store=store,
                         update_fod=command.update_fod,
                         dry_run=command.dry_run,
+                        monitor=monitor,
                     )
                 logger.info("pynix build finished")
                 if promote:
@@ -305,6 +366,7 @@ async def _build_in_session(
                         build_store=build_store,
                         update_fod=command.update_fod,
                         dry_run=command.dry_run,
+                        monitor=monitor,
                     )
                 logger.info("pynix build finished")
                 if promote:
