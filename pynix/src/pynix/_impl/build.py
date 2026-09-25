@@ -239,13 +239,15 @@ async def run_build(command: Build) -> None:
         # nix_session documents: the test suite substitutes a double for
         # it, and a keyword that is always present makes every such double
         # wrong even for the ordinary build that never wanted a namespace.
-        namespace_kwargs: dict[str, Any] = {} if namespace is None else {"namespace": namespace}
+        session_kwargs: dict[str, Any] = {} if namespace is None else {"namespace": namespace}
+        if command.nom:
+            session_kwargs["monitor"] = True
         nix = await stack.enter_async_context(
             nix_session(
                 settings=settings,
                 verbosity=command.verbosity,
                 print_build_logs=command.print_build_logs,
-                **namespace_kwargs,
+                **session_kwargs,
             )
         )
         if command.sandbox_path:

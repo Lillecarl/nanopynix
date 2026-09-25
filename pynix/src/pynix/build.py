@@ -48,6 +48,14 @@ class Build(ConfiguredCommand):
 
     print_build_logs: bool = print_build_logs_option()
 
+    nom: bool = opt(
+        False,
+        help=(
+            "Show the progress as nix-output-monitor does: running and finished builds and downloads, "
+            "and a row of totals, at the bottom of stderr."
+        ),
+    )
+
     update_fod: bool = opt(False, help="Update plain fixed-output hash literals after a hash mismatch.")
 
     dry_run: bool = opt(False, help="Show --update-fod changes without writing or rebuilding.")

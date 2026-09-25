@@ -38,6 +38,7 @@ import urllib.parse
 from typing import TYPE_CHECKING, Any
 
 import anyio
+from nanopynix_bindings import util as nanopynix_util
 
 import nanopynix
 import pynix._util as pynix_util
@@ -112,6 +113,7 @@ class SharedSessions:
         experimental_features: Sequence[str] | None = None,
         verbosity: nanopynix.LogLevelInput | None = None,
         print_build_logs: bool = False,
+        monitor: bool = False,
     ) -> AsyncGenerator[Any]:
         if _nix_is_stubbed():
             async with self._originals["nix_session"](
@@ -127,8 +129,19 @@ class SharedSessions:
         # Log forwarding stays per invocation: tests assert on the logs a
         # single command produced, and log_stream() is a fan-out subscription,
         # so each command gets its own consumer over the shared session.
-        async with pynix_util.forward_nix_logs(session, print_build_logs=print_build_logs):
-            yield session
+        if not monitor:
+            async with pynix_util.forward_nix_logs(session, print_build_logs=print_build_logs):
+                yield session
+            return
+        # The shared session is inproc and opened without tracking, and a
+        # process holds one inproc session, so the monitor turns the
+        # process-wide gate on around the command instead.
+        nanopynix_util.set_activity_tracking(True)
+        try:
+            async with pynix_util.forward_nix_logs(session, print_build_logs=print_build_logs, monitor=True):
+                yield session
+        finally:
+            nanopynix_util.set_activity_tracking(False)
 
     @contextlib.asynccontextmanager
     async def store_session(

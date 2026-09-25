@@ -14,10 +14,12 @@ from typing import TYPE_CHECKING, Any, NoReturn, TextIO, cast
 import anyio
 import structlog
 from rich.console import Console
+from rich.live import Live
 from rich.text import Text
 
 import nanopynix
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
+from pynix._build_monitor import MonitorState, render
 
 if TYPE_CHECKING or BEARTYPING:
     import os
@@ -36,6 +38,8 @@ _LOG_DRAIN_QUIET_SECONDS = 0.05
 # A Nix "result" action's args are at least [_, result_type], with an
 # optional trailing fields list.
 _MIN_RESULT_EVENT_ARGS = 2
+# nom redraws on every event; four times a second shows the same thing.
+_MONITOR_REDRAW_SECONDS = 0.25
 
 # Build-progress/error messages go here, not stdout -- so a command's
 # print_json() output stays clean, machine-parseable JSON even when the same
@@ -103,23 +107,37 @@ async def forward_nix_logs(
     *,
     print_build_logs: bool = False,
     log_file: TextIO | None = None,
+    monitor: bool = False,
 ) -> AsyncGenerator[None]:
+    """Print the session's logs while the block runs.
+
+    With ``monitor``, draw nom's status at the bottom of stderr instead, and
+    print the log above it. The session must have activity tracking on.
+    """
     old_config = structlog.get_config()
+    live = _start_monitor() if monitor else None
+    # After the monitor starts: `Live` swaps `sys.stderr` for a proxy that
+    # prints above it, and structlog binds whatever `sys.stderr` is now.
     if log_file is None:
         configure_logging()
     else:
         configure_logging(file=log_file)
     activity = _LogActivity()
+    state = MonitorState(started=time.monotonic(), print_build_logs=print_build_logs)
     try:
         async with anyio.create_task_group() as tg:
-            tg.start_soon(
-                functools.partial(
-                    _forward_nix_logs,
-                    session,
-                    print_build_logs=print_build_logs,
-                    activity=activity,
+            if live is None:
+                tg.start_soon(
+                    functools.partial(
+                        _forward_nix_logs,
+                        session,
+                        print_build_logs=print_build_logs,
+                        activity=activity,
+                    )
                 )
-            )
+            else:
+                tg.start_soon(_monitor_nix_logs, session, live, state, activity)
+                tg.start_soon(_redraw, live, state)
             try:
                 yield
             finally:
@@ -129,6 +147,9 @@ async def forward_nix_logs(
                 with anyio.CancelScope(shield=True):
                     await _drain_logs(activity)
                 tg.cancel_scope.cancel()
+                if live is not None:
+                    live.update(_monitor_view(live, state, finished_at=time.strftime("%H:%M:%S")), refresh=True)
+                    live.stop()
     except* BaseException as eg:
         # anyio task groups always wrap exceptions in a group, even a lone
         # one raised by the yielded body itself -- unwrap the common single
@@ -142,21 +163,27 @@ async def forward_nix_logs(
 
 
 @asynccontextmanager
-async def nix_session(
+async def nix_session(  # noqa: PLR0913 -- keyword-only, one per session option; a bundle would hide which ones a command sets
     *,
     settings: nanopynix.NixSettings | os.PathLike[str] | str | None = None,
     experimental_features: Sequence[str] | None = None,
     verbosity: nanopynix.LogLevelInput | None = None,
     print_build_logs: bool = False,
     namespace: nanopynix.OverlayNamespace | None = None,
+    monitor: bool = False,
 ) -> AsyncGenerator[AsyncSession[Any, Any, Any]]:
     """Open a Nix session and forward its logs for the duration of the block.
 
     Defaults to :class:`nanopynix.inproc.Session`. When *namespace* is given,
     opens :class:`nanopynix.rpc.Session` instead, because entering an overlay
-    namespace requires process isolation.
+    namespace requires process isolation. *monitor* draws nom's status in
+    place of the log lines.
     """
     kwargs: dict[str, Any] = {}
+    forward_kwargs: dict[str, Any] = {}
+    if monitor:
+        kwargs["activity_tracking"] = True
+        forward_kwargs["monitor"] = True
     if settings is not None:
         kwargs["settings"] = settings
     if experimental_features is not None:
@@ -170,7 +197,7 @@ async def nix_session(
         session_factory = nanopynix.inproc.Session
     async with (
         session_factory(**kwargs) as nix,
-        forward_nix_logs(nix, print_build_logs=print_build_logs),
+        forward_nix_logs(nix, print_build_logs=print_build_logs, **forward_kwargs),
     ):
         yield nix
 
@@ -297,6 +324,37 @@ async def _drain_logs(activity: _LogActivity) -> None:
     while seen != activity.count and time.monotonic() < deadline:
         seen = activity.count
         await anyio.sleep(_LOG_DRAIN_QUIET_SECONDS)
+
+
+def _start_monitor() -> Live:
+    # Not auto-refreshed: rich's refresh thread would read the state while the
+    # event loop writes it. `_redraw` draws from the loop instead.
+    live = Live(console=error_console, auto_refresh=False, transient=False)
+    live.start()
+    return live
+
+
+def _monitor_view(live: Live, state: MonitorState, *, finished_at: str | None = None) -> Text:
+    console = live.console
+    height = console.size.height if console.is_terminal else None
+    return render(state, time.monotonic(), width=console.size.width, height=height, finished_at=finished_at)
+
+
+async def _redraw(live: Live, state: MonitorState) -> None:
+    while True:
+        live.update(_monitor_view(live, state), refresh=True)
+        await anyio.sleep(_MONITOR_REDRAW_SECONDS)
+
+
+async def _monitor_nix_logs(session: Any, live: Live, state: MonitorState, activity: _LogActivity) -> None:
+    async for event in session.log_stream():
+        activity.count += 1
+        if event.is_request_finalized or not event.is_nix_log:
+            continue
+        for line in state.apply(event, time.monotonic()):
+            # Unwrapped, as Nix prints it: a store path broken across lines
+            # cannot be copied.
+            live.console.print(line, soft_wrap=True)
 
 
 async def _forward_nix_logs(session: Any, *, print_build_logs: bool, activity: _LogActivity) -> None:

@@ -115,6 +115,34 @@ async def test_build_file_derivation(
 
 
 @LINUX_CHROOT_BUILD
+async def test_build_nom_draws_the_build_and_its_totals(
+    shared_nix_environment: NixTestEnvironment,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--nom`` draws the finished build and the sum row, and stdout stays JSON."""
+    nix_file = tmp_path / "nom.nix"
+    nix_file.write_text(
+        f"""
+derivation {{
+  name = "pynix-nom-test";
+  system = builtins.currentSystem;
+  builder = "/bin/sh";
+  args = [ "-c" "echo {tmp_path.name} > $out" ];
+}}
+"""
+    )
+    cmd = parse(["build", "--nom", "--file", str(nix_file), *shared_nix_environment.pynix_store_args()])
+
+    await cmd.run()
+
+    captured = capsys.readouterr()
+    assert "pynix-nom-test" in json.loads(captured.out)["outputs"]["out"]
+    assert "┃ ✔ pynix-nom-test" in captured.err
+    assert re.search(r"┗━ ∑ ⏵ 0 │ ✔ 1 │ ⏸ 0 │ .*Finished at \d\d:\d\d:\d\d", captured.err), captured.err
+
+
+@LINUX_CHROOT_BUILD
 async def test_build_file_derivation_attr(
     shared_nix_environment: NixTestEnvironment,
     nixpkgs_path: str,

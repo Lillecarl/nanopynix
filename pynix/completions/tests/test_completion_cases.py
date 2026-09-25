@@ -69,6 +69,7 @@ BUILD_OPTIONS = frozenset(
         "--namespaced",
         "--no-copy-back",
         "--no-print-build-logs",
+        "--nom",
         "--overlay-dir",
         "--print-build-logs",
         "--sandbox-path",
