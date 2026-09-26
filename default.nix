@@ -256,6 +256,14 @@ let
   countCallsPatch235 = ./nix/patches/nix-2.35-count-calls.patch;
   countCallsPatch236 = ./nix/patches/nix-2.36-count-calls.patch;
 
+  # A thunk that an interrupt stopped rethrows the interruption on every later
+  # force, because 2.34 caches `nix::Interrupted` like an evaluation error. A
+  # cancelled call then poisons every value it was forcing, for the life of the
+  # evaluator. Upstream's 5c4f498d3 corrects it in 2.35. Issue #309.
+  #
+  # Last in its list: the hunks are taken after `baseEnvSizePatch`.
+  interruptedThunkPatch234 = ./nix/patches/nix-2.34-interrupted-thunk-recovers.patch;
+
   # Which patches to apply to a given nix version's modular component set,
   # keyed by that version's own major.minor (e.g. "2.34"), with `default`
   # as the fallback for anything without its own entry (git's rolling
@@ -278,6 +286,7 @@ let
       baseEnvSizePatch
       gmtimePatch234
       countCallsPatch234
+      interruptedThunkPatch234
     ];
     "2.35" = [
       emptyBindingsPatch

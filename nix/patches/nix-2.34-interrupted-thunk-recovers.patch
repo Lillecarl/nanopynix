@@ -1,0 +1,72 @@
+Let a thunk that was interrupted be forced again.
+
+A backport of NixOS/nix 5c4f498d3, "Don't memoise Interrupted errors"
+(NixOS/nix#15980), first released in 2.35.0, so only the 2.34 lane
+takes it. huggorm carries the same file, and nanopynix#309 measured it
+here.
+
+EvalState::handleEvalExceptionForThunk and handleEvalExceptionForApp store
+the exception of a failed evaluation in the value, with mkFailed. They keep a
+recovery thunk only for RecoverableEvalError. nix::Interrupted derives
+BaseError, so 2.34 caches an interruption like an evaluation error, and every
+later force of that value rethrows it. `nix` never sees this, because an
+interrupt ends the process. An embedder that keeps an EvalState after a
+cancelled call does, measured on 2.34.8 with
+`{ a = builtins.toJSON (builtins.genList (x: x) 12000000); }`:
+
+    force a under an interrupt, cancelled at 0.2s  -> Interrupted, 0.34s
+    force a again, not interrupted                 -> Interrupted, 0.00s
+
+The change is upstream's, line for line. The diff is not: it is taken after
+nix-base-env-size.patch, with six lines of context, so it applies last.
+The two handlers share their first lines, so upstream's three-line hunks
+matched the wrong handler once the earlier patch moved the line numbers.
+
+diff --git a/src/libexpr/eval.cc b/src/libexpr/eval.cc
+index 1406366..ba39581 100644
+--- a/src/libexpr/eval.cc
++++ b/src/libexpr/eval.cc
+@@ -3,12 +3,13 @@
+ #include "nix/expr/eval-settings.hh"
+ #include "nix/expr/primops.hh"
+ #include "nix/expr/print-options.hh"
+ #include "nix/expr/symbol-table.hh"
+ #include "nix/expr/value.hh"
+ #include "nix/util/exit.hh"
++#include "nix/util/signals.hh"
+ #include "nix/util/types.hh"
+ #include "nix/util/util.hh"
+ #include "nix/util/environment-variables.hh"
+ #include "nix/store/store-api.hh"
+ #include "nix/store/derivations.hh"
+ #include "nix/store/downstream-placeholder.hh"
+@@ -2199,12 +2200,14 @@ void EvalState::handleEvalExceptionForThunk(Env * env, Expr * expr, Value & v, c
+         tryFixupBlackHolePos(v, pos);
+ 
+     auto e = std::current_exception();
+     Value * recovery = nullptr;
+     try {
+         std::rethrow_exception(e);
++    } catch (const Interrupted & e) {
++        recovery = allocValue();
+     } catch (const RecoverableEvalError & e) {
+         recovery = allocValue();
+     } catch (...) {
+     }
+     if (recovery) {
+         recovery->mkThunk(env, expr);
+@@ -2216,12 +2219,14 @@ void EvalState::handleEvalExceptionForThunk(Env * env, Expr * expr, Value & v, c
+ void EvalState::handleEvalExceptionForApp(Value & v, const Value & savedApp)
+ {
+     auto e = std::current_exception();
+     Value * recovery = nullptr;
+     try {
+         std::rethrow_exception(e);
++    } catch (const Interrupted & e) {
++        recovery = allocValue();
+     } catch (const RecoverableEvalError & e) {
+         recovery = allocValue();
+     } catch (...) {
+     }
+     if (recovery) {
+         *recovery = savedApp;

@@ -38,6 +38,8 @@ from nanopynix._core import _nix_executor
 from nanopynix.exceptions import EvaluatorAbandonedError
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from nanopynix.inproc import EvalSession
     from nanopynix_testing.nix_environment import InprocSessionFactory
 
@@ -131,6 +133,33 @@ async def test_a_cancelled_interruptible_operation_frees_the_evaluator(
         result = await evaluator.string("1 + 1")
         assert await result.to_python() == 2
         assert time.monotonic() - started < 1.0
+
+
+@pytest.mark.anyio
+async def test_an_interrupted_value_can_be_forced_again(
+    inproc_session: InprocSessionFactory,
+    tmp_path: Path,
+) -> None:
+    """The value the cancelled call was forcing is not poisoned.
+
+    Issue #309. Nix 2.34 stores the interruption in the thunk it stopped, so
+    every later force rethrew "interrupted by the user" at once. The test
+    above misses it, because it evaluates a new expression after the cancel.
+
+    ``import`` caches a file's value in the evaluator, so both evaluations
+    below force the same thunk ``a``.
+    """
+    root = tmp_path / "root.nix"
+    await anyio.Path(root).write_text(f"{{ a = builtins.toJSON ({INTERRUPTIBLE}); }}\n")
+    select = f"(import {root}).a"
+    async with inproc_session() as nix, nix.store() as store, nix.eval(store) as evaluator:
+        with anyio.move_on_after(CANCEL_AFTER) as scope:
+            await evaluator.string(select)
+        assert scope.cancelled_caught, "the work ended before the deadline, so this test cancelled nothing"
+
+        text = await (await evaluator.string(select)).as_string()
+        assert text.startswith("[0,1,2,")
+        assert text.endswith(",11999999]")
 
 
 @pytest.mark.anyio
