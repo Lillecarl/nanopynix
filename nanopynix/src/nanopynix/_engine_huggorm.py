@@ -14,6 +14,7 @@ imports this module, and ``nanopynix._engine`` decides that.
 
 from __future__ import annotations
 
+import itertools
 import logging
 import os
 import threading
@@ -66,7 +67,73 @@ ENGINE_MODULE = huggorm_bindings
 errors = _not_ported("errors")
 fetchers = _not_ported("fetchers")
 flake = _not_ported("flake")
-signals = _not_ported("signals")
+_scope_ids = itertools.count(1)
+
+
+class InterruptToken:
+    """A cancel that one thread arms with :class:`interrupt_scope` and any thread sets.
+
+    It owns one huggorm interrupt scope. huggorm keeps a cancelled scope in a
+    table until it is forgotten, and every ``checkInterrupt`` in the process
+    takes a lock while that table is not empty. So the token forgets its
+    scope when the scope ends, and a cancel that arrives later records only
+    the flag.
+    """
+
+    def __init__(self) -> None:
+        self._scope = next(_scope_ids)
+        self._lock = threading.Lock()
+        self._cancelled = False
+        self._ended = False
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+    def cancel(self) -> None:
+        with self._lock:
+            self._cancelled = True
+            if not self._ended:
+                huggorm_bindings.cancel_interrupt_scope(self._scope)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._cancelled = False
+            self._ended = False
+            huggorm_bindings.forget_interrupt_scope(self._scope)
+
+    def arm(self) -> int:
+        """Arm this token on the calling thread. Answers the scope it replaced."""
+        return huggorm_bindings.begin_interrupt_scope(self._scope)
+
+    def disarm(self, previous: int) -> None:
+        """Restore *previous* on the calling thread, and forget this scope."""
+        huggorm_bindings.end_interrupt_scope(previous)
+        with self._lock:
+            self._ended = True
+            huggorm_bindings.forget_interrupt_scope(self._scope)
+
+
+class interrupt_scope:  # noqa: N801 -- the other engine's name for the same context manager
+    """Arm *token* on this thread while the block runs."""
+
+    def __init__(self, token: InterruptToken) -> None:
+        self._token = token
+        self._previous: int | None = None
+
+    def __enter__(self) -> interrupt_scope:
+        if self._previous is not None:
+            raise ValueError("interrupt scope is already active")
+        self._previous = self._token.arm()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        previous, self._previous = self._previous, None
+        if previous is not None:
+            self._token.disarm(previous)
+
+
+signals = _not_ported("signals", InterruptToken=InterruptToken, interrupt_scope=interrupt_scope)
 
 get_env_sh_path = _not_ported("get_env_sh_path")
 
