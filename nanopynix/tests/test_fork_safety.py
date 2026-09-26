@@ -280,6 +280,51 @@ def test_a_forked_evaluator_queues_and_hands_back_no_release() -> None:
     assert releases.drain() == []
 
 
+def test_a_fork_mid_drain_leaves_the_child_a_working_log_pump() -> None:
+    """A child forked while the log pump drains can still flush.
+
+    The huggorm engine drains its log queue on a thread, under a lock. A fork
+    keeps the lock and not the thread, so a child forked mid-drain waited on
+    that lock for ever at its first flush. This hung a forked test of the
+    lane (`pytest-forked`) with every thread of the child in a futex wait.
+    """
+    pytest.importorskip("huggorm_bindings", reason="the log pump belongs to the huggorm engine")
+    from nanopynix import _engine_huggorm as engine  # noqa: PLC0415 -- needs huggorm_bindings
+
+    installed_here = engine._log_pump is None  # type: ignore[reportPrivateUsage] -- the pump under test
+    if installed_here:
+        engine.install_logger(lambda *_: None)
+    pump = engine._log_pump  # type: ignore[reportPrivateUsage] -- the pump under test
+    assert pump is not None
+    held = threading.Event()
+    finish = threading.Event()
+
+    def drain_slowly() -> None:
+        with pump._lock:  # type: ignore[reportPrivateUsage] -- stands in for a drain in progress
+            held.set()
+            finish.wait(5)
+
+    drainer = threading.Thread(target=drain_slowly)
+    drainer.start()
+    assert held.wait(5)
+    threading.Timer(0.2, finish.set).start()
+    pid = os.fork()
+    if pid == 0:
+        flushed = threading.Event()
+
+        def flush() -> None:
+            engine.flush_logs()
+            flushed.set()
+
+        threading.Thread(target=flush, daemon=True).start()
+        os._exit(0 if flushed.wait(5) else 1)
+    drainer.join()
+    _, status = os.waitpid(pid, 0)
+    if installed_here:
+        engine.remove_logger()
+    assert os.waitstatus_to_exitcode(status) == 0, "the child's flush waited on the lock the drain held at the fork"
+
+
 # ════════════════════════════════════════════════════════════════════
 # What a process may do after a fork, per engine
 # ════════════════════════════════════════════════════════════════════

@@ -386,6 +386,11 @@ class _LogPump:
 
     The lock orders the two readers. Without it, the thread could hold a
     drained batch while a flush pushes the marker ahead of it.
+
+    A ``fork()`` keeps the lock and not the thread. A child forked mid-drain
+    has the lock held for ever, and its first flush hangs. So the parent holds
+    the lock across the fork, and the child starts a lock and a thread of its
+    own.
     """
 
     def __init__(self, callback: Callable[..., None]) -> None:
@@ -398,8 +403,23 @@ class _LogPump:
         self._stream = huggorm_bindings.subscribe_process_logs(
             capacity=_LOG_QUEUE_CAPACITY, level=huggorm_bindings.default_verbosity()
         )
-        self._thread = threading.Thread(target=self._run, name="nanopynix-log-pump", daemon=True)
-        self._thread.start()
+        self._thread = self._start()
+
+    def _start(self) -> threading.Thread:
+        thread = threading.Thread(target=self._run, name="nanopynix-log-pump", daemon=True)
+        thread.start()
+        return thread
+
+    def before_fork(self) -> None:
+        self._lock.acquire()
+
+    def after_fork_in_parent(self) -> None:
+        self._lock.release()
+
+    def after_fork_in_child(self) -> None:
+        self._lock = threading.Lock()
+        self._stopped = threading.Event()
+        self._thread = self._start()
 
     def pump(self) -> None:
         with self._lock:
@@ -455,6 +475,30 @@ def flush_logs() -> None:
     pump = _log_pump
     if pump is not None:
         pump.pump()
+
+
+# The child keeps the pump that was live at the fork.
+_forking_pump: _LogPump | None = None
+
+
+def _before_fork() -> None:
+    global _forking_pump  # noqa: PLW0603 -- one pump per process, like the queue it reads
+    _forking_pump = _log_pump
+    if _forking_pump is not None:
+        _forking_pump.before_fork()
+
+
+def _after_fork_in_parent() -> None:
+    if _forking_pump is not None:
+        _forking_pump.after_fork_in_parent()
+
+
+def _after_fork_in_child() -> None:
+    if _forking_pump is not None:
+        _forking_pump.after_fork_in_child()
+
+
+os.register_at_fork(before=_before_fork, after_in_parent=_after_fork_in_parent, after_in_child=_after_fork_in_child)
 
 
 _activity_tracking = False
