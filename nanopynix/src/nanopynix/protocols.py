@@ -52,13 +52,12 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar, runtime_checkable
 
-from nanopynix_bindings.store import BuildMode
-
 # LogLevel, GcAction, and StoreDirs are runtime imports, unlike the type-only
 # names below: AsyncEvalSession parameterises AsyncVerbosityController with it,
 # and a base class expression is evaluated when the module loads.
 from nanopynix_proto.nix.common import GcAction, LogLevel, StoreDirs
 
+from nanopynix._engine import BuildMode
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
 

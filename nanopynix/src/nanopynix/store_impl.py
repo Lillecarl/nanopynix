@@ -64,12 +64,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from nanopynix_bindings.store import STORE_DISPATCH_METHODS
+from nanopynix._engine import STORE_DISPATCH_METHODS
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from nanopynix_bindings.store import Store
+    from nanopynix._engine import Store
 
 DISPATCHABLE_METHODS: tuple[str, ...] = STORE_DISPATCH_METHODS
 """The store operations the C++ trampoline dispatches into Python.

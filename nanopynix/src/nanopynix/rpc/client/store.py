@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from nanopynix_bindings.store import BuildMode
 from nanopynix_proto.nix.common import (
     GcAction,
     GcRoot,
@@ -53,6 +52,7 @@ from nanopynix_proto.nix.store import (
 )
 from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
+from nanopynix._engine import BuildMode
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
 from nanopynix.exceptions import SessionClosedError, StoreClosedError, WorkerDiedError

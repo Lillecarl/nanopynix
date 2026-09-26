@@ -15,10 +15,10 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 import anyio.to_thread
-from nanopynix_bindings import util as nanopynix_util
 from nanopynix_proto.nix.common import LogLevel
 
 from nanopynix._core._objects import CoreRuntime
+from nanopynix._engine import util as nanopynix_util
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.rpc.worker._handle_registry import HandleRegistry
 from nanopynix.settings import SettingsProvenance

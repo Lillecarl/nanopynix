@@ -23,17 +23,17 @@ from __future__ import annotations
 import weakref
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
-from nanopynix_bindings import (
+from nanopynix_proto.nix.common import GcAction, StoreDirs
+
+from nanopynix._core._extract import attrs_value_map, flake_ref_attrs, locked_node
+from nanopynix._core._nix_core import NixCore
+from nanopynix._engine import (
     errors as nanopynix_errors,
     expr as nanopynix_expr,
     fetchers as nanopynix_fetchers,
     flake as nanopynix_flake,
     store as nanopynix_store,
 )
-from nanopynix_proto.nix.common import GcAction, StoreDirs
-
-from nanopynix._core._extract import attrs_value_map, flake_ref_attrs, locked_node
-from nanopynix._core._nix_core import NixCore
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
 from nanopynix.models import (

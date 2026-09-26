@@ -46,6 +46,7 @@ import signal
 from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix._ansi import strip_ansi
+from nanopynix._engine import is_engine_error
 from nanopynix._typechecking import BEARTYPING
 
 if TYPE_CHECKING or BEARTYPING:
@@ -745,7 +746,7 @@ def translate_nix_exception(exc: BaseException) -> NixError | None:
     """
     if isinstance(exc, NixError):
         return None
-    if not type(exc).__module__.startswith("nanopynix_bindings"):
+    if not is_engine_error(exc):
         return None
     type_name = type(exc).__name__
     base = exception_for_nix_type(type_name)

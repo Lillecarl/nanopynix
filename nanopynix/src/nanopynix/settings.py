@@ -12,15 +12,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self, cast, get_args, get_origin, override
 
 import yaml
-from nanopynix_bindings import (
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic_settings import BaseSettings, EnvSettingsSource, PydanticBaseSettingsSource, SettingsConfigDict
+
+from nanopynix._engine import (
     expr as nanopynix_expr,
     fetchers as nanopynix_fetchers,
     flake as nanopynix_flake,
     util as nanopynix_util,
 )
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-from pydantic_settings import BaseSettings, EnvSettingsSource, PydanticBaseSettingsSource, SettingsConfigDict
-
 from nanopynix._features import DEFAULT_EXPERIMENTAL_FEATURES as DEFAULT_EXPERIMENTAL_FEATURES
 from nanopynix._fork import process_is_forked
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check

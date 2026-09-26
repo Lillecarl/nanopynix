@@ -33,7 +33,7 @@ caller happens to be.
 
 from __future__ import annotations
 
-from nanopynix_bindings.util import filter_ansi_escapes
+from nanopynix._engine import filter_ansi_escapes
 
 
 def strip_ansi(text: str) -> str:

@@ -17,8 +17,8 @@ import jsonschema
 import jsonschema.exceptions
 import jsonschema.validators
 import pydantic_core
-from nanopynix_bindings.expr import PrimopError
 
+from nanopynix._engine import PrimopError
 from nanopynix._typechecking import BEARTYPING
 
 if TYPE_CHECKING or BEARTYPING:

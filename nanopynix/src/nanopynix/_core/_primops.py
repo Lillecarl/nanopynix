@@ -12,8 +12,7 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING, Any
 
-from nanopynix_bindings import expr as nanopynix_expr
-
+from nanopynix._engine import expr as nanopynix_expr
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.models import PrimOpSpec
 

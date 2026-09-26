@@ -10,8 +10,8 @@ import weakref
 from typing import TYPE_CHECKING, Any, TypeVar
 
 import anyio
-from nanopynix_bindings import signals as nanopynix_signals
 
+from nanopynix._engine import signals as nanopynix_signals
 from nanopynix._fork import ForkGuard
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import EvaluatorAbandonedError

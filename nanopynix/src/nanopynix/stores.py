@@ -41,10 +41,10 @@ from types import UnionType
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Union, cast, get_args, get_origin
 from urllib.parse import quote, unquote
 
-from nanopynix_bindings import errors as nanopynix_errors, store as nanopynix_store
 from pydantic import AliasChoices, Field, model_validator
 
 from nanopynix._ansi import strip_ansi
+from nanopynix._engine import errors as nanopynix_errors, store as nanopynix_store
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.settings import (
     NIX_2_34,

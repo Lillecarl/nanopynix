@@ -13,8 +13,7 @@ resolves each public name through a module ``__getattr__``.
 
 from __future__ import annotations
 
-from nanopynix_bindings.util import enable_experimental_feature, init_libstore as _init_libstore_raw
-
+from nanopynix._engine import enable_experimental_feature, init_libstore as _init_libstore_raw
 from nanopynix._features import DEFAULT_EXPERIMENTAL_FEATURES
 
 

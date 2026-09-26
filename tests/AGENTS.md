@@ -251,6 +251,7 @@ What lives there now:
 | `test_docs_coverage.py` | every `__all__` name has an autodoc directive, with a ledger for the rest |
 | `test_doc_snippets.py` | every published Python block mirrors a region of an example that runs |
 | `test_core_has_no_getattr.py` | no `_core/` class forwards an unlisted name to a binding, untyped |
+| `test_one_engine_module.py` | only `_engine.py` imports the compiled Nix engine |
 | `test_ansi_filtering.py` | no module writes its own regular expression for an ANSI escape sequence |
 
 `nanopynix/tests/test_examples.py` is the case that clarifies the rule. Its

@@ -8,6 +8,6 @@ the bindings, which ``tests/meta/test_consumer_surface.py`` forbids.
 
 from __future__ import annotations
 
-from nanopynix_bindings._get_env import get_env_sh_path as get_env_sh_path
+from nanopynix._engine import get_env_sh_path as get_env_sh_path
 
 __all__ = ["get_env_sh_path"]

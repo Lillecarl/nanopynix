@@ -14,7 +14,6 @@ import logging
 from typing import Any
 
 import pydantic_core
-from nanopynix_bindings import expr as nanopynix_expr
 from nanopynix_proto.nix import common as common_pb
 from nanopynix_proto.nix.common import (
     # Bare (unaliased) names for RPC-handler return-type annotations, as
@@ -110,6 +109,7 @@ from nanopynix_proto.nix.eval import (
 from nanopynix._core._codec import python_to_scalar
 from nanopynix._core._extract import locked_flake as _locked_flake
 from nanopynix._core._objects import CoreEvalState, CoreValue
+from nanopynix._engine import expr as nanopynix_expr
 from nanopynix._wire import HandleKind
 from nanopynix.exceptions import EvaluatorAbandonedError
 from nanopynix.rpc.worker._grpc_util import worker_op, wrap_service_handlers

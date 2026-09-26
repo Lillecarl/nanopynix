@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from nanopynix_bindings import expr as nanopynix_expr, store as nanopynix_store, util as nanopynix_util
-
+from nanopynix._engine import expr as nanopynix_expr, store as nanopynix_store, util as nanopynix_util
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.models import SettingsProvenance
 

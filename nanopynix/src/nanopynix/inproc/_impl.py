@@ -19,7 +19,6 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from nanopynix_bindings import expr as nanopynix_expr, store as nanopynix_store, util as nanopynix_util
 from nanopynix_proto.nix.common import LogLevel, RequestFinalized
 
 from nanopynix._core._extract import locked_flake as _locked_flake_proto
@@ -27,6 +26,7 @@ from nanopynix._core._nix_core import build_mode_value
 from nanopynix._core._nix_executor import NIX_EVALUATOR_STACK_SIZE, NixThreadExecutor
 from nanopynix._core._objects import CoreEvalState, CoreLockedFlake, CoreRuntime, CoreStore, CoreValue
 from nanopynix._core._primops import register_import_path_primops, to_primop_specs
+from nanopynix._engine import expr as nanopynix_expr, store as nanopynix_store, util as nanopynix_util
 from nanopynix._env import validate_session_env
 from nanopynix._fork import ForkGuard
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check

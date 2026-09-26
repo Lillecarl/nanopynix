@@ -34,7 +34,6 @@ from typing import TYPE_CHECKING, Any
 import anyio
 import anyio.to_thread
 from grpclib_transports.stdio import serve_stdio_with_backchannel
-from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
 from nanopynix_proto.nix.common import LogEvent, LogLevel, NixLogEvent, RequestFinalized
 from nanopynix_proto.nix.worker import (
     CloseStoreRequest,
@@ -58,6 +57,7 @@ from nanopynix_proto.nix.worker import (
 )
 
 from nanopynix._core._primops import import_primop_callable as _import_callable
+from nanopynix._engine import expr as nanopynix_expr, util as nanopynix_util
 from nanopynix._process_title import set_process_title, set_worker_title
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import (

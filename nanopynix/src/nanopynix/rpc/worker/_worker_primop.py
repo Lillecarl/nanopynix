@@ -20,10 +20,10 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 import anyio.from_thread
-from nanopynix_bindings import util as nanopynix_util
 from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
 
 from nanopynix._core._codec import deep_value_to_python, python_to_deep_value
+from nanopynix._engine import util as nanopynix_util
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import CALL_ROUTE
 from nanopynix.rpc._primop_wire import reraise_if_primop_failure

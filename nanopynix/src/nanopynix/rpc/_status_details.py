@@ -62,6 +62,7 @@ from nanopynix_proto.google.rpc import Status as RpcStatus
 from nanopynix_proto.nix.common import ErrorIdentity, ErrorTrace, LogLevel, NixErrorInfo, SourcePos
 from pydantic import ValidationError
 
+from nanopynix._engine import is_engine_error
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import NixError, ObjectMisuseError
 
@@ -178,9 +179,8 @@ NIX_STATUS_DETAILS_CODEC = NixStatusDetailsCodec()
 def identity_for_exception(exc: BaseException) -> ErrorIdentity:
     """Name the exception's class, in whichever of the two vocabularies fits.
 
-    ``__module__`` is the discriminator, exactly as in
-    ``translate_nix_exception``: a class from ``nanopynix_bindings`` is a Nix
-    C++ class, and its Python name *is* the C++ name that
+    ``is_engine_error`` is the discriminator, exactly as in ``translate_nix_exception``: a class from the engine is a Nix C++
+    class, and its Python name *is* the C++ name that
     :func:`~nanopynix.exceptions.exception_for_nix_type` looks up. Anything
     else is a nanopynix or a Python class, and the client resolves it against
     its own allowlist.
@@ -189,7 +189,7 @@ def identity_for_exception(exc: BaseException) -> ErrorIdentity:
     thing the client can always use.
     """
     name = type(exc).__name__
-    if type(exc).__module__.startswith("nanopynix_bindings"):
+    if is_engine_error(exc):
         return ErrorIdentity(nix_type=name)
     return ErrorIdentity(class_name=name)
 
