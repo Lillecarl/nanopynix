@@ -18,6 +18,10 @@ let
       backend = "local";
     };
   };
+  # The port onto huggorm's bindings. `lib.nix` says why it blocks nothing.
+  huggormTestJob = {
+    test-huggorm-nix_2_34 = workflow.mkHuggormTestJob { };
+  };
   # Named alongside the test jobs so the `jobs` dispatch input can select it,
   # and so a docs deploy waits for it. It is the cheapest job in the workflow.
   staticChecksJob = {
@@ -35,8 +39,9 @@ let
     // ubsanTestJobs
     // nogcTestJobs
     // asanTestJobs;
-  # Everything the `jobs` dispatch input can name, which does include macOS.
-  allTestJobs = gatingTestJobs // darwinTestJob;
+  # Everything the `jobs` dispatch input can name, which does include macOS and
+  # the huggorm port.
+  allTestJobs = gatingTestJobs // darwinTestJob // huggormTestJob;
   selectedTestJobs = builtins.mapAttrs (
     name: job:
     withCond "github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},', inputs.jobs), ',${name},')" job

@@ -1203,6 +1203,48 @@ in
     mkLastGreenJob
     ;
 
+  # **The port of nanopynix onto huggorm's generated bindings, and it is
+  # expected to fail.** `nanopynixForHuggorm` in `default.nix` is the scope, and
+  # huggorm's `tasks/097` is the board. The pass count is the progress measure,
+  # so the job runs the whole suite and blocks nothing: `continue-on-error`,
+  # and no docs deploy or last-green waits for it.
+  #
+  # `--continue-on-collection-errors`, because the tests of the bindings import
+  # `nanopynix_bindings` and that package is absent here by construction.
+  # Without it one of them stops the whole run and it measures nothing.
+  #
+  # Per-commit only, unlike the other kinds: it measures a port, not a
+  # supported build, and the scheduled matrices hold supported builds.
+  mkHuggormTestJob =
+    { }:
+    let
+      version = "nix_2_34-huggorm";
+      backend = "local";
+    in
+    mkJob {
+      continue-on-error = true;
+      env = testJobEnv { inherit version backend; } // {
+        PYTEST_ADDOPTS = "--continue-on-collection-errors";
+      };
+      steps = mkTestSetup { } ++ [
+        (mkBuildStep {
+          name = "Build the CI step package for the huggorm engine";
+          cap = caps.build;
+        })
+        (mkSandboxStep { })
+        (mkRunStep {
+          name = "Test nanopynix against the huggorm engine (full suite, ${backend} backend)";
+          subcommand = "suite";
+          cap = caps.suite;
+        })
+        (steps.uploadArtifact {
+          name = "Upload test output";
+          artifactName = "test-output-${backend}-${version}";
+          path = "\${{ github.workspace }}/test-gdb-output.log";
+        })
+      ];
+    };
+
   # Why these expand statically here, and through a GHA matrix in
   # `on_schedule.nix`, for the same jobs.
   #

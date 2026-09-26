@@ -671,6 +671,57 @@ jobs:
         path: ${{ github.workspace }}/junit.xml
       timeout-minutes: 15
     continue-on-error: true
+  test-huggorm-nix_2_34:
+    runs-on: ubuntu-24.04
+    needs:
+    - umbrella-rev
+    if: github.event_name != 'workflow_dispatch' || inputs.jobs == '' || contains(format(',{0},',
+      inputs.jobs), ',test-huggorm-nix_2_34,')
+    env:
+      BACKEND: local
+      CI_STEP: ciSteps.nix_2_34-huggorm
+      PYTEST_ADDOPTS: --continue-on-collection-errors
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
+    timeout-minutes: 150
+    steps:
+    - name: Make room on the runner
+      run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup
+        /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell
+        /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker
+        system prune --all --force; docker builder prune --all --force; df -h /
+      if: runner.os == 'Linux'
+      timeout-minutes: 10
+    - uses: actions/checkout@main
+      timeout-minutes: 10
+    - uses: cachix/install-nix-action@master
+      with:
+        extra_nix_config: |
+          access-tokens = github.com=${{ github.token }}
+          experimental-features = nix-command flakes
+      timeout-minutes: 15
+    - uses: cachix/cachix-action@master
+      with:
+        name: lillecarl
+        authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        useDaemon: false
+      timeout-minutes: 15
+    - name: Build the CI step package for the huggorm engine
+      run: nix build --file . "$CI_STEP" --out-link result --print-build-logs --print-out-paths
+      timeout-minutes: 30
+    - name: Enable Nix sandbox namespaces
+      run: nix run --file . ciSteps.enable-sandbox-namespaces
+      timeout-minutes: 10
+    - name: Test nanopynix against the huggorm engine (full suite, local backend)
+      run: ./result/bin/nanopynix-ci suite
+      timeout-minutes: 30
+    - name: Upload test output
+      uses: actions/upload-artifact@main
+      if: ${{ !cancelled() }}
+      with:
+        name: test-output-local-nix_2_34-huggorm
+        path: ${{ github.workspace }}/test-gdb-output.log
+      timeout-minutes: 15
+    continue-on-error: true
   test-local-git:
     runs-on: ubuntu-24.04
     needs:
