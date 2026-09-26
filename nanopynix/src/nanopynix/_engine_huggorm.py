@@ -500,7 +500,18 @@ def parse_nix_path(value: str | None = None) -> list[str]:
     return list(huggorm_bindings.parse_nix_path(raw)) if raw else []
 
 
-expr = _not_ported("expr", init_libexpr=init_libexpr, is_pseudo_url=is_pseudo_url, parse_nix_path=parse_nix_path)
+def _enter_evaluator_thread() -> None:
+    """Do nothing: huggorm registers a thread with the collector on its first evaluator call."""
+
+
+expr = _not_ported(
+    "expr",
+    _enter_evaluator_thread=_enter_evaluator_thread,
+    _exit_evaluator_thread=huggorm_bindings.gc_release_thread,
+    init_libexpr=init_libexpr,
+    is_pseudo_url=is_pseudo_url,
+    parse_nix_path=parse_nix_path,
+)
 store = _not_ported(
     "store",
     Store=Store,
