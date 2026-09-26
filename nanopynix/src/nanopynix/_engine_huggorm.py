@@ -478,6 +478,10 @@ class EvalState:
     def value_from_python(self, obj: object) -> Value:
         return Value(self, self._make(obj))
 
+    def repl_active(self) -> bool:
+        """No: this engine has no REPL scope yet, so none is ever active."""
+        return False
+
     def reset_file_cache(self) -> None:
         # `«nix-internal»/derivation-internal.nix` names no file to forget.
         for path in self.state.cached_files():
