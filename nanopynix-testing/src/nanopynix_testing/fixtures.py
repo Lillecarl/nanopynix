@@ -38,9 +38,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import pytest
-from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
 
 import nanopynix
+from nanopynix._engine import expr as nanopynix_expr, util as nanopynix_util
 from nanopynix.inproc import _impl as inproc_impl
 from nanopynix.settings import DEFAULT_EXPERIMENTAL_FEATURES
 from test_support.subprocess_output import run_process

@@ -9,9 +9,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from nanopynix_bindings import util as nanopynix_util
 
 import nanopynix
+from nanopynix._engine import util as nanopynix_util
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
