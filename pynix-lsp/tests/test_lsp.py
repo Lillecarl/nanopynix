@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 from lsprotocol import types
@@ -435,6 +435,32 @@ async def test_sync_document_reports_a_context_diagnostic_at_the_directives_own_
     assert published
     diagnostic = next(d for d in published[-1].diagnostics if "boom" in d.message)
     assert diagnostic.range.start.line == 1
+
+
+async def test_sync_document_reports_a_context_that_cannot_open(
+    lsp_server: PynixLanguageServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure to open the context is published, not raised.
+
+    Raised, pygls logs it and publishes nothing, so a client waiting for
+    diagnostics waits until its own deadline.
+    """
+
+    async def refuse() -> NoReturn:
+        raise RuntimeError("no evaluator here")
+
+    monkeypatch.setattr(lsp_server, "ensure_nix", refuse)
+    uri = asset("broken_context_second_line.nix").as_uri()
+    published: list[types.PublishDiagnosticsParams] = []
+    lsp_server.text_document_publish_diagnostics = published.append  # type: ignore[method-assign] -- swap the real RPC notification for a test recorder
+
+    await _sync_document(lsp_server, uri)
+
+    assert published
+    diagnostic = next(d for d in published[-1].diagnostics if "no evaluator here" in d.message)
+    assert diagnostic.message.startswith("pynix-lsp could not open a Nix context")
+    assert diagnostic.range.start.line == 1
+    assert uri not in lsp_server.contexts
 
 
 async def test_sync_document_reports_a_diagnostic_for_broken_syntax(lsp_server: PynixLanguageServer) -> None:

@@ -41,6 +41,7 @@ from pynix_lsp._syntax import (
 )
 
 if TYPE_CHECKING or BEARTYPING:
+    from pynix_lsp._context import ContextDirective
     from pynix_lsp._syntax import ParseErrorRange
 
 _SERVER_NAME = "pynix-lsp"
@@ -254,6 +255,52 @@ async def _warm_module_args(context: FileContext, source: str) -> None:
             _logger.debug("module-arg warm-up for %r failed (file likely closed mid-warm)", name, exc_info=True)
 
 
+def _setup_failure_diagnostic(error: Exception, line: int) -> types.Diagnostic:
+    position = types.Position(line, 0)
+    message = error.msg_without_ansi if isinstance(error, NixError) else str(error)
+    return types.Diagnostic(
+        range=types.Range(start=position, end=position),
+        message=f"pynix-lsp could not open a Nix context: {message}",
+        severity=types.DiagnosticSeverity.Error,
+        source=_SERVER_NAME,
+    )
+
+
+async def _open_context(
+    ls: PynixLanguageServer, uri: str, directives: list[ContextDirective], source: str
+) -> FileContext:
+    """Evaluate a file's context directives, and keep the result for *uri*."""
+    _session, _store, shared_evals = await ls.ensure_nix()
+    context = FileContext(shared_evals, directives, _file_dir(uri))
+    await context.reload()
+    for dialect in DIALECTS:
+        await dialect.derive_roots(context)
+    ls.contexts[uri] = context
+    warm_task = asyncio.create_task(_warm_module_args(context, source))
+    ls.warm_tasks.add(warm_task)
+    warm_task.add_done_callback(ls.warm_tasks.discard)
+    return context
+
+
+async def _reopen_context(
+    ls: PynixLanguageServer, uri: str, directives: list[ContextDirective], source: str
+) -> tuple[FileContext | None, types.Diagnostic | None]:
+    """Open *uri*'s context, or say why it cannot open.
+
+    The failure is returned to be published, not raised. pygls logs a raised
+    exception and sends nothing, so the client waits for diagnostics that
+    never come -- 120 s per test in pynix-lsp's own suite.
+    """
+    try:
+        return await _open_context(ls, uri, directives, source), None
+    except Exception as error:
+        _logger.exception("could not open the Nix context of %s", uri)
+        stale = ls.contexts.pop(uri, None)
+        if stale is not None:
+            await stale.close()
+        return None, _setup_failure_diagnostic(error, directives[0].line)
+
+
 async def _sync_document(ls: PynixLanguageServer, uri: str) -> None:
     """Reconcile one document's context against its current header directives.
 
@@ -284,16 +331,9 @@ async def _sync_document(ls: PynixLanguageServer, uri: str) -> None:
             await context.close()
             del ls.contexts[uri]
         context = None
-    elif context is None or context.directives != directives:
-        _session, _store, shared_evals = await ls.ensure_nix()
-        context = FileContext(shared_evals, directives, _file_dir(uri))
-        await context.reload()
-        for dialect in DIALECTS:
-            await dialect.derive_roots(context)
-        ls.contexts[uri] = context
-        warm_task = asyncio.create_task(_warm_module_args(context, source))
-        ls.warm_tasks.add(warm_task)
-        warm_task.add_done_callback(ls.warm_tasks.discard)
+    setup_failure: types.Diagnostic | None = None
+    if directives and (context is None or context.directives != directives):
+        context, setup_failure = await _reopen_context(ls, uri, directives, source)
 
     parse_error_ranges = parse_errors(source)
     ls.has_parse_errors[uri] = bool(parse_error_ranges)
@@ -301,6 +341,8 @@ async def _sync_document(ls: PynixLanguageServer, uri: str) -> None:
         ls.last_good_source[uri] = source
 
     diagnostics = [_parse_error_diagnostic(error) for error in parse_error_ranges]
+    if setup_failure is not None:
+        diagnostics.append(setup_failure)
     if context is not None:
         directives_by_name = {directive.name: directive for directive in context.directives}
         diagnostics.extend(
