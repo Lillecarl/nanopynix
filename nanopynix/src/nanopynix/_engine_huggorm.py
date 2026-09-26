@@ -515,15 +515,16 @@ def build_info() -> dict[str, Any]:
     """The linked Nix's version, and what this engine can do.
 
     ``boehm_gc`` is a fact about the linked libexpr, and huggorm answers it.
-    The rest are nanopynix features the huggorm engine does not offer yet,
-    so each is ``False`` until its name is ported. They are here and not
-    absent, because callers index them.
+    ``dynamic_primop_registration`` is :func:`register_primop`. The rest are
+    nanopynix features the huggorm engine does not offer yet, so each is
+    ``False`` until its name is ported. They are here and not absent, because
+    callers index them.
     """
     return {
         "nix_version": huggorm_bindings.nix_version(),
         "capabilities": {
             "boehm_gc": huggorm_bindings.boehm_gc(),
-            "dynamic_primop_registration": False,
+            "dynamic_primop_registration": True,
             "eval_statistics": False,
             "store_impl_read_derivation": False,
         },
