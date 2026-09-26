@@ -15,10 +15,11 @@ imports this module, and ``nanopynix._engine`` decides that.
 from __future__ import annotations
 
 import itertools
+import json
 import logging
 import os
 import threading
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 import huggorm_bindings  # type: ignore[reportMissingImports] -- installed only in the huggorm scope
 
@@ -137,11 +138,7 @@ signals = _not_ported("signals", InterruptToken=InterruptToken, interrupt_scope=
 
 get_env_sh_path = _not_ported("get_env_sh_path")
 
-EvalState = _not_ported("EvalState")
-PrimopError = _not_ported("PrimopError")
-Value = _not_ported("Value")
 eval_counters_enabled = _not_ported("eval_counters_enabled")
-eval_file = _not_ported("eval_file")
 
 
 def init_libexpr() -> None:
@@ -154,7 +151,6 @@ def init_libexpr() -> None:
 
 
 is_pseudo_url = huggorm_bindings.is_pseudo_url
-register_primop = _not_ported("register_primop")
 set_eval_counters_enabled = _not_ported("set_eval_counters_enabled")
 
 input_from_attrs = _not_ported("input_from_attrs")
@@ -288,6 +284,209 @@ def parse_store_reference(uri: str) -> dict[str, Any]:
         "render": reference.render(),
         "render_without_params": reference.render(with_params=False),
     }
+
+
+class PrimopError(Exception):
+    """A primop's own failure, whose message Nix shows as it is."""
+
+
+# Registered before a state opens, and given to each state that opens after,
+# as the other engine's global `RegisterPrimOp` is.
+_primops: dict[str, tuple[int, Callable[..., Any]]] = {}
+
+
+def register_primop(name: str, arity: int, arg_names: list[str], doc: str, callback: Callable[..., Any]) -> None:
+    """Give every state opened after this call ``builtins.<name>``.
+
+    ``arg_names`` and ``doc`` are not kept: huggorm's primop carries neither.
+    """
+    del arg_names, doc
+    _primops[name] = (arity, callback)
+
+
+def _cleanup_primop_registry() -> None:
+    _primops.clear()
+
+
+# `bool` before `int`, because a bool is an int to `isinstance`.
+_SCALAR_MAKERS = ((bool, "make_bool"), (int, "make_int"), (float, "make_float"), (str, "make_string"))
+
+
+class Value:
+    """A huggorm ``Value`` that answers the other engine's method names.
+
+    ``nanopynix._core._objects.CoreValue`` is the one caller. The other
+    engine forces a value before it reads one, and huggorm refuses to read
+    a thunk, so each read forces first.
+    """
+
+    __slots__ = ("_state", "raw")
+
+    def __init__(self, state: EvalState, value: Any) -> None:
+        self._state = state
+        # Any, so a released value can hold None.
+        self.raw: Any = value
+
+    def __getattr__(self, name: str) -> type:
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return _not_ported(f"Value.{name}")
+
+    def _forced(self) -> Any:
+        self._state.state.force(self.raw)
+        return self.raw
+
+    def _child(self, value: Any) -> Value:
+        self._state.state.force(value)
+        return Value(self._state, value)
+
+    def _release(self) -> None:
+        self.raw = None
+
+    def force(self) -> None:
+        self._forced()
+
+    def to_python(self) -> Any:
+        return json.loads(self._forced().to_json(False))
+
+    def to_json(self, *, copy_to_store: bool = False) -> Any:
+        return json.loads(self._forced().to_json(copy_to_store))
+
+    def type_name(self) -> str:
+        return self.raw.type_name()
+
+    def as_int(self) -> int:
+        return self._forced().integer()
+
+    def as_float(self) -> float:
+        return self._forced().floating()
+
+    def as_bool(self) -> bool:
+        return self._forced().boolean()
+
+    def as_string(self) -> str:
+        return self._forced().string_value()
+
+    def realise_string(self) -> str:
+        return self._forced().realise_string()
+
+    def realise_argv(self) -> list[str]:
+        return self._forced().realise_argv()
+
+    def attr_get(self, name: str) -> Value:
+        return self._child(self._forced().get(name))
+
+    def has_attr(self, name: str) -> bool:
+        return self._forced().has(name)
+
+    def attr_names(self) -> list[str]:
+        value = self._forced()
+        return [value.name_at(index) for index in range(value.size())]
+
+    def list_get(self, index: int) -> Value:
+        return self._child(self._forced().at(index))
+
+    def list_length(self) -> int:
+        return self._forced().size()
+
+    def call(self, argument: Value) -> Value:
+        return self._child(self._forced().apply(argument.raw))
+
+    def auto_call(self) -> Value:
+        """Apply with no arguments, as Nix's ``autoCallFunction`` does.
+
+        That fills a lambda's defaulted formals, and follows ``__functor``. It
+        answers anything else unapplied, where huggorm's ``apply_auto`` refuses.
+        """
+        value = self._forced()
+        if value.type_name() == "attrs" and value.has("__functor"):
+            functor = self._child(value.get("__functor"))
+            return functor.call(self).auto_call()
+        if value.type_name() == "function" and value.is_lambda() and value.has_formals():
+            return self._child(value.apply_auto(self._state.state.make_attrs()))
+        return self
+
+    def derived_path(self) -> str:
+        return f"{self._state.store.get_store_dir()}/{self._forced().drv_path().to_string()}"
+
+
+class EvalState:
+    """A huggorm ``EvalState`` that answers the other engine's method names.
+
+    ``nanopynix._core._objects.CoreEvalState`` is the one caller.
+    """
+
+    def __init__(
+        self,
+        store: Store,
+        search_path: list[str] | None = None,
+        build_store: Store | None = None,
+        eval_settings: dict[str, str] | None = None,
+        fetch_settings: dict[str, str] | None = None,
+    ) -> None:
+        settings = {**(eval_settings or {}), **(fetch_settings or {})}
+        if search_path:
+            # The other engine puts the search path in front of the `nix-path`
+            # setting, as `nix -I` does, so the setting still answers after it.
+            configured = huggorm_bindings.get_setting("nix-path") or ""
+            settings["nix-path"] = " ".join([*search_path, configured]).strip()
+        self.store = store
+        self.state = huggorm_bindings.EvalState(
+            store.store, settings, None if build_store is None else build_store.store
+        )
+        for name, (arity, callback) in _primops.items():
+            self.state.register_primop(name, arity, self._primop(callback))
+
+    def __getattr__(self, name: str) -> type:
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return _not_ported(f"EvalState.{name}")
+
+    def _primop(self, callback: Callable[..., Any]) -> Callable[..., Any]:
+        def bridge(*arguments: Any) -> Any:
+            converted = [json.loads(argument.to_json(False)) for argument in arguments]
+            return self._make(callback(*converted))
+
+        return bridge
+
+    def _make(self, obj: Any) -> Any:
+        if isinstance(obj, Value):
+            return obj.raw
+        if obj is None:
+            return self.state.make_null()
+        for kind, maker in _SCALAR_MAKERS:
+            if isinstance(obj, kind):
+                return getattr(self.state, maker)(obj)
+        if isinstance(obj, list | tuple):
+            made = self.state.make_list()
+            for item in cast("list[Any] | tuple[Any, ...]", obj):
+                self.state.list_append(made, self._make(item))
+            return made
+        if isinstance(obj, dict):
+            made = self.state.make_attrs()
+            for key, item in cast("dict[Any, Any]", obj).items():
+                self.state.attrs_set(made, str(key), self._make(item))
+            return made
+        raise NotPortedError(f"the huggorm engine cannot yet make a Nix value from {type(obj).__name__}")
+
+    def eval_string(self, expression: str, path: str = "<string>") -> Value:
+        return Value(self, self.state.eval_expr(expression, path))
+
+    def eval_file(self, path: str) -> Value:
+        return Value(self, self.state.eval_file(path))
+
+    def value_from_python(self, obj: object) -> Value:
+        return Value(self, self._make(obj))
+
+    def reset_file_cache(self) -> None:
+        # `«nix-internal»/derivation-internal.nix` names no file to forget.
+        for path in self.state.cached_files():
+            if path.startswith("/"):
+                self.state.forget_file(path)
+
+
+def eval_file(state: EvalState, path: str) -> Value:
+    return state.eval_file(path)
 
 
 process_connection = _not_ported("process_connection")
@@ -550,11 +749,17 @@ def _enter_evaluator_thread() -> None:
 
 expr = _not_ported(
     "expr",
+    EvalState=EvalState,
+    PrimopError=PrimopError,
+    Value=Value,
+    _cleanup_primop_registry=_cleanup_primop_registry,
     _enter_evaluator_thread=_enter_evaluator_thread,
     _exit_evaluator_thread=huggorm_bindings.gc_release_thread,
     init_libexpr=init_libexpr,
+    eval_file=eval_file,
     is_pseudo_url=is_pseudo_url,
     parse_nix_path=parse_nix_path,
+    register_primop=register_primop,
 )
 store = _not_ported(
     "store",
