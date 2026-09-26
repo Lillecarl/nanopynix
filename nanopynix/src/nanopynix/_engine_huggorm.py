@@ -14,6 +14,7 @@ imports this module, and ``nanopynix._engine`` decides that.
 
 from __future__ import annotations
 
+import os
 from typing import Any, NoReturn
 
 import huggorm_bindings  # type: ignore[reportMissingImports] -- installed only in the huggorm scope
@@ -56,11 +57,9 @@ def _not_ported(name: str, **ported: object) -> type:
 ENGINE_MODULE = huggorm_bindings
 
 errors = _not_ported("errors")
-expr = _not_ported("expr")
 fetchers = _not_ported("fetchers")
 flake = _not_ported("flake")
 signals = _not_ported("signals")
-store = _not_ported("store")
 
 get_env_sh_path = _not_ported("get_env_sh_path")
 
@@ -70,7 +69,7 @@ Value = _not_ported("Value")
 eval_counters_enabled = _not_ported("eval_counters_enabled")
 eval_file = _not_ported("eval_file")
 init_libexpr = _not_ported("init_libexpr")
-is_pseudo_url = _not_ported("is_pseudo_url")
+is_pseudo_url = huggorm_bindings.is_pseudo_url
 register_primop = _not_ported("register_primop")
 set_eval_counters_enabled = _not_ported("set_eval_counters_enabled")
 
@@ -116,7 +115,7 @@ def enable_experimental_feature(name: str) -> None:
     huggorm_bindings.set_setting("extra-experimental-features", name)
 
 
-filter_ansi_escapes = _not_ported("filter_ansi_escapes")
+filter_ansi_escapes = huggorm_bindings.filter_ansi_escapes
 get_verbosity = _not_ported("get_verbosity")
 
 
@@ -140,6 +139,16 @@ install_logger = _not_ported("install_logger")
 list_settings = huggorm_bindings.list_settings
 remove_logger = _not_ported("remove_logger")
 set_verbosity = _not_ported("set_verbosity")
+
+
+def parse_nix_path(value: str | None = None) -> list[str]:
+    """Split a search path as Nix does; ``None`` reads ``NIX_PATH``."""
+    raw = os.environ.get("NIX_PATH", "") if value is None else value
+    return list(huggorm_bindings.parse_nix_path(raw)) if raw else []
+
+
+expr = _not_ported("expr", is_pseudo_url=is_pseudo_url, parse_nix_path=parse_nix_path)
+store = _not_ported("store", render_store_reference=huggorm_bindings.render_store_reference)
 
 
 util = _not_ported(
