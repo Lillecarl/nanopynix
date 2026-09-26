@@ -42,9 +42,14 @@ class _NotPortedMeta(type):
         raise NotPortedError(f"the huggorm engine has no {cls.__qualname__} yet (huggorm tasks/097)")
 
 
-def _not_ported(name: str) -> type:
-    """A placeholder class for *name*. ``Exception`` is its base, so it can stand in an ``except``."""
-    return _NotPortedMeta(name.rsplit(".", 1)[-1], (Exception,), {"__qualname__": name, "__module__": __name__})
+def _not_ported(name: str, **ported: object) -> type:
+    """A placeholder class for *name*. ``Exception`` is its base, so it can stand in an ``except``.
+
+    *ported* are the names it does answer: an area of the bindings, such as
+    ``util``, answers those and is a placeholder for the rest.
+    """
+    namespace = {"__qualname__": name, "__module__": __name__, **ported}
+    return _NotPortedMeta(name.rsplit(".", 1)[-1], (Exception,), namespace)
 
 
 #: Loaded, so that a scope whose extension does not link fails at import.
@@ -56,7 +61,6 @@ fetchers = _not_ported("fetchers")
 flake = _not_ported("flake")
 signals = _not_ported("signals")
 store = _not_ported("store")
-util = _not_ported("util")
 
 get_env_sh_path = _not_ported("get_env_sh_path")
 
@@ -84,13 +88,69 @@ open_store = _not_ported("open_store")
 process_connection = _not_ported("process_connection")
 register_store_implementation = _not_ported("register_store_implementation")
 
-build_info = _not_ported("build_info")
-current_system = _not_ported("current_system")
-enable_experimental_feature = _not_ported("enable_experimental_feature")
+current_system = huggorm_bindings.current_system
+set_setting = huggorm_bindings.set_setting
+
+
+def build_info() -> dict[str, Any]:
+    """The linked Nix's version, and what this engine can do.
+
+    ``boehm_gc`` is a fact about the linked libexpr, and huggorm answers it.
+    The rest are nanopynix features the huggorm engine does not offer yet,
+    so each is ``False`` until its name is ported. They are here and not
+    absent, because callers index them.
+    """
+    return {
+        "nix_version": huggorm_bindings.nix_version(),
+        "capabilities": {
+            "boehm_gc": huggorm_bindings.boehm_gc(),
+            "dynamic_primop_registration": False,
+            "eval_statistics": False,
+            "store_impl_read_derivation": False,
+        },
+    }
+
+
+def enable_experimental_feature(name: str) -> None:
+    """Add *name* to the enabled features, as ``extra-experimental-features`` does in nix.conf."""
+    huggorm_bindings.set_setting("extra-experimental-features", name)
+
+
 filter_ansi_escapes = _not_ported("filter_ansi_escapes")
 get_verbosity = _not_ported("get_verbosity")
-init_libstore = _not_ported("init_libstore")
+
+
+_config_loaded = False
+
+
+def init_libstore(load_config: bool = True) -> None:
+    """Read nix.conf once, as ``nix::initLibStore`` does in the other engine.
+
+    huggorm initialises libstore at import and reads no configuration, so
+    all that is left is the file. The first call that asks reads it, and a
+    later call changes nothing.
+    """
+    global _config_loaded  # noqa: PLW0603 -- process-wide, like the Nix state it mirrors
+    if load_config and not _config_loaded:
+        huggorm_bindings.load_config()
+        _config_loaded = True
+
+
 install_logger = _not_ported("install_logger")
-list_settings = _not_ported("list_settings")
+list_settings = huggorm_bindings.list_settings
 remove_logger = _not_ported("remove_logger")
 set_verbosity = _not_ported("set_verbosity")
+
+
+util = _not_ported(
+    "util",
+    build_info=build_info,
+    current_system=current_system,
+    enable_experimental_feature=enable_experimental_feature,
+    get_setting=huggorm_bindings.get_setting,
+    init_libstore=init_libstore,
+    list_settings=huggorm_bindings.list_settings,
+    list_settings_metadata_json=huggorm_bindings.settings_json,
+    reset_overridden=huggorm_bindings.reset_overridden,
+    set_setting=set_setting,
+)

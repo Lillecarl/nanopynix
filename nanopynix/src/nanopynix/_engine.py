@@ -76,6 +76,7 @@ if TYPE_CHECKING or ENGINE == "nanopynix_bindings":
         install_logger as install_logger,
         list_settings as list_settings,
         remove_logger as remove_logger,
+        set_setting as set_setting,
         set_verbosity as set_verbosity,
     )
 
@@ -115,6 +116,7 @@ else:
         register_store_implementation as register_store_implementation,
         remove_logger as remove_logger,
         set_eval_counters_enabled as set_eval_counters_enabled,
+        set_setting as set_setting,
         set_verbosity as set_verbosity,
         signals as signals,
         store as store,
