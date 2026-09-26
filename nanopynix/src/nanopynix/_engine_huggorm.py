@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import threading
+import weakref
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 import huggorm_bindings  # type: ignore[reportMissingImports] -- installed only in the huggorm scope
@@ -443,9 +444,19 @@ class EvalState:
         return _not_ported(f"EvalState.{name}")
 
     def _primop(self, callback: Callable[..., Any]) -> Callable[..., Any]:
+        # Weak, because the state holds the bridge. A strong reference is a
+        # cycle only the cyclic collector frees, and the store stays open until
+        # it runs: 20 sessions with one primop held 16 descriptors of the
+        # store's database. Nix calls the bridge only inside an evaluation,
+        # which a caller reaches through this object, so it is alive then.
+        owner = weakref.ref(self)
+
         def bridge(*arguments: Any) -> Any:
+            state = owner()
+            if state is None:
+                raise RuntimeError("the evaluator that registered this primop is closed")
             converted = [json.loads(argument.to_json(False)) for argument in arguments]
-            return self._make(callback(*converted))
+            return state._make(callback(*converted))
 
         return bridge
 
