@@ -142,7 +142,17 @@ PrimopError = _not_ported("PrimopError")
 Value = _not_ported("Value")
 eval_counters_enabled = _not_ported("eval_counters_enabled")
 eval_file = _not_ported("eval_file")
-init_libexpr = _not_ported("init_libexpr")
+
+
+def init_libexpr() -> None:
+    """Enable ``fetch-tree``, as the other engine's ``init_libexpr`` does.
+
+    That function also starts the Boehm collector. huggorm starts it at
+    import, so the feature is all that is left.
+    """
+    enable_experimental_feature("fetch-tree")
+
+
 is_pseudo_url = huggorm_bindings.is_pseudo_url
 register_primop = _not_ported("register_primop")
 set_eval_counters_enabled = _not_ported("set_eval_counters_enabled")
@@ -368,7 +378,7 @@ def parse_nix_path(value: str | None = None) -> list[str]:
     return list(huggorm_bindings.parse_nix_path(raw)) if raw else []
 
 
-expr = _not_ported("expr", is_pseudo_url=is_pseudo_url, parse_nix_path=parse_nix_path)
+expr = _not_ported("expr", init_libexpr=init_libexpr, is_pseudo_url=is_pseudo_url, parse_nix_path=parse_nix_path)
 store = _not_ported("store", render_store_reference=huggorm_bindings.render_store_reference)
 
 
