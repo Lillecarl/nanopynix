@@ -18,12 +18,12 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 import pytest
-from nanopynix_bindings.store import BuildMode
 from nanopynix_proto.nix.common import LogLevel
 from prompt_toolkit.completion import CompleteEvent, Completion
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import ANSI, FormattedText
 
+from nanopynix import BuildMode
 from nanopynix.exceptions import EvaluatorAbandonedError, NixError
 from nanopynix.models import AttrDoc, Doc, NixType
 from nanopynix.rpc import ReplSession, Store, ValueProxy
