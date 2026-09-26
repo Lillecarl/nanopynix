@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 import pytest
 
 import nanopynix
-from nanopynix._engine import expr as nanopynix_expr, util as nanopynix_util
+from nanopynix._engine import expr as nanopynix_expr, set_setting
 from nanopynix.inproc import _impl as inproc_impl
 from nanopynix.settings import DEFAULT_EXPERIMENTAL_FEATURES
 from test_support.subprocess_output import run_process
@@ -254,8 +254,8 @@ def store_path_recorder() -> StorePathRecorder:
 @pytest.fixture(scope="session", autouse=True)
 def _init() -> None:  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
     """Initialize libstore without opening a host-selected store."""
-    nanopynix_util.set_setting("build-users-group", "")
-    nanopynix_util.set_setting("require-drop-supplementary-groups", "false")
+    set_setting("build-users-group", "")
+    set_setting("require-drop-supplementary-groups", "false")
     nanopynix.init_libstore(load_config=False)
 
 

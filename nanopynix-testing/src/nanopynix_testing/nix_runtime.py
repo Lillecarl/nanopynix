@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 import nanopynix
-from nanopynix._engine import util as nanopynix_util
+from nanopynix._engine import set_setting
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -212,8 +212,8 @@ def pytest_configure(config: pytest.Config) -> None:
 def _initialise_libstore_before_any_fork() -> None:
     if sys.platform != "darwin":
         return
-    nanopynix_util.set_setting("build-users-group", "")
-    nanopynix_util.set_setting("require-drop-supplementary-groups", "false")
+    set_setting("build-users-group", "")
+    set_setting("require-drop-supplementary-groups", "false")
     nanopynix.init_libstore(load_config=False)
 
 
