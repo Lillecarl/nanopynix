@@ -460,16 +460,23 @@ _UNDECORATABLE_PATTERN = re.compile(r"BeartypeClawDecorWarning: .*? ([\w.]+)\(\)
 # covered 5 modules where the checkout holds 131. `pynix._impl._quiet` lost its
 # runtime check that way and this test stayed green. Measured: the walk imports
 # 131 submodules in 1.4 s, and every one of them imports.
+#
+# **Except the module of the engine the venv does not install.**
+# `nanopynix._engine_huggorm` imports `huggorm_bindings`, which only the
+# huggorm scope has, so the walk skips it unless that is the engine here.
 _INSTRUMENTED_IMPORT_PROBE = f"""
 import importlib
 import pkgutil
 
 import beartype.roar
+from nanopynix._engine import ENGINE
 from nanopynix.settings import normalize_nix_path
 
 for name in {PACKAGES!r}:
     package = importlib.import_module(name)
     for found in pkgutil.walk_packages(package.__path__, prefix=name + "."):
+        if found.name == "nanopynix._engine_huggorm" and ENGINE != "huggorm_bindings":
+            continue
         importlib.import_module(found.name)
 
 try:

@@ -10,6 +10,12 @@
     inherit system;
     config.allowUnfree = true;
   },
+  # The compiled Nix engine behind the exported packages: "bindings" for
+  # `nanopynix-bindings`, "huggorm" for huggorm's generated bindings. The
+  # huggorm engine is a port in progress, and huggorm's tasks/097 tracks it.
+  # A consumer that imports this file with "huggorm" runs its own suite
+  # against the port, with no edit of its own source.
+  engine ? "bindings",
 }:
 let
   inherit (pkgs) lib;
@@ -363,6 +369,10 @@ let
       # `nix/nix-closure.nix` names each package, and issue #111 holds the
       # measurements.
       wheel ? false,
+      # The compiled engine that `nanopynix._engine` imports. A whole scope,
+      # for the reason the collector is one: two libnix copies cannot share a
+      # process, and the venv decides which one it holds.
+      engine ? "bindings",
     }:
     assert lib.assertMsg (!(sanitizer.requiresNoGC or false) || !gc) ''
       The ${sanitizer.name} sanitizer needs `gc = false`.
@@ -439,6 +449,40 @@ let
                 inherit sanitizer sanitizerRuntime;
               };
 
+              # huggorm's generated bindings, linked against this scope's Nix
+              # components. The collector must be the one libexpr links, or
+              # the process holds two.
+              huggorm-bindings = (import sources.huggorm { inherit pkgs; }).huggorm-bindings.override {
+                inherit (final)
+                  nix-util
+                  nix-store
+                  nix-expr
+                  nix-fetchers
+                  nix-flake
+                  ;
+                python3Packages = python.pkgs;
+                boehmgc = patchedBoehmGC;
+              };
+
+              engineBindings = if engine == "huggorm" then final.huggorm-bindings else final.nanopynix-bindings;
+
+              # `nanopynix/pyproject.toml` names `nanopynix-bindings`, and the
+              # huggorm scope does not build it, so the dependency is swapped
+              # here and not in the file every other scope reads.
+              engineOverlay =
+                if engine == "huggorm" then
+                  _pyFinal: pyPrev: {
+                    nanopynix = pyPrev.nanopynix.overrideAttrs (old: {
+                      passthru = old.passthru // {
+                        dependencies = builtins.removeAttrs old.passthru.dependencies [ "nanopynix-bindings" ] // {
+                          huggorm-bindings = [ ];
+                        };
+                      };
+                    });
+                  }
+                else
+                  _: _: { };
+
               # Everything above the bindings is a pyproject.nix builders
               # package. The set is built once per Nix version and holds both
               # the built and the editable form of each project.
@@ -495,7 +539,7 @@ let
                   # the roots are just the propagated inputs nixpkgs computed --
                   # no second hand-written dependency list to fall out of date.
                   nixpkgsRoots = [
-                    final.nanopynix-bindings
+                    final.engineBindings
                   ]
                   ++ ps.nixpkgsRootsFor {
                     inherit python;
@@ -511,7 +555,7 @@ let
                     # in as a root above rather than looked up by name.
                     exclude = [ "nanopynix-bindings" ];
                   };
-                  overlay = lib.composeExtensions final.pyPackages.built overlay;
+                  overlay = lib.composeExtensions (lib.composeExtensions final.pyPackages.built final.engineOverlay) overlay;
                 };
 
               pythonSet = final.pythonSetWith { };
@@ -718,6 +762,8 @@ let
               "-wheel"
             else if !gc then
               "-nogc"
+            else if engine == "huggorm" then
+              "-huggorm"
             else
               "";
         in
@@ -795,6 +841,20 @@ let
   # One version only. A wheel carries one Nix, which is the whole reason a
   # wheel removes the ABI matrix.
   nanopynixForWheel = (nanopynixForNixVersions { wheel = true; }).nix_2_34-wheel;
+
+  # The scope whose engine is huggorm's generated bindings. Off the matrices
+  # like the wheel: the port is expected to fail, and a blocking job would say
+  # nothing new. One version, because huggorm binds one.
+  nanopynixForHuggorm = (nanopynixForNixVersions { engine = "huggorm"; }).nix_2_34-huggorm;
+
+  # What the exported packages below come from. See the `engine` argument.
+  exported =
+    if engine == "huggorm" then
+      nanopynixForHuggorm
+    else if engine == "bindings" then
+      nanopynixVersions.stable
+    else
+      throw "default.nix: engine must be \"bindings\" or \"huggorm\", not ${builtins.toJSON engine}";
 
   # The wheel itself. `nix/wheel.nix` runs `auditwheel repair` over the
   # extension above, which bundles each library and writes the `manylinux` tag.
@@ -934,10 +994,14 @@ let
   ciSteps = import ./ci/steps.nix {
     inherit
       pkgs
-      tests
       ciVersionMatrix
       variantSuffixes
       ;
+    # The huggorm lane has a step, and no place in any matrix: `tests` feeds the
+    # matrices, and this name is not in it.
+    tests = tests // {
+      nanopynix-tests-nix_2_34-huggorm = nanopynixForHuggorm.nanopynix.test;
+    };
   };
 
   getByVersion =
@@ -960,7 +1024,7 @@ lib.throwIf (unlistedVariants != [ ])
   {
     inherit (pkgs) lib;
 
-    inherit (nanopynixVersions.stable)
+    inherit (exported)
       nanopynix
       nanopynix-bindings
       nanopynix-helpers
@@ -1008,6 +1072,7 @@ lib.throwIf (unlistedVariants != [ ])
       pkgs
       nanopynixVersions
       nanopynixForWheel
+      nanopynixForHuggorm
       # The C and C++ closure that the wheel bundles, and the stdenv that
       # builds it. `cxxRuntime` is the one C++ runtime of that closure, and it
       # is a build of its own that has its own gate.
