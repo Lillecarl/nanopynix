@@ -186,6 +186,15 @@ class _PathInfo:
         self.sigs: list[str] = [signature.to_string() for signature in info.sigs()]
 
 
+def _added_name(name: str | None, path: str) -> str:
+    """The name an added path gets: *name*, else the last component of *path*.
+
+    ``os.path.basename`` and not ``Path.name``: a trailing slash leaves no
+    name, as it does in the other engine, and Nix refuses the empty one.
+    """
+    return os.path.basename(path) if name is None else name  # noqa: PTH119 -- Path.name drops a trailing slash
+
+
 class Store:
     """A huggorm ``Store`` that answers the other engine's method names.
 
@@ -251,6 +260,14 @@ class Store:
 
     def ensure_path(self, path: Any) -> None:
         self.store.ensure_path(path)
+
+    def add_to_store(self, path: str, name: str | None = None, method: str = "nar", hash_algo: str = "sha256") -> Any:
+        return self.store.add_path_to_store(_added_name(name, path), path, method, hash_algo)
+
+    def compute_store_path(
+        self, path: str, name: str | None = None, method: str = "nar", hash_algo: str = "sha256"
+    ) -> Any:
+        return self.store.compute_store_path(_added_name(name, path), path, method, hash_algo)
 
     def add_temp_root(self, path: Any) -> None:
         self.store.add_temp_root(path)
