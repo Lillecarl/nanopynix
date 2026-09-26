@@ -148,11 +148,16 @@ async def test_an_interrupted_value_can_be_forced_again(
 
     ``import`` caches a file's value in the evaluator, so both evaluations
     below force the same thunk ``a``.
+
+    The list is built before the cancel scope, as in the test above. Building
+    it polls no ``checkInterrupt()``, and under a sanitizer it outlasts the
+    interrupt grace, so a cancel there abandons the evaluator instead.
     """
     root = tmp_path / "root.nix"
-    await anyio.Path(root).write_text(f"{{ a = builtins.toJSON ({INTERRUPTIBLE}); }}\n")
+    await anyio.Path(root).write_text(f"rec {{ l = {INTERRUPTIBLE}; a = builtins.toJSON l; }}\n")
     select = f"(import {root}).a"
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as evaluator:
+        await evaluator.string(f"builtins.length (import {root}).l")
         with anyio.move_on_after(CANCEL_AFTER) as scope:
             await evaluator.string(select)
         assert scope.cancelled_caught, "the work ended before the deadline, so this test cancelled nothing"
