@@ -40,6 +40,7 @@ import anyio
 import janus
 from nanopynix_proto.nix.common import EventsDropped, LogEvent as LogEventProto
 
+from nanopynix._engine import flush_logs
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.models import LogEvent
 
@@ -168,7 +169,13 @@ class LogCollector:
         self._put_log((LogStreamEventKind.NIX, req_id, action, *args))
 
     def request_finalized(self, request_id: int) -> None:
-        """Enqueue the typed operation boundary after its Nix work finishes."""
+        """Enqueue the typed operation boundary after its Nix work finishes.
+
+        The engine delivers its queued records first. An engine that queues
+        them would otherwise let the marker overtake the records it closes,
+        and a :class:`LogCapture` would stop listening before they arrived.
+        """
+        flush_logs()
         self._put_control((LogStreamEventKind.FINALIZED, request_id))
 
     def _put_log(self, item: Any) -> None:

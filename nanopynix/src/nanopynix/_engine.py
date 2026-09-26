@@ -80,6 +80,8 @@ if TYPE_CHECKING or ENGINE == "nanopynix_bindings":
         set_verbosity as set_verbosity,
     )
 
+    from nanopynix._engine_bindings import flush_logs as flush_logs
+
 else:
     from nanopynix._engine_huggorm import (
         STORE_DISPATCH_METHODS as STORE_DISPATCH_METHODS,
@@ -98,6 +100,7 @@ else:
         fetchers as fetchers,
         filter_ansi_escapes as filter_ansi_escapes,
         flake as flake,
+        flush_logs as flush_logs,
         get_env_sh_path as get_env_sh_path,
         get_flake as get_flake,
         get_verbosity as get_verbosity,
