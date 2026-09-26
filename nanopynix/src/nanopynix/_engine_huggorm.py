@@ -166,8 +166,130 @@ parse_flake_ref = _not_ported("parse_flake_ref")
 
 STORE_DISPATCH_METHODS: tuple[str, ...] = ()
 BuildMode = _not_ported("BuildMode")
-Store = _not_ported("Store")
-open_store = _not_ported("open_store")
+
+
+class _PathInfo:
+    """A huggorm ``PathInfo`` in the other engine's shape: strings, and paths absolute."""
+
+    __slots__ = ("ca", "deriver", "nar_hash", "nar_size", "path", "references", "registration_time", "sigs", "ultimate")
+
+    def __init__(self, info: Any) -> None:
+        prefix = f"{info.store_dir()}/"
+        deriver = info.deriver()
+        ca = info.ca()
+        self.path: str = prefix + info.path().to_string()
+        self.references: list[str] = [prefix + reference.to_string() for reference in info.references()]
+        self.nar_hash: str = info.nar_hash().sri()
+        self.nar_size: int = info.nar_size()
+        # The other engine reports Nix's unset time, 0, as None.
+        self.registration_time: int | None = info.registration_time() or None
+        self.deriver: str | None = None if deriver is None else prefix + deriver.to_string()
+        self.ca: str | None = None if ca is None else ca.render()
+        self.ultimate: bool = info.ultimate()
+        self.sigs: list[str] = [signature.to_string() for signature in info.sigs()]
+
+
+class Store:
+    """A huggorm ``Store`` that answers the other engine's method names.
+
+    ``nanopynix._core._objects.CoreStore`` is the one caller, so its calls are
+    the whole surface. A method not ported yet is a placeholder, and calling it
+    raises :class:`NotPortedError` naming ``Store.<method>``.
+    """
+
+    def __init__(self, store: Any) -> None:
+        self.store = store
+
+    def __getattr__(self, name: str) -> type:
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return _not_ported(f"Store.{name}")
+
+    def close(self) -> None:
+        self.store.close()
+
+    def get_store_dir(self) -> str:
+        return self.store.store_dir()
+
+    def get_uri(self, *, with_params: bool = False) -> str:
+        return self.store.reference() if with_params else self.store.get_uri()
+
+    def parse_store_path(self, path: str) -> Any:
+        return self.store.parse_store_path(path)
+
+    def is_valid_path(self, path: Any) -> bool:
+        return self.store.is_valid_path(path)
+
+    def query_path_info_typed(self, path: Any) -> _PathInfo:
+        return _PathInfo(self.store.query_path_info(path))
+
+    def follow_links_to_store_path(self, path: str) -> Any:
+        return self.store.follow_links_to_store_path(path)
+
+    def query_path_from_hash_part(self, hash_part: str) -> Any:
+        return self.store.query_path_from_hash_part(hash_part)
+
+    def query_all_valid_paths(self) -> list[Any]:
+        return self.store.query_all_valid_paths()
+
+    def compute_fs_closure(
+        self, path: Any, flip_direction: bool, include_outputs: bool, include_derivers: bool
+    ) -> list[Any]:
+        return self.store.compute_fs_closure([path], flip_direction, include_outputs, include_derivers)
+
+    def query_derivation_outputs(self, path: Any) -> list[Any]:
+        return list(self.store.query_derivation_output_map(path).values())
+
+    def query_valid_derivers(self, path: Any) -> list[Any]:
+        return self.store.query_valid_derivers(path)
+
+    def query_referrers(self, path: Any) -> list[Any]:
+        return self.store.query_referrers(path)
+
+    def query_substitutable_paths(self, paths: list[Any]) -> list[Any]:
+        return self.store.query_substitutable_paths(paths)
+
+    def get_build_log(self, path: Any) -> str | None:
+        return self.store.get_build_log(path)
+
+    def ensure_path(self, path: Any) -> None:
+        self.store.ensure_path(path)
+
+    def add_temp_root(self, path: Any) -> None:
+        self.store.add_temp_root(path)
+
+    def copy_closure(
+        self, paths: list[Any], destination: Store, repair: bool, check_sigs: bool, substitute: bool
+    ) -> None:
+        self.store.copy_closure(destination.store, paths, repair, check_sigs, substitute)
+
+
+def open_store(uri: str) -> Store:
+    return Store(huggorm_bindings.Store(uri))
+
+
+def parse_store_reference(uri: str) -> dict[str, Any]:
+    """A store URI as libstore reads it, in the dict the other engine returns."""
+    reference = huggorm_bindings.parse_store_reference(uri)
+    match reference.variant():
+        case huggorm_bindings.StoreReferenceAuto():
+            kind, scheme, authority = "Auto", None, None
+        case huggorm_bindings.StoreReferenceDaemon():
+            kind, scheme, authority = "Daemon", "unix", ""
+        case huggorm_bindings.StoreReferenceLocal():
+            kind, scheme, authority = "Local", "local", ""
+        case specified:
+            kind, scheme, authority = "Specified", specified.scheme(), specified.authority()
+    return {
+        "type": kind,
+        "scheme": scheme,
+        "authority": authority,
+        "params": reference.params(),
+        "render": reference.render(),
+        "render_without_params": reference.render(with_params=False),
+    }
+
+
 process_connection = _not_ported("process_connection")
 register_store_implementation = _not_ported("register_store_implementation")
 
@@ -379,7 +501,14 @@ def parse_nix_path(value: str | None = None) -> list[str]:
 
 
 expr = _not_ported("expr", init_libexpr=init_libexpr, is_pseudo_url=is_pseudo_url, parse_nix_path=parse_nix_path)
-store = _not_ported("store", render_store_reference=huggorm_bindings.render_store_reference)
+store = _not_ported(
+    "store",
+    Store=Store,
+    StorePath=huggorm_bindings.StorePath,
+    open_store=open_store,
+    parse_store_reference=parse_store_reference,
+    render_store_reference=huggorm_bindings.render_store_reference,
+)
 
 
 util = _not_ported(
