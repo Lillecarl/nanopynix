@@ -22,6 +22,9 @@ let
 
   pyproject-nix = import sources.pyproject-nix { inherit lib; };
 
+  # huggorm's packages, for the `-huggorm` scope and for the type gate.
+  huggorm = import sources.huggorm { inherit pkgs; };
+
   # Every Python package this repo needs that does *not* depend on
   # nanopynix-bindings, added to the interpreter's own package set.
   #
@@ -452,7 +455,7 @@ let
               # huggorm's generated bindings, linked against this scope's Nix
               # components. The collector must be the one libexpr links, or
               # the process holds two.
-              huggorm-bindings = (import sources.huggorm { inherit pkgs; }).huggorm-bindings.override {
+              huggorm-bindings = huggorm.huggorm-bindings.override {
                 inherit (final)
                   nix-util
                   nix-store
@@ -655,7 +658,10 @@ let
               # An attrset of derivations, not one derivation, so a failing
               # run names the gate. `flake.nix` puts it under `checks`; the
               # `packages` filter drops it, which is what we want.
-              checks = final.callPackage ./nix/checks.nix { inherit completionSpike; };
+              checks = final.callPackage ./nix/checks.nix {
+                inherit completionSpike;
+                inherit (huggorm) huggorm-generated;
+              };
             }
           ) scope.packages
         );

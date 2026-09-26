@@ -37,6 +37,8 @@
   ncurses,
   nix,
   completionSpike,
+  # Carries `huggorm_bindings-stubs`, which the type gate reads.
+  huggorm-generated,
 }:
 let
   # Only the trees the gates read. An allowlist, and not the shared denylist
@@ -247,7 +249,14 @@ in
   # command covers the same files as treefmt's python formatter, and no more.
   format = mkCheck "format" [ ruff ] "ruff format --no-cache --check .";
 
-  types = mkCheck "types" [ pyright pythonEnv ] "pyright --pythonpath ${pythonEnv}/bin/python";
+  # `nanopynix/_engine_huggorm.py` calls huggorm's bindings, and no scope that
+  # this gate reads installs them. Their PEP 561 stubs come from
+  # `huggorm-generated`, and pyright reads `PYTHONPATH` through the
+  # interpreter's `sys.path`, so the huggorm engine is checked too.
+  types = mkCheck "types" [
+    pyright
+    pythonEnv
+  ] "PYTHONPATH=${huggorm-generated}/${huggorm-generated.pythonModule.sitePackages} pyright --pythonpath ${pythonEnv}/bin/python";
 
   # `scripts/` was covered by nothing. `writeShellApplication` runs shellcheck
   # over the script it builds, which covers the test runner of
