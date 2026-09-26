@@ -1541,3 +1541,25 @@ async def test_inproc_value_build_raises_on_build_failure(inproc_session: Inproc
         """)
         with pytest.raises(RuntimeError):
             await drv.build()
+
+
+@pytest.mark.anyio
+async def test_tracking_activities_turns_the_gate_on_for_the_block(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    """The block turns Nix's activity gate on, and the exit restores the session's own setting."""
+    async with inproc_session() as nix:
+        assert not nanopynix_util.get_activity_tracking()
+        with nix.tracking_activities():
+            assert nanopynix_util.get_activity_tracking()
+        assert not nanopynix_util.get_activity_tracking()
+
+
+@pytest.mark.anyio
+async def test_tracking_activities_restores_a_session_that_tracks(
+    inproc_session: InprocSessionFactory,
+) -> None:
+    async with inproc_session(activity_tracking=True) as nix:
+        with nix.tracking_activities():
+            assert nanopynix_util.get_activity_tracking()
+        assert nanopynix_util.get_activity_tracking()

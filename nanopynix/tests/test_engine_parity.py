@@ -176,6 +176,10 @@ LEDGER: dict[str, str] = {
         "purpose -- it is how a caller reaches a binding this facade does not wrap, and running it anywhere "
         "but that thread is an error the evaluator refuses."
     ),
+    "Session.tracking_activities:inproc-only": (
+        "TRANSPORT: Nix's activity gate is process-wide. rpc sets it once for each worker, from "
+        "`activity_tracking=` at spawn, and has no call that changes it on a running worker."
+    ),
     # "Session.capture_logs:rpc-only" retired here. LogCapture was rpc's, in
     # rpc.client.session, over a ContextVar in rpc.client._pool -- but nothing
     # about recording log events depends on where Nix runs, and inproc already

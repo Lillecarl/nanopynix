@@ -9,6 +9,7 @@ evaluator thread-affinity requirements.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import itertools
 import json
@@ -103,7 +104,7 @@ def normalize_nix_path(nix_path: str | Sequence[str] | None) -> list[str]:
 
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+    from collections.abc import AsyncIterator, Callable, Generator, Mapping, Sequence
     from os import PathLike
 
     from nanopynix_proto.nix.common import GcAction, StoreDirs
@@ -925,6 +926,22 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         defaults, which suit a caller that reads its logs.
         """
         return LogCapture(self, max_events=max_events, wait_timeout=wait_timeout)
+
+    @contextlib.contextmanager
+    def tracking_activities(self) -> Generator[None]:
+        """Deliver build and copy activities at any verbosity, for one block.
+
+        The constructor's *activity_tracking* sets this for the life of the
+        session. This sets it for the block, and then restores the session's
+        own setting. Nix's gate is process-wide, and a process holds one open
+        :class:`Session`, so the session is what may change it.
+        """
+        self._check_open()
+        nanopynix_util.set_activity_tracking(True)
+        try:
+            yield
+        finally:
+            nanopynix_util.set_activity_tracking(self._activity_tracking)
 
 
 class Store(AsyncStore):
