@@ -416,6 +416,18 @@ class Store:
     def optimise_store(self) -> None:
         self.store.optimise_store()
 
+    def verify_store(self, check_contents: bool, repair: bool) -> bool:
+        return self.store.verify_store(check_contents, repair)
+
+    def add_indirect_root(self, path: str) -> None:
+        self.store.add_indirect_root(path)
+
+    def find_roots(self, censor: bool) -> list[dict[str, str]]:
+        return [
+            {"link": root.link(), "path": self.store.print_store_path(root.path())}
+            for root in self.store.find_roots(censor)
+        ]
+
     def collect_garbage(
         self, action: GCAction, ignore_liveness: bool, paths_to_delete: list[Any], max_freed: int
     ) -> dict[str, Any]:
