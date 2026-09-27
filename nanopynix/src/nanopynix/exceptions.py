@@ -697,6 +697,10 @@ _NIX_EXCEPTION_TYPES: dict[str, type[NixError]] = {
     "SysError": NixSysError,
     "UsageError": UsageError,
     "UnimplementedError": UnimplementedError,
+    # huggorm's spellings, where they differ from the C++ name: a Python
+    # name that would shadow a builtin, and the root it calls `NixError`.
+    "NixError": NixError,
+    "NixTypeError": NixTypeError,
 }
 
 
@@ -748,8 +752,12 @@ def translate_nix_exception(exc: BaseException) -> NixError | None:
         return None
     if not is_engine_error(exc):
         return None
-    type_name = type(exc).__name__
-    base = exception_for_nix_type(type_name)
+    # The nearest class the table names, so an engine class with no entry of
+    # its own, such as huggorm's `BadStorePathName`, maps as its parent does.
+    base = next(
+        (known for kind in type(exc).__mro__ if (known := exception_for_nix_type(kind.__name__)) is not None),
+        None,
+    )
     if base is None:
         return None
     message = str(exc)
