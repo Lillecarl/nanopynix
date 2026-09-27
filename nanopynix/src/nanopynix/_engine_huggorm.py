@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import threading
+import time
 import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, cast
@@ -610,6 +611,20 @@ def _cleanup_primop_registry() -> None:
     _primops.clear()
 
 
+def _sleep(seconds: object) -> bool:
+    """``builtins.sleep``, which the other engine adds in C++ for tests.
+
+    It polls no interrupt while it waits, so a cancellation cannot stop it.
+    That is what the cancel tests need.
+    """
+    if isinstance(seconds, bool) or not isinstance(seconds, int | float):
+        raise PrimopError(f"builtins.sleep takes a number of seconds, got {seconds!r}")
+    if seconds < 0:
+        raise PrimopError(f"builtins.sleep takes a number of seconds that is not negative, got {seconds:f}")
+    time.sleep(seconds)
+    return True
+
+
 # `bool` before `int`, because a bool is an int to `isinstance`.
 _SCALAR_MAKERS = ((bool, "make_bool"), (int, "make_int"), (float, "make_float"), (str, "make_string"))
 
@@ -782,6 +797,8 @@ class EvalState:
         self.state = huggorm_bindings.EvalState(
             store.store, settings, None if build_store is None else build_store.store
         )
+        # `__`, so it is `builtins.sleep` and does not shadow a `sleep` binding.
+        self.state.register_primop("__sleep", 1, self._primop(_sleep))
         for name, (arity, callback) in _primops.items():
             self.state.register_primop(name, arity, self._primop(callback))
 
