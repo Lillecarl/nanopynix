@@ -698,9 +698,12 @@ _NIX_EXCEPTION_TYPES: dict[str, type[NixError]] = {
     "UsageError": UsageError,
     "UnimplementedError": UnimplementedError,
     # huggorm's spellings, where they differ from the C++ name: a Python
-    # name that would shadow a builtin, and the root it calls `NixError`.
+    # name that would shadow a builtin, the root it calls `NixError`, and
+    # its own two classes for a missing attribute and list index.
     "NixError": NixError,
     "NixTypeError": NixTypeError,
+    "MissingAttribute": MissingAttributeError,
+    "ListIndex": ListIndexError,
 }
 
 
