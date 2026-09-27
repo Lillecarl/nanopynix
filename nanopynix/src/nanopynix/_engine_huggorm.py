@@ -627,6 +627,38 @@ def _sleep(seconds: object) -> bool:
     return True
 
 
+#: What ``to_json`` refuses, by huggorm's type name.
+_NOT_JSON = frozenset({"function", "external"})
+
+
+def _primop_argument(state: Any, primop: str, value: Any) -> object:
+    """A primop's argument as JSON data, or the other engine's error naming what JSON cannot hold."""
+    try:
+        return json.loads(value.to_json(False))
+    except NixError as error:
+        try:
+            kind = _first_non_json(state, value)
+        except NixError:
+            kind = None
+        if kind is None:
+            raise
+        raise EvalError(f"{primop}: argument contains non JSON-compatible Nix value of type '{kind}'") from error
+
+
+def _first_non_json(state: Any, value: Any) -> str | None:
+    state.force(value)
+    kind = value.type_name()
+    if kind in _NOT_JSON:
+        return kind
+    if kind == "list":
+        items = (value.at(index) for index in range(value.length()))
+    elif kind == "attrs":
+        items = (value.get(name) for name in value.names())
+    else:
+        return None
+    return next((found for item in items if (found := _first_non_json(state, item)) is not None), None)
+
+
 # `bool` before `int`, because a bool is an int to `isinstance`.
 _SCALAR_MAKERS = ((bool, "make_bool"), (int, "make_int"), (float, "make_float"), (str, "make_string"))
 
@@ -800,16 +832,16 @@ class EvalState:
             store.store, settings, None if build_store is None else build_store.store
         )
         # `__`, so it is `builtins.sleep` and does not shadow a `sleep` binding.
-        self.state.register_primop("__sleep", 1, self._primop(_sleep))
+        self.state.register_primop("__sleep", 1, self._primop("sleep", _sleep))
         for name, (arity, callback) in _primops.items():
-            self.state.register_primop(name, arity, self._primop(callback))
+            self.state.register_primop(name, arity, self._primop(name, callback))
 
     def __getattr__(self, name: str) -> type:
         if name.startswith("__"):
             raise AttributeError(name)
         return _not_ported(f"EvalState.{name}")
 
-    def _primop(self, callback: Callable[..., Any]) -> Callable[..., Any]:
+    def _primop(self, name: str, callback: Callable[..., Any]) -> Callable[..., Any]:
         # Weak, because the state holds the bridge. A strong reference is a
         # cycle only the cyclic collector frees, and the store stays open until
         # it runs: 20 sessions with one primop held 16 descriptors of the
@@ -821,7 +853,7 @@ class EvalState:
             state = owner()
             if state is None:
                 raise RuntimeError("the evaluator that registered this primop is closed")
-            converted = [json.loads(argument.to_json(False)) for argument in arguments]
+            converted = [_primop_argument(state.state, name, argument) for argument in arguments]
             try:
                 result = callback(*converted)
             except (PrimopError, ValueError) as error:
@@ -842,7 +874,7 @@ class EvalState:
         if arity == 0:
             return self._make(callback())
         name = getattr(callback, "__qualname__", type(callback).__qualname__)
-        return self.state.make_primop(name, arity, self._primop(callback))
+        return self.state.make_primop(name, arity, self._primop(name, callback))
 
     def _make(self, obj: Any) -> Any:
         if isinstance(obj, Value):
