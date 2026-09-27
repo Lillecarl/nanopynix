@@ -181,6 +181,82 @@ class _PathInfo:
         self.sigs: list[str] = [signature.to_string() for signature in info.sigs()]
 
 
+class _MissingPaths:
+    """A huggorm ``MissingPaths`` in the other engine's shape: paths absolute."""
+
+    __slots__ = ("download_size", "nar_size", "unknown", "will_build", "will_substitute")
+
+    def __init__(self, missing: Any, prefix: str) -> None:
+        self.will_build: list[str] = [prefix + path.to_string() for path in missing.will_build()]
+        self.will_substitute: list[str] = [prefix + path.to_string() for path in missing.will_substitute()]
+        self.unknown: list[str] = [prefix + path.to_string() for path in missing.unknown()]
+        self.download_size: int = missing.download_size()
+        self.nar_size: int = missing.nar_size()
+
+
+class _InputDrvNode:
+    """A huggorm ``InputDrvNode`` in the other engine's shape: fields, not methods."""
+
+    __slots__ = ("dynamic_outputs", "outputs")
+
+    def __init__(self, node: Any) -> None:
+        self.outputs: list[str] = node.outputs()
+        self.dynamic_outputs: dict[str, _InputDrvNode] = {
+            name: _InputDrvNode(child) for name, child in node.dynamic_outputs().items()
+        }
+
+
+class _DerivationOutput:
+    """One arm of a huggorm ``DerivationOutput``, flattened to the other engine's five fields."""
+
+    __slots__ = ("ca", "hash_algo", "method", "path", "type")
+
+    def __init__(self, output: Any, prefix: str) -> None:
+        self.path: str | None = None
+        self.ca: str | None = None
+        self.method: str | None = None
+        self.hash_algo: str | None = None
+        match output:
+            case huggorm_bindings.DerivationOutputInputAddressed():
+                self.type = "InputAddressed"
+                self.path = prefix + output.path().to_string()
+            case huggorm_bindings.DerivationOutputCAFixed():
+                self.type = "CAFixed"
+                self.ca = output.ca().render()
+            case huggorm_bindings.DerivationOutputCAFloating():
+                self.type = "CAFloating"
+                self.method, self.hash_algo = str(output.method()), str(output.hash_algo())
+            case huggorm_bindings.DerivationOutputDeferred():
+                self.type = "Deferred"
+            case huggorm_bindings.DerivationOutputImpure():
+                self.type = "Impure"
+                self.method, self.hash_algo = str(output.method()), str(output.hash_algo())
+            case _:
+                raise TypeError(f"huggorm returned an unknown derivation output: {output!r}")
+
+
+class _Derivation:
+    """A huggorm ``Derivation`` in the other engine's shape: strings, and paths absolute."""
+
+    __slots__ = ("args", "builder", "env", "input_drvs", "input_srcs", "name", "outputs", "structured_attrs", "system")
+
+    def __init__(self, drv: Any, store_dir: str) -> None:
+        prefix = f"{store_dir}/"
+        self.name: str = drv.name()
+        self.system: str = drv.system()
+        self.builder: str = drv.builder()
+        self.args: list[str] = drv.args()
+        self.env: dict[str, str] = drv.env()
+        self.input_srcs: list[str] = [prefix + path.to_string() for path in drv.input_srcs()]
+        self.input_drvs: dict[str, _InputDrvNode] = {
+            prefix + base_name: _InputDrvNode(node) for base_name, node in drv.input_drvs().items()
+        }
+        self.outputs: dict[str, _DerivationOutput] = {
+            name: _DerivationOutput(output, prefix) for name, output in drv.outputs().items()
+        }
+        self.structured_attrs: str | None = drv.structured_attrs()
+
+
 def _added_name(name: str | None, path: str) -> str:
     """The name an added path gets: *name*, else the last component of *path*.
 
@@ -252,6 +328,33 @@ class Store:
 
     def get_build_log(self, path: Any) -> str | None:
         return self.store.get_build_log(path)
+
+    def get_store_dirs(self) -> dict[str, str | None]:
+        def text(path: Any) -> str | None:
+            return None if path is None else str(path)
+
+        return {
+            "store_dir": self.store.store_dir(),
+            "uri": self.store.get_uri(),
+            "root_dir": text(self.store.root_dir()),
+            "state_dir": text(self.store.state_dir()),
+            "log_dir": text(self.store.log_dir()),
+            "real_store_dir": text(self.store.real_store_dir()),
+            "build_dir": text(self.store.build_dir()),
+        }
+
+    def query_missing_typed(self, paths: list[str]) -> _MissingPaths:
+        prefix = f"{self.store.store_dir()}/"
+        # The other engine reads a base name as a path in this store.
+        targets = [self.store.parse_derived_path(path if path.startswith("/") else prefix + path) for path in paths]
+        return _MissingPaths(self.store.query_missing(targets), prefix)
+
+    def query_missing(self, paths: list[str]) -> dict[str, Any]:
+        missing = self.query_missing_typed(paths)
+        return {name: getattr(missing, name) for name in _MissingPaths.__slots__}
+
+    def read_derivation_typed(self, drv_path: Any) -> _Derivation:
+        return _Derivation(self.store.read_derivation(drv_path), self.store.store_dir())
 
     def ensure_path(self, path: Any) -> None:
         self.store.ensure_path(path)
