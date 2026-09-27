@@ -1067,13 +1067,13 @@ def build_info() -> dict[str, Any]:
 
 
 def enable_experimental_feature(name: str) -> None:
-    """Add *name* to the enabled features, as ``extra-experimental-features`` does in nix.conf.
+    """Add *name* to the enabled features, and leave the setting's overridden mark.
 
-    An unknown name raises, as the other engine does: the setting only warns.
+    An unknown name raises ``RuntimeError``, as the other engine does.
     """
     if not huggorm_bindings.is_experimental_feature(name):
         raise RuntimeError(f"unknown experimental feature: {name}")
-    huggorm_bindings.set_setting("extra-experimental-features", name)
+    huggorm_bindings.enable_experimental_feature(name)
 
 
 filter_ansi_escapes = huggorm_bindings.filter_ansi_escapes
