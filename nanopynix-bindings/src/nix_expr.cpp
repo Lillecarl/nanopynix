@@ -808,7 +808,7 @@ bool PyEvalState::repl_active() const {
 
 void PyEvalState::repl_bind(nix::Symbol symbol, nix::Value &value) {
     if (repl_displ >= repl_env_capacity)
-        throw std::runtime_error("REPL environment is full");
+        throw nix::Error("environment full; cannot add more variables");
     if (auto oldVar = repl_static_env->find(symbol); oldVar != repl_static_env->vars.end())
         repl_static_env->vars.erase(oldVar);
     repl_static_env->vars.emplace_back(symbol, repl_displ);
@@ -924,7 +924,7 @@ std::vector<std::string> PyEvalState::repl_add_attrs(PyValue attrs) {
     // that shadows per binding, while this sorts and deduplicates once at the
     // end, which is a different operation and a much cheaper one.
     if (repl_displ + bindings->size() > repl_env_capacity)
-        throw std::runtime_error("REPL environment is full");
+        throw nix::Error("environment full; cannot add more variables");
 
     std::vector<std::string> names;
     names.reserve(bindings->size());

@@ -31,6 +31,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from nanopynix.exceptions import NixError
+
 if TYPE_CHECKING:
     from nanopynix_testing.nix_environment import InprocSessionFactory, RpcSessionFactory
 
@@ -75,20 +77,16 @@ async def test_rpc_fills_the_repl_scope_exactly_to_the_end(rpc_session: RpcSessi
 
 # ── One past the end is refused, not written ─────────────────────────
 #
-# `RuntimeError` on both engines, and not narrowed further on purpose. inproc
-# gets the bindings' own `std::runtime_error` translation; rpc gets a
-# `nanopynix.NixError`, which subclasses `RuntimeError` -- so the type a caller
-# writes in an `except` clause agrees, while the exact class and the message
-# text do not (rpc's reads "[Unknown] RuntimeError: ..."). That difference is a
-# property of every non-Nix exception crossing the worker boundary rather than
-# anything about this condition, so it is recorded here and not asserted.
+# Nix's own error and message, from `NixRepl::addAttrsToScope`, on both
+# engines. It is a `nix::Error`, so it arrives as `NixError` in process and
+# over the worker boundary alike.
 
 
 async def test_inproc_refuses_one_binding_past_the_end(inproc_session: InprocSessionFactory) -> None:
-    with pytest.raises(RuntimeError, match="REPL environment is full"):
+    with pytest.raises(NixError, match="environment full; cannot add more variables"):
         await _add_attrs(inproc_session, REPL_ENV_CAPACITY + 1)
 
 
 async def test_rpc_refuses_one_binding_past_the_end(rpc_session: RpcSessionFactory) -> None:
-    with pytest.raises(RuntimeError, match="REPL environment is full"):
+    with pytest.raises(NixError, match="environment full; cannot add more variables"):
         await _add_attrs(rpc_session, REPL_ENV_CAPACITY + 1)
