@@ -67,7 +67,6 @@ def _not_ported(name: str, **ported: object) -> type:
 ENGINE_MODULE = huggorm_bindings
 
 errors = _not_ported("errors")
-flake = _not_ported("flake")
 _scope_ids = itertools.count(1)
 
 
@@ -156,9 +155,6 @@ set_eval_counters_enabled = _not_ported("set_eval_counters_enabled")
 input_from_attrs = _not_ported("input_from_attrs")
 input_from_url = _not_ported("input_from_url")
 
-get_flake = _not_ported("get_flake")
-lock_flake = _not_ported("lock_flake")
-parse_flake_ref = _not_ported("parse_flake_ref")
 
 STORE_DISPATCH_METHODS: tuple[str, ...] = ()
 BuildMode = _not_ported("BuildMode")
@@ -559,6 +555,81 @@ class EvalState:
 
 def eval_file(state: EvalState, path: str) -> Value:
     return state.eval_file(path)
+
+
+class LockedFlake:
+    """A locked flake, in the shape the other engine's ``LockedFlake`` has."""
+
+    __slots__ = ("raw",)
+
+    def __init__(self, raw: Any) -> None:
+        self.raw: Any = raw
+
+    def description(self) -> str:
+        return self.raw.description() or ""
+
+    def find_input(self, path: list[str]) -> dict[str, Any] | None:
+        node = self.raw.find_input(path)
+        if node is None:
+            return None
+        return {
+            "locked_ref": node.locked_ref().to_string(),
+            "original_ref": node.original_ref().to_string(),
+            "is_flake": node.is_flake(),
+        }
+
+    def write_lock_file(self) -> None:
+        self.raw.write_lock_file()
+
+
+def _lock_flake(
+    state: EvalState,
+    ref: Any,
+    update_inputs: bool | list[str] = False,
+    write_lock_file: bool = True,
+    flake_settings: dict[str, str] | None = None,
+) -> LockedFlake:
+    """``update_inputs`` is True to recreate the lock file, or the inputs to update."""
+    recreate, update = (update_inputs, []) if isinstance(update_inputs, bool) else (False, list(update_inputs))
+    return LockedFlake(
+        state.state.lock_flake(
+            ref, recreate=recreate, update=update, write_lock_file=write_lock_file, settings=flake_settings or {}
+        )
+    )
+
+
+def _call_flake(state: EvalState, locked: LockedFlake) -> Value:
+    return Value(state, state.state.call_flake(locked.raw))
+
+
+def _get_flake(state: EvalState, ref: Any) -> Any:
+    return state.state.get_flake(ref)
+
+
+def _metadata_json(state: EvalState, locked: LockedFlake) -> str:
+    return state.state.flake_metadata_json(locked.raw)
+
+
+def _eval_flake(
+    state: EvalState, ref: str, write_lock_file: bool = True, flake_settings: dict[str, str] | None = None
+) -> Value:
+    locked = _lock_flake(state, huggorm_bindings.parse_flake_ref(ref), False, write_lock_file, flake_settings)
+    return _call_flake(state, locked)
+
+
+flake = _not_ported(
+    "flake",
+    LockedFlake=LockedFlake,
+    call_flake=_call_flake,
+    eval_flake=_eval_flake,
+    get_flake=_get_flake,
+    lock_flake=_lock_flake,
+    metadata_json=_metadata_json,
+    parse_flake_ref=huggorm_bindings.parse_flake_ref,
+)
+get_flake = _get_flake
+lock_flake = _lock_flake
+parse_flake_ref = huggorm_bindings.parse_flake_ref
 
 
 process_connection = _not_ported("process_connection")
