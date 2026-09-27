@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 import huggorm_bindings  # type: ignore[reportMissingImports] -- installed only in the huggorm scope
+from huggorm_bindings.errors import NixError  # type: ignore[reportMissingImports] -- as above
 
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import NO_GC_LIMIT
@@ -452,6 +453,38 @@ class Store:
 
     def read_derivation_typed(self, drv_path: Any) -> _Derivation:
         return _Derivation(self.store.read_derivation(drv_path), self.store.store_dir())
+
+    def write_dev_shell_derivation(self, drv_path: Any, get_env_script: str) -> Any:
+        """``getDerivationEnvironment`` in Nix's ``develop.cc``, over the derivation's JSON.
+
+        ``add_derivation`` fills in the deferred output paths, so no Nix version
+        branch and no hash computation happens here.
+        """
+        document = json.loads(self.store.read_derivation(drv_path).to_json())
+        if os.path.basename(document["builder"]) != "bash":  # noqa: PTH119 -- Nix's baseNameOf, on a string
+            raise NixError("'develop' only works on derivations that use 'bash' as their builder")
+        script = self.store.add_to_store(
+            "get-env.sh",
+            get_env_script.encode(),
+            huggorm_bindings.ContentAddressMethod.TEXT,
+            huggorm_bindings.HashAlgorithm.SHA256,
+        )
+        document["args"] = [self.store.print_store_path(script)]
+        # A dev shell is not the build, so the build's reference checks do not apply.
+        if document.get("structuredAttrs") is not None:
+            document["structuredAttrs"].pop("outputChecks", None)
+        else:
+            for check in ("allowedReferences", "allowedRequisites", "disallowedReferences", "disallowedRequisites"):
+                document["env"].pop(check, None)
+        document["name"] += "-env"
+        document["env"]["name"] = document["name"]
+        document["inputs"]["srcs"].append(script.to_string())
+        for name, output in document["outputs"].items():
+            # Input-addressed and fixed outputs have a path to invalidate; the other kinds have none.
+            if "path" in output or "hash" in output:
+                document["outputs"][name] = {}
+                document["env"][name] = ""
+        return self.store.add_derivation(json.dumps(document))
 
     def ensure_path(self, path: Any) -> None:
         self.store.ensure_path(path)
