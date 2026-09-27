@@ -723,6 +723,13 @@ class EvalState:
     def value_from_python(self, obj: object) -> Value:
         return Value(self, self._make(obj))
 
+    # huggorm takes both kinds through one method, as its constructor does.
+    def set_eval_setting(self, name: str, value: str) -> None:
+        self.state.set_setting(name, value)
+
+    def set_fetch_setting(self, name: str, value: str) -> None:
+        self.state.set_setting(name, value)
+
     def begin_repl(self) -> None:
         if self._repl is not None:
             raise RuntimeError("REPL scope is already active")
