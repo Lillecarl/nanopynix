@@ -485,6 +485,7 @@ class EvalState:
             configured = huggorm_bindings.get_setting("nix-path") or ""
             settings["nix-path"] = " ".join([*search_path, configured]).strip()
         self.store = store
+        self._repl: Any = None
         self.state = huggorm_bindings.EvalState(
             store.store, settings, None if build_store is None else build_store.store
         )
@@ -542,9 +543,43 @@ class EvalState:
     def value_from_python(self, obj: object) -> Value:
         return Value(self, self._make(obj))
 
+    def begin_repl(self) -> None:
+        if self._repl is not None:
+            raise RuntimeError("REPL scope is already active")
+        self._repl = self.state.repl()
+
     def repl_active(self) -> bool:
-        """No: this engine has no REPL scope yet, so none is ever active."""
-        return False
+        return self._repl is not None
+
+    def _scope(self) -> Any:
+        if self._repl is None:
+            raise RuntimeError("REPL scope is not active")
+        return self._repl
+
+    def repl_process_line(self, line: str, path: str) -> Value | None:
+        made = self._scope().process_line(line, path)
+        return None if made is None else Value(self, made)
+
+    def repl_eval_string(self, expression: str, path: str) -> Value:
+        return Value(self, self._scope().eval_expr(expression, path))
+
+    def repl_eval_file(self, path: str) -> Value:
+        return Value(self, self._scope().eval_file(path))
+
+    def repl_load_file(self, path: str) -> Value:
+        return Value(self, self._scope().load_file(path))
+
+    def repl_add_attrs(self, value: Value) -> list[str]:
+        return self._scope().add_attrs(value.raw)
+
+    def repl_scope_names(self) -> list[str]:
+        return self._scope().names()
+
+    def repl_select(self, expression: str, path: str = "<string>") -> dict[str, Any] | None:
+        selected = self._scope().select(expression, path)
+        if selected is None:
+            return None
+        return {"name": selected.name(), "attrs": Value(self, selected.attrs())}
 
     def reset_file_cache(self) -> None:
         # `«nix-internal»/derivation-internal.nix` names no file to forget.

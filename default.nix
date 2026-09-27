@@ -462,6 +462,7 @@ let
                   nix-expr
                   nix-fetchers
                   nix-flake
+                  nix-cmd
                   ;
                 python3Packages = python.pkgs;
                 boehmgc = patchedBoehmGC;
