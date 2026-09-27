@@ -14,6 +14,7 @@ imports this module, and ``nanopynix._engine`` decides that.
 
 from __future__ import annotations
 
+import dataclasses
 import enum
 import importlib.resources
 import inspect
@@ -29,6 +30,7 @@ from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 import huggorm_bindings  # type: ignore[reportMissingImports] -- installed only in the huggorm scope
 from huggorm_bindings.errors import BadStorePath, EvalError, NixError  # type: ignore[reportMissingImports] -- as above
+from nanopynix_proto.nix.common import ActivityType, ResultType
 
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import NO_GC_LIMIT
@@ -1091,6 +1093,83 @@ def _callback_args(record: Any) -> tuple[object, ...] | None:
             return None
 
 
+@dataclasses.dataclass(slots=True)
+class _Tracked:
+    type: int
+    last_progress: float = 0.0
+    last_counts: list[int | str] | None = None
+
+
+class _ActivityFilter:
+    """The other engine's ``ActivityTracker``: what a build monitor reads, and only then.
+
+    Off, a start with text goes up, as ``SimpleLogger`` prints it, and no stop
+    or progress does. On, the four types a monitor reads go up whole: start,
+    stop, phase, expected and progress. A copy's progress goes up at most once
+    per interval; a summary's goes up only when its counts change, because
+    Nix sends both summaries on every update of the worker.
+    """
+
+    _WANTED = frozenset({ActivityType.COPY_PATH, ActivityType.COPY_PATHS, ActivityType.BUILDS, ActivityType.BUILD})
+    _TRACKED_RESULTS = frozenset({ResultType.SET_PHASE, ResultType.PROGRESS, ResultType.SET_EXPECTED})
+    _LOG_LINES = frozenset({ResultType.BUILD_LOG_LINE, ResultType.POST_BUILD_LOG_LINE})
+    _PROGRESS_INTERVAL = 0.1
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.enabled = False
+        self._tracked: dict[int, _Tracked] = {}
+
+    def set_enabled(self, on: bool) -> None:
+        with self._lock:
+            self.enabled = on
+            if not on:
+                self._tracked.clear()
+
+    def passes(self, record: Any) -> bool:
+        match record.action():
+            case "start":
+                return self._start(record) or bool(record.text())
+            case "stop":
+                with self._lock:
+                    return self._tracked.pop(record.id(), None) is not None
+            case "result":
+                return record.type() in self._LOG_LINES or self._result(record)
+            case _:
+                return True
+
+    def _start(self, record: Any) -> bool:
+        with self._lock:
+            if not self.enabled or record.type() not in self._WANTED:
+                return False
+            self._tracked[record.id()] = _Tracked(record.type())
+            return True
+
+    def _result(self, record: Any) -> bool:
+        if record.type() not in self._TRACKED_RESULTS:
+            return False
+        with self._lock:
+            tracked = self._tracked.get(record.id())
+            if tracked is None:
+                return False
+            return record.type() != ResultType.PROGRESS or self._progress_is_news(tracked, record)
+
+    def _progress_is_news(self, tracked: _Tracked, record: Any) -> bool:
+        if tracked.type == ActivityType.COPY_PATH:
+            now = time.monotonic()
+            due = now - tracked.last_progress >= self._PROGRESS_INTERVAL
+            if due:
+                tracked.last_progress = now
+            return due
+        counts = [*_field_values(record), 0, 0, 0, 0][:4]
+        changed = counts != tracked.last_counts
+        tracked.last_counts = counts
+        return changed
+
+
+_activity_filter = _ActivityFilter()
+
+
 class _LogPump:
     """Drains huggorm's process queue into one callback.
 
@@ -1140,6 +1219,8 @@ class _LogPump:
     def pump(self) -> None:
         with self._lock:
             for record in self._stream.drain():
+                if not _activity_filter.passes(record):
+                    continue
                 args = _callback_args(record)
                 if args is None:
                     continue
@@ -1217,22 +1298,13 @@ def _after_fork_in_child() -> None:
 os.register_at_fork(before=_before_fork, after_in_parent=_after_fork_in_parent, after_in_child=_after_fork_in_child)
 
 
-_activity_tracking = False
-
-
 def set_activity_tracking(on: bool) -> None:
-    """Record the choice. huggorm has no activity filter yet, so it sends every activity.
-
-    Every activity is a superset of what tracking forwards, so a build
-    monitor still sees its builds and copies. The filter that narrows the
-    rest is the next step of huggorm ``tasks/097``.
-    """
-    global _activity_tracking  # noqa: PLW0603 -- process-wide, like the filter it stands for
-    _activity_tracking = on
+    """Forward what a build monitor reads, as :class:`_ActivityFilter` says."""
+    _activity_filter.set_enabled(on)
 
 
 def get_activity_tracking() -> bool:
-    return _activity_tracking
+    return _activity_filter.enabled
 
 
 _config_loaded = False
