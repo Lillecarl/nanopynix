@@ -628,6 +628,29 @@ class Value:
     def realise_argv(self) -> list[str]:
         return self._forced().realise_argv()
 
+    def get_doc(self) -> dict[str, Any] | None:
+        doc = self.raw.doc()
+        if doc is None:
+            return None
+        return {
+            "name": doc.name(),
+            "args": doc.args(),
+            "arity": doc.arity(),
+            "doc": doc.doc(),
+            "path": doc.path(),
+            "line": doc.line(),
+        }
+
+    def attr_doc(self, name: str) -> dict[str, Any] | None:
+        doc = self.raw.attr_doc(name)
+        if doc is None:
+            return None
+        return {"path": doc.path(), "line": doc.line(), "doc": doc.doc()}
+
+    def edit_location(self) -> dict[str, Any]:
+        location = self.raw.edit_location()
+        return {"path": location.path(), "line": location.line()}
+
     def attr_get(self, name: str) -> Value:
         return self._child(self._forced().get(name))
 
