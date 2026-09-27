@@ -660,7 +660,7 @@ let
               # `packages` filter drops it, which is what we want.
               checks = final.callPackage ./nix/checks.nix {
                 inherit completionSpike;
-                inherit (huggorm) huggorm-generated;
+                inherit (huggorm) huggorm-generated huggorm-bindings;
               };
             }
           ) scope.packages

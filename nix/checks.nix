@@ -39,6 +39,8 @@
   completionSpike,
   # Carries `huggorm_bindings-stubs`, which the type gate reads.
   huggorm-generated,
+  # The runtime package those stubs fall back to.
+  huggorm-bindings,
 }:
 let
   # Only the trees the gates read. An allowlist, and not the shared denylist
@@ -253,10 +255,18 @@ in
   # this gate reads installs them. Their PEP 561 stubs come from
   # `huggorm-generated`, and pyright reads `PYTHONPATH` through the
   # interpreter's `sys.path`, so the huggorm engine is checked too.
-  types = mkCheck "types" [
-    pyright
-    pythonEnv
-  ] "PYTHONPATH=${huggorm-generated}/${huggorm-generated.pythonModule.sitePackages} pyright --pythonpath ${pythonEnv}/bin/python";
+  #
+  # The runtime package goes on the path as well. The stubs are `partial`:
+  # a vocabulary such as `RegistryType` is plain Python in `words.py`, which
+  # no stub describes, and without it every word a stub names is Unknown.
+  types =
+    let
+      sitePackages = drv: "${drv}/${drv.pythonModule.sitePackages}";
+    in
+    mkCheck "types" [
+      pyright
+      pythonEnv
+    ] "PYTHONPATH=${sitePackages huggorm-generated}:${sitePackages huggorm-bindings} pyright --pythonpath ${pythonEnv}/bin/python";
 
   # `scripts/` was covered by nothing. `writeShellApplication` runs shellcheck
   # over the script it builds, which covers the test runner of
