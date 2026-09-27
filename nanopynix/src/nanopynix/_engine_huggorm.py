@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 import huggorm_bindings  # type: ignore[reportMissingImports] -- installed only in the huggorm scope
-from huggorm_bindings.errors import BadStorePath, NixError  # type: ignore[reportMissingImports] -- as above
+from huggorm_bindings.errors import BadStorePath, EvalError, NixError  # type: ignore[reportMissingImports] -- as above
 
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import NO_GC_LIMIT
@@ -820,7 +820,13 @@ class EvalState:
             if state is None:
                 raise RuntimeError("the evaluator that registered this primop is closed")
             converted = [json.loads(argument.to_json(False)) for argument in arguments]
-            return state._make(callback(*converted))
+            try:
+                result = callback(*converted)
+            except (PrimopError, ValueError) as error:
+                # The other engine's rule: these two reject the input, so Nix
+                # shows their message bare. huggorm does that for its own errors.
+                raise EvalError(str(error)) from error
+            return state._make(result)
 
         return bridge
 
