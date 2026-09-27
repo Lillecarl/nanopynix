@@ -375,6 +375,10 @@ class Store:
     def get_build_log(self, path: Any) -> str | None:
         return self.store.get_build_log(path)
 
+    def dump_db(self, paths: list[Any], show_derivers: bool, show_hash: bool) -> str:
+        # One path at a time: Nix takes a set, and the other engine keeps the caller's order.
+        return "".join(self.store.make_validity_registration([path], show_derivers, show_hash) for path in paths)
+
     def get_store_dirs(self) -> dict[str, str | None]:
         def text(path: Any) -> str | None:
             return None if path is None else str(path)
