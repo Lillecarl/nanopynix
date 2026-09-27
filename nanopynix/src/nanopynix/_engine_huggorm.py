@@ -67,7 +67,6 @@ def _not_ported(name: str, **ported: object) -> type:
 ENGINE_MODULE = huggorm_bindings
 
 errors = _not_ported("errors")
-fetchers = _not_ported("fetchers")
 flake = _not_ported("flake")
 _scope_ids = itertools.count(1)
 
@@ -302,6 +301,47 @@ def parse_store_reference(uri: str) -> dict[str, Any]:
         "render": reference.render(),
         "render_without_params": reference.render(with_params=False),
     }
+
+
+def _registry_write(wrote: Any) -> dict[str, Any]:
+    return {"path": wrote.path(), "removed": wrote.removed(), "to": wrote.target(), "locked": wrote.locked()}
+
+
+def _list_registry_entries(store: Store, fetch_settings: dict[str, str]) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": str(entry.layer()),
+            "from": entry.source(),
+            "to": entry.target(),
+            "exact": entry.exact(),
+            "extra_attrs": entry.extra_attrs(),
+        }
+        for entry in huggorm_bindings.registry_entries(store.store, fetch_settings)
+    ]
+
+
+def _registry_add(path: str, from_url: str, to_url: str, fetch_settings: dict[str, str]) -> dict[str, Any]:
+    return _registry_write(huggorm_bindings.registry_add(path or None, from_url, to_url, settings=fetch_settings))
+
+
+def _registry_remove(path: str, from_url: str, fetch_settings: dict[str, str]) -> dict[str, Any]:
+    return _registry_write(huggorm_bindings.registry_remove(path or None, from_url, settings=fetch_settings))
+
+
+def _registry_pin(store: Store, path: str, url: str, locked_url: str, fetch_settings: dict[str, str]) -> dict[str, Any]:
+    return _registry_write(
+        huggorm_bindings.registry_pin(store.store, path or None, url, locked_url or None, settings=fetch_settings)
+    )
+
+
+fetchers = _not_ported(
+    "fetchers",
+    list_registry_entries=_list_registry_entries,
+    user_registry_path=huggorm_bindings.user_registry_path,
+    registry_add=_registry_add,
+    registry_remove=_registry_remove,
+    registry_pin=_registry_pin,
+)
 
 
 class PrimopError(Exception):
