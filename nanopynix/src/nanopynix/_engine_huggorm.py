@@ -14,6 +14,7 @@ imports this module, and ``nanopynix._engine`` decides that.
 
 from __future__ import annotations
 
+import enum
 import itertools
 import json
 import logging
@@ -157,7 +158,52 @@ input_from_url = _not_ported("input_from_url")
 
 
 STORE_DISPATCH_METHODS: tuple[str, ...] = ()
-BuildMode = _not_ported("BuildMode")
+
+
+class BuildMode(enum.IntEnum):
+    """Nix's build modes, by the names and integers the other engine uses."""
+
+    Normal = 0
+    Repair = 1
+    Check = 2
+
+    def huggorm(self) -> Any:
+        return huggorm_bindings.BuildMode[self.name.upper()]
+
+
+def _build_result(result: Any, store: Any) -> dict[str, Any]:
+    """A huggorm ``KeyedBuildResult`` as the other engine's dict: paths absolute, statuses as words."""
+    target = result.path()
+    rendered = store.print_derived_path(target)
+    if isinstance(target, huggorm_bindings.DerivedPathBuilt):
+        spec = target.outputs()
+        drv_path, outputs = rendered.rsplit("^", 1)[0], ["*"] if spec.all() else spec.names()
+    else:
+        drv_path, outputs = rendered, []
+    prefix = f"{store.store_dir()}/"
+    success, error = result.success(), result.error()
+    if success is not None:
+        status, error_msg = str(success.status()), ""
+        built_outputs = {
+            name: {
+                "out_path": prefix + realisation.out_path().to_string(),
+                "signatures": [signature.to_string() for signature in realisation.signatures()],
+            }
+            for name, realisation in success.built_outputs().items()
+        }
+    elif error is not None:
+        # `colored` is Nix's message as it came; `message` strips it.
+        status, error_msg, built_outputs = str(error.status), error.colored, {}
+    else:
+        status, error_msg, built_outputs = "unknown", "", {}
+    return {
+        "drv_path": drv_path,
+        "outputs": outputs,
+        "success": success is not None,
+        "status": status,
+        "error_msg": error_msg,
+        "built_outputs": built_outputs,
+    }
 
 
 class _PathInfo:
@@ -344,10 +390,22 @@ class Store:
         }
 
     def query_missing_typed(self, paths: list[str]) -> _MissingPaths:
+        return _MissingPaths(self.store.query_missing(self._derived_paths(paths)), f"{self.store.store_dir()}/")
+
+    def _derived_paths(self, paths: list[str]) -> list[Any]:
         prefix = f"{self.store.store_dir()}/"
         # The other engine reads a base name as a path in this store.
-        targets = [self.store.parse_derived_path(path if path.startswith("/") else prefix + path) for path in paths]
-        return _MissingPaths(self.store.query_missing(targets), prefix)
+        return [self.store.parse_derived_path(path if path.startswith("/") else prefix + path) for path in paths]
+
+    def build_paths_with_results(
+        self, paths: list[str], build_mode: int, eval_store: Store | None
+    ) -> list[dict[str, Any]]:
+        results = self.store.build_paths_with_results(
+            self._derived_paths(paths),
+            BuildMode(build_mode).huggorm(),
+            None if eval_store is None else eval_store.store,
+        )
+        return [_build_result(result, self.store) for result in results]
 
     def query_missing(self, paths: list[str]) -> dict[str, Any]:
         missing = self.query_missing_typed(paths)
@@ -566,6 +624,24 @@ class Value:
 
     def derived_path(self) -> str:
         return f"{self._state.store.get_store_dir()}/{self._forced().drv_path().to_string()}"
+
+    def build(self, build_store: Store | None, build_mode: int, eval_store: Store | None) -> dict[str, Any]:
+        value = self._forced()
+        drv_path = value.drv_path()
+        output_paths = value.output_paths()
+        prefix = f"{self._state.store.get_store_dir()}/"
+        store = self._state.store if build_store is None else build_store
+        target = huggorm_bindings.DerivedPathBuilt(
+            drv_path, huggorm_bindings.OutputsSpec(names=sorted(output_paths) or ["out"])
+        )
+        results = store.store.build_paths_with_results(
+            [target], BuildMode(build_mode).huggorm(), None if eval_store is None else eval_store.store
+        )
+        return {
+            "drv_path": prefix + drv_path.to_string(),
+            "outputs": {name: prefix + path.to_string() for name, path in output_paths.items() if path is not None},
+            "results": [_build_result(result, store.store) for result in results],
+        }
 
 
 class EvalState:
@@ -1046,6 +1122,7 @@ expr = _not_ported(
 )
 store = _not_ported(
     "store",
+    BuildMode=BuildMode,
     Store=Store,
     StorePath=huggorm_bindings.StorePath,
     open_store=open_store,
