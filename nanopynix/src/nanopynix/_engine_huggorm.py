@@ -561,7 +561,8 @@ class Value:
             return functor.call(self).auto_call()
         if value.type_name() == "function" and value.is_lambda() and value.has_formals():
             return self._child(value.apply_auto(self._state.state.make_attrs()))
-        return self
+        # A new wrapper, not `self`: each caller releases what it holds.
+        return Value(self._state, value)
 
     def derived_path(self) -> str:
         return f"{self._state.store.get_store_dir()}/{self._forced().drv_path().to_string()}"
