@@ -661,7 +661,11 @@ class Value:
         return self._forced().integer()
 
     def as_float(self) -> float:
-        return self._forced().floating()
+        # Nix's forceFloat widens an integer; huggorm's accessor reads one kind.
+        value = self._forced()
+        if value.type_name() == "int":
+            return float(value.integer())
+        return value.floating()
 
     def as_bool(self) -> bool:
         return self._forced().boolean()
