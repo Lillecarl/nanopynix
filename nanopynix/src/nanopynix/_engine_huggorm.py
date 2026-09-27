@@ -704,14 +704,13 @@ class Value:
         return self._forced().has(name)
 
     def attr_names(self) -> list[str]:
-        value = self._forced()
-        return [value.name_at(index) for index in range(value.size())]
+        return self._forced().names()
 
     def list_get(self, index: int) -> Value:
         return self._child(self._forced().at(index))
 
     def list_length(self) -> int:
-        return self._forced().size()
+        return self._forced().length()
 
     def call(self, argument: Value) -> Value:
         return self._child(self._forced().apply(argument.raw))
