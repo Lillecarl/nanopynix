@@ -15,12 +15,14 @@ imports this module, and ``nanopynix._engine`` decides that.
 from __future__ import annotations
 
 import enum
+import importlib.resources
 import itertools
 import json
 import logging
 import os
 import threading
 import weakref
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 import huggorm_bindings  # type: ignore[reportMissingImports] -- installed only in the huggorm scope
@@ -136,7 +138,11 @@ class interrupt_scope:  # noqa: N801 -- the other engine's name for the same con
 
 signals = _not_ported("signals", InterruptToken=InterruptToken, interrupt_scope=interrupt_scope)
 
-get_env_sh_path = _not_ported("get_env_sh_path")
+
+def get_env_sh_path() -> Path:
+    """Return Nix's ``get-env.sh``, which ``huggorm_bindings`` carries."""
+    return Path(str(importlib.resources.files(huggorm_bindings) / "get-env.sh"))
+
 
 eval_counters_enabled = _not_ported("eval_counters_enabled")
 
