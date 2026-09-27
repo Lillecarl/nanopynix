@@ -393,6 +393,12 @@ class Store:
             "build_dir": text(self.store.build_dir()),
         }
 
+    def add_perm_root(self, path: Any, gc_root: str) -> str:
+        return str(self.store.add_perm_root(path, gc_root))
+
+    def optimise_store(self) -> None:
+        self.store.optimise_store()
+
     def query_missing_typed(self, paths: list[str]) -> _MissingPaths:
         return _MissingPaths(self.store.query_missing(self._derived_paths(paths)), f"{self.store.store_dir()}/")
 
