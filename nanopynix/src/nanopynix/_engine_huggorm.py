@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import enum
 import importlib.resources
+import inspect
 import itertools
 import json
 import logging
@@ -802,6 +803,18 @@ class EvalState:
 
         return bridge
 
+    def _make_function(self, callback: Callable[..., Any]) -> Any:
+        # The other engine's rule: the parameter count is the arity, and a
+        # callable with none, or with no signature, is called now.
+        try:
+            arity = len(inspect.signature(callback).parameters)
+        except (TypeError, ValueError):
+            arity = 0
+        if arity == 0:
+            return self._make(callback())
+        name = getattr(callback, "__qualname__", type(callback).__qualname__)
+        return self.state.make_primop(name, arity, self._primop(callback))
+
     def _make(self, obj: Any) -> Any:
         if isinstance(obj, Value):
             return obj.raw
@@ -820,6 +833,8 @@ class EvalState:
             for key, item in cast("dict[Any, Any]", obj).items():
                 self.state.attrs_set(made, str(key), self._make(item))
             return made
+        if callable(obj):
+            return self._make_function(obj)
         raise NotPortedError(f"the huggorm engine cannot yet make a Nix value from {type(obj).__name__}")
 
     def eval_string(self, expression: str, path: str = "<string>") -> Value:
