@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 import huggorm_bindings  # type: ignore[reportMissingImports] -- installed only in the huggorm scope
-from huggorm_bindings.errors import NixError  # type: ignore[reportMissingImports] -- as above
+from huggorm_bindings.errors import BadStorePath, NixError  # type: ignore[reportMissingImports] -- as above
 
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import NO_GC_LIMIT
@@ -72,7 +72,8 @@ def _not_ported(name: str, **ported: object) -> type:
 #: Loaded, so that a scope whose extension does not link fails at import.
 ENGINE_MODULE = huggorm_bindings
 
-errors = _not_ported("errors")
+# `Error` is the other engine's name for the root of Nix's errors.
+errors = _not_ported("errors", Error=NixError, BadStorePath=BadStorePath)
 _scope_ids = itertools.count(1)
 
 
