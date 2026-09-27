@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, NoReturn, cast
 import huggorm_bindings  # type: ignore[reportMissingImports] -- installed only in the huggorm scope
 
 from nanopynix._typechecking import BEARTYPING
+from nanopynix._wire import NO_GC_LIMIT
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Callable
@@ -175,6 +176,15 @@ class BuildMode(enum.IntEnum):
 
     def huggorm(self) -> Any:
         return huggorm_bindings.BuildMode[self.name.upper()]
+
+
+class GCAction(enum.Enum):
+    """Nix's collector actions, by the names the other engine uses."""
+
+    ReturnLive = huggorm_bindings.GCAction.RETURN_LIVE
+    ReturnDead = huggorm_bindings.GCAction.RETURN_DEAD
+    DeleteDead = huggorm_bindings.GCAction.DELETE_DEAD
+    DeleteSpecific = huggorm_bindings.GCAction.DELETE_SPECIFIC
 
 
 def _build_result(result: Any, store: Any) -> dict[str, Any]:
@@ -404,6 +414,19 @@ class Store:
 
     def optimise_store(self) -> None:
         self.store.optimise_store()
+
+    def collect_garbage(
+        self, action: GCAction, ignore_liveness: bool, paths_to_delete: list[Any], max_freed: int
+    ) -> dict[str, Any]:
+        options = huggorm_bindings.GCOptions(
+            action.value,
+            ignore_liveness,
+            paths_to_delete,
+            # huggorm spells Nix's "no limit" as None, not as the largest u64.
+            None if max_freed == NO_GC_LIMIT else max_freed,
+        )
+        results = self.store.collect_garbage(options)
+        return {"paths": list(results.paths()), "bytes_freed": results.bytes_freed()}
 
     def query_missing_typed(self, paths: list[str]) -> _MissingPaths:
         return _MissingPaths(self.store.query_missing(self._derived_paths(paths)), f"{self.store.store_dir()}/")
@@ -1149,6 +1172,7 @@ expr = _not_ported(
 store = _not_ported(
     "store",
     BuildMode=BuildMode,
+    GCAction=GCAction,
     Store=Store,
     StorePath=huggorm_bindings.StorePath,
     open_store=open_store,
