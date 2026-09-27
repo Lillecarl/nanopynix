@@ -509,6 +509,7 @@ def _registry_pin(store: Store, path: str, url: str, locked_url: str, fetch_sett
 
 fetchers = _not_ported(
     "fetchers",
+    list_fetch_settings_metadata_json=huggorm_bindings.fetch_settings_json,
     list_registry_entries=_list_registry_entries,
     user_registry_path=huggorm_bindings.user_registry_path,
     registry_add=_registry_add,
@@ -861,6 +862,7 @@ flake = _not_ported(
     call_flake=_call_flake,
     eval_flake=_eval_flake,
     get_flake=_get_flake,
+    list_flake_settings_metadata_json=huggorm_bindings.flake_settings_json,
     lock_flake=_lock_flake,
     metadata_json=_metadata_json,
     parse_flake_ref=huggorm_bindings.parse_flake_ref,
@@ -1140,6 +1142,7 @@ expr = _not_ported(
     init_libexpr=init_libexpr,
     eval_file=eval_file,
     is_pseudo_url=is_pseudo_url,
+    list_eval_settings_metadata_json=huggorm_bindings.eval_settings_json,
     parse_nix_path=parse_nix_path,
     register_primop=register_primop,
 )
