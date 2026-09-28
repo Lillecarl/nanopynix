@@ -25,11 +25,11 @@ from typing import Any
 
 import pytest
 from grpclib.const import Status
-from nanopynix_bindings import errors as nanopynix_errors
 from nanopynix_proto.google.protobuf import Any as ProtoAny
 from nanopynix_proto.google.rpc import Status as RpcStatus
 from nanopynix_proto.nix.common import ErrorIdentity, LogLevel, NixErrorInfo, SourcePos
 
+from nanopynix._engine import errors as nanopynix_errors
 from nanopynix.exceptions import (
     EvalError,
     ListIndexError,

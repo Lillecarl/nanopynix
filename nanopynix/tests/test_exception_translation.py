@@ -34,10 +34,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from nanopynix_bindings import errors as nanopynix_errors
 
 import nanopynix
 from nanopynix import NixEvalSettings
+from nanopynix._engine import errors as nanopynix_errors
 
 if TYPE_CHECKING:
     from nanopynix_testing.nix_environment import NixTestEnvironment

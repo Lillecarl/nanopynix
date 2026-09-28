@@ -14,12 +14,12 @@ from typing import TYPE_CHECKING, Any
 import anyio
 import pytest
 from anyio import Path as AnyioPath
-from nanopynix_bindings import expr as nanopynix_expr, util as nanopynix_util
 from nanopynix_proto.nix.common import GcAction, LogLevel
 
 import nanopynix
 from nanopynix import Derivation, GcResult, MissingInfo, NixType, StorePath, inproc, yaml_primops
 from nanopynix._ansi import strip_ansi
+from nanopynix._engine import expr as nanopynix_expr, util as nanopynix_util
 from nanopynix.settings import NixEvalSettings, normalize_nix_path
 from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD, LINUX_PROC_FS, NIX_GC_ROOTS_BUG
 from test_support.git_fixtures import init_flake_repo

@@ -32,9 +32,9 @@ from typing import TYPE_CHECKING
 
 import anyio
 import pytest
-from nanopynix_bindings import errors as nanopynix_errors
 
 from nanopynix._core import _nix_executor
+from nanopynix._engine import errors as nanopynix_errors
 from nanopynix.exceptions import EvaluatorAbandonedError
 
 if TYPE_CHECKING:

@@ -43,10 +43,10 @@ import uuid
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from nanopynix_bindings import errors as nanopynix_errors
 
 import nanopynix
 from nanopynix import inproc
+from nanopynix._engine import errors as nanopynix_errors
 from nanopynix.exceptions import translate_nix_exception
 from nanopynix_testing.nix_environment import with_nixpkgs
 

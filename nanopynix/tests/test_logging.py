@@ -15,10 +15,10 @@ import anyio
 import anyio.lowlevel
 import anyio.to_thread
 import pytest
-from nanopynix_bindings import util as nanopynix_util
 from nanopynix_proto.nix.common import LogEvent as LogEventProto, NixLogEvent, RequestFinalized
 
 from nanopynix import LogCollector
+from nanopynix._engine import util as nanopynix_util
 from nanopynix.logging import (
     _OUTBOX_CEILING_FACTOR,  # type: ignore[reportPrivateUsage] -- the test pins the ceiling this constant sets
     CallbackBus,

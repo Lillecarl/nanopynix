@@ -19,11 +19,11 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 import pytest
-from nanopynix_bindings import store as nanopynix_store
 from pydantic import ValidationError
 
 import nanopynix
 from nanopynix import stores
+from nanopynix._engine import store as nanopynix_store
 from nanopynix.namespace import OverlayNamespace
 from nanopynix.settings import NIX_2_34, NixStoreDefaults, field_is_supported, running_nix_version
 from nanopynix_testing.nix_environment import force_rmtree

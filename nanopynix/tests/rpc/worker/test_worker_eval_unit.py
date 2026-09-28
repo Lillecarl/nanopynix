@@ -9,7 +9,6 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import anyio
-import nanopynix_bindings.store as nanopynix_store
 import pytest
 from nanopynix_proto.nix.eval import OpenEvalRequest
 from nanopynix_proto.nix.worker import InitRequest
@@ -22,6 +21,7 @@ from nanopynix._core._objects import (  # type: ignore[reportPrivateUsage] -- te
     CoreStore,
     CoreValue,
 )
+from nanopynix._engine import store as nanopynix_store
 from nanopynix._wire import HandleKind
 from nanopynix.rpc.worker._handle_registry import (
     HandleRegistry,  # type: ignore[reportPrivateUsage] -- test imports private module

@@ -30,7 +30,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from nanopynix_bindings import expr as nanopynix_expr
+
+from nanopynix._engine import expr as nanopynix_expr
 
 if TYPE_CHECKING:
     from nanopynix_testing.nix_environment import InprocSessionFactory

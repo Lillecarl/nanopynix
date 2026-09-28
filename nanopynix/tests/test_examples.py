@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from nanopynix_bindings.store import open_store
 
 import nanopynix
+from nanopynix._engine import open_store
 
 _EXAMPLES = Path(__file__).resolve().parents[2] / "docs" / "examples"
 if not _EXAMPLES.is_dir():

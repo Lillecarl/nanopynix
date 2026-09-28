@@ -32,7 +32,7 @@ from test_support.subprocess_output import CompletedProcess, run_process
 # test -- before this module's fix, only what nix.conf happened to supply.
 _REPORT_SCRIPT = """
 import nanopynix
-from nanopynix_bindings import util as nanopynix_util
+from nanopynix._engine import util as nanopynix_util
 nanopynix.{entry}(load_config=False)
 print(nanopynix_util.get_setting("experimental-features"))
 """

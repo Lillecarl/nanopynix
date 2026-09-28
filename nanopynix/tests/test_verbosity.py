@@ -4,9 +4,9 @@ import os
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from nanopynix_bindings import util as nanopynix_util
 
 from nanopynix import LogLevel, normalize_log_level
+from nanopynix._engine import util as nanopynix_util
 from nanopynix.rpc import Session
 
 if TYPE_CHECKING:

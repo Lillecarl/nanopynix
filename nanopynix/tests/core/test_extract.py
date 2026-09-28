@@ -8,12 +8,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from nanopynix_bindings import (
-    fetchers as nanopynix_fetchers,  # L1 Input
-    flake as nanopynix_flake,  # L1 FlakeRef, LockedFlake, parse_flake_ref
-    store as nanopynix_store,  # L1 StorePath, Store, PathInfo, BuildResult, MissingInfo
-)
-
 from nanopynix._core._extract import (
     _attrs_map,  # pyright: ignore[reportPrivateUsage] -- test reaches into _extract's private helper for direct unit coverage, see below
     _attrs_value,  # pyright: ignore[reportPrivateUsage] -- test reaches into _extract's private helper for direct unit coverage, see below
@@ -21,6 +15,11 @@ from nanopynix._core._extract import (
     input_attrs,
     locked_flake,
     locked_node,
+)
+from nanopynix._engine import (
+    fetchers as nanopynix_fetchers,  # L1 Input
+    flake as nanopynix_flake,  # L1 FlakeRef, LockedFlake, parse_flake_ref
+    store as nanopynix_store,  # L1 StorePath, Store, PathInfo, BuildResult, MissingInfo
 )
 from nanopynix.models import StorePath
 from test_support.git_fixtures import init_flake_repo

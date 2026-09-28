@@ -15,7 +15,6 @@ import anyio
 import pytest
 from grpclib.exceptions import GRPCError
 from grpclib_transports import inproc_worker_with_backchannel
-from nanopynix_bindings import util as nanopynix_util
 from nanopynix_proto.nix.eval import EvalServiceStub, EvalStringRequest
 from nanopynix_proto.nix.worker import (
     CloseStoreRequest,
@@ -26,6 +25,7 @@ from nanopynix_proto.nix.worker import (
 )
 
 from nanopynix._core._nix_executor import NixThreadExecutor
+from nanopynix._engine import util as nanopynix_util
 from nanopynix._wire import HandleKind
 from nanopynix.exceptions import LockedFlakeReleasedError
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler

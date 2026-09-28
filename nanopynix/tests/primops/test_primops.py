@@ -8,8 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from nanopynix_bindings import store as nanopynix_store
-
+from nanopynix._engine import store as nanopynix_store
 from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
 
 if TYPE_CHECKING:
