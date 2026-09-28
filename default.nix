@@ -387,6 +387,18 @@ let
       closure, so it is caught here instead.
     '';
     let
+      # The huggorm engine starts the collector at import and runs
+      # `nix::initGC` at the first evaluator, so the collector must carry
+      # huggorm's patch as well (huggorm tasks/101). The other engine keeps
+      # the collector it has, and its cached closure.
+      scopeBoehmGC =
+        if engine == "huggorm" then
+          patchedBoehmGC.overrideAttrs (old: {
+            patches = old.patches ++ huggorm.bdwgcPatches;
+          })
+        else
+          patchedBoehmGC;
+
       isNixScope =
         _name: v:
         (builtins.tryEval v).success
@@ -465,7 +477,7 @@ let
                   nix-cmd
                   ;
                 python3Packages = python.pkgs;
-                boehmgc = patchedBoehmGC;
+                boehmgc = scopeBoehmGC;
               };
 
               engineBindings = if engine == "huggorm" then final.huggorm-bindings else final.nanopynix-bindings;
@@ -717,7 +729,7 @@ let
       # condition its own comment warns about, right where we're chasing a GC
       # crash.
       boehmgcOverride = lib.optionalAttrs gc {
-        boehmgc = sanitizer.sanitizeBoehmGC patchedBoehmGC;
+        boehmgc = sanitizer.sanitizeBoehmGC scopeBoehmGC;
       };
 
       # The patch, and nothing else. This runs before
@@ -727,7 +739,7 @@ let
         scope:
         scope.overrideScope (
           _final: prev: {
-            nix-expr = prev.nix-expr.override { boehmgc = patchedBoehmGC; };
+            nix-expr = prev.nix-expr.override { boehmgc = scopeBoehmGC; };
           }
         );
 
