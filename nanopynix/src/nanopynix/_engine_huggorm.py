@@ -24,13 +24,15 @@ import logging
 import os
 import threading
 import time
+import types
 import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 import huggorm_bindings  # type: ignore[reportMissingImports] -- installed only in the huggorm scope
+from huggorm_bindings import errors as huggorm_errors  # type: ignore[reportMissingImports] -- as above
 from huggorm_bindings.errors import BadStorePath, EvalError, NixError  # type: ignore[reportMissingImports] -- as above
-from nanopynix_proto.nix.common import ActivityType, ResultType
+from nanopynix_proto.nix.common import ActivityType, LogLevel, ResultType
 
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import NO_GC_LIMIT
@@ -75,8 +77,32 @@ def _not_ported(name: str, **ported: object) -> type:
 #: Loaded, so that a scope whose extension does not link fails at import.
 ENGINE_MODULE = huggorm_bindings
 
-# `Error` is the other engine's name for the root of Nix's errors.
-errors = _not_ported("errors", Error=NixError, BadStorePath=BadStorePath)
+# The other engine's names for huggorm's classes. Three differ: huggorm
+# spells Nix's `TypeError` and `AssertionError` with `Nix` in front, so
+# they do not shadow the builtins, calls `Interrupted` what the other
+# engine calls `OperationCancelled`, and calls the root `NixError`.
+#
+# Every name of the other engine's module, so a plain namespace: a name
+# it lacks raises AttributeError, as that module does.
+errors = types.SimpleNamespace(
+    Error=NixError,
+    EvalBaseError=huggorm_errors.EvalBaseError,
+    EvalError=EvalError,
+    ParseError=huggorm_errors.ParseError,
+    TypeError=huggorm_errors.NixTypeError,
+    UndefinedVarError=huggorm_errors.UndefinedVarError,
+    AssertionError=huggorm_errors.NixAssertionError,
+    ThrownError=huggorm_errors.ThrownError,
+    InvalidPath=huggorm_errors.InvalidPath,
+    Unsupported=huggorm_errors.Unsupported,
+    BadStorePath=BadStorePath,
+    SysError=huggorm_errors.SysError,
+    UsageError=huggorm_errors.UsageError,
+    UnimplementedError=huggorm_errors.UnimplementedError,
+    MissingAttributeError=huggorm_errors.MissingAttribute,
+    ListIndexError=huggorm_errors.ListIndex,
+    OperationCancelled=huggorm_errors.Interrupted,
+)
 _scope_ids = itertools.count(1)
 
 
@@ -155,11 +181,13 @@ eval_counters_enabled = _not_ported("eval_counters_enabled")
 
 
 def init_libexpr() -> None:
-    """Enable ``fetch-tree``, as the other engine's ``init_libexpr`` does.
+    """Start the collector and enable ``fetch-tree``, as the other engine's ``init_libexpr`` does.
 
-    That function also starts the Boehm collector. huggorm starts it at
-    import, so the feature is all that is left.
+    huggorm starts the collector at its first evaluator by itself. Starting it
+    here keeps the other engine's order: Nix copies ``NIX_PATH`` into
+    ``nix-path`` as the session starts, and not during some later test.
     """
+    huggorm_bindings.start_collector()
     enable_experimental_feature("fetch-tree")
 
 
@@ -368,14 +396,19 @@ class Store:
     def query_path_info_typed(self, path: Any) -> _PathInfo:
         return _PathInfo(self.store.query_path_info(path))
 
+    def query_path_info(self, path: Any) -> dict[str, Any]:
+        info = self.query_path_info_typed(path)
+        return {name: getattr(info, name) for name in _PathInfo.__slots__}
+
     def follow_links_to_store_path(self, path: str) -> Any:
         return self.store.follow_links_to_store_path(path)
 
     def query_path_from_hash_part(self, hash_part: str) -> Any:
         return self.store.query_path_from_hash_part(hash_part)
 
-    def query_all_valid_paths(self) -> list[Any]:
-        return self.store.query_all_valid_paths()
+    def query_all_valid_paths(self) -> list[str]:
+        # Printed, as the other engine answers.
+        return [self.store.print_store_path(path) for path in self.store.query_all_valid_paths()]
 
     def compute_fs_closure(
         self, path: Any, flip_direction: bool, include_outputs: bool, include_derivers: bool
@@ -446,13 +479,15 @@ class Store:
         results = self.store.collect_garbage(options)
         return {"paths": list(results.paths()), "bytes_freed": results.bytes_freed()}
 
-    def query_missing_typed(self, paths: list[str]) -> _MissingPaths:
+    def query_missing_typed(self, paths: list[Any]) -> _MissingPaths:
         return _MissingPaths(self.store.query_missing(self._derived_paths(paths)), f"{self.store.store_dir()}/")
 
-    def _derived_paths(self, paths: list[str]) -> list[Any]:
+    def _derived_paths(self, paths: list[Any]) -> list[Any]:
         prefix = f"{self.store.store_dir()}/"
-        # The other engine reads a base name as a path in this store.
-        return [self.store.parse_derived_path(path if path.startswith("/") else prefix + path) for path in paths]
+        # The other engine takes a `StorePath` or a string, and reads a base
+        # name as a path in this store.
+        texts = [path if isinstance(path, str) else path.to_string() for path in paths]
+        return [self.store.parse_derived_path(text if text.startswith("/") else prefix + text) for text in texts]
 
     def build_paths_with_results(
         self, paths: list[str], build_mode: int, eval_store: Store | None
@@ -464,7 +499,7 @@ class Store:
         )
         return [_build_result(result, self.store) for result in results]
 
-    def query_missing(self, paths: list[str]) -> dict[str, Any]:
+    def query_missing(self, paths: list[Any]) -> dict[str, Any]:
         missing = self.query_missing_typed(paths)
         return {name: getattr(missing, name) for name in _MissingPaths.__slots__}
 
@@ -705,6 +740,38 @@ class Value:
 
     def type_name(self) -> str:
         return self.raw.type_name()
+
+    # Without forcing, as the other engine's predicates are: a thunk
+    # answers False to each of them and True to `is_thunk`.
+    def is_null(self) -> bool:
+        return self.raw.type_name() == "null"
+
+    def is_int(self) -> bool:
+        return self.raw.type_name() == "int"
+
+    def is_float(self) -> bool:
+        return self.raw.type_name() == "float"
+
+    def is_bool(self) -> bool:
+        return self.raw.type_name() == "bool"
+
+    def is_string(self) -> bool:
+        return self.raw.type_name() == "string"
+
+    def is_path(self) -> bool:
+        return self.raw.type_name() == "path"
+
+    def is_attrs(self) -> bool:
+        return self.raw.type_name() == "attrs"
+
+    def is_list(self) -> bool:
+        return self.raw.type_name() == "list"
+
+    def is_function(self) -> bool:
+        return self.raw.type_name() == "function"
+
+    def is_thunk(self) -> bool:
+        return self.raw.type_name() == "thunk"
 
     def as_int(self) -> int:
         return self._forced().integer()
@@ -1336,6 +1403,11 @@ def error_detail(exc: BaseException) -> tuple[str, dict[str, Any] | None]:
     )
 
 
+def _log_test(msg: str) -> None:
+    """Log *msg* through Nix's logger at INFO, as the other engine's hook does."""
+    huggorm_bindings.log_message(LogLevel.INFO, msg)
+
+
 def flush_logs() -> None:
     """Deliver every queued record to the callback now."""
     pump = _log_pump
@@ -1413,6 +1485,9 @@ expr = _not_ported(
     _cleanup_primop_registry=_cleanup_primop_registry,
     _enter_evaluator_thread=_enter_evaluator_thread,
     _exit_evaluator_thread=huggorm_bindings.gc_release_thread,
+    _gc_collect=huggorm_bindings.collect_garbage,
+    _gc_owner_thread_id=huggorm_bindings.collector_owner_thread,
+    _gc_stats=huggorm_bindings.gc_stats,
     init_libexpr=init_libexpr,
     eval_file=eval_file,
     is_pseudo_url=is_pseudo_url,
@@ -1441,6 +1516,7 @@ util = _not_ported(
     get_default_verbosity=get_default_verbosity,
     get_log_ceiling=get_log_ceiling,
     get_logger_request_id=get_logger_request_id,
+    _log_test=_log_test,
     get_setting=huggorm_bindings.get_setting,
     get_verbosity=get_verbosity,
     init_libstore=init_libstore,

@@ -702,6 +702,7 @@ _NIX_EXCEPTION_TYPES: dict[str, type[NixError]] = {
     # its own two classes for a missing attribute and list index.
     "NixError": NixError,
     "NixTypeError": NixTypeError,
+    "NixAssertionError": NixAssertionError,
     "MissingAttribute": MissingAttributeError,
     "ListIndex": ListIndexError,
 }
