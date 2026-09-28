@@ -23,9 +23,9 @@ import inspect
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from nanopynix_bindings.errors import BadStorePath
 
 from nanopynix import inproc
+from nanopynix._engine import errors as engine_errors
 from nanopynix.exceptions import BadStorePathError, NixError
 
 if TYPE_CHECKING:
@@ -153,7 +153,7 @@ async def test_the_guard_lives_in_cpp_not_in_the_python_wrapper(
     """
     async with inproc_session() as session, session.store() as store:
         raw = cast("Any", store._require_raw())
-        with pytest.raises(BadStorePath, match="must not be empty"):
+        with pytest.raises(engine_errors.BadStorePath, match="must not be empty"):
             raw.parse_store_path("")
 
 
