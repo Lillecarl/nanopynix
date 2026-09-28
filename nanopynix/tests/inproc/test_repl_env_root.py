@@ -36,7 +36,13 @@ from nanopynix._engine import expr as nanopynix_expr
 if TYPE_CHECKING:
     from nanopynix_testing.nix_environment import InprocSessionFactory
 
-pytestmark = pytest.mark.nix_capability("boehm_gc")
+pytestmark = [
+    pytest.mark.nix_capability("boehm_gc"),
+    pytest.mark.nix_engine(
+        "nanopynix_bindings",
+        reason="probes that engine's own REPL environment; huggorm's test_repl holds its equivalent",
+    ),
+]
 """Every test here needs the collector, and the whole module is about it.
 
 ``_gc_collect``, ``_gc_finalizer_self_test`` and ``_gc_repl_env_finalized``

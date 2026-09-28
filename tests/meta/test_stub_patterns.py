@@ -80,6 +80,10 @@ class TestPatternKeys:
             f"`foo_typed` and gives it the wrong signature. Add a `$`."
         )
 
+    @pytest.mark.nix_engine(
+        "nanopynix_bindings",
+        reason="the .pat files type that engine's stubs, and the check imports it",
+    )
     def test_every_key_names_something_real(self, path: Path) -> None:
         """A dead key leaves the real attribute with whatever stubgen guessed."""
         dead: list[str] = []

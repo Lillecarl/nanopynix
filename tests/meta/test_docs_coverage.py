@@ -31,6 +31,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import nanopynix
 from tests.support.docs_directives import (
     DIRECTIVE as DIRECTIVE,
@@ -68,6 +70,10 @@ def test_the_directive_scanner_finds_the_docs() -> None:
     assert id(nanopynix.NixError) in rendered.ids, "a known-documented class is missing; the resolver is wrong"
 
 
+@pytest.mark.nix_engine(
+    "nanopynix_bindings",
+    reason="the API pages document that engine's modules, and huggorm's differ",
+)
 def test_every_directive_resolves() -> None:
     """A directive naming something that does not exist renders nothing.
 
@@ -105,6 +111,10 @@ def test_the_scanner_reads_every_directive_that_renders_an_object() -> None:
     assert DIRECTIVE.match(".. note:: something") is None
 
 
+@pytest.mark.nix_engine(
+    "nanopynix_bindings",
+    reason="the API pages document that engine's modules, and huggorm's differ",
+)
 def test_every_public_name_has_a_page_or_a_reason() -> None:
     rendered = documented(API_DIR)
     missing = {
