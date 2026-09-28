@@ -80,7 +80,7 @@ if TYPE_CHECKING or ENGINE == "nanopynix_bindings":
         set_verbosity as set_verbosity,
     )
 
-    from nanopynix._engine_bindings import flush_logs as flush_logs
+    from nanopynix._engine_bindings import error_detail as error_detail, flush_logs as flush_logs
 
 else:
     from nanopynix._engine_huggorm import (
@@ -93,6 +93,7 @@ else:
         build_info as build_info,
         current_system as current_system,
         enable_experimental_feature as enable_experimental_feature,
+        error_detail as error_detail,
         errors as errors,
         eval_counters_enabled as eval_counters_enabled,
         eval_file as eval_file,

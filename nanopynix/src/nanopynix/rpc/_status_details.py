@@ -62,7 +62,7 @@ from nanopynix_proto.google.rpc import Status as RpcStatus
 from nanopynix_proto.nix.common import ErrorIdentity, ErrorTrace, LogLevel, NixErrorInfo, SourcePos
 from pydantic import ValidationError
 
-from nanopynix._engine import is_engine_error
+from nanopynix._engine import error_detail, is_engine_error
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import NixError, ObjectMisuseError
 
@@ -230,11 +230,10 @@ def details_for_exception(exc: BaseException) -> list[Message]:
 
     Always at least the :class:`ErrorIdentity`, which is what lets the client
     raise the class the worker raised. The :class:`NixErrorInfo` joins it when
-    the exception has one, in two shapes that one lookup covers because the
-    bindings and :class:`~nanopynix.NixError` agree on the names:
+    the exception has one, in two shapes:
 
-    * a raw nanobind binding exception, with ``raw``/``info`` attached by
-      ``nix_error_info.hh``. This is the common case -- the worker
+    * a raw engine exception, read through the engine's ``error_detail``.
+      This is the common case -- the worker
       deliberately does *not* run ``translate_nix_exception``, because the
       identity carries the Nix C++ class name and translating would replace
       that with the public one.
@@ -245,12 +244,14 @@ def details_for_exception(exc: BaseException) -> list[Message]:
     handler exception, including ones that have nothing to do with Nix and may
     happen to carry an unrelated ``info``.
     """
-    raw: object = getattr(exc, "raw", None)
-    info: object = getattr(exc, "info", None)
-    encoded = error_info_from_dict(
-        raw=raw if isinstance(raw, str) else "",
-        info=cast("dict[str, Any]", info) if isinstance(info, dict) else None,
-    )
+    if is_engine_error(exc):
+        raw, info = error_detail(exc)
+    else:
+        found: object = getattr(exc, "raw", None)
+        carried: object = getattr(exc, "info", None)
+        raw = found if isinstance(found, str) else ""
+        info = cast("dict[str, Any]", carried) if isinstance(carried, dict) else None
+    encoded = error_info_from_dict(raw=raw, info=info)
     details: list[Message] = [identity_for_exception(exc)]
     if encoded is not None:
         details.append(encoded)

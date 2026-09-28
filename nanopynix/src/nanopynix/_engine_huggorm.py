@@ -1304,6 +1304,38 @@ def remove_logger() -> None:
         pump.close()
 
 
+def _position(pos: Any) -> dict[str, Any] | None:
+    if pos is None:
+        return None
+    return {"file": pos.file(), "line": pos.line(), "column": pos.column()}
+
+
+def error_detail(exc: BaseException) -> tuple[str, dict[str, Any] | None]:
+    """Nix's own rendering of *exc*, and its ``nix::ErrorInfo`` as a dict.
+
+    The dict has the keys ``nix_error_info.hh`` writes. ``pos["file"]`` is
+    huggorm's: the file alone, where the other engine appends the line and
+    the column to it.
+    """
+    raw: object = getattr(exc, "colored", "")
+    info: Any = getattr(exc, "info", None)
+    if not isinstance(info, huggorm_bindings.ErrorInfo):
+        return (raw if isinstance(raw, str) else "", None)
+    return (
+        raw if isinstance(raw, str) else "",
+        {
+            "level": info.level(),
+            "msg": info.msg(),
+            "pos": _position(info.pos()),
+            "is_from_expr": info.is_from_expr(),
+            "status": info.status(),
+            "traces": [{"hint": trace.hint(), "pos": _position(trace.pos())} for trace in info.traces()],
+            "truncated": info.truncated(),
+            "suggestions": list(info.suggestions()),
+        },
+    )
+
+
 def flush_logs() -> None:
     """Deliver every queued record to the callback now."""
     pump = _log_pump

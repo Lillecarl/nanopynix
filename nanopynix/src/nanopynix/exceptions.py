@@ -46,7 +46,7 @@ import signal
 from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix._ansi import strip_ansi
-from nanopynix._engine import is_engine_error
+from nanopynix._engine import error_detail, is_engine_error
 from nanopynix._typechecking import BEARTYPING
 
 if TYPE_CHECKING or BEARTYPING:
@@ -744,12 +744,12 @@ def translate_nix_exception(exc: BaseException) -> NixError | None:
     ``AssertionError``), and matching on the name alone would silently convert
     an ordinary Python ``TypeError`` from caller code into a Nix eval error.
 
-    ``raw``/``info`` carry over directly: the bindings attach them under those
-    same names (``nanopynix-bindings/src/nix_error_info.hh``), holding the
+    ``raw``/``info`` come from the engine's ``error_detail``, which reads the
     ``nix::ErrorInfo`` -- position, evaluation trace, suggestions -- that
-    ``str(exc)`` alone cannot express. They are read defensively because the
-    binding translator degrades to a message-only raise if building them
-    fails, which must stay a loss of detail rather than an ``AttributeError``.
+    ``str(exc)`` alone cannot express. Each engine attaches it in its own
+    shape, and ``error_detail`` gives the one dict :attr:`NixError.info`
+    documents. An exception that carries none gives ``None``, which stays a
+    loss of detail rather than an ``AttributeError``.
     """
     if isinstance(exc, NixError):
         return None
@@ -765,9 +765,8 @@ def translate_nix_exception(exc: BaseException) -> NixError | None:
         return None
     message = str(exc)
     cls, error_type = refine_within(base, message)
-    raw = getattr(exc, "raw", "")
-    info = getattr(exc, "info", None)
-    return cls(error_type, message, raw=raw if isinstance(raw, str) else "", info=info)
+    raw, info = error_detail(exc)
+    return cls(error_type, message, raw=raw, info=info)
 
 
 def split_type_prefix(message: str) -> tuple[str | None, str]:
