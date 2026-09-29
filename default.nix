@@ -409,7 +409,12 @@ let
         && lib.hasAttr "newScope" v
         && lib.hasAttr "packages" v;
 
-      patchNixScope = scope: scope.appendPatches (patchesFor scope);
+      # The huggorm engine opens a LocalStore per caller, so its Nix names a
+      # temp-roots file per store (huggorm's `libstorePatches`). The other
+      # engine caches one store per URI and keeps its cached closure.
+      patchNixScope =
+        scope:
+        scope.appendPatches (patchesFor scope ++ lib.optionals (engine == "huggorm") huggorm.libstorePatches);
 
       # nix's own components (nix-util, nix-store, ...) keep resolving
       # through scope.newScope completely unmodified below -- so their own

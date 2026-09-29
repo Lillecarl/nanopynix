@@ -477,7 +477,7 @@ async def _temp_roots_descriptors(state_dir: anyio.Path) -> list[str]:
 
 
 @LINUX_PROC_FS
-async def test_two_handles_on_one_local_store_share_the_temp_roots_file(
+async def test_two_handles_on_one_local_store_keep_each_others_temp_roots(
     inproc_session: InprocSessionFactory,
     tmp_path: Path,
 ) -> None:
@@ -504,10 +504,30 @@ async def test_two_handles_on_one_local_store_share_the_temp_roots_file(
     the second store always reaches `tryUnlink`. Two descriptors, one of them
     on a deleted file, is the broken answer there.
 
-    Nix git gives each store its own name, so neither failure can happen on
-    it. The count is still one, because the cache still gives one store, and
-    that is what this asserts on every version.
+    Nix git gives each store its own name, and so does huggorm's patch of
+    2.34, so neither failure can happen there. The count is one only where an
+    engine caches its stores, which the test below asserts for that engine.
     """
+    held = await _two_stores_take_temp_roots(inproc_session, tmp_path)
+    assert not [h for h in held if h.endswith(" (deleted)")], f"a store deleted another one's temp roots: {held}"
+
+
+@LINUX_PROC_FS
+@pytest.mark.nix_engine(
+    "nanopynix_bindings",
+    reason="that engine caches a store per URI; huggorm gives each store its own temp-roots file",
+)
+async def test_two_handles_on_one_local_store_are_one_local_store(
+    inproc_session: InprocSessionFactory,
+    tmp_path: Path,
+) -> None:
+    """The cache in `nix_store.cpp` gives two handles one `LocalStore`, and so one file."""
+    held = await _two_stores_take_temp_roots(inproc_session, tmp_path)
+    assert len(held) == 1, f"{len(held)} LocalStore objects, each with its own temp-roots file: {held}"
+
+
+async def _two_stores_take_temp_roots(inproc_session: InprocSessionFactory, tmp_path: Path) -> list[str]:
+    """Open two handles on one store, take a root in each, and list the temp-roots descriptors."""
     uri, root, source = await _write_store_root(tmp_path)
     state_dir = root / "nix" / "var" / "nix"
 
@@ -520,7 +540,7 @@ async def test_two_handles_on_one_local_store_share_the_temp_roots_file(
         held = await _temp_roots_descriptors(state_dir)
         note(temp_roots_descriptors=held)
         assert held, "no descriptor holds the temp-roots file, so this test proves nothing"
-        assert len(held) == 1, f"{len(held)} LocalStore objects, each with its own temp-roots file: {held}"
+        return held
 
 
 async def test_a_store_root_that_came_back_is_not_the_old_store(

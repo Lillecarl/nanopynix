@@ -1501,6 +1501,7 @@ store = _not_ported(
     GCAction=GCAction,
     Store=Store,
     StorePath=huggorm_bindings.StorePath,
+    list_store_types_json=huggorm_bindings.store_types_json,
     open_store=open_store,
     parse_store_reference=parse_store_reference,
     render_store_reference=huggorm_bindings.render_store_reference,
