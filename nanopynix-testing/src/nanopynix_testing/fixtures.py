@@ -164,6 +164,18 @@ class StorePathRecorder:
             os.fsync(file.fileno())
 
 
+#: The process's settings once its first session applied them. A later test is
+#: judged against these, so one that puts them back is not a leak.
+_settled: dict[str, str] | None = None
+#: Whether the settings have moved off the settled ones since a test last saw
+#: them there, and that was reported. One report per move, not per test.
+_drift_reported = False
+
+
+def _changes(old: dict[str, str], new: dict[str, str]) -> list[str]:
+    return sorted(f"{name}: {old.get(name)!r} -> {value!r}" for name, value in new.items() if old.get(name) != value)
+
+
 @pytest.fixture(autouse=True)
 def no_process_wide_nix_setting_survives_a_test(request: pytest.FixtureRequest) -> Generator[None]:
     """Fail the test that leaves a Nix setting behind in this process.
@@ -200,11 +212,17 @@ def no_process_wide_nix_setting_survives_a_test(request: pytest.FixtureRequest) 
     that register this plugin are exactly the ones with nanopynix, so
     ``libpynix`` and ``grpclib-transports`` never load it.
 
+    **A fixture of a wider scope sets up and tears down outside every test's
+    window.** So a change it makes shows at the setup of the next test, and is
+    reported there, once, until the settings are back. A later test whose
+    session puts the settled values back is not blamed for it.
+
     Measured before it went in: ``list_settings()`` costs 72 us and spawns no
     thread, so this is 354 ms across a 2452-test run and leaves the process
     single-threaded -- which it must, or the ``forked`` tests that run first
     would be forking a dirty process. Issue #282.
     """
+    global _settled, _drift_reported  # noqa: PLW0603 -- the settings belong to the process, and so does what this knows of them
     if "forked" in request.keywords:
         yield
         return
@@ -223,14 +241,26 @@ def no_process_wide_nix_setting_survives_a_test(request: pytest.FixtureRequest) 
     guard = inproc_impl._process_guard  # type: ignore[reportPrivateUsage] -- see the comment above  # noqa: SLF001 -- see the comment above
     was_initialised = guard._initialized_pid is not None  # type: ignore[reportPrivateUsage] -- see above  # noqa: SLF001 -- see above
     before = nanopynix.list_settings()
+    drift = _changes(_settled, before) if was_initialised and _settled is not None else []
+    if not drift:
+        _drift_reported = False
+    elif not _drift_reported:
+        _drift_reported = True
+        pytest.fail(
+            "a Nix setting moved between the last test and this one, in the pytest process, where every "
+            "test after it reads the value. A fixture set up or torn down in between moved it; this test "
+            "asked for " + ", ".join(request.fixturenames) + "\n  " + "\n  ".join(drift),
+            pytrace=False,
+        )
     yield
-    if not was_initialised:
-        return
     after = nanopynix.list_settings()
+    if not was_initialised:
+        _settled = after
+        return
 
-    changed = sorted(
-        f"{name}: {before.get(name)!r} -> {value!r}" for name, value in after.items() if before.get(name) != value
-    )
+    # A value the first session settled is a restore, and no leak.
+    unsettled = {name: value for name, value in after.items() if _settled is None or _settled.get(name) != value}
+    changed = _changes(before, unsettled)
     if changed:
         pytest.fail(
             "this test left a Nix setting behind in the pytest process, where every test after it reads "
