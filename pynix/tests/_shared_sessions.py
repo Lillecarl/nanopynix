@@ -83,7 +83,7 @@ class SharedSessions:
             # developer machine are none of its business. This mattered less
             # while a session sent its own defaults over the file anyway; it
             # matters now that the file stands unless a caller speaks.
-            self._session = await self._stack.enter_async_context(nanopynix.inproc.Session())
+            self._session = await self._stack.enter_async_context(nanopynix.inproc.Session(load_config=False))
         return self._session
 
     async def _shared_store(self, store_uri: str) -> tuple[Any, Any]:

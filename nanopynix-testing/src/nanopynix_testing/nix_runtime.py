@@ -5,16 +5,18 @@ from __future__ import annotations
 import os
 import re
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
 import nanopynix
+import nanopynix.libstore
 from nanopynix._engine import set_setting
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Generator, Iterable
 
 
 @dataclass(frozen=True)
@@ -212,6 +214,26 @@ def _initialise_libstore_before_any_fork() -> None:
     set_setting("build-users-group", "")
     set_setting("require-drop-supplementary-groups", "false")
     nanopynix.init_libstore(load_config=False)
+
+
+@contextmanager
+def configuration_settled() -> Generator[None]:
+    """Hold this process's ``nix.conf`` as already read, for the block.
+
+    pynix's CLI loads ``nix.conf``, as a real command must. A test runs that
+    CLI inside the pytest process, where the load puts the host's
+    substituters, sandbox and builders into every later test.
+    ``load_config_once`` reads at most once per process, so the CLI's load
+    reads nothing inside this block.
+    """
+    # The once-per-process mark is the only switch; nanopynix has no public one
+    # for a harness, and a consumer has no reason to want one.
+    previous = nanopynix.libstore._config_loaded  # noqa: SLF001  # type: ignore[reportPrivateUsage] -- see above
+    nanopynix.libstore._config_loaded = True  # noqa: SLF001  # type: ignore[reportPrivateUsage] -- see above
+    try:
+        yield
+    finally:
+        nanopynix.libstore._config_loaded = previous  # noqa: SLF001  # type: ignore[reportPrivateUsage] -- see above
 
 
 def configured_backends(config: pytest.Config) -> tuple[str, ...]:

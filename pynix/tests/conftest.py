@@ -52,6 +52,7 @@ from _shared_sessions import FAITHFUL_SESSIONS_ENV_VAR, SharedSessions
 # here settles it. `nanopynix/tests/conftest.py` carries the same import and
 # the full account.
 from nanopynix_testing.nix_environment import anyio_backend as anyio_backend
+from nanopynix_testing.nix_runtime import configuration_settled
 from pynix import parse
 
 if TYPE_CHECKING:
@@ -408,6 +409,19 @@ def pynix_live_log(
     with contextlib.suppress(RuntimeError, ValueError):
         faulthandler.unregister(signal.SIGUSR2)
     stack_file.close()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _host_nix_conf_stays_out() -> Iterator[None]:  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
+    """Keep the host's ``nix.conf`` out of the pytest process.
+
+    Every pynix command loads it, and these tests run the commands in this
+    process, so the first one put the host's substituters, sandbox and
+    builders into every test after it. Module scope, so a module-scoped
+    fixture that runs a command is covered as well.
+    """
+    with configuration_settled():
+        yield
 
 
 @pytest.fixture(scope="module", autouse=True)
