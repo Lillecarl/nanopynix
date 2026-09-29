@@ -113,7 +113,6 @@ from nanopynix._wire import HandleKind
 from nanopynix.exceptions import EvaluatorAbandonedError
 from nanopynix.rpc.worker._grpc_util import worker_op, wrap_service_handlers
 from nanopynix.rpc.worker._handle_registry import EvalEntry
-from nanopynix.rpc.worker._proto_shape import proto_shape
 from nanopynix.rpc.worker._state import WorkerState
 from nanopynix.rpc.worker._worker_nix import NIX_EVALUATOR_STACK_SIZE, NixThreadExecutor
 
@@ -523,20 +522,14 @@ class EvalServiceHandler(EvalServiceBase):
                 f"handle={message.handle} build_store_handle={message.build_store_handle or 'eval'} "
                 f"eval_store={'separate' if eval_store is not None else 'none'} build_mode={message.build_mode}",
             )
-        raw = value.build(
-            build_store,
-            message.build_mode,
-            eval_store,
-        )
+        response = value.build(build_store, message.build_mode, eval_store)
         if self._state.collector is not None:
-            shaped = proto_shape(raw)
             self._state.log(
                 "msg",
                 int(common_pb.LogLevel.DEBUG),
-                f"eval build finish drv_path={shaped.get('drv_path', '')} outputs={sorted(shaped.get('outputs', {}))}",
+                f"eval build finish drv_path={response.drv_path} outputs={sorted(response.outputs)}",
             )
-            return BuildResponse.from_dict(shaped)
-        return BuildResponse.from_dict(proto_shape(raw))
+        return response
 
     # ── flake methods ─────────────────────────────────────────────
 

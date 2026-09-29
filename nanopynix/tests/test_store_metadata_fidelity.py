@@ -202,15 +202,19 @@ async def test_rpc_read_derivation_keeps_nested_input_drvs(rpc_session: RpcSessi
 class _StandInNode:
     """One node of a ``DerivedPathMap``, which a test can build.
 
-    The engine's node is the real one, and nanobind binds it for reading
-    only, so it has no constructor.
-    ``_derivation_outputs`` takes the ``_DerivedPathNode`` protocol rather
-    than that class, and this is the class that protocol exists for. The two
-    fields are the whole of it.
+    huggorm's node has no setters. ``_derivation_outputs`` takes the
+    ``_DerivedPathNode`` protocol rather than that class, and this is the
+    class that protocol exists for.
     """
 
-    outputs: list[str]
-    dynamic_outputs: dict[str, _StandInNode]
+    output_names: list[str]
+    children: dict[str, _StandInNode]
+
+    def outputs(self) -> list[str]:
+        return self.output_names
+
+    def dynamic_outputs(self) -> dict[str, _StandInNode]:
+        return self.children
 
 
 def test_the_input_drvs_builder_recurses_and_keeps_every_output() -> None:
@@ -227,11 +231,11 @@ def test_the_input_drvs_builder_recurses_and_keeps_every_output() -> None:
 
     node = _derivation_outputs(
         _StandInNode(
-            outputs=["out"],
-            dynamic_outputs={
+            output_names=["out"],
+            children={
                 "first": _StandInNode(
-                    outputs=["a", "b"],
-                    dynamic_outputs={"deeper": _StandInNode(outputs=["c"], dynamic_outputs={})},
+                    output_names=["a", "b"],
+                    children={"deeper": _StandInNode(output_names=["c"], children={})},
                 ),
             },
         )

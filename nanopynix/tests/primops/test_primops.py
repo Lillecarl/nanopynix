@@ -5,14 +5,12 @@ The fixtures register the primops before the session's evaluator opens.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
-from nanopynix._engine import store as nanopynix_store
 from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD
 
 if TYPE_CHECKING:
-    from nanopynix._core._objects import CoreEvalState
+    from nanopynix._core._objects import CoreEvalState, CoreStore
     from nanopynix_testing.nix_environment import NixTestEnvironment
 
 
@@ -118,7 +116,7 @@ class TestRegisterPrimop:
     def test_string_return_value_carries_context_from_arg(
         self,
         eval_state: CoreEvalState,
-        store: Any,
+        store: CoreStore,
     ):
         """The string context of a context-bearing argument -- e.g.
         "${someDerivation}" -- must survive on the primop's *return* value
@@ -151,10 +149,9 @@ class TestRegisterPrimop:
             args = [ "-c" "echo ${test_identity_string "${leaf}"} > $out" ];
           }
         """)
-        outputs = cast("dict[str, str]", v.build()["outputs"])
-        out = outputs["out"]
-        info = store.query_path_info(nanopynix_store.StorePath(Path(out).name))
-        assert any("primop-context-propagation-leaf" in ref for ref in info["references"])
+        out = v.build().outputs["out"]
+        info = store.query_path_info(out)
+        assert any("primop-context-propagation-leaf" in ref for ref in info.references)
 
 
 class TestCallableToNixFunction:

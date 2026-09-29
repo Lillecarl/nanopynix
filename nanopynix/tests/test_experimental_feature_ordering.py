@@ -44,10 +44,11 @@ print(nanopynix_util.get_setting("experimental-features"))
 _ABORT_SCRIPT = """
 import sys
 import nanopynix
+from nanopynix._core._objects import CoreRuntime
 
 root, drv = sys.argv[1], sys.argv[2]
 nanopynix.init_libstore(load_config=False)
-store = nanopynix.open_store("local://" + root)
+store = CoreRuntime().open_store("local://" + root)
 nanopynix.enable_experimental_feature("ca-derivations")
 store.query_missing([drv])
 print("SURVIVED")

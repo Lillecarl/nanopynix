@@ -20,12 +20,12 @@ mistake for an ordinary failure.
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from nanopynix import inproc
-from nanopynix._engine import errors as engine_errors
+from nanopynix._engine import BadStorePath
 from nanopynix.exceptions import BadStorePathError, NixError
 
 if TYPE_CHECKING:
@@ -139,21 +139,15 @@ async def test_the_guard_lives_in_cpp_not_in_the_python_wrapper(
 ) -> None:
     """A raw-binding caller must hit the guard too, without any Python help.
 
-    This used to go through ``store_is_valid_path({"path": ""})`` -- the
-    proto-dict entry point that both engines shared. That layer is gone: both
-    engines now normalise paths in ``CoreStore._store_path``, which forwards
-    ``""`` to ``parse_store_path`` precisely so the rejection stays in C++
-    rather than moving into Python where a raw caller would bypass it.
-
-    So the target moves to the direct binding, and the guarantee is unchanged
-    and arguably stronger: reaching past every Python layer still raises
-    instead of aborting the process. Going through the raw object deliberately
-    skips ``_run_with_log_context``, inproc's translation chokepoint, so what
+    Both engines normalise paths in ``CoreStore._store_path``, which forwards
+    ``""`` to ``parse_store_path``, so the rejection stays in C++ and a raw
+    caller cannot bypass it. Going through the raw object skips
+    ``_run_with_log_context``, inproc's translation chokepoint, so what
     surfaces is the untranslated binding error -- which is the point.
     """
     async with inproc_session() as session, session.store() as store:
-        raw = cast("Any", store._require_raw())
-        with pytest.raises(engine_errors.BadStorePath, match="must not be empty"):
+        raw = store._require_core().require_raw()  # type: ignore[reportPrivateUsage] -- the test reaches past the async layer on purpose
+        with pytest.raises(BadStorePath, match="must not be empty"):
             raw.parse_store_path("")
 
 

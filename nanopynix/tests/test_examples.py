@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 import nanopynix
-from nanopynix._engine import open_store
+from nanopynix._core._objects import CoreRuntime
 
 _EXAMPLES = Path(__file__).resolve().parents[2] / "docs" / "examples"
 if not _EXAMPLES.is_dir():
@@ -42,7 +42,7 @@ def _seed_isolated_store(root: Path) -> str:
     """
     nanopynix.init_libstore()
     store_uri = f"local://?root={root}"
-    store = open_store(store_uri)
+    store = CoreRuntime().open_store(store_uri)
     try:
         seed_file = root.parent / "example-seed.txt"
         seed_file.write_text("nanopynix doc-example fixture\n", encoding="utf-8")

@@ -31,13 +31,11 @@ Lifecycle and extension points
   already runs it. The other two exist so that you can build a daemon or a
   store type, and each one has its own contract below.
 
-Plain queries and constructors
+Plain queries
 : `build_info`, `current_system`, `eval_counters_enabled`, `get_verbosity`,
-  `is_pseudo_url`,
-  `list_settings`,
-  `open_store`, `input_from_url` and `input_from_attrs` read state or build an
-  object. They are safe to call, and `BuildMode` and `PrimopError` are the
-  types that they take and raise.
+  `is_pseudo_url` and `list_settings` read state. They are safe to call.
+  `BuildMode` and `PrimopError` are types that the async API takes and a
+  primop raises.
 
 ## Thread confinement, and why the async API exists
 
@@ -195,9 +193,8 @@ as unexpected rather than deliberate.
 
 ## Stores
 
-`open_store` opens a store from a URI, or the configured default store when you
-give no argument. `session.store()` is the async route, and it also accepts the
-typed models of {doc}`stores` in place of a URI string.
+A store comes from `session.store()`, which takes a URI or one of the typed
+models of {doc}`stores`.
 
 `BuildMode` selects what a build does: `Normal` builds what is missing,
 `Repair` rebuilds a path whose contents are damaged, and `Check` builds a path
@@ -214,8 +211,6 @@ operations that a store may override. Registration is process-wide and
 permanent, the same as `register_primop`.
 
 ```{eval-rst}
-.. autofunction:: nanopynix.open_store
-
 .. autoclass:: nanopynix.BuildMode
    :members:
    :undoc-members:
@@ -223,18 +218,6 @@ permanent, the same as `register_primop`.
 .. autofunction:: nanopynix.process_connection
 
 .. autofunction:: nanopynix.register_store_implementation
-```
-
-## Fetchers
-
-An `Input` is one source that Nix can fetch — a Git repository, a tarball, or
-a local path. `input_from_url` builds one from a URL, and `input_from_attrs`
-builds one from the attribute form that a lock file holds.
-
-```{eval-rst}
-.. autofunction:: nanopynix.input_from_url
-
-.. autofunction:: nanopynix.input_from_attrs
 ```
 
 ## The environment dumper script

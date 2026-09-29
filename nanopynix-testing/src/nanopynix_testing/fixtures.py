@@ -48,6 +48,7 @@ from test_support.subprocess_output import run_process
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterable, Iterator
 
+    from nanopynix.models import StorePath
     from nanopynix_testing.nix_environment import NixTestEnvironment
 
 #: The file that marks the top of the checkout. `repo_root` walks up for it.
@@ -283,14 +284,14 @@ def _configure_worker_local_stores(_init: None) -> Iterator[None]:  # type: igno
 
 
 @pytest.fixture(scope="session")
-def store(l1_nix_environment: NixTestEnvironment) -> Iterator[Any]:
+def store(l1_nix_environment: NixTestEnvironment) -> Iterator[CoreStore]:
     """Open this run's isolated local/native-daemon Store.
 
     Backed by ``l1_nix_environment`` (see ``nanopynix_testing.nix_environment``),
     never the host Nix installation's own store. Sync tests cannot depend on
     the async ``shared_nix_environment``, hence the dedicated sync fixture.
     """
-    opened = nanopynix.open_store(l1_nix_environment.store_uri)
+    opened = CoreRuntime().open_store(l1_nix_environment.store_uri)
     try:
         yield opened
     finally:
@@ -298,7 +299,7 @@ def store(l1_nix_environment: NixTestEnvironment) -> Iterator[Any]:
 
 
 @pytest.fixture(scope="session")
-def store_seeded_path(store: Any, l1_nix_environment: NixTestEnvironment) -> Any:
+def store_seeded_path(store: CoreStore, l1_nix_environment: NixTestEnvironment) -> StorePath:
     """A StorePath added directly into this session's isolated Store.
 
     Store-backed tests must not derive fixture paths from the host Nix
@@ -370,9 +371,9 @@ def _register_test_primops() -> None:  # type: ignore[reportUnusedFunction] -- p
 
 
 @pytest.fixture(scope="session")
-def eval_state(store: Any, init_expr: object, _register_test_primops: object) -> CoreEvalState:  # noqa: ARG001 -- init_expr and _register_test_primops are ordering-only fixture dependencies, never read here
+def eval_state(store: CoreStore, init_expr: object, _register_test_primops: object) -> CoreEvalState:  # noqa: ARG001 -- init_expr and _register_test_primops are ordering-only fixture dependencies, never read here
     """A session-scoped evaluator, opened after the test primops are registered."""
-    return CoreRuntime().open_eval_state(CoreStore(store), [])
+    return CoreRuntime().open_eval_state(store, [])
 
 
 @pytest.fixture(scope="session", autouse=True)

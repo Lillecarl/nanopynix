@@ -30,7 +30,6 @@ from nanopynix._engine import (
     eval_counters_enabled,
     gc_release_thread,
     set_eval_counters_enabled,
-    store as nanopynix_store,
     util as nanopynix_util,
 )
 from nanopynix._env import validate_session_env
@@ -215,29 +214,6 @@ class _InprocProcessGuard:
 
 
 _process_guard = _InprocProcessGuard()
-
-
-def _print_store_path(raw_store: nanopynix_store.Store, raw_path: nanopynix_store.StorePath | str) -> str:
-    """Render a store path absolute, whichever of Nix's two spellings arrives.
-
-    The union is not convenience: the bindings genuinely return both. Anything
-    that goes through ``parse_store_path`` hands back a ``RawStorePath``, whose
-    ``str()`` is the bare ``hash-name``, while the collective queries funnel
-    through C++'s ``store_paths_to_string_list`` and hand back strings that are
-    already absolute. Normalising both here is what lets one helper serve
-    either; the prefix test below is what makes it idempotent.
-    """
-    path = str(raw_path)
-    store_dir = raw_store.get_store_dir().rstrip("/")
-    if path == store_dir or path.startswith(f"{store_dir}/"):
-        return path
-    return f"{store_dir}/{path}"
-
-
-def _print_store_paths(
-    raw_store: nanopynix_store.Store, raw_paths: Sequence[nanopynix_store.StorePath | str]
-) -> list[str]:
-    return [_print_store_path(raw_store, path) for path in raw_paths]
 
 
 def _detach_logger() -> None:
@@ -941,7 +917,7 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
 
 
 class Store(AsyncStore):
-    """Async façade over one direct ``nanopynix_store.Store`` pointer.
+    """Async façade over one :class:`CoreStore`.
 
     A store logs at its session's level, and not at any evaluator's. Every
     method here dispatches through :meth:`Session.run`, so the level follows
@@ -978,11 +954,6 @@ class Store(AsyncStore):
         self._session._stores.discard(self)  # type: ignore[reportPrivateUsage] -- session owns store lifetime tracking  # noqa: SLF001
         if local is not None:
             await self._session._run_closing(local.close)  # type: ignore[reportPrivateUsage] -- Store teardown follows Session close ordering  # noqa: SLF001
-
-    def _require_raw(self) -> nanopynix_store.Store:
-        if self._core is None:
-            raise StoreClosedError("Store is not open — use async with")
-        return self._core.require_raw()
 
     @property
     def is_open(self) -> bool:
@@ -1362,10 +1333,6 @@ class Store(AsyncStore):
         return await self._session.run(
             functools.partial(self._require_core().verify_store, check_contents=check_contents, repair=repair),
         )
-
-    async def _public_store_paths(self, raw_paths: Sequence[nanopynix_store.StorePath | str]) -> list[StorePath]:
-        paths = await self._session.run(_print_store_paths, self._require_raw(), raw_paths)
-        return [StorePath(path) for path in paths]
 
 
 class EvalSession(AsyncEvalSession["Value"]):

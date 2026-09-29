@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING
 from nanopynix._engine import (
     BuildMode as NixBuildMode,
     EvalState,
+    Store,
     get_setting,
     init_libexpr,
     parse_nix_path as nix_parse_nix_path,
-    store as nanopynix_store,
     util as nanopynix_util,
 )
 from nanopynix._typechecking import BEARTYPING
@@ -145,14 +145,14 @@ class NixCore:
             applied[name] = read_back
         return applied
 
-    def open_store(self, uri: str) -> nanopynix_store.Store:
-        return nanopynix_store.open_store(uri)
+    def open_store(self, uri: str) -> Store:
+        return Store(uri)
 
     def open_eval_state(
         self,
-        store: nanopynix_store.Store,
+        store: Store,
         nix_path: Sequence[str],
-        build_store: nanopynix_store.Store | None = None,
+        build_store: Store | None = None,
         eval_settings: Mapping[str, str] | None = None,
         fetch_settings: Mapping[str, str] | None = None,
     ) -> EvalState:
@@ -162,7 +162,7 @@ class NixCore:
             # In front of the `nix-path` setting, as `nix -I` puts it, so the
             # setting still answers after the search path.
             settings["nix-path"] = " ".join([*nix_path, get_setting("nix-path") or ""]).strip()
-        return EvalState(store.store, settings, None if build_store is None else build_store.store)
+        return EvalState(store, settings, build_store)
 
     def get_verbosity(self) -> int:
         """Return the Nix log verbosity of the calling thread.

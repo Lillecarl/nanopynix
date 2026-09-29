@@ -1,6 +1,9 @@
 [tool.pyright]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
+# The gate reads the stubs of the stable Nix. A shape a later Nix has is
+# unreachable here, as `nanopynix/_engine.py` spells it.
+defineConstant = { GC_PATHS_UNION = false }
 extraPaths = [
   ".",
   "nanopynix/src",

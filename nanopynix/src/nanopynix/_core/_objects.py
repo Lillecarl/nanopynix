@@ -13,28 +13,44 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import time
 import weakref
-from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 from nanopynix_proto.nix.common import GcAction, StoreDirs
+from nanopynix_proto.nix.eval import BuildResponse
 
 from nanopynix._core._extract import attrs_value_map, flake_ref_attrs
 from nanopynix._core._nix_core import NixCore, nix_build_mode
 from nanopynix._core._primops import registered_primops
 from nanopynix._engine import (
+    BadStorePath,
+    ContentAddressMethod,
+    DerivationOutputCAFixed,
+    DerivationOutputCAFloating,
+    DerivationOutputDeferred,
+    DerivationOutputImpure,
+    DerivationOutputInputAddressed,
     DerivedPathBuilt,
     EvalError,
     EvalState,
+    GCAction,
+    HashAlgorithm,
     KeyedBuildResult,
     LockedFlake,
     NixError,
     OutputsSpec,
+    Store,
+    StorePath as NixStorePath,
     Value,
-    errors as nanopynix_errors,
-    fetchers as nanopynix_fetchers,
+    gc_options,
     parse_flake_ref,
-    store as nanopynix_store,
+    registry_add,
+    registry_entries,
+    registry_pin,
+    registry_remove,
+    user_registry_path,
 )
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
 from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT, BuildMode
@@ -60,62 +76,47 @@ from nanopynix.models import (
     StorePath,
 )
 
-_RAW_GC_ACTIONS = {
-    GcAction.RETURN_LIVE: nanopynix_store.GCAction.ReturnLive,
-    GcAction.RETURN_DEAD: nanopynix_store.GCAction.ReturnDead,
-    GcAction.DELETE_DEAD: nanopynix_store.GCAction.DeleteDead,
-    GcAction.DELETE_SPECIFIC: nanopynix_store.GCAction.DeleteSpecific,
+_GC_ACTIONS = {
+    GcAction.RETURN_LIVE: GCAction.RETURN_LIVE,
+    GcAction.RETURN_DEAD: GCAction.RETURN_DEAD,
+    GcAction.DELETE_DEAD: GCAction.DELETE_DEAD,
+    GcAction.DELETE_SPECIFIC: GCAction.DELETE_SPECIFIC,
 }
 
 if TYPE_CHECKING or BEARTYPING:
+    import pathlib
     from collections.abc import Callable, Mapping, Sequence
 
-    from nanopynix._engine import BuildMode as NixBuildMode, Repl, StorePath as NixStorePath
+    from nanopynix._engine import BuildMode as NixBuildMode, RegistryWrite as NixRegistryWrite, Repl
 
 
 @runtime_checkable
 class _DerivedPathNode(Protocol):
-    """The two fields that ``_derivation_outputs`` reads off one node.
+    """The two readers that ``_derivation_outputs`` calls on one node.
 
-    The engine's node is the real one, and it
-    satisfies this by structure. A protocol, and not that class directly,
-    because nanobind binds the class for reading only and it has no
-    constructor. A test cannot build the tree that Nix will not produce on
-    demand -- a child with several outputs, or a second level -- and
-    ``test_the_input_drvs_builder_recurses_and_keeps_every_output`` covers
-    exactly those two shapes from a stand-in node.
+    huggorm's ``InputDrvNode`` satisfies this by structure. A protocol, and
+    not that class, because huggorm's node has no setters, so a test cannot
+    build the tree that Nix will not produce on demand -- a child with several
+    outputs, or a second level. ``test_the_input_drvs_builder_recurses_and_keeps_every_output``
+    covers those two shapes from a stand-in node.
     """
 
     # A protocol with no `__slots__` gives every class that inherits it a
     # `__dict__`, and the cost is invisible.
     __slots__ = ()
 
-    @property
     def outputs(self) -> list[str]: ...
 
-    @property
     def dynamic_outputs(self) -> Mapping[str, _DerivedPathNode]: ...
 
 
-def _registry_write(raw: Mapping[str, Any]) -> RegistryWrite:
-    """One dict from the bindings, as the model the wire also carries.
-
-    ``fetchers.pat`` declares the shape as ``RegistryWriteDict``, and that
-    name is not the annotation here. It exists in the stub alone, and
-    ``NANOPYNIX_BEARTYPING=1`` resolves every annotation at run time, so
-    naming it would fail the import of this module.
-    """
-    return RegistryWrite(path=raw["path"], removed=raw["removed"], to=raw["to"], locked=raw["locked"])
-
-
-def _build_result(result: KeyedBuildResult, store: Any) -> dict[str, object]:
+def _build_result(result: KeyedBuildResult, store: Store) -> BuildResult:
     """One build's outcome: paths absolute, and statuses as words.
 
-    *store* is huggorm's ``Store``: it spells the target, and its directory
-    makes each path absolute.
+    *store* spells the target, and its directory makes each path absolute.
     """
     target = result.path()
-    rendered: str = store.print_derived_path(target)
+    rendered = store.print_derived_path(target)
     if isinstance(target, DerivedPathBuilt):
         spec = target.outputs()
         drv_path, outputs = rendered.rsplit("^", 1)[0], ["*"] if spec.all() else spec.names()
@@ -123,14 +124,14 @@ def _build_result(result: KeyedBuildResult, store: Any) -> dict[str, object]:
         drv_path, outputs = rendered, []
     prefix = f"{store.store_dir()}/"
     success, error = result.success(), result.error()
-    built_outputs: dict[str, dict[str, object]] = {}
+    built_outputs: dict[str, RealisedOutput] = {}
     if success is not None:
         status, error_msg = str(success.status()), ""
         built_outputs = {
-            name: {
-                "out_path": prefix + realisation.out_path().to_string(),
-                "signatures": [signature.to_string() for signature in realisation.signatures()],
-            }
+            name: RealisedOutput(
+                out_path=prefix + realisation.out_path().to_string(),
+                signatures=[signature.to_string() for signature in realisation.signatures()],
+            )
             for name, realisation in success.built_outputs().items()
         }
     elif error is not None:
@@ -138,14 +139,14 @@ def _build_result(result: KeyedBuildResult, store: Any) -> dict[str, object]:
         status, error_msg = str(error.status), error.colored
     else:
         status, error_msg = "unknown", ""
-    return {
-        "drv_path": drv_path,
-        "outputs": outputs,
-        "success": success is not None,
-        "status": status,
-        "error_msg": error_msg,
-        "built_outputs": built_outputs,
-    }
+    return BuildResult(
+        drv_path=drv_path,
+        outputs=outputs,
+        success=success is not None,
+        status=status,
+        error_msg=error_msg,
+        built_outputs=built_outputs,
+    )
 
 
 def _derivation_outputs(node: _DerivedPathNode) -> DerivationOutputs:
@@ -153,23 +154,65 @@ def _derivation_outputs(node: _DerivedPathNode) -> DerivationOutputs:
 
     ``dynamic_outputs`` nests once per level of dynamic derivation, so this
     recurses rather than handing the node straight to ``DerivationOutputs``.
-
-    *node* carries fields, and it is not a dictionary. That is what makes
-    each name below a checked one: pyright reads the field of the node and the
-    field of the model, and it fails when the two stop agreeing. A ``**dict``
-    spread type-checks against any shape at all, including a wrong one.
     """
     return DerivationOutputs(
-        outputs=node.outputs,
-        dynamic_outputs={name: _derivation_outputs(child) for name, child in node.dynamic_outputs.items()},
+        outputs=node.outputs(),
+        dynamic_outputs={name: _derivation_outputs(child) for name, child in node.dynamic_outputs().items()},
     )
 
 
-class CoreStore:
-    """One direct thread-safe store pointer shared by the Store pool."""
+type _NixDerivationOutput = (
+    DerivationOutputInputAddressed
+    | DerivationOutputCAFixed
+    | DerivationOutputCAFloating
+    | DerivationOutputDeferred
+    | DerivationOutputImpure
+)
 
-    def __init__(self, raw: nanopynix_store.Store) -> None:
-        self.raw: nanopynix_store.Store | None = raw
+
+def _derivation_output(output: _NixDerivationOutput, prefix: str) -> DerivationOutput:
+    """One arm of huggorm's output union, as the model's five fields."""
+    match output:
+        case DerivationOutputInputAddressed():
+            return DerivationOutput(
+                type="InputAddressed", path=prefix + output.path().to_string(), ca=None, method=None, hash_algo=None
+            )
+        case DerivationOutputCAFixed():
+            return DerivationOutput(type="CAFixed", path=None, ca=output.ca().render(), method=None, hash_algo=None)
+        case DerivationOutputCAFloating():
+            return DerivationOutput(
+                type="CAFloating", path=None, ca=None, method=str(output.method()), hash_algo=str(output.hash_algo())
+            )
+        case DerivationOutputDeferred():
+            return DerivationOutput(type="Deferred", path=None, ca=None, method=None, hash_algo=None)
+        case DerivationOutputImpure():
+            return DerivationOutput(
+                type="Impure", path=None, ca=None, method=str(output.method()), hash_algo=str(output.hash_algo())
+            )
+
+
+def _added_name(name: str | None, path: str) -> str:
+    """The name an added path gets: *name*, else the last component of *path*.
+
+    ``os.path.basename`` and not ``Path.name``: a trailing slash leaves no
+    name, and Nix refuses the empty one.
+    """
+    return os.path.basename(path) if name is None else name  # noqa: PTH119 -- Path.name drops a trailing slash
+
+
+def _registry_write(wrote: NixRegistryWrite) -> RegistryWrite:
+    return RegistryWrite(path=wrote.path(), removed=wrote.removed(), to=wrote.target(), locked=wrote.locked())
+
+
+def _text(path: pathlib.Path | None) -> str | None:
+    return None if path is None else str(path)
+
+
+class CoreStore:
+    """One store, shared by the threads of a store pool."""
+
+    def __init__(self, raw: Store) -> None:
+        self.raw: Store | None = raw
 
     def close(self) -> None:
         raw = self.raw
@@ -177,114 +220,95 @@ class CoreStore:
         if raw is not None:
             raw.close()
 
-    def require_raw(self) -> nanopynix_store.Store:
+    def require_raw(self) -> Store:
         if self.raw is None:
             raise RuntimeError("local store has been closed")
         return self.raw
 
-    def _store_path(self, path: str | nanopynix_store.StorePath) -> nanopynix_store.StorePath:
-        """Normalise a caller-supplied path to a ``nix::StorePath``.
+    def _store_path(self, path: str | NixStorePath) -> NixStorePath:
+        """A caller's path as huggorm's ``StorePath``.
 
-        This is the Python home of what ``nix_store.cpp``'s
-        ``store_path_from_string()`` did for the proto-dict entrypoints, so
-        that both engines share one implementation instead of inproc using the
-        direct binding (no absolutization) and rpc using the dict funnel
-        (absolutization). A relative path is resolved against the store
-        directory, matching what the rpc engine has always accepted.
-
-        The empty string is deliberately *not* rejected here: it is forwarded
-        to ``parse_store_path``, whose C++ guard raises ``BadStorePath`` rather
-        than letting ``canonPath``'s assertion abort the process. Keeping the
-        rejection there means both engines keep reporting it exactly as they
-        do today, and the guard stays reachable for raw-binding callers too.
+        A relative path is resolved against the store directory. The empty
+        string goes on to ``parse_store_path``, which raises ``BadStorePath``
+        for it, so both engines report it the same way.
         """
-        if isinstance(path, nanopynix_store.StorePath):
+        if isinstance(path, NixStorePath):
             return path
         raw = self.require_raw()
         if path and not path.startswith("/"):
-            path = f"{raw.get_store_dir()}/{path}"
+            path = f"{raw.store_dir()}/{path}"
         return raw.parse_store_path(path)
+
+    def _derived_paths(self, paths: Sequence[str | NixStorePath]) -> list[NixStorePath | DerivedPathBuilt]:
+        """Each path as Nix reads a derived path; a base name is a path in this store."""
+        raw = self.require_raw()
+        prefix = f"{raw.store_dir()}/"
+        texts = [path if isinstance(path, str) else path.to_string() for path in paths]
+        return [raw.parse_derived_path(text if text.startswith("/") else prefix + text) for text in texts]
 
     @staticmethod
     def _require_filesystem_path(path: str, method: str) -> None:
         """Reject the empty string for the methods that take a *filesystem* path.
 
-        ``_store_path`` above forwards ``""`` to ``parse_store_path``, whose
-        C++ guard rejects it. The three methods that take a filesystem path
-        rather than a store path -- ``follow_links_to_store_path``,
-        ``add_to_store`` and ``compute_store_path`` -- never reach that guard,
-        and Nix resolves a relative path against the *process working
-        directory*, so ``""`` silently becomes "whatever directory this process
-        happens to be in".
+        ``follow_links_to_store_path``, ``add_to_store`` and
+        ``compute_store_path`` take a filesystem path, and Nix resolves a
+        relative one against the *process working directory*. So ``""``
+        becomes whatever directory this process is in. The packaged test
+        runner runs from a store copy of the tree, and there
+        ``follow_links_to_store_path("")`` returns the store path of the
+        working directory, on every supported Nix version.
 
-        That is not a theoretical hazard. It is invisible from a source
-        checkout, because the cwd is not in the store and Nix then errors
-        anyway -- but run from a cwd that *is* inside the store (which is
-        exactly what the packaged test runner does, since it ``cd``s into a
-        store copy of the tree) and ``follow_links_to_store_path("")`` returns
-        the cwd's store path as a perfectly good answer, on every supported Nix
-        version. ``add_to_store("")`` would likewise have copied the working
-        directory into the store.
-
-        Nix's own behaviour here is neither safe nor consistent across
-        versions: 2.35 and git raise a bare ``std::filesystem`` "cannot make
-        absolute path: Invalid argument" ``RuntimeError`` instead, which is at
-        least an error but not one a caller can distinguish from any other
-        internal failure. Rejecting it here gives one answer everywhere, and
-        the same ``BadStorePath`` every other path-taking entry point already
-        produces for ``""``.
+        Nix 2.35 and git raise a bare ``std::filesystem`` "cannot make absolute
+        path" error instead, which a caller cannot tell from any other internal
+        failure. Rejecting it here gives the same ``BadStorePath`` that every
+        other path-taking method gives for ``""``.
         """
         if path == "":
-            raise nanopynix_errors.BadStorePath(f"{method}: the empty string is not a path")
+            raise BadStorePath(f"{method}: the empty string is not a path")
 
-    def print_store_path(self, path: nanopynix_store.StorePath | str) -> str:
-        """Render a store path absolute, whichever of Nix's two spellings arrives.
+    def print_store_path(self, path: NixStorePath | str) -> str:
+        """Render a store path absolute, from a ``StorePath`` or from a string.
 
-        The union is not convenience: the bindings genuinely return both.
-        Anything that goes through ``parse_store_path`` hands back a
-        ``StorePath``, whose ``str()`` is the bare ``hash-name``, while the
-        collective queries funnel through C++'s ``store_paths_to_string_list``
-        and hand back strings that are already absolute. Normalising both here
-        is what lets one helper serve either; the prefix test is what makes it
+        ``str()`` of a ``StorePath`` is the bare ``hash-name``, and a string
+        from a caller may already be absolute; the prefix test makes this
         idempotent.
         """
         text = str(path)
-        store_dir = self.require_raw().get_store_dir().rstrip("/")
+        store_dir = self.require_raw().store_dir().rstrip("/")
         if text == store_dir or text.startswith(f"{store_dir}/"):
             return text
         return f"{store_dir}/{text}"
 
-    def print_store_paths(self, paths: Sequence[nanopynix_store.StorePath | str]) -> list[str]:
+    def print_store_paths(self, paths: Sequence[NixStorePath | str]) -> list[str]:
         return [self.print_store_path(path) for path in paths]
 
-    def is_valid_path(self, path: str | nanopynix_store.StorePath) -> bool:
+    def is_valid_path(self, path: str | NixStorePath) -> bool:
         return self.require_raw().is_valid_path(self._store_path(path))
 
-    def query_missing(self, derived_paths: Sequence[str | nanopynix_store.StorePath]) -> MissingInfo:
+    def query_missing(self, derived_paths: Sequence[str | NixStorePath]) -> MissingInfo:
         """Return which of ``derived_paths`` still need building or substituting.
 
         Derived paths, not store paths, and Nix's own reading of them: a
         plain ``.drv`` is an opaque fetch and selects **no** outputs, while
-        Nix's ``^`` separator selects them. ``parse_derived_paths`` in C++
-        hands both straight to ``nix::DerivedPath::parse``.
+        Nix's ``^`` separator selects them.
 
         The async ``Store`` of each engine is the layer that reads a bare
         ``.drv`` as every output, through
         :meth:`~nanopynix.models.DerivedPath.for_build`. This layer maps Nix
         and does not, so a caller here gets what ``nix build`` would give.
         """
-        missing = self.require_raw().query_missing_typed([str(path) for path in derived_paths])
+        missing = self.require_raw().query_missing(self._derived_paths(derived_paths))
         return MissingInfo(
-            will_build=missing.will_build,
-            will_substitute=missing.will_substitute,
-            unknown=missing.unknown,
-            download_size=missing.download_size,
-            nar_size=missing.nar_size,
+            will_build=self.print_store_paths(missing.will_build()),
+            will_substitute=self.print_store_paths(missing.will_substitute()),
+            unknown=self.print_store_paths(missing.unknown()),
+            download_size=missing.download_size(),
+            nar_size=missing.nar_size(),
         )
 
     def build_paths_with_results(
         self,
-        derived_paths: Sequence[str | nanopynix_store.StorePath],
+        derived_paths: Sequence[str | NixStorePath],
         *,
         build_mode: int,
         eval_store: CoreStore | None = None,
@@ -294,41 +318,23 @@ class CoreStore:
         Nix's reading of a derived path, as in :meth:`query_missing` above: a
         bare ``.drv`` here builds nothing.
         """
-        results = self.require_raw().build_paths_with_results(
-            [str(path) for path in derived_paths],
-            build_mode,
-            None if eval_store is None else eval_store.require_raw(),
-        )
-        return [
-            BuildResult(
-                drv_path=result["drv_path"],
-                outputs=result["outputs"],
-                success=result["success"],
-                status=result["status"],
-                error_msg=result["error_msg"],
-                built_outputs={
-                    name: RealisedOutput(out_path=output["out_path"], signatures=output["signatures"])
-                    for name, output in result["built_outputs"].items()
-                },
-            )
-            for result in results
-        ]
+        return self.build_targets(self._derived_paths(derived_paths), nix_build_mode(build_mode), eval_store)
 
     def build_targets(
         self,
         targets: list[NixStorePath | DerivedPathBuilt],
         build_mode: NixBuildMode,
         eval_store: CoreStore | None,
-    ) -> list[dict[str, object]]:
-        raw = self.require_raw().store
+    ) -> list[BuildResult]:
+        raw = self.require_raw()
         results = raw.build_paths_with_results(
-            targets, build_mode, None if eval_store is None else eval_store.require_raw().store
+            targets, build_mode, None if eval_store is None else eval_store.require_raw()
         )
         return [_build_result(result, raw) for result in results]
 
     def copy_closure(
         self,
-        paths: Sequence[str | nanopynix_store.StorePath],
+        paths: Sequence[str | NixStorePath],
         dest_store: CoreStore,
         *,
         repair: bool = False,
@@ -336,8 +342,8 @@ class CoreStore:
         substitute: bool = False,
     ) -> None:
         self.require_raw().copy_closure(
-            [self._store_path(path) for path in paths],
             dest_store.require_raw(),
+            [self._store_path(path) for path in paths],
             repair,
             check_sigs,
             substitute,
@@ -346,13 +352,23 @@ class CoreStore:
     # --- Identity ---------------------------------------------------------
 
     def get_uri(self, *, with_params: bool = False) -> str:
-        return self.require_raw().get_uri(with_params=with_params)
+        raw = self.require_raw()
+        return raw.reference() if with_params else raw.get_uri()
 
     def get_store_dir(self) -> str:
-        return self.require_raw().get_store_dir()
+        return self.require_raw().store_dir()
 
     def get_store_dirs(self) -> StoreDirs:
-        return StoreDirs(**self.require_raw().get_store_dirs())
+        raw = self.require_raw()
+        return StoreDirs(
+            store_dir=raw.store_dir(),
+            uri=raw.get_uri(),
+            root_dir=_text(raw.root_dir()),
+            state_dir=_text(raw.state_dir()),
+            log_dir=_text(raw.log_dir()),
+            real_store_dir=_text(raw.real_store_dir()),
+            build_dir=_text(raw.build_dir()),
+        )
 
     def parse_store_path(self, path: str) -> StorePath:
         return StorePath(self.print_store_path(self._store_path(path)))
@@ -367,31 +383,34 @@ class CoreStore:
 
     # --- Queries ----------------------------------------------------------
 
-    def query_path_info(self, path: str | nanopynix_store.StorePath) -> PathInfo:
-        info = self.require_raw().query_path_info_typed(self._store_path(path))
+    def query_path_info(self, path: str | NixStorePath) -> PathInfo:
+        info = self.require_raw().query_path_info(self._store_path(path))
+        deriver = info.deriver()
+        ca = info.ca()
         return PathInfo(
-            path=info.path,
-            references=info.references,
-            nar_hash=info.nar_hash,
-            nar_size=info.nar_size,
-            registration_time=info.registration_time,
-            deriver=info.deriver,
-            ca=info.ca,
-            ultimate=info.ultimate,
-            sigs=info.sigs,
+            path=self.print_store_path(info.path()),
+            references=self.print_store_paths(info.references()),
+            nar_hash=info.nar_hash().sri(),
+            nar_size=info.nar_size(),
+            # Nix's unset time is 0, and the model's is None.
+            registration_time=info.registration_time() or None,
+            deriver=None if deriver is None else self.print_store_path(deriver),
+            ca=None if ca is None else ca.render(),
+            ultimate=info.ultimate(),
+            sigs=[signature.to_string() for signature in info.sigs()],
         )
 
     def dump_db(
         self,
-        paths: Sequence[str | nanopynix_store.StorePath],
+        paths: Sequence[str | NixStorePath],
         *,
         show_derivers: bool = True,
         show_hash: bool = True,
     ) -> str:
-        return self.require_raw().dump_db(
-            [self._store_path(path) for path in paths],
-            show_derivers,
-            show_hash,
+        raw = self.require_raw()
+        # One path at a time: Nix takes a set, and this keeps the caller's order.
+        return "".join(
+            raw.make_validity_registration([self._store_path(path)], show_derivers, show_hash) for path in paths
         )
 
     def query_all_valid_paths(self) -> list[StorePath]:
@@ -399,7 +418,7 @@ class CoreStore:
 
     def compute_fs_closure(
         self,
-        path: str | nanopynix_store.StorePath,
+        path: str | NixStorePath,
         *,
         flip_direction: bool = False,
         include_outputs: bool = False,
@@ -407,75 +426,84 @@ class CoreStore:
     ) -> list[StorePath]:
         return self._public_paths(
             self.require_raw().compute_fs_closure(
-                self._store_path(path),
+                [self._store_path(path)],
                 flip_direction,
                 include_outputs,
                 include_derivers,
             ),
         )
 
-    def query_derivation_outputs(self, path: str | nanopynix_store.StorePath) -> list[StorePath]:
-        return self._public_paths(self.require_raw().query_derivation_outputs(self._store_path(path)))
+    def query_derivation_outputs(self, path: str | NixStorePath) -> list[StorePath]:
+        return self._public_paths(list(self.require_raw().query_derivation_output_map(self._store_path(path)).values()))
 
-    def query_valid_derivers(self, path: str | nanopynix_store.StorePath) -> list[StorePath]:
+    def query_valid_derivers(self, path: str | NixStorePath) -> list[StorePath]:
         return self._public_paths(self.require_raw().query_valid_derivers(self._store_path(path)))
 
-    def query_referrers(self, path: str | nanopynix_store.StorePath) -> list[StorePath]:
+    def query_referrers(self, path: str | NixStorePath) -> list[StorePath]:
         return self._public_paths(self.require_raw().query_referrers(self._store_path(path)))
 
-    def query_substitutable_paths(self, paths: Sequence[str | nanopynix_store.StorePath]) -> list[StorePath]:
+    def query_substitutable_paths(self, paths: Sequence[str | NixStorePath]) -> list[StorePath]:
         return self._public_paths(
             self.require_raw().query_substitutable_paths([self._store_path(path) for path in paths]),
         )
 
-    def get_build_log(self, path: str | nanopynix_store.StorePath) -> str | None:
+    def get_build_log(self, path: str | NixStorePath) -> str | None:
         return self.require_raw().get_build_log(self._store_path(path))
 
-    def read_derivation(self, drv_path: str | nanopynix_store.StorePath) -> Derivation:
-        drv = self.require_raw().read_derivation_typed(self._store_path(drv_path))
-        # Every name below is a checked one. The bound type carries a real
-        # annotation for each field, so pyright reads the binding and the model
-        # together and fails when the two stop agreeing. The dictionary this
-        # replaced could only be spread, and a `**dict` spread type-checks
-        # against any shape at all -- including a wrong one.
+    def read_derivation(self, drv_path: str | NixStorePath) -> Derivation:
+        raw = self.require_raw()
+        drv = raw.read_derivation(self._store_path(drv_path))
+        prefix = f"{raw.store_dir()}/"
         return Derivation(
-            name=drv.name,
-            system=drv.system,
-            builder=drv.builder,
-            args=drv.args,
-            env=drv.env,
-            input_srcs=drv.input_srcs,
-            input_drvs={path: _derivation_outputs(node) for path, node in drv.input_drvs.items()},
-            outputs={
-                name: DerivationOutput(
-                    type=output.type,
-                    path=output.path,
-                    ca=output.ca,
-                    method=output.method,
-                    hash_algo=output.hash_algo,
-                )
-                for name, output in drv.outputs.items()
-            },
-            structured_attrs=drv.structured_attrs,
+            name=drv.name(),
+            system=drv.system(),
+            builder=drv.builder(),
+            args=drv.args(),
+            env=drv.env(),
+            input_srcs=self.print_store_paths(drv.input_srcs()),
+            input_drvs={prefix + base_name: _derivation_outputs(node) for base_name, node in drv.input_drvs().items()},
+            outputs={name: _derivation_output(output, prefix) for name, output in drv.outputs().items()},
+            structured_attrs=drv.structured_attrs(),
         )
 
     # --- Mutation ---------------------------------------------------------
 
     def write_dev_shell_derivation(
         self,
-        drv_path: str | nanopynix_store.StorePath,
+        drv_path: str | NixStorePath,
         get_env_script: str,
     ) -> str:
         """Rewrite *drv_path* to dump its build environment, and store it.
 
-        The rewrite itself is in C++, because the three supported Nix versions
-        disagree on how a derivation gets written and how its output paths are
-        filled. See ``write_dev_shell_derivation`` in ``nix_store.cpp``.
+        ``getDerivationEnvironment`` in Nix's ``develop.cc``, over the
+        derivation's JSON. ``add_derivation`` fills in the deferred output
+        paths, so no Nix version branch and no hash computation happens here.
         """
-        raw = self.require_raw().write_dev_shell_derivation(self._store_path(drv_path), get_env_script)
-        return self.print_store_path(raw)
+        raw = self.require_raw()
+        document = json.loads(raw.read_derivation(self._store_path(drv_path)).to_json())
+        if os.path.basename(document["builder"]) != "bash":  # noqa: PTH119 -- Nix's baseNameOf, on a string
+            raise NixError("'develop' only works on derivations that use 'bash' as their builder")
+        script = raw.add_to_store(
+            "get-env.sh", get_env_script.encode(), ContentAddressMethod.TEXT, HashAlgorithm.SHA256
+        )
+        document["args"] = [raw.print_store_path(script)]
+        # A dev shell is not the build, so the build's reference checks do not apply.
+        if document.get("structuredAttrs") is not None:
+            document["structuredAttrs"].pop("outputChecks", None)
+        else:
+            for check in ("allowedReferences", "allowedRequisites", "disallowedReferences", "disallowedRequisites"):
+                document["env"].pop(check, None)
+        document["name"] += "-env"
+        document["env"]["name"] = document["name"]
+        document["inputs"]["srcs"].append(script.to_string())
+        for name, output in document["outputs"].items():
+            # Input-addressed and fixed outputs have a path to invalidate; the other kinds have none.
+            if "path" in output or "hash" in output:
+                document["outputs"][name] = {}
+                document["env"][name] = ""
+        return self.print_store_path(raw.add_derivation(json.dumps(document)))
 
-    def ensure_path(self, path: str | nanopynix_store.StorePath) -> None:
+    def ensure_path(self, path: str | NixStorePath) -> None:
         self.require_raw().ensure_path(self._store_path(path))
 
     def add_to_store(
@@ -487,9 +515,10 @@ class CoreStore:
         hash_algo: str = DEFAULT_HASH_ALGO,
     ) -> StorePath:
         self._require_filesystem_path(path, "add_to_store")
-        return StorePath(
-            self.print_store_path(self.require_raw().add_to_store(path, name, method, hash_algo)),
+        added = self.require_raw().add_path_to_store(
+            _added_name(name, path), path, ContentAddressMethod(method), HashAlgorithm(hash_algo)
         )
+        return StorePath(self.print_store_path(added))
 
     def compute_store_path(
         self,
@@ -500,9 +529,10 @@ class CoreStore:
         hash_algo: str = DEFAULT_HASH_ALGO,
     ) -> StorePath:
         self._require_filesystem_path(path, "compute_store_path")
-        return StorePath(
-            self.print_store_path(self.require_raw().compute_store_path(path, name, method, hash_algo)),
+        computed = self.require_raw().compute_store_path(
+            _added_name(name, path), path, ContentAddressMethod(method), HashAlgorithm(hash_algo)
         )
+        return StorePath(self.print_store_path(computed))
 
     def optimise_store(self) -> None:
         self.require_raw().optimise_store()
@@ -512,18 +542,19 @@ class CoreStore:
 
     # --- Garbage collection -----------------------------------------------
 
-    def add_temp_root(self, path: str | nanopynix_store.StorePath) -> None:
+    def add_temp_root(self, path: str | NixStorePath) -> None:
         self.require_raw().add_temp_root(self._store_path(path))
 
-    def add_perm_root(self, path: str | nanopynix_store.StorePath, gc_root: str) -> str:
-        return self.require_raw().add_perm_root(self._store_path(path), gc_root)
+    def add_perm_root(self, path: str | NixStorePath, gc_root: str) -> str:
+        return str(self.require_raw().add_perm_root(self._store_path(path), gc_root))
 
     def add_indirect_root(self, path: str) -> None:
         """``path`` is a filesystem symlink, not a store path -- no normalisation."""
         self.require_raw().add_indirect_root(path)
 
     def find_roots(self, *, censor: bool = False) -> list[GcRoot]:
-        return [GcRoot(link=root["link"], path=root["path"]) for root in self.require_raw().find_roots(censor)]
+        raw = self.require_raw()
+        return [GcRoot(link=root.link(), path=raw.print_store_path(root.path())) for root in raw.find_roots(censor)]
 
     # --- The flake registry -----------------------------------------------
 
@@ -532,23 +563,22 @@ class CoreStore:
 
         The store is here because the global layer downloads its file into
         one. Pass ``{"flake-registry": ""}`` to drop that layer, and no
-        download or GC root happens. ``list_registry_entries`` in
-        ``nix_fetchers.cpp`` gives the whole reason.
+        download or GC root happens.
         """
         return [
             RegistryEntry(
-                type=entry["type"],
-                from_=entry["from"],
-                to=entry["to"],
-                exact=entry["exact"],
-                extra_attrs=attrs_value_map(entry["extra_attrs"]),
+                type=str(entry.layer()),
+                from_=entry.source(),
+                to=entry.target(),
+                exact=entry.exact(),
+                extra_attrs=attrs_value_map(entry.extra_attrs()),
             )
-            for entry in nanopynix_fetchers.list_registry_entries(self.require_raw(), dict(fetch_settings or {}))
+            for entry in registry_entries(self.require_raw(), dict(fetch_settings or {}))
         ]
 
     def user_registry_path(self) -> str:
         """The registry file of the user, which is where a write goes by default."""
-        return nanopynix_fetchers.user_registry_path()
+        return user_registry_path()
 
     def registry_add(
         self,
@@ -561,14 +591,11 @@ class CoreStore:
     ) -> RegistryWrite:
         """Point ``from_ref`` at ``to_ref``, in one registry file.
 
-        An empty ``path`` names the registry of the user. The write reads the
-        file from disk each time, and not from Nix's per-process cache, so two
-        writes to two files in one process do not read each other.
-        ``registry_add`` in ``nix_fetchers.cpp`` gives the whole reason.
+        An absent or empty ``path`` names the registry of the user. The write
+        reads the file from disk each time, and not from Nix's per-process
+        cache, so two writes to two files in one process do not read each other.
         """
-        return _registry_write(
-            nanopynix_fetchers.registry_add(path or "", from_ref, to_ref, dict(fetch_settings or {})),
-        )
+        return _registry_write(registry_add(path or None, from_ref, to_ref, settings=dict(fetch_settings or {})))
 
     def registry_remove(
         self,
@@ -579,9 +606,7 @@ class CoreStore:
         fetch_settings: Mapping[str, str] | None = None,
     ) -> RegistryWrite:
         """Drop every entry for ``from_ref``, from one registry file."""
-        return _registry_write(
-            nanopynix_fetchers.registry_remove(path or "", from_ref, dict(fetch_settings or {})),
-        )
+        return _registry_write(registry_remove(path or None, from_ref, settings=dict(fetch_settings or {})))
 
     def registry_pin(
         self,
@@ -600,16 +625,10 @@ class CoreStore:
         result carries one.
         """
         return _registry_write(
-            nanopynix_fetchers.registry_pin(
-                self.require_raw(),
-                path or "",
-                ref,
-                locked or "",
-                dict(fetch_settings or {}),
-            ),
+            registry_pin(self.require_raw(), path or None, ref, locked or None, settings=dict(fetch_settings or {})),
         )
 
-    @no_runtime_type_check  # action validates its own membership in _RAW_GC_ACTIONS at
+    @no_runtime_type_check  # action validates its own membership in _GC_ACTIONS at
     # runtime for untyped callers (see the KeyError guard below); beartype's
     # parameter check would otherwise intercept before that guard runs and
     # raise its own exception type instead of the documented ValueError.
@@ -618,22 +637,24 @@ class CoreStore:
         action: GcAction,
         *,
         ignore_liveness: bool = False,
-        paths_to_delete: Sequence[str | nanopynix_store.StorePath] = (),
+        paths_to_delete: Sequence[str | NixStorePath] = (),
         max_freed: int = NO_GC_LIMIT,
     ) -> GcResult:
         try:
-            raw_action = _RAW_GC_ACTIONS[action]
+            nix_action = _GC_ACTIONS[action]
         except KeyError as exc:
             raise ValueError(f"unsupported garbage-collection action: {action!r}") from exc
-        result = self.require_raw().collect_garbage(
-            raw_action,
+        options = gc_options(
+            nix_action,
             ignore_liveness,
             [self._store_path(path) for path in paths_to_delete],
-            max_freed,
+            # huggorm spells Nix's "no limit" as None, not as the largest u64.
+            None if max_freed == NO_GC_LIMIT else max_freed,
         )
-        return GcResult(paths=self._public_paths(result["paths"]), bytes_freed=result["bytes_freed"])
+        result = self.require_raw().collect_garbage(options)
+        return GcResult(paths=self._public_paths(result.paths()), bytes_freed=result.bytes_freed())
 
-    def _public_paths(self, raw_paths: Sequence[nanopynix_store.StorePath | str]) -> list[StorePath]:
+    def _public_paths(self, raw_paths: Sequence[NixStorePath | str]) -> list[StorePath]:
         return [StorePath(path) for path in self.print_store_paths(raw_paths)]
 
 
@@ -1083,19 +1104,18 @@ class CoreValue:
         build_store: CoreStore | None = None,
         build_mode: int = BuildMode.Normal,
         eval_store: CoreStore | None = None,
-    ) -> dict[str, object]:
+    ) -> BuildResponse:
         raw = self._forced()
         drv_path = raw.drv_path()
         output_paths = raw.output_paths()
         store = self._eval_state.store if build_store is None else build_store
         prefix = f"{self._eval_state.store.get_store_dir()}/"
         target = DerivedPathBuilt(drv_path, OutputsSpec(names=sorted(output_paths) or ["out"]))
-        results = store.build_targets([target], nix_build_mode(build_mode), eval_store)
-        return {
-            "drv_path": prefix + drv_path.to_string(),
-            "outputs": {name: prefix + path.to_string() for name, path in output_paths.items() if path is not None},
-            "results": results,
-        }
+        return BuildResponse(
+            drv_path=prefix + drv_path.to_string(),
+            outputs={name: prefix + path.to_string() for name, path in output_paths.items() if path is not None},
+            results=store.build_targets([target], nix_build_mode(build_mode), eval_store),
+        )
 
     def derived_path(self) -> str:
         """The ``.drv`` of this derivation, as an absolute path."""

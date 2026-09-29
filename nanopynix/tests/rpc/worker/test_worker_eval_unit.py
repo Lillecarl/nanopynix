@@ -21,7 +21,7 @@ from nanopynix._core._objects import (  # type: ignore[reportPrivateUsage] -- te
     CoreStore,
     CoreValue,
 )
-from nanopynix._engine import store as nanopynix_store
+from nanopynix._engine import Store
 from nanopynix._wire import HandleKind
 from nanopynix.rpc.worker._handle_registry import (
     HandleRegistry,  # type: ignore[reportPrivateUsage] -- test imports private module
@@ -107,18 +107,21 @@ class _FakeBridge:
 
 
 class _FakeEvalState(nix_core.EvalState):
+    """A real evaluator that remembers what opened it.
+
+    Real, because beartype checks ``EvalState`` at run time.
+    """
+
     def __init__(
         self,
-        store: object,
+        store: Store,
         settings: dict[str, str] | None = None,
-        build_store: object | None = None,
+        build_store: Store | None = None,
     ) -> None:
+        super().__init__(store, settings, build_store)
         self.store = store
         self.settings = settings or {}
         self.build_store = build_store
-
-    def register_primop(self, name: str, arity: int, fn: object) -> None:
-        del name, arity, fn
 
 
 def _fake_raw(eval_state: CoreEvalState) -> _FakeEvalState:
@@ -134,41 +137,15 @@ def _fake_raw(eval_state: CoreEvalState) -> _FakeEvalState:
     return raw
 
 
-class _StoreId(nanopynix_store.Store):
-    """A store stand-in that is only ever compared by an identity string.
-
-    ``_FakeEvalState`` never calls anything on the store it is given -- it
-    just stashes it and the assertions below check *which* one open_eval
-    picked -- so equality against the identity string is all that matters.
-    """
-
-    def __init__(self, ident: str) -> None:
-        self._ident = ident
-        # What `open_eval_state` hands the evaluator, so the double sees the identity string.
-        self.store = ident
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, str) and other == self._ident
-
-    def __hash__(self) -> int:
-        return hash(self._ident)
-
-    def __repr__(self) -> str:
-        return self._ident
+def _dummy_store() -> Store:
+    return Store("dummy://")
 
 
-class _FakeStore(nanopynix_store.Store):
-    def __init__(self) -> None:
-        pass
-
-    # with_params mirrors the real binding, which declares it keyword-capable
-    # ("with_params"_a): CoreStore.get_uri forwards it by name, so a fake that
-    # takes no argument no longer stands in for one.
-    def get_uri(self, with_params: bool = False) -> str:  # positional-or-keyword, as the binding declares it
-        _ = with_params
+class _FakeStore(Store):
+    def get_uri(self) -> str:
         return "local"
 
-    def get_store_dir(self) -> str:
+    def store_dir(self) -> str:
         return "/nix/store"
 
 
@@ -177,9 +154,9 @@ def test_worker_opens_auto_store_with_explicit_auto_uri(monkeypatch: pytest.Monk
 
     def _open_store(uri: str) -> _FakeStore:
         opened_uris.append(uri)
-        return _FakeStore()
+        return _FakeStore("dummy://")
 
-    monkeypatch.setattr(nix_core.nanopynix_store, "open_store", _open_store)
+    monkeypatch.setattr(nix_core, "Store", _open_store)
     handler = WorkerServiceHandler(WorkerState())
 
     _handle, uri, store_dir = handler._open_store("auto")  # type: ignore[reportPrivateUsage] -- test verifies worker store dispatch
@@ -216,21 +193,27 @@ def test_worker_title_lists_open_store_uris(monkeypatch: pytest.MonkeyPatch) -> 
     closed: list[str] = []
     monkeypatch.setattr(worker, "set_process_title", lambda title, **_kwargs: titles.append(title))  # type: ignore[reportUnknownLambdaType, reportUnknownArgumentType] -- lambda receives Any from setattr
 
-    class Store(nanopynix_store.Store):
-        def __init__(self, uri: str) -> None:
-            self.uri = uri
+    # Named after construction: a nanobind subclass hands its constructor's
+    # arguments to the C++ constructor, whatever `__init__` says.
+    class NamedStore(Store):
+        uri = ""
 
-        def get_uri(self, with_params: bool = False) -> str:  # positional-or-keyword, as the binding declares it
-            _ = with_params
+        def get_uri(self) -> str:
             return self.uri
 
-        def get_store_dir(self) -> str:
+        def store_dir(self) -> str:
             return "/nix/store"
 
         def close(self) -> None:
+            super().close()
             closed.append(self.uri)
 
-    monkeypatch.setattr(nix_core.nanopynix_store, "open_store", Store)  # type: ignore[reportUnknownArgumentType] -- callable receives Any from setattr
+    def open_named(uri: str) -> NamedStore:
+        store = NamedStore("dummy://")
+        store.uri = uri
+        return store
+
+    monkeypatch.setattr(nix_core, "Store", open_named)
     state = WorkerState()
     state.worker_subname = "quiet-otter"
     handler = WorkerServiceHandler(state)
@@ -294,12 +277,10 @@ async def test_open_eval_allows_concurrent_eval_states(monkeypatch: pytest.Monke
     monkeypatch.setattr(nix_core, "EvalState", _FakeEvalState)
 
     state = WorkerState()
-    # These strings stand in for a store only as identity markers -- the
-    # assertions below check *which* one open_eval picked, and _FakeEvalState
-    # never calls anything on them. Cast because CoreStore now names the real
-    # binding type rather than Any.
-    second_handle = state.handles.allocate(CoreStore(_StoreId("second-store")), HandleKind.STORE)
-    first_handle = state.handles.allocate(CoreStore(_StoreId("first-store")), HandleKind.STORE)
+    # The assertions below check *which* store open_eval picked, by identity.
+    second_store, first_store = _dummy_store(), _dummy_store()
+    second_handle = state.handles.allocate(CoreStore(second_store), HandleKind.STORE)
+    first_handle = state.handles.allocate(CoreStore(first_store), HandleKind.STORE)
     state.nix_path = ["nixpkgs=/tmp/nixpkgs"]
     handler = EvalServiceHandler(state)
 
@@ -308,7 +289,7 @@ async def test_open_eval_allows_concurrent_eval_states(monkeypatch: pytest.Monke
 
     assert isinstance(selected, CoreEvalState)
     assert isinstance(selected.raw, _FakeEvalState)
-    assert selected.raw.store == "second-store"
+    assert selected.raw.store is second_store
     assert selected.raw.settings["nix-path"].split()[0] == "nixpkgs=/tmp/nixpkgs"
 
     assert handler._get_es(response.eval_handle) is selected  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
@@ -317,7 +298,7 @@ async def test_open_eval_allows_concurrent_eval_states(monkeypatch: pytest.Monke
     second_response = await handler.open_eval(OpenEvalRequest(store_handle=first_handle, request_id=2))
     assert second_response.eval_handle != response.eval_handle
     second_selected = handler._get_es(second_response.eval_handle)  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
-    assert _fake_raw(second_selected).store == "first-store"
+    assert _fake_raw(second_selected).store is first_store
     assert second_selected is not selected
 
     close_eval_state(state, response.eval_handle)
@@ -342,16 +323,17 @@ async def test_open_eval_forwards_the_build_store_handle(
     monkeypatch.setattr(nix_core, "EvalState", _FakeEvalState)
 
     state = WorkerState()
-    eval_store = state.handles.allocate(CoreStore(_StoreId("eval-store")), HandleKind.STORE)
-    build_store = state.handles.allocate(CoreStore(_StoreId("build-store")), HandleKind.STORE)
+    eval_raw, build_raw = _dummy_store(), _dummy_store()
+    eval_store = state.handles.allocate(CoreStore(eval_raw), HandleKind.STORE)
+    build_store = state.handles.allocate(CoreStore(build_raw), HandleKind.STORE)
     handler = EvalServiceHandler(state)
 
     with_build = await handler.open_eval(
         OpenEvalRequest(store_handle=eval_store, build_store_handle=build_store, request_id=1),
     )
     selected = handler._get_es(with_build.eval_handle)  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
-    assert _fake_raw(selected).store == "eval-store"
-    assert _fake_raw(selected).build_store == "build-store", "the build store did not reach the evaluator"
+    assert _fake_raw(selected).store is eval_raw
+    assert _fake_raw(selected).build_store is build_raw, "the build store did not reach the evaluator"
 
     # 0 is the wire's "none", as for every other optional handle.
     without_build = await handler.open_eval(OpenEvalRequest(store_handle=eval_store, request_id=2))

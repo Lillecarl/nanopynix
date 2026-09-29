@@ -15,7 +15,7 @@ rather than implied.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import anyio
 import pytest
@@ -23,7 +23,8 @@ from pydantic import ValidationError
 
 import nanopynix
 from nanopynix import stores
-from nanopynix._engine import store as nanopynix_store
+from nanopynix._core._objects import CoreRuntime
+from nanopynix._engine import parse_store_reference
 from nanopynix.namespace import OverlayNamespace
 from nanopynix.settings import NIX_2_34, NixStoreDefaults, field_is_supported, running_nix_version
 from nanopynix_testing.nix_environment import force_rmtree
@@ -87,8 +88,7 @@ def test_nix_parses_every_rendered_uri(config: stores.StoreConfig) -> None:
     catches a URI this library reads back happily and Nix refuses.
     """
     uri = config.uri()
-    parsed: Any = nanopynix_store.parse_store_reference(uri)
-    assert parsed["render"] == uri
+    assert parse_store_reference(uri).render() == uri
 
 
 def test_a_setting_the_store_type_does_not_have_is_refused() -> None:
@@ -380,11 +380,12 @@ async def test_a_model_opens_the_store_it_describes(tmp_path: Path) -> None:
     coverage stops at the drift check and the round-trip above.
     """
     config = stores.Local(root=str(tmp_path / "store"), require_sigs=False)
-    store = nanopynix.open_store(config.uri())
+    runtime = CoreRuntime()
+    store = runtime.open_store(config.uri())
     note(local_store_dir=store.get_store_dir())
     assert store.get_store_dir() == "/nix/store"
 
-    dummy = nanopynix.open_store(stores.Dummy().uri())
+    dummy = runtime.open_store(stores.Dummy().uri())
     assert dummy.get_store_dir() == "/nix/store"
 
 

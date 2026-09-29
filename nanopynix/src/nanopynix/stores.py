@@ -44,7 +44,16 @@ from urllib.parse import quote, unquote
 from pydantic import AliasChoices, Field, model_validator
 
 from nanopynix._ansi import strip_ansi
-from nanopynix._engine import errors as nanopynix_errors, store as nanopynix_store
+from nanopynix._engine import (
+    NixError,
+    StoreReferenceAuto,
+    StoreReferenceDaemon,
+    StoreReferenceLocal,
+    StoreReferenceSpecified,
+    parse_store_reference,
+    render_store_reference,
+    store_types_json,
+)
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.settings import (
     NIX_2_34,
@@ -99,7 +108,7 @@ def _nix_uri_errors_as_value_error(uri: str) -> Generator[None]:
     """
     try:
         yield
-    except nanopynix_errors.Error as error:
+    except NixError as error:
         raise ValueError(f"Nix cannot read {uri!r} as a store URI: {strip_ansi(str(error))}") from error
 
 
@@ -208,7 +217,7 @@ class StoreConfig(NixConfigModel):
         """
         raw = self._render_raw()
         with _nix_uri_errors_as_value_error(raw):
-            return nanopynix_store.render_store_reference(raw)
+            return render_store_reference(raw)
 
     def _render_raw(self) -> str:
         query = "&".join(f"{key}={quote(value, safe=_QUERY_SAFE)}" for key, value in sorted(self.params().items()))
@@ -559,18 +568,22 @@ def parse(uri: str) -> StoreConfig:
             care which half of it Nix objected to.
     """
     with _nix_uri_errors_as_value_error(uri):
-        reference = cast("dict[str, Any]", nanopynix_store.parse_store_reference(uri))  # type: ignore[reportUnknownArgumentType] -- C++ extension without type stubs
-    params: dict[str, str] = dict(reference["params"])
-    kind: str = reference["type"]
-    if kind == "Auto":
-        return _validate(Auto, params, uri)
-    scheme: str = reference["scheme"]
+        reference = parse_store_reference(uri)
+    params = reference.params()
+    match reference.variant():
+        case StoreReferenceAuto():
+            return _validate(Auto, params, uri)
+        case StoreReferenceDaemon():
+            scheme, authority = "unix", ""
+        case StoreReferenceLocal():
+            scheme, authority = "local", ""
+        case StoreReferenceSpecified() as specified:
+            scheme, authority = specified.scheme(), specified.authority()
     model = _BY_SCHEME.get(scheme)
     if model is None:
         known = ", ".join(sorted(_BY_SCHEME))
         raise ValueError(f"no store model for scheme {scheme!r} in {uri!r}; known schemes: {known}")
     data: dict[str, Any] = dict(params)
-    authority: str = reference["authority"]
     for name, field in model.model_fields.items():
         part = _uri_part_of(field)
         if part == "authority" and (authority or field.is_required()):
@@ -727,7 +740,7 @@ def list_store_types() -> dict[str, dict[str, Any]]:
     Nix documents. Each entry has ``doc``, ``uri-schemes``, ``settings`` and
     ``experimentalFeature``.
     """
-    raw: dict[str, dict[str, Any]] = json.loads(nanopynix_store.list_store_types_json())
+    raw: dict[str, dict[str, Any]] = json.loads(store_types_json())
     return raw
 
 
