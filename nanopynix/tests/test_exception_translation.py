@@ -271,10 +271,8 @@ def test_interrupted_is_not_folded_into_the_error_hierarchy() -> None:
 
     Asserted structurally rather than by provoking a real interrupt: setting
     Nix's global interrupt flag in-process poisons every later eval in the
-    session, which is the same upstream behaviour that already forces
-    ``nanopynix/tests/bindings/test_daemon_protocol.py`` to skip. What this
-    pins is the consequence that matters -- ``except Exception`` must not
-    swallow a cancellation.
+    session. What this pins is the consequence that matters -- ``except
+    Exception`` must not swallow a cancellation.
     """
     assert issubclass(KeyboardInterrupt, BaseException)
     assert not issubclass(KeyboardInterrupt, Exception)

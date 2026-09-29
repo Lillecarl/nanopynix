@@ -26,10 +26,10 @@ Process-wide state
   writes one thread's level, and the paragraph below says what that means.
 
 Lifecycle and extension points
-: `init_libexpr`, `process_connection` and `register_store_implementation` are
-  not day-to-day calls. `init_libexpr` runs once for the process, and a session
-  already runs it. The other two exist so that you can build a daemon or a
-  store type, and each one has its own contract below.
+: `init_libexpr` and `register_store_implementation` are not day-to-day calls.
+  `init_libexpr` runs once for the process, and a session already runs it.
+  `register_store_implementation` exists so that you can build a store type,
+  and it has its own contract below.
 
 Plain queries
 : `build_info`, `current_system`, `eval_counters_enabled`, `get_verbosity`,
@@ -200,11 +200,6 @@ models of {doc}`stores`.
 `Repair` rebuilds a path whose contents are damaged, and `Check` builds a path
 that exists again and compares the result.
 
-`process_connection` serves one connection of the Nix daemon protocol on a file
-descriptor that you own. It is how a Python process acts as a Nix daemon. The
-`trusted` argument decides what the peer may ask for, and the caller must
-decide it, because the binding cannot know how the peer authenticated.
-
 `register_store_implementation` claims a URI scheme for a Python class. The
 factory returns a {class}`~nanopynix.StoreImpl` subclass, which lists the
 operations that a store may override. Registration is process-wide and
@@ -214,8 +209,6 @@ permanent, the same as `register_primop`.
 .. autoclass:: nanopynix.BuildMode
    :members:
    :undoc-members:
-
-.. autofunction:: nanopynix.process_connection
 
 .. autofunction:: nanopynix.register_store_implementation
 ```

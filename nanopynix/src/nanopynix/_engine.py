@@ -188,9 +188,3 @@ def register_store_implementation(scheme: str, factory: object) -> NoReturn:
     """Claim a URI scheme for a Python store. huggorm cannot serve one yet (tasks/084)."""
     del scheme, factory
     raise NotImplementedError("huggorm cannot implement a Nix store in Python yet")
-
-
-def process_connection(store: Store, fd: int, *, trusted: bool) -> NoReturn:
-    """Serve one Nix daemon connection. huggorm cannot serve one."""
-    del store, fd, trusted
-    raise NotImplementedError("huggorm does not serve the Nix daemon protocol")
