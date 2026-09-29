@@ -29,7 +29,7 @@ from nanopynix_proto.google.protobuf import Any as ProtoAny
 from nanopynix_proto.google.rpc import Status as RpcStatus
 from nanopynix_proto.nix.common import ErrorIdentity, LogLevel, NixErrorInfo, SourcePos
 
-from nanopynix._engine import errors as nanopynix_errors
+from nanopynix._engine import EvalError as EngineEvalError
 from nanopynix.exceptions import (
     EvalError,
     ListIndexError,
@@ -357,7 +357,7 @@ def test_a_binding_exception_is_named_in_the_nix_vocabulary() -> None:
     A bound class's Python name *is* its Nix C++ name, so it goes in
     ``nix_type`` where ``exception_for_nix_type`` can look it up.
     """
-    assert identity_for_exception(nanopynix_errors.EvalError("boom")) == ErrorIdentity(nix_type="EvalError")
+    assert identity_for_exception(EngineEvalError("boom")) == ErrorIdentity(nix_type="EvalError")
 
 
 @pytest.mark.parametrize(

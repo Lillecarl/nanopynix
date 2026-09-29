@@ -46,11 +46,13 @@ import signal
 from typing import TYPE_CHECKING, Any, cast
 
 from nanopynix._ansi import strip_ansi
-from nanopynix._engine import error_detail, is_engine_error
+from nanopynix._engine import ErrorInfo, is_engine_error
 from nanopynix._typechecking import BEARTYPING
 
 if TYPE_CHECKING or BEARTYPING:
     from nanopynix_proto.nix.common import NixType
+
+    from nanopynix._engine import Position
 
 # ════════════════════════════════════════════════════════════════════
 # Exception hierarchy
@@ -736,8 +738,39 @@ def refine_within(base: type[NixError], msg: str) -> tuple[type[NixError], str]:
     return base, base.__name__
 
 
+def _position(pos: Position | None) -> dict[str, Any] | None:
+    if pos is None:
+        return None
+    return {"file": pos.file(), "line": pos.line(), "column": pos.column()}
+
+
+def error_info_dict(info: ErrorInfo) -> dict[str, Any]:
+    """*info* as the dict :attr:`NixError.info` documents."""
+    return {
+        "level": info.level(),
+        "msg": info.msg(),
+        "pos": _position(info.pos()),
+        "is_from_expr": info.is_from_expr(),
+        "status": info.status(),
+        "traces": [{"hint": trace.hint(), "pos": _position(trace.pos())} for trace in info.traces()],
+        "truncated": info.truncated(),
+        "suggestions": list(info.suggestions()),
+    }
+
+
+def error_detail(exc: BaseException) -> tuple[str, dict[str, Any] | None]:
+    """Nix's own rendering of *exc*, and its ``nix::ErrorInfo`` as a dict.
+
+    ``pos["file"]`` is the file alone, with no line and column appended.
+    """
+    raw: object = getattr(exc, "colored", "")
+    rendered = raw if isinstance(raw, str) else ""
+    info: object = getattr(exc, "info", None)
+    return rendered, error_info_dict(info) if isinstance(info, ErrorInfo) else None
+
+
 def translate_nix_exception(exc: BaseException) -> NixError | None:
-    """Map a raw nanobind Nix exception onto the public hierarchy (boundary A).
+    """Map a raw engine Nix exception onto the public hierarchy (boundary A).
 
     Returns ``None`` when *exc* is not a Nix binding exception and should
     propagate untouched -- including when it is already a :class:`NixError`,
@@ -748,12 +781,10 @@ def translate_nix_exception(exc: BaseException) -> NixError | None:
     ``AssertionError``), and matching on the name alone would silently convert
     an ordinary Python ``TypeError`` from caller code into a Nix eval error.
 
-    ``raw``/``info`` come from the engine's ``error_detail``, which reads the
+    ``raw``/``info`` come from :func:`error_detail`, which reads the
     ``nix::ErrorInfo`` -- position, evaluation trace, suggestions -- that
-    ``str(exc)`` alone cannot express. Each engine attaches it in its own
-    shape, and ``error_detail`` gives the one dict :attr:`NixError.info`
-    documents. An exception that carries none gives ``None``, which stays a
-    loss of detail rather than an ``AttributeError``.
+    ``str(exc)`` alone cannot express. An exception that carries none gives
+    ``None``, which stays a loss of detail rather than an ``AttributeError``.
     """
     if isinstance(exc, NixError):
         return None

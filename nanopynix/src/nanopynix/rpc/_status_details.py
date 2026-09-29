@@ -62,9 +62,9 @@ from nanopynix_proto.google.rpc import Status as RpcStatus
 from nanopynix_proto.nix.common import ErrorIdentity, ErrorTrace, LogLevel, NixErrorInfo, SourcePos
 from pydantic import ValidationError
 
-from nanopynix._engine import error_detail, is_engine_error
+from nanopynix._engine import is_engine_error
 from nanopynix._typechecking import BEARTYPING
-from nanopynix.exceptions import NixError, ObjectMisuseError
+from nanopynix.exceptions import NixError, ObjectMisuseError, error_detail
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Sequence

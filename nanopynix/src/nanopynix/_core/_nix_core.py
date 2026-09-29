@@ -9,13 +9,19 @@ from nanopynix._engine import (
     BuildMode as NixBuildMode,
     EvalState,
     Store,
+    default_verbosity,
     get_setting,
-    init_libexpr,
+    list_settings,
     parse_nix_path as nix_parse_nix_path,
-    util as nanopynix_util,
+    reset_overridden,
+    set_default_verbosity,
+    set_setting,
+    set_thread_verbosity,
+    thread_verbosity,
 )
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import BuildMode
+from nanopynix.libstore import enable_experimental_feature, init_libexpr, load_config_once
 from nanopynix.models import SettingsProvenance
 
 if TYPE_CHECKING or BEARTYPING:
@@ -81,21 +87,21 @@ class NixCore:
         dereferences those statements. ``nanopynix.init_libstore`` carries that
         measurement.
         """
-        nanopynix_util.init_libstore(load_config=load_config)
+        load_config_once(load_config)
         # Whatever loadConfFile just set is, by definition, the overridden set.
-        from_config = dict(nanopynix_util.list_settings(overridden_only=True))
+        from_config = dict(list_settings(overridden_only=True))
         # Reset the bookkeeping only -- no value changes -- so the same query
         # after applying our settings reports ours and nothing else.
-        nanopynix_util.reset_overridden()
+        reset_overridden()
 
         # After the reset, so that what this enables is reported as applied.
         # nanopynix did apply it, and a caller that compares `applied` against
         # `from_config` must see the change.
         for feature in experimental_features:
-            nanopynix_util.enable_experimental_feature(feature)
+            enable_experimental_feature(feature)
         for name, value in settings.items():
-            nanopynix_util.set_setting(name, value)
-        applied = dict(nanopynix_util.list_settings(overridden_only=True))
+            set_setting(name, value)
+        applied = dict(list_settings(overridden_only=True))
 
         if verbosity is not None:
             # The default, and not this thread's level: the caller configured
@@ -103,8 +109,8 @@ class NixCore:
             # The dispatch wrapper carries the level onto each Nix thread that
             # runs an operation, and this covers the threads Nix starts for
             # itself, which never pass through that wrapper.
-            nanopynix_util.set_default_verbosity(verbosity)
-            nanopynix_util.set_verbosity(verbosity)
+            set_default_verbosity(verbosity)
+            set_thread_verbosity(verbosity)
         # Safe from any thread: huggorm starts the collector on a thread of its
         # own. Here and not at the first evaluator, so that Nix copies
         # `NIX_PATH` into `nix-path` as the session starts.
@@ -119,7 +125,7 @@ class NixCore:
         With ``overridden_only``, only the settings something has set, which is
         what tells an applied value apart from a default.
         """
-        return dict(nanopynix_util.list_settings(overridden_only=overridden_only))
+        return dict(list_settings(overridden_only=overridden_only))
 
     def apply_settings(self, settings: Mapping[str, str]) -> dict[str, str]:
         """Write ``settings`` into Nix's global registry, and read each one back.
@@ -133,10 +139,10 @@ class NixCore:
         against that by refusing to write while either is open.
         """
         for name, value in settings.items():
-            nanopynix_util.set_setting(name, value)
+            set_setting(name, value)
         applied: dict[str, str] = {}
         for name in settings:
-            read_back: str | None = nanopynix_util.get_setting(name)
+            read_back: str | None = get_setting(name)
             if read_back is None:
                 # `set_setting` raises for a name Nix does not know, so a name
                 # that vanishes between the write and the read is a defect in
@@ -173,7 +179,7 @@ class NixCore:
         this through a session's executor therefore reads the level that the
         session's dispatch wrapper set for this operation.
         """
-        return nanopynix_util.get_verbosity()
+        return thread_verbosity()
 
     def set_verbosity(self, verbosity: int) -> int:
         """Set the level for the calling thread and for every new Nix thread.
@@ -182,10 +188,10 @@ class NixCore:
         of a whole session. The session holds the level of its own operations,
         so this call is what reaches the threads Nix starts for itself.
         """
-        nanopynix_util.set_default_verbosity(verbosity)
-        nanopynix_util.set_verbosity(verbosity)
-        return nanopynix_util.get_verbosity()
+        set_default_verbosity(verbosity)
+        set_thread_verbosity(verbosity)
+        return thread_verbosity()
 
     def get_default_verbosity(self) -> int:
         """Return the level that a new Nix thread starts at."""
-        return nanopynix_util.get_default_verbosity()
+        return default_verbosity()

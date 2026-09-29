@@ -17,11 +17,11 @@ from pydantic_settings import BaseSettings, EnvSettingsSource, PydanticBaseSetti
 
 from nanopynix._core._nix_core import parse_nix_path
 from nanopynix._engine import (
+    build_info,
     eval_settings_json,
     fetch_settings_json,
     flake_settings_json,
     settings_json,
-    util as nanopynix_util,
 )
 from nanopynix._features import DEFAULT_EXPERIMENTAL_FEATURES as DEFAULT_EXPERIMENTAL_FEATURES
 from nanopynix._fork import process_is_forked
@@ -223,7 +223,7 @@ def only_on(platform: str) -> Any:
 
 def running_nix_version() -> str:
     """The version of the Nix that nanopynix is linked with."""
-    build_info_result: Any = nanopynix_util.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
+    build_info_result: Any = build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
     return str(build_info_result["nix_version"])
 
 

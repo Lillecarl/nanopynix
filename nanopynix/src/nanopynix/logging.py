@@ -40,7 +40,7 @@ import anyio
 import janus
 from nanopynix_proto.nix.common import EventsDropped, LogEvent as LogEventProto
 
-from nanopynix._engine import flush_logs
+from nanopynix._core._logs import flush_logs
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.models import LogEvent
 
@@ -125,12 +125,12 @@ class LogStreamEventKind(enum.StrEnum):
 class LogCollector:
     """Thread-safe collector for Nix log events.
 
-    Pass ``collector.callback`` to ``nanopynix_util.install_logger()``.
+    Pass ``collector.callback`` to ``install_logger()``.
 
     Usage::
 
         collector = LogCollector()
-        nanopynix_util.install_logger(collector.callback)
+        install_logger(collector.callback)
 
         # Sync drain (worker subprocess):
         for event in collector.drain():

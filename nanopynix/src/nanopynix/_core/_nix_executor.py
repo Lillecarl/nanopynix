@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextlib
+import itertools
 import logging
 import threading
 import weakref
@@ -11,13 +13,18 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 import anyio
 
-from nanopynix._engine import signals as nanopynix_signals
+from nanopynix._engine import (
+    begin_interrupt_scope,
+    cancel_interrupt_scope,
+    end_interrupt_scope,
+    forget_interrupt_scope,
+)
 from nanopynix._fork import ForkGuard
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.exceptions import EvaluatorAbandonedError
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Generator
 
 _T = TypeVar("_T")
 
@@ -91,8 +98,43 @@ def _noop() -> None:
     """Warm-up body: exists only so the pool has a reason to spawn its thread."""
 
 
+_scope_ids = itertools.count(1)
+
+
+class InterruptToken:
+    """A cancel that one thread arms and any thread sets.
+
+    It owns one huggorm interrupt scope. huggorm keeps a cancelled scope in a
+    table until it is forgotten, and every ``checkInterrupt`` in the process
+    takes a lock while that table is not empty. So the token forgets its
+    scope when the scope ends, and a cancel that arrives later does nothing.
+    """
+
+    def __init__(self) -> None:
+        self._scope = next(_scope_ids)
+        self._lock = threading.Lock()
+        self._ended = False
+
+    def cancel(self) -> None:
+        with self._lock:
+            if not self._ended:
+                cancel_interrupt_scope(self._scope)
+
+    @contextlib.contextmanager
+    def armed(self) -> Generator[None]:
+        """Arm this token on the calling thread while the block runs."""
+        previous = begin_interrupt_scope(self._scope)
+        try:
+            yield
+        finally:
+            end_interrupt_scope(previous)
+            with self._lock:
+                self._ended = True
+                forget_interrupt_scope(self._scope)
+
+
 def _run_interruptible[T](
-    token: nanopynix_signals.InterruptToken,
+    token: InterruptToken,
     func: Callable[..., T],
     args: tuple[Any, ...],
 ) -> T:
@@ -102,7 +144,7 @@ def _run_interruptible[T](
     reads its interrupt predicate from a C++ ``thread_local``. Only code running
     on the Nix thread can install one for that thread.
     """
-    with nanopynix_signals.interrupt_scope(token):
+    with token.armed():
         return func(*args)
 
 
@@ -245,7 +287,7 @@ class NixThreadExecutor:
         allow_when_closing: bool,
     ) -> _T:
         self._fork.check()
-        token = nanopynix_signals.InterruptToken()
+        token = InterruptToken()
         with self._lock:
             self._require_usable(allow_when_closing=allow_when_closing)
             self._ensure_worker_spawned()
@@ -272,7 +314,7 @@ class NixThreadExecutor:
 
     async def _interrupt(
         self,
-        token: nanopynix_signals.InterruptToken,
+        token: InterruptToken,
         future: concurrent.futures.Future[Any],
         loop: asyncio.AbstractEventLoop,
     ) -> None:

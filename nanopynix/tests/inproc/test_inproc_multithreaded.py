@@ -12,9 +12,10 @@ from typing import TYPE_CHECKING, cast
 import anyio
 import anyio.to_thread
 import pytest
+from nanopynix_proto.nix.common import LogLevel
 
 from nanopynix import EvalSessionClosedError, NixSettings, inproc
-from nanopynix._engine import util as nanopynix_util
+from nanopynix._engine import get_setting, log_message, set_setting
 from test_support.notes import note
 
 # `_session` below builds an `inproc.Session` directly rather than through the
@@ -63,8 +64,8 @@ async def _session(*, store_workers: int = 4) -> AsyncGenerator[inproc.Session]:
     how the leak was found at all. Issue #282.
     """
     async with _raw_session(store_workers=store_workers) as nix:
-        previous = await nix.run(nanopynix_util.get_setting, "max-jobs")
-        await nix.run(nanopynix_util.set_setting, "max-jobs", "25")
+        previous = await nix.run(get_setting, "max-jobs")
+        await nix.run(set_setting, "max-jobs", "25")
         try:
             yield nix
         finally:
@@ -72,7 +73,7 @@ async def _session(*, store_workers: int = 4) -> AsyncGenerator[inproc.Session]:
             # Nix reported no value to restore, and writing a guess would be
             # worse than leaving the one this helper set.
             if previous is not None:
-                await nix.run(nanopynix_util.set_setting, "max-jobs", previous)
+                await nix.run(set_setting, "max-jobs", previous)
 
 
 def _wait_for_peer(barrier: threading.Barrier) -> int:
@@ -82,7 +83,7 @@ def _wait_for_peer(barrier: threading.Barrier) -> int:
 
 def _emit_log(message: str, barrier: threading.Barrier) -> int:
     barrier.wait(timeout=5)
-    nanopynix_util._log_test(message)  # type: ignore[reportPrivateUsage] -- test imports private helper
+    log_message(LogLevel.INFO, message)
     return threading.get_ident()
 
 

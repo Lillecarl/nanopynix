@@ -56,8 +56,8 @@ from nanopynix_proto.nix.worker import (
     WorkerServiceBase,
 )
 
+from nanopynix._core._logs import install_logger, set_activity_tracking
 from nanopynix._core._primops import import_primop_callable as _import_callable, register_primop
-from nanopynix._engine import util as nanopynix_util
 from nanopynix._process_title import set_process_title, set_worker_title
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import (
@@ -226,7 +226,7 @@ class WorkerServiceHandler(WorkerServiceBase):
             int(message.verbosity) if message.verbosity is not None else self._state.runtime.get_default_verbosity()
         )
         self._state.nix_path = list(message.nix_path)
-        nanopynix_util.set_activity_tracking(message.activity_tracking)
+        set_activity_tracking(message.activity_tracking)
 
         primops_raw = [
             {
@@ -529,7 +529,7 @@ def worker_service_factory(
 
     collector = LogCollector()
     outbox = LogOutbox()
-    nanopynix_util.install_logger(collector.callback)
+    install_logger(collector.callback)
     with contextlib.suppress(RuntimeError, ValueError):
         _install_worker_diagnostics(collector, outbox)
 

@@ -24,8 +24,9 @@ from nanopynix_proto.nix.worker import (
     WorkerServiceStub,
 )
 
+from nanopynix._core._logs import remove_logger
 from nanopynix._core._nix_executor import NixThreadExecutor
-from nanopynix._engine import util as nanopynix_util
+from nanopynix._engine import set_thread_verbosity, thread_verbosity
 from nanopynix._wire import HandleKind
 from nanopynix.exceptions import LockedFlakeReleasedError
 from nanopynix.rpc.client._manager import ManagerPrimopServiceHandler
@@ -139,7 +140,7 @@ async def l3_inproc(isolated_nix_environment: NixTestEnvironment) -> AsyncIterat
     handlers: list[object] = []
     store_uri = isolated_nix_environment.store_uri
     executor = NixThreadExecutor()
-    previous_verbosity = await executor.run(nanopynix_util.get_verbosity)
+    previous_verbosity = await executor.run(thread_verbosity)
 
     def service_factory(backchannel: Any) -> list[Any]:
         result = worker_service_factory(backchannel, executor=executor)
@@ -185,8 +186,8 @@ async def l3_inproc(isolated_nix_environment: NixTestEnvironment) -> AsyncIterat
                 assert worker_state.handles.iter_kind(HandleKind.LOCKED_FLAKE) == []
                 assert worker_state.handles.iter_kind(HandleKind.STORE) == []
                 await worker_stub.shutdown(ShutdownRequest(request_id=1_000_001))
-                await executor.run(nanopynix_util.remove_logger)
-                await executor.run(nanopynix_util.set_verbosity, previous_verbosity)
+                await executor.run(remove_logger)
+                await executor.run(set_thread_verbosity, previous_verbosity)
             finally:
                 executor.shutdown(wait=True)
 

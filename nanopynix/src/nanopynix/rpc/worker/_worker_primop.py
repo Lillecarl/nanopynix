@@ -23,7 +23,7 @@ import anyio.from_thread
 from nanopynix_proto.nix.manager import CallPrimopRequest, CallPrimopResponse
 
 from nanopynix._core._codec import deep_value_to_python, python_to_deep_value
-from nanopynix._engine import util as nanopynix_util
+from nanopynix._engine import current_request
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import CALL_ROUTE
 from nanopynix.rpc._primop_wire import reraise_if_primop_failure
@@ -89,7 +89,7 @@ class ThreadedRpcPrimopBridge:
         request = CallPrimopRequest(
             name=name,
             args=[python_to_deep_value(a) for a in args],
-            request_id=nanopynix_util.get_logger_request_id(),
+            request_id=current_request(),
         )
         with anyio.fail_after(_RPC_TIMEOUT):
             response: CallPrimopResponse = await self._backchannel.call_unary(

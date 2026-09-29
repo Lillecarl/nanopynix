@@ -1,7 +1,7 @@
 """Tests for the PyLogger log streaming with LogCollector."""
 
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
-# LogCollector, nanopynix_util.{install_logger,remove_logger,get/set_verbosity,set_logger_request_id}
+# LogCollector, install_logger, remove_logger, the thread's verbosity and set_logger_request_id
 # are C++ nanobind extension functions without type stubs; all member/variable types are Unknown.
 
 from __future__ import annotations
@@ -9,16 +9,17 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any
 
 import anyio
 import anyio.lowlevel
 import anyio.to_thread
 import pytest
-from nanopynix_proto.nix.common import LogEvent as LogEventProto, NixLogEvent, RequestFinalized
+from nanopynix_proto.nix.common import LogEvent as LogEventProto, LogLevel, NixLogEvent, RequestFinalized
 
 from nanopynix import LogCollector
-from nanopynix._engine import util as nanopynix_util
+from nanopynix._core._logs import install_logger, remove_logger, set_logger_request_id
+from nanopynix._engine import log_message, set_thread_verbosity, thread_verbosity
 from nanopynix.logging import (
     _OUTBOX_CEILING_FACTOR,  # type: ignore[reportPrivateUsage] -- the test pins the ceiling this constant sets
     CallbackBus,
@@ -37,11 +38,9 @@ if TYPE_CHECKING:
     from nanopynix_testing.nix_environment import InprocSessionFactory, RpcSessionFactory
 
 
-class _LogTestModule(Protocol):
-    def _log_test(self, msg: str) -> None: ...
-
-
-_log_test: Callable[[str], None] = cast("_LogTestModule", nanopynix_util)._log_test  # type: ignore[reportPrivateUsage] -- test imports private helper
+def _log_test(msg: str) -> None:
+    """Log *msg* through Nix's logger at INFO."""
+    log_message(LogLevel.INFO, msg)
 
 
 async def _collect(collector: LogCollector, count: int, timeout: float = 2.0) -> list[tuple[str, int, str, int, str]]:  # noqa: ASYNC109 -- timeout is passed straight through to asyncio.wait_for, which accepts a timeout parameter
@@ -60,7 +59,7 @@ async def _collect(collector: LogCollector, count: int, timeout: float = 2.0) ->
 async def test_log_stream_basic():
     """LogCollector yields messages emitted via _log_test."""
     c = LogCollector()
-    nanopynix_util.install_logger(c.callback)
+    install_logger(c.callback)
 
     try:
         _log_test("hello from nix")
@@ -79,21 +78,21 @@ async def test_log_stream_basic():
             assert isinstance(e[4], str), f"msg should be str, got {type(e[4])}"
 
     finally:
-        nanopynix_util.remove_logger()
+        remove_logger()
         await c.aclose()
 
 
 async def test_log_stream_actions():
     """Log messages have the expected action and content."""
     c = LogCollector()
-    nanopynix_util.install_logger(c.callback)
+    install_logger(c.callback)
 
     _log_test("action test")
 
     stream = c.stream()
     event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
 
-    nanopynix_util.remove_logger()
+    remove_logger()
     await c.aclose()
 
     assert event[2] == "msg"
@@ -103,14 +102,14 @@ async def test_log_stream_actions():
 async def test_log_stream_remove_logger_stops():
     """After remove_logger, the callback should not receive events."""
     c = LogCollector()
-    nanopynix_util.install_logger(c.callback)
+    install_logger(c.callback)
 
     _log_test("before remove")
     stream = c.stream()
     event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
     assert event[4] == "before remove"
 
-    nanopynix_util.remove_logger()
+    remove_logger()
     await c.aclose()
 
     remaining = [e async for e in stream]
@@ -120,12 +119,12 @@ async def test_log_stream_remove_logger_stops():
 async def test_log_stream_shutdown_clean():
     """After sentinel + close, remaining items drain cleanly."""
     c = LogCollector()
-    nanopynix_util.install_logger(c.callback)
+    install_logger(c.callback)
 
     _log_test("msg1")
     _log_test("msg2")
 
-    nanopynix_util.remove_logger()
+    remove_logger()
 
     # Signal end-of-stream with sentinel, then drain
     c.send_sentinel()
@@ -139,37 +138,37 @@ async def test_log_stream_shutdown_clean():
 async def test_verbosity_filters_low_levels():
     """Setting verbosity to Error (0) should suppress Info-level messages."""
     c = LogCollector()
-    nanopynix_util.install_logger(c.callback)
+    install_logger(c.callback)
 
-    old = nanopynix_util.get_verbosity()
+    old = thread_verbosity()
     try:
-        nanopynix_util.set_verbosity(0)  # lvlError
+        set_thread_verbosity(0)  # lvlError
 
         _log_test("should be dropped")
 
-        nanopynix_util.remove_logger()
-        nanopynix_util.set_verbosity(old)
+        remove_logger()
+        set_thread_verbosity(old)
         await c.aclose()
 
         stream = c.stream()
         items = [e async for e in stream]
         assert items == [], f"Expected no events at Error verbosity, got {[i[4] for i in items]}"
     finally:
-        nanopynix_util.set_verbosity(old)
+        set_thread_verbosity(old)
         with contextlib.suppress(Exception):
-            nanopynix_util.remove_logger()
+            remove_logger()
         await c.aclose()
 
 
 async def test_request_id_in_events():
     """set_logger_request_id tags events correctly."""
     c = LogCollector()
-    nanopynix_util.install_logger(c.callback)
+    install_logger(c.callback)
 
     try:
-        nanopynix_util.set_logger_request_id(42)
+        set_logger_request_id(42)
         _log_test("tagged")
-        nanopynix_util.set_logger_request_id(0)
+        set_logger_request_id(0)
 
         stream = c.stream()
         event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
@@ -181,7 +180,7 @@ async def test_request_id_in_events():
         event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
         assert event[1] == 0
     finally:
-        nanopynix_util.remove_logger()
+        remove_logger()
         await c.aclose()
 
 
@@ -230,12 +229,12 @@ async def test_a_consumer_that_never_drains_does_not_stop_nix():
     from `LogCollector._put_log` makes this fail.
     """
     c = LogCollector(maxsize=8)
-    nanopynix_util.install_logger(c.callback)
+    install_logger(c.callback)
     try:
         with anyio.fail_after(30):
             await anyio.to_thread.run_sync(_emit_many, 50, abandon_on_cancel=True)
     finally:
-        nanopynix_util.remove_logger()
+        remove_logger()
 
     stats = c.stats()
     assert stats["dropped"] > 0, stats
@@ -636,8 +635,8 @@ async def test_removing_the_logger_before_installing_one_is_accepted() -> None:
     needed nothing to be there first. The new shape has one object from
     import, so this asks that the object really does exist that early.
     """
-    nanopynix_util.remove_logger()
-    nanopynix_util.remove_logger()
+    remove_logger()
+    remove_logger()
     # Nix's own logger takes the message. Reaching this line is the assertion:
     # a null or freed logger would take the process down instead.
     _log_test("no callback is attached")
@@ -650,20 +649,20 @@ async def test_the_logger_survives_a_detach_and_serves_the_next_session() -> Non
     after the first has already told the binding it is finished.
     """
     first = LogCollector()
-    nanopynix_util.install_logger(first.callback)
+    install_logger(first.callback)
     _log_test("for the first")
-    nanopynix_util.remove_logger()
+    remove_logger()
     await first.aclose()
 
     second = LogCollector()
-    nanopynix_util.install_logger(second.callback)
+    install_logger(second.callback)
     try:
         _log_test("for the second")
         stream = second.stream()
         event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
         assert event[4] == "for the second"
     finally:
-        nanopynix_util.remove_logger()
+        remove_logger()
         await second.aclose()
 
 
@@ -674,19 +673,19 @@ async def test_a_detached_logger_delivers_nothing_to_the_old_callback() -> None:
     the callback that was there before nor the one that comes after.
     """
     old = LogCollector()
-    nanopynix_util.install_logger(old.callback)
-    nanopynix_util.remove_logger()
+    install_logger(old.callback)
+    remove_logger()
     _log_test("between the two sessions")
 
     new = LogCollector()
-    nanopynix_util.install_logger(new.callback)
+    install_logger(new.callback)
     try:
         _log_test("after the second attach")
         stream = new.stream()
         event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
         assert event[4] == "after the second attach", "the detached message arrived late"
     finally:
-        nanopynix_util.remove_logger()
+        remove_logger()
         await new.aclose()
 
     old.send_sentinel()

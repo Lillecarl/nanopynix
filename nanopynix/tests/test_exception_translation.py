@@ -38,7 +38,7 @@ import pytest
 
 import nanopynix
 from nanopynix import NixEvalSettings
-from nanopynix._engine import errors as nanopynix_errors
+from nanopynix._engine import errors as engine_errors
 
 if TYPE_CHECKING:
     from nanopynix_testing.nix_environment import NixTestEnvironment
@@ -191,13 +191,13 @@ def test_the_bound_classes_mirror_nix_own_hierarchy() -> None:
     A caller writing ``except huggorm_bindings.errors.EvalError`` should
     catch a ``TypeError``, exactly as a C++ ``catch (nix::EvalError &)`` would.
     """
-    assert issubclass(nanopynix_errors.TypeError, nanopynix_errors.EvalError)
-    assert issubclass(nanopynix_errors.EvalError, nanopynix_errors.EvalBaseError)
-    assert issubclass(nanopynix_errors.EvalBaseError, nanopynix_errors.Error)
-    assert issubclass(nanopynix_errors.ThrownError, nanopynix_errors.AssertionError)
+    assert issubclass(engine_errors.NixTypeError, engine_errors.EvalError)
+    assert issubclass(engine_errors.EvalError, engine_errors.EvalBaseError)
+    assert issubclass(engine_errors.EvalBaseError, engine_errors.NixError)
+    assert issubclass(engine_errors.ThrownError, engine_errors.NixAssertionError)
     # ParseError is a direct child of Error in Nix, NOT an eval error.
-    assert issubclass(nanopynix_errors.ParseError, nanopynix_errors.Error)
-    assert not issubclass(nanopynix_errors.ParseError, nanopynix_errors.EvalBaseError)
+    assert issubclass(engine_errors.ParseError, engine_errors.NixError)
+    assert not issubclass(engine_errors.ParseError, engine_errors.EvalBaseError)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -279,9 +279,8 @@ def test_interrupted_is_not_folded_into_the_error_hierarchy() -> None:
     assert issubclass(KeyboardInterrupt, BaseException)
     assert not issubclass(KeyboardInterrupt, Exception)
     assert not issubclass(KeyboardInterrupt, nanopynix.NixError)
-    # And no bound class shadows the name, which would make the mapping
-    # ambiguous for anyone reading the module.
-    assert not hasattr(nanopynix_errors, "Interrupted")
+    # The engine's own class for it is no Exception either.
+    assert not issubclass(engine_errors.Interrupted, Exception)
 
 
 # ════════════════════════════════════════════════════════════════════

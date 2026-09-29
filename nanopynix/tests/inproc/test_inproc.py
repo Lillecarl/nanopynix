@@ -19,7 +19,8 @@ from nanopynix_proto.nix.common import GcAction, LogLevel
 import nanopynix
 from nanopynix import Derivation, GcResult, MissingInfo, NixType, StorePath, inproc, yaml_primops
 from nanopynix._ansi import strip_ansi
-from nanopynix._engine import collect_garbage, collector_owner_thread, gc_stats, util as nanopynix_util
+from nanopynix._core._logs import get_activity_tracking
+from nanopynix._engine import collect_garbage, collector_owner_thread, gc_stats, log_message
 from nanopynix.settings import NixEvalSettings, normalize_nix_path
 from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD, LINUX_PROC_FS, NIX_GC_ROOTS_BUG
 from test_support.git_fixtures import init_flake_repo
@@ -1183,7 +1184,7 @@ async def test_inproc_session_subscribe_receives_log_events(inproc_session: Inpr
         events: list[Any] = []
         subscription = nix.subscribe(events.append)
         try:
-            nanopynix_util._log_test("inproc subscribe test")  # type: ignore[reportPrivateUsage] -- test imports private helper
+            log_message(LogLevel.INFO, "inproc subscribe test")
             # The predicate the assertion below uses, and not `if events`.
             # Every lane of the soak emits into the one session-wide stream,
             # so `if events` broke on a peer's event before this test's own
@@ -1203,7 +1204,7 @@ async def test_inproc_session_subscribe_receives_log_events(inproc_session: Inpr
 async def test_inproc_session_log_stream_yields_events(inproc_session: InprocSessionFactory) -> None:
     async with inproc_session() as nix:
         stream = nix.log_stream()
-        nanopynix_util._log_test("inproc log_stream test")  # type: ignore[reportPrivateUsage] -- test imports private helper
+        log_message(LogLevel.INFO, "inproc log_stream test")
         event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
         assert event.message == "inproc log_stream test"
         await stream.aclose()
@@ -1544,10 +1545,10 @@ async def test_tracking_activities_turns_the_gate_on_for_the_block(
 ) -> None:
     """The block turns Nix's activity gate on, and the exit restores the session's own setting."""
     async with inproc_session() as nix:
-        assert not nanopynix_util.get_activity_tracking()
+        assert not get_activity_tracking()
         with nix.tracking_activities():
-            assert nanopynix_util.get_activity_tracking()
-        assert not nanopynix_util.get_activity_tracking()
+            assert get_activity_tracking()
+        assert not get_activity_tracking()
 
 
 @pytest.mark.anyio
@@ -1556,5 +1557,5 @@ async def test_tracking_activities_restores_a_session_that_tracks(
 ) -> None:
     async with inproc_session(activity_tracking=True) as nix:
         with nix.tracking_activities():
-            assert nanopynix_util.get_activity_tracking()
-        assert nanopynix_util.get_activity_tracking()
+            assert get_activity_tracking()
+        assert get_activity_tracking()

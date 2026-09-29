@@ -29,6 +29,7 @@ from nanopynix_proto.nix.worker import (
     SubscribeLogsRequest,
 )
 
+import nanopynix._core._nix_core as nix_core  # type: ignore[reportPrivateUsage] -- test patches the names NixCore calls
 import nanopynix.rpc.worker._worker as worker  # type: ignore[reportPrivateUsage] -- test imports private module
 from nanopynix._core._objects import (
     CoreEvalState,  # type: ignore[reportPrivateUsage] -- test double subclasses the real core type
@@ -148,10 +149,10 @@ async def test_init_writes_nix_conf_and_skips_empty_settings_render(monkeypatch:
     def _noop(*_args: object, **_kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr(worker.nanopynix_util, "set_setting", _noop)
-    monkeypatch.setattr(worker.nanopynix_util, "enable_experimental_feature", _noop)
-    monkeypatch.setattr(worker.nanopynix_util, "init_libstore", _noop)
-    monkeypatch.setattr(worker.nanopynix_util, "set_verbosity", _noop)
+    monkeypatch.setattr(nix_core, "set_setting", _noop)
+    monkeypatch.setattr(nix_core, "enable_experimental_feature", _noop)
+    monkeypatch.setattr(nix_core, "load_config_once", _noop)
+    monkeypatch.setattr(nix_core, "set_thread_verbosity", _noop)
     monkeypatch.setattr(worker, "_register_primops", _noop)
     # **`setenv` first, so `monkeypatch` has something to restore.** `delenv`
     # on a variable that is already unset records nothing, and `handler.init`
@@ -205,10 +206,10 @@ async def test_init_puts_the_environment_in_place_before_libstore_loads(monkeypa
     def _record(*_args: object, **_kwargs: object) -> None:
         seen["at_init_libstore"] = os.environ.get(name)
 
-    monkeypatch.setattr(worker.nanopynix_util, "set_setting", _noop)
-    monkeypatch.setattr(worker.nanopynix_util, "enable_experimental_feature", _noop)
-    monkeypatch.setattr(worker.nanopynix_util, "init_libstore", _record)
-    monkeypatch.setattr(worker.nanopynix_util, "set_verbosity", _noop)
+    monkeypatch.setattr(nix_core, "set_setting", _noop)
+    monkeypatch.setattr(nix_core, "enable_experimental_feature", _noop)
+    monkeypatch.setattr(nix_core, "load_config_once", _record)
+    monkeypatch.setattr(nix_core, "set_thread_verbosity", _noop)
     monkeypatch.setattr(worker, "_register_primops", _noop)
     # Through monkeypatch rather than a plain assignment, so that its teardown
     # removes what the handler writes. The worker itself never restores a name
@@ -246,7 +247,7 @@ async def test_init_reports_and_reraises_initialization_failures(
     def _boom(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("nix init exploded")
 
-    monkeypatch.setattr(worker.nanopynix_util, "enable_experimental_feature", _boom)
+    monkeypatch.setattr(nix_core, "enable_experimental_feature", _boom)
 
     state = WorkerState()
     state.executor = NixThreadExecutor()

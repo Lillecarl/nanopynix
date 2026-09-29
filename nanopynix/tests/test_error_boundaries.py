@@ -46,7 +46,7 @@ import pytest
 
 import nanopynix
 from nanopynix import inproc
-from nanopynix._engine import errors as nanopynix_errors
+from nanopynix._engine import errors as engine_errors
 from nanopynix.exceptions import translate_nix_exception
 from nanopynix_testing.nix_environment import with_nixpkgs
 
@@ -380,29 +380,27 @@ async def test_both_engines_refuse_gc_roots_the_same_way_on_a_store_that_has_non
 
 
 def test_inproc_raises_the_public_hierarchy_not_raw_bindings() -> None:
-    """The raw nanobind classes must not be what reaches inproc callers.
+    """The engine's raw classes must not be what reaches inproc callers.
 
     The bound classes still exist and still have no relationship to the public
     hierarchy -- that part is unchanged, and is exactly why inproc translates
     at its call chokepoint instead of relying on inheritance.
     """
     # Unchanged upstream fact: the bound types are unrelated to NixError.
-    assert not issubclass(nanopynix_errors.EvalError, nanopynix.NixError)
-    assert not issubclass(nanopynix_errors.InvalidPath, nanopynix.NixError)
-    assert nanopynix_errors.EvalError is not nanopynix.EvalError
+    assert not issubclass(engine_errors.EvalError, nanopynix.NixError)
+    assert not issubclass(engine_errors.InvalidPath, nanopynix.NixError)
+    assert engine_errors.EvalError is not nanopynix.EvalError
 
     # ...which is why translation is required, and must be total over the
-    # types the bindings actually register. They all live in one module now:
-    # a single translator owns the nix::Error hierarchy, so the classes it
-    # dispatches to had to stop being scattered across expr/store/util.
+    # types the engine raises.
     for name in (
-        "Error",
+        "NixError",
         "EvalBaseError",
         "EvalError",
         "ParseError",
-        "TypeError",
+        "NixTypeError",
         "UndefinedVarError",
-        "AssertionError",
+        "NixAssertionError",
         "ThrownError",
         "InvalidPath",
         "Unsupported",
@@ -411,7 +409,7 @@ def test_inproc_raises_the_public_hierarchy_not_raw_bindings() -> None:
         "UsageError",
         "UnimplementedError",
     ):
-        bound = getattr(nanopynix_errors, name)
+        bound = getattr(engine_errors, name)
         translated = translate_nix_exception(bound("boom"))
         assert translated is not None, f"{name} has no public counterpart"
         assert isinstance(translated, nanopynix.NixError)

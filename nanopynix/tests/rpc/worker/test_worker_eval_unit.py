@@ -174,7 +174,7 @@ async def test_worker_factory_sets_worker_title(monkeypatch: pytest.MonkeyPatch)
     """
     titled: list[None] = []
     monkeypatch.setattr(worker, "set_worker_title", lambda: titled.append(None) or "quiet-otter")
-    monkeypatch.setattr(worker.nanopynix_util, "install_logger", lambda _callback: None)  # type: ignore[reportUnknownLambdaType] -- lambda receives Any from setattr
+    monkeypatch.setattr(worker, "install_logger", lambda _callback: None)  # type: ignore[reportUnknownLambdaType] -- lambda receives Any from setattr
 
     handlers = worker.worker_service_factory()
     try:
@@ -234,10 +234,10 @@ async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.Mo
     def record(*_args: object, **_kwargs: object) -> None:
         initialized_on.append(threading.get_ident())
 
-    monkeypatch.setattr(worker.nanopynix_util, "set_setting", record)
-    monkeypatch.setattr(worker.nanopynix_util, "enable_experimental_feature", record)
-    monkeypatch.setattr(worker.nanopynix_util, "init_libstore", record)
-    monkeypatch.setattr(worker.nanopynix_util, "set_verbosity", record)
+    monkeypatch.setattr(nix_core, "set_setting", record)
+    monkeypatch.setattr(nix_core, "enable_experimental_feature", record)
+    monkeypatch.setattr(nix_core, "load_config_once", record)
+    monkeypatch.setattr(nix_core, "set_thread_verbosity", record)
     monkeypatch.setattr(nix_core, "init_libexpr", record)
     monkeypatch.setattr(worker, "_register_primops", record)
 

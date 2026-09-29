@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from nanopynix import LogLevel, normalize_log_level
-from nanopynix._engine import util as nanopynix_util
+from nanopynix._engine import process_verbosity, thread_verbosity
 from nanopynix.rpc import Session
 
 if TYPE_CHECKING:
@@ -316,7 +316,7 @@ async def test_a_change_of_level_reaches_a_thread_that_already_ran(
         original = await session.get_verbosity()
 
         async def evaluator_thread_level() -> LogLevel:
-            return LogLevel(await evaluator.run(nanopynix_util.get_verbosity))
+            return LogLevel(await evaluator.run(thread_verbosity))
 
         try:
             await session.set_verbosity("info")
@@ -344,7 +344,7 @@ async def test_nix_filters_at_a_pinned_ceiling_that_no_call_moves(
     does so in another process, and reaching it would mean a new message on
     the wire that nothing but this test would ever send.
     """
-    ceiling = nanopynix_util.get_log_ceiling()
+    ceiling = process_verbosity()
     if os.environ.get("NANOPYNIX_LOG_CEILING"):
         # The caller moved the ceiling at import, which is what that variable
         # is for. The level below is then not the default, and only the part
@@ -362,7 +362,7 @@ async def test_nix_filters_at_a_pinned_ceiling_that_no_call_moves(
         try:
             for level in ("error", "debug", "vomit", "notice"):
                 await session.set_verbosity(level)
-                assert nanopynix_util.get_log_ceiling() == ceiling, f"set_verbosity({level!r}) moved the ceiling"
+                assert process_verbosity() == ceiling, f"set_verbosity({level!r}) moved the ceiling"
         finally:
             await session.set_verbosity(original)
 

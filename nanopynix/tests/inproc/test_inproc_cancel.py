@@ -34,7 +34,7 @@ import anyio
 import pytest
 
 from nanopynix._core import _nix_executor
-from nanopynix._engine import errors as nanopynix_errors
+from nanopynix._engine import Interrupted
 from nanopynix.exceptions import EvaluatorAbandonedError
 
 if TYPE_CHECKING:
@@ -71,7 +71,7 @@ CANCEL_AFTER = 0.2
 # boundary again.
 #
 # The sleep says how long it takes, so nothing here is tuned to a machine.
-# `_sleep` in `nanopynix/_engine_huggorm.py` implements it, as a builtin
+# `_sleep` in `nanopynix/_core/_objects.py` implements it, as a builtin
 # that upstream Nix does not have.
 UNINTERRUPTIBLE_SECONDS = 5.0
 UNINTERRUPTIBLE = f"builtins.sleep {UNINTERRUPTIBLE_SECONDS}"
@@ -286,7 +286,7 @@ async def test_a_cancelled_operation_raises_operation_cancelled(
     exc_info = records[-1].exc_info
     assert exc_info is not None
     raised = exc_info[1]
-    assert isinstance(raised, nanopynix_errors.OperationCancelled)
+    assert isinstance(raised, Interrupted)
     assert not isinstance(raised, KeyboardInterrupt)
 
 

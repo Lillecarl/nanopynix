@@ -22,15 +22,20 @@ from typing import TYPE_CHECKING, Any
 
 from nanopynix_proto.nix.common import LogLevel, RequestFinalized
 
+from nanopynix._core._logs import install_logger, remove_logger, set_activity_tracking, set_logger_request_id
 from nanopynix._core._nix_core import build_mode_value, parse_nix_path
 from nanopynix._core._nix_executor import NIX_EVALUATOR_STACK_SIZE, NixThreadExecutor
 from nanopynix._core._objects import CoreEvalState, CoreLockedFlake, CoreRuntime, CoreStore, CoreValue
 from nanopynix._core._primops import register_import_path_primops, to_primop_specs
 from nanopynix._engine import (
+    current_request,
+    default_verbosity,
     eval_counters_enabled,
     gc_release_thread,
+    set_default_verbosity,
     set_eval_counters_enabled,
-    util as nanopynix_util,
+    set_thread_verbosity,
+    thread_verbosity,
 )
 from nanopynix._env import validate_session_env
 from nanopynix._fork import ForkGuard
@@ -218,8 +223,8 @@ _process_guard = _InprocProcessGuard()
 
 def _detach_logger() -> None:
     # Tracking is process-wide, so a session that turned it on turns it off.
-    nanopynix_util.set_activity_tracking(False)
-    nanopynix_util.remove_logger()
+    set_activity_tracking(False)
+    remove_logger()
 
 
 def _run_with_log_context[T](operation_id: int, verbosity: int, func: Callable[..., T], args: tuple[object, ...]) -> T:
@@ -238,10 +243,10 @@ def _run_with_log_context[T](operation_id: int, verbosity: int, func: Callable[.
     session's. This function applies that level to whichever thread ran this
     operation, and restores what was there before.
     """
-    previous_id = nanopynix_util.get_logger_request_id()
-    previous_verbosity = nanopynix_util.get_verbosity()
-    nanopynix_util.set_logger_request_id(operation_id)
-    nanopynix_util.set_verbosity(verbosity)
+    previous_id = current_request()
+    previous_verbosity = thread_verbosity()
+    set_logger_request_id(operation_id)
+    set_thread_verbosity(verbosity)
     try:
         return func(*args)
     except Exception as exc:
@@ -250,8 +255,8 @@ def _run_with_log_context[T](operation_id: int, verbosity: int, func: Callable[.
             raise
         raise translated from exc
     finally:
-        nanopynix_util.set_logger_request_id(previous_id)
-        nanopynix_util.set_verbosity(previous_verbosity)
+        set_logger_request_id(previous_id)
+        set_thread_verbosity(previous_verbosity)
 
 
 class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
@@ -383,17 +388,15 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         logger_installed = False
         try:
             self._apply_environment()
-            self._verbosity_before = nanopynix_util.get_default_verbosity()
-            nanopynix_util.install_logger(self._collector.callback)
-            nanopynix_util.set_activity_tracking(self._activity_tracking)
+            self._verbosity_before = default_verbosity()
+            install_logger(self._collector.callback)
+            set_activity_tracking(self._activity_tracking)
             logger_installed = True
             await executor.run(self._init_nix)
             # Take the level now that `_init_nix` has published it. A session
             # that named no verbosity gets Nix's own compiled-in level, which
             # is what `get_default_verbosity` reports before anything sets it.
-            self._level = (
-                self._verbosity if self._verbosity is not None else LogLevel(nanopynix_util.get_default_verbosity())
-            )
+            self._level = self._verbosity if self._verbosity is not None else LogLevel(default_verbosity())
             _process_guard.mark_initialized(signature)
             self._opened = True
             self._log_task = asyncio.create_task(self._forward_logs())
@@ -534,8 +537,8 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
             self._opened = False
             self._restore_environment()
             if self._verbosity_before is not None:
-                nanopynix_util.set_default_verbosity(self._verbosity_before)
-                nanopynix_util.set_verbosity(self._verbosity_before)
+                set_default_verbosity(self._verbosity_before)
+                set_thread_verbosity(self._verbosity_before)
                 self._verbosity_before = None
             _process_guard.release(self)
             # The teardown marker. It ends every `log_stream` iterator, and
@@ -909,11 +912,11 @@ class Session(AsyncSession["Store", "EvalSession", "ReplSession"]):
         :class:`Session`, so the session is what may change it.
         """
         self._check_open()
-        nanopynix_util.set_activity_tracking(True)
+        set_activity_tracking(True)
         try:
             yield
         finally:
-            nanopynix_util.set_activity_tracking(self._activity_tracking)
+            set_activity_tracking(self._activity_tracking)
 
 
 class Store(AsyncStore):

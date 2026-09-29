@@ -1,8 +1,8 @@
 """The one Nix initialisation entry point, and the cheapest way to reach it.
 
 **This module exists so that a program that initialises libstore does not
-import the rest of nanopynix.** It imports the compiled bindings and the
-feature tuple, and nothing else. Issue #123 measured the case it serves: a
+import the rest of nanopynix.** It imports the engine and the feature tuple,
+and nothing else. Issue #123 measured the case it serves: a
 planner of ``ddrn/examples/venv-graph`` spent 97% of its run on
 ``import nanopynix``, and the one name it read from the package was
 ``init_libstore``.
@@ -13,8 +13,15 @@ resolves each public name through a module ``__getattr__``.
 
 from __future__ import annotations
 
-from nanopynix._engine import enable_experimental_feature, init_libstore as _init_libstore_raw
+from nanopynix._engine import (
+    enable_experimental_feature as nix_enable_experimental_feature,
+    is_experimental_feature,
+    load_config as nix_load_config,
+    start_collector,
+)
 from nanopynix._features import DEFAULT_EXPERIMENTAL_FEATURES
+
+_config_loaded = False
 
 
 def init_libstore(load_config: bool = True) -> None:
@@ -45,9 +52,46 @@ def init_libstore(load_config: bool = True) -> None:
     through ``runtime.initialize``, which calls
     :func:`enable_experimental_feature` at the same point of its own sequence;
     that is additive and harmless.
+
+    huggorm initialises libstore at import, so what is left is the
+    configuration: see :func:`load_config_once`.
     """
-    _init_libstore_raw(load_config=load_config)
+    load_config_once(load_config)
     _enable_default_experimental_features()
+
+
+def load_config_once(load_config: bool = True) -> None:
+    """Read ``nix.conf`` and ``NIX_CONFIG``, the first time a call asks.
+
+    huggorm reads no configuration by itself. A later call changes nothing,
+    so a value a caller set after the first read stays set.
+    """
+    global _config_loaded  # noqa: PLW0603 -- process-wide, like the Nix configuration it reads
+    if load_config and not _config_loaded:
+        nix_load_config()
+        _config_loaded = True
+
+
+def init_libexpr() -> None:
+    """Start the collector, and enable ``fetch-tree``.
+
+    huggorm starts the collector at its first evaluator by itself. Here and
+    not there, so that Nix copies ``NIX_PATH`` into ``nix-path`` as a session
+    starts, and not during some later call.
+    """
+    start_collector()
+    enable_experimental_feature("fetch-tree")
+
+
+def enable_experimental_feature(name: str) -> None:
+    """Add *name* to the enabled features, and mark the setting overridden.
+
+    Raises:
+        RuntimeError: Nix has no experimental feature called *name*.
+    """
+    if not is_experimental_feature(name):
+        raise RuntimeError(f"unknown experimental feature: {name}")
+    nix_enable_experimental_feature(name)
 
 
 def _enable_default_experimental_features() -> None:

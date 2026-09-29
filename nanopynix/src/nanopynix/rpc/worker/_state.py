@@ -17,8 +17,9 @@ import anyio
 import anyio.to_thread
 from nanopynix_proto.nix.common import LogLevel
 
+from nanopynix._core._logs import set_logger_request_id
 from nanopynix._core._objects import CoreRuntime
-from nanopynix._engine import util as nanopynix_util
+from nanopynix._engine import current_request, set_thread_verbosity, thread_verbosity
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.rpc.worker._handle_registry import HandleRegistry
 from nanopynix.settings import SettingsProvenance
@@ -115,17 +116,17 @@ class WorkerState:
         level = self.verbosity if verbosity is None else verbosity
 
         def _run() -> Any:
-            previous_id = nanopynix_util.get_logger_request_id()
-            previous_verbosity = nanopynix_util.get_verbosity()
-            nanopynix_util.set_logger_request_id(request_id)
-            nanopynix_util.set_verbosity(level)
+            previous_id = current_request()
+            previous_verbosity = thread_verbosity()
+            set_logger_request_id(request_id)
+            set_thread_verbosity(level)
             try:
                 return operation(*args)
             finally:
                 if collector is not None:
                     collector.request_finalized(request_id)
-                nanopynix_util.set_logger_request_id(previous_id)
-                nanopynix_util.set_verbosity(previous_verbosity)
+                set_logger_request_id(previous_id)
+                set_thread_verbosity(previous_verbosity)
 
         if executor is not None:
             return await executor.run(_run)
@@ -134,4 +135,4 @@ class WorkerState:
     def log(self, action: str, *args: object) -> None:
         """Emit a diagnostic in the current executor thread's request context."""
         if self.collector is not None:
-            self.collector.callback(nanopynix_util.get_logger_request_id(), action, *args)
+            self.collector.callback(current_request(), action, *args)

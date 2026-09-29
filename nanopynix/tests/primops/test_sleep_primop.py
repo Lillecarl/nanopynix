@@ -5,7 +5,7 @@ tests need an operation that Nix cannot interrupt, and they used to get one
 from a large fold -- which measures the machine rather than stating a duration,
 and which therefore passed on one macOS host and failed on another.
 
-``_sleep`` in ``nanopynix/_engine_huggorm.py`` implements it. These tests pin
+``_sleep`` in ``nanopynix/_core/_objects.py`` implements it. These tests pin
 the three properties the cancel tests depend on.
 """
 

@@ -46,20 +46,17 @@ if typing.TYPE_CHECKING:
         stores as stores,
     )
     from nanopynix._ansi import strip_ansi as strip_ansi
+    from nanopynix._core._logs import install_logger, remove_logger
     from nanopynix._core._primops import register_primop
     from nanopynix._engine import (
-        build_info,  # type: ignore[reportUnknownVariableType] -- C++ extension without type stubs
+        build_info,
         current_system,
-        enable_experimental_feature,
         eval_counters_enabled,
         get_verbosity,
-        init_libexpr,
-        install_logger,
         is_pseudo_url,
         list_settings,
         process_connection as process_connection,
         register_store_implementation as register_store_implementation,
-        remove_logger,
         set_eval_counters_enabled,
         set_verbosity,
     )
@@ -120,7 +117,7 @@ if typing.TYPE_CHECKING:
         WrongNixTypeError,
     )
     from nanopynix.get_env import get_env_sh_path as get_env_sh_path
-    from nanopynix.libstore import init_libstore as init_libstore
+    from nanopynix.libstore import enable_experimental_feature, init_libexpr, init_libstore as init_libstore
     from nanopynix.logging import LogCapture, LogCollector
     from nanopynix.models import (
         ActivityType,
@@ -323,7 +320,7 @@ _NAME_TO_MODULE: typing.Final[dict[str, str]] = {
     "check_all_settings_model_drift": "nanopynix.settings",
     "check_settings_model_drift": "nanopynix.settings",
     "current_system": "nanopynix._engine",
-    "enable_experimental_feature": "nanopynix._engine",
+    "enable_experimental_feature": "nanopynix.libstore",
     "enter_overlay_namespace": "nanopynix.namespace",
     "eval_counters_enabled": "nanopynix._engine",
     "from_go_like_yaml": "nanopynix.primops",
@@ -334,9 +331,9 @@ _NAME_TO_MODULE: typing.Final[dict[str, str]] = {
     "from_yaml_stream": "nanopynix.primops",
     "get_env_sh_path": "nanopynix.get_env",
     "get_verbosity": "nanopynix._engine",
-    "init_libexpr": "nanopynix._engine",
+    "init_libexpr": "nanopynix.libstore",
     "init_libstore": "nanopynix.libstore",
-    "install_logger": "nanopynix._engine",
+    "install_logger": "nanopynix._core._logs",
     "is_pseudo_url": "nanopynix._engine",
     "list_eval_settings_metadata": "nanopynix.settings",
     "list_fetch_settings_metadata": "nanopynix.settings",
@@ -348,7 +345,7 @@ _NAME_TO_MODULE: typing.Final[dict[str, str]] = {
     "process_connection": "nanopynix._engine",
     "register_primop": "nanopynix._core._primops",
     "register_store_implementation": "nanopynix._engine",
-    "remove_logger": "nanopynix._engine",
+    "remove_logger": "nanopynix._core._logs",
     "set_eval_counters_enabled": "nanopynix._engine",
     "set_manager_title": "nanopynix._process_title",
     "set_verbosity": "nanopynix._engine",
