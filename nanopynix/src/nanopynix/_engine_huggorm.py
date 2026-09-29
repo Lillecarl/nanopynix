@@ -669,7 +669,9 @@ _NOT_JSON = frozenset({"function", "external"})
 def _primop_argument(state: Any, primop: str, value: Any) -> object:
     """A primop's argument as JSON data, or the other engine's error naming what JSON cannot hold."""
     try:
-        return json.loads(value.to_json(False))
+        # Built first, as the other engine does: a primop may read a path
+        # an argument names, so the path has to exist.
+        return json.loads(value.realise_json(False))
     except NixError as error:
         try:
             kind = _first_non_json(state, value)
@@ -695,7 +697,7 @@ def _first_non_json(state: Any, value: Any) -> str | None:
 
 
 # `bool` before `int`, because a bool is an int to `isinstance`.
-_SCALAR_MAKERS = ((bool, "make_bool"), (int, "make_int"), (float, "make_float"), (str, "make_string"))
+_SCALAR_MAKERS = ((bool, "make_bool"), (int, "make_int"), (float, "make_float"))
 
 
 class Value:
@@ -854,7 +856,9 @@ class Value:
     def derived_path(self) -> str:
         return f"{self._state.store.get_store_dir()}/{self._forced().drv_path().to_string()}"
 
-    def build(self, build_store: Store | None, build_mode: int, eval_store: Store | None) -> dict[str, Any]:
+    def build(
+        self, build_store: Store | None = None, build_mode: int = BuildMode.Normal, eval_store: Store | None = None
+    ) -> dict[str, Any]:
         value = self._forced()
         drv_path = value.drv_path()
         output_paths = value.output_paths()
@@ -921,13 +925,17 @@ class EvalState:
             if state is None:
                 raise RuntimeError("the evaluator that registered this primop is closed")
             converted = [_primop_argument(state.state, name, argument) for argument in arguments]
+            # Every string the primop returns owes the store what its input
+            # owed, the other engine's rule: a result that dropped the context
+            # would drop a dependency from any closure built on it.
+            context = sorted({element for argument in arguments for element in argument.string_context()})
             try:
                 result = callback(*converted)
             except (PrimopError, ValueError) as error:
                 # The other engine's rule: these two reject the input, so Nix
                 # shows their message bare. huggorm does that for its own errors.
                 raise EvalError(str(error)) from error
-            return state._make(result)
+            return state._make(result, context)
 
         return bridge
 
@@ -943,23 +951,29 @@ class EvalState:
         name = getattr(callback, "__qualname__", type(callback).__qualname__)
         return self.state.make_primop(name, arity, self._primop(name, callback))
 
-    def _make(self, obj: Any) -> Any:
+    def _make(self, obj: Any, context: list[str] | None = None) -> Any:
+        """*obj* as a Nix value; every string in it carries *context*."""
         if isinstance(obj, Value):
             return obj.raw
         if obj is None:
             return self.state.make_null()
+        if isinstance(obj, str):
+            return self.state.make_string(obj, context)
         for kind, maker in _SCALAR_MAKERS:
             if isinstance(obj, kind):
                 return getattr(self.state, maker)(obj)
+        return self._make_compound(obj, context)
+
+    def _make_compound(self, obj: Any, context: list[str] | None) -> Any:
         if isinstance(obj, list | tuple):
             made = self.state.make_list()
             for item in cast("list[Any] | tuple[Any, ...]", obj):
-                self.state.list_append(made, self._make(item))
+                self.state.list_append(made, self._make(item, context))
             return made
         if isinstance(obj, dict):
             made = self.state.make_attrs()
             for key, item in cast("dict[Any, Any]", obj).items():
-                self.state.attrs_set(made, str(key), self._make(item))
+                self.state.attrs_set(made, str(key), self._make(item, context))
             return made
         if callable(obj):
             return self._make_function(obj)
