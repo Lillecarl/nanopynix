@@ -1,7 +1,7 @@
 """Tests for the asynchronous direct-pointer in-process API."""
 
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportAttributeAccessIssue=false
-# nanopynix_store / nanopynix_expr are C++ extensions without type stubs.
+# nanopynix_store is the untyped store adapter.
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from nanopynix_proto.nix.common import GcAction, LogLevel
 import nanopynix
 from nanopynix import Derivation, GcResult, MissingInfo, NixType, StorePath, inproc, yaml_primops
 from nanopynix._ansi import strip_ansi
-from nanopynix._engine import expr as nanopynix_expr, util as nanopynix_util
+from nanopynix._engine import collect_garbage, collector_owner_thread, gc_stats, util as nanopynix_util
 from nanopynix.settings import NixEvalSettings, normalize_nix_path
 from nanopynix_testing.nix_markers import LINUX_CHROOT_BUILD, LINUX_PROC_FS, NIX_GC_ROOTS_BUG
 from test_support.git_fixtures import init_flake_repo
@@ -201,10 +201,8 @@ def _tracked_values(evaluator: Any) -> int:
 
 def _collect_and_read_non_gc_bytes() -> int:
     """Collect, then read Boehm's uncollectable total. Evaluator thread only."""
-    # Underscore-prefixed because these are an L1 probe, not an API. This test
-    # is the caller they exist for.
-    nanopynix_expr._gc_collect()  # type: ignore[reportPrivateUsage] -- L1 collector probe
-    return nanopynix_expr._gc_stats()["non_gc_bytes"]  # type: ignore[reportPrivateUsage] -- L1 collector probe
+    collect_garbage()
+    return gc_stats()["non_gc_bytes"]
 
 
 async def _root_bytes(evaluator: Any) -> int:
@@ -219,7 +217,7 @@ async def _root_bytes(evaluator: Any) -> int:
     bytes across an allocate-and-free cycle, so it can read below where it
     started.
 
-    ``_gc_collect`` must run on an evaluator thread. ``nix::initGC`` runs on
+    ``collect_garbage`` must run on an evaluator thread. ``nix::initGC`` runs on
     the session's Nix thread, so the collector does not know the Python main
     thread, and it aborts the process rather than refusing a collection from
     one it does not know.
@@ -241,11 +239,8 @@ async def test_a_collected_value_releases_its_nix_root(inproc_session: InprocSes
     read a value Nix cannot flatten to JSON, so the count grew with every read
     and never came back down.
 
-    Nothing defers the release. ``nanopynix_expr.Value`` holds the
-    ``RootValue`` by value, Nix allocates it with Boehm's
-    ``traceable_allocator``, and that frees with ``GC_FREE``. So the
-    destructor of the binding object removes the root, and ``gc.collect()`` is
-    all this test has to do.
+    Nothing defers the release. huggorm's ``Value`` roots its Nix value for as
+    long as Python holds it, so ``gc.collect()`` is all this test has to do.
     """
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as evaluator:
         root = await evaluator.string(_ATTRSET_OF_500)
@@ -289,7 +284,7 @@ async def test_the_collector_owner_thread_outlives_the_session(
         assert (await evaluator.string("1 + 1")) is not None
 
     # The session and both of its pools are gone here. The owner is not.
-    owner = nanopynix_expr._gc_owner_thread_id()
+    owner = collector_owner_thread()
     note(collector_owner_thread=owner)
     assert owner != 0, "a session ran, so the collector has an owner thread"
     assert await AnyioPath(f"/proc/self/task/{owner}").exists(), (
@@ -1275,7 +1270,7 @@ def test_inproc_session_nix_conf_accepts_existing_path(tmp_path: Path) -> None:
 
 def test_normalize_nix_path_str_and_list_variants() -> None:
     """``normalize_nix_path`` (nanopynix.settings) is shared by inproc.Session and rpc.Session."""
-    assert normalize_nix_path("foo=/bar") == list(nanopynix_expr.parse_nix_path("foo=/bar"))
+    assert normalize_nix_path("foo=/bar") == ["foo=/bar"]
     assert normalize_nix_path(["a", "b"]) == ["a", "b"]
 
 

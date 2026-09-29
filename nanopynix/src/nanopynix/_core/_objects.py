@@ -1,49 +1,55 @@
-"""Transport-neutral Nix resources shared by both engines.
+"""The Nix objects that ``inproc`` and the RPC worker share.
 
-These objects own L1 bindings and are intentionally synchronous. The public
-``inproc`` API may share a ``CoreStore`` across Store-pool threads, but each
-``CoreEvalState`` and its values remain confined to one evaluator thread. The
-RPC worker places the same objects behind opaque remote handles.
+They hold huggorm's objects and are synchronous. ``inproc`` may share a
+``CoreStore`` across the threads of its store pool, but each
+``CoreEvalState`` and its values stay on one evaluator thread. The RPC worker
+puts the same objects behind opaque remote handles.
 
-``Core`` and not ``Local``, which is what these were called until this module
-was renamed from ``_local.py``. ``nix::LocalStore`` is a *specific* Nix store
-implementation -- ``nix_store.cpp``'s ``store_get_store_dirs_direct`` does a
-``dynamic_cast<nix::LocalStore *>`` precisely because an arbitrary
-``nix::Store`` may not be one. ``CoreStore`` wraps whatever store it is
-handed, including a ``unix://`` daemon store (which the ``daemon`` test
-backend uses throughout), so the old name asserted a vtable guarantee this
-layer does not make and has never exposed. ``Core`` instead names the thing
-that is actually true of them: they are the ``_core`` layer both engines
-build on, below the process boundary that distinguishes ``inproc`` from
-``rpc``.
+``Core`` and not ``Local``: ``CoreStore`` holds any store it is given,
+a ``unix://`` daemon store included, and ``nix::LocalStore`` is one kind.
 """
 
 from __future__ import annotations
 
+import inspect
+import json
+import time
 import weakref
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 from nanopynix_proto.nix.common import GcAction, StoreDirs
 
-from nanopynix._core._extract import attrs_value_map, flake_ref_attrs, locked_node
-from nanopynix._core._nix_core import NixCore
+from nanopynix._core._extract import attrs_value_map, flake_ref_attrs
+from nanopynix._core._nix_core import NixCore, nix_build_mode
+from nanopynix._core._primops import registered_primops
 from nanopynix._engine import (
+    DerivedPathBuilt,
+    EvalError,
+    EvalState,
+    KeyedBuildResult,
+    LockedFlake,
+    NixError,
+    OutputsSpec,
+    Value,
     errors as nanopynix_errors,
-    expr as nanopynix_expr,
     fetchers as nanopynix_fetchers,
-    flake as nanopynix_flake,
+    parse_flake_ref,
     store as nanopynix_store,
 )
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
-from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
+from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT, BuildMode
+from nanopynix.exceptions import PrimopError
 from nanopynix.models import (
+    AttrDoc,
     BuildResult,
     Derivation,
     DerivationOutput,
     DerivationOutputs,
+    Doc,
     FlakeRef,
     GcResult,
     GcRoot,
+    JsonValue,
     LockedNode,
     MissingInfo,
     PathInfo,
@@ -62,7 +68,9 @@ _RAW_GC_ACTIONS = {
 }
 
 if TYPE_CHECKING or BEARTYPING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
+
+    from nanopynix._engine import BuildMode as NixBuildMode, Repl, StorePath as NixStorePath
 
 
 @runtime_checkable
@@ -98,6 +106,46 @@ def _registry_write(raw: Mapping[str, Any]) -> RegistryWrite:
     naming it would fail the import of this module.
     """
     return RegistryWrite(path=raw["path"], removed=raw["removed"], to=raw["to"], locked=raw["locked"])
+
+
+def _build_result(result: KeyedBuildResult, store: Any) -> dict[str, object]:
+    """One build's outcome: paths absolute, and statuses as words.
+
+    *store* is huggorm's ``Store``: it spells the target, and its directory
+    makes each path absolute.
+    """
+    target = result.path()
+    rendered: str = store.print_derived_path(target)
+    if isinstance(target, DerivedPathBuilt):
+        spec = target.outputs()
+        drv_path, outputs = rendered.rsplit("^", 1)[0], ["*"] if spec.all() else spec.names()
+    else:
+        drv_path, outputs = rendered, []
+    prefix = f"{store.store_dir()}/"
+    success, error = result.success(), result.error()
+    built_outputs: dict[str, dict[str, object]] = {}
+    if success is not None:
+        status, error_msg = str(success.status()), ""
+        built_outputs = {
+            name: {
+                "out_path": prefix + realisation.out_path().to_string(),
+                "signatures": [signature.to_string() for signature in realisation.signatures()],
+            }
+            for name, realisation in success.built_outputs().items()
+        }
+    elif error is not None:
+        # `colored` is Nix's message as it came; `message` strips it.
+        status, error_msg = str(error.status), error.colored
+    else:
+        status, error_msg = "unknown", ""
+    return {
+        "drv_path": drv_path,
+        "outputs": outputs,
+        "success": success is not None,
+        "status": status,
+        "error_msg": error_msg,
+        "built_outputs": built_outputs,
+    }
 
 
 def _derivation_outputs(node: _DerivedPathNode) -> DerivationOutputs:
@@ -265,6 +313,18 @@ class CoreStore:
             )
             for result in results
         ]
+
+    def build_targets(
+        self,
+        targets: list[NixStorePath | DerivedPathBuilt],
+        build_mode: NixBuildMode,
+        eval_store: CoreStore | None,
+    ) -> list[dict[str, object]]:
+        raw = self.require_raw().store
+        results = raw.build_paths_with_results(
+            targets, build_mode, None if eval_store is None else eval_store.require_raw().store
+        )
+        return [_build_result(result, raw) for result in results]
 
     def copy_closure(
         self,
@@ -577,44 +637,103 @@ class CoreStore:
         return [StorePath(path) for path in self.print_store_paths(raw_paths)]
 
 
-class CoreEvalState:
-    """One direct evaluator pointer bound to a :class:`CoreStore`."""
+def _sleep(seconds: object) -> bool:
+    """``builtins.sleep``, for tests.
 
-    def __init__(self, raw: nanopynix_expr.EvalState, store: CoreStore) -> None:
-        self.raw: nanopynix_expr.EvalState | None = raw
+    It polls no interrupt while it waits, so a cancellation cannot stop it.
+    That is what the cancel tests need.
+    """
+    if isinstance(seconds, bool) or not isinstance(seconds, int | float):
+        raise PrimopError(f"builtins.sleep takes a number of seconds, got {seconds!r}")
+    if seconds < 0:
+        raise PrimopError(f"builtins.sleep takes a number of seconds that is not negative, got {seconds:f}")
+    time.sleep(seconds)
+    return True
+
+
+#: What ``to_json`` refuses, by huggorm's type name.
+_NOT_JSON = frozenset({"function", "external"})
+
+
+def _primop_argument(state: EvalState, primop: str, value: Value) -> object:
+    """A primop's argument as JSON data, or an error naming what JSON cannot hold."""
+    try:
+        # Realised first: a primop may read a path that an argument names, so
+        # the path has to exist.
+        return json.loads(value.realise_json(False))
+    except NixError as error:
+        try:
+            kind = _first_non_json(state, value)
+        except NixError:
+            kind = None
+        if kind is None:
+            raise
+        raise EvalError(f"{primop}: argument contains non JSON-compatible Nix value of type '{kind}'") from error
+
+
+def _first_non_json(state: EvalState, value: Value) -> str | None:
+    state.force(value)
+    kind = value.type_name()
+    if kind in _NOT_JSON:
+        return kind
+    if kind == "list":
+        items = (value.at(index) for index in range(value.length()))
+    elif kind == "attrs":
+        items = (value.get(name) for name in value.names())
+    else:
+        return None
+    return next((found for item in items if (found := _first_non_json(state, item)) is not None), None)
+
+
+def _make_scalar(state: EvalState, obj: object, context: list[str] | None) -> Value | None:
+    match obj:
+        case None:
+            return state.make_null()
+        case str():
+            return state.make_string(obj, context)
+        # Before `int`, because a bool is an int to `isinstance`.
+        case bool():
+            return state.make_bool(obj)
+        case int():
+            return state.make_int(obj)
+        case float():
+            return state.make_float(obj)
+        case _:
+            return None
+
+
+class CoreEvalState:
+    """One evaluator bound to a :class:`CoreStore`, confined to one Nix thread."""
+
+    def __init__(self, raw: EvalState, store: CoreStore) -> None:
+        self.raw: EvalState | None = raw
         self.store = store
-        # Weak. This set does not own a value, and it must not: reference
-        # counting already owns it. `nanopynix_expr.Value` holds Nix's
-        # `RootValue` by value, and Nix allocates that with Boehm's
-        # `traceable_allocator`, which is `GC_MALLOC_UNCOLLECTABLE` to allocate
-        # and `GC_FREE` to release. So the destructor of the binding object
-        # removes the Nix root, at once, the moment the last Python reference
-        # goes. A strong `set` here defeated all of that and made every value
-        # the evaluator ever handed out immortal.
-        #
-        # What the set is for is `close` below: it frees the roots of the
-        # values a caller still holds, while `_run_closing` still has the
-        # evaluator thread. That ordering matters. Each value holds its parent
-        # through `nb::keep_alive`, up to the `EvalState` object, so a leaked
-        # handle would otherwise keep `nix::EvalState` alive past
-        # `executor.shutdown`, and destroy it -- its AST arena, its symbol
-        # table -- on whichever thread finally dropped the handle.
+        # Weak, because reference counting owns each value: a huggorm `Value`
+        # roots its Nix value for as long as Python holds it. `close` frees the
+        # values a caller still holds while the evaluator thread runs, so no
+        # value outlives the evaluator on another thread.
         self._values: weakref.WeakSet[CoreValue] = weakref.WeakSet()
         self._locked_flakes: set[CoreLockedFlake] = set()
+        self._repl: Repl | None = None
+        # `__`, so it is `builtins.sleep` and does not shadow a `sleep` binding.
+        raw.register_primop("__sleep", 1, self._primop("sleep", _sleep))
+        for name, (arity, callback) in registered_primops().items():
+            raw.register_primop(name, arity, self._primop(name, callback))
 
     def close(self) -> None:
         for value in tuple(self._values):
             value.close()
         for locked_flake in tuple(self._locked_flakes):
             locked_flake.close()
+        self._repl = None
         self.raw = None
 
-    def require_raw(self) -> nanopynix_expr.EvalState:
+    def require_raw(self) -> EvalState:
         if self.raw is None:
             raise RuntimeError("local evaluator has been closed")
         return self.raw
 
-    def wrap_value(self, raw: nanopynix_expr.Value) -> CoreValue:
+    def wrap_value(self, raw: Value) -> CoreValue:
         value = CoreValue(self, raw)
         self._values.add(value)
         return value
@@ -622,51 +741,126 @@ class CoreEvalState:
     def discard_value(self, value: CoreValue) -> None:
         self._values.discard(value)
 
-    def eval_string(self, expression: str, path: str) -> CoreValue:
-        return self.wrap_value(self.require_raw().eval_string(expression, path))
+    def eval_string(self, expression: str, path: str = "<string>") -> CoreValue:
+        return self.wrap_value(self.require_raw().eval_expr(expression, path))
 
     def eval_file(self, path: str) -> CoreValue:
         return self.wrap_value(self.require_raw().eval_file(path))
 
+    def begin_repl(self) -> None:
+        if self._repl is not None:
+            raise RuntimeError("REPL scope is already active")
+        self._repl = self.require_raw().repl()
+
+    def repl_active(self) -> bool:
+        self.require_raw()
+        return self._repl is not None
+
+    def _scope(self) -> Repl:
+        self.require_raw()
+        if self._repl is None:
+            raise RuntimeError("REPL scope is not active")
+        return self._repl
+
     def repl_eval_file(self, path: str) -> CoreValue:
-        return self.wrap_value(self.require_raw().repl_eval_file(path))
+        return self.wrap_value(self._scope().eval_file(path))
 
     def repl_eval_string(self, expression: str, path: str) -> CoreValue:
-        return self.wrap_value(self.require_raw().repl_eval_string(expression, path))
+        return self.wrap_value(self._scope().eval_expr(expression, path))
 
     def repl_load_file(self, path: str) -> CoreValue:
-        return self.wrap_value(self.require_raw().repl_load_file(path))
+        return self.wrap_value(self._scope().load_file(path))
 
     def repl_process_line(self, line: str, path: str) -> CoreValue | None:
-        raw = self.require_raw().repl_process_line(line, path)
+        raw = self._scope().process_line(line, path)
         return None if raw is None else self.wrap_value(raw)
 
     def repl_add_attrs(self, value: CoreValue) -> list[str]:
-        return self.require_raw().repl_add_attrs(value.require_raw())
-
-    def repl_active(self) -> bool:
-        return self.require_raw().repl_active()
-
-    def begin_repl(self) -> None:
-        self.require_raw().begin_repl()
+        return self._scope().add_attrs(value.require_raw())
 
     def repl_scope_names(self) -> list[str]:
-        return self.require_raw().repl_scope_names()
+        return self._scope().names()
 
     def repl_select(self, expression: str, path: str = "<string>") -> tuple[str, CoreValue] | None:
-        raw = self.require_raw().repl_select(expression, path)
-        if raw is None:
+        selected = self._scope().select(expression, path)
+        if selected is None:
             return None
-        return raw["name"], self.wrap_value(raw["attrs"])
+        return selected.name(), self.wrap_value(selected.attrs())
 
     def reset_file_cache(self) -> None:
-        self.require_raw().reset_file_cache()
+        raw = self.require_raw()
+        # `«nix-internal»/derivation-internal.nix` names no file to forget.
+        for path in raw.cached_files():
+            if path.startswith("/"):
+                raw.forget_file(path)
 
     def statistics_json(self) -> str:
-        return self.require_raw().statistics_json()
+        self.require_raw()
+        raise NotImplementedError("huggorm reports no evaluator statistics yet")
 
-    def value_from_python(self, value: Any) -> CoreValue:
-        return self.wrap_value(self.require_raw().value_from_python(_unwrap_local_values(value)))
+    def value_from_python(self, value: object) -> CoreValue:
+        return self.wrap_value(self._make(value))
+
+    def _make(self, obj: object, context: list[str] | None = None) -> Value:
+        """*obj* as a Nix value; every string in it carries *context*."""
+        state = self.require_raw()
+        if isinstance(obj, CoreValue):
+            return obj.require_raw()
+        scalar = _make_scalar(state, obj, context)
+        if scalar is not None:
+            return scalar
+        if isinstance(obj, list | tuple):
+            made = state.make_list()
+            for item in cast("list[object] | tuple[object, ...]", obj):
+                state.list_append(made, self._make(item, context))
+            return made
+        if isinstance(obj, dict):
+            made = state.make_attrs()
+            for key, item in cast("dict[object, object]", obj).items():
+                state.attrs_set(made, str(key), self._make(item, context))
+            return made
+        if callable(obj):
+            return self._make_function(obj)
+        raise TypeError(f"cannot make a Nix value from {type(obj).__name__}")
+
+    def _make_function(self, callback: Callable[..., object]) -> Value:
+        # The parameter count is the arity, and a callable with none, or with
+        # no signature, is called now.
+        try:
+            arity = len(inspect.signature(callback).parameters)
+        except (TypeError, ValueError):
+            arity = 0
+        if arity == 0:
+            return self._make(callback())
+        name = getattr(callback, "__qualname__", type(callback).__qualname__)
+        return self.require_raw().make_primop(name, arity, self._primop(name, callback))
+
+    def _primop(self, name: str, callback: Callable[..., object]) -> Callable[..., Value]:
+        # Weak, because the state holds the bridge. A strong reference is a
+        # cycle only the cyclic collector frees, and the store stays open until
+        # it runs: 20 sessions with one primop held 16 descriptors of the
+        # store's database. Nix calls the bridge only inside an evaluation,
+        # which a caller reaches through this object, so it is alive then.
+        owner = weakref.ref(self)
+
+        def bridge(*arguments: Value) -> Value:
+            evaluator = owner()
+            if evaluator is None:
+                raise RuntimeError("the evaluator that registered this primop is closed")
+            state = evaluator.require_raw()
+            converted = [_primop_argument(state, name, argument) for argument in arguments]
+            # Every string the primop returns owes the store what its input
+            # owed: a result that dropped the context would drop a dependency
+            # from any closure built on it.
+            context = sorted({element for argument in arguments for element in argument.string_context()})
+            try:
+                result = callback(*converted)
+            except (PrimopError, ValueError) as error:
+                # Both reject the input, so Nix shows their message bare.
+                raise EvalError(str(error)) from error
+            return evaluator._make(result, context)
+
+        return bridge
 
     def lock_flake(
         self,
@@ -676,34 +870,25 @@ class CoreEvalState:
         write_lock_file: bool,
         flake_settings: Mapping[str, str] | None = None,
     ) -> CoreLockedFlake:
-        raw = nanopynix_flake.lock_flake(
-            self.require_raw(),
-            nanopynix_flake.parse_flake_ref(ref),
-            update_inputs=update_inputs,
+        """``update_inputs`` is True to recreate the lock file, or the inputs to update."""
+        recreate, update = (update_inputs, []) if isinstance(update_inputs, bool) else (False, list(update_inputs))
+        raw = self.require_raw().lock_flake(
+            parse_flake_ref(ref),
+            recreate=recreate,
+            update=update,
             write_lock_file=write_lock_file,
-            flake_settings=dict(flake_settings) if flake_settings else {},
+            settings=dict(flake_settings or {}),
         )
         locked_flake = CoreLockedFlake(self, raw)
         self._locked_flakes.add(locked_flake)
         return locked_flake
 
     def call_locked_flake(self, locked_flake: CoreLockedFlake) -> CoreValue:
-        return self.wrap_value(nanopynix_flake.call_flake(self.require_raw(), locked_flake.require_raw()))
+        return self.wrap_value(self.require_raw().call_flake(locked_flake.require_raw()))
 
     def get_flake(self, ref: str) -> FlakeRef:
-        """Resolve a flake reference without evaluating its outputs.
-
-        Shared rather than left in the RPC worker, where the three steps below
-        used to live inline: this is pure libexpr and a registry lookup, so
-        there was nothing about it that belonged to a transport. inproc had no
-        equivalent at all, which the signature ledger carried as
-        "EvalSession.get_flake:rpc-only".
-        """
-        resolved = nanopynix_flake.get_flake(
-            self.require_raw(),
-            nanopynix_flake.parse_flake_ref(ref),
-        )
-        return FlakeRef(attrs=flake_ref_attrs(resolved))
+        """Resolve a flake reference without evaluating its outputs."""
+        return FlakeRef(attrs=flake_ref_attrs(self.require_raw().get_flake(parse_flake_ref(ref))))
 
     def eval_flake(
         self,
@@ -712,14 +897,13 @@ class CoreEvalState:
         write_lock_file: bool,
         flake_settings: Mapping[str, str] | None = None,
     ) -> CoreValue:
-        return self.wrap_value(
-            nanopynix_flake.eval_flake(
-                self.require_raw(),
-                ref,
-                write_lock_file,
-                dict(flake_settings) if flake_settings else {},
-            ),
+        locked_flake = self.lock_flake(
+            ref, update_inputs=False, write_lock_file=write_lock_file, flake_settings=flake_settings
         )
+        try:
+            return self.call_locked_flake(locked_flake)
+        finally:
+            locked_flake.close()
 
     def configure(
         self,
@@ -733,10 +917,8 @@ class CoreEvalState:
         rendered keys, which is all that reaches a worker over RPC. A worker
         must refuse what its client refuses, whatever built the request.
 
-        The check runs before ``require_raw``, which is the order the two
-        engines already use: each rejects before it dispatches. A hand-built
-        request therefore meets the same answer whether or not the evaluator is
-        still open.
+        The check runs before ``require_raw``, so a hand-built request meets
+        the same answer whether or not the evaluator is still open.
 
         Raises:
             SettingNotLiveError: A key Nix reads only while constructing the
@@ -753,129 +935,135 @@ class CoreEvalState:
         reject_construction_time_keys(eval_rendered, model=NixEvalSettings, target="evaluator")
         reject_construction_time_keys(fetch_rendered, model=NixFetchSettings, target="evaluator")
         raw = self.require_raw()
-        for name, value in eval_rendered.items():
-            raw.set_eval_setting(name, value)
-        for name, value in fetch_rendered.items():
-            raw.set_fetch_setting(name, value)
+        # huggorm's one setter tries the evaluator's settings, then the fetcher's.
+        for name, value in (*eval_rendered.items(), *fetch_rendered.items()):
+            raw.set_setting(name, value)
 
     def discard_locked_flake(self, locked_flake: CoreLockedFlake) -> None:
         self._locked_flakes.discard(locked_flake)
 
 
 class CoreValue:
-    """One rooted L1 value, confined to its owning Nix thread.
+    """One rooted value, confined to its evaluator's Nix thread.
 
-    ``nanopynix_expr.Value`` contains Nix's ``RootValue``. This wrapper gives
-    both L2 and L3 one ownership and child-value construction boundary, while
-    keeping the raw pointer private to thread-confined local code.
+    huggorm refuses to read a thunk, so each read forces first, as Nix's own
+    readers do. The predicates of the type do not force: a thunk answers
+    ``"thunk"``.
     """
 
-    def __init__(self, eval_state: CoreEvalState, raw: nanopynix_expr.Value) -> None:
+    def __init__(self, eval_state: CoreEvalState, raw: Value) -> None:
         self._eval_state = eval_state
-        self._raw: nanopynix_expr.Value | None = raw
+        self._raw: Value | None = raw
 
     def close(self) -> None:
-        raw = self._raw
         self._raw = None
         self._eval_state.discard_value(self)
-        if raw is not None:
-            raw._release()  # type: ignore[reportPrivateUsage] -- L1 RootValue lifetime API  # noqa: SLF001
 
-    def require_raw(self) -> nanopynix_expr.Value:
+    def require_raw(self) -> Value:
         self._eval_state.require_raw()
         if self._raw is None:
             raise RuntimeError("local value has been released")
         return self._raw
 
+    def _forced(self) -> Value:
+        raw = self.require_raw()
+        self._eval_state.require_raw().force(raw)
+        return raw
+
+    def _child(self, raw: Value) -> CoreValue:
+        self._eval_state.require_raw().force(raw)
+        return self._eval_state.wrap_value(raw)
+
     def force(self) -> None:
-        self.require_raw().force()
+        self._forced()
 
-    # `ValueType` and `EditLocation` below exist only in the generated stub --
-    # they are declared in nanopynix-bindings/src/expr.pat's `__prefix__`, not
-    # exported by the compiled module. pyright resolves them from the .pyi and
-    # checks these signatures normally; beartype evaluates annotations for real
-    # at decoration time and gets AttributeError, which makes it skip the whole
-    # method. Exempting them says so, rather than weakening the annotation to
-    # something beartype happens to be able to import.
-    @no_runtime_type_check
-    def to_python(self) -> nanopynix_expr.ValueType:
-        return self.require_raw().to_python()
-
-    @no_runtime_type_check
-    def to_json(self, copy_to_store: bool = False) -> nanopynix_expr.ValueType:
-        # Keyword, not positional: the binding declares copy_to_store
-        # keyword-only (nanopynix-bindings/src/expr.pat). The positional call
-        # this replaces went unnoticed while `raw` was typed Any.
-        return self.require_raw().to_json(copy_to_store=copy_to_store)
+    def to_json(self, copy_to_store: bool = False) -> JsonValue:
+        return json.loads(self._forced().to_json(copy_to_store))
 
     def type_name(self) -> str:
         return self.require_raw().type_name()
 
     def as_int(self) -> int:
-        return self.require_raw().as_int()
+        return self._forced().integer()
 
     def as_float(self) -> float:
-        return self.require_raw().as_float()
+        # Nix's forceFloat widens an integer; huggorm's accessor reads one kind.
+        raw = self._forced()
+        if raw.type_name() == "int":
+            return float(raw.integer())
+        return raw.floating()
 
     def as_bool(self) -> bool:
-        return self.require_raw().as_bool()
+        return self._forced().boolean()
 
     def as_string(self) -> str:
-        return self.require_raw().as_string()
+        return self._forced().string_value()
 
     def realise_string(self) -> str:
-        return self.require_raw().realise_string()
+        return self._forced().realise_string()
 
     def realise_argv(self) -> list[str]:
-        return self.require_raw().realise_argv()
+        return self._forced().realise_argv()
 
-    @no_runtime_type_check  # stub-only return type; see to_python above
-    def edit_location(self) -> nanopynix_expr.EditLocation:
-        return self.require_raw().edit_location()
+    def edit_location(self) -> tuple[str, int]:
+        location = self.require_raw().edit_location()
+        return location.path(), location.line()
 
-    @no_runtime_type_check  # stub-only return type; see to_python above
-    def get_doc(self) -> nanopynix_expr.Doc | None:
-        return self.require_raw().get_doc()
+    def get_doc(self) -> Doc | None:
+        doc = self.require_raw().doc()
+        if doc is None:
+            return None
+        return Doc(name=doc.name(), args=doc.args(), arity=doc.arity(), doc=doc.doc(), path=doc.path(), line=doc.line())
 
-    @no_runtime_type_check  # stub-only return type; see to_python above
-    def attr_doc(self, name: str) -> nanopynix_expr.AttrDoc | None:
-        return self.require_raw().attr_doc(name)
+    def attr_doc(self, name: str) -> AttrDoc | None:
+        doc = self.require_raw().attr_doc(name)
+        if doc is None:
+            return None
+        return AttrDoc(path=doc.path(), line=doc.line(), doc=doc.doc())
 
     def attr_get(self, name: str) -> CoreValue:
-        return self._eval_state.wrap_value(self.require_raw().attr_get(name))
+        return self._child(self._forced().get(name))
 
     def has_attr(self, name: str) -> bool:
-        return self.require_raw().has_attr(name)
+        return self._forced().has(name)
 
     def attr_names(self) -> list[str]:
-        return self.require_raw().attr_names()
+        return self._forced().names()
 
     def list_get(self, index: int) -> CoreValue:
-        return self._eval_state.wrap_value(self.require_raw().list_get(index))
+        return self._child(self._forced().at(index))
 
     def list_length(self) -> int:
-        return self.require_raw().list_length()
+        return self._forced().length()
 
     def auto_call(self) -> CoreValue:
-        return self._eval_state.wrap_value(self.require_raw().auto_call())
+        """Apply with no arguments, as Nix's ``autoCallFunction`` does.
+
+        That fills a lambda's defaulted formals, and follows ``__functor``. It
+        answers anything else unapplied, where huggorm's ``apply_auto`` refuses.
+        A new wrapper and not ``self``, because each caller closes what it holds.
+        """
+        raw = self._forced()
+        if raw.type_name() == "attrs" and raw.has("__functor"):
+            functor = self._child(raw.get("__functor"))
+            try:
+                applied = functor.call(self)
+            finally:
+                functor.close()
+            try:
+                return applied.auto_call()
+            finally:
+                applied.close()
+        if raw.type_name() == "function" and raw.is_lambda() and raw.has_formals():
+            return self._child(raw.apply_auto(self._eval_state.require_raw().make_attrs()))
+        return self._eval_state.wrap_value(raw)
 
     def call(self, *arguments: CoreValue) -> CoreValue:
         """Apply this value as a Nix function to each argument in turn.
 
         Nix functions are curried -- ``f a b`` is ``(f a) b`` -- so more than
-        one argument means more than one application, and the partial results
-        in between are rooted values no caller ever sees. Rebinding ``result``
-        frees each one, because nothing else holds it: ``call`` keeps only the
-        evaluator alive, not the value it was applied to. It used to keep the
-        receiver alive too, and then every partial survived until the final
-        result did, so this loop released each one by hand.
-
-        Shared rather than per-engine: inproc took exactly one ``argument``,
-        which the signature ledger carried as ``Value.call:params``, and the
-        RPC worker ran this loop inline in ``_do_call``. That copy leaked one
-        rooted value per extra argument, and given no arguments at all it
-        handed back a second handle onto the *same* rooted value, so releasing
-        either handle freed it under the other.
+        one argument means more than one application. The partial results in
+        between are values no caller sees, and rebinding ``result`` frees each.
 
         Raises:
             TypeError: No arguments were given. Nix has no nullary
@@ -883,64 +1071,72 @@ class CoreValue:
         """
         if not arguments:
             raise TypeError("call() needs at least one argument; Nix has no nullary application")
-        result = self.require_raw()
+        state = self._eval_state.require_raw()
+        result = self._forced()
         for argument in arguments:
-            result = result.call(argument.require_raw())
+            result = result.apply(argument.require_raw())
+            state.force(result)
         return self._eval_state.wrap_value(result)
 
-    def build(self, build_store: CoreStore | None, build_mode: int, eval_store: CoreStore | None) -> dict[str, object]:
-        return self.require_raw().build(
-            None if build_store is None else build_store.require_raw(),
-            build_mode,
-            None if eval_store is None else eval_store.require_raw(),
-        )
+    def build(
+        self,
+        build_store: CoreStore | None = None,
+        build_mode: int = BuildMode.Normal,
+        eval_store: CoreStore | None = None,
+    ) -> dict[str, object]:
+        raw = self._forced()
+        drv_path = raw.drv_path()
+        output_paths = raw.output_paths()
+        store = self._eval_state.store if build_store is None else build_store
+        prefix = f"{self._eval_state.store.get_store_dir()}/"
+        target = DerivedPathBuilt(drv_path, OutputsSpec(names=sorted(output_paths) or ["out"]))
+        results = store.build_targets([target], nix_build_mode(build_mode), eval_store)
+        return {
+            "drv_path": prefix + drv_path.to_string(),
+            "outputs": {name: prefix + path.to_string() for name, path in output_paths.items() if path is not None},
+            "results": results,
+        }
 
     def derived_path(self) -> str:
-        """Return this derivation's self-contained canonical DerivedPath string."""
-        return self.require_raw().derived_path()
+        """The ``.drv`` of this derivation, as an absolute path."""
+        return f"{self._eval_state.store.get_store_dir()}/{self._forced().drv_path().to_string()}"
 
 
 class CoreLockedFlake:
     """One in-memory locked flake, confined to its owning Nix thread."""
 
-    def __init__(self, eval_state: CoreEvalState, raw: nanopynix_flake.LockedFlake) -> None:
+    def __init__(self, eval_state: CoreEvalState, raw: LockedFlake) -> None:
         self._eval_state = eval_state
-        self._raw: nanopynix_flake.LockedFlake | None = raw
+        self._raw: LockedFlake | None = raw
 
     def close(self) -> None:
         self._raw = None
         self._eval_state.discard_locked_flake(self)
 
-    def require_raw(self) -> nanopynix_flake.LockedFlake:
+    def require_raw(self) -> LockedFlake:
         self._eval_state.require_raw()
         if self._raw is None:
             raise RuntimeError("local locked flake has been released")
         return self._raw
 
+    def description(self) -> str:
+        return self.require_raw().description() or ""
+
     def write_lock_file(self) -> None:
         self.require_raw().write_lock_file()
 
     def metadata_json(self) -> str:
-        return nanopynix_flake.metadata_json(self._eval_state.require_raw(), self.require_raw())
+        return self._eval_state.require_raw().flake_metadata_json(self.require_raw())
 
     def find_input(self, path: Sequence[str]) -> LockedNode | None:
         node = self.require_raw().find_input(list(path))
-        return None if node is None else locked_node(node)
-
-
-def _unwrap_local_values(value: Any) -> Any:
-    if isinstance(value, CoreValue):
-        return value.require_raw()
-    if isinstance(value, list):
-        items = cast("list[Any]", value)
-        return [_unwrap_local_values(item) for item in items]
-    if isinstance(value, tuple):
-        items = cast("tuple[Any, ...]", value)
-        return tuple(_unwrap_local_values(item) for item in items)
-    if isinstance(value, dict):
-        items = cast("dict[Any, Any]", value)
-        return {key: _unwrap_local_values(item) for key, item in items.items()}
-    return value
+        if node is None:
+            return None
+        return LockedNode(
+            locked_ref=node.locked_ref().to_string(),
+            original_ref=node.original_ref().to_string(),
+            is_flake=node.is_flake(),
+        )
 
 
 class CoreRuntime:

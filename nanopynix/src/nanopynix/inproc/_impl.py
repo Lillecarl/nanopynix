@@ -22,12 +22,17 @@ from typing import TYPE_CHECKING, Any
 
 from nanopynix_proto.nix.common import LogLevel, RequestFinalized
 
-from nanopynix._core._extract import locked_flake as _locked_flake_proto
-from nanopynix._core._nix_core import build_mode_value
+from nanopynix._core._nix_core import build_mode_value, parse_nix_path
 from nanopynix._core._nix_executor import NIX_EVALUATOR_STACK_SIZE, NixThreadExecutor
 from nanopynix._core._objects import CoreEvalState, CoreLockedFlake, CoreRuntime, CoreStore, CoreValue
 from nanopynix._core._primops import register_import_path_primops, to_primop_specs
-from nanopynix._engine import expr as nanopynix_expr, store as nanopynix_store, util as nanopynix_util
+from nanopynix._engine import (
+    eval_counters_enabled,
+    gc_release_thread,
+    set_eval_counters_enabled,
+    store as nanopynix_store,
+    util as nanopynix_util,
+)
 from nanopynix._env import validate_session_env
 from nanopynix._fork import ForkGuard
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
@@ -37,6 +42,7 @@ from nanopynix._wire import (
     DEFAULT_STORE_URI,
     NIX_USER_CONF_FILES_ENV,
     NO_GC_LIMIT,
+    BuildMode,
 )
 from nanopynix.exceptions import (
     EvalSessionClosedError,
@@ -96,10 +102,8 @@ NIX_PATH_SETTING_KEY = "nix-path"
 
 def normalize_nix_path(nix_path: str | Sequence[str] | None) -> list[str]:
     """Coerce ``nix_path`` to a resolved list of ``NIX_PATH`` entries."""
-    if nix_path is None:
-        return list(nanopynix_expr.parse_nix_path())
-    if isinstance(nix_path, str):
-        return list(nanopynix_expr.parse_nix_path(nix_path))
+    if nix_path is None or isinstance(nix_path, str):
+        return parse_nix_path(nix_path)
     return list(nix_path)
 
 
@@ -119,14 +123,6 @@ if TYPE_CHECKING or BEARTYPING:
         NixSettings,
     )
     from nanopynix.stores import StoreConfig
-
-
-BuildMode = nanopynix_store.BuildMode
-RawEvalState = nanopynix_expr.EvalState
-RawGCAction = nanopynix_store.GCAction
-RawStore = nanopynix_store.Store
-RawStorePath = nanopynix_store.StorePath
-RawValue = nanopynix_expr.Value
 
 
 class _InprocProcessGuard:
@@ -1403,8 +1399,7 @@ class EvalSession(AsyncEvalSession["Value"]):
         self._locked_flakes: set[LockedFlake] = set()
         self._executor = NixThreadExecutor(
             thread_name_prefix="nix-eval",
-            thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
-            thread_finalizer=nanopynix_expr._exit_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
+            thread_finalizer=gc_release_thread,
             stack_size=NIX_EVALUATOR_STACK_SIZE,
         )
 
@@ -1422,8 +1417,7 @@ class EvalSession(AsyncEvalSession["Value"]):
         if self._executor.closed:
             self._executor = NixThreadExecutor(
                 thread_name_prefix="nix-eval",
-                thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
-                thread_finalizer=nanopynix_expr._exit_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
+                thread_finalizer=gc_release_thread,
                 stack_size=NIX_EVALUATOR_STACK_SIZE,
             )
         nix_path = (
@@ -1458,15 +1452,12 @@ class EvalSession(AsyncEvalSession["Value"]):
                 rendered_fetch,
             )
         except BaseException:
-            # By this point the executor's dedicated thread has already run
-            # its thread_initializer (GC_register_my_thread) as a side effect
-            # of submitting the open_eval_state call above. Without this
-            # shutdown, a failure here would abandon that thread still
-            # registered with Boehm GC -- it would eventually be torn down by
-            # Python's own ThreadPoolExecutor atexit/weakref machinery, which
-            # has no knowledge of our thread_finalizer, leaving a
-            # GC-registered-but-dead thread that a later, unrelated
-            # collection cycle can crash on (pthread_kill on a dead tid).
+            # huggorm registered the executor's thread with the collector at
+            # the open_eval_state call above. Without this shutdown, a failure
+            # here abandons that thread still registered -- Python's own
+            # ThreadPoolExecutor teardown does not know our thread_finalizer,
+            # and a later collection can crash on the dead thread
+            # (pthread_kill on a dead tid).
             self._executor.shutdown(wait=True)
             raise
         self._session._evals.add(self)  # type: ignore[reportPrivateUsage] -- Session owns evaluator lifetime tracking  # noqa: SLF001
@@ -1573,11 +1564,6 @@ class EvalSession(AsyncEvalSession["Value"]):
         finally:
             self._session._collector.request_finalized(operation_id)  # type: ignore[reportPrivateUsage] -- Session owns the log collector  # noqa: SLF001
 
-    def _require_raw(self) -> nanopynix_expr.EvalState:
-        if not self._active or self._core is None:
-            raise EvalSessionClosedError("EvalSession is not open — use async with")
-        return self._core.require_raw()
-
     def _require_core(self) -> CoreEvalState:
         if not self._active or self._core is None:
             raise EvalSessionClosedError("EvalSession is not open — use async with")
@@ -1681,8 +1667,7 @@ class EvalSession(AsyncEvalSession["Value"]):
                 flake_settings=rendered_flake,
             ),
         )
-        proto = await self.run(_locked_flake_proto, local.require_raw())
-        locked_flake = LockedFlake(self, local, proto.description)
+        locked_flake = LockedFlake(self, local, await self.run(local.description))
         self._locked_flakes.add(locked_flake)
         return locked_flake
 
@@ -1729,14 +1714,14 @@ class EvalSession(AsyncEvalSession["Value"]):
         return await self.run(self._require_core().get_flake, ref)
 
     async def reset_file_cache(self) -> None:
-        await self.run(self._require_raw().reset_file_cache)
+        await self.run(self._require_core().reset_file_cache)
 
     async def statistics(self) -> dict[str, Any]:
-        return json.loads(await self.run(self._require_raw().statistics_json))
+        return json.loads(await self.run(self._require_core().statistics_json))
 
     async def set_eval_counters_enabled(self, enabled: bool) -> bool:
-        nanopynix_expr.set_eval_counters_enabled(enabled)
-        return nanopynix_expr.eval_counters_enabled()
+        set_eval_counters_enabled(enabled)
+        return eval_counters_enabled()
 
 
 class ReplSession(EvalSession, AsyncReplSession["Value"]):
@@ -1796,7 +1781,7 @@ class ReplSession(EvalSession, AsyncReplSession["Value"]):
         if self._repl_begun:
             return
         try:
-            await self.run(self._require_raw().begin_repl)
+            await self.run(self._require_core().begin_repl)
         except BaseException:
             await self.close()
             raise
@@ -1829,7 +1814,7 @@ class ReplSession(EvalSession, AsyncReplSession["Value"]):
         return await self.run(self._require_core().repl_add_attrs, local_value)
 
     async def scope_names(self) -> list[str]:
-        return await self.run(self._require_raw().repl_scope_names)
+        return await self.run(self._require_core().repl_scope_names)
 
     async def repl_select(self, expr: str) -> tuple[str, Value] | None:
         local = await self.run(self._require_core().repl_select, expr)
@@ -2098,27 +2083,13 @@ class Value(AsyncValue["Store"]):
         return await self._eval_session.run((await self._resolve()).realise_argv)
 
     async def edit_location(self) -> tuple[str, int]:
-        location = await self._eval_session.run((await self._resolve()).edit_location)
-        return location["path"], location["line"]
+        return await self._eval_session.run((await self._resolve()).edit_location)
 
     async def get_doc(self) -> Doc | None:
-        raw = await self._eval_session.run((await self._resolve()).get_doc)
-        if raw is None:
-            return None
-        return Doc(
-            name=raw["name"],
-            args=raw["args"],
-            arity=raw["arity"],
-            doc=raw["doc"],
-            path=raw["path"],
-            line=raw["line"],
-        )
+        return await self._eval_session.run((await self._resolve()).get_doc)
 
     async def attr_doc(self, name: str) -> AttrDoc | None:
-        raw = await self._eval_session.run((await self._resolve()).attr_doc, name)
-        if raw is None:
-            return None
-        return AttrDoc(path=raw["path"], line=raw["line"], doc=raw["doc"])
+        return await self._eval_session.run((await self._resolve()).attr_doc, name)
 
     def attr(self, name: str) -> Value:
         """Select attribute ``name``, deferring the Nix work until forced.
@@ -2281,11 +2252,6 @@ __all__ = [
     "BuildMode",
     "EvalSession",
     "LockedFlake",
-    "RawEvalState",
-    "RawGCAction",
-    "RawStore",
-    "RawStorePath",
-    "RawValue",
     "ReplSession",
     "Session",
     "Store",

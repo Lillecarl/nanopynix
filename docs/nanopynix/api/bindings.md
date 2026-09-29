@@ -1,9 +1,9 @@
 # The compiled bindings
 
 The engine is huggorm's generated bindings, `huggorm_bindings`, a set of
-nanobind extensions that link against Nix's own C++ libraries. The `nanopynix`
-package exports 23 names over it, so each one is a public promise of this
-project and each one has an entry below.
+nanobind extensions that link against Nix's own C++ libraries. Each name below
+is one that the `nanopynix` package exports over it, so each one is a public
+promise of this project.
 
 **Most callers do not need this page.** {class}`~nanopynix.rpc.Session` and
 {mod}`nanopynix.inproc` wrap every name here in an async API that manages the
@@ -13,7 +13,7 @@ when you want to know what a higher-level call does underneath.
 
 ## Three kinds of name
 
-The 23 names are not one surface, and the risk of calling one directly differs
+The names are not one surface, and the risk of calling one directly differs
 a lot between the three groups.
 
 Process-wide state
@@ -35,24 +35,21 @@ Plain queries and constructors
 : `build_info`, `current_system`, `eval_counters_enabled`, `get_verbosity`,
   `is_pseudo_url`,
   `list_settings`,
-  `open_store`, `eval_file`, `parse_flake_ref`, `get_flake`, `lock_flake`,
-  `input_from_url` and `input_from_attrs` read state or build an object. They
-  are safe to call, and the classes `EvalState`, `Value`, `BuildMode` and
-  `PrimopError` are the types that they take and return.
+  `open_store`, `input_from_url` and `input_from_attrs` read state or build an
+  object. They are safe to call, and `BuildMode` and `PrimopError` are the
+  types that they take and raise.
 
 ## Thread confinement, and why the async API exists
 
-Nix's evaluator is not thread-safe. An {class}`~nanopynix.EvalState`
-refuses a call from any thread except the one that built it, and a
-{class}`~nanopynix.Value` belongs to the evaluator that made it.
+Nix's evaluator is not thread-safe, and nanopynix exports no raw evaluator. An evaluator
+belongs to one thread, and a value belongs to the evaluator that made it.
 Every call into the bindings also blocks, because the C++ side has no
 `await`.
 
 The two engines exist to solve that. The in-process engine runs the bindings on
 a dedicated thread and hands the caller a future. The rpc engine runs them in a
 separate worker process. Either way the caller writes `await`, and neither one
-lets a value cross to an evaluator that does not own it. Code that calls the
-bindings directly gets neither guarantee.
+lets a value cross to an evaluator that does not own it.
 
 ## Process and build information
 
@@ -145,22 +142,12 @@ prefer them. See {doc}`settings`.
 `init_libexpr` initialises Nix's evaluation library for the process. A session
 calls it, so a caller who uses a session must not call it again.
 
-`EvalState` is the C++ evaluator itself. It holds the Nix expression cache, the
-search path and the garbage-collected heap that every `Value` lives in. Build
-one through `session.eval(store)` rather than directly: the session confines it
-to one thread and closes it in order.
-
-`Value` is one Nix value — an integer, a string, an attribute set, a function,
-or a thunk that produces one of these. A `Value` stays alive for as long as the
-evaluator that made it. The async API wraps it as
-{class}`~nanopynix.AsyncValue`, which adds the accessors, the type checks and
-the ownership rule that a bare `Value` has not got.
-
-`eval_file` evaluates one `.nix` file and returns the resulting `Value`.
+An evaluator comes from `session.eval(store)`, which confines it to one thread
+and closes it in order. Its values are {class}`~nanopynix.AsyncValue`.
 
 `set_eval_counters_enabled` turns the evaluation counters on, and
 `eval_counters_enabled` reports their state. The counters back the numeric
-fields of `EvalState.statistics_json`, and Nix leaves them off unless
+fields of `EvalSession.statistics()`, and Nix leaves them off unless
 `NIX_SHOW_STATS` is set, because each increment costs an atomic write.
 
 **Both name the process, and not one evaluator.** `nix::Counter::enabled` is a
@@ -172,17 +159,18 @@ process. Issue #118 tracks the repair, which moves the switch and the counters
 onto the evaluator.
 
 `is_pseudo_url` reports whether Nix downloads a string as a tarball, rather
-than reading it as a path. It is the first test that `eval_file` and
-`EvalState.file` apply to their argument: `channel:nixos-unstable` and a URL
+than reading it as a path. It is the first test that `EvalSession.file`
+applies to its argument: `channel:nixos-unstable` and a URL
 with a scheme that Nix fetches both answer `True`, and `github:NixOS/nixpkgs`,
 `<nixpkgs>` and `./default.nix` all answer `False`. Ask this when you classify
 such an argument yourself, because the list of schemes belongs to Nix and it
 moves with the Nix version. `pynix` uses it to decide which `--file` arguments
 it hands over unchanged.
 
-`register_primop` adds a Python function to `builtins`. Registration is
-process-wide and permanent, so a name can be claimed once. `Session(primops=...)`
-is the supported route, and it also gives the rpc engine a way to run the
+`register_primop(name, arity, callback)` adds a Python function to `builtins`
+of every evaluator that opens after the call. Registration is process-wide, and
+a second registration of a name replaces the first. `Session(primops=...)` is
+the supported route, and it also gives the rpc engine a way to run the
 function on the client. See {doc}`primops`.
 
 `PrimopError` is the class that a primop raises to reject its argument.
@@ -193,12 +181,6 @@ as unexpected rather than deliberate.
 
 ```{eval-rst}
 .. autofunction:: nanopynix.init_libexpr
-
-.. autoclass:: nanopynix.EvalState
-
-.. autoclass:: nanopynix.Value
-
-.. autofunction:: nanopynix.eval_file
 
 .. autofunction:: nanopynix.eval_counters_enabled
 
@@ -243,41 +225,11 @@ permanent, the same as `register_primop`.
 .. autofunction:: nanopynix.register_store_implementation
 ```
 
-## Flakes
-
-The three flake functions run in order. `parse_flake_ref` turns a string such
-as `github:NixOS/nixpkgs` into a `FlakeRef`. `get_flake` resolves that
-reference through the registry, and it does **not** lock. `lock_flake`
-resolves the inputs and returns a `LockedFlake` with the description and the
-input tree.
-
-`session.lock_flake()` and `session.eval_flake()` do the same work
-asynchronously.
-
-```{warning}
-`nanopynix.FlakeRef` and `nanopynix.LockedFlake` are **not** the classes that
-these functions return. The two top-level names are the proto models of
-{doc}`models`, which the async API returns, and the classes here are the C++
-objects that the bindings wrap. The names are the same and the types are not,
-so a `FlakeRef` from `parse_flake_ref` does not satisfy an annotation that
-means the model.
-```
-
-```{eval-rst}
-.. autofunction:: nanopynix.parse_flake_ref
-
-.. autofunction:: nanopynix.get_flake
-
-.. autofunction:: nanopynix.lock_flake
-```
-
 ## Fetchers
 
 An `Input` is one source that Nix can fetch — a Git repository, a tarball, or
 a local path. `input_from_url` builds one from a URL, and `input_from_attrs`
-builds one from the attribute form that a lock file holds. The same warning
-applies as for the flake classes above: `nanopynix.Input` is the proto model,
-and `huggorm_bindings.Input` is the C++ object.
+builds one from the attribute form that a lock file holds.
 
 ```{eval-rst}
 .. autofunction:: nanopynix.input_from_url

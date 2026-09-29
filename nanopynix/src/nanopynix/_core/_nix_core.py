@@ -2,30 +2,42 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
-from nanopynix._engine import expr as nanopynix_expr, store as nanopynix_store, util as nanopynix_util
+from nanopynix._engine import (
+    BuildMode as NixBuildMode,
+    EvalState,
+    get_setting,
+    init_libexpr,
+    parse_nix_path as nix_parse_nix_path,
+    store as nanopynix_store,
+    util as nanopynix_util,
+)
 from nanopynix._typechecking import BEARTYPING
+from nanopynix._wire import BuildMode
 from nanopynix.models import SettingsProvenance
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Mapping, Sequence
 
 
-def build_mode_value(build_mode: nanopynix_store.BuildMode | int | None) -> int:
-    """Normalise the three ways a caller may name a build mode to Nix's int.
-
-    Shared because both engines accept the same three spellings and must agree
-    on what each means: the enum, the raw int Nix uses on the wire, and
-    ``None`` for "normal". Previously one copy lived on rpc's ValueProxy while
-    inproc simply typed the parameter ``Any`` and called ``int()`` on it, which
-    accepted anything with an ``__int__`` and rejected the enum's own name.
-    """
+def build_mode_value(build_mode: BuildMode | int | None) -> int:
+    """The wire's integer for a build mode; ``None`` is a normal build."""
     if build_mode is None:
-        return nanopynix_store.BuildMode.Normal.value
-    if isinstance(build_mode, int):
-        return build_mode
-    return build_mode.value
+        return BuildMode.Normal.value
+    return int(build_mode)
+
+
+def nix_build_mode(build_mode: int) -> NixBuildMode:
+    """huggorm's word for the wire's integer. An unknown integer raises ``ValueError``."""
+    return NixBuildMode[BuildMode(build_mode).name.upper()]
+
+
+def parse_nix_path(value: str | None = None) -> list[str]:
+    """Split a search path as Nix does; ``None`` reads ``NIX_PATH``."""
+    raw = os.environ.get("NIX_PATH", "") if value is None else value
+    return nix_parse_nix_path(raw) if raw else []
 
 
 class NixCore:
@@ -93,13 +105,10 @@ class NixCore:
             # itself, which never pass through that wrapper.
             nanopynix_util.set_default_verbosity(verbosity)
             nanopynix_util.set_verbosity(verbosity)
-        # Safe from any thread. `init_libexpr` starts the Boehm collector on a
-        # thread of its own that never exits, because Boehm keeps its one
-        # static `first_thread` entry for whoever calls `GC_INIT()` and removes
-        # it at no point. `nix_expr.cpp` carries the measurement, and owning
-        # the thread there is what makes a caller that skips this function --
-        # anything that builds an `EvalState` directly -- safe too.
-        nanopynix_expr.init_libexpr()
+        # Safe from any thread: huggorm starts the collector on a thread of its
+        # own. Here and not at the first evaluator, so that Nix copies
+        # `NIX_PATH` into `nix-path` as the session starts.
+        init_libexpr()
         return SettingsProvenance(from_config=from_config, applied=applied)
 
     # Not keyword-only: the worker dispatches it through `run_request`, which
@@ -146,14 +155,14 @@ class NixCore:
         build_store: nanopynix_store.Store | None = None,
         eval_settings: Mapping[str, str] | None = None,
         fetch_settings: Mapping[str, str] | None = None,
-    ) -> nanopynix_expr.EvalState:
-        return nanopynix_expr.EvalState(
-            store,
-            list(nix_path),
-            build_store,
-            dict(eval_settings) if eval_settings else {},
-            dict(fetch_settings) if fetch_settings else {},
-        )
+    ) -> EvalState:
+        """Open an evaluator. huggorm's constructor takes both kinds of setting in one map."""
+        settings = {**(eval_settings or {}), **(fetch_settings or {})}
+        if nix_path:
+            # In front of the `nix-path` setting, as `nix -I` puts it, so the
+            # setting still answers after the search path.
+            settings["nix-path"] = " ".join([*nix_path, get_setting("nix-path") or ""]).strip()
+        return EvalState(store.store, settings, None if build_store is None else build_store.store)
 
     def get_verbosity(self) -> int:
         """Return the Nix log verbosity of the calling thread.

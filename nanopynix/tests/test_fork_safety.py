@@ -338,10 +338,11 @@ _EVALUATOR_WITH_NO_INIT_LIBEXPR = """
 import sys
 
 import nanopynix
+from nanopynix._core._objects import CoreRuntime
 
 nanopynix.init_libstore(load_config=False)
-store = nanopynix.open_store(sys.argv[1])
-nanopynix.EvalState(store, [])
+runtime = CoreRuntime()
+runtime.open_eval_state(runtime.open_store(sys.argv[1]), [])
 print("constructed")
 """
 
@@ -385,7 +386,7 @@ sys.exit(os.waitstatus_to_exitcode(status))
 
 
 async def test_an_evaluator_needs_no_init_libexpr_before_it(shared_nix_environment: NixTestEnvironment) -> None:
-    """``nanopynix.EvalState(store)`` constructs, rather than aborting the process.
+    """An evaluator constructs with no ``init_libexpr`` first, rather than aborting the process.
 
     **Issue #54.** ``PyEvalState::init`` registered the calling thread with
     Boehm and never started the collector, so the process died on SIGABRT with

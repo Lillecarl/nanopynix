@@ -107,7 +107,7 @@ if TYPE_CHECKING or BEARTYPING:
     from betterproto2 import Message
     from nanopynix_proto.nix.common import LockedFlake as LockedFlakeProto
 
-    from nanopynix._engine import BuildMode
+    from nanopynix._wire import BuildMode
     from nanopynix.rpc.client._pool import WorkerClient
     from nanopynix.rpc.client.store import Store
 

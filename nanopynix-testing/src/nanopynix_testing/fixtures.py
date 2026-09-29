@@ -32,15 +32,15 @@ is a fixture that fails in a new rootdir for a reason nobody can read.
 
 from __future__ import annotations
 
-import atexit
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 import nanopynix
-from nanopynix._engine import expr as nanopynix_expr, set_setting
+from nanopynix._core._objects import CoreEvalState, CoreRuntime, CoreStore
+from nanopynix._engine import set_setting
 from nanopynix.inproc import _impl as inproc_impl
 from nanopynix.settings import DEFAULT_EXPERIMENTAL_FEATURES
 from test_support.subprocess_output import run_process
@@ -321,69 +321,58 @@ def _register_test_primops() -> None:  # type: ignore[reportUnusedFunction] -- p
     build_info: Any = nanopynix.build_info()  # type: ignore[reportUnknownVariableType, reportUnknownMemberType] -- C++ extension without type stubs
     if not build_info["capabilities"]["dynamic_primop_registration"]:
         return
-    nanopynix.register_primop("test_add_one", 1, ["x"], "increment by 1", lambda x: x + 1)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
-    nanopynix.register_primop("test_add", 2, ["x", "y"], "add two ints", lambda x, y: x + y)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
-    nanopynix.register_primop("test_shout", 1, ["s"], "uppercase a string", lambda s: s.upper())  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
-    nanopynix.register_primop("test_not", 1, ["b"], "negate a boolean", lambda b: not b)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
-    nanopynix.register_primop("test_sum", 1, ["xs"], "sum a list of ints", sum)
-    nanopynix.register_primop("test_get", 2, ["attrs", "key"], "get attr from set", lambda attrs, key: attrs[key])  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
-    nanopynix.register_primop("test_null", 1, ["_x"], "always returns null", lambda _x: None)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
-    nanopynix.register_primop("test_half", 1, ["x"], "divide by 2 as float", lambda x: x / 2.0)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
-    nanopynix.register_primop("test_range", 1, ["n"], "range(1, n+1)", lambda n: list(range(1, n + 1)))  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
-    nanopynix.register_primop("test_make_attrs", 1, ["x"], "return { x = x; y = x+1; }", lambda x: {"x": x, "y": x + 1})  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
-    nanopynix.register_primop("test_greet", 1, ["name"], "return greeting string", lambda name: f"Hello, {name}!")  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
-    nanopynix.register_primop("test_double", 1, ["x"], "double an int", lambda x: x * 2)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
-    nanopynix.register_primop("test_triple", 1, ["x"], "triple an int", lambda x: x * 3)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
-    nanopynix.register_primop("test_overwrite", 1, ["x"], "first version", lambda x: x + 1)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
-    nanopynix.register_primop("test_overwrite", 1, ["x"], "second version — wins", lambda x: x * 10)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
-    nanopynix.register_primop("test_answer", 0, [], "the answer (zero arity)", lambda: 42)
-    nanopynix.register_primop("test_add4", 4, ["a", "b", "c", "d"], "add 4 ints", lambda a, b, c, d: a + b + c + d)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
-    nanopynix.register_primop("test_identity_string", 1, ["s"], "return the string arg unchanged", lambda s: s)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_add_one", 1, lambda x: x + 1)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_add", 2, lambda x, y: x + y)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_shout", 1, lambda s: s.upper())  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_not", 1, lambda b: not b)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_sum", 1, sum)
+    nanopynix.register_primop("test_get", 2, lambda attrs, key: attrs[key])  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_null", 1, lambda _x: None)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_half", 1, lambda x: x / 2.0)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_range", 1, lambda n: list(range(1, n + 1)))  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_make_attrs", 1, lambda x: {"x": x, "y": x + 1})  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_greet", 1, lambda name: f"Hello, {name}!")  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_double", 1, lambda x: x * 2)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_triple", 1, lambda x: x * 3)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_overwrite", 1, lambda x: x + 1)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_overwrite", 1, lambda x: x * 10)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_answer", 0, lambda: 42)
+    nanopynix.register_primop("test_add4", 4, lambda a, b, c, d: a + b + c + d)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_identity_string", 1, lambda s: s)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
 
     # Callable-returning primops (tests the Python-callable → Nix-function bridge).
-    nanopynix.register_primop("test_return_lazy_42", 0, [], "returns a zero-arg lambda → 42", lambda: lambda: 42)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_return_lazy_42", 0, lambda: lambda: 42)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
     nanopynix.register_primop(
         "test_attrs_property",
         1,
-        ["n"],
-        "returns { result = lambda: n * n; } (zero-arg, evaluated immediately)",
         lambda n: {"result": lambda: n * n},  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
     )
     nanopynix.register_primop(
         "test_attrs_fn",
         1,
-        ["x"],
-        "returns { add = lambda y: x + y; } (1-arg callable)",
         lambda x: {"add": lambda y: x + y},  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
     )
     nanopynix.register_primop(
         "test_attrs_fn2",
         1,
-        ["x"],
-        "returns { mul = lambda a, b: x * a * b; } (2-arg callable)",
         lambda x: {"mul": lambda a, b: x * a * b},  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
     )
     nanopynix.register_primop(
         "test_closure_fn",
         2,
-        ["n", "prefix"],
-        "returns { greet = lambda name: prefix + ' ' + name + ' ' + str(n+2); }",
         lambda n, prefix: {"greet": lambda name: f"{prefix} {name} {n + 2}"},  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
     )
     nanopynix.register_primop(
         "test_callable_curry",
         2,
-        ["a", "b"],
-        "returns a callable that takes one arg",
         lambda _a, _b: lambda x: x * 2,  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
     )
 
 
 @pytest.fixture(scope="session")
-def eval_state(store: Any, init_expr: object, _register_test_primops: object) -> Any:  # noqa: ARG001 -- init_expr and _register_test_primops are ordering-only fixture dependencies, never read here
-    """Create a session-scoped EvalState. Depends on _register_test_primops
-    so that primops are registered before EvalState processes them."""
-    return nanopynix.EvalState(store)
+def eval_state(store: Any, init_expr: object, _register_test_primops: object) -> CoreEvalState:  # noqa: ARG001 -- init_expr and _register_test_primops are ordering-only fixture dependencies, never read here
+    """A session-scoped evaluator, opened after the test primops are registered."""
+    return CoreRuntime().open_eval_state(CoreStore(store), [])
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -400,17 +389,6 @@ def _enable_default_experimental_features() -> None:  # type: ignore[reportUnuse
     """
     for feature in DEFAULT_EXPERIMENTAL_FEATURES:
         nanopynix.enable_experimental_feature(feature)
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _cleanup_primops() -> None:  # type: ignore[reportUnusedFunction] -- pytest autouse fixture, wired by pytest
-    """Clear C++ primop registry at process exit to avoid segfault
-    when nb::object destructors fire after Python finalization."""
-
-    class _PrimopRegistryModule(Protocol):
-        def _cleanup_primop_registry(self) -> None: ...
-
-    atexit.register(cast("_PrimopRegistryModule", nanopynix_expr)._cleanup_primop_registry)  # type: ignore[reportPrivateUsage] -- intentional cleanup of C++ state at process exit  # noqa: SLF001 -- same reason
 
 
 @pytest.fixture(scope="session")

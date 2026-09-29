@@ -57,9 +57,8 @@ from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar, runtime_checkabl
 # and a base class expression is evaluated when the module loads.
 from nanopynix_proto.nix.common import GcAction, LogLevel, StoreDirs
 
-from nanopynix._engine import BuildMode
 from nanopynix._typechecking import BEARTYPING
-from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
+from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT, BuildMode
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import AsyncIterator, Mapping, Sequence

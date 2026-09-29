@@ -106,20 +106,19 @@ class _FakeBridge:
         return None
 
 
-class _FakeEvalState(nix_core.nanopynix_expr.EvalState):
+class _FakeEvalState(nix_core.EvalState):
     def __init__(
         self,
         store: object,
-        nix_path: list[str],
+        settings: dict[str, str] | None = None,
         build_store: object | None = None,
-        eval_settings: dict[str, str] | None = None,
-        fetch_settings: dict[str, str] | None = None,
     ) -> None:
         self.store = store
-        self.nix_path = nix_path
+        self.settings = settings or {}
         self.build_store = build_store
-        self.eval_settings = eval_settings
-        self.fetch_settings = fetch_settings
+
+    def register_primop(self, name: str, arity: int, fn: object) -> None:
+        del name, arity, fn
 
 
 def _fake_raw(eval_state: CoreEvalState) -> _FakeEvalState:
@@ -145,6 +144,8 @@ class _StoreId(nanopynix_store.Store):
 
     def __init__(self, ident: str) -> None:
         self._ident = ident
+        # What `open_eval_state` hands the evaluator, so the double sees the identity string.
+        self.store = ident
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, str) and other == self._ident
@@ -254,7 +255,7 @@ async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.Mo
     monkeypatch.setattr(worker.nanopynix_util, "enable_experimental_feature", record)
     monkeypatch.setattr(worker.nanopynix_util, "init_libstore", record)
     monkeypatch.setattr(worker.nanopynix_util, "set_verbosity", record)
-    monkeypatch.setattr(nix_core.nanopynix_expr, "init_libexpr", record)
+    monkeypatch.setattr(nix_core, "init_libexpr", record)
     monkeypatch.setattr(worker, "_register_primops", record)
 
     state = WorkerState()
@@ -286,12 +287,11 @@ async def test_worker_initializes_nix_on_dedicated_thread(monkeypatch: pytest.Mo
 @pytest.mark.anyio
 @pytest.mark.concurrency
 async def test_open_eval_allows_concurrent_eval_states(monkeypatch: pytest.MonkeyPatch, init_expr: object) -> None:
-    # `init_expr` forces real Boehm GC initialization: this test's open_eval
-    # spins up real NixThreadExecutor instances with the real
-    # _enter_evaluator_thread/_exit_evaluator_thread GC registration hooks,
-    # which require nix::initGC() to have already run once in this process.
+    # `init_expr` starts the real collector: this test's open_eval starts
+    # real NixThreadExecutor instances whose finalizer is the real
+    # `gc_release_thread`.
     del init_expr
-    monkeypatch.setattr(nix_core.nanopynix_expr, "EvalState", _FakeEvalState)
+    monkeypatch.setattr(nix_core, "EvalState", _FakeEvalState)
 
     state = WorkerState()
     # These strings stand in for a store only as identity markers -- the
@@ -309,7 +309,7 @@ async def test_open_eval_allows_concurrent_eval_states(monkeypatch: pytest.Monke
     assert isinstance(selected, CoreEvalState)
     assert isinstance(selected.raw, _FakeEvalState)
     assert selected.raw.store == "second-store"
-    assert selected.raw.nix_path == ["nixpkgs=/tmp/nixpkgs"]
+    assert selected.raw.settings["nix-path"].split()[0] == "nixpkgs=/tmp/nixpkgs"
 
     assert handler._get_es(response.eval_handle) is selected  # type: ignore[reportPrivateUsage] -- test accesses private method on handler
 
@@ -339,7 +339,7 @@ async def test_open_eval_forwards_the_build_store_handle(
     ``None`` it replaced, that test still passes and this one fails.
     """
     del init_expr  # as above: real GC init before a real NixThreadExecutor
-    monkeypatch.setattr(nix_core.nanopynix_expr, "EvalState", _FakeEvalState)
+    monkeypatch.setattr(nix_core, "EvalState", _FakeEvalState)
 
     state = WorkerState()
     eval_store = state.handles.allocate(CoreStore(_StoreId("eval-store")), HandleKind.STORE)

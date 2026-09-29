@@ -15,10 +15,12 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, EnvSettingsSource, PydanticBaseSettingsSource, SettingsConfigDict
 
+from nanopynix._core._nix_core import parse_nix_path
 from nanopynix._engine import (
-    expr as nanopynix_expr,
-    fetchers as nanopynix_fetchers,
-    flake as nanopynix_flake,
+    eval_settings_json,
+    fetch_settings_json,
+    flake_settings_json,
+    settings_json,
     util as nanopynix_util,
 )
 from nanopynix._features import DEFAULT_EXPERIMENTAL_FEATURES as DEFAULT_EXPERIMENTAL_FEATURES
@@ -1139,34 +1141,32 @@ def normalize_nix_path(nix_path: str | Sequence[str] | None) -> list[str]:
     ``None`` falls back to parsing the process environment's ``NIX_PATH``; a
     colon-separated string is parsed the same way Nix itself would.
     """
-    if nix_path is None:
-        return list(nanopynix_expr.parse_nix_path())
-    if isinstance(nix_path, str):
-        return list(nanopynix_expr.parse_nix_path(nix_path))
+    if nix_path is None or isinstance(nix_path, str):
+        return parse_nix_path(nix_path)
     return list(nix_path)
 
 
 def list_settings_metadata() -> dict[str, NixSettingMetadata]:
     """Return Nix's live registry of global store/eval settings, keyed by name."""
-    raw: dict[str, object] = json.loads(nanopynix_util.list_settings_metadata_json())
+    raw: dict[str, object] = json.loads(settings_json())
     return _settings_metadata_from_raw(raw)
 
 
 def list_eval_settings_metadata() -> dict[str, NixSettingMetadata]:
     """Return Nix's live registry of evaluator-specific settings, keyed by name."""
-    raw: dict[str, object] = json.loads(nanopynix_expr.list_eval_settings_metadata_json())
+    raw: dict[str, object] = json.loads(eval_settings_json())
     return _settings_metadata_from_raw(raw)
 
 
 def list_fetch_settings_metadata() -> dict[str, NixSettingMetadata]:
     """Return Nix's live registry of fetcher-specific settings, keyed by name."""
-    raw: dict[str, object] = json.loads(nanopynix_fetchers.list_fetch_settings_metadata_json())
+    raw: dict[str, object] = json.loads(fetch_settings_json())
     return _settings_metadata_from_raw(raw)
 
 
 def list_flake_settings_metadata() -> dict[str, NixSettingMetadata]:
     """Return Nix's live registry of flake-specific settings, keyed by name."""
-    raw: dict[str, object] = json.loads(nanopynix_flake.list_flake_settings_metadata_json())
+    raw: dict[str, object] = json.loads(flake_settings_json())
     return _settings_metadata_from_raw(raw)
 
 

@@ -56,8 +56,8 @@ from nanopynix_proto.nix.worker import (
     WorkerServiceBase,
 )
 
-from nanopynix._core._primops import import_primop_callable as _import_callable
-from nanopynix._engine import expr as nanopynix_expr, util as nanopynix_util
+from nanopynix._core._primops import import_primop_callable as _import_callable, register_primop
+from nanopynix._engine import util as nanopynix_util
 from nanopynix._process_title import set_process_title, set_worker_title
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import (
@@ -108,13 +108,7 @@ def _register_primops(
             callback = rpc_primop_callback_factory(rpc_bridge, spec.name, spec.arity)
         else:
             callback = _import_callable(spec.import_path)
-        nanopynix_expr.register_primop(
-            spec.name,
-            spec.arity,
-            spec.args,
-            spec.doc,
-            callback,
-        )
+        register_primop(spec.name, spec.arity, callback)
 
 
 def _install_worker_diagnostics(collector: LogCollector, outbox: LogOutbox) -> None:
@@ -668,12 +662,11 @@ async def _shutdown_worker(handlers: list[WorkerServices]) -> None:
     worker_state: WorkerState = _worker_state_of(handlers)
 
     # First, and the reason this function has to run at all. Each evaluator
-    # owns a dedicated thread that `_enter_evaluator_thread` registered with
-    # the Boehm collector, and `close_eval_state` is the only thing that runs
-    # the matching `_exit_evaluator_thread` on it. Without this, the thread is
-    # joined by `concurrent.futures`'s own atexit hook and exits still
-    # registered, and a later collection then signals a dead tid. See the
-    # account in `_core/_nix_executor.py`.
+    # owns a dedicated thread that huggorm registered with the collector, and
+    # `close_eval_state` is the only thing that runs `gc_release_thread` on
+    # it. Without this, the thread is joined by `concurrent.futures`'s own
+    # atexit hook and exits still registered, and a later collection then
+    # signals a dead tid. See the account in `_core/_nix_executor.py`.
     #
     # `anyio.to_thread`, and not the shared executor: `close_eval_state`
     # blocks on the evaluator's thread, so it can run on neither the event

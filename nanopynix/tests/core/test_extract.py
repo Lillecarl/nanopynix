@@ -1,7 +1,4 @@
-"""Tests for _extract.py — L1 nanobind → dict converters.
-
-Needs C++ modules loaded but no Nix daemon.
-"""
+"""Tests for the attribute converters of ``_core/_extract.py``, and the core's flake shapes."""
 
 from __future__ import annotations
 
@@ -9,23 +6,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from nanopynix._core._extract import (
-    _attrs_map,  # pyright: ignore[reportPrivateUsage] -- test reaches into _extract's private helper for direct unit coverage, see below
     _attrs_value,  # pyright: ignore[reportPrivateUsage] -- test reaches into _extract's private helper for direct unit coverage, see below
     flake_ref_attrs,
-    input_attrs,
-    locked_flake,
-    locked_node,
 )
 from nanopynix._engine import (
-    fetchers as nanopynix_fetchers,  # L1 Input
-    flake as nanopynix_flake,  # L1 FlakeRef, LockedFlake, parse_flake_ref
-    store as nanopynix_store,  # L1 StorePath, Store, PathInfo, BuildResult, MissingInfo
+    parse_flake_ref,
+    store as nanopynix_store,  # StorePath, Store, PathInfo, BuildResult, MissingInfo
 )
 from nanopynix.models import StorePath
 from test_support.git_fixtures import init_flake_repo
 
 if TYPE_CHECKING:
-    import nanopynix
+    from nanopynix._core._objects import CoreEvalState
 
 # ════════════════════════════════════════════════════════════════════
 # StorePath wrapper
@@ -131,100 +123,35 @@ def test_missing_info_shape(store: Any):
 
 
 # ════════════════════════════════════════════════════════════════════
-# input_attrs / flake_ref_attrs
+# flake_ref_attrs / _attrs_value
 # ════════════════════════════════════════════════════════════════════
 
 
-def test_input_attrs_from_url():
-    inp = nanopynix_fetchers.input_from_url("github:NixOS/nixpkgs")
-    result = input_attrs(inp)
-    assert isinstance(result, dict)
+def test_flake_ref_attrs():
+    result = flake_ref_attrs(parse_flake_ref("github:NixOS/nixpkgs"))
     assert result["type"].string_value == "github"
     assert result["owner"].string_value == "NixOS"
     assert result["repo"].string_value == "nixpkgs"
 
 
-def test_flake_ref_attrs():
-    fr = nanopynix_flake.parse_flake_ref("github:NixOS/nixpkgs")
-    result = flake_ref_attrs(fr)
-    assert isinstance(result, dict)
-    assert result["type"].string_value == "github"
-
-
-def test_flake_ref_attrs_vs_input_attrs():
-    """flake_ref_attrs and input_attrs produce the same shape for the same URL."""
-    fr = nanopynix_flake.parse_flake_ref("github:NixOS/nixpkgs")
-    inp = nanopynix_fetchers.input_from_url("github:NixOS/nixpkgs")
-    assert flake_ref_attrs(fr) == input_attrs(inp)
-
-
-# ════════════════════════════════════════════════════════════════════
-# _attrs_value / _attrs_map — private helpers with no other direct coverage
-# ════════════════════════════════════════════════════════════════════
-
-
 def test_attrs_value_bool_and_int_and_string_branches():
-    """input_attrs/flake_ref_attrs only ever exercise the string_value
-    fallback in practice; these dumb coverage tests pin the bool and int
-    branches of _attrs_value directly."""
+    """A flake reference exercises only the string branch; these pin the other two."""
     assert _attrs_value(True).bool_value is True
     assert _attrs_value(7).int_value == 7
     assert _attrs_value("s").string_value == "s"
 
 
-def test_attrs_map_converts_a_plain_dict():
-    """_attrs_map has no current callers (kept as a util for future ones);
-    this dumb coverage test exercises it directly so it doesn't bit-rot."""
-    result = _attrs_map({"a": 1, "b": True, "c": "s"})
-    assert result.entries["a"].int_value == 1
-    assert result.entries["b"].bool_value is True
-    assert result.entries["c"].string_value == "s"
-
-
 # ════════════════════════════════════════════════════════════════════
-# locked_node — one node of a lock graph
+# CoreLockedFlake
 # ════════════════════════════════════════════════════════════════════
 
 
-def test_locked_node_carries_both_references():
-    result = locked_node(
-        {
-            "locked_ref": "github:NixOS/nixpkgs/123abc",
-            "original_ref": "github:NixOS/nixpkgs/nixos-24.11",
-            "is_flake": True,
-        },
-    )
-    assert result.locked_ref == "github:NixOS/nixpkgs/123abc"
-    assert result.original_ref == "github:NixOS/nixpkgs/nixos-24.11"
-    assert result.is_flake is True
-
-
-def test_locked_node_keeps_is_flake_false():
-    """``is_flake`` is read straight from the node, and not defaulted.
-
-    The message this replaced defaulted a missing ``is_flake`` to true, because
-    it was assembled from a declared input where the key could be absent. The
-    C++ side always sets all three keys, so a false here means Nix said false.
-    """
-    result = locked_node({"locked_ref": "path:/x", "original_ref": "path:/x", "is_flake": False})
-    assert result.is_flake is False
-
-
-# ════════════════════════════════════════════════════════════════════
-# locked_flake — from C++ LockedFlake
-# ════════════════════════════════════════════════════════════════════
-
-
-def test_locked_flake_shape(eval_state: nanopynix.EvalState, tmp_path: Path):
-    """lock_flake returns a LockedFlake, extract yields expected dict shape."""
+def test_locked_flake_shape(eval_state: CoreEvalState, tmp_path: Path):
     init_flake_repo(tmp_path, r'hello = "world";')
 
-    fr = nanopynix_flake.parse_flake_ref(str(tmp_path))
-    lf = nanopynix_flake.lock_flake(
-        eval_state,
-        fr,
-        write_lock_file=False,
-    )
-    result = locked_flake(lf)
-
-    assert isinstance(result.description, str)
+    locked = eval_state.lock_flake(str(tmp_path), update_inputs=False, write_lock_file=False)
+    try:
+        assert isinstance(locked.description(), str)
+        assert locked.find_input(["missing"]) is None
+    finally:
+        locked.close()

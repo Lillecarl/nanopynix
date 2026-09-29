@@ -527,9 +527,7 @@ known-first-party = [
   # tell them from a third-party package without being told.
   "_shared_sessions",
   "nanopynix",
-  "nanopynix_expr",
   "nanopynix_fetchers",
-  "nanopynix_flake",
   "nanopynix_store",
   "nanopynix_util",
   "support",

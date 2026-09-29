@@ -28,7 +28,7 @@ async def _open_descriptors() -> int:
 async def test_a_closed_evaluator_with_a_primop_frees_its_store(
     shared_nix_environment: NixTestEnvironment, tmp_path: Path
 ) -> None:
-    nanopynix.register_primop("test_release_probe", 1, ["x"], "echo x", lambda x: x)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
+    nanopynix.register_primop("test_release_probe", 1, lambda x: x)  # type: ignore[reportUnknownLambdaType] -- primop callbacks receive Any from Nix
     uri = f"local://?root={tmp_path}"
 
     async def one_session() -> None:

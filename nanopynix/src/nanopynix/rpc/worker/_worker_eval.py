@@ -107,9 +107,8 @@ from nanopynix_proto.nix.eval import (
 )
 
 from nanopynix._core._codec import python_to_scalar
-from nanopynix._core._extract import locked_flake as _locked_flake
 from nanopynix._core._objects import CoreEvalState, CoreValue
-from nanopynix._engine import expr as nanopynix_expr
+from nanopynix._engine import eval_counters_enabled, gc_release_thread, set_eval_counters_enabled
 from nanopynix._wire import HandleKind
 from nanopynix.exceptions import EvaluatorAbandonedError
 from nanopynix.rpc.worker._grpc_util import worker_op, wrap_service_handlers
@@ -269,8 +268,7 @@ class EvalServiceHandler(EvalServiceBase):
         build_store = self._state.handles.get_store(message.build_store_handle) if message.build_store_handle else None
         executor = NixThreadExecutor(
             thread_name_prefix="nix-eval",
-            thread_initializer=nanopynix_expr._enter_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
-            thread_finalizer=nanopynix_expr._exit_evaluator_thread,  # type: ignore[reportPrivateUsage] -- L1 GC thread-lifetime hook  # noqa: SLF001
+            thread_finalizer=gc_release_thread,
             stack_size=NIX_EVALUATOR_STACK_SIZE,
         )
         eval_state = await self._state.run_request(
@@ -406,8 +404,8 @@ class EvalServiceHandler(EvalServiceBase):
 
     @worker_op
     def set_eval_counters(self, message: SetEvalCountersRequest) -> SetEvalCountersResponse:
-        nanopynix_expr.set_eval_counters_enabled(message.enabled)
-        return SetEvalCountersResponse(enabled=nanopynix_expr.eval_counters_enabled())
+        set_eval_counters_enabled(message.enabled)
+        return SetEvalCountersResponse(enabled=eval_counters_enabled())
 
     # Named for the wire op, not the client method: the RPC is ForceJson and
     # really does transfer JSON. ValueProxy.to_python() decodes it.
@@ -439,37 +437,24 @@ class EvalServiceHandler(EvalServiceBase):
 
     @worker_op
     def edit_location(self, message: EditLocationRequest) -> EditLocationResponse:
-        location = self._resolve(message.handle).edit_location()
-        return EditLocationResponse(path=location["path"], line=location["line"])
+        path, line = self._resolve(message.handle).edit_location()
+        return EditLocationResponse(path=path, line=line)
 
     @worker_op
     def get_doc(self, message: GetDocRequest) -> GetDocResponse:
-        raw = self._resolve(message.handle).get_doc()
-        if raw is None:
+        doc = self._resolve(message.handle).get_doc()
+        if doc is None:
             return GetDocResponse()
         return GetDocResponse(
-            doc=Doc(
-                name=raw["name"],
-                args=raw["args"],
-                arity=raw["arity"],
-                doc=raw["doc"],
-                path=raw["path"],
-                line=raw["line"],
-            ),
+            doc=Doc(name=doc.name, args=doc.args, arity=doc.arity, doc=doc.doc, path=doc.path, line=doc.line),
         )
 
     @worker_op
     def attr_doc(self, message: AttrDocRequest) -> AttrDocResponse:
-        raw = self._resolve(message.handle).attr_doc(message.name)
-        if raw is None:
+        doc = self._resolve(message.handle).attr_doc(message.name)
+        if doc is None:
             return AttrDocResponse()
-        return AttrDocResponse(
-            attr_doc=AttrDoc(
-                path=raw["path"],
-                line=raw["line"],
-                doc=raw["doc"],
-            ),
-        )
+        return AttrDocResponse(attr_doc=AttrDoc(path=doc.path, line=doc.line, doc=doc.doc))
 
     @worker_op
     def attr(self, message: AttrRequest) -> ValueHandle:
@@ -584,9 +569,7 @@ class EvalServiceHandler(EvalServiceBase):
             self._state.log("msg", int(common_pb.LogLevel.INFO), "lock_flake: C++ lock_flake returned")
         handle = self._state.handles.allocate(lf, HandleKind.LOCKED_FLAKE, owner=message.eval_handle)
 
-        lf_pb = _locked_flake(lf.require_raw())
-        lf_pb.handle = handle
-        return lf_pb
+        return LockedFlake(description=lf.description(), handle=handle)
 
     @worker_op
     def call_locked_flake(self, message: CallLockedFlakeRequest) -> ValueHandle:

@@ -20,6 +20,14 @@ class HandleKind(enum.StrEnum):
     LOCKED_FLAKE = "locked_flake"
 
 
+class BuildMode(enum.IntEnum):
+    """Nix's build modes, by the integers ``BuildRequest.build_mode`` carries."""
+
+    Normal = 0
+    Repair = 1
+    Check = 2
+
+
 CALL_ROUTE = "/nix.manager.ManagerPrimopService/Call"
 """gRPC route for ManagerPrimopService.Call -- betterproto2 bakes this string
 into the generated stub method body with no importable constant of its own,

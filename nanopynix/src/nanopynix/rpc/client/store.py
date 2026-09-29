@@ -52,9 +52,8 @@ from nanopynix_proto.nix.store import (
 )
 from nanopynix_proto.nix.worker import CloseStoreRequest, OpenStoreRequest
 
-from nanopynix._engine import BuildMode
 from nanopynix._typechecking import BEARTYPING, no_runtime_type_check
-from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT
+from nanopynix._wire import DEFAULT_CA_METHOD, DEFAULT_HASH_ALGO, NO_GC_LIMIT, BuildMode
 from nanopynix.exceptions import SessionClosedError, StoreClosedError, WorkerDiedError
 from nanopynix.models import BuildResult, Derivation, DerivedPath, GcResult, MissingInfo, StorePath
 from nanopynix.protocols import AsyncStore

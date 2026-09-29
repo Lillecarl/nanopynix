@@ -31,7 +31,7 @@ as the caller's exception would be a lie. Only a marked string is the caller's.
 
 from __future__ import annotations
 
-from nanopynix._engine import PrimopError
+from nanopynix.exceptions import PrimopError
 
 # Prefixed onto the wire string so the worker can tell "the caller's primop
 # raised" from "the backchannel broke". A message that begins with this by

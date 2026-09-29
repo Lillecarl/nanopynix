@@ -85,9 +85,7 @@ def _bound_names(tree: ast.Module) -> tuple[frozenset[str], frozenset[str]]:
             bound = alias.asname or alias.name
             if module == "nanopynix" and alias.name == "inproc":
                 modules.add(bound)
-            elif (module == "nanopynix" and alias.name == "EvalState") or (
-                module.startswith("nanopynix.inproc") and alias.name in _SESSION_NAMES
-            ):
+            elif module.startswith("nanopynix.inproc") and alias.name in _SESSION_NAMES:
                 direct.add(bound)
     return frozenset(modules), frozenset(direct)
 
@@ -102,11 +100,7 @@ def construction_sites(source: str) -> list[tuple[int, str]]:
             continue
         rendered = ast.unparse(node.func)
         head, _, leaf = rendered.rpartition(".")
-        if (
-            rendered in direct
-            or (head in modules and leaf in _SESSION_NAMES)
-            or (leaf == "EvalState" and head == "nanopynix")
-        ):
+        if rendered in direct or (head in modules and leaf in _SESSION_NAMES) or leaf == "open_eval_state":
             found.append((node.lineno, rendered))
     return sorted(found)
 
@@ -152,7 +146,7 @@ def test_the_scanner_can_see_the_test_tree() -> None:
 
 
 def test_the_scanner_finds_each_construction() -> None:
-    assert construction_sites("import nanopynix\nnanopynix.EvalState(store)\n") == [(2, "nanopynix.EvalState")]
+    assert construction_sites("CoreRuntime().open_eval_state(store, [])\n") == [(1, "CoreRuntime().open_eval_state")]
     assert construction_sites("from nanopynix import inproc\ninproc.Session()\n") == [(2, "inproc.Session")]
     assert construction_sites("import nanopynix.inproc as ip\nip.Session()\n") == [(2, "ip.Session")]
     assert construction_sites("from nanopynix.inproc import EvalSession\nEvalSession()\n") == [(2, "EvalSession")]

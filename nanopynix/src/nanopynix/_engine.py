@@ -1,32 +1,54 @@
 """The Nix engine, and the only module of nanopynix that imports it.
 
 Every other module takes the engine from here. The engine is huggorm's
-generated bindings, and ``_engine_huggorm`` gives them the names below.
+generated bindings, and ``huggorm_bindings-stubs`` types each name.
 """
 
 from __future__ import annotations
 
+from huggorm_bindings import (
+    AttrDoc as AttrDoc,
+    BuildMode as BuildMode,
+    DerivedPathBuilt as DerivedPathBuilt,
+    Doc as Doc,
+    EvalState as EvalState,
+    FlakeRef as FlakeRef,
+    KeyedBuildResult as KeyedBuildResult,
+    LockedFlake as LockedFlake,
+    OutputsSpec as OutputsSpec,
+    Repl as Repl,
+    StorePath as StorePath,
+    Value as Value,
+    collect_garbage as collect_garbage,
+    collector_owner_thread as collector_owner_thread,
+    eval_settings_json as eval_settings_json,
+    fetch_settings_json as fetch_settings_json,
+    flake_settings_json as flake_settings_json,
+    gc_release_thread as gc_release_thread,
+    gc_stats as gc_stats,
+    get_setting as get_setting,
+    parse_flake_ref as parse_flake_ref,
+    parse_nix_path as parse_nix_path,
+    settings_json as settings_json,
+)
+from huggorm_bindings.errors import (  # pyright: ignore[reportMissingTypeStubs] -- errors.py ships as source, and huggorm_bindings-stubs has no errors.pyi
+    EvalError as EvalError,
+    NixError as NixError,
+)
+
 from nanopynix._engine_huggorm import (
     STORE_DISPATCH_METHODS as STORE_DISPATCH_METHODS,
-    BuildMode as BuildMode,
-    EvalState as EvalState,
-    PrimopError as PrimopError,
     Store as Store,
-    Value as Value,
     build_info as build_info,
     current_system as current_system,
     enable_experimental_feature as enable_experimental_feature,
     error_detail as error_detail,
     errors as errors,
     eval_counters_enabled as eval_counters_enabled,
-    eval_file as eval_file,
-    expr as expr,
     fetchers as fetchers,
     filter_ansi_escapes as filter_ansi_escapes,
-    flake as flake,
     flush_logs as flush_logs,
     get_env_sh_path as get_env_sh_path,
-    get_flake as get_flake,
     get_verbosity as get_verbosity,
     init_libexpr as init_libexpr,
     init_libstore as init_libstore,
@@ -35,11 +57,8 @@ from nanopynix._engine_huggorm import (
     install_logger as install_logger,
     is_pseudo_url as is_pseudo_url,
     list_settings as list_settings,
-    lock_flake as lock_flake,
     open_store as open_store,
-    parse_flake_ref as parse_flake_ref,
     process_connection as process_connection,
-    register_primop as register_primop,
     register_store_implementation as register_store_implementation,
     remove_logger as remove_logger,
     set_eval_counters_enabled as set_eval_counters_enabled,

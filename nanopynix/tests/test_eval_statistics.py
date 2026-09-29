@@ -54,9 +54,7 @@ MULTIPLICATIONS = 50
 
 TABLES = ("primops", "functions", "attributes")
 
-# `build_info` returns an untyped dict from the bindings, so the cast is what
-# gives pyright a type to work with here.
-_BUILD_INFO = cast("dict[str, Any]", nanopynix.build_info())  # pyright: ignore[reportUnknownMemberType] -- build_info is a nanobind function that returns an untyped dict, so the call itself is unknown and the cast alone cannot answer it
+_BUILD_INFO = nanopynix.build_info()
 _CAPABILITIES = cast("dict[str, Any]", _BUILD_INFO["capabilities"])
 
 pytestmark = pytest.mark.skipif(

@@ -258,6 +258,10 @@ class EvalHashMismatchError(EvalError, HashMismatchError):
     """
 
 
+class PrimopError(Exception):
+    """A primop's own failure. Nix shows its message as it is, with no class name."""
+
+
 class ParseError(NixError):
     """Nix expression parse error."""
 
@@ -1024,6 +1028,7 @@ __all__ = [
     "OutputRejectedError",
     "ParseError",
     "PermanentBuildError",
+    "PrimopError",
     "RestrictedPathError",
     "SessionClosedError",
     "SettingNotLiveError",

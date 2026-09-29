@@ -1,10 +1,9 @@
-"""Shared plumbing for registering PrimOpSpecs against the process-global
-nanopynix_expr.register_primop() -- used by both the RPC worker
-(rpc/worker/_worker.py, inside its subprocess) and inproc (inproc/_impl.py,
-in the caller's own process). Only the rpc=True bridged-callback case (an
-arbitrary manager-side Python callable crossing the RPC worker's process
-boundary) is worker-specific and stays in _worker.py -- there is no process
-boundary to bridge for inproc callers.
+"""The process-wide primop registry, and PrimOpSpec registration against it.
+
+Both the RPC worker (inside its subprocess) and inproc (in the caller's
+process) register here. Only the rpc=True case, a manager-side callable that
+crosses the worker's process boundary, is worker-specific, and
+``rpc/worker/_worker.py`` bridges it.
 """
 
 from __future__ import annotations
@@ -12,12 +11,32 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING, Any
 
-from nanopynix._engine import expr as nanopynix_expr
 from nanopynix._typechecking import BEARTYPING
 from nanopynix.models import PrimOpSpec
 
 if TYPE_CHECKING or BEARTYPING:
     from collections.abc import Callable, Mapping, Sequence
+
+
+# Every evaluator opened after a registration gets it, as Nix's global
+# `RegisterPrimOp` does.
+_registered: dict[str, tuple[int, Callable[..., Any]]] = {}
+
+
+def register_primop(name: str, arity: int, callback: Callable[..., Any]) -> None:
+    """Give every evaluator opened after this call ``builtins.<name>``.
+
+    A second registration of *name* replaces the first.
+    """
+    _registered[name] = (arity, callback)
+
+
+def registered_primops() -> dict[str, tuple[int, Callable[..., Any]]]:
+    return dict(_registered)
+
+
+def clear_primops() -> None:
+    _registered.clear()
 
 
 def to_primop_specs(specs: Sequence[PrimOpSpec | Mapping[str, Any]] | None) -> list[PrimOpSpec]:
@@ -51,10 +70,4 @@ def register_import_path_primops(specs: Sequence[PrimOpSpec]) -> None:
             raise ValueError(
                 f"primop {spec.name!r} needs rpc=True bridging, not supported by register_import_path_primops"
             )
-        nanopynix_expr.register_primop(
-            spec.name,
-            spec.arity,
-            spec.args,
-            spec.doc,
-            import_primop_callable(spec.import_path),
-        )
+        register_primop(spec.name, spec.arity, import_primop_callable(spec.import_path))
