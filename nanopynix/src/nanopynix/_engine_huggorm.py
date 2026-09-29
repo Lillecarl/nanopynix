@@ -194,8 +194,40 @@ def init_libexpr() -> None:
 is_pseudo_url = huggorm_bindings.is_pseudo_url
 set_eval_counters_enabled = _not_ported("set_eval_counters_enabled")
 
-input_from_attrs = _not_ported("input_from_attrs")
-input_from_url = _not_ported("input_from_url")
+
+class Input:
+    """A huggorm ``Input`` that answers the other engine's method names."""
+
+    __slots__ = ("raw",)
+
+    def __init__(self, raw: Any) -> None:
+        self.raw: Any = raw
+
+    def to_string(self) -> str:
+        return self.raw.to_string()
+
+    def to_url_string(self) -> str:
+        return self.raw.to_url_string()
+
+    def to_attrs(self) -> dict[str, Any]:
+        return self.raw.to_attrs()
+
+    def get_fingerprint(self, store: Store) -> str | None:
+        return self.raw.fingerprint(store.store)
+
+    def __str__(self) -> str:
+        return self.raw.to_string()
+
+    def __repr__(self) -> str:
+        return f"Input('{self.raw.to_string()}')"
+
+
+def input_from_url(url: str) -> Input:
+    return Input(huggorm_bindings.input_from_url(url))
+
+
+def input_from_attrs(attrs: dict[str, Any]) -> Input:
+    return Input(huggorm_bindings.input_from_attrs(attrs))
 
 
 STORE_DISPATCH_METHODS: tuple[str, ...] = ()
@@ -617,6 +649,9 @@ def _registry_pin(store: Store, path: str, url: str, locked_url: str, fetch_sett
 
 fetchers = _not_ported(
     "fetchers",
+    Input=Input,
+    input_from_attrs=input_from_attrs,
+    input_from_url=input_from_url,
     list_fetch_settings_metadata_json=huggorm_bindings.fetch_settings_json,
     list_registry_entries=_list_registry_entries,
     user_registry_path=huggorm_bindings.user_registry_path,
