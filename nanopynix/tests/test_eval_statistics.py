@@ -1,7 +1,7 @@
 """The evaluation statistics of an evaluator, on both engines.
 
 `NIX_SHOW_STATS=1 nix` prints a report of an evaluation. `statistics` returns
-the same report, and `nix-2.34-count-calls.patch` is what makes it reachable
+the same report, and huggorm's count-calls patch is what makes it reachable
 from an embedded evaluator.
 
 **Two switches control the report, and each one covers a different half.**

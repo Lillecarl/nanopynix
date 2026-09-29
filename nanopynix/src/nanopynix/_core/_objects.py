@@ -816,8 +816,7 @@ class CoreEvalState:
                 raw.forget_file(path)
 
     def statistics_json(self) -> str:
-        self.require_raw()
-        raise NotImplementedError("huggorm reports no evaluator statistics yet")
+        return self.require_raw().statistics_json()
 
     def value_from_python(self, value: object) -> CoreValue:
         return self.wrap_value(self._make(value))

@@ -661,7 +661,7 @@ class NixEvalSettings(NixConfigModel):
       ``createBaseEnv`` registers with ``addConstant`` while constructing the
       evaluator.
     * ``count_calls`` becomes a ``const`` member of the evaluator, which the
-      constructor reads once. ``nix-2.35-count-calls.patch`` adds the setting,
+      constructor reads once. huggorm's count-calls patch adds the setting,
       and every supported Nix takes that patch.
     """
 

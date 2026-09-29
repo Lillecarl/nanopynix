@@ -229,21 +229,6 @@ let
   gmtimePatch234 = ./nix/patches/nix-2.34-gmtime-not-thread-safe.patch;
   gmtimePatch236 = ./nix/patches/nix-2.36-gmtime-not-thread-safe.patch;
 
-  # `EvalState::printStatistics` writes its report to stderr, or to the file
-  # that `NIX_SHOW_STATS_PATH` names. nanopynix embeds the evaluator, so it can
-  # read neither. The patch splits a `statisticsJSON` out of that function,
-  # turns `count-calls` into an ordinary `EvalSettings` option, and makes the
-  # three call-count maps concurrent. The patch header gives the reason for
-  # each part, and the upstream defect that the third part corrects.
-  #
-  # One file for each version, because the context differs. The three files
-  # add and remove the same lines, and only the lines around them move: 2.36
-  # writes `noPos` where 2.35 writes `pos` at two call sites that a hunk of
-  # this patch touches. The 2.36 file covers git as well.
-  countCallsPatch234 = ./nix/patches/nix-2.34-count-calls.patch;
-  countCallsPatch235 = ./nix/patches/nix-2.35-count-calls.patch;
-  countCallsPatch236 = ./nix/patches/nix-2.36-count-calls.patch;
-
   # A thunk that an interrupt stopped rethrows the interruption on every later
   # force, because 2.34 caches `nix::Interrupted` like an evaluation error. A
   # cancelled call then poisons every value it was forcing, for the life of the
@@ -261,26 +246,21 @@ let
     # `lib.versions.majorMinor` reads "2.36pre20260804_d8c24e61" as "2.36".
     # So this list is the newest set, and it holds no patch that upstream
     # already carries. A future version whose source moved fails here, at the
-    # patch, and that is the failure to want: the bindings gate the statistics
-    # on the version number, so a silent absence would instead break the build
-    # of the bindings.
+    # patch, and that is the failure to want.
     default = [
       baseEnvSizePatch
       gmtimePatch236
-      countCallsPatch236
     ];
     "2.34" = [
       emptyBindingsPatch
       baseEnvSizePatch
       gmtimePatch234
-      countCallsPatch234
       interruptedThunkPatch234
     ];
     "2.35" = [
       emptyBindingsPatch
       baseEnvSizePatch
       gmtimePatch234
-      countCallsPatch235
     ];
   };
 
@@ -370,9 +350,11 @@ let
         && lib.hasAttr "packages" v;
 
       # huggorm opens a LocalStore per caller, so its Nix names a temp-roots
-      # file per store, and tells a daemon its own level (huggorm's
-      # `libstorePatches`).
-      patchNixScope = scope: scope.appendPatches (patchesFor scope ++ huggorm.libstorePatches);
+      # file per store, tells a daemon its own level, and gives the evaluator
+      # its statistics report and the `count-calls` setting
+      # (huggorm's `nixPatchesFor`).
+      patchNixScope =
+        scope: scope.appendPatches (patchesFor scope ++ huggorm.nixPatchesFor scope.version);
 
       # nix's own components (nix-util, nix-store, ...) keep resolving
       # through scope.newScope completely unmodified below -- so their own

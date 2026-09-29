@@ -53,7 +53,8 @@ from huggorm_bindings import (
     default_verbosity as default_verbosity,
     enable_experimental_feature as enable_experimental_feature,
     end_interrupt_scope as end_interrupt_scope,
-    errors as errors,  # pyright: ignore[reportMissingTypeStubs] -- as below
+    errors as errors,  # pyright: ignore[reportMissingTypeStubs] -- errors.py ships as source, with no errors.pyi
+    eval_counters_enabled as eval_counters_enabled,
     eval_settings_json as eval_settings_json,
     fetch_settings_json as fetch_settings_json,
     filter_ansi_escapes as filter_ansi_escapes,
@@ -79,6 +80,7 @@ from huggorm_bindings import (
     render_store_reference as render_store_reference,
     reset_overridden as reset_overridden,
     set_default_verbosity as set_default_verbosity,
+    set_eval_counters_enabled as set_eval_counters_enabled,
     set_setting as set_setting,
     set_thread_verbosity as set_thread_verbosity,
     settings_json as settings_json,
@@ -157,7 +159,7 @@ def build_info() -> dict[str, Any]:
         "capabilities": {
             "boehm_gc": boehm_gc(),
             "dynamic_primop_registration": True,
-            "eval_statistics": False,
+            "eval_statistics": True,
             "store_impl_read_derivation": False,
         },
     }
@@ -171,17 +173,6 @@ def build_info() -> dict[str, Any]:
 #: The store operations a Python store may serve: none, until huggorm can
 #: implement a store virtual in Python (huggorm tasks/084).
 STORE_DISPATCH_METHODS: tuple[str, ...] = ()
-
-
-def eval_counters_enabled() -> bool:
-    """Whether Nix counts evaluation work. huggorm cannot read the switch yet."""
-    raise NotImplementedError("huggorm has no evaluation counters yet")
-
-
-def set_eval_counters_enabled(enabled: bool) -> None:
-    """Turn Nix's evaluation counters on or off. huggorm cannot set the switch yet."""
-    del enabled
-    raise NotImplementedError("huggorm has no evaluation counters yet")
 
 
 def register_store_implementation(scheme: str, factory: object) -> NoReturn:
