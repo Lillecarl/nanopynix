@@ -242,7 +242,7 @@ the run right after `to_python()` moved onto `printValueAsJSON`.
      ~~*Nix throwing a bare `nix::Error` from libstore/libexpr
      internals*~~ -- DONE, and it dissolved the constraint rather than
      working around it. All the exception classes and **one** translator
-     now live in `nanopynix-bindings/src/nix_errors.cpp`; with a single
+     are declared in huggorm's `decl/errors.py`; with a single
      translator owning the hierarchy there is no registration order left
      to get wrong, so `nix::Error` can finally be the catch-all. The
      ordering that remains is the `catch` chain's, which is in one place

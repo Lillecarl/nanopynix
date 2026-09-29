@@ -1,4 +1,4 @@
-"""Asynchronous in-process Nix API backed by direct L1 object pointers.
+"""Asynchronous in-process Nix API over the core objects of ``_core``.
 
 Unlike :class:`nanopynix.rpc.Session`, this module does not start a worker
 process. Store work uses a bounded thread pool, while each evaluator owns a
@@ -231,7 +231,7 @@ def _run_with_log_context[T](operation_id: int, verbosity: int, func: Callable[.
     """Run one Nix call on the Nix thread, in this operation's log context.
 
     This is the single chokepoint through which every in-process Nix call
-    passes, so it is also where boundary A is translated: the raw nanobind
+    passes, so it is also where boundary A is translated: the engine's raw
     exception is replaced by its ``nanopynix.exceptions`` equivalent, giving
     inproc callers the same exception types the rpc engine raises.
 
@@ -1900,7 +1900,7 @@ class Value(AsyncValue["Store"]):
         await self.release()
 
     async def release(self) -> None:
-        """Release this value's rooted L1 object. This operation is idempotent.
+        """Release this value's rooted Nix value. This operation is idempotent.
 
         ``release`` and not ``close``: rpc has only ``release``, inproc used to
         have both with ``release`` a one-line alias, and two names for one
@@ -2178,7 +2178,7 @@ class Value(AsyncValue["Store"]):
         if target_store._session is not self._eval_session._session:  # type: ignore[reportPrivateUsage] -- session ownership guard  # noqa: SLF001
             raise ValueError("Store belongs to a different inproc Session")
         # The canonical DerivedPath string, which for a plain derivation is
-        # its .drvPath and selects all outputs. Taken from L1 directly rather
+        # its .drvPath and selects all outputs. Taken from the core value rather
         # than through a method of its own: build() is the only caller, and a
         # public accessor for the intermediate would be inproc-only surface
         # with nothing on the other engine to match it.

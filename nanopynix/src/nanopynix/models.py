@@ -56,12 +56,10 @@ from nanopynix._ansi import strip_ansi as _strip_ansi
 
 #: Where the text of a log action sits in ``LogEventExt.args``.
 #:
-#: ``PyLogger`` in ``nix_util.cpp`` calls the Python callback with the
-#: arguments each Nix logger method gives it, and the three differ: ``log``
-#: has a level then the text, ``warn`` has the text alone, and ``logEI`` has
-#: a level, the text, then the structured payload. So the text is not always
-#: last, and reading ``args[-1]`` for it was right only while nothing came
-#: after it.
+#: The log pump in ``_core/_logs.py`` calls the callback with the arguments
+#: of each kind of record, and they differ: ``msg`` has a level then the text,
+#: ``warn`` has the text alone, and ``error`` has a level, the text, then the
+#: structured payload. So the text is not always last.
 _MESSAGE_INDEX: dict[str, int] = {"msg": 1, "warn": 0, "error": 1}
 
 #: Where ``logEI``'s structured payload sits, after the text.

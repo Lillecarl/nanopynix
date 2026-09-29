@@ -1,7 +1,7 @@
-"""Thread-safe bridge from Nix's C++ logger to Python consumers.
+"""Thread-safe bridge from Nix's logger to Python consumers.
 
-The C++ ``PyLogger`` calls the callback from *any* thread after
-``gil_scoped_acquire``, so the callback must be thread-safe.  We use a
+The log pump in ``_core/_logs.py`` calls the callback from its own thread and
+from any thread that flushes, so the callback must be thread-safe.  We use a
 ``janus.Queue`` which provides both a synchronous (thread-safe) interface
 for the worker subprocess and an async interface for the Nix manager client.
 

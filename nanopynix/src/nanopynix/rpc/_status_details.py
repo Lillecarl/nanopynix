@@ -42,11 +42,12 @@ the codec strips the duplicate.
 
 The public :attr:`~nanopynix.NixError.info` stays a plain ``dict``, not
 :class:`~nanopynix_proto.nix.common.NixErrorInfo`. On inproc there is no proto
-anywhere in the path -- ``nix_error_info.hh`` builds the dict directly in C++ --
-so making the message the public type would add a dict -> message -> dict
-round-trip whose only purpose is to make the two engines *look* alike, and
-would silently drop any field C++ emits that the schema has not caught up
-with. The message is a wire encoding; the dict is the API.
+anywhere in the path -- :func:`~nanopynix.exceptions.error_info_dict` builds
+the dict from the engine's ``ErrorInfo`` -- so making the message the public
+type would add a dict -> message -> dict round-trip whose only purpose is to
+make the two engines *look* alike, and would silently drop any field the
+engine reports that the schema has not caught up with. The message is a wire
+encoding; the dict is the API.
 """
 
 from __future__ import annotations
@@ -88,10 +89,11 @@ def error_info_from_dict(*, raw: str, info: dict[str, Any] | None) -> NixErrorIn
     ``None`` means "nothing to send", so the trailer is omitted entirely rather
     than carrying an empty message.
 
-    Tolerant by construction. The input is whatever ``nix_error_info.hh``
-    attached, and this runs on a path that is *already* reporting a failure --
-    replacing the caller's Nix error with a :class:`ValidationError` raised by
-    the error reporter would be strictly worse than losing the detail. Fields
+    Tolerant by construction. The input is whatever
+    :func:`~nanopynix.exceptions.error_info_dict` built, and this runs on a
+    path that is *already* reporting a failure -- replacing the caller's Nix
+    error with a :class:`ValidationError` raised by the error reporter would
+    be strictly worse than losing the detail. Fields
     that do not fit the schema (an out-of-int32 ``status``, a malformed
     ``pos``) are dropped individually; only a wholly unusable payload degrades
     to ``None``.
@@ -109,9 +111,9 @@ def error_info_from_dict(*, raw: str, info: dict[str, Any] | None) -> NixErrorIn
 
 
 def error_info_to_dict(message: NixErrorInfo) -> dict[str, Any]:
-    """Render the wire message back into the shape ``nix_error_info.hh`` emits.
+    """Render the wire message back into the shape ``error_info_dict`` builds.
 
-    Key-for-key identical to the C++ dict, so an rpc caller's
+    Key-for-key identical to that dict, so an rpc caller's
     :attr:`~nanopynix.NixError.info` compares equal to an inproc caller's for
     the same failure. ``raw`` is deliberately absent: it travels in the same
     message but is a sibling of ``info``, not a member of it.

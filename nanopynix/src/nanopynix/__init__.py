@@ -5,7 +5,7 @@
 # entry looks like. The reason sits here rather than after the code because
 # pyright rejects trailing text on its pragma -- it reports a directive error
 # and silently stops suppressing.
-"""nanopynix — nanobind-based Python bindings for Nix."""
+"""nanopynix — Nix from Python, over huggorm's generated bindings."""
 
 from __future__ import annotations
 

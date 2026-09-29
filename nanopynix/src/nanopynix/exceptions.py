@@ -5,7 +5,7 @@ failure, so ``except nanopynix.NixError`` works regardless of engine. Three
 different amounts of information are available depending on where the error
 crosses into Python, and this module has one entry point per case:
 
-**A. Nix C++ → Python (nanobind).** The concrete C++ exception type survives
+**A. Nix C++ → Python (the engine).** The concrete C++ exception type survives
 as the bound class's name, so ``exception_for_nix_type`` maps it directly.
 :mod:`nanopynix.inproc` translates at its single call chokepoint.
 
@@ -828,13 +828,10 @@ def split_type_prefix(message: str) -> tuple[str | None, str]:
 # strings are huggorm's `BuildFailureStatus` words, and they travel verbatim in
 # `BuildResult.status`, so both nanopynix engines map them identically.
 #
-# One producer, deliberately: the header exists because `nix_expr.cpp` and
-# `nix_store.cpp` used to render a BuildResult each with their own copy of this
-# vocabulary. Two copies free to drift meant the eval route and the store route
-# could name the same failure differently, and this table would then hand
-# callers two different exception classes for it depending on which route
-# reported it. Names not in this table fall back to plain `BuildError`, so a
-# drift would have degraded quietly rather than raised.
+# One producer: `_build_result` in `_core/_objects.py` renders the BuildResult
+# of the eval route and of the store route alike. Names not in this table fall
+# back to plain `BuildError`, so a new word degrades quietly rather than
+# raising.
 _BUILD_STATUS_EXCEPTIONS: dict[str, type[BuildError]] = {
     "permanent-failure": PermanentBuildError,
     "input-rejected": InputRejectedError,

@@ -54,6 +54,5 @@ DEFAULT_HASH_ALGO = "sha256"
 Shared rather than per-engine because the two must agree exactly: the store
 path these produce is a pure function of the content *and* these parameters, so
 an engine that defaulted differently would compute a different path for the
-same directory. The C++ bindings apply the same two values when a caller leaves
-them unset (``nix_store.cpp``'s ``parse_content_address_method`` /
-``parse_store_hash_algo``)."""
+same directory. huggorm's ``add_path_to_store`` defaults to the same two
+values."""

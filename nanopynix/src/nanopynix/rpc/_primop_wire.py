@@ -17,8 +17,8 @@ for a primop that raised ``PrimopError("no such user")``.
 
 Because one string is all there is, this module puts the whole answer in that
 string. :func:`encode` renders the text Nix should show, using the same rule
-the C++ bridge applies to a primop that raises in the worker
-(``nix_expr.cpp``): a ``PrimopError`` or a ``ValueError`` is a deliberate
+the bridge in ``_core/_objects.py`` applies to a primop that raises in the
+worker: a ``PrimopError`` or a ``ValueError`` is a deliberate
 rejection and its message is shown bare, and any other class is unexpected and
 keeps its name as a prefix. The worker then re-raises a ``PrimopError`` holding
 that exact text, so Nix renders a manager-side primop failure and a
@@ -43,9 +43,9 @@ MARKER = "\x00nanopynix.primop-raised\x00"
 def encode(exc: BaseException) -> str:
     """Render ``exc`` as the text Nix should show, marked as a primop failure.
 
-    Mirrors ``py_primop_bridge`` in ``nix_expr.cpp``. Keep the two in step: a
-    class that is deliberate there and unexpected here would make the same
-    primop read differently depending on where it ran.
+    Mirrors ``CoreEvalState._primop`` in ``_core/_objects.py``. Keep the two
+    in step: a class that is deliberate there and unexpected here would make
+    the same primop read differently depending on where it ran.
     """
     detail = str(exc)
     if not isinstance(exc, PrimopError | ValueError):

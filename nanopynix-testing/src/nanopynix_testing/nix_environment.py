@@ -412,8 +412,8 @@ def l1_nix_environment(
     nix_backend: str,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[NixTestEnvironment]:
-    """Sync counterpart of ``shared_nix_environment`` for plain (non-async) L1
-    binding tests, which cannot depend on an async fixture. Bridges via
+    """Sync counterpart of ``shared_nix_environment`` for plain (non-async)
+    tests of the core objects, which cannot depend on an async fixture. Bridges via
     ``asyncio.run`` only because starting the native daemon subprocess must
     stay async; nothing below actually needs a running event loop.
     """
