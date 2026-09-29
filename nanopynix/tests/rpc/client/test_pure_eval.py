@@ -1,9 +1,5 @@
 """Tests for pure/impure evaluation control via ``session.eval(store, eval_settings=...)``."""
 
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
-# nanopynix types (Session, NixType, current_system, etc.) are C++ nanobind
-# extensions without type stubs; all member/variable types are Unknown.
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

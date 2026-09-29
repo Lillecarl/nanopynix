@@ -1,8 +1,5 @@
 """Integration tests for manager-side RPC primops."""
 
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
-# Session / nanopynix are C++ nanobind extensions without type stubs.
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

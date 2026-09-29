@@ -1,9 +1,5 @@
 """Tests for eval over RPC — EvalSession + ValueProxy."""
 
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportMissingParameterType=false, reportUnknownArgumentType=false
-# Session / nanopynix are C++ nanobind extensions without type stubs.
-# Variable types and nested function parameter types are unresolvable.
-
 from __future__ import annotations
 
 import asyncio

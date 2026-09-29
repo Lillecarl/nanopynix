@@ -1,18 +1,10 @@
-"""TEMPORARY: does the single exception translator dispatch correctly?
+"""Does the single exception translator dispatch correctly?
 
-Scaffolding for CIP3 item 3, written alongside the change that replaced
-nanobind's one-translator-per-type registration with a single translator owning
-the whole ``nix::Error`` hierarchy. huggorm's ``decl/errors.py`` declares it now,
-and emits the one catch chain from it.
+huggorm's ``decl/errors.py`` declares Nix's error hierarchy and emits one
+catch chain from it, so one translator owns the whole ``nix::Error``
+hierarchy and no import order decides which class wins.
 
-The old arrangement decided which translator won by *registration order*, which
-is the order the extension modules happen to be imported in -- unobservable
-from any one translation unit. That is why plain ``nix::Error`` was left
-unregistered (registering the base of every bound type risked shadowing all of
-them), and why anything Nix threw as a plain ``nix::Error`` reached Python as a
-bare ``RuntimeError`` with its ``ErrorInfo`` discarded.
-
-So there are three properties worth pinning, and they pull against each other
+There are three properties worth pinning, and they pull against each other
 -- which is exactly why a table of "this expression raises that class" is not
 enough on its own:
 
@@ -24,10 +16,6 @@ enough on its own:
 3. The **catch-all does not overreach**: standard C++ exceptions are *not*
    ours, and must keep falling through to nanobind's default translator.
    Nothing about (1) or (2) would notice if we started swallowing them.
-
-Promote to ``nanopynix/tests`` if it earns its keep; it overlaps the same
-boundary A that ``test_error_matrix.py`` records, and the two should probably
-land together (see TODO.md item 8 / task #78).
 """
 
 from __future__ import annotations
@@ -83,8 +71,8 @@ async def test_our_own_binding_throws_pick_a_registered_subclass(
 
     The test above drives a throw from inside Nix, where we have no say in
     the type. This one drives a throw from our own binding code --
-    ``edit_location()`` on a function hits ``nix_expr.cpp``'s "selected
-    function cannot be shown in an editor" -- where we do.
+    ``edit_location()`` on a function hits huggorm's "selected function
+    cannot be shown in an editor" -- where we do.
 
     Worth pinning precisely because a regression here is *silent*: reverting
     the throw to plain ``nix::Error`` still produces a ``NixError`` with
@@ -227,10 +215,9 @@ async def test_standard_cxx_exceptions_are_left_to_nanobind(
     so it no longer demonstrates anything about fall-through.
 
     Using a released value is the substitute, and it is worth being precise
-    about what it does and does not prove. ``nix_expr.cpp`` does throw
-    ``std::runtime_error("Nix value has been released")``, but inproc guards
-    the same condition in Python first, so what arrives is
-    ``ValueReleasedError`` and the C++ throw is never reached. The
+    about what it does and does not prove. inproc guards the condition in
+    Python, so what arrives is ``ValueReleasedError`` and no engine code
+    runs. The
     assertion below is therefore about the boundary between "Nix said no" and
     "you used the API wrong", not about the translator's decline path.
 

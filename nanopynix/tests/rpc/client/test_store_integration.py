@@ -1,8 +1,5 @@
 """Integration tests for the L2 Store facade against hermetic stores."""
 
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnnecessaryIsInstance=false
-# nanopynix / nanopynix_proto are C++ nanobind extensions without type stubs.
-
 from __future__ import annotations
 
 from pathlib import Path

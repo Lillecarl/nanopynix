@@ -365,7 +365,7 @@ async def test_engines_agree_on_failure(
     """The same failure must arrive as the same exception type on both engines.
 
     Not the same message: rpc's travels as gRPC status detail and inproc's
-    comes straight off the nanobind boundary, and Nix colourises both. The
+    comes straight from the engine, and Nix colourises both. The
     type is what ``except`` clauses are written against.
     """
     inproc_outcome = await _run(inproc_session, case)

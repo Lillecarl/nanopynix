@@ -13,9 +13,6 @@ Both engines are checked wherever the answer could differ, because an
 inproc/rpc asymmetry is a defect unless process isolation forces it.
 """
 
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
-# nanopynix types are C++ nanobind extensions without type stubs.
-
 from __future__ import annotations
 
 import shutil

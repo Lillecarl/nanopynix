@@ -1,8 +1,4 @@
-"""Tests for the PyLogger log streaming with LogCollector."""
-
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
-# LogCollector, install_logger, remove_logger, the thread's verbosity and set_logger_request_id
-# are C++ nanobind extension functions without type stubs; all member/variable types are Unknown.
+"""Tests for Nix log streaming through LogCollector."""
 
 from __future__ import annotations
 
@@ -615,26 +611,17 @@ async def test_bus_log_stream_discards_the_oldest_when_the_caller_falls_behind(
 # The one logger of the process (issue #66)
 # =========================================================================
 #
-# `install_logger` used to put a new `PyLogger` in `nix::logger`, and
-# `remove_logger` used to put Nix's simple logger back, which freed it.
 # `nix::Activity` holds a `Logger &` and calls `logger.stopActivity(id)` when
 # it dies, and Nix's curl file-transfer thread destroys an `Activity` on its
-# own schedule -- with no way to join that thread. ThreadSanitizer named the
-# free and the read.
-#
-# So the binding installs one logger at import and never frees it, and the two
-# calls below only attach and detach a callback. The tests here pin the
-# behaviour that shape must keep. They cannot see the pointer, so each one
-# asserts on what a caller can observe.
+# own schedule -- with no way to join that thread. So Nix's logger must never
+# be freed, and `install_logger` and `remove_logger` only subscribe to and
+# unsubscribe from huggorm's queue of its records. The tests here pin that.
+# They cannot see the logger, so each one asserts on what a caller can
+# observe.
 
 
 async def test_removing_the_logger_before_installing_one_is_accepted() -> None:
-    """A caller that closes a session it never opened must not crash.
-
-    The old shape answered this by installing a fresh simple logger, which
-    needed nothing to be there first. The new shape has one object from
-    import, so this asks that the object really does exist that early.
-    """
+    """A caller that closes a session it never opened must not crash."""
     remove_logger()
     remove_logger()
     # Nix's own logger takes the message. Reaching this line is the assertion:
@@ -744,12 +731,10 @@ async def test_an_error_event_carries_the_same_payload_on_both_engines(
     inproc_session: InprocSessionFactory,
     rpc_session: RpcSessionFactory,
 ) -> None:
-    """``PyLogger::logEI`` sends Nix's structured detail, and rpc keeps it.
+    """An error record carries Nix's structured detail, and rpc keeps it.
 
-    ``logEI`` used to send ``ei.msg.str()`` alone, so the position, the trace,
-    the suggestions and ``isFromExpr`` were dropped at that line. The log path
-    of this library was therefore less structured than Nix's own
-    ``JSONLogger::logEI``, while its error path was more. Issue #48, item 3.
+    The position, the trace, the suggestions and ``isFromExpr`` travel with the
+    message, as they do in Nix's own ``JSONLogger::logEI``. Issue #48, item 3.
 
     The two engines are compared against each other because the payload
     crosses a process boundary on one of them and not on the other. Process

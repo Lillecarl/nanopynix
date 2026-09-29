@@ -1,28 +1,16 @@
 """The REPL scope holds a fixed number of bindings, and says so at the edge.
 
-``begin_repl`` allocates one ``nix::Env`` for the whole REPL session and hands
-out one displacement per binding. ``nix::Env::values`` is a flexible array with
-no length, so nothing about it can be checked at the point of use: the only
-thing standing between a 32769th binding and a heap write past the end is an
-explicit bounds check, and there are three of them, in
-``repl_process_line`` (via ``repl_bind``) and ``repl_add_attrs``.
+huggorm's ``Repl`` allocates one ``nix::Env`` for the whole REPL session and
+hands out one displacement per binding. ``nix::Env::values`` is a flexible
+array with no length, so the only thing standing between a 32769th binding
+and a heap write past the end is an explicit bounds check. What this file pins
+is the edge: filling the env exactly to the end is accepted, and one binding
+more is refused.
 
-They used to spell the size literally while the allocation used a ``constexpr``
-scoped inside ``begin_repl``, so changing the allocation would have left the
-guards protecting the old bound -- silently, and in the direction that
-corrupts. They now read ``PyEvalState::repl_env_capacity``, which is set from
-the value passed to ``allocEnv``, so the two cannot disagree.
-
-That much is structural and no test can observe it. What this file pins is the
-edge itself, which *is* observable and was off by one: filling the env exactly
-to the end used to be refused, because the batch check asked
-``displ + size >= capacity`` where the last index used is ``displ + size - 1``.
-
-The number below is ``begin_repl``'s ``repl_env_size``. Deliberately repeated
-rather than exposed through a binding -- a caller has no use for it, and one
-more entry on the public surface to save a test from naming a constant is the
-wrong trade. If it changes, these two tests are the reminder that the boundary
-they describe is something callers can reach.
+The number below is ``env_size`` in huggorm's ``cpp/eval.hpp``. Repeated here
+rather than exposed -- a caller has no use for it. If it changes, these two
+tests are the reminder that the boundary they describe is something callers
+can reach.
 """
 
 from __future__ import annotations
@@ -37,7 +25,7 @@ if TYPE_CHECKING:
     from nanopynix_testing.nix_environment import InprocSessionFactory, RpcSessionFactory
 
 REPL_ENV_CAPACITY = 32768
-"""``repl_env_size`` in ``PyEvalState::begin_repl``; see the module docstring."""
+"""``env_size`` in huggorm's ``cpp/eval.hpp``; see the module docstring."""
 
 
 def _attrset_of(count: int) -> str:

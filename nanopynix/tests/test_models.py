@@ -449,8 +449,8 @@ class TestDerivedPath:
     def test_for_build_needs_no_store_directory(self):
         """It works on a relative path, which is why it can live in Python.
 
-        Nix resolves a relative store path *before* it looks for the
-        separator (``nix_store.cpp``'s ``parse_derived_paths``), so appending
+        The core store resolves a relative store path *before* Nix looks for
+        the separator (``CoreStore._derived_paths``), so appending
         the selector first is correct and needs no store configuration. That
         is what makes this a string rule rather than a worker one.
         """

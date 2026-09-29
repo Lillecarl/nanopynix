@@ -1,17 +1,16 @@
-"""Tests for the asynchronous direct-pointer in-process API."""
-
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportAttributeAccessIssue=false
-# nanopynix_store is the untyped store adapter.
+"""Tests for the asynchronous in-process API."""
 
 from __future__ import annotations
 
 import asyncio
 import gc
 import threading
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import anyio
+import anyio.lowlevel
 import pytest
 from anyio import Path as AnyioPath
 from nanopynix_proto.nix.common import GcAction, LogLevel
@@ -152,7 +151,7 @@ async def test_inproc_concurrent_eval_sessions_have_independent_pure_eval(
         await pure.open()
         await impure.open()
         try:
-            # nanopynix.EvalError, not the raw nanobind nanopynix_expr.EvalError:
+            # nanopynix.EvalError, not the engine's raw EvalError:
             # inproc translates Nix binding exceptions onto the public hierarchy
             # at its call chokepoint, so both engines raise the same type for
             # the same failure. nanopynix/tests/rpc/client/test_pure_eval.py
@@ -302,9 +301,8 @@ async def test_a_collected_value_gives_its_root_back_to_the_collector(
 
     The count above cannot see a root that something other than ``CoreValue``
     holds. Measured: 200 attrsets, one child kept from each, every parent
-    dropped -- the count falls to 200 and Boehm frees nothing, because each
-    child holds its parent through ``nb::keep_alive``. So the count alone
-    would call that fixed.
+    dropped -- the count falls to 200, and Boehm frees nothing if a child
+    holds its parent. So the count alone would call that fixed.
     """
     async with inproc_session() as nix, nix.store() as store, nix.eval(store) as evaluator:
         before = await _root_bytes(evaluator)
@@ -332,11 +330,10 @@ async def test_a_dropped_parent_gives_its_root_back_while_a_child_lives(
 ) -> None:
     """Keeping one attribute must not keep the attrset it came from.
 
-    A child used to hold its parent through ``nb::keep_alive``, and the
-    evaluator only through that chain, so one leaf pinned every root above it
-    -- and a root pins everything reachable from it in the Nix heap, which for
-    the top of a tree is the whole tree. Measured before the change, on the
-    shape below: the tracked count fell to 200 and Boehm freed nothing at all.
+    A child that held its parent would pin every root above it -- and a root
+    pins everything reachable from it in the Nix heap, which for the top of a
+    tree is the whole tree. On the shape below that shows as a tracked count
+    of 200 while Boehm frees nothing at all.
 
     Two hundred separate attrsets, not one, because a single root is 32 bytes
     and Boehm's own accounting drifts by about that much.
@@ -1207,6 +1204,7 @@ async def test_inproc_session_log_stream_yields_events(inproc_session: InprocSes
         log_message(LogLevel.INFO, "inproc log_stream test")
         event = await asyncio.wait_for(stream.__anext__(), timeout=2.0)
         assert event.message == "inproc log_stream test"
+        assert isinstance(stream, AsyncGenerator)
         await stream.aclose()
 
 

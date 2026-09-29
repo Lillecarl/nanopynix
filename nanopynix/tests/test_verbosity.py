@@ -354,7 +354,7 @@ async def test_nix_filters_at_a_pinned_ceiling_that_no_call_moves(
         f"the ceiling is {LogLevel(ceiling).name}, and the default is CHATTY. "
         "Raising it makes every `debug()` site format a message that the filter then drops, "
         "which costs a flake evaluation its RPC deadline. Lowering it drops messages the "
-        "filter never sees. `nix_util.cpp` carries the measurement."
+        "filter never sees."
     )
 
     async with inproc_session() as session:

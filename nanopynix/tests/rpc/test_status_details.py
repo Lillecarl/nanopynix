@@ -7,8 +7,8 @@ RPC round-trip cannot reach. Two categories:
   so the budget never binds and the trimming path never runs in the matrix.
   It is not decorative -- the payload rides an HTTP/2 header, where going over
   is a connection-level protocol error rather than a truncated field.
-* **The dict <-> message conversion.** ``nix_error_info.hh`` builds a plain
-  dict in C++, and the schema constrains what can be encoded (``status`` is an
+* **The dict <-> message conversion.** ``error_info_dict`` builds a plain
+  dict, and the schema constrains what can be encoded (``status`` is an
   int32, ``pos`` is a message). A payload that does not fit must degrade to
   less detail, never to a :class:`ValidationError` raised *by the thing
   reporting an error*.
@@ -51,7 +51,7 @@ from nanopynix.rpc._status_details import (
 
 
 def _info(*, traces: int = 0, msg: str = "boom", **overrides: Any) -> dict[str, Any]:
-    """The shape ``nix_error_info.hh`` attaches, key for key."""
+    """The shape ``error_info_dict`` builds, key for key."""
     return {
         "level": 0,
         "msg": msg,
@@ -316,14 +316,14 @@ def test_details_for_exception_reads_a_translated_nix_error() -> None:
 
 
 def test_details_for_exception_reads_binding_style_attributes() -> None:
-    """The worker's common case: a raw nanobind exception, not a NixError."""
+    """An exception that carries ``raw`` and ``info``, as a translated NixError does."""
 
     class _BoundError(RuntimeError):
         pass
 
     exc = _BoundError("boom")
-    exc.raw = "error: boom"  # type: ignore[attr-defined] -- mimics nix_error_info.hh
-    exc.info = _info()  # type: ignore[attr-defined] -- mimics nix_error_info.hh
+    exc.raw = "error: boom"  # type: ignore[attr-defined] -- the attributes a NixError declares
+    exc.info = _info()  # type: ignore[attr-defined] -- as above
 
     assert _nix_info_in(details_for_exception(exc)).is_from_expr is True
 

@@ -2,9 +2,9 @@
 
 Three boundaries, which the error pipeline used to conflate:
 
-* **A** Nix C++ -> Python via nanobind. Ours. The bound exception types name
-  the C++ class, and ``nix_error_info.hh`` attaches the ``nix::ErrorInfo``
-  (position, trace, suggestions) that ``e.what()`` cannot carry.
+* **A** Nix C++ -> Python via the engine. Ours. The engine's exception types
+  name the C++ class, and carry the ``nix::ErrorInfo`` (position, trace,
+  suggestions) that ``e.what()`` cannot carry.
 * **B** nanopynix worker -> client via gRPC. Ours. The type name rides the
   status message; the ``ErrorInfo`` rides the ``grpc-status-details-bin``
   trailer. Both must be wired on both ends -- see
@@ -290,8 +290,8 @@ async def test_error_detail_survives_every_boundary(
     #
     # Anything raised by the C++ evaluator or store carries a `nix::ErrorInfo`
     # -- position, evaluation trace, suggestions -- which C++ is the only place
-    # to have. Both engines now propagate it -- inproc via nix_error_info.hh's
-    # raw/info attributes, rpc via those same attributes forwarded through the
+    # to have. Both engines propagate it -- inproc via the engine exception's
+    # ErrorInfo, rpc via the same detail forwarded through the
     # grpc-status-details-bin trailer -- so assert it rather than record it.
     #
     # Deliberately NOT asserted for the two `build_*` cases: those are built by

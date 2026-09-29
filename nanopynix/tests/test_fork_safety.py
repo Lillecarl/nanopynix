@@ -386,10 +386,9 @@ sys.exit(os.waitstatus_to_exitcode(status))
 async def test_an_evaluator_needs_no_init_libexpr_before_it(shared_nix_environment: NixTestEnvironment) -> None:
     """An evaluator constructs with no ``init_libexpr`` first, rather than aborting the process.
 
-    **Issue #54.** ``PyEvalState::init`` registered the calling thread with
-    Boehm and never started the collector, so the process died on SIGABRT with
-    nothing a caller could catch. Measured, by taking the collector start back
-    out::
+    **Issue #54.** An evaluator that registers its thread with Boehm before
+    anything started the collector kills the process with SIGABRT, and nothing
+    can catch it. Measured, with no collector start::
 
         exited -6
         --- stderr ---

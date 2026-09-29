@@ -233,15 +233,13 @@ async def test_an_unknown_experimental_feature_is_a_bare_runtime_error(
 
     A bad ``max-jobs`` above arrives as :class:`nanopynix.NixError`, because
     Nix raises it and the translation layer catches it. This one is a
-    ``std::runtime_error`` thrown by ``nix_util.cpp`` itself before Nix is
-    asked, so nothing translates it -- the caller gets a bare ``RuntimeError``
-    for one bad setting and a ``NixError`` for another.
+    ``RuntimeError`` that ``nanopynix.enable_experimental_feature`` raises
+    before Nix is asked, so nothing translates it -- the caller gets a bare
+    ``RuntimeError`` for one bad setting and a ``NixError`` for another.
 
-    That asymmetry is worth removing, and the removal belongs in the bindings
-    rather than here: ``nanopynix/tests/bindings/test_util.py`` pins the
-    ``RuntimeError`` as ``enable_experimental_feature``'s own contract, so
-    changing it is a change to that binding and to that test. Pinned here so
-    the inconsistency is written down where a caller meets it.
+    That asymmetry is worth removing, and the removal is a change to that
+    function's contract. Pinned here so the inconsistency is written down
+    where a caller meets it.
     """
     base = shared_nix_environment.settings.model_dump(exclude_none=True)
     settings = nanopynix.NixSettings.model_validate({**base, "experimental_features": ["no-such-feature"]})

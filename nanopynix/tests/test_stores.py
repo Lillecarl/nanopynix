@@ -10,9 +10,6 @@ their coverage is the drift check and the round-trip only. That is stated
 rather than implied.
 """
 
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
-# The store bindings are C++ nanobind extensions without type stubs.
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -484,9 +481,9 @@ async def test_two_handles_on_one_local_store_keep_each_others_temp_roots(
 ) -> None:
     """Two `Store` objects on one URI hold one temp-roots file between them.
 
-    One descriptor means one `LocalStore`, which is what the cache in
-    `nix_store.cpp` gives. Two means two, and on 2.34 and 2.35 two is a
-    defect: those versions name the file `<stateDir>/temproots/<getpid()>`,
+    Each huggorm `Store` is a `LocalStore` of its own, and on unpatched 2.34
+    and 2.35 two in one process are a defect: those versions name the file
+    `<stateDir>/temproots/<getpid()>`,
     and Nix gives the assumption in its own comment. The file "*must* be
     stale, since there can be no two processes with the same pid". A second
     `LocalStore` in one process breaks that in two ways:
