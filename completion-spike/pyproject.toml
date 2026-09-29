@@ -7,8 +7,7 @@ name = "completion-spike"
 version = "0.1.0"
 description = "Static and dynamic shell completion for a cyclopts program, and a way to test it"
 authors = [{ name = "Carl Andersson", email = "github@lillecarl.com" }]
-# PEP 639. Apache-2.0, like every project here except `nanopynix-bindings`:
-# this one links nothing and imports nothing of Nix. `license-files` cannot
+# PEP 639. Apache-2.0, like every project here. `license-files` cannot
 # name a path above the source root of a distribution, so the file beside this
 # one is a copy of the one at the root of the repository. Read the
 # `# Licensing` section of AGENTS.md.

@@ -459,7 +459,7 @@ class AsyncStore(Protocol):
         ``.drv`` as an opaque fetch and builds none of its outputs.
         :meth:`~nanopynix.models.DerivedPath.for_build` applies it, and each
         engine's ``Store`` calls that before the request reaches a binding --
-        so ``nanopynix_bindings`` keeps Nix's meaning and this keeps the
+        so ``huggorm_bindings`` keeps Nix's meaning and this keeps the
         useful one.
 
         Each result reports the request back decomposed:

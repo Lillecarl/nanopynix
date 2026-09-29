@@ -314,40 +314,6 @@ let
     codecov = 10;
     # One `echo` for each group, behind one evaluation of the tree.
     versionMatrix = 20;
-    # **The whole wheel closure, from cold.** This build is not the ordinary
-    # `nix build` of a Nix version: `nix/cxx-stdenv.nix` gives the closure its
-    # own compiler wrapper, so cachix holds none of it until this job has run
-    # once, and boost, openssl and Nix itself all compile here.
-    #
-    # **Measured on the runner, from cold.** Run 31605397637 is the first run
-    # of this job, so cachix held none of the closure. The build compiled 95
-    # derivations on `ubuntu-24.04` in 40 minutes, and 96 on `ubuntu-24.04-arm`
-    # in 34 minutes. The rest of each closure came from `cache.nixos.org`: 296
-    # paths and 229 paths.
-    #
-    # 120 gives three times the measurement. The number that a cap must beat is
-    # the build that hangs, and not the build that is slow: a step that stops
-    # after 2 hours reports the hang, and a step that stops after 4 hours
-    # reports the same hang and spends twice as much of the runner.
-    #
-    # **360 minutes is the hard limit of a job, and `mkJob` derives the job cap
-    # from this number.** The other steps of the job and `jobSlack` add 95, so
-    # a build cap above 265 gives a job cap that GitHub never applies: it stops
-    # the job at its own limit instead, and the run reports a cancellation
-    # rather than the step that ran out of time.
-    #
-    # **A bump of nixpkgs is the case that can exceed this.** The 296 paths
-    # above are substitutions, and a flake update can land on a revision that
-    # `cache.nixos.org` has not built yet. The step then compiles them as well.
-    # Raise this number when that happens, and record the run that measured it.
-    wheelBuild = 120;
-    # `scripts/wheel-inspect.sh` unzips the wheel and reads each object with
-    # `readelf`. It takes seconds.
-    wheelInspect = 10;
-    # `scripts/wheel-smoke.sh` pulls a Rocky Linux 9 image, installs an
-    # interpreter with `uv`, and evaluates. The pull and the interpreter are
-    # the whole of it.
-    wheelSmoke = 20;
   };
 
   # The cap of a job, derived from the caps of its steps.
@@ -587,12 +553,12 @@ let
   # **The reason this job earns a slot is #140.** Darwin is the one host in
   # this matrix that is clang with libc++, measured:
   #
-  #   nanopynixVersions.nix_2_34.nanopynix-bindings.stdenv.cc.name
+  #   nanopynixVersions.nix_2_34.huggorm-bindings.stdenv.cc.name
   #     -> clang-wrapper-21.1.8
   #   ...stdenv.cc.libcxx.name  -> libcxx-21.1.6+apple-sdk-26.5
   #
   # That is the library which compares `type_info` by address, which is the
-  # claim `nanopynix-bindings/package.nix` records and that nothing can
+  # claim nanobind's `-fvisibility=hidden` makes risky, and that nothing can
   # confirm today. Its two failures are a lost exception translation and a
   # null `dynamic_cast`, and the second is a *wrong answer* rather than an
   # error.
@@ -942,71 +908,6 @@ let
       }
     );
 
-  # The wheel, built and then read. Issue #120 asks for this job, and it gives
-  # the four defects that reached a finished build while no gate read any of
-  # `nix/cxx-stdenv.nix`, `nix/cxx-runtime.nix`, `nix/lower-glibc.py`,
-  # `nix/closure.nix` or `nix/nix-closure.nix`.
-  #
-  # **`auditwheel` is the floor gate, and it runs inside the build.**
-  # `nix/wheel.nix` repairs to `manylinux_2_34` and `auditwheel` refuses a tag
-  # that the objects do not support, so a raised floor fails `nix build` and
-  # never reaches the steps below. Measured twice on 2026-08-12, both times as
-  # "cannot repair ... because of the presence of too-recent versioned
-  # symbols". So this job needs no floor check of its own, and the two steps
-  # below answer what the build cannot.
-  #
-  # **One job for each architecture, and never emulation.** `runs-on` carries
-  # the difference and nothing else does: `nix/cxx-stdenv.nix` reads
-  # `stdenv.hostPlatform`, so an arm64 runner builds the aarch64 wheel with no
-  # cross configuration. An x86-64 runner with binfmt would build the same
-  # wheel under qemu, and it would take many hours.
-  mkWheelJob =
-    {
-      runner ? "ubuntu-24.04",
-      # `scripts/wheel-smoke.sh` runs the wheel, so it needs an interpreter of
-      # the wheel's own architecture. That is what the native runner gives.
-      smoke ? true,
-      ref ? null,
-      needs ? [ ],
-    }:
-    mkJob (
-      lib.optionalAttrs (needs != [ ]) { inherit needs; }
-      // {
-        runs-on = runner;
-        # `wheel-smoke.sh` takes the container runtime from here. It defaults to
-        # podman, and a GitHub runner carries docker.
-        env.WHEEL_SMOKE_RUNTIME = "docker";
-        steps = [
-          (steps.checkout { inherit ref; })
-        ]
-        ++ [
-          (steps.installNix { })
-          (steps.cachix { })
-          {
-            name = "Build the wheel";
-            timeout-minutes = caps.wheelBuild;
-            run = "nix build --file . nanopynixWheel --out-link result-wheel --print-build-logs";
-          }
-          {
-            # Reads the files and runs nothing, so it answers for either
-            # architecture. It fails when an object asks the host for a C++
-            # standard library.
-            name = "Read the wheel";
-            timeout-minutes = caps.wheelInspect;
-            run = "./scripts/wheel-inspect.sh result-wheel";
-          }
-        ]
-        ++ lib.optional smoke {
-          # The check that reads nothing and runs everything: it installs the
-          # wheel on a distribution whose glibc is the floor exactly, and
-          # evaluates with it.
-          name = "Load the wheel on Rocky Linux 9";
-          timeout-minutes = caps.wheelSmoke;
-          run = "./scripts/wheel-smoke.sh result-wheel";
-        };
-      }
-    );
-
   # **The build waits for nothing, and the deploy carries the argument.**
   # `docs-build` used to name every gating test job, so one red job in the
   # matrix skipped it. A sanitizer job reads the memory of the C++ libraries,
@@ -1197,53 +1098,10 @@ in
     mkAsanTestJob
     mkNoGCTestJob
     mkStaticChecksJob
-    mkWheelJob
     mkDocsBuildJob
     mkDocsDeployJob
     mkLastGreenJob
     ;
-
-  # **The port of nanopynix onto huggorm's generated bindings, and it is
-  # expected to fail.** `nanopynixForHuggorm` in `default.nix` is the scope, and
-  # huggorm's `tasks/097` is the board. The pass count is the progress measure,
-  # so the job runs the whole suite and blocks nothing: `continue-on-error`,
-  # and no docs deploy or last-green waits for it.
-  #
-  # `--continue-on-collection-errors`, because the tests of the bindings import
-  # `nanopynix_bindings` and that package is absent here by construction.
-  # Without it one of them stops the whole run and it measures nothing.
-  #
-  # Per-commit only, unlike the other kinds: it measures a port, not a
-  # supported build, and the scheduled matrices hold supported builds.
-  mkHuggormTestJob =
-    { }:
-    let
-      version = "nix_2_34-huggorm";
-      backend = "local";
-    in
-    mkJob {
-      continue-on-error = true;
-      env = testJobEnv { inherit version backend; } // {
-        PYTEST_ADDOPTS = "--continue-on-collection-errors";
-      };
-      steps = mkTestSetup { } ++ [
-        (mkBuildStep {
-          name = "Build the CI step package for the huggorm engine";
-          cap = caps.build;
-        })
-        (mkSandboxStep { })
-        (mkRunStep {
-          name = "Test nanopynix against the huggorm engine (full suite, ${backend} backend)";
-          subcommand = "suite";
-          cap = caps.suite;
-        })
-        (steps.uploadArtifact {
-          name = "Upload test output";
-          artifactName = "test-output-${backend}-${version}";
-          path = "\${{ github.workspace }}/test-gdb-output.log";
-        })
-      ];
-    };
 
   # Why these expand statically here, and through a GHA matrix in
   # `on_schedule.nix`, for the same jobs.

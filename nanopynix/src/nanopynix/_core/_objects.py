@@ -69,7 +69,7 @@ if TYPE_CHECKING or BEARTYPING:
 class _DerivedPathNode(Protocol):
     """The two fields that ``_derivation_outputs`` reads off one node.
 
-    ``nanopynix_bindings.store.DerivationOutputs`` is the real one, and it
+    The engine's node is the real one, and it
     satisfies this by structure. A protocol, and not that class directly,
     because nanobind binds the class for reading only and it has no
     constructor. A test cannot build the tree that Nix will not produce on

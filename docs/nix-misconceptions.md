@@ -127,10 +127,10 @@ The supported floor is 2.34, so the two released versions still carry it. Do
 not read a test that passes on `git` as proof that the code is safe: the
 failure is version-specific, and `git` is the version that cannot show it.
 
-**Why it matters here:** `nanopynix-bindings` keeps one `LocalStore` for each
-state directory, in `nix_store.cpp`. Do not remove that cache, and do not key
-it on the store URI: a URI names a location, and pytest gives one location to
-two different directories in one session. Issue #99.
+**Why it matters here:** huggorm opens a `LocalStore` for each caller, so the
+Nix it links carries huggorm's `nix-temp-roots-per-store.patch`, which names the
+file `<pid>-<n>`. Do not drop that patch while a supported Nix lacks
+upstream's `makeTempPath`. Issue #99.
 
 ## Adding to this file
 

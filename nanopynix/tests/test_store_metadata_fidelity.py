@@ -202,8 +202,8 @@ async def test_rpc_read_derivation_keeps_nested_input_drvs(rpc_session: RpcSessi
 class _StandInNode:
     """One node of a ``DerivedPathMap``, which a test can build.
 
-    ``nanopynix_bindings.store.DerivationOutputs`` is the real one, and
-    nanobind binds it for reading only, so it has no constructor.
+    The engine's node is the real one, and nanobind binds it for reading
+    only, so it has no constructor.
     ``_derivation_outputs`` takes the ``_DerivedPathNode`` protocol rather
     than that class, and this is the class that protocol exists for. The two
     fields are the whole of it.

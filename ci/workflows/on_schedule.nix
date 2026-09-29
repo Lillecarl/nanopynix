@@ -9,9 +9,8 @@ let
     ;
 
   # **A dispatch can select one job, and a scheduled run always takes them
-  # all.** `on_commit.nix` carries the same expression, and the wheel jobs are
-  # why this workflow needs it too: each one builds the whole closure, so a run
-  # to test one of them must not start the entire nightly.
+  # all.** `on_commit.nix` carries the same expression, so a run to test one
+  # job does not start the entire nightly.
   #
   # `version-matrix` never takes this condition. Every job below reads the
   # version list it computes.
@@ -27,8 +26,7 @@ let
   #
   # A dispatch needs the other half. The job selection above lets you run one
   # job of this workflow, and a checkout of `develop` then builds code that the
-  # job under test does not have. That is how the wheel jobs arrived: neither
-  # one can run before it reaches `develop`, and each one costs hours.
+  # job under test does not have.
   branch = "\${{ github.ref_name }}";
   matrixJob = "version-matrix";
 
@@ -177,36 +175,6 @@ workflow.evalWorkflow {
   // dispatchable (
     allTestJobs
     // {
-      # **The wheel, on each architecture, and here rather than on every
-      # commit.** This build compiles the whole closure with a compiler wrapper
-      # of its own, so it shares no derivation with the test jobs and cachix
-      # holds none of it until this job has run. `ci/workflows/lib.nix` gives the
-      # measurement behind the cap.
-      #
-      # A scheduled run is also where a toolchain change first shows: three of
-      # the four defects of issue #120 came from the toolchain under this job,
-      # and a bumped nixpkgs is how the next one arrives. The bump itself is
-      # the umbrella's now -- nixidae owns nix/sources.lock.
-      wheel-x86_64 = workflow.mkWheelJob {
-        ref = branch;
-        needs = [ matrixJob ];
-      };
-
-      # **A native arm64 runner, and never emulation.** GitHub supplies
-      # `ubuntu-24.04-arm` to a public repository, and this host registers binfmt
-      # for aarch64, so an x86-64 runner would silently build the whole closure
-      # under qemu.
-      #
-      # It runs the smoke test as well, because the runner is the architecture of
-      # the wheel. That is the one thing the community builder cannot give: a
-      # foreign-architecture container does not start on the machine that builds
-      # the aarch64 wheel by hand today.
-      wheel-aarch64 = workflow.mkWheelJob {
-        runner = "ubuntu-24.04-arm";
-        ref = branch;
-        needs = [ matrixJob ];
-      };
-
       docs-build = workflow.mkDocsBuildJob {
         needs = builtins.attrNames allTestJobs;
         ref = branch;

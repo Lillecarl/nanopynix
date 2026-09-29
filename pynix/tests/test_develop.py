@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
 #: A store path, with the hash reduced to a placeholder. The ``-env``
 #: derivation is content-addressed over ``get-env.sh``, so any difference in
-#: that script changes every path. ``nanopynix-bindings`` ships the same
+#: that script changes every path. ``huggorm-bindings`` ships the same
 #: ``get-env.sh`` that Nix embeds, so the two derivations agree.
 _STORE_PATH = re.compile(r"/nix/store/[a-z0-9]{32}-")
 

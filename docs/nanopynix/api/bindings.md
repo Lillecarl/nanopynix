@@ -1,8 +1,9 @@
 # The compiled bindings
 
-`nanopynix_bindings` is the nanobind extension that links against Nix's own
-C++ libraries. The `nanopynix` package re-exports 23 names from it, so each one
-is a public promise of this project and each one has an entry below.
+The engine is huggorm's generated bindings, `huggorm_bindings`, a set of
+nanobind extensions that link against Nix's own C++ libraries. The `nanopynix`
+package exports 23 names over it, so each one is a public promise of this
+project and each one has an entry below.
 
 **Most callers do not need this page.** {class}`~nanopynix.rpc.Session` and
 {mod}`nanopynix.inproc` wrap every name here in an async API that manages the
@@ -41,9 +42,9 @@ Plain queries and constructors
 
 ## Thread confinement, and why the async API exists
 
-Nix's evaluator is not thread-safe. An {class}`~nanopynix_bindings.expr.EvalState`
+Nix's evaluator is not thread-safe. An {class}`~nanopynix.EvalState`
 refuses a call from any thread except the one that built it, and a
-{class}`~nanopynix_bindings.expr.Value` belongs to the evaluator that made it.
+{class}`~nanopynix.Value` belongs to the evaluator that made it.
 Every call into the bindings also blocks, because the C++ side has no
 `await`.
 
@@ -65,9 +66,9 @@ version comparison at each call site.
 the `system` setting is applied.
 
 ```{eval-rst}
-.. autofunction:: nanopynix_bindings.util.build_info
+.. autofunction:: nanopynix.build_info
 
-.. autofunction:: nanopynix_bindings.util.current_system
+.. autofunction:: nanopynix.current_system
 ```
 
 ## Logging
@@ -99,15 +100,15 @@ here is undone by the next dispatched operation, which applies the level of
 whatever the caller dispatched through.
 
 ```{eval-rst}
-.. autofunction:: nanopynix_bindings.util.install_logger
+.. autofunction:: nanopynix.install_logger
 
-.. autofunction:: nanopynix_bindings.util.remove_logger
+.. autofunction:: nanopynix.remove_logger
 
-.. autofunction:: nanopynix_bindings.util.set_verbosity
+.. autofunction:: nanopynix.set_verbosity
 
-.. autofunction:: nanopynix_bindings.util.get_verbosity
+.. autofunction:: nanopynix.get_verbosity
 
-.. autofunction:: nanopynix_bindings.util.filter_ansi_escapes
+.. autofunction:: nanopynix._engine.filter_ansi_escapes
 ```
 
 `filter_ansi_escapes` is `nix::filterANSIEscapes`, and it keeps the upstream
@@ -134,9 +135,9 @@ prefer them. See {doc}`settings`.
 ```
 
 ```{eval-rst}
-.. autofunction:: nanopynix_bindings.util.list_settings
+.. autofunction:: nanopynix.list_settings
 
-.. autofunction:: nanopynix_bindings.util.enable_experimental_feature
+.. autofunction:: nanopynix.enable_experimental_feature
 ```
 
 ## Evaluation
@@ -191,23 +192,23 @@ same way. Any other class keeps its name as a prefix, which marks the failure
 as unexpected rather than deliberate.
 
 ```{eval-rst}
-.. autofunction:: nanopynix_bindings.expr.init_libexpr
+.. autofunction:: nanopynix.init_libexpr
 
-.. autoclass:: nanopynix_bindings.expr.EvalState
+.. autoclass:: nanopynix.EvalState
 
-.. autoclass:: nanopynix_bindings.expr.Value
+.. autoclass:: nanopynix.Value
 
-.. autofunction:: nanopynix_bindings.expr.eval_file
+.. autofunction:: nanopynix.eval_file
 
-.. autofunction:: nanopynix_bindings.expr.eval_counters_enabled
+.. autofunction:: nanopynix.eval_counters_enabled
 
-.. autofunction:: nanopynix_bindings.expr.set_eval_counters_enabled
+.. autofunction:: nanopynix.set_eval_counters_enabled
 
-.. autofunction:: nanopynix_bindings.expr.is_pseudo_url
+.. autofunction:: nanopynix.is_pseudo_url
 
-.. autofunction:: nanopynix_bindings.expr.register_primop
+.. autofunction:: nanopynix.register_primop
 
-.. autoexception:: nanopynix_bindings.expr.PrimopError
+.. autoexception:: nanopynix.PrimopError
 ```
 
 ## Stores
@@ -231,15 +232,15 @@ operations that a store may override. Registration is process-wide and
 permanent, the same as `register_primop`.
 
 ```{eval-rst}
-.. autofunction:: nanopynix_bindings.store.open_store
+.. autofunction:: nanopynix.open_store
 
-.. autoclass:: nanopynix_bindings.store.BuildMode
+.. autoclass:: nanopynix.BuildMode
    :members:
    :undoc-members:
 
-.. autofunction:: nanopynix_bindings.store.process_connection
+.. autofunction:: nanopynix.process_connection
 
-.. autofunction:: nanopynix_bindings.store.register_store_implementation
+.. autofunction:: nanopynix.register_store_implementation
 ```
 
 ## Flakes
@@ -263,11 +264,11 @@ means the model.
 ```
 
 ```{eval-rst}
-.. autofunction:: nanopynix_bindings.flake.parse_flake_ref
+.. autofunction:: nanopynix.parse_flake_ref
 
-.. autofunction:: nanopynix_bindings.flake.get_flake
+.. autofunction:: nanopynix.get_flake
 
-.. autofunction:: nanopynix_bindings.flake.lock_flake
+.. autofunction:: nanopynix.lock_flake
 ```
 
 ## Fetchers
@@ -276,19 +277,19 @@ An `Input` is one source that Nix can fetch — a Git repository, a tarball, or
 a local path. `input_from_url` builds one from a URL, and `input_from_attrs`
 builds one from the attribute form that a lock file holds. The same warning
 applies as for the flake classes above: `nanopynix.Input` is the proto model,
-and `nanopynix_bindings.fetchers.Input` is the C++ object.
+and `huggorm_bindings.Input` is the C++ object.
 
 ```{eval-rst}
-.. autofunction:: nanopynix_bindings.fetchers.input_from_url
+.. autofunction:: nanopynix.input_from_url
 
-.. autofunction:: nanopynix_bindings.fetchers.input_from_attrs
+.. autofunction:: nanopynix.input_from_attrs
 ```
 
 ## The environment dumper script
 
 Nix embeds `get-env.sh` into the `nix` binary, and no library carries it.
-The bindings ship the file because they are the distribution that links
-libnix. `get_env_sh_path` returns the path to the installed copy, which is
+huggorm's bindings ship the file, copied from the Nix source of the version
+they link. `get_env_sh_path` returns the path to the installed copy, which is
 what `pynix print-dev-env` reads when it rewrites a derivation to dump its
 own build environment.
 

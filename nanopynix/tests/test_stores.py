@@ -505,25 +505,10 @@ async def test_two_handles_on_one_local_store_keep_each_others_temp_roots(
     on a deleted file, is the broken answer there.
 
     Nix git gives each store its own name, and so does huggorm's patch of
-    2.34, so neither failure can happen there. The count is one only where an
-    engine caches its stores, which the test below asserts for that engine.
+    2.34 and 2.35, so neither failure can happen there.
     """
     held = await _two_stores_take_temp_roots(inproc_session, tmp_path)
     assert not [h for h in held if h.endswith(" (deleted)")], f"a store deleted another one's temp roots: {held}"
-
-
-@LINUX_PROC_FS
-@pytest.mark.nix_engine(
-    "nanopynix_bindings",
-    reason="that engine caches a store per URI; huggorm gives each store its own temp-roots file",
-)
-async def test_two_handles_on_one_local_store_are_one_local_store(
-    inproc_session: InprocSessionFactory,
-    tmp_path: Path,
-) -> None:
-    """The cache in `nix_store.cpp` gives two handles one `LocalStore`, and so one file."""
-    held = await _two_stores_take_temp_roots(inproc_session, tmp_path)
-    assert len(held) == 1, f"{len(held)} LocalStore objects, each with its own temp-roots file: {held}"
 
 
 async def _two_stores_take_temp_roots(inproc_session: InprocSessionFactory, tmp_path: Path) -> list[str]:

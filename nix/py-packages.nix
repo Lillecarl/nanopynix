@@ -12,7 +12,7 @@
   python,
   root,
   # The linked Nix version, appended as a PEP 440 local segment to every
-  # project here that reaches nanopynix-bindings -- see `nixLinked` below.
+  # project here that reaches huggorm-bindings -- see `nixLinked` below.
   version,
 }:
 
@@ -120,11 +120,11 @@ let
   protoSrc = callPackage (root + "/nanopynix-proto/generated.nix") { inherit python; };
   greeterSrc = callPackage (root + "/greeter-proto/generated.nix") { inherit python; };
 
-  # Every project that reaches nanopynix-bindings -- directly, or through
+  # Every project that reaches huggorm-bindings -- directly, or through
   # `nanopynix` -- is built against one specific Nix version's C++ components
   # and is not interchangeable with the same source built against another, so
-  # the version says which one. See nanopynix-bindings/package.nix for why
-  # this is a PEP 440 local segment (`+nix...`) and not a plain suffix.
+  # the version says which one. A PEP 440 local segment (`+nix...`), because
+  # a plain suffix would read as a newer release of the same package.
   #
   # nanopynix-proto, greeter-proto, grpclib-transports and pytest-agent
   # deliberately don't get it: none of them reaches the bindings, so each
@@ -225,8 +225,8 @@ let
         # nanopynix and nothing dlopens the instrumented .so.
         #
         # The two places that genuinely need the preload still have it, both
-        # scoped to a process that really does load the extension:
-        # nanopynix-bindings/package.nix (stubgen + pythonImportsCheck) and
+        # scoped to a process that really does load the extension: the
+        # huggorm-bindings override in default.nix (its import check) and
         # nanopynix/tests.nix's runner script (the pytest process itself).
         meta = rendered.meta // {
           license = lib.licenses.asl20;
@@ -245,7 +245,7 @@ let
 
     # No `nixLinked`, although this project declares `--file`, `--flake` and
     # `--attr`. It declares those three and reads none of them, so it reaches
-    # `nanopynix-bindings` through nothing and really is the same package
+    # `huggorm-bindings` through nothing and really is the same package
     # whatever Nix is linked. `grpclib-transports` and `pytest-agent` are here
     # for the same reason.
     libpynix = _pySelf: rendered: {

@@ -5,8 +5,8 @@ tests need an operation that Nix cannot interrupt, and they used to get one
 from a large fold -- which measures the machine rather than stating a duration,
 and which therefore passed on one macOS host and failed on another.
 
-``nanopynix-bindings/src/nix_expr.cpp`` implements it and carries the reasoning.
-These tests pin the three properties that reasoning depends on.
+``_sleep`` in ``nanopynix/_engine_huggorm.py`` implements it. These tests pin
+the three properties the cancel tests depend on.
 """
 
 from __future__ import annotations

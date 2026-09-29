@@ -62,7 +62,6 @@ let
       ../ruff.toml
       ../ruff-strict.toml
       ../nanopynix
-      ../nanopynix-bindings
       ../nanopynix-helpers
       ../nanopynix-proto
       # The CLI layer, which issue #222 moved out of `../pynix`. Without it
@@ -88,14 +87,6 @@ let
       # `check-shell` below. `writeShellApplication` shellchecks only the
       # scripts that it generates, and none of these is one of those.
       ../scripts
-      # The licence step of the wheel build. It runs inside a derivation, so
-      # no test imports it and only these gates read it. It is also the check
-      # that stops an unattributed library reaching PyPI, so a fault in it is
-      # a licence fault.
-      ../nix/wheel-notice.py
-      # The gate step of the same build, and here for the same reason. A
-      # fault in it is a gate that passes, which is worse than no gate.
-      ../nix/wheel-gates.py
       # The renderer of the completion scripts. `nix/mk-app.nix` runs it inside
       # each application build, and `checks.completions` runs it as well: the
       # dev-shell branch of its `scripts` fixture renders the three scripts
@@ -104,14 +95,8 @@ let
       # takes. Absent from this list the file is not in the source, and Python
       # answers a missing script with exit status 2 and no message at all.
       #
-      # It also brings the file into `check-lint` and `check-format`, which
-      # read three of the four `nix/*.py` files without it.
+      # It also brings the file into `check-lint` and `check-format`.
       ../nix/render-completions.py
-      # The rewrite that lowers the glibc floor of every object of the wheel
-      # closure. It runs as a setup hook inside each build, so no test imports
-      # it either, and a fault in it is a wheel that installs and then fails to
-      # load on the oldest host it claims.
-      ../nix/lower-glibc.py
       # Tracked, and therefore in scope, although it holds one module and no
       # project of its own. With it the gate reads 259 Python files, which is
       # what `ruff format --check .` reads in the dev shell. Without it the
@@ -124,7 +109,7 @@ let
   # install bakes in an absolute path outside the store, which is exactly what
   # a sandbox does not have. pyright reads first-party code through the
   # `extraPaths` in pyproject.toml, so what this env is really for is the
-  # third-party stubs and the generated `nanopynix_bindings` ones.
+  # third-party stubs.
   #
   # The spec matches the dev shell's, `docs` extra included, because
   # `extraPaths` lists `docs` and `docs/conf.py` imports sphinx.
@@ -251,10 +236,9 @@ in
   # command covers the same files as treefmt's python formatter, and no more.
   format = mkCheck "format" [ ruff ] "ruff format --no-cache --check .";
 
-  # `nanopynix/_engine_huggorm.py` calls huggorm's bindings, and no scope that
-  # this gate reads installs them. Their PEP 561 stubs come from
-  # `huggorm-generated`, and pyright reads `PYTHONPATH` through the
-  # interpreter's `sys.path`, so the huggorm engine is checked too.
+  # The engine's PEP 561 stubs come from `huggorm-generated`, which the env
+  # does not install, and pyright reads `PYTHONPATH` through the
+  # interpreter's `sys.path`.
   #
   # The runtime package goes on the path as well. The stubs are `partial`:
   # a vocabulary such as `RegistryType` is plain Python in `words.py`, which
@@ -272,10 +256,6 @@ in
   # over the script it builds, which covers the test runner of
   # nanopynix/tests.nix and no hand-written file, so these three grew without a
   # gate. `-x` follows a `source`, and the scripts are the only shell here.
-  #
-  # The wheel closure needed a compiler wrapper of its own until it moved back
-  # onto the gcc stdenv of nixpkgs, and that wrapper was the second command
-  # here. It is gone, and so is the exception it needed.
   shell = mkCheck "shell" [
     shellcheck
   ] "shellcheck -x scripts/*.sh";

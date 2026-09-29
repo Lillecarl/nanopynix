@@ -44,7 +44,7 @@ CANCEL_AFTER = 0.2
 # The same shape in `inproc/test_inproc_cancel.py` ran in 0.72 s on an M-series
 # Mac at 12 million, so the margin over the grace was a property of the
 # hardware rather than of the expression. A sleep states the duration.
-# `nanopynix-bindings/src/nix_expr.cpp` implements it.
+# `_sleep` in `nanopynix/_engine_huggorm.py` implements it.
 UNINTERRUPTIBLE_SECONDS = 8.0
 UNINTERRUPTIBLE = f"builtins.sleep {UNINTERRUPTIBLE_SECONDS}"
 

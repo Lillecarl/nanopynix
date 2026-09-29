@@ -159,7 +159,7 @@ async def test_a_settings_value_nix_rejects_names_the_setting(
 
     **The assertion is the message, not the class, and that is measured.** On
     Nix 2.34 both of these arrive as :class:`nanopynix.NixError`. On 2.31
-    ``cores`` arrives as a raw ``nanopynix_bindings.errors.UsageError`` while
+    ``cores`` arrived as a raw engine ``UsageError`` while
     ``max-jobs`` still translates -- the two are refused at different moments,
     and only one of those moments is inside the translating call. Asserting
     the class would therefore pin a version difference that has nothing to do

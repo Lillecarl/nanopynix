@@ -71,8 +71,8 @@ CANCEL_AFTER = 0.2
 # boundary again.
 #
 # The sleep says how long it takes, so nothing here is tuned to a machine.
-# `nanopynix-bindings/src/nix_expr.cpp` implements it, and says why it is a
-# builtin that upstream Nix does not have.
+# `_sleep` in `nanopynix/_engine_huggorm.py` implements it, as a builtin
+# that upstream Nix does not have.
 UNINTERRUPTIBLE_SECONDS = 5.0
 UNINTERRUPTIBLE = f"builtins.sleep {UNINTERRUPTIBLE_SECONDS}"
 

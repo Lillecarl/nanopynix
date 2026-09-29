@@ -8,7 +8,7 @@ copy on purpose.
 interpreter, because ``nanopynix/__init__.py`` maps each public name to a
 module and resolves it on first read. So the import is cheap. What is not
 cheap is what naming ``nanopynix`` in ``pyproject.toml`` would drag in:
-``nanopynix-bindings``, a compiled extension linked against one Nix version.
+``huggorm-bindings``, a compiled extension linked against one Nix version.
 This project would then be built once per version of the matrix, and a program
 that has not built the bindings could not take it at all -- for five lines that
 set one attribute.

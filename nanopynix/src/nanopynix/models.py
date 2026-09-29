@@ -194,7 +194,7 @@ class DerivedPath(str):
         first, so that a bare ``.drv`` selects every output.
 
         The conversion is here, and not in the bindings, so that
-        ``nanopynix_bindings`` keeps Nix's own semantics for a function that
+        ``huggorm_bindings`` keeps Nix's own semantics for a function that
         maps a Nix one. Everything else passes through: a bare
         non-derivation path stays opaque, because a fetch is what that
         genuinely means, and a string that already carries ``^`` said what it

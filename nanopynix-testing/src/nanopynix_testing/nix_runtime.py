@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 import nanopynix
-from nanopynix._engine import ENGINE, ENGINES, set_setting
+from nanopynix._engine import set_setting
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -172,7 +172,6 @@ def pytest_configure(config: pytest.Config) -> None:
         "nix_capability(name): require a compiled nanopynix/Nix capability",
         "nix_sanitizer(name): run only under the named sanitizer",
         "nix_platform(name): run only on the named `sys.platform`",
-        "nix_engine(name, reason): run only under the named engine package, such as nanopynix_bindings",
         (
             "nix_known_issue(exclude=(), sanitizer=None, reason=''): skip an explicitly bounded "
             "upstream defect. Give `exclude`, or `sanitizer`, or both"
@@ -354,15 +353,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             wanted = platform_marker.args[0]
             if sys.platform != wanted:
                 item.add_marker(pytest.mark.skip(reason=f"needs {wanted}, and this host is {sys.platform}"))
-
-        engine_marker = item.get_closest_marker("nix_engine")
-        if engine_marker is not None:
-            wanted = engine_marker.args[0] if len(engine_marker.args) == 1 else None
-            reason = engine_marker.kwargs.get("reason")
-            if wanted not in ENGINES or not isinstance(reason, str) or not reason:
-                raise pytest.UsageError(f"nix_engine requires one of {ENGINES} and a non-empty reason")
-            if wanted != ENGINE:
-                item.add_marker(pytest.mark.skip(reason=f"{reason}; needs {wanted}, and this build has {ENGINE}"))
 
         sanitizer_marker = item.get_closest_marker("nix_sanitizer")
         if sanitizer_marker is not None:

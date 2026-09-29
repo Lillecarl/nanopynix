@@ -11,7 +11,7 @@ it mirrors, because the two have to agree for ``print-dev-env`` to agree with
 ``nix print-dev-env``.
 
 ``get-env.sh`` is Nix's own ``src/nix/get-env.sh``, carried by
-``nanopynix-bindings`` because Nix compiles it into the ``nix`` binary and no
+``huggorm-bindings`` because Nix compiles it into the ``nix`` binary and no
 library carries it.
 """
 
@@ -24,11 +24,10 @@ from typing import Any, Literal, cast
 
 from nanopynix import get_env_sh_path
 
-#: The ``get-env.sh`` that ``nanopynix-bindings`` ships -- Nix's own
+#: The ``get-env.sh`` that ``huggorm-bindings`` ships -- Nix's own
 #: ``src/nix/get-env.sh``, carried there because Nix compiles it into the
-#: ``nix`` binary and no library carries it. See
-#: ``nanopynix_bindings._get_env`` and ``nanopynix.get_env`` for the
-#: provenance.
+#: ``nix`` binary and no library carries it. See ``nanopynix.get_env`` for
+#: the provenance.
 GET_ENV_SH: Path = get_env_sh_path()
 
 #: Variables that the shell must keep from the caller rather than take from the

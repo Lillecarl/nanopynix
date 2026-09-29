@@ -28,11 +28,11 @@ terminal, pass `--agent-max-summary-lines=0`.
 - direnv exec . ruff check --fix
 - direnv exec . ruff check --config ruff-strict.toml --fix # This configuration reports zero findings now. Keep it at zero. A new finding comes from your change.
 
-**`direnv exec .` serves a cached environment, so a C++ change is invisible to
-it until you reload.** `.direnv` holds a built `nanopynix-bindings` from a
-store path, and nothing under `nanopynix-bindings/src/` is a file that direnv
-watches. A change there -- yours, or one that arrived with a `jj` update --
-reaches nothing until:
+**`direnv exec .` serves a cached environment, so an engine change is invisible
+to it until you reload.** `.direnv` holds a built `huggorm-bindings` from a
+store path, and huggorm's checkout is not a file that direnv watches. A change
+there -- yours, or one that arrived with an umbrella update -- reaches nothing
+until:
 
 - direnv reload
 
@@ -265,7 +265,7 @@ are the same store path. And `libpynix/src/libpynix/_typecheck.py` carries its
 own `no_runtime_type_check` rather than importing `nanopynix._typechecking`.
 The cost avoided there is the dependency and not the import: that module is
 cheap to import, at 55 modules against 34 for a bare interpreter, but naming
-`nanopynix` in `pyproject.toml` drags in `nanopynix-bindings`, and a program
+`nanopynix` in `pyproject.toml` drags in `huggorm-bindings`, and a program
 that has not built the bindings could then not take this project at all.
 
 **`libpynix.command` is generic, and `libpynix.nix_options` names Nix.** The
@@ -469,40 +469,24 @@ make that prose comply.
 
 # Licensing
 
-**The repository is Apache-2.0. `nanopynix-bindings` alone is
-LGPL-2.1-or-later.** The root `LICENSE` holds the Apache text, and
-`LICENSE.LGPL-2.1` beside it holds the other. Each project carries a copy of
-the one that applies to it, because `license-files` cannot name a path above
-the source root of a distribution.
+**The repository is Apache-2.0, every project in it.** The root `LICENSE` holds
+the text, and each project carries a copy, because `license-files` cannot name
+a path above the source root of a distribution.
 
-The bindings link libnixexpr and libnixstore. Nix publishes those under
-LGPL-2.1-or-later, so the licence of that project follows the library it
-links. Every other project imports the bindings at run time and links nothing.
+No project here links Nix. The engine is huggorm's bindings, which link
+libnixexpr and libnixstore and are built in huggorm; nanopynix imports them at
+run time, which section 6 of the LGPL exists for.
 
-**Keep "or-later" on the bindings.** Apache-2.0 and LGPL-2.1 are incompatible
-in one direction: the patent grant of Apache-2.0 adds a term that version 2.1
-does not permit a licensee to add. That direction is code moving *into* the
-bindings from an Apache-2.0 project here, and "or-later" is what makes the
-move legal, because the bindings can be taken as LGPL-3.0 and Apache-2.0 is
-compatible with LGPL-3.0. Remove "or-later" and that move becomes a licence
-violation, silently.
+**`huggorm-bindings` ships `get-env.sh`.** `src/nix/get-env.sh` is Nix's own
+script, and Nix compiles it into the `nix` binary as a file-static string. It
+lives in no library, so a consumer of the libraries must carry it. The build
+copies it from the Nix source of the version it links, so the bytes follow
+that Nix. `nanopynix` re-exports the path, so `pynix` reads it without
+importing the engine.
 
-The other direction needs no argument. Section 6 of the LGPL exists for a work
-that uses the library, and an Apache-2.0 work that imports the bindings is
-that work.
-
-**`nanopynix-bindings` also ships `get-env.sh`.** `src/nix/get-env.sh` is Nix's
-own script, and Nix compiles it into the `nix` binary as a file-static string.
-It lives in no library, so a consumer of the libraries must carry it. The
-bindings carry it, because they are the LGPL project. The Nix build copies it
-from the Nix source of the version it links, so the bytes follow that Nix and
-no copy sits in the tree. `nanopynix` re-exports the path, so `pynix` reads it
-without importing a private implementation module of the bindings.
-
-`tests/meta/test_licensing.py` holds each part of this that a machine can
-check: every project states a licence, the bindings state the LGPL one, every
-other project states the Apache one, and every `license-files` entry names a
-file that is really there.
+`tests/meta/test_licensing.py` holds what a machine can check: every project
+states Apache-2.0, and every `license-files` entry names a file that is really
+there.
 
 # Design notes
 

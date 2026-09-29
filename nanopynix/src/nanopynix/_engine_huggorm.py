@@ -1,15 +1,9 @@
-"""The huggorm engine: nanopynix's engine surface, answered by huggorm's bindings.
+"""The engine: nanopynix's engine surface, answered by huggorm's bindings.
 
-A port in progress, and huggorm's ``tasks/097`` tracks it. Each name that is
-not ported yet is a placeholder, so ``import nanopynix`` works and each test
-fails where it reaches the gap, with an error that names it. The failures of
-the huggorm lane are then the list of what is left, one name at a time.
-
-A placeholder goes when its name is ported. None may stay once the lane is
-green: a caller that reaches one gets ``NotImplementedError``.
-
-Only a venv that installs ``huggorm_bindings`` and not ``nanopynix_bindings``
-imports this module, and ``nanopynix._engine`` decides that.
+An adapter. It gives huggorm's names the shapes nanopynix's callers were
+written against, and its callers move onto huggorm's own API one area at a
+time until it is empty. ``nanopynix._engine`` is the only module that imports
+it.
 """
 
 from __future__ import annotations

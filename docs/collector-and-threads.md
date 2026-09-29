@@ -627,7 +627,7 @@ root first, and the crash after:
 
 ```
 nix-store --add-root ./keep --indirect -r "$(direnv exec . python -c \
-  'import nanopynix_bindings,pathlib;print(pathlib.Path(nanopynix_bindings.__file__).parent)' \
+  'import huggorm_bindings,pathlib;print(pathlib.Path(huggorm_bindings.__file__).parent)' \
   | grep -o '^/nix/store/[^/]*')"
 ```
 

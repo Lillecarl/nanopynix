@@ -2,7 +2,8 @@
 
 Scaffolding for CIP3 item 3, written alongside the change that replaced
 nanobind's one-translator-per-type registration with a single translator owning
-the whole ``nix::Error`` hierarchy (``nanopynix-bindings/src/nix_errors.cpp``).
+the whole ``nix::Error`` hierarchy. huggorm's ``decl/errors.py`` declares it now,
+and emits the one catch chain from it.
 
 The old arrangement decided which translator won by *registration order*, which
 is the order the extension modules happen to be imported in -- unobservable
@@ -187,7 +188,7 @@ async def test_eval_base_error_is_bound_even_though_it_is_not_an_eval_error(
 def test_the_bound_classes_mirror_nix_own_hierarchy() -> None:
     """Catch-chain order is only half of it; the Python MRO must agree too.
 
-    A caller writing ``except nanopynix_bindings.errors.EvalError`` should
+    A caller writing ``except huggorm_bindings.errors.EvalError`` should
     catch a ``TypeError``, exactly as a C++ ``catch (nix::EvalError &)`` would.
     """
     assert issubclass(nanopynix_errors.TypeError, nanopynix_errors.EvalError)

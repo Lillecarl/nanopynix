@@ -8,8 +8,7 @@ the file reaches exactly what is registered there and nothing else.
 libcmd is what registers the other three -- ``EvalSettings``,
 ``fetchers::Settings`` and ``flake::Settings`` -- and nanopynix does not link
 libcmd. So each of those took its compiled default whatever the file said, and
-the caller was the only source of a non-default value. Issue #234, and
-``nanopynix-bindings/src/settings_util.hh`` carries the argument and the fix.
+the caller was the only source of a non-default value. Issue #234.
 
 **Each case runs in a subprocess, and that is not caution.**
 ``initLibStore`` reads the file once for the whole process, and the pytest

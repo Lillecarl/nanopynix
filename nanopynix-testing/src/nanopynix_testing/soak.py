@@ -38,8 +38,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 import anyio
 
-from nanopynix._engine import ENGINE
-
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
@@ -368,19 +366,6 @@ def _another_platform_only(module: Any, func: Any) -> bool:
     return False
 
 
-def _another_engine_only(module: Any, func: Any) -> bool:
-    """Whether ``nix_engine`` names an engine that is not the installed one.
-
-    The same gap as ``_another_platform_only``: pytest turns the mark into a
-    skip at collection, and this scanner reads the source marks. The engine
-    is known at import, so no runtime is needed to answer.
-    """
-    return any(
-        mark.name == "nix_engine" and len(mark.args) == 1 and mark.args[0] != ENGINE
-        for mark in _all_marks(module, func)
-    )
-
-
 def _wants_an_unsupplied_fixture(module: Any, func: Any) -> bool:
     """Whether ``usefixtures`` asks for a fixture the driver does not supply.
 
@@ -528,7 +513,7 @@ def discover_roster(*, root: Path, engine: str | None = None) -> list[SoakCandid
                 continue
             if _marks_of(module, func) & _DISQUALIFYING_MARKS:
                 continue
-            if _another_platform_only(module, func) or _another_engine_only(module, func):
+            if _another_platform_only(module, func):
                 continue
             if _wants_an_unsupplied_fixture(module, func):
                 continue

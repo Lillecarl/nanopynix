@@ -836,8 +836,7 @@ def test_global_config_aggregates_the_other_three_registries() -> None:
     ``globalConfig`` and to nothing else, so a setting from the file reached
     only what was registered there -- and nothing registered the other three,
     because libcmd is what does that and this library does not link libcmd.
-    ``nanopynix-bindings/src/settings_util.cpp`` now registers one object of
-    each kind, which is what ``src/libcmd/common-eval-args.cc`` does and why
+    The engine registers one object of each kind, which is what ``src/libcmd/common-eval-args.cc`` does and why
     ``nix config show`` lists all four.
 
     So the overlap is total rather than empty, and that is the assertion: a

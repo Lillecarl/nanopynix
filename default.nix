@@ -10,23 +10,17 @@
     inherit system;
     config.allowUnfree = true;
   },
-  # The compiled Nix engine behind the exported packages: "bindings" for
-  # `nanopynix-bindings`, "huggorm" for huggorm's generated bindings. The
-  # huggorm engine is a port in progress, and huggorm's tasks/097 tracks it.
-  # A consumer that imports this file with "huggorm" runs its own suite
-  # against the port, with no edit of its own source.
-  engine ? "bindings",
 }:
 let
   inherit (pkgs) lib;
 
   pyproject-nix = import sources.pyproject-nix { inherit lib; };
 
-  # huggorm's packages, for the `-huggorm` scope and for the type gate.
+  # huggorm, whose generated bindings are the engine of every scope.
   huggorm = import sources.huggorm { inherit pkgs; };
 
   # Every Python package this repo needs that does *not* depend on
-  # nanopynix-bindings, added to the interpreter's own package set.
+  # huggorm-bindings, added to the interpreter's own package set.
   #
   # The division is the point. Nothing here reaches nix-store/nix-expr or the
   # bindings, so none of it varies by Nix version and all of it is built once
@@ -189,21 +183,6 @@ let
   # to.
   patchedBoehmGC = boehmgc.patchBoehmGC pkgs.nixDependencies.boehmgc;
 
-  # Every C and C++ library of the closure, rebuilt for the wheel. The file
-  # gives the package list, the payload trim and the corrections that each
-  # package needs.
-  #
-  # **At the top level, and not in the `let` of `nanopynixForNixVersions`.**
-  # `nanopynixWheel` reads `wheelLibs` to name the licence of each library that
-  # rides in the wheel, and that binding is a sibling of this one. Neither this
-  # import nor `patchedBoehmGC` above reads an argument of that function, so
-  # both moved out whole.
-  wheelNix = import ./nix/nix-closure.nix {
-    inherit lib pkgs;
-    boehmgc = patchedBoehmGC;
-    python = pythonBase;
-  };
-
   # A confirmed data race in nix::Bindings::emptyBindings (a process-wide
   # shared static that ExprAttrs::eval unconditionally writes to -- see the
   # patch's own commentary) found via ThreadSanitizer (see `sanitizers` above).
@@ -334,7 +313,7 @@ let
   # nixComponents_2_34/nixComponents_2_35/nixComponents_git, this discovers
   # every modular component set via isNixScope and extends each with
   # nanopynix's own packages uniformly (using the scope's own
-  # newScope/callPackage machinery, so e.g. nanopynix-bindings's
+  # newScope/callPackage machinery, so e.g. huggorm-bindings's
   # nix-store/nix-expr/... args resolve to that version's own components, not
   # some other pkgs-level one) -- nixpkgs adding a new nixComponents_X is
   # picked up here without editing this file. No separate dedup step is
@@ -362,20 +341,6 @@ let
       # bad as it sounds so long as evaluation just takes place within
       # short-lived processes". An RPC worker is such a process.
       gc ? true,
-      # Whether the whole C and C++ closure is rebuilt for a PyPI wheel, which
-      # lowers the glibc floor and gives the closure one private C++ runtime so
-      # that the wheel runs off NixOS.
-      #
-      # A whole scope, and for the same reason as the sanitizer above: a wheel
-      # takes the highest glibc floor of everything that it carries, so one
-      # library of the stdenv of nixpkgs holds the whole wheel at `GLIBC_2.38`.
-      # `nix/nix-closure.nix` names each package, and issue #111 holds the
-      # measurements.
-      wheel ? false,
-      # The compiled engine that `nanopynix._engine` imports. A whole scope,
-      # for the reason the collector is one: two libnix copies cannot share a
-      # process, and the venv decides which one it holds.
-      engine ? "bindings",
     }:
     assert lib.assertMsg (!(sanitizer.requiresNoGC or false) || !gc) ''
       The ${sanitizer.name} sanitizer needs `gc = false`.
@@ -387,17 +352,12 @@ let
       closure, so it is caught here instead.
     '';
     let
-      # The huggorm engine starts the collector at import and runs
-      # `nix::initGC` at the first evaluator, so the collector must carry
-      # huggorm's patch as well (huggorm tasks/101). The other engine keeps
-      # the collector it has, and its cached closure.
-      scopeBoehmGC =
-        if engine == "huggorm" then
-          patchedBoehmGC.overrideAttrs (old: {
-            patches = old.patches ++ huggorm.bdwgcPatches;
-          })
-        else
-          patchedBoehmGC;
+      # huggorm starts the collector at import and runs `nix::initGC` at the
+      # first evaluator, so the collector carries huggorm's patch as well
+      # (huggorm tasks/101).
+      scopeBoehmGC = patchedBoehmGC.overrideAttrs (old: {
+        patches = old.patches ++ huggorm.bdwgcPatches;
+      });
 
       isNixScope =
         _name: v:
@@ -409,12 +369,10 @@ let
         && lib.hasAttr "newScope" v
         && lib.hasAttr "packages" v;
 
-      # The huggorm engine opens a LocalStore per caller, so its Nix names a
-      # temp-roots file per store (huggorm's `libstorePatches`). The other
-      # engine caches one store per URI and keeps its cached closure.
-      patchNixScope =
-        scope:
-        scope.appendPatches (patchesFor scope ++ lib.optionals (engine == "huggorm") huggorm.libstorePatches);
+      # huggorm opens a LocalStore per caller, so its Nix names a temp-roots
+      # file per store, and tells a daemon its own level (huggorm's
+      # `libstorePatches`).
+      patchNixScope = scope: scope.appendPatches (patchesFor scope ++ huggorm.libstorePatches);
 
       # nix's own components (nix-util, nix-store, ...) keep resolving
       # through scope.newScope completely unmodified below -- so their own
@@ -424,7 +382,7 @@ let
       # own packages instead go through callNixPythonPackage, a second
       # callPackage-like function that also has `python.pkgs` and pkgs in
       # scope, plus `final` so they can still reference
-      # nix-store/nix-expr/nanopynix-bindings/etc directly.
+      # nix-store/nix-expr/huggorm-bindings/etc directly.
       extendNixScope =
         scope:
         lib.makeScope scope.newScope (
@@ -433,76 +391,62 @@ let
             let
               sanitizerRuntime = if sanitizer == null then null else sanitizer.runtime;
 
-              # `pythonBase` unchanged. There used to be a per-version overlay
-              # here adding our own projects to the interpreter's set, but
-              # they are pyproject.nix builders packages now and live in
-              # `pythonSet` below. The only per-version Python package left is
-              # nanopynix-bindings, and that goes straight into the builders
-              # set as a lifted root -- so nothing version-specific needs to
-              # be in the interpreter's own set at all.
+              # `pythonBase` unchanged. Our own projects are pyproject.nix
+              # builders packages in `pythonSet` below, and the one
+              # per-version Python package, huggorm-bindings, goes straight
+              # into the builders set as a lifted root -- so nothing
+              # version-specific needs to be in the interpreter's own set.
               python = pythonBase;
-
-              # nanopynix-bindings is the one package left that needs
-              # nixpkgs' Python infrastructure spliced in (buildPythonPackage,
-              # nanobind, the stub-generation machinery). Everything else in
-              # this scope resolves through `final.callPackage`, which is the
-              # scope's own -- so `python.pkgs` is not in scope for them, and
-              # cannot shadow a builders-set package with the nixpkgs one of
-              # the same name.
-              callPythonPackage = lib.callPackageWith (
-                pkgs
-                // python.pkgs
-                // {
-                  inherit python pyproject-nix;
-                }
-                // final
-              );
             in
             {
-              # nanopynix-bindings stays a nixpkgs `buildPythonPackage`: it is
-              # a cmake/nanobind extension linked against *this* scope's Nix
-              # C++ components, with its own stub generation, and none of that
-              # is what pyproject.nix's builders are for. It is lifted into
-              # the builders set below instead -- which is exactly what
-              # `hacks.nixpkgsPrebuilt` exists for.
-              nanopynix-bindings = callPythonPackage ./nanopynix-bindings/package.nix {
-                inherit sanitizer sanitizerRuntime;
-              };
-
               # huggorm's generated bindings, linked against this scope's Nix
-              # components. The collector must be the one libexpr links, or
-              # the process holds two.
-              huggorm-bindings = huggorm.huggorm-bindings.override {
-                inherit (final)
-                  nix-util
-                  nix-store
-                  nix-expr
-                  nix-fetchers
-                  nix-flake
-                  nix-cmd
-                  ;
-                python3Packages = python.pkgs;
-                boehmgc = scopeBoehmGC;
-              };
-
-              engineBindings = if engine == "huggorm" then final.huggorm-bindings else final.nanopynix-bindings;
-
-              # `nanopynix/pyproject.toml` names `nanopynix-bindings`, and the
-              # huggorm scope does not build it, so the dependency is swapped
-              # here and not in the file every other scope reads.
-              engineOverlay =
-                if engine == "huggorm" then
-                  _pyFinal: pyPrev: {
-                    nanopynix = pyPrev.nanopynix.overrideAttrs (old: {
-                      passthru = old.passthru // {
-                        dependencies = builtins.removeAttrs old.passthru.dependencies [ "nanopynix-bindings" ] // {
-                          huggorm-bindings = [ ];
+              # components. The collector is the one libexpr links, or the
+              # process holds two; a scope with no collector passes none, and
+              # huggorm makes no collector call.
+              #
+              # A sanitized scope instruments the extension with the flags
+              # every nix-* component gets (nix/sanitizer.nix), so the two
+              # agree. The runtime is preloaded for the build's own import
+              # check: a late `dlopen` cannot grow the static TLS block that
+              # CPython sized at start.
+              huggorm-bindings =
+                (huggorm.huggorm-bindings.override {
+                  inherit (final)
+                    nix-util
+                    nix-store
+                    nix-expr
+                    nix-fetchers
+                    nix-flake
+                    nix-cmd
+                    ;
+                  python3Packages = python.pkgs;
+                  boehmgc = lib.findFirst (
+                    p: (p.pname or "") == "boehm-gc"
+                  ) null final.nix-expr.propagatedBuildInputs;
+                }).overrideAttrs
+                  (
+                    old:
+                    lib.optionalAttrs (sanitizer != null) {
+                      env =
+                        (old.env or { })
+                        // {
+                          NIX_CFLAGS_COMPILE = sanitizer.flags;
+                          NIX_CFLAGS_LINK = sanitizer.linkFlag;
+                        }
+                        // sanitizer.buildEnv
+                        // lib.optionalAttrs (sanitizerRuntime != null) {
+                          LD_PRELOAD = sanitizerRuntime;
                         };
-                      };
-                    });
-                  }
-                else
-                  _: _: { };
+                      dontStrip = true;
+                    }
+                  );
+
+              # The surface generated for those bindings: its stubs describe
+              # this scope's Nix (huggorm tasks/055).
+              huggorm-generated = huggorm.huggorm-generated.override {
+                inherit (final) huggorm-bindings;
+                python3Packages = python.pkgs;
+              };
 
               # Everything above the bindings is a pyproject.nix builders
               # package. The set is built once per Nix version and holds both
@@ -560,7 +504,7 @@ let
                   # the roots are just the propagated inputs nixpkgs computed --
                   # no second hand-written dependency list to fall out of date.
                   nixpkgsRoots = [
-                    final.engineBindings
+                    final.huggorm-bindings
                   ]
                   ++ ps.nixpkgsRootsFor {
                     inherit python;
@@ -574,9 +518,9 @@ let
                     projectRoots = final.pyPackages.projectRoots ++ [ ./completion-spike ] ++ projectRoots;
                     # A nixpkgs Python package, but this scope's own -- lifted
                     # in as a root above rather than looked up by name.
-                    exclude = [ "nanopynix-bindings" ];
+                    exclude = [ "huggorm-bindings" ];
                   };
-                  overlay = lib.composeExtensions (lib.composeExtensions final.pyPackages.built final.engineOverlay) overlay;
+                  overlay = lib.composeExtensions final.pyPackages.built overlay;
                 };
 
               pythonSet = final.pythonSetWith { };
@@ -678,7 +622,7 @@ let
               # `packages` filter drops it, which is what we want.
               checks = final.callPackage ./nix/checks.nix {
                 inherit completionSpike;
-                inherit (huggorm) huggorm-generated huggorm-bindings;
+                inherit (final) huggorm-generated huggorm-bindings;
               };
             }
           ) scope.packages
@@ -688,7 +632,7 @@ let
       # consistent instrumentation (see nix/sanitizer.nix) --
       # applied after extendNixScope (rather than on the raw nixComponents_X
       # scope) since overrideScope/overrideAllMesonComponents both survive
-      # onto the extended scope, so nanopynix-bindings/nanopynix end up built
+      # onto the extended scope, so huggorm-bindings/nanopynix end up built
       # against the *same* instrumented nix-store/nix-expr/etc via the shared
       # `final` fixpoint.
       applySanitizerOverrides =
@@ -751,7 +695,7 @@ let
       # Drop the collector from libexpr, and from everything above it in the
       # scope. One override, applied at the same point and for the same reason
       # as `applySanitizerOverrides`: the scope fixpoint carries it to
-      # nanopynix-bindings, so the extension links against the libexpr that
+      # huggorm-bindings, so the extension links against the libexpr that
       # this scope built and not some other one.
       #
       # nixpkgs' own `libexpr/package.nix` turns `enableGC` into
@@ -782,12 +726,8 @@ let
           suffix =
             if sanitizer != null then
               "-${sanitizer.suffix}"
-            else if wheel then
-              "-wheel"
             else if !gc then
               "-nogc"
-            else if engine == "huggorm" then
-              "-huggorm"
             else
               "";
         in
@@ -815,11 +755,6 @@ let
       # nix-expr when `gc` is false -- and the order still says which one wins
       # if a third ever arrives.
       ++ lib.optional (!gc) (lib.mapAttrs (_: applyNoGCOverrides))
-      # Last, so this is the final word on the stdenv of the scope. It writes
-      # `nix-expr` too, and `applyBoehmGCPatch` above writes the same
-      # attribute: the later one wins, and the collector that it names is the
-      # patched one rebuilt for the wheel, so the patch survives the order.
-      ++ lib.optional wheel (lib.mapAttrs (_: wheelNix.applyWheelOverrides))
       ++ [ (lib.mapAttrs' rename) ]
     );
 
@@ -845,99 +780,6 @@ let
   nanopynixVersions = nanopynixVersionsInternal // {
     stable = getByVersion pkgs.nixVersions.stable.version;
     latest = getByVersion pkgs.nixVersions.latest.version;
-  };
-
-  # The wheel build, and **deliberately not a member of
-  # `nanopynixVersionsInternal`.**
-  #
-  # Every CI job comes from that set: `tests` maps it to one
-  # `nanopynix-tests-<name>` package for each entry, and `ciVersionMatrix`
-  # groups the same names into the matrices. Adding "-wheel" there would put a
-  # from-source rebuild of the whole C and C++ closure into the per-commit
-  # matrix, on every version. That closure leaves the binary cache by
-  # construction, because lowering the glibc floor is what it is for.
-  #
-  # So it lives here, reachable by name for a person who wants a wheel, and
-  # invisible to the matrices. `variantSuffixes` needs no "-wheel" entry for the
-  # same reason: `unlistedVariants` reads `nanopynixVersionsInternal`, and this
-  # is not in it.
-  #
-  # One version only. A wheel carries one Nix, which is the whole reason a
-  # wheel removes the ABI matrix.
-  nanopynixForWheel = (nanopynixForNixVersions { wheel = true; }).nix_2_34-wheel;
-
-  # The scope whose engine is huggorm's generated bindings. Off the matrices
-  # like the wheel: the port is expected to fail, and a blocking job would say
-  # nothing new. One version, because huggorm binds one.
-  nanopynixForHuggorm = (nanopynixForNixVersions { engine = "huggorm"; }).nix_2_34-huggorm;
-
-  # What the exported packages below come from. See the `engine` argument.
-  exported =
-    if engine == "huggorm" then
-      nanopynixForHuggorm
-    else if engine == "bindings" then
-      nanopynixVersions.stable
-    else
-      throw "default.nix: engine must be \"bindings\" or \"huggorm\", not ${builtins.toJSON engine}";
-
-  # The wheel itself. `nix/wheel.nix` runs `auditwheel repair` over the
-  # extension above, which bundles each library and writes the `manylinux` tag.
-  # Off the matrices for the same reason as the build it reads.
-  # The licence text of every library that the wheel bundles. The package set
-  # is the whole rebuilt closure plus the collector and the five Nix components,
-  # which is every library that can end up in `nanopynix_bindings.libs/`.
-  nanopynixWheelLicenses = pkgs.callPackage ./nix/wheel-licenses.nix { } {
-    packages = wheelNix.wheelLibs // {
-      boehmgc = wheelNix.wheelBoehmGC;
-      # The one C++ runtime of the closure. Every C++ object of the wheel names
-      # it, so the wheel carries it and the notice has to describe it.
-      nanopynix-cxx-runtime = wheelNix.cxxRuntime;
-      inherit (nanopynixForWheel)
-        nix-util
-        nix-store
-        nix-expr
-        nix-fetchers
-        nix-flake
-        ;
-    };
-  };
-
-  nanopynixWheel = pkgs.callPackage ./nix/wheel.nix {
-    inherit (pkgs.python3Packages) auditwheel wheel;
-    licenses = nanopynixWheelLicenses;
-    inherit (wheelNix) cxxRuntime;
-    inherit (wheelNix.cxxStdenv) lowerGlibc;
-    bindings = nanopynixForWheel.nanopynix-bindings.override {
-      # **The Nix version is in the name, and not in the version.**
-      #
-      # PyPI holds one name for one project, and this project builds one
-      # artifact for each Nix version. Those artifacts are alternatives: each
-      # imports as `nanopynix_bindings`, so two of them cannot be installed
-      # together, and the name is what says so. `opencv-python` against
-      # `opencv-python-headless` is the same shape.
-      #
-      # The version then stays the version of this project, which is what a
-      # dependency specifier wants to name. The other route, a version of
-      # `2.34.8.1` with the Nix version leading, reads well for a pin and
-      # leaves this package no way to state a version of its own API.
-      #
-      # Major and minor only. A Nix patch release does not change the ABI that
-      # the extension links, so `nix2-34` covers 2.34.8 and 2.34.9, and the
-      # exact version stays in `build_info()` and in the metadata.
-      pypiName = "nanopynix-bindings-nix${
-        lib.replaceStrings [ "." ] [ "-" ] (lib.versions.majorMinor nanopynixForWheel.version)
-      }";
-
-      # **Here, and in no other build.** One `cp313-abi3` wheel imports on
-      # every CPython from 3.13 up, so a release of CPython costs no rebuild.
-      # Without it PyPI needs one wheel for each Python minor version, times
-      # three Nix versions and two architectures.
-      #
-      # `nanopynix-bindings/package.nix` says why nothing that Nix builds wants
-      # this: such a build serves one interpreter, and the stable ABI stops
-      # nanobind reading the internals of CPython directly.
-      stableAbi = true;
-    };
   };
 
   # Per-version test runners, exposed individually as `nanopynix-tests-<name>`
@@ -1021,11 +863,7 @@ let
       ciVersionMatrix
       variantSuffixes
       ;
-    # The huggorm lane has a step, and no place in any matrix: `tests` feeds the
-    # matrices, and this name is not in it.
-    tests = tests // {
-      nanopynix-tests-nix_2_34-huggorm = nanopynixForHuggorm.nanopynix.test;
-    };
+    inherit tests;
   };
 
   getByVersion =
@@ -1048,13 +886,14 @@ lib.throwIf (unlistedVariants != [ ])
   {
     inherit (pkgs) lib;
 
-    inherit (exported)
+    inherit (nanopynixVersions.stable)
       nanopynix
-      nanopynix-bindings
+      # The engine: huggorm's generated bindings, linked against this Nix.
+      huggorm-bindings
       nanopynix-helpers
       nanopynix-proto
       # The command-line layer of issue #222. It reaches
-      # `nanopynix-bindings` through nothing, so this one attribute is the
+      # `huggorm-bindings` through nothing, so this one attribute is the
       # same package for every Nix version -- see `nixLinked` in
       # `nix/py-packages.nix`. It is under `stable` for consistency with its
       # neighbours here, and not because the version means anything to it.
@@ -1095,14 +934,6 @@ lib.throwIf (unlistedVariants != [ ])
       sources
       pkgs
       nanopynixVersions
-      nanopynixForWheel
-      nanopynixForHuggorm
-      # The C and C++ closure that the wheel bundles, and the stdenv that
-      # builds it. `cxxRuntime` is the one C++ runtime of that closure, and it
-      # is a build of its own that has its own gate.
-      wheelNix
-      nanopynixWheel
-      nanopynixWheelLicenses
       pyproject-nix
       tests
       experiments

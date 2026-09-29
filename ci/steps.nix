@@ -420,7 +420,7 @@ let
   # suite's `test_lsp.py`. All ten failures were in the pynix suite, and none
   # were in `nanopynix/tests`, so nothing is lost by the cut and the whole
   # failure set goes with it. Only instrumented code reports:
-  # nanopynix-bindings, the Nix libraries and boost. `nanopynix/tests` drives
+  # huggorm-bindings, the Nix libraries and boost. `nanopynix/tests` drives
   # that surface directly, and the pynix suite reaches the bindings only
   # along paths `nanopynix/tests` already covers.
   #

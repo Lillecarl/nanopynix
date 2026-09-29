@@ -103,7 +103,7 @@ let
   # and both are meson components, so the flags below reach both. That matters:
   # the two implementations give `boost::context::fiber` a different layout, so
   # a build that used each in a different file would break the one-definition
-  # rule. No header of Nix includes boost this way, so nanopynix-bindings needs
+  # rule. No header of Nix includes boost this way, so huggorm-bindings needs
   # nothing.
   #
   # **The defines alone do not link, and `sanitizeBoost` below is the other
@@ -195,8 +195,9 @@ in
     else
       "ubsan";
 
-  # Environment for the *build* of nanopynix-bindings, beside the compile
-  # flags. `nanopynix-bindings/package.nix` merges it into `env`.
+  # Environment for the *build* of huggorm-bindings, beside the compile
+  # flags. The `huggorm-bindings` override in `default.nix` merges it into
+  # `env`.
   #
   # **ASAN needs `detect_leaks=0` here, and the `LD_PRELOAD` that `runtime`
   # above sets is the reason.** That preload is derivation-wide, because
@@ -237,10 +238,8 @@ in
   # you lower the floor again.
   requiresNoGC = isAddress;
   flags = sanitizerFlagsStr;
-  # One token, no spaces. The compile flags go through NIX_CFLAGS_COMPILE,
-  # which takes a string, but CMake's linker-flag variables have to arrive as
-  # a single `-D...=` argument -- see nanopynix-bindings/package.nix for what
-  # re-splits them otherwise. Only the `-fsanitize=` list matters at link
+  # One token, no spaces: the link flag of the extension, which
+  # `NIX_CFLAGS_LINK` carries. Only the `-fsanitize=` list matters at link
   # time; the rest is instrumentation and debug info.
   linkFlag = "-fsanitize=${name}";
 

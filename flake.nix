@@ -83,12 +83,10 @@
         lib.filterAttrs (_: value: lib.meta.availableOn each.${system}.pkgs.stdenv.hostPlatform value) {
           inherit (each.${system})
             nanopynix
-            nanopynix-bindings
+            huggorm-bindings
             nanopynix-helpers
             nanopynix-proto
             nanopynix-docs
-            nanopynixWheel
-            nanopynixWheelLicenses
             libpynix
             pynix
             pynix-lsp

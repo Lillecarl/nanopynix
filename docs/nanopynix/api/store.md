@@ -32,7 +32,7 @@ which reads as "already up to date" for a derivation that was never built.
 
 {meth}`~nanopynix.DerivedPath.for_build` is the conversion, and each engine's
 `Store` applies it before the request reaches a binding.
-`nanopynix_bindings` therefore keeps Nix's meaning: a bare `.drv` there is
+`huggorm_bindings` therefore keeps Nix's meaning: a bare `.drv` there is
 opaque, and a caller of the compiled bindings can still ask for the fetch.
 
 Everything else passes through unchanged. A bare path that is *not* a

@@ -28,7 +28,7 @@ license-files = [ "LICENSE" ]
 # `--attr` name Nix concepts.** This project declares those three options and
 # reads none of them, so it needs no evaluator.
 #
-# The thing that entry would really add is `nanopynix-bindings`, a compiled
+# The thing that entry would really add is `huggorm-bindings`, a compiled
 # extension linked against one Nix version. Two things follow. A consumer that
 # has not built the bindings can still take this project and build its parser,
 # and this project is one package for every Nix version rather than one for

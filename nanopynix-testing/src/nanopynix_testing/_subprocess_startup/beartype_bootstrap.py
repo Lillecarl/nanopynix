@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 
-# nanopynix_bindings is deliberately absent: its submodules are
+# huggorm_bindings is deliberately absent: its modules are
 # nanobind-compiled .so extensions, not Python source, so there is no AST for
 # beartype's import hook to instrument. nanopynix_proto is absent too -- it is
 # betterproto2-generated code, not hand-written, so checking it would flag

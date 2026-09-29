@@ -657,10 +657,9 @@ _CLASSIFIERS: list[tuple[re.Pattern[str], type[NixError], str]] = [
 # Boundaries A and B — the Nix C++ type name is known, so use it
 # ════════════════════════════════════════════════════════════════════
 
-# Nix C++ exception type name -> Python class. Keys are the names nanobind
-# registers in `nanopynix-bindings` (`nb::exception<nix::EvalError>(m,
-# "EvalError", ...)`), which are also the names the RPC worker puts on the
-# wire as a `TypeName: message` prefix. Authoritative when present: the
+# Nix C++ exception type name -> Python class. Keys are the class names of
+# `huggorm_bindings.errors`, which are also the names the RPC worker puts on
+# the wire as a `TypeName: message` prefix. Authoritative when present: the
 # concrete C++ type is strictly better information than any message pattern.
 _NIX_EXCEPTION_TYPES: dict[str, type[NixError]] = {
     # The catch-all. Nix throws plain nix::Error freely from libstore and
@@ -791,9 +790,8 @@ def split_type_prefix(message: str) -> tuple[str | None, str]:
 # ════════════════════════════════════════════════════════════════════
 
 # Nix's BuildResult::Failure::Status vocabulary -> exception class. These
-# strings are produced by `nanopynix::build_result::failure_status_str` in
-# `nanopynix-bindings/src/build_result_util.hh` and travel verbatim in
-# `BuildResult.status`, so both engines can map them identically.
+# strings are huggorm's `BuildFailureStatus` words, and they travel verbatim in
+# `BuildResult.status`, so both nanopynix engines map them identically.
 #
 # One producer, deliberately: the header exists because `nix_expr.cpp` and
 # `nix_store.cpp` used to render a BuildResult each with their own copy of this

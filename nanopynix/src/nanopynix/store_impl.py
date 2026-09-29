@@ -28,7 +28,7 @@ What is here, and what is not
 -----------------------------
 
 The rule is that whatever you can *call* on a
-:class:`~nanopynix_bindings.store.Store`, you can *implement* here. Two groups
+:class:`huggorm_bindings.Store`, you can *implement* here. Two groups
 of Nix store operations are deliberately absent:
 
 * Anything needing a stream or a build result -- ``add_to_store``,
@@ -133,7 +133,7 @@ class StoreImpl:
         """Metadata for ``path``, or ``None`` if it is not valid.
 
         ``path`` is a base name. The return value is a dict in the same shape
-        :meth:`nanopynix_bindings.store.Store.query_path_info` produces, so a
+        :meth:`huggorm_bindings.Store.query_path_info` produces, so a
         store may echo one back unchanged: ``path``, ``references``,
         ``nar_hash``, ``nar_size``, ``registration_time``, ``deriver``, ``ca``,
         ``ultimate`` and ``sigs``. Absent optionals may be omitted or given as
@@ -252,7 +252,7 @@ class StoreImpl:
         encountered, and ``include_derivers`` its deriver.
 
         Note this takes a *set* of paths where
-        :meth:`nanopynix_bindings.store.Store.compute_fs_closure` takes one:
+        :meth:`huggorm_bindings.Store.compute_fs_closure` takes one:
         Nix has two overloads and only the set-taking one is virtual, so it is
         the only one that can be dispatched. The single-path form is the
         set form with one element.
@@ -274,7 +274,7 @@ class StoreImpl:
         file", while ``<drv>^*`` means "build it".
 
         Return a dict in the shape
-        :meth:`nanopynix_bindings.store.Store.query_missing` produces, so one
+        :meth:`huggorm_bindings.Store.query_missing` produces, so one
         may be echoed back unchanged: ``will_build``, ``will_substitute``,
         ``unknown``, ``download_size`` and ``nar_size``. Missing keys keep
         Nix's defaults (empty sets, zero), so a store that only knows some of
@@ -290,7 +290,7 @@ class StoreImpl:
         is what a store holding one already has. Nix parses it with its own
         reader, so a derivation round-trips exactly -- including
         ``__structuredAttrs`` and nested ``inputDrvs``, which a dict shaped
-        like :meth:`nanopynix_bindings.store.Store.read_derivation`'s output
+        like :meth:`huggorm_bindings.Store.read_derivation`'s output
         could not reconstruct without this module reimplementing Nix's
         ``DerivationOutput`` variants once per supported version.
 
