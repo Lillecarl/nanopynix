@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from nanopynix._engine import ENGINE, ENGINES
 from nanopynix_testing.soak import DENYLIST, discover_roster, roster_hash
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -135,7 +136,7 @@ def test_a_test_that_needs_another_platform_is_not_in_the_roster() -> None:
     **Three tests failed on macOS before that check existed**, all of them
     `/proc` probes that the ordinary run skips:
     `test_stores.py::test_two_store_roots_get_a_local_store_each`,
-    `test_stores.py::test_two_handles_on_one_local_store_share_the_temp_roots_file`
+    `test_stores.py::test_two_handles_on_one_local_store_keep_each_others_temp_roots`
     and `test_inproc.py::test_the_collector_owner_thread_outlives_the_session`.
     A missing platform gate reads as a concurrency defect, which is the most
     expensive way to read it.
@@ -164,6 +165,28 @@ def test_a_test_that_needs_another_platform_is_not_in_the_roster() -> None:
         "A test that the ordinary run skips must not join a lane, because its failure there "
         "reads as a concurrency defect."
     )
+
+
+def test_a_test_for_another_engine_is_not_in_the_roster() -> None:
+    """The soak honours `nix_engine` for the reason it honours `nix_platform`.
+
+    pytest turns the mark into a skip at collection, and the scanner reads the
+    source marks, so it reads `nix_engine` itself. The mark comes off again,
+    as in the test above.
+    """
+    roster = discover_roster(root=REPO_ROOT)
+    assert roster, "the scanner found no test at all, so this gate proves nothing"
+
+    victim = roster[0]
+    other = next(name for name in ENGINES if name != ENGINE)
+    before = list(getattr(victim.func, "pytestmark", []))
+    try:
+        pytest.mark.nix_engine(other, reason="a test of the other engine")(victim.func)
+        after = {candidate.nodeid for candidate in discover_roster(root=REPO_ROOT)}
+    finally:
+        victim.func.pytestmark = before
+
+    assert victim.nodeid not in after, f"{victim.nodeid} is for {other}, and the soak ran it under {ENGINE}"
 
 
 def test_the_roster_hash_is_stable_across_two_scans() -> None:
