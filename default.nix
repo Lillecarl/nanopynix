@@ -334,7 +334,7 @@ let
     let
       # huggorm starts the collector at import and runs `nix::initGC` at the
       # first evaluator, so the collector carries huggorm's patch as well
-      # (huggorm tasks/101).
+      # (huggorm#101).
       scopeBoehmGC = patchedBoehmGC.overrideAttrs (old: {
         patches = old.patches ++ huggorm.bdwgcPatches;
       });
@@ -424,7 +424,7 @@ let
                   );
 
               # The surface generated for those bindings: its stubs describe
-              # this scope's Nix (huggorm tasks/055).
+              # this scope's Nix (huggorm#55).
               huggorm-generated = huggorm.huggorm-generated.override {
                 inherit (final) huggorm-bindings;
                 python3Packages = python.pkgs;
