@@ -1226,6 +1226,8 @@ def _field_values(record: Any) -> list[int | str]:
 def _callback_args(record: Any) -> tuple[object, ...] | None:
     """The arguments the other engine's logger passes its callback, after the request id."""
     match record.action():
+        case "msg" if (info := record.info()) is not None:
+            return ("error", record.level(), info.msg(), _info_dict(info))
         case "msg":
             return ("msg", record.level(), record.text())
         case "start":
@@ -1437,19 +1439,21 @@ def error_detail(exc: BaseException) -> tuple[str, dict[str, Any] | None]:
     info: Any = getattr(exc, "info", None)
     if not isinstance(info, huggorm_bindings.ErrorInfo):
         return (raw if isinstance(raw, str) else "", None)
-    return (
-        raw if isinstance(raw, str) else "",
-        {
-            "level": info.level(),
-            "msg": info.msg(),
-            "pos": _position(info.pos()),
-            "is_from_expr": info.is_from_expr(),
-            "status": info.status(),
-            "traces": [{"hint": trace.hint(), "pos": _position(trace.pos())} for trace in info.traces()],
-            "truncated": info.truncated(),
-            "suggestions": list(info.suggestions()),
-        },
-    )
+    return (raw if isinstance(raw, str) else "", _info_dict(info))
+
+
+def _info_dict(info: Any) -> dict[str, Any]:
+    """*info* with the keys ``nix_error_info.hh`` writes."""
+    return {
+        "level": info.level(),
+        "msg": info.msg(),
+        "pos": _position(info.pos()),
+        "is_from_expr": info.is_from_expr(),
+        "status": info.status(),
+        "traces": [{"hint": trace.hint(), "pos": _position(trace.pos())} for trace in info.traces()],
+        "truncated": info.truncated(),
+        "suggestions": list(info.suggestions()),
+    }
 
 
 def _log_test(msg: str) -> None:
