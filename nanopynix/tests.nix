@@ -123,9 +123,9 @@ in
     # without this the job goes green with the report sitting in its log. It is
     # set here rather than compiled in with -fno-sanitize-recover because the
     # compile-time form also reaches sqlite's build-time code generator, where
-    # upstream UB killed the build -- see nix/sanitizer.nix. This puts the
-    # fatal boundary around the process under test, which is the thing being
-    # gated.
+    # upstream UB killed the build -- see huggorm's nix/sanitizer.nix. This
+    # puts the fatal boundary around the process under test, which is the
+    # thing being gated.
     #
     # print_stacktrace: a UBSan report names one source line. The line that a
     # header gives is the line of the header, so the caller is the part that

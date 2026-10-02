@@ -39,6 +39,6 @@ thread:Curl_thread_create
 # **This is scoped to the WAL layer, and not to sqlite.** Every function of
 # that layer is named `wal*` or `sqlite3Wal*`. A race that straddles sqlite
 # and nix-store's own code still reports, which is the reason
-# `nix/sanitizer.nix` instruments sqlite at all.
+# huggorm's `nix/sanitizer.nix` instruments sqlite at all.
 race:^wal
 race:^sqlite3Wal

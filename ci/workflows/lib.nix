@@ -205,8 +205,8 @@ let
   # time that the build needs, and it holds the suite to the time that the
   # suite needs.
   #
-  # This also answers a real cost. A change to `nix/sanitizer.nix` rebuilds
-  # the instrumented closure, which takes 25 minutes for the TSAN variant and
+  # This also answers a real cost. A change to huggorm's `nix/sanitizer.nix`
+  # rebuilds the instrumented closure, which takes 25 minutes for the TSAN variant and
   # 38 for the UBSan one, and one 30-minute job cap stopped two TSAN jobs for
   # that reason alone (run 30782379867). The build step now holds that number
   # by itself, and the test steps keep the tight cap that makes a hang visible.
@@ -220,15 +220,15 @@ let
     # of Nix itself, which a bumped nixpkgs causes.
     build = 30;
     # The same build, instrumented. Cold, and measured: 25 minutes for TSAN,
-    # 38 for UBSan on the slowest version. A change to nix/sanitizer.nix is
-    # the only thing that makes it cold.
+    # 38 for UBSan on the slowest version. A change to huggorm's
+    # nix/sanitizer.nix is the only thing that makes it cold.
     tsanBuild = 45;
     ubsanBuild = 60;
     # The ASAN build has two numbers now, and they answer a question this
     # comment used to guess at: 26 minutes cold in run 30860160011, and 25
     # minutes in run 30883251498, which builds boost as well. `sanitizeBoost`
-    # in nix/sanitizer.nix gives the reason that variant needs its own boost,
-    # and the second number says that boost costs nothing next to the nix
+    # in huggorm's nix/sanitizer.nix gives the reason that variant needs its
+    # own boost, and the second number says that boost costs nothing next to the nix
     # closure. The cap stays at the UBSan one.
     # There is no `nogcBuild`: `-Dgc=disabled` rebuilds nix-expr, nix-flake
     # and the bindings and nothing else -- measured, three derivations -- so
@@ -714,7 +714,7 @@ let
   # UBSan runs on its own rather than beside TSAN, although the two combine.
   # One sanitizer for each job keeps a red job attributable to one sanitizer.
   # The reason used to be 2.31, which the TSAN matrix skipped, and issue #126
-  # dropped that version. See nix/sanitizer.nix.
+  # dropped that version. See huggorm's nix/sanitizer.nix.
   #
   # The AddressSanitizer job is `mkAsanTestJob` below, and it needs a libexpr
   # with no collector. `mkNoGCTestJob` is that build without the sanitizer.
@@ -821,7 +821,7 @@ let
   # that is still live. The first ASAN variant of this repository passed the
   # flag through `NIX_CFLAGS_COMPILE`, which meson never reads, and it then
   # reported exactly that -- a tag read of a freed `Value`, which was not
-  # evidence of anything. See `requiresNoGC` in nix/sanitizer.nix.
+  # evidence of anything. See `requiresNoGC` in huggorm's nix/sanitizer.nix.
   #
   # `detect_leaks=0` is not a workaround. Without the collector the evaluator
   # allocates and never releases, so a leak checker reports the design of the

@@ -352,7 +352,7 @@ Each of these has evidence, and needs new evidence to reopen.
   `Will retry suspend and restart signals if necessary` appears.
 
 - **The tolerated branch of our own patch.**
-  `nix/patches/boehmgc-tolerate-suspend-thread-exit-race.patch` widens
+  huggorm's `nix/patches/boehmgc-tolerate-suspend-thread-exit-race.patch` widens
   `GC_suspend_all` and `GC_start_world` to accept `EINVAL` beside `ESRCH`. That
   branch runs `n_live_threads--; break;`, so it leaves a thread unsuspended and
   leaves its entry in `GC_threads`, and the count then balances by
@@ -738,7 +738,7 @@ arena and not into collected memory, which is what the comment above
 | `test-ubsan-*` | yes | undefined operations | reachability errors |
 | `test-nogc-*` | no | ordinary defects | every Boehm defect |
 
-libexpr refuses ASan together with the collector, and `nix/sanitizer.nix` gives
+libexpr refuses ASan together with the collector, and huggorm's `nix/sanitizer.nix` gives
 the reason: the collector can free an object that is still live, and ASan then
 reports a read of memory that Boehm freed. The report is not evidence.
 

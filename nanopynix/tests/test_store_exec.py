@@ -47,10 +47,10 @@ if TYPE_CHECKING:
 #   /bin/sh: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_ABI_DT_X86_64_PLT'
 #   not found (required by /nix/store/...-glibc-2.42-67/...)
 #
-# Both tests below then failed, on every ASAN run. `nix/sanitizer.nix` records
-# the same failure against the host git, and `nanopynix/tests.nix` answers it
-# the same way: take the program from this closure. `sys.executable` is that,
-# with no new input to declare.
+# Both tests below then failed, on every ASAN run. huggorm's
+# `nix/sanitizer.nix` records the same failure against the host git, and
+# `nanopynix/tests.nix` answers it the same way: take the program from this
+# closure. `sys.executable` is that, with no new input to declare.
 _SCRIPT = f"#!{sys.executable}\nprint('store-exec-ok')\n"
 
 

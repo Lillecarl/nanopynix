@@ -112,7 +112,7 @@ let
   # pynix-lsp/src/pynix_lsp/_tofu_core_schema.py, which invokes this at LSP-
   # server runtime rather than baking a static snapshot. Independent of any
   # nanopynix/Nix version, so it lives here rather than inside
-  # nanopynixForNixVersions.
+  # `lanes`.
   tofuCoreSchemaTool = pkgs.callPackage ./tools/tofu-core-schema/package.nix { };
 
   # Execs a program out of a *relocated* store with that store mounted at its
@@ -120,7 +120,7 @@ let
   # for why this cannot be a binding and has to be a separate exec-final
   # binary. A no-op `execvp` when the store is not relocated, so callers route
   # through it unconditionally. Like tofuCoreSchemaTool it depends on no Nix
-  # library, so it lives out here rather than in nanopynixForNixVersions.
+  # library, so it lives out here rather than in `lanes`.
   storeExecTool = pkgs.callPackage ./tools/store-exec/package.nix { };
 
   # **The same tool, as a list that is empty off Linux.** `store-exec.c`
@@ -140,7 +140,7 @@ let
   # The completion spike: a tiny cyclopts program, the shell code that gives a
   # cyclopts script a dynamic completion, and a pty driver that proves it in
   # fish, bash and zsh. Version-independent, like the two tools above, so it
-  # lives out here and not in `nanopynixForNixVersions`. Its own tests run in
+  # lives out here and not in `lanes`. Its own tests run in
   # its own build -- see nix/completion-spike.nix.
   completionSpike = pythonBase.pkgs.callPackage ./nix/completion-spike.nix { };
 
@@ -152,625 +152,236 @@ let
     pyprojectUtil = pkgs.callPackage pyproject-nix.build.util { };
   };
 
-  # One entry per sanitizer variant that gets its own set of Nix builds.
-  #
-  # **The ASAN variant runs against a libexpr with no collector, and it is the
-  # only one that must.** libexpr refuses the combination of ASAN and the
-  # collector, and `nix/sanitizer.nix` gives the test that libexpr makes. An
-  # earlier variant reached a build only because the flag arrived in an
-  # environment variable that meson never reads, and what that build reported
-  # was a tag read of a `Value` that the collector had already freed.
-  # `sanitizer.requiresNoGC` now carries that rule, and
-  # `nanopynixForNixVersions` asserts on it.
-  #
-  # UBSan runs on its own rather than beside TSAN, although the two combine.
-  # Each one then reports against a build that the other did not instrument,
-  # so a finding names one sanitizer and not a pair of them.
-  sanitizers = {
-    tsan = pkgs.callPackage ./nix/sanitizer.nix { name = "thread"; };
-    ubsan = pkgs.callPackage ./nix/sanitizer.nix { name = "undefined"; };
-    asan = pkgs.callPackage ./nix/sanitizer.nix { name = "address"; };
-  };
-
-  # Every build with a collector links this one. `nix/boehmgc.nix` gives the
-  # abort it corrects, and the reason the correction is not a sanitizer
-  # concern.
-  boehmgc = pkgs.callPackage ./nix/boehmgc.nix { };
-
-  # The collector every build gets, whether or not a sanitizer is asking.
-  # `applyBoehmGCPatch` puts it in place for a build with no sanitizer;
-  # `boehmgcOverride` is what the sanitized builds add their instrumentation
-  # to.
-  patchedBoehmGC = boehmgc.patchBoehmGC pkgs.nixDependencies.boehmgc;
-
-  # A confirmed data race in nix::Bindings::emptyBindings (a process-wide
-  # shared static that ExprAttrs::eval unconditionally writes to -- see the
-  # patch's own commentary) found via ThreadSanitizer (see `sanitizers` above).
-  # thread_local gives each evaluator OS thread its own instance, fixing the
-  # race without any behavior change for single-threaded use.
-  #
-  # **2.34 and 2.35 only, because 2.36 corrects the defect.** Upstream made
-  # `emptyBindings` a `const constinit` object, and it guards the write in
-  # `ExprAttrs::eval` with `if (bindings.bindings != &Bindings::emptyBindings)`.
-  # No thread writes the shared instance there, so the patch has nothing to
-  # correct and does not apply.
-  emptyBindingsPatch = ./nix/patches/nix-thread-local-empty-bindings.patch;
-
-  # The base environment of an evaluator holds one slot for each name that
-  # `createBaseEnv` registers, and `BASE_ENV_SIZE` fixes the count at 128 with
-  # no bound check on either write. Nix itself needs 119 of those slots, and
-  # `nanopynix.register_primop` takes one more for each primop a consumer adds
-  # -- 24 of them in `tests/conftest.py` alone, which writes 120 bytes past the
-  # end of the block.
-  #
-  # **Every version gets this, and not only the builds with no collector.**
-  # Boehm rounds an allocation up to a size class, so the collector build makes
-  # the same out-of-bounds write into the slack of the block and reports
-  # nothing. `-Dgc=disabled` gets an exact `calloc`, which is why ASAN found it
-  # (issue #52). The defect is in both builds.
-  #
-  # The patch header gives the measurement, and the reason the size is a
-  # constant at all.
-  baseEnvSizePatch = ./nix/patches/nix-base-env-size.patch;
-
-  # `gmtime` returns a pointer into one buffer that the C library shares
-  # between every thread, and Nix calls it at two places that both format a
-  # `lastModified`: `describe` in libflake, which `lockFlake` reaches, and
-  # `emitTreeAttrs` in libexpr, which `callFlake` and the `fetchTree` primops
-  # reach. Two evaluator threads that touch a flake at the same time then
-  # overwrite each other's result. `nix` the command evaluates on one thread
-  # and never meets this; nanopynix gives each evaluator its own thread, so it
-  # does. ThreadSanitizer found it -- see issue #90, and the patch header.
-  #
-  # Two files for one change, because `emitTreeAttrs` differs. `describe` is
-  # byte-identical on every version. 2.36 gives `attrs.alloc` a second
-  # argument, the position of the call, so the line that the patch replaces is
-  # not the same line. The 2.36 file covers git as well.
-  gmtimePatch234 = ./nix/patches/nix-2.34-gmtime-not-thread-safe.patch;
-  gmtimePatch236 = ./nix/patches/nix-2.36-gmtime-not-thread-safe.patch;
-
-  # A thunk that an interrupt stopped rethrows the interruption on every later
-  # force, because 2.34 caches `nix::Interrupted` like an evaluation error. A
-  # cancelled call then poisons every value it was forcing, for the life of the
-  # evaluator. Upstream's 5c4f498d3 corrects it in 2.35. Issue #309.
-  #
-  # Last in its list: the hunks are taken after `baseEnvSizePatch`.
-  interruptedThunkPatch234 = ./nix/patches/nix-2.34-interrupted-thunk-recovers.patch;
-
-  # Which patches to apply to a given nix version's modular component set,
-  # keyed by that version's own major.minor (e.g. "2.34"), with `default`
-  # as the fallback for anything without its own entry (git's rolling
-  # pre-release version string, any future point release, ...).
-  nixPatches = {
-    # A version with no entry of its own, and git is that version today:
-    # `lib.versions.majorMinor` reads "2.36pre20260804_d8c24e61" as "2.36".
-    # So this list is the newest set, and it holds no patch that upstream
-    # already carries. A future version whose source moved fails here, at the
-    # patch, and that is the failure to want.
-    default = [
-      baseEnvSizePatch
-      gmtimePatch236
-    ];
-    "2.34" = [
-      emptyBindingsPatch
-      baseEnvSizePatch
-      gmtimePatch234
-      interruptedThunkPatch234
-    ];
-    "2.35" = [
-      emptyBindingsPatch
-      baseEnvSizePatch
-      gmtimePatch234
-    ];
-  };
-
-  patchesFor = scope: nixPatches.${lib.versions.majorMinor scope.version} or nixPatches.default;
-
-  # **The oldest Nix that this repository supports.** Every variant reads it,
-  # so one number moves the whole matrix.
+  # **The oldest Nix that this repository supports.** huggorm's `lanes`
+  # name the versions, and evaluation fails if one is older than this.
   #
   # 2.31 was the version below it, and issue #126 holds the measurement that
   # removed it. On one commit, the `test-local` job skipped 107 tests on 2.31
   # and 13 on 2.35, and it took 12m22s against 7m39s. It was the job with the
-  # least signal and the longest run. `ci/render.py` also could not run on 2.31
-  # at all, because primop registration is broken there and upstream does not
-  # plan to correct it. That second reason no longer holds on its own: issue
-  # #121 moved the renderer off `builtins.toYAML`, so it registers no primop.
-  #
-  # **2.34 and not 2.32, because 2.32 and 2.33 do not exist to build.** nixpkgs
-  # carries `nixComponents_2_32` and `nixComponents_2_33`, and evaluating
-  # either one throws. `isNixScope` already dropped both, so a floor of "2.32"
-  # would select the same versions while naming one that no job can build.
+  # least signal and the longest run.
   #
   # Raise this number when the next version earns the same measurement. Do not
   # add a version-specific branch to library code to keep an old one alive --
   # `AGENTS.md` gives that rule, and this floor is what makes it affordable.
   supportedNixFloor = "2.34";
 
-  # Builds one full nanopynix scope per modular Nix component set nixpkgs
-  # exposes, optionally with ThreadSanitizer instrumentation applied to nix
-  # itself and to nanopynix's own C++ bindings. Rather than hand-enumerating
-  # nixComponents_2_34/nixComponents_2_35/nixComponents_git, this discovers
-  # every modular component set via isNixScope and extends each with
-  # nanopynix's own packages uniformly (using the scope's own
-  # newScope/callPackage machinery, so e.g. huggorm-bindings's
-  # nix-store/nix-expr/... args resolve to that version's own components, not
-  # some other pkgs-level one) -- nixpkgs adding a new nixComponents_X is
-  # picked up here without editing this file. No separate dedup step is
-  # needed: isNixScope only matches modular component scopes, never the
-  # "stable"/"latest" plain-derivation aliases that could otherwise collide.
-  nanopynixForNixVersions =
-    # `null` for the plain build, or one of `sanitizers` above. The variants
-    # are separate attribute sets rather than an option on one build, because
-    # every C and C++ library in the process has to agree.
-    {
-      sanitizer ? null,
-      # Whether libexpr keeps the Boehm collector.
-      #
-      # **A whole scope, and never a runtime choice.** `EvalState` carries a
-      # `baseEnvP` member only when the collector is present, so the two builds
-      # are not ABI-compatible and one process must load exactly one of them.
-      # Nothing in Python can pick: a forkserver child imports
-      # `nanopynix.rpc.worker._worker` while it unpickles the process target,
-      # before any code of ours runs there, and `multiprocessing` keeps one
-      # forkserver for each process, started from the parent's `sys.path`. So
-      # the venv decides, and a non-GC deployment is a different venv.
-      #
-      # Without the collector the evaluator allocates and never releases. Nix's
-      # own `libexpr/package.nix` says why that is tolerable: "this is not as
-      # bad as it sounds so long as evaluation just takes place within
-      # short-lived processes". An RPC worker is such a process.
-      gc ? true,
-    }:
-    assert lib.assertMsg (!(sanitizer.requiresNoGC or false) || !gc) ''
-      The ${sanitizer.name} sanitizer needs `gc = false`.
+  # One scope per huggorm lane: the lane's patched Nix, its collector, its
+  # sanitizer and its bindings, and this repository's packages over them.
+  # huggorm's `nix/versions.nix` holds every Nix patch, and `mkLane` there
+  # applies each variant.
+  lanes = lib.mapAttrs (
+    name: lane:
+    assert lib.assertMsg (lib.versionAtLeast lane.version supportedNixFloor)
+      "huggorm's lane ${name} is Nix ${lane.version}, below supportedNixFloor ${supportedNixFloor}.";
+    lane.overrideScope (
+      final: _prev:
+      let
+        # `pythonBase` unchanged. Our own projects are pyproject.nix
+        # builders packages in `pythonSet` below, and the one per-version
+        # Python package, huggorm-bindings, goes straight into the builders
+        # set as a lifted root.
+        python = pythonBase;
+      in
+      {
+        # The bindings and their generated surface, built with this
+        # repository's interpreter set.
+        python3Packages = python.pkgs;
 
-      libexpr fails the build outright on the combination, rather than
-      disabling the collector by itself, because nixpkgs writes
-      `-Dgc=enabled` and `disable_if` only demotes an `auto` feature. That
-      error arrives after a from-source rebuild of the whole instrumented
-      closure, so it is caught here instead.
-    '';
-    let
-      # huggorm starts the collector at import and runs `nix::initGC` at the
-      # first evaluator, so the collector carries huggorm's patch as well
-      # (huggorm#101).
-      scopeBoehmGC = patchedBoehmGC.overrideAttrs (old: {
-        patches = old.patches ++ huggorm.bdwgcPatches;
-      });
+        # Everything above the bindings is a pyproject.nix builders
+        # package. The set is built once per Nix version and holds both
+        # the built and the editable form of each project.
+        # No sanitizer: nothing in these pure-Python
+        # builds loads the instrumented extension, and preloading the
+        # TSAN runtime here only instrumented `uv` -- see the comment
+        # on the `nanopynix` override in that file.
+        pyPackages = pkgs.callPackage ./nix/py-packages.nix {
+          inherit
+            ps
+            python
+            ;
+          root = ./.;
+          # The linked Nix version, so two builds of the same source
+          # against different Nix components are distinguishable.
+          inherit (final) version;
+        };
 
-      isNixScope =
-        _name: v:
-        (builtins.tryEval v).success
-        && !lib.isDerivation v
-        && lib.isAttrs v
-        && lib.hasAttr "appendPatches" v
-        && lib.hasAttr "overrideScope" v
-        && lib.hasAttr "newScope" v
-        && lib.hasAttr "packages" v;
+        /*
+          This repo's Python closure, optionally widened by a consumer's
+          own projects.
 
-      # huggorm opens a LocalStore per caller, so its Nix names a temp-roots
-      # file per store, tells a daemon its own level, and gives the evaluator
-      # its statistics report and the `count-calls` setting
-      # (huggorm's `nixPatchesFor`).
-      patchNixScope =
-        scope: scope.appendPatches (patchesFor scope ++ huggorm.nixPatchesFor scope.version);
+          The parameters exist for a consumer that builds one of *its
+          own* pyproject.toml projects against this closure --
+          easykubenix does, for its `ekn` CLI. Adding the project to the
+          overlay is not enough on its own: a set's nixpkgs packages are
+          lifted once, from the roots `mkPythonSet` is seeded with, and
+          the lifting machinery is internal to nix/python-set.nix. So a
+          dependency that only the consumer's project declares (`kr8s`,
+          for `ekn`) has no way into the set after the fact -- an
+          `overrideScope` can add the project but not the closure it
+          needs. Passing `projectRoots` here reads that project's
+          pyproject.toml alongside ours and resolves its dependencies
+          the same way, which is the only place that can happen.
 
-      # nix's own components (nix-util, nix-store, ...) keep resolving
-      # through scope.newScope completely unmodified below -- so their own
-      # deps (e.g. nix-util's `brotli`) still come from plain nixpkgs, not
-      # from the Python set (which has its own, incompatible `brotli`: the
-      # Python bindings, not the C library with a pkg-config .pc file). Our
-      # own packages instead go through callNixPythonPackage, a second
-      # callPackage-like function that also has `python.pkgs` and pkgs in
-      # scope, plus `final` so they can still reference
-      # nix-store/nix-expr/huggorm-bindings/etc directly.
-      extendNixScope =
-        scope:
-        lib.makeScope scope.newScope (
-          lib.extends (
-            final: _prev:
-            let
-              sanitizerRuntime = if sanitizer == null then null else sanitizer.runtime;
-
-              # `pythonBase` unchanged. Our own projects are pyproject.nix
-              # builders packages in `pythonSet` below, and the one
-              # per-version Python package, huggorm-bindings, goes straight
-              # into the builders set as a lifted root -- so nothing
-              # version-specific needs to be in the interpreter's own set.
-              python = pythonBase;
-            in
-            {
-              # huggorm's generated bindings, linked against this scope's Nix
-              # components. The collector is the one libexpr links, or the
-              # process holds two; a scope with no collector passes none, and
-              # huggorm makes no collector call.
-              #
-              # A sanitized scope instruments the extension with the flags
-              # every nix-* component gets (nix/sanitizer.nix), so the two
-              # agree. The runtime is preloaded for the build's own import
-              # check: a late `dlopen` cannot grow the static TLS block that
-              # CPython sized at start.
-              huggorm-bindings =
-                (huggorm.huggorm-bindings.override {
-                  inherit (final)
-                    nix-util
-                    nix-store
-                    nix-expr
-                    nix-fetchers
-                    nix-flake
-                    nix-cmd
-                    ;
-                  python3Packages = python.pkgs;
-                  boehmgc = lib.findFirst (
-                    p: (p.pname or "") == "boehm-gc"
-                  ) null final.nix-expr.propagatedBuildInputs;
-                }).overrideAttrs
-                  (
-                    old:
-                    lib.optionalAttrs (sanitizer != null) {
-                      env =
-                        (old.env or { })
-                        // {
-                          NIX_CFLAGS_COMPILE = sanitizer.flags;
-                          NIX_CFLAGS_LINK = sanitizer.linkFlag;
-                        }
-                        // sanitizer.buildEnv
-                        // lib.optionalAttrs (sanitizerRuntime != null) {
-                          LD_PRELOAD = sanitizerRuntime;
-                        };
-                      dontStrip = true;
-                    }
-                  );
-
-              # The surface generated for those bindings: its stubs describe
-              # this scope's Nix (huggorm#55).
-              huggorm-generated = huggorm.huggorm-generated.override {
-                inherit (final) huggorm-bindings;
-                python3Packages = python.pkgs;
-              };
-
-              # Everything above the bindings is a pyproject.nix builders
-              # package. The set is built once per Nix version and holds both
-              # the built and the editable form of each project.
-              # No sanitizer: nothing in these pure-Python
-              # builds loads the instrumented extension, and preloading the
-              # TSAN runtime here only instrumented `uv` -- see the comment
-              # on the `nanopynix` override in that file.
-              pyPackages = pkgs.callPackage ./nix/py-packages.nix {
-                inherit
-                  ps
-                  python
-                  ;
-                root = ./.;
-                # The linked Nix version, so two builds of the same source
-                # against different Nix components are distinguishable.
-                inherit (final) version;
-              };
-
-              /*
-                This repo's Python closure, optionally widened by a consumer's
-                own projects.
-
-                The parameters exist for a consumer that builds one of *its
-                own* pyproject.toml projects against this closure --
-                easykubenix does, for its `ekn` CLI. Adding the project to the
-                overlay is not enough on its own: a set's nixpkgs packages are
-                lifted once, from the roots `mkPythonSet` is seeded with, and
-                the lifting machinery is internal to nix/python-set.nix. So a
-                dependency that only the consumer's project declares (`kr8s`,
-                for `ekn`) has no way into the set after the fact -- an
-                `overrideScope` can add the project but not the closure it
-                needs. Passing `projectRoots` here reads that project's
-                pyproject.toml alongside ours and resolves its dependencies
-                the same way, which is the only place that can happen.
-
-                Type: pythonSetWith :: AttrSet -> AttrSet
-              */
-              pythonSetWith =
-                {
-                  # Consumer pyproject.toml directories, read for their
-                  # third-party dependencies exactly as ours are. Their own
-                  # names are excluded from the nixpkgs lookup automatically
-                  # (see `nixpkgsRootsFor`), since `overlay` supplies them.
-                  projectRoots ? [ ],
-                  # The consumer's own projects, as a standard overlay.
-                  # Composed *over* ours, so it can also replace one of them.
-                  overlay ? (_final: _prev: { }),
-                }:
-                ps.mkPythonSet {
-                  inherit python;
-                  # Sourced from nixpkgs: the build systems, plus the whole
-                  # third-party runtime closure, plus our own native extension.
-                  # `python.pkgs` already resolved every one of those names, so
-                  # the roots are just the propagated inputs nixpkgs computed --
-                  # no second hand-written dependency list to fall out of date.
-                  nixpkgsRoots = [
-                    final.huggorm-bindings
-                  ]
-                  ++ ps.nixpkgsRootsFor {
-                    inherit python;
-                    # `completion-spike` is not one of `pyPackages`: it is a
-                    # nixpkgs `buildPythonApplication`, and it runs its own
-                    # tests in its own build. Its *declarations* are read here
-                    # anyway, so that `cyclopts` and `pexpect` reach this set
-                    # and the type gate can see the tree. Reading the
-                    # pyproject.toml is all `nixpkgsRootsFor` does, so this
-                    # adds no second package.
-                    projectRoots = final.pyPackages.projectRoots ++ [ ./completion-spike ] ++ projectRoots;
-                    # A nixpkgs Python package, but this scope's own -- lifted
-                    # in as a root above rather than looked up by name.
-                    exclude = [ "huggorm-bindings" ];
-                  };
-                  overlay = lib.composeExtensions final.pyPackages.built overlay;
-                };
-
-              pythonSet = final.pythonSetWith { };
-
-              # The same set with our projects swapped for editable installs.
-              # `mkVirtualEnv` from here gives a venv whose site-packages
-              # points back at this checkout.
-              editablePythonSet = final.pythonSet.overrideScope final.pyPackages.editable;
-
-              inherit (final.pythonSet)
-                nanopynix-proto
-                nanopynix-helpers
-                # The command-line layer that issue #222 moved out of
-                # `pynix`. Exported so that a second Nix CLI in Python can
-                # take it instead of copying it, which is the whole reason it
-                # is a project of its own.
-                libpynix
-                # The pytest plugin, developed here alongside everything else.
-                # Exported because a consumer's test suite may want it too --
-                # see the note on the outer `inherit` for the one way to take
-                # it that actually works.
-                pytest-agent
-                ;
-
-              nanopynix = final.pythonSet.nanopynix // {
-                test = final.callPackage ./nanopynix/tests.nix {
-                  inherit (final.nanopynix) version;
-                  inherit (sources) nixpkgs;
-                  inherit sanitizer sanitizerRuntime;
-                  inherit (final) pythonSet;
-                  # The one list that the dev shell also takes, so a tool the
-                  # suite needs cannot reach only one of them. See
-                  # nix/suite-runtime.nix.
-                  inherit (final) suiteRuntime;
-                };
-              };
-
-              pynix = mkApp {
-                name = "pynix";
-                inherit (final) pythonSet;
-                # `pynix develop` calls `nanopynix.store_exec_prefix`, which
-                # resolves this off PATH. The prefix runs a program out of a
-                # store that is relocated, which is every store that pynix
-                # opens away from the root one.
-                #
-                # `tofuCoreSchemaTool` was here as well until issue #107. It
-                # belongs to the language server, so it is on the PATH of the
-                # `pynix-lsp` application below.
-                pathInputs = storeExecTools;
-                completions = true;
-              };
-              # The language server, as a release application of its own.
-              # Issue #107 split it out of `pynix`, so that `pygls`,
-              # `lsprotocol` and `jsonschema` are not in the closure of
-              # `pynix build`. `pynix` is still a dependency of it, because the
-              # server imports `pynix._nix_syntax` and `pynix._completion`.
-              #
-              # `tofuCoreSchemaTool` is here because
-              # `pynix_lsp._tofu_core_schema` runs it at request time, rather
-              # than reading a snapshot that this repository stores.
-              # `storeExecTools` is here for the same reason it is on `pynix`:
-              # the terranix dialect runs `tofu` out of the store that the
-              # server evaluates against.
-              pynix-lsp = mkApp {
-                name = "pynix-lsp";
-                inherit (final) pythonSet;
-                pathInputs = [
-                  tofuCoreSchemaTool
-                ]
-                ++ storeExecTools;
-              };
-              # What the suite needs on PATH, shared by the packaged runner
-              # and the dev shell so the two cannot drift again. The file
-              # says which drifts it already cost.
-              suiteRuntime = final.callPackage ./nix/suite-runtime.nix {
-                inherit tofuCoreSchemaTool storeExecTools;
-              };
-              shell = final.callPackage ./nix/shell.nix {
-                pythonSet = final.editablePythonSet;
-              };
-              nonEditableShell = final.callPackage ./nix/shell.nix {
-                inherit (final) pythonSet;
-              };
-              # A live, editable-install `pynix`/`ekn` env (no devtools --
-              # see nix/shell.nix for the full interactive nanopynix shell),
-              # exported so other repos can drop a hot-reloading `pynix`
-              # into their own devShell/direnv without rebuilding on every
-              # edit here. See nix/virtual-env.nix's own docstring for why no
-              # env var is needed.
-              pynixDevEnv = final.callPackage ./nix/virtual-env.nix {
-                pythonSet = final.editablePythonSet;
-              };
-              pynixNonEditableDevEnv = final.callPackage ./nix/virtual-env.nix {
-                inherit (final) pythonSet;
-              };
-              nanopynix-docs = final.callPackage ./nix/docs.nix { };
-              # An attrset of derivations, not one derivation, so a failing
-              # run names the gate. `flake.nix` puts it under `checks`; the
-              # `packages` filter drops it, which is what we want.
-              checks = final.callPackage ./nix/checks.nix {
-                inherit completionSpike;
-                inherit (final) huggorm-generated huggorm-bindings;
-              };
-            }
-          ) scope.packages
-        );
-
-      # nix-store's sqlite buildInput + every meson-based nix-* library get
-      # consistent instrumentation (see nix/sanitizer.nix) --
-      # applied after extendNixScope (rather than on the raw nixComponents_X
-      # scope) since overrideScope/overrideAllMesonComponents both survive
-      # onto the extended scope, so huggorm-bindings/nanopynix end up built
-      # against the *same* instrumented nix-store/nix-expr/etc via the shared
-      # `final` fixpoint.
-      applySanitizerOverrides =
-        scope:
-        (scope.overrideScope (
-          _final: prev:
-          let
-            # One boost for the three components that take it. `sanitizeBoost`
-            # in nix/sanitizer.nix gives the one-definition-rule reason that
-            # makes "the same one" load-bearing rather than tidy.
-            boost = sanitizer.sanitizeBoost pkgs.boost;
-            ucontextBoost = lib.optionalAttrs sanitizer.needsUcontextBoost { inherit boost; };
-          in
+          Type: pythonSetWith :: AttrSet -> AttrSet
+        */
+        pythonSetWith =
           {
-            nix-util = prev.nix-util.override ucontextBoost;
-            nix-store = prev.nix-store.override (
-              { sqlite = sanitizer.sanitizeSqlite pkgs.sqlite; } // ucontextBoost
-            );
-            # boost reaches nix-expr whatever the collector does, and boehmgc
-            # does not. The comment below gives the reason boehmgc is absent
-            # from a build with no collector, and that reason does not reach
-            # boost: libexpr links boost in both builds.
-            nix-expr = prev.nix-expr.override (ucontextBoost // boehmgcOverride);
-          }
-        )).overrideAllMesonComponents
-          sanitizer.mesonComponentOverrides;
+            # Consumer pyproject.toml directories, read for their
+            # third-party dependencies exactly as ours are. Their own
+            # names are excluded from the nixpkgs lookup automatically
+            # (see `nixpkgsRootsFor`), since `overlay` supplies them.
+            projectRoots ? [ ],
+            # The consumer's own projects, as a standard overlay.
+            # Composed *over* ours, so it can also replace one of them.
+            overlay ? (_final: _prev: { }),
+          }:
+          ps.mkPythonSet {
+            inherit python;
+            # Sourced from nixpkgs: the build systems, plus the whole
+            # third-party runtime closure, plus our own native extension.
+            # `python.pkgs` already resolved every one of those names, so
+            # the roots are just the propagated inputs nixpkgs computed --
+            # no second hand-written dependency list to fall out of date.
+            nixpkgsRoots = [
+              final.huggorm-bindings
+            ]
+            ++ ps.nixpkgsRootsFor {
+              inherit python;
+              # `completion-spike` is not one of `pyPackages`: it is a
+              # nixpkgs `buildPythonApplication`, and it runs its own
+              # tests in its own build. Its *declarations* are read here
+              # anyway, so that `cyclopts` and `pexpect` reach this set
+              # and the type gate can see the tree. Reading the
+              # pyproject.toml is all `nixpkgsRootsFor` does, so this
+              # adds no second package.
+              projectRoots = final.pyPackages.projectRoots ++ [ ./completion-spike ] ++ projectRoots;
+              # A nixpkgs Python package, but this scope's own -- lifted
+              # in as a root above rather than looked up by name.
+              exclude = [ "huggorm-bindings" ];
+            };
+            overlay = lib.composeExtensions final.pyPackages.built overlay;
+          };
 
-      # Absent from a build with no collector, and not merely unused there.
-      # `enableGC = false` drops boehmgc from libexpr's inputs entirely, so
-      # this would name a patched, instrumented library that nothing links --
-      # one more thing for a reader to reconcile against a closure that does
-      # not contain it.
-      # pkgs.nixDependencies.boehmgc, not prev.boehmgc or pkgs.boehmgc:
-      # nixComponents_X's own scope never contains a `boehmgc` attribute at
-      # all -- nixpkgs builds each nixComponents_X via a *separate*
-      # `nixDependencies` scope (`nixDependencies.callPackage
-      # ./modular/packages.nix {...}` in nix/default.nix), and that
-      # nixDependencies scope (packaging/dependencies.nix in nix's own source)
-      # is where boehmgc's enableLargeConfig + 1MiB initial mark stack tuning
-      # actually lives -- confirmed by `prev.boehmgc` failing eval with
-      # "attribute 'boehmgc' missing". Sanitizing a fresh pkgs.boehmgc would
-      # silently drop that tuning -- exactly the kind of undersized-mark-stack
-      # condition its own comment warns about, right where we're chasing a GC
-      # crash.
-      boehmgcOverride = lib.optionalAttrs gc {
-        boehmgc = sanitizer.sanitizeBoehmGC scopeBoehmGC;
-      };
+        pythonSet = final.pythonSetWith { };
 
-      # The patch, and nothing else. This runs before
-      # `applySanitizerOverrides`, so a sanitized build still ends up with the
-      # instrumented collector: both write `boehmgc`, and the later one wins.
-      applyBoehmGCPatch =
-        scope:
-        scope.overrideScope (
-          _final: prev: {
-            nix-expr = prev.nix-expr.override { boehmgc = scopeBoehmGC; };
-          }
-        );
+        # The same set with our projects swapped for editable installs.
+        # `mkVirtualEnv` from here gives a venv whose site-packages
+        # points back at this checkout.
+        editablePythonSet = final.pythonSet.overrideScope final.pyPackages.editable;
 
-      # Drop the collector from libexpr, and from everything above it in the
-      # scope. One override, applied at the same point and for the same reason
-      # as `applySanitizerOverrides`: the scope fixpoint carries it to
-      # huggorm-bindings, so the extension links against the libexpr that
-      # this scope built and not some other one.
-      #
-      # nixpkgs' own `libexpr/package.nix` turns `enableGC` into
-      # `lib.mesonEnable "gc" enableGC` and drops `boehmgc` from
-      # `propagatedBuildInputs`, so nothing else here has to know.
-      applyNoGCOverrides =
-        scope:
-        scope.overrideScope (
-          _final: prev: {
-            nix-expr = prev.nix-expr.override { enableGC = false; };
-          }
-        );
+        inherit (final.pythonSet)
+          nanopynix-proto
+          nanopynix-helpers
+          # The command-line layer that issue #222 moved out of
+          # `pynix`. Exported so that a second Nix CLI in Python can
+          # take it instead of copying it, which is the whole reason it
+          # is a project of its own.
+          libpynix
+          # The pytest plugin, developed here alongside everything else.
+          # Exported because a consumer's test suite may want it too --
+          # see the note on the outer `inherit` for the one way to take
+          # it that actually works.
+          pytest-agent
+          ;
 
-      # nixComponents_2_34 -> nix_2_34, nixComponents_git -> git (matching
-      # the names the previous hand-written patchedNixVersions used), plus a
-      # suffix for each variant axis: "-tsan"/"-ubsan"/"-asan" for a sanitizer,
-      # "-nogc" for a build with no collector.
-      #
-      # The ASAN variant takes "-asan" alone, although it is also a build with
-      # no collector. `requiresNoGC` makes the two inseparable, so a
-      # "-asan-nogc" name would repeat one fact twice and give CI a suffix that
-      # two filters have to strip.
-      rename =
-        name: value:
-        let
-          bare = lib.removePrefix "nixComponents_" name;
-          versionName = if bare == "git" then "git" else "nix_${bare}";
-          suffix =
-            if sanitizer != null then
-              "-${sanitizer.suffix}"
-            else if !gc then
-              "-nogc"
-            else
-              "";
-        in
-        lib.nameValuePair "${versionName}${suffix}" value;
-    in
-    lib.pipe pkgs.nixVersions (
-      [
-        (lib.filterAttrs isNixScope)
-        # **The supported floor, and every variant obeys it.** `git` passes
-        # too: `majorMinor` of a `2.35pre...` version is `2.35`.
-        (lib.filterAttrs (
-          _: scope: lib.versionAtLeast (lib.versions.majorMinor scope.version) supportedNixFloor
-        ))
-      ]
-      ++ [
-        (lib.mapAttrs (_: patchNixScope))
-        (lib.mapAttrs (_: extendNixScope))
-      ]
-      # Before the sanitizer, so an instrumented build still gets the
-      # instrumented collector rather than this plain patched one.
-      ++ lib.optional gc (lib.mapAttrs (_: applyBoehmGCPatch))
-      ++ lib.optional (sanitizer != null) (lib.mapAttrs (_: applySanitizerOverrides))
-      # After the sanitizer, so this is the last word on nix-expr. The two
-      # overrides do not collide -- `applySanitizerOverrides` no longer names
-      # nix-expr when `gc` is false -- and the order still says which one wins
-      # if a third ever arrives.
-      ++ lib.optional (!gc) (lib.mapAttrs (_: applyNoGCOverrides))
-      ++ [ (lib.mapAttrs' rename) ]
-    );
+        nanopynix = final.pythonSet.nanopynix // {
+          test = final.callPackage ./nanopynix/tests.nix {
+            inherit (final.nanopynix) version;
+            inherit (sources) nixpkgs;
+            inherit (final) sanitizer;
+            sanitizerRuntime = if final.sanitizer == null then null else final.sanitizer.runtime;
+            inherit (final) pythonSet;
+            # The one list that the dev shell also takes, so a tool the
+            # suite needs cannot reach only one of them. See
+            # nix/suite-runtime.nix.
+            inherit (final) suiteRuntime;
+          };
+        };
 
-  # Five variants of every supported Nix version. Nix evaluates each one
-  # lazily, so the cost here is evaluation and not a build: CI names the
-  # `nanopynix-tests-<variant>` package it wants, and nothing else realises.
-  nanopynixVersionsInternal =
-    nanopynixForNixVersions { }
-    // nanopynixForNixVersions { sanitizer = sanitizers.tsan; }
-    // nanopynixForNixVersions { sanitizer = sanitizers.ubsan; }
-    # The collector build and the ASAN build, both of which run against a
-    # libexpr with `-Dgc=disabled`. The plain one proves that the evaluator
-    # works without the collector; the ASAN one is what that build exists for.
-    # Separating them keeps a failure attributable: an ASAN job that goes red
-    # while `-nogc` stays green is a memory error, and both red together is a
-    # build without a collector that does not work.
-    // nanopynixForNixVersions { gc = false; }
-    // nanopynixForNixVersions {
-      sanitizer = sanitizers.asan;
-      gc = false;
-    };
+        pynix = mkApp {
+          name = "pynix";
+          inherit (final) pythonSet;
+          # `pynix develop` calls `nanopynix.store_exec_prefix`, which
+          # resolves this off PATH. The prefix runs a program out of a
+          # store that is relocated, which is every store that pynix
+          # opens away from the root one.
+          #
+          # `tofuCoreSchemaTool` was here as well until issue #107. It
+          # belongs to the language server, so it is on the PATH of the
+          # `pynix-lsp` application below.
+          pathInputs = storeExecTools;
+          completions = true;
+        };
+        # The language server, as a release application of its own.
+        # Issue #107 split it out of `pynix`, so that `pygls`,
+        # `lsprotocol` and `jsonschema` are not in the closure of
+        # `pynix build`. `pynix` is still a dependency of it, because the
+        # server imports `pynix._nix_syntax` and `pynix._completion`.
+        #
+        # `tofuCoreSchemaTool` is here because
+        # `pynix_lsp._tofu_core_schema` runs it at request time, rather
+        # than reading a snapshot that this repository stores.
+        # `storeExecTools` is here for the same reason it is on `pynix`:
+        # the terranix dialect runs `tofu` out of the store that the
+        # server evaluates against.
+        pynix-lsp = mkApp {
+          name = "pynix-lsp";
+          inherit (final) pythonSet;
+          pathInputs = [
+            tofuCoreSchemaTool
+          ]
+          ++ storeExecTools;
+        };
+        shell = final.callPackage ./nix/shell.nix {
+          pythonSet = final.editablePythonSet;
+        };
+        nonEditableShell = final.callPackage ./nix/shell.nix {
+          inherit (final) pythonSet;
+        };
+        # A live, editable-install `pynix`/`ekn` env (no devtools --
+        # see nix/shell.nix for the full interactive nanopynix shell),
+        # exported so other repos can drop a hot-reloading `pynix`
+        # into their own devShell/direnv without rebuilding on every
+        # edit here. See nix/virtual-env.nix's own docstring for why no
+        # env var is needed.
+        pynixDevEnv = final.callPackage ./nix/virtual-env.nix {
+          pythonSet = final.editablePythonSet;
+        };
+        pynixNonEditableDevEnv = final.callPackage ./nix/virtual-env.nix {
+          inherit (final) pythonSet;
+        };
+        nanopynix-docs = final.callPackage ./nix/docs.nix { };
+        # An attrset of derivations, not one derivation, so a failing
+        # run names the gate. `flake.nix` puts it under `checks`; the
+        # `packages` filter drops it, which is what we want.
+        checks = final.callPackage ./nix/checks.nix {
+          inherit completionSpike;
+          inherit (final) huggorm-generated huggorm-bindings;
+        };
 
-  nanopynixVersions = nanopynixVersionsInternal // {
-    stable = getByVersion pkgs.nixVersions.stable.version;
-    latest = getByVersion pkgs.nixVersions.latest.version;
+        # What the suite needs on PATH, shared by the packaged runner and
+        # the dev shell so the two cannot drift again. The file says which
+        # drifts it already cost.
+        suiteRuntime = final.callPackage ./nix/suite-runtime.nix {
+          inherit tofuCoreSchemaTool storeExecTools;
+          inherit (final.nixComponents) nix-cli;
+        };
+      }
+    )
+  ) huggorm.lanes;
+
+  nanopynixVersions = lanes // {
+    stable = lanes.nix_2_34;
+    latest = lanes.nix_2_35;
   };
 
   # Per-version test runners, exposed individually as `nanopynix-tests-<name>`
   # flake packages so CI can build/run each Nix version in its own job.
   tests = lib.mapAttrs' (
     name: value: lib.nameValuePair "nanopynix-tests-${name}" value.nanopynix.test
-  ) nanopynixVersionsInternal;
+  ) lanes;
 
-  # Every suffix that `rename` above gives a variant scope.
+  # Every suffix that huggorm's `lanes` give a variant scope.
   #
   # **A suffix that is missing here does not fail.** It quietly puts a slow,
   # uncovered build into the regular per-commit matrix, because "not a variant"
@@ -785,14 +396,14 @@ let
 
   # The check that makes a forgotten suffix a build failure.
   #
-  # `rename` above writes a suffix for each variant axis, and every consumer of
-  # these names sorts by that suffix. A new axis that nobody adds to
+  # huggorm's `lanes` carry a suffix for each variant axis, and every consumer
+  # of these names sorts by that suffix. A new axis that nobody adds to
   # `ci/variants.nix` reads as a regular version everywhere, so it joins the
   # per-commit matrix as a slow build that collects no coverage. Nothing else
   # notices, because "not a variant" is the default.
   unlistedVariants = builtins.filter (
     name: builtins.match "^(nix_[0-9_]+|git)$" name == null && !hasKnownSuffix name
-  ) (builtins.attrNames nanopynixVersionsInternal);
+  ) (builtins.attrNames lanes);
   hasKnownSuffix = name: lib.any (suffix: lib.hasSuffix suffix name) variantSuffixes;
 
   # The version names of `tests`, grouped by variant, with the bare names under
@@ -848,14 +459,6 @@ let
     inherit tests;
   };
 
-  getByVersion =
-    version:
-    lib.pipe nanopynixVersionsInternal [
-      lib.attrsToList
-      (lib.map (v: v.value))
-      (lib.filter (v: v.version == version))
-      (lib.head)
-    ];
 in
 lib.throwIf (unlistedVariants != [ ])
   ''
