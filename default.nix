@@ -242,8 +242,11 @@ let
             # `python.pkgs` already resolved every one of those names, so
             # the roots are just the propagated inputs nixpkgs computed --
             # no second hand-written dependency list to fall out of date.
+            # `huggorm` is the library over the bindings, for a consumer
+            # that moves off nanopynix one module at a time.
             nixpkgsRoots = [
               final.huggorm-bindings
+              final.huggorm
             ]
             ++ ps.nixpkgsRootsFor {
               inherit python;
@@ -255,9 +258,12 @@ let
               # pyproject.toml is all `nixpkgsRootsFor` does, so this
               # adds no second package.
               projectRoots = final.pyPackages.projectRoots ++ [ ./completion-spike ] ++ projectRoots;
-              # A nixpkgs Python package, but this scope's own -- lifted
-              # in as a root above rather than looked up by name.
-              exclude = [ "huggorm-bindings" ];
+              # nixpkgs Python packages, but this scope's own -- lifted
+              # in as roots above rather than looked up by name.
+              exclude = [
+                "huggorm-bindings"
+                "huggorm"
+              ];
             };
             overlay = lib.composeExtensions final.pyPackages.built overlay;
           };
