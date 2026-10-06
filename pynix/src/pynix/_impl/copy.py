@@ -83,7 +83,7 @@ async def _evaluated_paths(command: Copy, nix: Any, source: Any, source_uri: str
     return valid
 
 
-async def _closure(source: Any, paths: Iterable[str]) -> list[str]:
+async def closure_of(source: Any, paths: Iterable[str]) -> list[str]:
     """Every path that the copy will carry, sorted.
 
     ``compute_fs_closure`` takes one path, so a request for several is one
@@ -105,6 +105,60 @@ async def _valid(store: Any, paths: Iterable[str]) -> list[str]:
     return [path for path in paths if await store.is_valid_path(path)]
 
 
+async def copy_verified(  # noqa: PLR0913 -- two stores, the two path sets, and the policy; no pair of them belongs together
+    source: Any,
+    requested: list[str],
+    closure: list[str],
+    destination: Any,
+    destination_uri: str,
+    *,
+    check_sigs: bool,
+) -> tuple[list[str], list[str]]:
+    """Copy *requested* and its *closure* to *destination*, and prove that it arrived.
+
+    Returns the paths that were present before, and the paths that arrived.
+    Exits with an error when a path that was missing is still missing.
+    """
+    # **Before the copy, and one question for each path.** Nix reports
+    # nothing about what it wrote, so "what did this command copy" has
+    # to be the difference between the two stores. `query_missing` does
+    # not answer it: that one asks what a *build* would still have to
+    # do, over derived paths and substituters.
+    present = await _valid(destination, closure)
+    missing = [path for path in closure if path not in set(present)]
+    logger.info(
+        "pynix copy starting",
+        destination=destination_uri,
+        requested=len(requested),
+        closure=len(closure),
+        missing=len(missing),
+    )
+    await source.copy_closure(list(requested), destination, check_sigs=check_sigs)
+
+    # **And again afterwards, because a copy can end quietly.**
+    # `Store::addMultipleToStore` (`src/libstore/store-api.cc`) catches
+    # the failure of one path when `keep-going` is on: it counts it in
+    # `nrFailed`, logs it, and returns. `copyPaths` returns void and
+    # never reads `nrFailed`, so no caller of `copyClosure` can learn
+    # that a path failed.
+    #
+    # Measured on 2.34, 2.35 and git alike: a copy of an unsigned path
+    # into a store that requires a signature raised nothing, wrote
+    # nothing, and this command reported both paths as copied. That
+    # report was the difference computed above, which is what the
+    # command *meant* to copy. `arrived` is what it did copy.
+    arrived = sorted(await _valid(destination, missing))
+
+    stranded = [path for path in missing if path not in set(arrived)]
+    if stranded:
+        error_exit(
+            f"{len(stranded)} of {len(missing)} path(s) did not reach {destination_uri}, "
+            f"and Nix reported no error: {', '.join(stranded[:_NAMED_IN_A_FAILURE])}"
+            + (" ..." if len(stranded) > _NAMED_IN_A_FAILURE else ""),
+        )
+    return present, arrived
+
+
 async def run_copy(command: Copy) -> None:
     """The body of :meth:`pynix.copy.Copy.run`."""
     source_uri, destination_uri = _endpoints(command)
@@ -115,7 +169,7 @@ async def run_copy(command: Copy) -> None:
             error_exit("name a store path, or name --file or --flake")
 
         try:
-            closure = await _closure(source, requested)
+            closure = await closure_of(source, requested)
         except Exception as exc:
             # stderr, and not stdout: the output of this command is JSON, and
             # `pynix copy ... | jq` must not read this instead. `pynix.path_info`
@@ -123,43 +177,13 @@ async def run_copy(command: Copy) -> None:
             error_exit(str(exc), cause=exc)
 
         async with nix.store(destination_uri) as destination:
-            # **Before the copy, and one question for each path.** Nix reports
-            # nothing about what it wrote, so "what did this command copy" has
-            # to be the difference between the two stores. `query_missing` does
-            # not answer it: that one asks what a *build* would still have to
-            # do, over derived paths and substituters.
-            present = await _valid(destination, closure)
-            missing = [path for path in closure if path not in set(present)]
-            logger.info(
-                "pynix copy starting",
-                source=source_uri,
-                destination=destination_uri,
-                requested=len(requested),
-                closure=len(closure),
-                missing=len(missing),
-            )
-            await source.copy_closure(list(requested), destination, check_sigs=command.check_sigs)
-
-            # **And again afterwards, because a copy can end quietly.**
-            # `Store::addMultipleToStore` (`src/libstore/store-api.cc`) catches
-            # the failure of one path when `keep-going` is on: it counts it in
-            # `nrFailed`, logs it, and returns. `copyPaths` returns void and
-            # never reads `nrFailed`, so no caller of `copyClosure` can learn
-            # that a path failed.
-            #
-            # Measured on 2.34, 2.35 and git alike: a copy of an unsigned path
-            # into a store that requires a signature raised nothing, wrote
-            # nothing, and this command reported both paths as copied. That
-            # report was the difference computed above, which is what the
-            # command *meant* to copy. `arrived` is what it did copy.
-            arrived = sorted(await _valid(destination, missing))
-
-        stranded = [path for path in missing if path not in set(arrived)]
-        if stranded:
-            error_exit(
-                f"{len(stranded)} of {len(missing)} path(s) did not reach {destination_uri}, "
-                f"and Nix reported no error: {', '.join(stranded[:_NAMED_IN_A_FAILURE])}"
-                + (" ..." if len(stranded) > _NAMED_IN_A_FAILURE else ""),
+            present, arrived = await copy_verified(
+                source,
+                requested,
+                closure,
+                destination,
+                destination_uri,
+                check_sigs=command.check_sigs,
             )
 
     print_json(
