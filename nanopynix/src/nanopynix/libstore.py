@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from nanopynix._engine import (
     enable_experimental_feature as nix_enable_experimental_feature,
+    init_plugins,
     is_experimental_feature,
     load_config as nix_load_config,
     start_collector,
@@ -22,6 +23,7 @@ from nanopynix._engine import (
 from nanopynix._features import DEFAULT_EXPERIMENTAL_FEATURES
 
 _config_loaded = False
+_plugins_loaded = False
 
 
 def init_libstore(load_config: bool = True) -> None:
@@ -57,6 +59,7 @@ def init_libstore(load_config: bool = True) -> None:
     configuration: see :func:`load_config_once`.
     """
     load_config_once(load_config)
+    load_plugins_once()
     _enable_default_experimental_features()
 
 
@@ -70,6 +73,20 @@ def load_config_once(load_config: bool = True) -> None:
     if load_config and not _config_loaded:
         nix_load_config()
         _config_loaded = True
+
+
+def load_plugins_once() -> None:
+    """Load the plugins that ``plugin-files`` names, the first time a call asks.
+
+    Nix loads plugins once per process, so a ``plugin-files`` value set after
+    the first call has no effect. Call it after the configuration and the
+    settings, and before the first store opens: a plugin registers its store
+    types as it loads.
+    """
+    global _plugins_loaded  # noqa: PLW0603 -- process-wide, like the plugins Nix loads
+    if not _plugins_loaded:
+        _plugins_loaded = True
+        init_plugins()
 
 
 def init_libexpr() -> None:

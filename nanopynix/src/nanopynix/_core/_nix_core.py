@@ -21,7 +21,7 @@ from nanopynix._engine import (
 )
 from nanopynix._typechecking import BEARTYPING
 from nanopynix._wire import BuildMode
-from nanopynix.libstore import enable_experimental_feature, init_libexpr, load_config_once
+from nanopynix.libstore import enable_experimental_feature, init_libexpr, load_config_once, load_plugins_once
 from nanopynix.models import SettingsProvenance
 
 if TYPE_CHECKING or BEARTYPING:
@@ -102,6 +102,8 @@ class NixCore:
         for name, value in settings.items():
             set_setting(name, value)
         applied = dict(list_settings(overridden_only=True))
+        # After the settings, so a session's own `plugin-files` counts too.
+        load_plugins_once()
 
         if verbosity is not None:
             # The default, and not this thread's level: the caller configured

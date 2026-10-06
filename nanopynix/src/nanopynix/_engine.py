@@ -63,6 +63,7 @@ from huggorm_bindings import (
     gc_release_thread as gc_release_thread,
     gc_stats as gc_stats,
     get_setting as get_setting,
+    init_plugins as init_plugins,
     is_experimental_feature as is_experimental_feature,
     is_pseudo_url as is_pseudo_url,
     list_settings as list_settings,
