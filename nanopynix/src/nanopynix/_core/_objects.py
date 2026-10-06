@@ -1094,7 +1094,7 @@ class CoreValue:
         state = self._eval_state.require_raw()
         result = self._forced()
         for argument in arguments:
-            result = result.apply(argument.require_raw())
+            result = result(argument.require_raw())
             state.force(result)
         return self._eval_state.wrap_value(result)
 
