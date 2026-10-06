@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import re
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -314,6 +314,85 @@ async def test_from_pulls_out_of_the_store_it_names(
     assert result["from"] == shared_nix_environment.store_uri
     assert result["to"] == destination_store
     assert result["copied"] == [built_closure["leaf"]]
+
+
+async def _build_and_copy(
+    shared_nix_environment: NixTestEnvironment,
+    chain_file: Path,
+    destination: str,
+    capsys: pytest.CaptureFixture[str],
+) -> dict[str, Any]:
+    command = parse(
+        [
+            "build",
+            "--file",
+            str(chain_file),
+            "--attr",
+            "top",
+            "--copy",
+            destination,
+            *shared_nix_environment.pynix_store_args(),
+        ],
+    )
+    await command.run()
+    return json.loads(capsys.readouterr().out)
+
+
+@LINUX_CHROOT_BUILD
+async def test_build_copy_puts_the_closure_of_the_result_in_the_named_store(
+    shared_nix_environment: NixTestEnvironment,
+    chain_file: Path,
+    destination_store: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``pynix build --copy`` builds in ``--store`` and leaves the result in the other store.
+
+    The destination requires signatures, and nothing signed these paths. The
+    copy still arrives, because ``--copy`` copies as ``--no-check-sigs`` does.
+    """
+    result = await _build_and_copy(shared_nix_environment, chain_file, destination_store, capsys)
+
+    top = result["outputs"]["out"]
+    copy: dict[str, Any] = result["copy"]
+    copied: list[str] = copy["copied"]
+    assert copy["to"] == destination_store
+    assert top in copied
+    assert len(copied) == 2  # top and the leaf that it names
+    assert copy["alreadyPresent"] == []
+
+    for path in copied:
+        command = parse(["store", "is-valid-path", path, "--store", destination_store])
+        await command.run()
+        assert json.loads(capsys.readouterr().out)["valid"] is True
+
+
+@LINUX_CHROOT_BUILD
+async def test_build_copy_reports_a_result_that_is_already_there(
+    shared_nix_environment: NixTestEnvironment,
+    chain_file: Path,
+    destination_store: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    first = await _build_and_copy(shared_nix_environment, chain_file, destination_store, capsys)
+
+    second = await _build_and_copy(shared_nix_environment, chain_file, destination_store, capsys)
+
+    assert second["copy"] == {"to": destination_store, "copied": [], "alreadyPresent": first["copy"]["copied"]}
+
+
+async def test_build_copy_with_dry_run_is_refused(
+    chain_file: Path,
+    destination_store: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    command = parse(
+        ["build", "--file", str(chain_file), "--update-fod", "--dry-run", "--copy", destination_store],
+    )
+
+    with pytest.raises(SystemExit):
+        await command.run()
+
+    assert "--copy" in capsys.readouterr().err
 
 
 async def test_a_copy_with_no_second_store_reports_what_is_missing(

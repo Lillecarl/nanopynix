@@ -31,6 +31,7 @@ import nanopynix
 from nanopynix._typechecking import BEARTYPING
 from pynix import _impl
 from pynix._build_monitor import BuildPlan, MonitorState
+from pynix._impl.copy import closure_of, copy_verified
 from pynix._util import error_console, error_exit, nix_session, print_json, report_and_exit
 from pynix.build import Build
 
@@ -112,6 +113,20 @@ async def _promote_to_host_store(nix: Any, store: Any, outputs: dict[str, str]) 
     async with nix.store(_HOST_STORE_URI) as host:
         logger.info("pynix build promoting outputs to the host store", paths=len(paths))
         await store.copy_closure(paths, host, check_sigs=False)
+
+
+async def _copy_outputs(nix: Any, store: Any, outputs: dict[str, str], uri: str) -> dict[str, Any]:
+    """Copy the closure of *outputs* from *store* to *uri*, and report what arrived.
+
+    Signature checking is off for the reason ``_promote_to_host_store`` gives,
+    and the destination still decides. A path that it refuses quietly is
+    caught by :func:`pynix._impl.copy.copy_verified`.
+    """
+    requested = sorted(set(outputs.values()))
+    closure = await closure_of(store, requested)
+    async with nix.store(uri) as destination:
+        present, arrived = await copy_verified(store, requested, closure, destination, uri, check_sigs=False)
+    return {"to": uri, "copied": arrived, "alreadyPresent": present}
 
 
 async def _require_a_local_file(target: EvaluationTarget) -> None:
@@ -283,6 +298,8 @@ async def run_build(command: Build) -> None:
         await _require_a_local_file(target)
     if command.dry_run and not command.update_fod:
         error_exit("--dry-run requires --update-fod")
+    if command.dry_run and command.copy is not None:
+        error_exit("--dry-run builds nothing, so --copy has nothing to copy")
 
     namespaced = _resolve_namespaced(command)
 
@@ -294,11 +311,14 @@ async def run_build(command: Build) -> None:
     # Outside the session, so the error passes through its log forwarding:
     # --nom counts it in the last frame, and the message prints after that.
     try:
-        outputs, updates = await _build_in_session(command, target, namespaced=namespaced, settings=settings)
+        outputs, updates, copied = await _build_in_session(command, target, namespaced=namespaced, settings=settings)
     except BuildTargetError as exc:
         report_and_exit(exc)
 
-    print_json({"outputs": outputs, "updatedFods": updates, "dryRun": command.dry_run})
+    report: dict[str, Any] = {"outputs": outputs, "updatedFods": updates, "dryRun": command.dry_run}
+    if copied is not None:
+        report["copy"] = copied
+    print_json(report)
 
 
 async def _build_in_session(
@@ -307,7 +327,8 @@ async def _build_in_session(
     *,
     namespaced: bool,
     settings: PynixNixSettings,
-) -> tuple[dict[str, str], int]:
+) -> tuple[dict[str, str], int, dict[str, Any] | None]:
+    copied: dict[str, Any] | None = None
     async with AsyncExitStack() as stack:
         namespace = await stack.enter_async_context(_overlay_namespace(namespaced, command.overlay_dir))
         # Passed only when there is one, which is the convention
@@ -351,6 +372,8 @@ async def _build_in_session(
                 logger.info("pynix build finished")
                 if promote:
                     await _promote_to_host_store(nix, store, outputs)
+                if command.copy is not None and outputs:
+                    copied = await _copy_outputs(nix, store, outputs, command.copy)
         else:
             async with (
                 nix.store(command.eval_store) as eval_store,
@@ -371,7 +394,9 @@ async def _build_in_session(
                 logger.info("pynix build finished")
                 if promote:
                     await _promote_to_host_store(nix, build_store, outputs)
-    return outputs, updates
+                if command.copy is not None and outputs:
+                    copied = await _copy_outputs(nix, build_store, outputs, command.copy)
+    return outputs, updates, copied
 
 
 def _resolve_namespaced(command: Build) -> bool:

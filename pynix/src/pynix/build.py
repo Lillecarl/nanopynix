@@ -89,6 +89,14 @@ class Build(ConfiguredCommand):
         ),
     )
 
+    copy: str | None = opt(
+        None,
+        help=(
+            "Store URI to copy the closure of the outputs into when the build succeeds. --store and the "
+            "configured builders decide where the build runs, and this option decides where the result ends up."
+        ),
+    )
+
     # No default is written: `libpynix` gives a repeated option a new empty
     # list for each command, because one shared literal would keep whatever a
     # previous parse appended to it.

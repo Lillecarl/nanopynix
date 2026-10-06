@@ -27,6 +27,7 @@ Build a Nix derivation value
 | `--namespaced` | `bool` | Build in a private user namespace, against an overlay store whose lower layer is the host store. Nothing is copied in, the host store does not change, and this process owns the sandbox settings that the daemon otherwise controls. Linux only. (default: `False`) |
 | `--overlay-dir` | `Path or None` | Keep the overlay's upper layer here, instead of in a temporary directory that is deleted on exit. Reuse the same directory to keep what earlier --namespaced builds produced. Implies --namespaced. (default: `None`) |
 | `--copy-back` | `bool` | Copy the outputs of a --namespaced build into the host store when the build succeeds. Without it the outputs are gone when the worker exits. (default: `True`) |
+| `--copy` | `str or None` | Store URI to copy the closure of the outputs into when the build succeeds. --store and the configured builders decide where the build runs, and this option decides where the result ends up. (default: `None`) |
 | `--sandbox-path` | `list[str]` | Extra path to mount into the build sandbox, as /inside=/outside or /path. Repeatable. Requires --namespaced, because the daemon does not let a client change its sandbox. (default: `None`) |
 
 ### `pynix config`
